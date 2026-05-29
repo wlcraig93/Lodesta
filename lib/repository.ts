@@ -25,6 +25,7 @@ import {
   assignExperiment,
   createAndStoreSite,
   createClaim,
+  completeClaimCheckout,
   createPreviewToken,
   getForms,
   getSiteBundle,
@@ -101,6 +102,14 @@ export type RegisterDomainInput = {
   providerHostnameId?: string;
 };
 
+export type CompleteClaimCheckoutInput = {
+  claimId?: string;
+  checkoutSessionId?: string;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  completedAt?: string;
+};
+
 export type UpdateLeadStatusInput = {
   siteId: string;
   submissionId: string;
@@ -161,6 +170,7 @@ export type LodestaRepository = {
   applyFindingToDraft(input: { siteId: string; findingId: string }): Promise<ApplyFindingResult>;
   applyAiEdit(input: { siteId: string; message: string }): Promise<AiEditRepositoryResult>;
   createClaim(input: CreateClaimInput): Promise<ClaimResult>;
+  completeClaimCheckout(input: CompleteClaimCheckoutInput): Promise<ClaimRecord | null>;
   listClaims(siteId?: string): Promise<ClaimRecord[]>;
   registerDomain(input: RegisterDomainInput): Promise<DomainResult>;
   listDomains(siteId?: string): Promise<DomainRecord[]>;
@@ -270,6 +280,9 @@ export const localRepository: LodestaRepository = {
         ownerEmail: input.ownerEmail
       })
     };
+  },
+  async completeClaimCheckout(input) {
+    return completeClaimCheckout(input);
   },
   async listClaims(siteId) {
     return listClaims(siteId);

@@ -426,6 +426,7 @@ export type ClaimRecord = {
   verifiedFacts: string[];
   acceptedTermsAt?: string;
   acceptedManagementAt?: string;
+  claimedAt?: string;
   createdAt: string;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;

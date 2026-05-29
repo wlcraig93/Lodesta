@@ -19,6 +19,7 @@ import type {
 } from "../models";
 import type {
   CreateClaimInput,
+  CompleteClaimCheckoutInput,
   CreateSiteInput,
   RecordSubmissionInput,
   RegisterDomainInput,
@@ -151,6 +152,7 @@ type ClaimRow = {
   status: ClaimRecord["status"];
   fact_verification: unknown;
   created_at: string;
+  claimed_at: string | null;
 };
 
 type DomainRow = {
@@ -564,6 +566,37 @@ export const supabaseRepository: LodestaRepository = {
       stripeCheckoutSessionId: checkout.sessionId,
       checkout
     };
+  },
+
+  async completeClaimCheckout(input: CompleteClaimCheckoutInput) {
+    if (!input.claimId && !input.checkoutSessionId) return null;
+    const supabase = getSupabaseAdminClient();
+    let query = supabase.from("claims").select("*");
+    if (input.claimId) {
+      query = query.eq("id", input.claimId);
+    } else {
+      query = query.eq("stripe_checkout_session_id", input.checkoutSessionId);
+    }
+    const existing = await requireMaybe<ClaimRow>(query.maybeSingle(), "Find claim for checkout completion");
+    if (!existing) return null;
+
+    const claimedAt = input.completedAt ?? new Date().toISOString();
+    const row = await requireData<ClaimRow>(
+      supabase
+        .from("claims")
+        .update({
+          status: "claimed",
+          claimed_at: claimedAt,
+          stripe_customer_id: input.stripeCustomerId ?? existing.stripe_customer_id,
+          stripe_subscription_id: input.stripeSubscriptionId ?? existing.stripe_subscription_id,
+          stripe_checkout_session_id: input.checkoutSessionId ?? existing.stripe_checkout_session_id
+        })
+        .eq("id", existing.id)
+        .select("*")
+        .single(),
+      "Complete claim checkout"
+    );
+    return rowToClaim(row);
   },
 
   async listClaims(siteId) {
@@ -1046,6 +1079,7 @@ function rowToClaim(row: ClaimRow): ClaimRecord {
     verifiedFacts: factVerification?.verifiedFacts ?? [],
     acceptedTermsAt: factVerification?.acceptedTermsAt,
     acceptedManagementAt: factVerification?.acceptedManagementAt,
+    claimedAt: row.claimed_at ?? undefined,
     status: row.status,
     createdAt: row.created_at,
     stripeCustomerId: row.stripe_customer_id ?? undefined,

@@ -377,6 +377,28 @@ export function createClaim(input: {
   };
 }
 
+export function completeClaimCheckout(input: {
+  claimId?: string;
+  checkoutSessionId?: string;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  completedAt?: string;
+}) {
+  const claim = state().claims.find(
+    (candidate) =>
+      (input.claimId && candidate.id === input.claimId) ||
+      (input.checkoutSessionId && candidate.stripeCheckoutSessionId === input.checkoutSessionId)
+  );
+  if (!claim) return null;
+
+  claim.status = "claimed";
+  claim.claimedAt = input.completedAt ?? new Date().toISOString();
+  claim.stripeCustomerId = input.stripeCustomerId ?? claim.stripeCustomerId;
+  claim.stripeSubscriptionId = input.stripeSubscriptionId ?? claim.stripeSubscriptionId;
+  claim.stripeCheckoutSessionId = input.checkoutSessionId ?? claim.stripeCheckoutSessionId;
+  return claim;
+}
+
 export function listClaims(siteId?: string) {
   return state().claims.filter((claim) => !siteId || claim.siteId === siteId);
 }

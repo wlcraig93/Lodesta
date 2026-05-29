@@ -11,7 +11,7 @@
     "smoke": "bash scripts/smoke.sh",
     "smoke:dev": "bash scripts/smoke.sh --start-server",
     "cli": "node scripts/lodesta.mjs",
-    "worker": "tsx workers/runner.ts",
+    "worker": "node --import tsx workers/runner.ts",
     "verify:supabase": "node --import tsx scripts/verify-supabase.ts"
   },
   "dependencies": {

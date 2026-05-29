@@ -16,13 +16,16 @@ Explicit launch stance:
 ## Architecture Decisions
 
 - Product app: Next.js + TypeScript.
+- Launch market: US-only intake is enforced at admin generation, presence assessment, and worker/job boundaries for explicit non-US prompts, unsupported country-code domains, and extracted country facts.
 - Public sites: dynamic structured renderer backed by versioned site JSON.
 - Database/auth: Supabase Auth and Postgres.
 - Deployment: Railway for the app, API, and worker processes.
 - Custom domains: Cloudflare for SaaS for scaled customer domains, SSL, and CDN; Railway's Cloudflare integration is not a replacement for multi-tenant custom hostname management.
 - Assets: pre-claim previews use generated/licensed imagery and extracted facts. Scraped photos, logos, and marketing copy are reference-only until owner grant.
 - Workers: use the same repository/API contracts as the web app. Railway workers are acceptable for launch; crawler-heavy or browser-heavy jobs can move to dedicated worker infrastructure later if volume or anti-bot behavior requires it.
+- Cron orchestration: `/api/jobs/schedule` queues recurring maintenance jobs, including monthly action lists and analytics retention, while workers process the queue through the repository boundary.
 - Deployment readiness: `/api/health` is the Railway liveness endpoint, `/api/health?deep=1` is the admin readiness endpoint, and `npm run verify:supabase` proves the Supabase repository contract against a live project after `supabase/schema.sql` is applied.
+- Data lifecycle: raw analytics events are pruned through `/api/analytics/retention`, `npm run cli -- prune-analytics`, or the `analytics_retention` worker job using `LODESTA_ANALYTICS_RETENTION_DAYS`.
 
 ## Canonical Models
 
@@ -85,7 +88,7 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
 
 9. Experiments
    - Launch with narrow content-neutral experiments only.
-   - First surfaces: sticky CTA and CTA prominence.
+   - First surfaces: sticky CTA, CTA prominence, form length/order, and hero layout.
    - Owner-truth content is never autonomously rewritten.
    - Fleet/cohort learning matters more than per-site significance for low-traffic SMBs.
 
@@ -94,7 +97,8 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
    - Claims store the authenticated Supabase user id when available plus owner email, so later owner access can be authorized through Supabase Auth rather than an operator token.
    - Verified claim facts update canonical provenance.
    - Stripe checkout is used when configured; `checkout.session.completed` webhooks mark claims as paid/claimed.
-   - Cloudflare for SaaS custom hostname registration persists DNS/verification instructions.
+   - Publish and custom-domain APIs return `402 Payment Required` until checkout has completed and the site has a `claimed` record.
+   - Cloudflare for SaaS custom hostname registration persists DNS/verification instructions after claim.
 
 11. CLI and Workers
    - CLI calls the same HTTP APIs as the app.

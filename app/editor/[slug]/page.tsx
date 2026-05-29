@@ -3,12 +3,14 @@ import { notFound } from "next/navigation";
 import { AiEditChat } from "@/components/AiEditChat";
 import { DesignControls } from "@/components/DesignControls";
 import { ResponsivePreview } from "@/components/ResponsivePreview";
-import { SectionEditorForm } from "@/components/SectionEditorForm";
+import { SectionEditorForm, type EditableField } from "@/components/SectionEditorForm";
 import { getEditingVersion } from "@/lib/sample-data";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { approvedVariantsForSection } from "@/lib/section-variants";
+import { claimGateForBundle } from "@/lib/site-publication";
 import type { ThemePresetId } from "@/lib/theme-presets";
-import type { SectionModel } from "@/lib/models";
+import type { BusinessProfile, SectionModel } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +24,15 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
   const home = version.pages[0];
   const activeTheme = version.theme ?? bundle.siteModel.theme;
   const editableSections = home.sections
-    .map((section) => ({ section, fields: editableTextFields(section) }))
+    .map((section) => ({ section, fields: editableFields(section, bundle.businessProfile) }))
     .filter((item) => item.fields.length > 0);
-  const summary = await repository.analyticsSummary(bundle.businessProfile.siteId);
-  const leads = await repository.listFormSubmissions(bundle.businessProfile.siteId);
+  const siteId = bundle.businessProfile.siteId;
+  const [summary, leads, claims] = await Promise.all([
+    repository.analyticsSummary(siteId),
+    repository.listFormSubmissions(siteId),
+    repository.listClaims(siteId)
+  ]);
+  const claimGate = claimGateForBundle(bundle, claims);
 
   return (
     <main className="admin-page">
@@ -99,7 +106,9 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
             sections={home.sections.map((section) => ({
               id: section.id,
               type: section.type,
-              label: String(section.props.heading ?? section.props.eyebrow ?? section.variant)
+              label: String(section.props.heading ?? section.props.eyebrow ?? section.variant),
+              variant: section.variant,
+              variantOptions: approvedVariantsForSection(section.type, section.variant)
             }))}
           />
 
@@ -121,7 +130,12 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
         </section>
 
         <aside className="panel">
-          <AiEditChat siteId={bundle.businessProfile.siteId} siteSlug={bundle.siteModel.slug} />
+          <AiEditChat
+            siteId={siteId}
+            siteSlug={bundle.siteModel.slug}
+            publishDisabled={!claimGate.ok}
+            publishDisabledReason={claimGate.ok ? undefined : claimGate.reason}
+          />
 
           <h2>Guardrails</h2>
           <p>System-only and pinned fields cannot be edited here. Owner-truth copy is saved to draft before publish.</p>
@@ -146,16 +160,59 @@ function presetFromMood(mood: string): ThemePresetId {
   return "warm";
 }
 
-function editableTextFields(section: SectionModel) {
-  return Object.entries(section.fieldPolicies)
-    .filter(([, policy]) => policy.editScope === "owner_freetext")
-    .filter(([key]) => typeof section.props[key] === "string")
-    .map(([key]) => ({
-      key,
-      label: humanizeField(key),
-      value: String(section.props[key] ?? ""),
-      multiline: key.toLowerCase().includes("body") || String(section.props[key] ?? "").length > 90
-    }));
+function editableFields(section: SectionModel, business: BusinessProfile): EditableField[] {
+  const fields: EditableField[] = [];
+  for (const [key, policy] of Object.entries(section.fieldPolicies)) {
+    if (policy.editScope !== "owner_freetext" && policy.editScope !== "owner_choice") continue;
+    const value = section.props[key];
+    if (policy.editScope === "owner_freetext" && typeof value === "string") {
+      fields.push({
+        kind: "text",
+        key,
+        label: humanizeField(key),
+        value: String(value ?? ""),
+        multiline: key.toLowerCase().includes("body") || String(value ?? "").length > 90
+      });
+      continue;
+    }
+
+    if (policy.editScope === "owner_choice" && key.toLowerCase().includes("cta")) {
+      const cta = ctaValue(value);
+      if (!cta) continue;
+      fields.push({
+        kind: "cta",
+        key,
+        label: humanizeField(key),
+        value: cta,
+        options: ctaOptionsForBusiness(business, cta)
+      });
+      continue;
+    }
+
+    if ((policy.editScope === "owner_choice" || policy.editScope === "owner_freetext") && Array.isArray(value)) {
+      if (value.every((item) => typeof item === "string")) {
+        fields.push({
+          kind: "string_list",
+          key,
+          label: humanizeField(key),
+          value: value.map((item) => String(item))
+        });
+        continue;
+      }
+
+      const columns = objectListColumns(value);
+      if (columns.length) {
+        fields.push({
+          kind: "object_list",
+          key,
+          label: humanizeField(key),
+          value: value.map((item) => normalizeObjectListItem(item, columns)),
+          columns
+        });
+      }
+    }
+  }
+  return fields;
 }
 
 function humanizeField(key: string) {
@@ -163,4 +220,70 @@ function humanizeField(key: string) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ctaOptionsForBusiness(business: BusinessProfile, current: { label: string; href: string; role: string }) {
+  const options = [
+    business.phone ? { label: "Call Now", href: `tel:${business.phone}`, role: "tel" } : undefined,
+    business.bookingLinks[0] ? { label: "Book Now", href: business.bookingLinks[0], role: "booking" } : undefined,
+    business.orderingLinks[0] ? { label: "Order Online", href: business.orderingLinks[0], role: "ordering" } : undefined,
+    { label: "Request Information", href: "#contact", role: "form" },
+    { label: "Get a Quote", href: "#contact", role: "form" },
+    { label: "Ask a Question", href: "#contact", role: "form" }
+  ].filter((option): option is { label: string; href: string; role: string } => Boolean(option));
+  if (!options.some((option) => sameCta(option, current))) options.unshift(current);
+  return dedupeCtas(options);
+}
+
+function ctaValue(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as { label?: unknown; href?: unknown; role?: unknown };
+  if (typeof candidate.label !== "string" || typeof candidate.href !== "string") return undefined;
+  return {
+    label: candidate.label,
+    href: candidate.href,
+    role: typeof candidate.role === "string" ? candidate.role : "cta"
+  };
+}
+
+function objectListColumns(value: unknown[]) {
+  const columns = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    for (const [key, child] of Object.entries(item)) {
+      if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") columns.add(key);
+    }
+  }
+  return preferredColumnOrder([...columns]);
+}
+
+function normalizeObjectListItem(value: unknown, columns: string[]) {
+  const item = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return Object.fromEntries(columns.map((column) => [column, String(item[column] ?? "")]));
+}
+
+function preferredColumnOrder(columns: string[]) {
+  const preferred = ["title", "label", "question", "quote", "author", "description", "answer", "href", "url", "alt"];
+  return columns.sort((left, right) => {
+    const leftIndex = preferred.indexOf(left);
+    const rightIndex = preferred.indexOf(right);
+    if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+    if (leftIndex === -1) return 1;
+    if (rightIndex === -1) return -1;
+    return leftIndex - rightIndex;
+  });
+}
+
+function dedupeCtas(options: Array<{ label: string; href: string; role: string }>) {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = `${option.role}|${option.href}|${option.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function sameCta(left: { label: string; href: string; role: string }, right: { label: string; href: string; role: string }) {
+  return left.label === right.label && left.href === right.href && left.role === right.role;
 }

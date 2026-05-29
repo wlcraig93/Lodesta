@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lodesta</title>
+    <meta
+      name="description"
+      content="Lodesta's AI agents continuously improve your website's copy, design, SEO, pages, and conversion flows."
+    />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap");
+
+      :root {
+        --paper: #f6f7f3;
+        --paper-deep: #e9ede6;
+        --ink: #14271e;
+        --muted: #5c645c;
+        --line: rgba(20, 39, 30, 0.12);
+        --line-strong: rgba(20, 39, 30, 0.24);
+        --forest: #24493a;
+        --forest-2: #1c392d;
+        --gold: #f5b63d;
+        --gold-2: #e9a92f;
+        --white: #fffefa;
+        --shadow: 0 28px 80px rgba(20, 39, 30, 0.13);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        color: var(--ink);
+        background: var(--paper);
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        overflow-x: hidden;
+        background:
+          linear-gradient(90deg, rgba(20, 39, 30, 0.035) 1px, transparent 1px) 50% 0 /
+            88px 88px,
+          var(--paper);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .page-shell {
+        min-height: 100vh;
+        overflow: hidden;
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 22px 0;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+      }
+
+      .brand-logo-frame {
+        display: block;
+        width: 164px;
+        height: 68px;
+        overflow: hidden;
+      }
+
+      .brand-logo {
+        display: block;
+        width: 174px;
+        height: auto;
+        mix-blend-mode: multiply;
+        transform: translate(-7px, -2px);
+      }
+
+      .nav {
+        display: none;
+        align-items: center;
+        gap: 28px;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .nav a {
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .header-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 16px;
+        border: 1px solid var(--ink);
+        background: transparent;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .hero {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0 52px;
+      }
+
+      .hero-grid {
+        display: grid;
+        gap: 40px;
+        align-items: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        width: fit-content;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        color: var(--forest);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        width: 28px;
+        height: 1px;
+        background: currentColor;
+        content: "";
+      }
+
+      h1 {
+        max-width: 760px;
+        margin: 0;
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: clamp(56px, 12vw, 118px);
+        font-weight: 400;
+        line-height: 0.94;
+      }
+
+      .hero-copy {
+        max-width: 620px;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: clamp(17px, 2vw, 21px);
+        line-height: 1.55;
+      }
+
+      .hero-kicker {
+        max-width: 620px;
+        margin: 24px 0 0;
+        color: var(--ink);
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: clamp(19px, 2vw, 24px);
+        font-weight: 500;
+        line-height: 1.35;
+      }
+
+      .conversion-form {
+        display: grid;
+        max-width: 660px;
+        gap: 10px;
+        margin-top: 30px;
+        padding: 8px;
+        border: 1px solid var(--line-strong);
+        background: rgba(255, 254, 250, 0.72);
+        box-shadow: 0 18px 50px rgba(20, 39, 30, 0.08);
+      }
+
+      .conversion-form label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        overflow: hidden;
+        white-space: nowrap;
+      }
+
+      .conversion-form input {
+        min-height: 56px;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        font-size: 16px;
+        outline: none;
+        padding: 0 14px;
+      }
+
+      .conversion-form input::placeholder {
+        color: rgba(20, 39, 30, 0.44);
+      }
+
+      .primary-button {
+        min-height: 56px;
+        border: 1px solid var(--gold);
+        background: var(--gold);
+        color: var(--ink);
+        cursor: pointer;
+        font-weight: 800;
+        padding: 0 22px;
+      }
+
+      .primary-button:hover {
+        border-color: var(--gold-2);
+        background: var(--gold-2);
+      }
+
+      .trust-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 20px;
+        margin: 20px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .trust-row span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .trust-row span::before {
+        width: 6px;
+        height: 6px;
+        background: var(--gold);
+        content: "";
+      }
+
+      .product-art {
+        position: relative;
+        min-height: 560px;
+      }
+
+      .site-preview {
+        position: relative;
+        z-index: 1;
+        width: min(100%, 560px);
+        margin-left: auto;
+        border: 1px solid rgba(20, 39, 30, 0.16);
+        background: var(--white);
+        box-shadow: var(--shadow);
+      }
+
+      .preview-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 42px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .window-dots {
+        display: inline-flex;
+        gap: 6px;
+      }
+
+      .window-dots i {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--line-strong);
+      }
+
+      .preview-body {
+        display: grid;
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .preview-hero {
+        min-height: 278px;
+        padding: 22px;
+        background:
+          linear-gradient(rgba(36, 73, 58, 0.76), rgba(36, 73, 58, 0.84)),
+          url("data:image/svg+xml,%3Csvg width='900' height='520' viewBox='0 0 900 520' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='900' height='520' fill='%23f6f7f3'/%3E%3Crect x='60' y='88' width='780' height='330' fill='%235c645c'/%3E%3Crect x='100' y='132' width='170' height='286' fill='%2314271e'/%3E%3Crect x='310' y='142' width='490' height='118' fill='%23e9ede6'/%3E%3Crect x='310' y='284' width='214' height='134' fill='%23f5b63d'/%3E%3Crect x='548' y='284' width='252' height='134' fill='%2324493a'/%3E%3Ccircle cx='732' cy='190' r='44' fill='%23f5b63d'/%3E%3C/svg%3E");
+        background-position: center;
+        background-size: cover;
+        color: var(--white);
+      }
+
+      .preview-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 44px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .preview-nav-lines {
+        display: flex;
+        gap: 8px;
+      }
+
+      .preview-nav-lines span {
+        width: 42px;
+        height: 2px;
+        background: rgba(255, 254, 250, 0.62);
+      }
+
+      .preview-title {
+        max-width: 320px;
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: 48px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .preview-cta {
+        width: 126px;
+        height: 36px;
+        margin-top: 22px;
+        background: var(--gold);
+      }
+
+      .preview-sections {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 14px;
+      }
+
+      .preview-panel {
+        min-height: 120px;
+        border: 1px solid var(--line);
+        padding: 15px;
+      }
+
+      .preview-panel strong {
+        display: block;
+        margin-bottom: 14px;
+        font-size: 13px;
+      }
+
+      .lines {
+        display: grid;
+        gap: 8px;
+      }
+
+      .lines i {
+        display: block;
+        height: 7px;
+        background: rgba(20, 39, 30, 0.13);
+      }
+
+      .lines i:nth-child(2) {
+        width: 78%;
+      }
+
+      .lines i:nth-child(3) {
+        width: 58%;
+      }
+
+      .score-card {
+        position: absolute;
+        z-index: 2;
+        right: min(18px, 3vw);
+        bottom: 72px;
+        width: min(310px, calc(100% - 28px));
+        border: 1px solid rgba(246, 247, 243, 0.72);
+        background: rgba(20, 39, 30, 0.9);
+        color: var(--white);
+        box-shadow: 0 22px 70px rgba(20, 39, 30, 0.24);
+      }
+
+      .score-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 16px 16px 14px;
+        border-bottom: 1px solid rgba(246, 247, 243, 0.14);
+      }
+
+      .score-head span {
+        color: rgba(246, 247, 243, 0.62);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .score-value {
+        font-size: 58px;
+        font-weight: 500;
+        line-height: 0.86;
+      }
+
+      .score-list {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .score-item {
+        display: grid;
+        grid-template-columns: 7px 1fr;
+        gap: 10px;
+        color: rgba(246, 247, 243, 0.82);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .score-item::before {
+        width: 7px;
+        height: 7px;
+        margin-top: 5px;
+        background: var(--gold);
+        content: "";
+      }
+
+      .proof-strip {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 254, 250, 0.34);
+      }
+
+      .proof-inner {
+        display: grid;
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .proof-item {
+        display: grid;
+        gap: 8px;
+        padding: 24px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .proof-item:last-child {
+        border-bottom: 0;
+      }
+
+      .proof-item strong {
+        font-size: 30px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .proof-item span {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .section {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 72px 0;
+      }
+
+      .section-heading {
+        max-width: 760px;
+      }
+
+      .section-heading h2 {
+        margin: 0;
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: clamp(42px, 7vw, 76px);
+        font-weight: 400;
+        line-height: 1.02;
+      }
+
+      .section-heading p {
+        max-width: 570px;
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.6;
+      }
+
+      .steps {
+        display: grid;
+        gap: 18px;
+        margin-top: 38px;
+      }
+
+      .step {
+        border-top: 1px solid var(--line-strong);
+        padding-top: 20px;
+      }
+
+      .step-number {
+        color: var(--gold);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .step h3 {
+        margin: 16px 0 10px;
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: 22px;
+        font-weight: 500;
+        line-height: 1.15;
+      }
+
+      .step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.65;
+      }
+
+      .closing-band {
+        background: var(--forest);
+        color: var(--white);
+      }
+
+      .closing-inner {
+        display: grid;
+        gap: 28px;
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 62px 0;
+      }
+
+      .closing-inner h2 {
+        max-width: 760px;
+        margin: 0;
+        font-family: Figtree, ui-sans-serif, system-ui, sans-serif;
+        font-size: clamp(42px, 8vw, 82px);
+        font-weight: 400;
+        line-height: 1.02;
+      }
+
+      .closing-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .inverse-button,
+      .ghost-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0 20px;
+        font-weight: 800;
+      }
+
+      .inverse-button {
+        background: var(--gold);
+        color: var(--ink);
+      }
+
+      .ghost-button {
+        border: 1px solid rgba(246, 247, 243, 0.46);
+        color: var(--white);
+      }
+
+      @media (min-width: 720px) {
+        .nav {
+          display: flex;
+        }
+
+        .conversion-form {
+          grid-template-columns: 1fr auto;
+        }
+
+        .proof-inner {
+          grid-template-columns: repeat(3, 1fr);
+        }
+
+        .proof-item {
+          min-height: 132px;
+          padding: 28px 24px;
+          border-right: 1px solid var(--line);
+          border-bottom: 0;
+        }
+
+        .proof-item:first-child {
+          padding-left: 0;
+        }
+
+        .proof-item:last-child {
+          border-right: 0;
+          padding-right: 0;
+        }
+
+        .steps {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      @media (min-width: 980px) {
+        .site-header {
+          padding-top: 28px;
+        }
+
+        .hero {
+          padding-top: 58px;
+        }
+
+        .hero-grid {
+          grid-template-columns: minmax(0, 0.96fr) minmax(440px, 0.74fr);
+          gap: 52px;
+        }
+
+        .product-art {
+          transform: translateY(12px);
+        }
+      }
+
+      @media (max-width: 560px) {
+        .hero,
+        .section,
+        .proof-inner,
+        .closing-inner {
+          width: 358px;
+          max-width: calc(100vw - 32px);
+          margin-left: 16px;
+          margin-right: auto;
+        }
+
+        .site-header {
+          width: 358px;
+          max-width: calc(100vw - 32px);
+          margin-left: 16px;
+          margin-right: auto;
+        }
+
+        .header-action {
+          display: none;
+        }
+
+        .brand-logo {
+          width: 160px;
+        }
+
+        .brand-logo-frame {
+          width: 150px;
+          height: 62px;
+        }
+
+        .hero {
+          padding-top: 24px;
+        }
+
+        h1 {
+          font-size: clamp(52px, 14vw, 62px);
+          line-height: 0.96;
+          max-width: 8ch;
+        }
+
+        .hero-copy {
+          font-size: 16px;
+          max-width: 100%;
+        }
+
+        .conversion-form {
+          width: 100%;
+          max-width: 100%;
+        }
+
+        .primary-button {
+          width: 100%;
+        }
+
+        .product-art {
+          min-height: 500px;
+        }
+
+        .site-preview {
+          max-width: 100%;
+          margin-left: 0;
+        }
+
+        .preview-body {
+          padding: 12px;
+        }
+
+        .preview-hero {
+          min-height: 246px;
+          padding: 17px;
+        }
+
+        .preview-title {
+          font-size: 39px;
+          max-width: 250px;
+        }
+
+        .preview-sections {
+          grid-template-columns: 1fr;
+        }
+
+        .score-card {
+          bottom: 20px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header" aria-label="Site header">
+        <a class="brand" href="#" aria-label="Lodesta home">
+          <span class="brand-logo-frame">
+            <img class="brand-logo" src="assets/lodesta-logo.png" alt="Lodesta" />
+          </span>
+        </a>
+        <nav class="nav" aria-label="Main navigation">
+          <a href="#how">How it works</a>
+          <a href="#proof">Proof</a>
+          <a href="#pricing">Pricing</a>
+        </nav>
+        <a class="header-action" href="#preview">Request preview</a>
+      </header>
+
+      <main>
+        <section class="hero" id="preview">
+          <div class="hero-grid">
+            <div class="hero-content">
+              <div class="eyebrow">AI-managed website growth</div>
+              <h1>Put your website on autopilot.</h1>
+              <p class="hero-kicker">You control your brand. Lodesta optimizes your website.</p>
+              <p class="hero-copy">
+                Lodesta's AI agents continuously improve your site's copy, design, SEO,
+                pages, and conversion flows so more customers find, trust, and choose your
+                business.
+              </p>
+              <form class="conversion-form">
+                <label for="website-url">Business website URL</label>
+                <input
+                  id="website-url"
+                  name="website-url"
+                  type="url"
+                  placeholder="Enter your current website"
+                  autocomplete="url"
+                />
+                <button class="primary-button" type="submit">Generate my preview</button>
+              </form>
+              <div class="trust-row" aria-label="Product guarantees">
+                <span>Noindex previews</span>
+                <span>Claim before publishing</span>
+                <span>First-party analytics</span>
+              </div>
+            </div>
+
+            <div class="product-art" aria-label="Example generated website preview">
+              <div class="site-preview">
+                <div class="preview-topbar">
+                  <span>Generated replacement preview</span>
+                  <span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                </div>
+                <div class="preview-body">
+                  <div class="preview-hero">
+                    <div class="preview-nav">
+                      <span>WILLOW & MAIN</span>
+                      <span class="preview-nav-lines" aria-hidden="true">
+                        <span></span><span></span><span></span>
+                      </span>
+                    </div>
+                    <div class="preview-title">A calmer site built to receive customers.</div>
+                    <div class="preview-cta" aria-hidden="true"></div>
+                  </div>
+                  <div class="preview-sections">
+                    <div class="preview-panel">
+                      <strong>Services</strong>
+                      <span class="lines" aria-hidden="true"><i></i><i></i><i></i></span>
+                    </div>
+                    <div class="preview-panel preview-panel-quiet" aria-hidden="true">
+                      <span class="lines"><i></i><i></i><i></i></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <aside class="score-card" aria-label="Website quality score">
+                <div class="score-head">
+                  <span>Site score</span>
+                  <div class="score-value">84</div>
+                </div>
+                <div class="score-list">
+                  <div class="score-item">Primary call path is visible on mobile.</div>
+                  <div class="score-item">Monthly action list starts after claim.</div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="proof-strip" id="proof" aria-label="Product proof points">
+          <div class="proof-inner">
+            <div class="proof-item">
+              <strong>Preview first</strong>
+              <span>See the rebuilt site before paying or connecting a domain.</span>
+            </div>
+            <div class="proof-item">
+              <strong>Managed after launch</strong>
+              <span>Analytics, lead tracking, and monthly recommendations stay active.</span>
+            </div>
+            <div class="proof-item">
+              <strong>Not DIY</strong>
+              <span>Curated controls keep the site polished while owners update facts.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" id="how">
+          <div class="section-heading">
+            <h2>A sharper site, without becoming a web designer.</h2>
+            <p>
+              Lodesta handles the expensive parts of a small business website:
+              structure, conversion paths, local trust, analytics, and continuous cleanup.
+            </p>
+          </div>
+          <div class="steps">
+            <article class="step">
+              <span class="step-number">01</span>
+              <h3>Import the current site.</h3>
+              <p>
+                We read public pages, screenshots, SEO signals, business facts, and local
+                presence cues.
+              </p>
+            </article>
+            <article class="step">
+              <span class="step-number">02</span>
+              <h3>Generate a premium preview.</h3>
+              <p>
+                The replacement site is built from structured sections, not a disposable
+                image mockup.
+              </p>
+            </article>
+            <article class="step">
+              <span class="step-number">03</span>
+              <h3>Improve it every month.</h3>
+              <p>
+                Calls, forms, clicks, and engagement turn into a short action list owners can
+                approve.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="closing-band" id="pricing">
+          <div class="closing-inner">
+            <h2>Launch the site your next customer should have found first.</h2>
+            <div class="closing-actions">
+              <a class="inverse-button" href="#preview">Generate my preview</a>
+              <a class="ghost-button" href="#how">See the process</a>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

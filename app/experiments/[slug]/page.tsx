@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ExperimentControlForm } from "@/components/ExperimentControlForm";
+import { ExperimentLearningForm } from "@/components/ExperimentLearningForm";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
 
@@ -13,8 +15,10 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
 
   const events = await repository.listAnalyticsEvents(bundle.businessProfile.siteId);
   const analyses = await repository.analyzeExperiments(bundle.businessProfile.siteId);
+  const learnings = await repository.listExperimentLearnings({ siteId: bundle.businessProfile.siteId });
   const assignmentEvents = events.filter((event) => event.eventType === "experiment_assignment");
   const leaderCount = analyses.filter((analysis) => analysis.status === "leader_detected").length;
+  const runningCount = bundle.experiments.filter((experiment) => experiment.status === "running").length;
 
   return (
     <main className="admin-page">
@@ -41,14 +45,17 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
       </header>
 
       <section className="metric-row">
-        <Metric label="Running" value={bundle.experiments.filter((experiment) => experiment.status === "running").length} />
+        <Metric label="Opted in" value={runningCount} />
         <Metric label="Assignments" value={assignmentEvents.length} />
         <Metric label="Leaders" value={leaderCount} />
-        <Metric label="Calls" value={events.filter((event) => event.eventType === "tel_click").length} />
+        <Metric label="Learnings" value={learnings.filter((learning) => learning.status === "active").length} />
       </section>
 
       <section className="panel">
         <h2>Experiment Loops</h2>
+        {runningCount === 0 ? (
+          <p className="muted">No experiments are running. Start one explicitly before visitor sessions can be assigned.</p>
+        ) : null}
         <div className="finding-list">
           {bundle.experiments.map((experiment) => {
             const analysis = analyses.find((candidate) => candidate.experimentId === experiment.id);
@@ -71,11 +78,21 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
                     <strong>Holdout:</strong> {Math.round(experiment.holdoutPercent * 100)}% of sessions stay on the control variant.
                   </p>
                 ) : null}
-                {analysis?.leaderLabel ? (
+                {analysis?.status === "leader_detected" && analysis.leaderLabel ? (
                   <p>
                     <strong>Current leader:</strong> {analysis.leaderLabel}
                   </p>
                 ) : null}
+                <ExperimentControlForm
+                  siteId={bundle.businessProfile.siteId}
+                  experimentId={experiment.id}
+                  status={experiment.status}
+                />
+                <ExperimentLearningForm
+                  siteId={bundle.businessProfile.siteId}
+                  experimentId={experiment.id}
+                  disabledReason={learningDisabledReason(experiment.status, analysis)}
+                />
                 <div className="bar-list">
                   {(analysis?.variants ?? []).map((variant) => {
                     return (
@@ -118,6 +135,29 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
           {bundle.experiments.length === 0 ? <p className="muted">No experiments configured yet.</p> : null}
         </div>
       </section>
+
+      <section className="panel">
+        <h2>Learnings</h2>
+        <div className="finding-list">
+          {learnings.map((learning) => (
+            <article key={learning.id} className="finding-card">
+              <div className="button-row">
+                <span className="badge">{learning.status.replace("_", " ")}</span>
+                <span className="badge">{learning.confidence.replace("_", " ")}</span>
+              </div>
+              <h3>{learning.winnerLabel}</h3>
+              <p>{learning.generationRule}</p>
+              <p>
+                <strong>Standard:</strong> {learning.standardCriterionId}
+              </p>
+              <p>
+                <strong>Observed lift:</strong> {formatLift(learning.observedLift)} from {learning.totalAssignments} assignments.
+              </p>
+            </article>
+          ))}
+          {learnings.length === 0 ? <p className="muted">No experiment learnings adopted yet.</p> : null}
+        </div>
+      </section>
     </main>
   );
 }
@@ -134,6 +174,19 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 function formatLift(value: number) {
   if (!Number.isFinite(value) || value === 0) return "0%";
   return `${value > 0 ? "+" : ""}${Math.round(value * 100)}%`;
+}
+
+function learningDisabledReason(
+  status: string,
+  analysis: Awaited<ReturnType<typeof repository.analyzeExperiments>>[number] | undefined
+) {
+  if (!analysis) return "Analysis is not available yet.";
+  if (status === "rolled_back") return "Rolled-back experiments cannot adopt new learnings.";
+  if (status === "concluded") return "Experiment is already concluded.";
+  if (analysis.status !== "leader_detected") return "Keep collecting until a leader is detected.";
+  if (analysis.confidence === "insufficient_data") return "More assignments are needed before adopting a learning.";
+  if (analysis.leaderVariantId === analysis.controlVariantId) return "The control is still leading; no new default should be learned.";
+  return undefined;
 }
 
 function Bar({ label, value, max }: { label: string; value: number; max: number }) {

@@ -99,6 +99,21 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
   return { ok: true as const, draft, finding };
 }
 
+export function preserveFindingLifecycle(
+  nextFindings: OptimizationFinding[],
+  previousFindings: OptimizationFinding[]
+) {
+  const lifecycleById = new Map(
+    previousFindings
+      .filter((finding) => finding.status === "applied" || finding.status === "dismissed")
+      .map((finding) => [finding.id, finding.status])
+  );
+  return nextFindings.map((finding) => {
+    const status = lifecycleById.get(finding.id);
+    return status ? { ...finding, status } : finding;
+  });
+}
+
 function makeCtaSection(payload: Extract<SuggestedEditPayload, { action: "add_cta_section" }>): SectionModel {
   return {
     id: "cta_analytics_generated",

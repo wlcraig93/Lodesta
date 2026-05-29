@@ -1,25 +1,44 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AnalyticsSummary, ExperimentAnalysis, JobKind, JobRecord, LeadSubmission, OptimizationFinding, SiteBundle } from "./models";
+import type {
+  AnalyticsSummary,
+  ExperimentAnalysis,
+  ExperimentLearning,
+  JobKind,
+  JobRecord,
+  LeadSubmission,
+  OptimizationFinding,
+  SiteBundle
+} from "./models";
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput } from "./intake";
 import { runAudit } from "./audit";
 import { createPresenceIntakePlan } from "./presence-intake";
+import { gatherPublicPresenceSignals } from "./public-presence";
 import { runSiteQa } from "./qa";
+import { inspectUrlRender } from "./render-inspection";
+import { assertPublicFetchUrl } from "./url-safety";
+import { prepareIntakeInput } from "./intake-pipeline";
+import { assertLaunchMarket } from "./launch-market";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
+export const defaultJobMaxAttempts = 3;
+export const defaultJobStaleAfterMs = 1000 * 60 * 15;
 
 type JobsFile = {
   jobs: JobRecord[];
 };
 
 export type JobExecutionContext = {
+  workerId?: string;
   createAndStoreSite?: (input: { url?: string; prompt?: string }) => Promise<SiteBundle>;
   createPreviewToken?: (input: { siteId: string; expiresAt?: string }) => Promise<{ token: string } | null>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
   runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
   analyticsSummary?: (siteId: string) => Promise<AnalyticsSummary>;
+  pruneAnalyticsEvents?: (input: { before: string; siteId?: string }) => Promise<{ deleted: number; before: string; siteId?: string }>;
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
+  listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
   listFormSubmissions?: (siteId?: string) => Promise<LeadSubmission[]>;
 };
 
@@ -32,6 +51,8 @@ export async function enqueueJob(kind: JobKind, payload: Record<string, unknown>
     status: "queued",
     payload,
     attempts: 0,
+    maxAttempts: maxAttemptsFromPayload(payload),
+    runAfter: runAfterFromPayload(payload, now),
     createdAt: now,
     updatedAt: now
   };
@@ -52,12 +73,16 @@ export async function getJob(id: string) {
 
 export async function processNextJob(context?: JobExecutionContext) {
   const file = await readJobsFile();
-  const job = file.jobs.find((candidate) => candidate.status === "queued");
+  if (requeueStaleLocalJobs(file, Date.now())) await writeJobsFile(file);
+  const nowMs = Date.now();
+  const job = file.jobs.find((candidate) => candidate.status === "queued" && new Date(candidate.runAfter).getTime() <= nowMs);
   if (!job) return null;
 
   job.status = "running";
   job.attempts += 1;
   job.startedAt = new Date().toISOString();
+  job.lockedAt = job.startedAt;
+  job.lockedBy = context?.workerId ?? "local-worker";
   job.updatedAt = job.startedAt;
   await writeJobsFile(file);
 
@@ -70,11 +95,7 @@ export async function processNextJob(context?: JobExecutionContext) {
     });
     return await getJob(job.id);
   } catch (error) {
-    await updateJob(job.id, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown job error",
-      completedAt: new Date().toISOString()
-    });
+    await failOrRetryLocalJob(job.id, error);
     return await getJob(job.id);
   }
 }
@@ -92,9 +113,18 @@ export async function processAllQueuedJobs(limit = 25, context?: JobExecutionCon
 export async function executeJob(job: JobRecord, context?: JobExecutionContext): Promise<Record<string, unknown>> {
   switch (job.kind) {
     case "presence_assessment": {
-      const url = assertString(job.payload.url, "url");
-      const crawl = await crawlUrl(url);
-      return createPresenceIntakePlan(url, crawl) as unknown as Record<string, unknown>;
+      const url = await assertPublicFetchUrl(assertString(job.payload.url, "url"));
+      assertLaunchMarket({ url });
+      const [crawl, renderInspection] = await Promise.all([
+        crawlUrl(url),
+        inspectUrlRender({
+          url,
+          captureScreenshots: job.payload.screenshots !== false
+        })
+      ]);
+      const publicPresence = await gatherPublicPresenceSignals({ url, crawl });
+      assertLaunchMarket({ url, crawl, publicPresence });
+      return createPresenceIntakePlan(url, crawl, renderInspection, publicPresence) as unknown as Record<string, unknown>;
     }
     case "generate_site": {
       const input = {
@@ -103,10 +133,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       };
       const bundle = context?.createAndStoreSite
         ? await context.createAndStoreSite(input)
-        : createSiteFromInput({
-          ...input,
-          crawl: input.url ? await crawlUrl(input.url) : undefined
-        });
+        : createSiteFromInput(await prepareIntakeInput(input));
       return {
         siteId: bundle.businessProfile.siteId,
         slug: bundle.siteModel.slug,
@@ -192,10 +219,11 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       }
       const bundle = await context.getSiteBundle(siteId);
       if (!bundle) throw new Error(`Unknown site: ${siteId}`);
-      const [findings, analytics, experiments, leads] = await Promise.all([
+      const [findings, analytics, experiments, learnings, leads] = await Promise.all([
         context.runAndStoreAudit(siteId),
         context.analyticsSummary(siteId),
         context.analyzeExperiments(siteId),
+        context.listExperimentLearnings?.(siteId) ?? Promise.resolve([]),
         context.listFormSubmissions?.(siteId) ?? Promise.resolve([])
       ]);
       const qa = runSiteQa(bundle, { versionStatus: "draft" });
@@ -232,7 +260,24 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
           confidence: analysis.confidence,
           leaderLabel: analysis.leaderLabel,
           totalAssignments: analysis.totalAssignments
-        }))
+        })),
+        learnings: {
+          active: learnings.filter((learning) => learning.status === "active").length,
+          rolledBack: learnings.filter((learning) => learning.status === "rolled_back").length
+        }
+      };
+    }
+    case "analytics_retention": {
+      if (!context?.pruneAnalyticsEvents) {
+        throw new Error("analytics_retention requires repository-backed job context");
+      }
+      const before = retentionCutoffFromPayload(job.payload);
+      const siteId = typeof job.payload.siteId === "string" ? job.payload.siteId : undefined;
+      const result = await context.pruneAnalyticsEvents({ before, siteId });
+      return {
+        prunedAt: new Date().toISOString(),
+        retentionDays: retentionDaysFromPayload(job.payload),
+        ...result
       };
     }
     default:
@@ -241,19 +286,83 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
   }
 }
 
+export function retentionDaysFromPayload(payload: Record<string, unknown>) {
+  const raw = typeof payload.retentionDays === "number"
+    ? payload.retentionDays
+    : Number(process.env.LODESTA_ANALYTICS_RETENTION_DAYS ?? 395);
+  return Math.max(30, Math.min(Math.trunc(Number.isFinite(raw) ? raw : 395), 3650));
+}
+
+export function retentionCutoffFromPayload(payload: Record<string, unknown>) {
+  if (typeof payload.before === "string" && !Number.isNaN(new Date(payload.before).getTime())) {
+    return new Date(payload.before).toISOString();
+  }
+  return new Date(Date.now() - retentionDaysFromPayload(payload) * 24 * 60 * 60 * 1000).toISOString();
+}
+
 async function updateJob(id: string, patch: Partial<JobRecord>) {
   const file = await readJobsFile();
   const job = file.jobs.find((candidate) => candidate.id === id);
   if (!job) throw new Error(`Job not found: ${id}`);
-  Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  Object.assign(job, normalizeJobRecord({ ...job, ...patch, updatedAt: new Date().toISOString() }));
   await writeJobsFile(file);
+}
+
+async function failOrRetryLocalJob(id: string, error: unknown) {
+  const file = await readJobsFile();
+  const job = file.jobs.find((candidate) => candidate.id === id);
+  if (!job) throw new Error(`Job not found: ${id}`);
+  const message = error instanceof Error ? error.message : "Unknown job error";
+  const now = new Date().toISOString();
+  if (job.attempts < job.maxAttempts) {
+    Object.assign(job, {
+      status: "queued" as const,
+      error: message,
+      runAfter: new Date(Date.now() + retryDelayMs(job.attempts)).toISOString(),
+      lockedAt: undefined,
+      lockedBy: undefined,
+      updatedAt: now
+    });
+  } else {
+    Object.assign(job, {
+      status: "failed" as const,
+      error: message,
+      completedAt: now,
+      lockedAt: undefined,
+      lockedBy: undefined,
+      updatedAt: now
+    });
+  }
+  await writeJobsFile(file);
+}
+
+function requeueStaleLocalJobs(file: JobsFile, nowMs: number) {
+  let changed = false;
+  for (const job of file.jobs) {
+    if (job.status !== "running" || !job.lockedAt) continue;
+    if (nowMs - new Date(job.lockedAt).getTime() <= defaultJobStaleAfterMs) continue;
+    if (job.attempts >= job.maxAttempts) {
+      job.status = "failed";
+      job.error = job.error ?? "Job lock expired after all retry attempts.";
+      job.completedAt = new Date(nowMs).toISOString();
+    } else {
+      job.status = "queued";
+      job.error = job.error ?? "Job lock expired and was returned to the queue.";
+      job.runAfter = new Date(nowMs).toISOString();
+    }
+    job.lockedAt = undefined;
+    job.lockedBy = undefined;
+    job.updatedAt = new Date(nowMs).toISOString();
+    changed = true;
+  }
+  return changed;
 }
 
 async function readJobsFile(): Promise<JobsFile> {
   try {
     const raw = await readFile(jobsFile, "utf8");
     const parsed = JSON.parse(raw) as JobsFile;
-    return { jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [] };
+    return { jobs: Array.isArray(parsed.jobs) ? parsed.jobs.map(normalizeJobRecord) : [] };
   } catch {
     return { jobs: [] };
   }
@@ -267,6 +376,36 @@ async function writeJobsFile(file: JobsFile) {
 function assertString(value: unknown, label: string) {
   if (typeof value !== "string" || !value) throw new Error(`Missing ${label}`);
   return value;
+}
+
+export function retryDelayMs(attempts: number) {
+  const exponent = Math.max(0, Math.min(attempts - 1, 5));
+  return 1000 * 60 * 2 ** exponent;
+}
+
+export function maxAttemptsFromPayload(payload: Record<string, unknown>) {
+  const value = typeof payload.maxAttempts === "number" ? payload.maxAttempts : defaultJobMaxAttempts;
+  return Math.max(1, Math.min(Math.trunc(value), 10));
+}
+
+export function runAfterFromPayload(payload: Record<string, unknown>, fallback: string) {
+  return typeof payload.runAfter === "string" && !Number.isNaN(new Date(payload.runAfter).getTime())
+    ? payload.runAfter
+    : fallback;
+}
+
+export function normalizeJobRecord(job: Partial<JobRecord> & Pick<JobRecord, "id" | "kind" | "status" | "payload" | "attempts" | "createdAt" | "updatedAt">): JobRecord {
+  return {
+    ...job,
+    result: job.result,
+    error: job.error,
+    maxAttempts: job.maxAttempts ?? defaultJobMaxAttempts,
+    runAfter: job.runAfter ?? job.createdAt,
+    lockedBy: job.lockedBy,
+    lockedAt: job.lockedAt,
+    startedAt: job.startedAt,
+    completedAt: job.completedAt
+  };
 }
 
 function parseBatchUrls(input: unknown) {

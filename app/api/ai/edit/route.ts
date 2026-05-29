@@ -7,7 +7,7 @@ import { requireAdminOrSiteOwner } from "@/lib/security";
 const aiEditSchema = z.object({
   siteId: z.string().min(1),
   message: z.string().min(1).max(4000),
-  mode: z.enum(["draft", "publish_after_qa"]).default("draft")
+  mode: z.enum(["draft", "qa"]).default("draft")
 });
 
 export async function POST(request: Request) {
@@ -24,20 +24,28 @@ export async function POST(request: Request) {
     message: parsed.data.message
   });
   if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  if (!result.ok) return NextResponse.json({ error: result.message, result }, { status: 400 });
+  if (!result.ok) {
+    return NextResponse.json(
+      {
+        error: result.message,
+        issues: result.guardrailIssues,
+        warnings: result.warnings,
+        result
+      },
+      { status: 400 }
+    );
+  }
 
   const bundle = await repository.getSiteBundle(parsed.data.siteId);
   const qa = bundle ? runSiteQa(bundle, { versionStatus: "draft" }) : null;
 
-  if (parsed.data.mode === "publish_after_qa" && result.mutated) {
-    if (!qa?.passed) {
-      return NextResponse.json({ ...withoutBundle(result), qa, published: false });
-    }
-    const publish = await repository.publishDraft(parsed.data.siteId);
-    return NextResponse.json({ ...withoutBundle(result), qa, published: Boolean(publish?.ok), publish });
-  }
-
-  return NextResponse.json({ ...withoutBundle(result), qa, published: false });
+  return NextResponse.json({
+    ...withoutBundle(result),
+    qa,
+    published: false,
+    publishConfirmationRequired: Boolean(result.mutated && qa?.passed),
+    nextAction: qa?.passed ? "review_and_confirm_publish" : "fix_qa_before_publish"
+  });
 }
 
 function withoutBundle<T extends { bundle?: unknown }>(result: T) {

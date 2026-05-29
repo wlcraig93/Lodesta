@@ -118,6 +118,38 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
 
       <div className="admin-grid">
         <section className="panel">
+          <h2>Traffic Sources</h2>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Sessions</th>
+                <th>Actions</th>
+                <th>Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.outcomesBySource.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.label}</td>
+                  <td>{row.sessions}</td>
+                  <td>{row.primaryActions}</td>
+                  <td>{Math.round(row.actionRate * 100)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {summary.outcomesBySource.length === 0 ? <p className="muted">No source attribution yet.</p> : null}
+        </section>
+
+        <aside className="panel">
+          <h2>Click Map</h2>
+          <ClickMap points={summary.clickMap} sectionNames={sectionNames} />
+        </aside>
+      </div>
+
+      <div className="admin-grid">
+        <section className="panel">
           <h2>Section Outcomes</h2>
           <table className="data-table">
             <thead>
@@ -240,6 +272,35 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
         ) : null}
       </section>
 
+      <section className="panel">
+        <h2>Standard Correlations</h2>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Standard criterion</th>
+              <th>Signal</th>
+              <th>Metric</th>
+              <th>Events</th>
+              <th>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.standardCorrelations.map((row) => (
+              <tr key={row.criterionId}>
+                <td>
+                  {row.title}
+                  <small className="muted">{row.insight}</small>
+                </td>
+                <td>{row.signal}</td>
+                <td>{row.metric}</td>
+                <td>{row.events}</td>
+                <td>{Math.round(row.rate * 100)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
       <div className="admin-grid">
         <section className="panel">
           <h2>Recent Clicks</h2>
@@ -307,6 +368,46 @@ function Bar({ label, value, max }: { label: string; value: number; max: number 
       </div>
       <div className="bar-track">
         <span className="bar-fill" style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ClickMap({
+  points,
+  sectionNames
+}: {
+  points: NonNullable<Awaited<ReturnType<typeof repository.analyticsSummary>>["clickMap"]>;
+  sectionNames: Map<string, string>;
+}) {
+  if (points.length === 0) return <p className="muted">No coordinate click events yet.</p>;
+  const max = Math.max(...points.map((point) => point.count), 1);
+  return (
+    <div className="click-map-wrap">
+      <div className="click-map-canvas" aria-label="Aggregated click map">
+        {points.slice(0, 12).map((point) => (
+          <span
+            key={point.key}
+            className="click-map-dot"
+            title={`${point.label}: ${point.count}`}
+            style={
+              {
+                left: `${Math.round(point.normalizedX * 100)}%`,
+                top: `${Math.round(point.normalizedY * 100)}%`,
+                "--dot-size": `${12 + Math.round((point.count / max) * 22)}px`
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+      <div className="finding-list">
+        {points.slice(0, 5).map((point) => (
+          <article key={point.key} className="finding-card compact-card">
+            <span className="badge">{point.count} clicks</span>
+            <h3>{point.label}</h3>
+            <p>{point.sectionId ? sectionNames.get(point.sectionId) ?? point.sectionId : point.pageId ?? "unknown"}</p>
+          </article>
+        ))}
       </div>
     </div>
   );

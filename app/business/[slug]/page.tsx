@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BusinessProfileForm } from "@/components/BusinessProfileForm";
+import { OwnerAssetsForm } from "@/components/OwnerAssetsForm";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
 
@@ -40,6 +41,9 @@ export default async function BusinessProfilePage({ params }: { params: Promise<
         </section>
 
         <aside className="panel">
+          <h2>Owner-approved assets</h2>
+          <OwnerAssetsForm profile={bundle.businessProfile} />
+
           <h2>Verification state</h2>
           <div className="finding-list">
             {Object.entries(bundle.businessProfile.provenance).map(([key, provenance]) => (

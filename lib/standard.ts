@@ -2,6 +2,18 @@ import type { StandardCriterion } from "./models";
 
 export const standardCriteria: StandardCriterion[] = [
   {
+    id: "technical.https",
+    layer: "technical_seo",
+    vertical: "universal",
+    title: "Site is served over HTTPS",
+    checkMethod: "crawl",
+    threshold: { protocol: "https:" },
+    businessConsequence: "Browsers can warn visitors away from insecure sites before they call, book, or submit a form.",
+    generationRule: "Serve every published customer site over HTTPS through Railway or Cloudflare for SaaS.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
     id: "technical.healthy_response",
     layer: "technical_seo",
     vertical: "universal",
@@ -58,6 +70,18 @@ export const standardCriteria: StandardCriterion[] = [
     threshold: { canonicalRequired: true },
     businessConsequence: "Duplicate URL variants can dilute crawl signals and confuse indexing.",
     generationRule: "Render a canonical URL for every public page based on the mapped domain and page path.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
+    id: "seo.clean_urls",
+    layer: "technical_seo",
+    vertical: "universal",
+    title: "Public URLs are clean and readable",
+    checkMethod: "crawl",
+    threshold: { avoidFileExtensions: true, avoidQueryCanonical: true },
+    businessConsequence: "Messy URL patterns weaken trust and make service/location pages harder to understand and share.",
+    generationRule: "Render extensionless page slugs from the structured page model and keep canonical paths query-free.",
     auditEligible: true,
     experimentEligible: false
   },

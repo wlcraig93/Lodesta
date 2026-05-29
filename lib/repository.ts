@@ -5,11 +5,16 @@ import type {
   DomainRecord,
   Experiment,
   ExperimentAnalysis,
+  ExperimentLearning,
   FormDefinition,
   JobKind,
   JobRecord,
   LeadSubmission,
   OptimizationFinding,
+  OutboundCampaign,
+  OutboundEvent,
+  OutboundProspect,
+  OutboundSummary,
   PreviewToken,
   SiteBundle,
   WorkflowDelivery
@@ -17,16 +22,22 @@ import type {
 import type { AiEditResult } from "./ai-editor";
 import type { BusinessProfileUpdateInput } from "./business-profile-update";
 import type { UpdateSiteDesignInput, UpdateSiteDesignResult } from "./design";
+import type { EditorGuardrailIssue } from "./editor-guardrails";
+import type { UpdateFormSettingsInput, UpdateFormSettingsResult } from "./form-settings";
+import type { UpdateOwnerAssetsInput, UpdateOwnerAssetsResult } from "./owner-assets";
 import {
   updateBusinessProfile,
   analyticsSummary,
   applyAiEditToSite,
   applyFindingToDraft,
   assignExperiment,
+  concludeExperimentWithLearning,
   createAndStoreSite,
   createClaim,
   completeClaimCheckout,
+  dismissFinding,
   createPreviewToken,
+  createOutboundCampaign,
   getForms,
   getSiteBundle,
   getSiteBundleBySlug,
@@ -34,21 +45,33 @@ import {
   listClaims,
   listDomains,
   listExperiments,
+  listExperimentLearnings,
   listFormSubmissions,
+  listOutboundCampaigns,
+  listOutboundEvents,
+  listOutboundProspects,
   listWorkflowDeliveries,
   listPreviewTokens,
   listSiteBundles,
+  outboundSummary,
+  pruneAnalyticsEvents,
   publishDraft,
   publishVersion,
   recordAnalyticsEvent,
   recordFormSubmission,
+  recordOutboundEvent,
   recordWorkflowDelivery,
   registerDomain,
   resolvePreviewToken,
   runAndStoreAudit,
+  updateExperiment,
+  updateFormSettings,
   updateLeadStatus,
+  updateDomain,
+  updateOwnerAssets,
   updateSiteDesign as updateSiteDesignStore,
-  updateSectionProps
+  updateSectionProps,
+  upsertOutboundProspect
 } from "./store";
 import {
   enqueueJob,
@@ -60,8 +83,13 @@ import {
 } from "./jobs";
 import { supabaseRepository } from "./supabase/repository";
 import { createCheckoutSession, type CheckoutSessionResult } from "./billing";
-import { registerCustomHostname, type DomainVerification } from "./domains";
-import { crawlUrl } from "./crawler";
+import { refreshCustomHostnameStatus, registerCustomHostname, type DomainVerification } from "./domains";
+import { prepareIntakeInput } from "./intake-pipeline";
+import type {
+  CreateOutboundCampaignInput,
+  RecordOutboundEventInput,
+  UpsertOutboundProspectInput
+} from "./outbound";
 
 export type CreateSiteInput = {
   url?: string;
@@ -116,14 +144,33 @@ export type UpdateLeadStatusInput = {
   status: LeadSubmission["status"];
 };
 
-type SectionUpdateResult = { ok: false; reason: string } | { ok: true; bundle: SiteBundle } | null;
+export type PruneAnalyticsEventsInput = {
+  before: string;
+  siteId?: string;
+};
+
+export type PruneAnalyticsEventsResult = {
+  deleted: number;
+  before: string;
+  siteId?: string;
+};
+
+type SectionUpdateResult =
+  | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
+  | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
+  | null;
 type DesignUpdateResult = UpdateSiteDesignResult | null;
 type PublishResult = { ok: false; reason: string } | { ok: true; bundle: SiteBundle } | null;
+type BusinessProfileUpdateResult =
+  | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
+  | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
+  | null;
 type ExperimentAssignment =
   | { assigned: false; reason: string }
   | {
       assigned: true;
       experimentId: string;
+      surface: Experiment["surface"];
       variant: Record<string, unknown>;
       primaryMetric: Experiment["primaryMetric"];
       holdout: boolean;
@@ -132,8 +179,17 @@ type ApplyFindingResult =
   | { ok: false; reason: string }
   | { ok: true; draftCreated: boolean; qaRequired: boolean; finding: OptimizationFinding }
   | null;
+type DismissFindingResult =
+  | { ok: false; reason: string }
+  | { ok: true; finding: OptimizationFinding }
+  | null;
 type AiEditRepositoryResult = AiEditResult | null;
 type PreviewResolveResult = { token: PreviewToken; bundle: SiteBundle } | null;
+type ExperimentUpdateResult = { ok: false; reason: string } | { ok: true; experiment: Experiment } | null;
+type ExperimentLearningResult =
+  | { ok: false; reason: string; analysis?: ExperimentAnalysis }
+  | { ok: true; experiment: Experiment; learning: ExperimentLearning; analysis: ExperimentAnalysis }
+  | null;
 type ClaimResult = (ClaimRecord & {
   checkout: CheckoutSessionResult;
 }) | null;
@@ -154,7 +210,8 @@ export type LodestaRepository = {
   updateSiteDesign(input: UpdateSiteDesignInput): Promise<DesignUpdateResult>;
   publishDraft(siteId: string): Promise<PublishResult>;
   publishVersion(input: { siteId: string; versionId: string }): Promise<PublishResult>;
-  updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<SiteBundle | null>;
+  updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<BusinessProfileUpdateResult>;
+  updateOwnerAssets(input: UpdateOwnerAssetsInput): Promise<UpdateOwnerAssetsResult | null>;
   recordFormSubmission(input: RecordSubmissionInput): Promise<LeadSubmission>;
   listFormSubmissions(siteId?: string): Promise<LeadSubmission[]>;
   updateLeadStatus(input: UpdateLeadStatusInput): Promise<LeadSubmission | null>;
@@ -162,18 +219,37 @@ export type LodestaRepository = {
   listWorkflowDeliveries(siteId?: string): Promise<WorkflowDelivery[]>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<AnalyticsEvent>;
   listAnalyticsEvents(siteId?: string): Promise<AnalyticsEvent[]>;
+  pruneAnalyticsEvents(input: PruneAnalyticsEventsInput): Promise<PruneAnalyticsEventsResult>;
   analyticsSummary(siteId: string): Promise<AnalyticsSummary>;
   assignExperiment(input: { siteId: string; sessionId: string; experimentId?: string }): Promise<ExperimentAssignment>;
   analyzeExperiments(siteId: string): Promise<ExperimentAnalysis[]>;
   listExperiments(siteId: string): Promise<Experiment[]>;
+  updateExperiment(input: {
+    siteId: string;
+    experimentId: string;
+    status: Experiment["status"];
+    holdoutPercent?: number;
+  }): Promise<ExperimentUpdateResult>;
+  concludeExperimentWithLearning(input: { siteId: string; experimentId: string }): Promise<ExperimentLearningResult>;
+  listExperimentLearnings(filter?: { siteId?: string; status?: ExperimentLearning["status"] }): Promise<ExperimentLearning[]>;
   getForms(siteId: string): Promise<FormDefinition[]>;
+  updateFormSettings(input: UpdateFormSettingsInput): Promise<UpdateFormSettingsResult | null>;
   applyFindingToDraft(input: { siteId: string; findingId: string }): Promise<ApplyFindingResult>;
+  dismissFinding(input: { siteId: string; findingId: string }): Promise<DismissFindingResult>;
   applyAiEdit(input: { siteId: string; message: string }): Promise<AiEditRepositoryResult>;
   createClaim(input: CreateClaimInput): Promise<ClaimResult>;
   completeClaimCheckout(input: CompleteClaimCheckoutInput): Promise<ClaimRecord | null>;
   listClaims(siteId?: string): Promise<ClaimRecord[]>;
   registerDomain(input: RegisterDomainInput): Promise<DomainResult>;
+  refreshDomain(input: { domainId: string }): Promise<DomainRecord | null>;
   listDomains(siteId?: string): Promise<DomainRecord[]>;
+  createOutboundCampaign(input: CreateOutboundCampaignInput): Promise<OutboundCampaign>;
+  listOutboundCampaigns(): Promise<OutboundCampaign[]>;
+  upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
+  listOutboundProspects(campaignId?: string): Promise<OutboundProspect[]>;
+  recordOutboundEvent(input: RecordOutboundEventInput): Promise<OutboundEvent>;
+  listOutboundEvents(campaignId?: string): Promise<OutboundEvent[]>;
+  outboundSummary(campaignId?: string): Promise<OutboundSummary>;
   enqueueJob(kind: JobKind, payload: Record<string, unknown>): Promise<JobRecord>;
   listJobs(status?: JobRecord["status"]): Promise<JobRecord[]>;
   getJob(id: string): Promise<JobRecord | null>;
@@ -192,8 +268,7 @@ export const localRepository: LodestaRepository = {
     return getSiteBundleBySlug(slug);
   },
   async createAndStoreSite(input) {
-    const crawl = input.url ? await crawlUrl(input.url) : undefined;
-    return createAndStoreSite({ ...input, crawl });
+    return createAndStoreSite(await prepareIntakeInput(input));
   },
   async createPreviewToken(input) {
     return createPreviewToken(input);
@@ -222,6 +297,9 @@ export const localRepository: LodestaRepository = {
   async updateBusinessProfile(input) {
     return updateBusinessProfile(input);
   },
+  async updateOwnerAssets(input) {
+    return updateOwnerAssets(input);
+  },
   async recordFormSubmission(input) {
     return recordFormSubmission(input);
   },
@@ -243,6 +321,9 @@ export const localRepository: LodestaRepository = {
   async listAnalyticsEvents(siteId) {
     return listAnalyticsEvents(siteId);
   },
+  async pruneAnalyticsEvents(input) {
+    return pruneAnalyticsEvents(input);
+  },
   async analyticsSummary(siteId) {
     return analyticsSummary(siteId);
   },
@@ -257,11 +338,26 @@ export const localRepository: LodestaRepository = {
   async listExperiments(siteId) {
     return listExperiments(siteId);
   },
+  async updateExperiment(input) {
+    return updateExperiment(input);
+  },
+  async concludeExperimentWithLearning(input) {
+    return concludeExperimentWithLearning(input);
+  },
+  async listExperimentLearnings(filter) {
+    return listExperimentLearnings(filter);
+  },
   async getForms(siteId) {
     return getForms(siteId);
   },
+  async updateFormSettings(input) {
+    return updateFormSettings(input);
+  },
   async applyFindingToDraft(input) {
     return applyFindingToDraft(input);
+  },
+  async dismissFinding(input) {
+    return dismissFinding(input);
   },
   async applyAiEdit(input) {
     return applyAiEditToSite(input);
@@ -289,7 +385,14 @@ export const localRepository: LodestaRepository = {
   },
   async registerDomain(input) {
     if (!getSiteBundle(input.siteId)) return null;
-    const verification = await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
+    const verification = input.provider === "railway"
+      ? {
+          type: "cname" as const,
+          value: process.env.CLOUDFLARE_FALLBACK_ORIGIN ?? "customers.lodesta.example",
+          configured: true,
+          note: "Railway/manual custom domain. Configure DNS/custom domain in Railway, then traffic can resolve through the app."
+        }
+      : await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
     const domain = registerDomain({
       ...input,
       providerHostnameId: verification.providerHostnameId,
@@ -297,8 +400,45 @@ export const localRepository: LodestaRepository = {
     });
     return domain ? { ...domain, verification } : null;
   },
+  async refreshDomain(input) {
+    const domain = listDomains().find((candidate) => candidate.id === input.domainId);
+    if (!domain) return null;
+    const providerStatus = await refreshCustomHostnameStatus({
+      provider: domain.provider,
+      hostname: domain.hostname,
+      providerHostnameId: domain.providerHostnameId,
+      verification: domain.verification
+    });
+    return updateDomain({
+      domainId: domain.id,
+      status: providerStatus.status,
+      verification: providerStatus.verification,
+      providerHostnameId: providerStatus.verification?.providerHostnameId ?? domain.providerHostnameId
+    });
+  },
   async listDomains(siteId) {
     return listDomains(siteId);
+  },
+  async createOutboundCampaign(input) {
+    return createOutboundCampaign(input);
+  },
+  async listOutboundCampaigns() {
+    return listOutboundCampaigns();
+  },
+  async upsertOutboundProspect(input) {
+    return upsertOutboundProspect(input);
+  },
+  async listOutboundProspects(campaignId) {
+    return listOutboundProspects(campaignId);
+  },
+  async recordOutboundEvent(input) {
+    return recordOutboundEvent(input);
+  },
+  async listOutboundEvents(campaignId) {
+    return listOutboundEvents(campaignId);
+  },
+  async outboundSummary(campaignId) {
+    return outboundSummary(campaignId);
   },
   enqueueJob,
   listJobs,
@@ -313,12 +453,15 @@ export const localRepository: LodestaRepository = {
 
 function createLocalJobContext(): JobExecutionContext {
   return {
+    workerId: process.env.LODESTA_WORKER_ID ?? "local-worker",
     createAndStoreSite: localRepository.createAndStoreSite,
     createPreviewToken: localRepository.createPreviewToken,
     getSiteBundle: localRepository.getSiteBundle,
     runAndStoreAudit: localRepository.runAndStoreAudit,
     analyticsSummary: localRepository.analyticsSummary,
+    pruneAnalyticsEvents: localRepository.pruneAnalyticsEvents,
     analyzeExperiments: localRepository.analyzeExperiments,
+    listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
     listFormSubmissions: localRepository.listFormSubmissions
   };
 }

@@ -45,6 +45,55 @@ export type AssetReference = {
   rightsStatus: "preclaim_safe" | "customer_granted" | "reference_only" | "unknown";
 };
 
+export type AssetKind = "photo" | "logo" | "mockup" | "screenshot" | "icon" | "document" | "other";
+
+export type AssetUsageScope =
+  | "preclaim_preview"
+  | "published_site"
+  | "owner_dashboard"
+  | "internal_planning"
+  | "reference_only";
+
+export type SiteAsset = {
+  id: string;
+  siteId: string;
+  kind: AssetKind;
+  url?: string;
+  alt: string;
+  source: AssetReference["source"];
+  rightsStatus: AssetReference["rightsStatus"];
+  usageScope: AssetUsageScope;
+  ownerApproved: boolean;
+  provenance?: FieldProvenance;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type PublicPresenceSignal = {
+  id: string;
+  siteId: string;
+  provider: "google_places";
+  source: "places_api" | "google";
+  sourceUrl?: string;
+  placeId?: string;
+  confidence: number;
+  observedAt: string;
+  fields: {
+    name?: string;
+    phone?: string;
+    websiteUri?: string;
+    googleMapsUri?: string;
+    address?: BusinessProfile["address"];
+    geo?: BusinessProfile["geo"];
+    categories?: string[];
+    hours?: Record<string, string>;
+    rating?: number;
+    userRatingCount?: number;
+  };
+  provenance: Record<string, FieldProvenance>;
+  notes: string[];
+};
+
 export type BusinessProfile = {
   id: string;
   siteId: string;
@@ -241,7 +290,7 @@ export type OptimizationFinding = {
 export type QACheck = {
   id: string;
   siteId: string;
-  category: "seo" | "conversion" | "accessibility" | "forms" | "technical";
+  category: "seo" | "conversion" | "accessibility" | "forms" | "technical" | "trust" | "content";
   severity: "pass" | "warning" | "fail";
   title: string;
   detail: string;
@@ -258,6 +307,10 @@ export type Experiment = {
   holdoutPercent?: number;
   primaryMetric: "tel_clicks" | "form_submits" | "booking_clicks" | "order_clicks";
   status: "draft" | "running" | "concluded" | "rolled_back";
+  startedAt?: string;
+  concludedAt?: string;
+  rolledBackAt?: string;
+  updatedAt?: string;
 };
 
 export type ExperimentVariantOutcome = {
@@ -283,6 +336,29 @@ export type ExperimentAnalysis = {
   leaderLabel?: string;
   confidence: "insufficient_data" | "directional" | "strong";
   variants: ExperimentVariantOutcome[];
+};
+
+export type ExperimentLearning = {
+  id: string;
+  siteId: string;
+  experimentId: string;
+  cohort: string;
+  surface: Experiment["surface"];
+  primaryMetric: Experiment["primaryMetric"];
+  winnerVariantId: string;
+  winnerLabel: string;
+  controlVariantId: string;
+  confidence: ExperimentAnalysis["confidence"];
+  observedLift: number;
+  winnerActionRate: number;
+  controlActionRate: number;
+  totalAssignments: number;
+  metricActions: number;
+  standardCriterionId: string;
+  generationRule: string;
+  status: "active" | "rolled_back";
+  createdAt: string;
+  rolledBackAt?: string;
 };
 
 export type AnalyticsEvent = {
@@ -343,7 +419,36 @@ export type AnalyticsSummary = {
   outcomesByCtaRole: AnalyticsOutcomeRow[];
   outcomesBySection: AnalyticsOutcomeRow[];
   outcomesByExperimentVariant: AnalyticsOutcomeRow[];
+  outcomesBySource: AnalyticsOutcomeRow[];
+  clickMap: AnalyticsClickMapPoint[];
+  standardCorrelations: AnalyticsStandardCorrelation[];
   baselineComparison: AnalyticsBaselineComparison;
+};
+
+export type AnalyticsClickMapPoint = {
+  key: string;
+  label: string;
+  count: number;
+  primaryActions: number;
+  pageId?: string;
+  sectionId?: string;
+  elementRole?: string;
+  hrefType?: AnalyticsEvent["hrefType"];
+  deviceType?: AnalyticsEvent["deviceType"];
+  normalizedX: number;
+  normalizedY: number;
+};
+
+export type AnalyticsStandardCorrelation = {
+  criterionId: string;
+  title: string;
+  layer: StandardCriterion["layer"];
+  metric: string;
+  events: number;
+  primaryActions: number;
+  rate: number;
+  signal: "collecting" | "positive" | "watch" | "weak";
+  insight: string;
 };
 
 export type AnalyticsOutcomeRow = {
@@ -451,6 +556,82 @@ export type DomainRecord = {
   };
 };
 
+export type OutboundCampaign = {
+  id: string;
+  name: string;
+  channel: "direct_mail" | "email" | "phone" | "manual";
+  status: "draft" | "running" | "paused" | "completed";
+  createdAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  metadata?: Record<string, string | number | boolean>;
+};
+
+export type OutboundProspect = {
+  id: string;
+  campaignId: string;
+  siteId?: string;
+  businessName: string;
+  vertical?: Vertical;
+  sourceUrl?: string;
+  previewToken?: string;
+  mailingCode?: string;
+  status: "queued" | "mailed" | "preview_viewed" | "claim_started" | "claimed" | "published" | "disqualified";
+  createdAt: string;
+  mailedAt?: string;
+  firstPreviewViewedAt?: string;
+  claimStartedAt?: string;
+  claimedAt?: string;
+  publishedAt?: string;
+  disqualifiedAt?: string;
+  metadata?: Record<string, string | number | boolean>;
+};
+
+export type OutboundEvent = {
+  id: string;
+  campaignId: string;
+  prospectId?: string;
+  siteId?: string;
+  type:
+    | "mailer_sent"
+    | "preview_viewed"
+    | "claim_started"
+    | "claim_completed"
+    | "published"
+    | "support_contact"
+    | "disqualified"
+    | "credibility_feedback";
+  occurredAt: string;
+  value?: number;
+  metadata?: Record<string, string | number | boolean>;
+};
+
+export type OutboundSummary = {
+  campaignId?: string;
+  campaigns: number;
+  prospects: number;
+  mailed: number;
+  previewViewed: number;
+  claimsStarted: number;
+  claimed: number;
+  published: number;
+  disqualified: number;
+  supportContacts: number;
+  credibilityFeedbackCount: number;
+  avgCredibilityScore?: number;
+  mailerToPreviewRate: number;
+  mailerToClaimRate: number;
+  claimToPublishRate: number;
+  supportBurdenRate: number;
+  verticalBreakdown: Array<{
+    vertical: Vertical | "unknown";
+    prospects: number;
+    claimed: number;
+    published: number;
+    mailerToClaimRate: number;
+  }>;
+};
+
 export type StandardCriterion = {
   id: string;
   layer: "technical_seo" | "conversion" | "trust" | "content_structure";
@@ -489,10 +670,81 @@ export type StandardEvaluation = {
   checks: StandardCheckResult[];
 };
 
+export type RenderViewportName = "desktop" | "mobile";
+
+export type RenderScreenshotArtifact = {
+  viewport: RenderViewportName;
+  width: number;
+  height: number;
+  path?: string;
+  bytes?: number;
+  capturedAt: string;
+};
+
+export type RenderInspectionFinding = {
+  id: string;
+  severity: "pass" | "warning" | "fail";
+  title: string;
+  evidence: string;
+  viewport?: RenderViewportName;
+};
+
+export type RenderInspectionResult = {
+  sourceUrl: string;
+  finalUrl?: string;
+  adapter: "playwright" | "fetch_fallback";
+  capturedAt: string;
+  screenshots: RenderScreenshotArtifact[];
+  findings: RenderInspectionFinding[];
+  metrics: {
+    htmlBytes?: number;
+    bodyTextChars?: number;
+    sectionCount?: number;
+    ctaCount?: number;
+    formCount?: number;
+    telLinkCount?: number;
+    aboveFoldCtaDetected?: boolean;
+  };
+  unavailableReason?: string;
+};
+
+export type VisualQaFinding = {
+  id: string;
+  category: "hierarchy" | "responsive" | "conversion" | "brand" | "trust" | "accessibility" | "content";
+  severity: "pass" | "warning" | "fail";
+  title: string;
+  evidence: string;
+  recommendation?: string;
+  viewport?: RenderViewportName;
+};
+
+export type VisualQaResult = {
+  siteId: string;
+  source: "openai" | "deterministic_fallback";
+  model?: string;
+  target: "source_site" | "generated_site_model";
+  evaluatedAt: string;
+  screenshotCount: number;
+  selectedDesignDirectionId?: string;
+  summary: string;
+  findings: VisualQaFinding[];
+  limitations: string[];
+};
+
 export type PresenceAssessment = {
   siteId: string;
   sourceUrl?: string;
   standardEvaluation?: StandardEvaluation;
+  renderInspection?: RenderInspectionResult;
+  visualQa?: VisualQaResult;
+  assetInventory?: SiteAsset[];
+  publicPresenceSignals?: PublicPresenceSignal[];
+  brandAssessment?: BrandAssessment;
+  qualityScore?: PresenceQualityScore;
+  designDirections?: DesignDirection[];
+  selectedDesignDirectionId?: string;
+  mockupArtifacts?: CreativeMockupArtifact[];
+  generationPlanningSource?: "openai" | "deterministic_fallback";
   technicalNotes: string[];
   visualNotes: string[];
   brandNotes: string[];
@@ -508,16 +760,82 @@ export type CreativeBrief = {
   brandCuesToPreserve: string[];
 };
 
+export type BrandAssessment = {
+  id: string;
+  siteId: string;
+  confidence: number;
+  cues: string[];
+  colorSignals: string[];
+  typographySignals: string[];
+  imageStyleSignals: string[];
+  toneSignals: string[];
+  preservationRules: string[];
+  sourceNotes: string[];
+};
+
+export type DesignDirection = {
+  id: string;
+  siteId: string;
+  strategy: "modernized_brand" | "conversion_optimized" | "premium_redesign";
+  label: string;
+  rationale: string;
+  themePreset: "warm" | "premium" | "bold" | "clinical";
+  sectionEmphasis: SectionType[];
+  mockupPrompt: string;
+  generationRules: string[];
+  riskNotes: string[];
+  selected: boolean;
+};
+
+export type CreativeMockupArtifact = {
+  id: string;
+  siteId: string;
+  designDirectionId: string;
+  strategy: DesignDirection["strategy"];
+  status: "prompt_only" | "generated" | "failed";
+  provider: "openai" | "deterministic_fallback";
+  model?: string;
+  prompt: string;
+  revisedPrompt?: string;
+  image?: AssetReference;
+  assetId?: string;
+  storageProvider?: "local" | "supabase";
+  storagePath?: string;
+  size?: string;
+  quality?: "low" | "medium" | "high" | "auto";
+  outputFormat?: "png" | "jpeg" | "webp";
+  planningOnly: true;
+  generatedAt: string;
+  notes: string[];
+};
+
+export type PresenceQualityScore = {
+  siteId: string;
+  current?: StandardEvaluation["score"];
+  generated?: StandardEvaluation["score"];
+  measuredCriteria: number;
+  generatedCriteria: number;
+  coldUrlCheckableFailures: string[];
+  summary: string;
+};
+
 export type SiteBundle = {
   businessProfile: BusinessProfile;
   siteModel: SiteModel;
   extensionModel: ExtensionModel;
   optimizationFindings: OptimizationFinding[];
   experiments: Experiment[];
+  experimentLearnings?: ExperimentLearning[];
   presenceAssessment: PresenceAssessment;
 };
 
-export type JobKind = "presence_assessment" | "audit_site" | "generate_site" | "monthly_action_list" | "import_batch";
+export type JobKind =
+  | "presence_assessment"
+  | "audit_site"
+  | "generate_site"
+  | "monthly_action_list"
+  | "import_batch"
+  | "analytics_retention";
 
 export type JobRecord = {
   id: string;
@@ -527,6 +845,10 @@ export type JobRecord = {
   result?: Record<string, unknown>;
   error?: string;
   attempts: number;
+  maxAttempts: number;
+  runAfter: string;
+  lockedBy?: string;
+  lockedAt?: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;

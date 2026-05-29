@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { repository } from "@/lib/repository";
+import { authRequired } from "@/lib/auth-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,8 @@ export default async function AccountPage() {
   ]);
   const userId = user?.id;
   const userEmail = user?.email?.toLowerCase();
-  const visibleBundles = !configured
+  const localOpenMode = !configured && !authRequired();
+  const visibleBundles = localOpenMode
     ? bundles
     : userId || userEmail
       ? bundles.filter((bundle) =>

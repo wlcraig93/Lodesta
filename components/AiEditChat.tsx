@@ -5,6 +5,8 @@ import { useState } from "react";
 type AiEditChatProps = {
   siteId: string;
   siteSlug: string;
+  publishDisabled?: boolean;
+  publishDisabledReason?: string;
 };
 
 type ChatMessage = {
@@ -17,8 +19,10 @@ type AiEditResponse = {
   error?: string;
   operations?: Array<{ label: string; type: string }>;
   warnings?: string[];
+  issues?: Array<{ title: string; detail: string }>;
   qa?: { passed: boolean; checks: Array<{ severity: string; title: string }> } | null;
   published?: boolean;
+  publishConfirmationRequired?: boolean;
 };
 
 const starterMessages: ChatMessage[] = [
@@ -29,11 +33,12 @@ const starterMessages: ChatMessage[] = [
   }
 ];
 
-export function AiEditChat({ siteId, siteSlug }: AiEditChatProps) {
+export function AiEditChat({ siteId, siteSlug, publishDisabled = false, publishDisabledReason }: AiEditChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(starterMessages);
   const [prompt, setPrompt] = useState("");
-  const [mode, setMode] = useState<"draft" | "publish_after_qa">("draft");
+  const [mode, setMode] = useState<"draft" | "qa">("draft");
   const [status, setStatus] = useState("");
+  const [confirmingPublish, setConfirmingPublish] = useState(false);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -52,9 +57,12 @@ export function AiEditChat({ siteId, siteSlug }: AiEditChatProps) {
     const result = (await response.json()) as AiEditResponse;
 
     if (!response.ok) {
+      const issues = result.issues?.length
+        ? `\n\nGuardrails:\n${result.issues.map((issue) => `- ${issue.title}: ${issue.detail}`).join("\n")}`
+        : "";
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: result.error ?? "I could not apply that edit." }
+        { role: "assistant", content: `${result.error ?? "I could not apply that edit."}${issues}` }
       ]);
       setStatus("");
       return;
@@ -69,7 +77,9 @@ export function AiEditChat({ siteId, siteSlug }: AiEditChatProps) {
       ? `\n\n${result.operations.map((operation) => `- ${operation.label}`).join("\n")}`
       : "";
     const warnings = result.warnings?.length ? `\n\nWarnings:\n${result.warnings.map((warning) => `- ${warning}`).join("\n")}` : "";
-    const published = result.published ? "\n\nPublished after QA." : "\n\nSaved as draft.";
+    const published = result.publishConfirmationRequired
+      ? "\n\nSaved as QA-checked draft. Confirm publish when ready."
+      : "\n\nSaved as draft.";
 
     setMessages((current) => [
       ...current,
@@ -79,21 +89,31 @@ export function AiEditChat({ siteId, siteSlug }: AiEditChatProps) {
       }
     ]);
     window.dispatchEvent(new Event("lodesta:preview-refresh"));
-    setStatus(result.published ? "Published." : "Draft saved.");
+    setStatus(result.publishConfirmationRequired ? "Draft ready for publish confirmation." : "Draft saved.");
   }
 
   async function publishDraft() {
+    if (publishDisabled) {
+      setStatus(publishDisabledReason ?? "Complete checkout before publishing.");
+      return;
+    }
+    if (!confirmingPublish) {
+      setConfirmingPublish(true);
+      setStatus("Confirm publish to make the current QA-checked draft live.");
+      return;
+    }
     setStatus("Publishing draft...");
     const response = await fetch("/api/sites/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId })
+      body: JSON.stringify({ siteId, confirmed: true })
     });
     const result = await response.json();
     if (!response.ok || !result.ok) {
       setStatus(result.error ?? result.reason ?? "Unable to publish draft.");
       return;
     }
+    setConfirmingPublish(false);
     window.dispatchEvent(new Event("lodesta:preview-refresh"));
     setStatus("Draft published. Public preview is current.");
   }
@@ -139,20 +159,33 @@ export function AiEditChat({ siteId, siteSlug }: AiEditChatProps) {
           </button>
           <button
             type="button"
-            className={mode === "publish_after_qa" ? "active" : ""}
-            onClick={() => setMode("publish_after_qa")}
+            className={mode === "qa" ? "active" : ""}
+            onClick={() => setMode("qa")}
           >
-            QA + Publish
+            QA Review
           </button>
         </div>
         <div className="button-row">
           <button className="button primary" type="submit">
             Apply edit
           </button>
-          <button className="button secondary" type="button" onClick={() => void publishDraft()}>
-            Publish draft
+          <button className="button secondary" type="button" onClick={() => void publishDraft()} disabled={publishDisabled}>
+            {confirmingPublish ? "Confirm publish" : "Publish draft"}
           </button>
+          {confirmingPublish ? (
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                setConfirmingPublish(false);
+                setStatus("");
+              }}
+            >
+              Cancel
+            </button>
+          ) : null}
         </div>
+        {publishDisabled && publishDisabledReason ? <p className="form-status">{publishDisabledReason}</p> : null}
         {status ? <p className="form-status">{status}</p> : null}
       </form>
     </div>

@@ -2,6 +2,7 @@ import "./load-env";
 
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
+import { requiredClaimFactIds } from "../lib/fact-verification";
 
 type CheckResult = {
   name: string;
@@ -87,9 +88,22 @@ async function main() {
     timestamp: new Date().toISOString(),
     metadata: { role: "tel", runId }
   });
+  await supabaseRepository.recordAnalyticsEvent({
+    siteId: createdSiteId,
+    sessionId: `verify_old_${runId}`,
+    pageId: "page_home",
+    eventType: "pageview",
+    timestamp: "2020-01-01T00:00:00.000Z",
+    metadata: { runId }
+  });
   const analytics = await supabaseRepository.analyticsSummary(createdSiteId);
   assert(analytics.sessions >= 1, "Analytics summary did not include the recorded session.");
-  checks.push({ name: "analytics", ok: true, detail: `Analytics summary has ${analytics.sessions} session(s).` });
+  const prunedAnalytics = await supabaseRepository.pruneAnalyticsEvents({
+    siteId: createdSiteId,
+    before: "2021-01-01T00:00:00.000Z"
+  });
+  assert(prunedAnalytics.deleted >= 1, "Analytics retention prune did not delete the old verification event.");
+  checks.push({ name: "analytics", ok: true, detail: `Analytics summary has ${analytics.sessions} session(s); pruned ${prunedAnalytics.deleted} old event(s).` });
 
   const forms = await supabaseRepository.getForms(createdSiteId);
   const form = forms[0];
@@ -114,17 +128,58 @@ async function main() {
   assert(leads.some((candidate) => candidate.id === lead.id), "Lead submission was not persisted.");
   checks.push({ name: "lead", ok: true, detail: `Recorded lead ${lead.id}.` });
 
+  const draftAssignment = await supabaseRepository.assignExperiment({
+    siteId: createdSiteId,
+    sessionId: `verify_${runId}`
+  });
+  assert(!draftAssignment.assigned, "Experiment assignment should not run before owner opt-in.");
+
+  const experiment = bundle.experiments[0];
+  assert(experiment, "Created site has no experiment candidate.");
+  const optIn = await supabaseRepository.updateExperiment({
+    siteId: createdSiteId,
+    experimentId: experiment.id,
+    status: "running"
+  });
+  assert(optIn?.ok && optIn.experiment.status === "running", "Experiment opt-in did not persist.");
+
   const assignment = await supabaseRepository.assignExperiment({
     siteId: createdSiteId,
     sessionId: `verify_${runId}`
   });
   assert(assignment.assigned, "Experiment assignment failed.");
-  checks.push({ name: "experiment", ok: true, detail: `Assigned experiment ${assignment.experimentId}.` });
+  for (let index = 1; index <= 20; index += 1) {
+    const variantId = index <= 10 ? "control" : "sticky_action";
+    await supabaseRepository.recordAnalyticsEvent({
+      siteId: createdSiteId,
+      sessionId: `verify_experiment_${runId}_${index}`,
+      pageId: "page_home",
+      eventType: "experiment_assignment",
+      timestamp: new Date().toISOString(),
+      metadata: { experimentId: experiment.id, variantId, runId }
+    });
+  }
+  for (let index = 11; index <= 14; index += 1) {
+    await supabaseRepository.recordAnalyticsEvent({
+      siteId: createdSiteId,
+      sessionId: `verify_experiment_${runId}_${index}`,
+      pageId: "page_home",
+      eventType: "tel_click",
+      timestamp: new Date().toISOString(),
+      metadata: { runId }
+    });
+  }
+  const learning = await supabaseRepository.concludeExperimentWithLearning({
+    siteId: createdSiteId,
+    experimentId: experiment.id
+  });
+  assert(learning?.ok && learning.learning.status === "active", "Experiment learning was not adopted.");
+  checks.push({ name: "experiment", ok: true, detail: `Opted in, assigned, and adopted learning ${learning.learning.id}.` });
 
   const claim = await supabaseRepository.createClaim({
     siteId: createdSiteId,
     ownerEmail: `owner-${runId}@example.com`,
-    verifiedFacts: ["name", "phone", "services"],
+    verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
     acceptedTerms: true,
     acceptedManagement: true
   });
@@ -141,8 +196,12 @@ async function main() {
 
   const job = await supabaseRepository.enqueueJob("monthly_action_list", { siteId: createdSiteId });
   createdJobId = job.id;
+  assert(job.maxAttempts >= 1 && Boolean(job.runAfter), "Queued job did not include retry/backoff metadata.");
   const processed = await supabaseRepository.processNextJob();
-  assert(processed?.id === job.id && processed.status === "completed", "Queued job did not complete.");
+  assert(
+    processed?.id === job.id && processed.status === "completed" && !processed.lockedBy && !processed.lockedAt,
+    "Queued job did not complete and release its worker lock."
+  );
   checks.push({ name: "job", ok: true, detail: `Processed monthly action-list job ${job.id}.` });
 
   if (!keep) {

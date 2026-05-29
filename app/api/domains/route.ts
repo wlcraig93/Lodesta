@@ -3,6 +3,7 @@ import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { normalizeCustomHostname } from "@/lib/domains";
+import { claimGateForBundle } from "@/lib/site-publication";
 
 const domainSchema = z.object({
   siteId: z.string().min(1),
@@ -18,6 +19,23 @@ export async function POST(request: Request) {
   }
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
+
+  const bundle = await repository.getSiteBundle(parsed.data.siteId);
+  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  const claimGate = claimGateForBundle(bundle, await repository.listClaims(parsed.data.siteId));
+  if (!claimGate.ok) {
+    const verificationRequired = claimGate.code === "verification_required";
+    return NextResponse.json(
+      {
+        error: claimGate.reason,
+        claimGate: claimGate.code,
+        paymentRequired: !verificationRequired,
+        factVerificationRequired: verificationRequired,
+        missingRequiredFacts: claimGate.missingFacts
+      },
+      { status: verificationRequired ? 409 : 402 }
+    );
+  }
 
   let hostname: string;
   try {

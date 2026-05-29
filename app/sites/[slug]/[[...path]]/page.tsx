@@ -51,6 +51,8 @@ export default async function PublicSitePage({
   const pageSlug = path?.join("/") ?? "";
   const page = version.pages.find((candidate) => candidate.slug === pageSlug);
   if (!page) notFound();
+  const claims = await repository.listClaims(bundle.businessProfile.siteId);
+  const claimedForPublicRuntime = isIndexableSite(bundle, claims);
 
   return (
     <SiteRenderer
@@ -59,6 +61,9 @@ export default async function PublicSitePage({
       extensions={bundle.extensionModel}
       page={page}
       theme={version.theme ?? bundle.siteModel.theme}
+      experiments={bundle.experiments}
+      tracking={claimedForPublicRuntime}
+      formsEnabled={claimedForPublicRuntime}
     />
   );
 }

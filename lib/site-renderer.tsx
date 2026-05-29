@@ -1,7 +1,8 @@
-import type { BusinessProfile, ExtensionModel, PageModel, SectionModel, SiteModel, Theme } from "./models";
+import type { BusinessProfile, Experiment, ExtensionModel, PageModel, SectionModel, SiteModel, Theme } from "./models";
 import { getPublishedVersion } from "./sample-data";
 import { AnalyticsTracker } from "@/components/AnalyticsTracker";
 import { ExperimentRuntime } from "@/components/ExperimentRuntime";
+import { makeLocalBusinessJsonLd } from "./structured-data";
 
 type SiteRendererProps = {
   business: BusinessProfile;
@@ -9,10 +10,21 @@ type SiteRendererProps = {
   extensions: ExtensionModel;
   page?: PageModel;
   theme?: Theme;
+  experiments?: Experiment[];
   tracking?: boolean;
+  formsEnabled?: boolean;
 };
 
-export function SiteRenderer({ business, site, extensions, page, theme, tracking = true }: SiteRendererProps) {
+export function SiteRenderer({
+  business,
+  site,
+  extensions,
+  page,
+  theme,
+  experiments = [],
+  tracking = true,
+  formsEnabled = true
+}: SiteRendererProps) {
   const version = getPublishedVersion(site);
   const activePage = page ?? version.pages[0];
   const activeTheme = theme ?? version.theme ?? site.theme;
@@ -35,13 +47,22 @@ export function SiteRenderer({ business, site, extensions, page, theme, tracking
       }
     >
       {tracking ? <AnalyticsTracker siteId={business.siteId} pageId={activePage.id} /> : null}
-      {tracking ? <ExperimentRuntime siteId={business.siteId} /> : null}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessJson) }}
-      />
+      {tracking ? <ExperimentRuntime siteId={business.siteId} experiments={experiments} /> : null}
+      {localBusinessJson ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessJson) }}
+        />
+      ) : null}
       {activePage.sections.map((section) => (
-        <SectionRenderer key={section.id} pageId={activePage.id} section={section} business={business} extensions={extensions} />
+        <SectionRenderer
+          key={section.id}
+          pageId={activePage.id}
+          section={section}
+          business={business}
+          extensions={extensions}
+          formsEnabled={formsEnabled}
+        />
       ))}
       <MobileActionBar business={business} site={site} />
     </main>
@@ -52,12 +73,14 @@ function SectionRenderer({
   section,
   pageId,
   business,
-  extensions
+  extensions,
+  formsEnabled
 }: {
   section: SectionModel;
   pageId: string;
   business: BusinessProfile;
   extensions: ExtensionModel;
+  formsEnabled: boolean;
 }) {
   switch (section.type) {
     case "hero":
@@ -68,7 +91,7 @@ function SectionRenderer({
     case "services":
       return <FeatureGrid section={section} />;
     case "contact":
-      return <ContactSection pageId={pageId} section={section} business={business} extensions={extensions} />;
+      return <ContactSection pageId={pageId} section={section} business={business} extensions={extensions} formsEnabled={formsEnabled} />;
     case "testimonials":
       return <TestimonialsSection section={section} business={business} />;
     case "gallery":
@@ -359,12 +382,14 @@ function ContactSection({
   section,
   pageId,
   business,
-  extensions
+  extensions,
+  formsEnabled
 }: {
   section: SectionModel;
   pageId: string;
   business: BusinessProfile;
   extensions: ExtensionModel;
+  formsEnabled: boolean;
 }) {
   const formId = stringProp(section.props.formId);
   const form = extensions.forms.find((candidate) => candidate.id === formId);
@@ -388,7 +413,7 @@ function ContactSection({
         </div>
         {primaryCta ? <TrackedLink cta={primaryCta} className="button primary" /> : null}
       </div>
-      {form ? (
+      {form && formsEnabled ? (
         <form className="lead-form" action="/api/forms/submit" method="post">
           <input type="hidden" name="siteId" value={business.siteId} />
           <input type="hidden" name="formId" value={form.id} />
@@ -400,7 +425,13 @@ function ContactSection({
             <input name="companyWebsite" tabIndex={-1} autoComplete="off" />
           </label>
           {form.fields.map((field) => (
-            <label key={field.id}>
+            <label
+              key={field.id}
+              className="lead-field"
+              data-field-id={field.id}
+              data-field-type={field.type}
+              data-required={field.required ? "true" : "false"}
+            >
               <span>{field.label}</span>
               {field.type === "textarea" ? (
                 <textarea name={field.id} required={field.required} />
@@ -409,10 +440,15 @@ function ContactSection({
               )}
             </label>
           ))}
-          <button className="button primary" type="submit">
+          <button className="button primary lead-submit" type="submit">
             {form.submitLabel}
           </button>
         </form>
+      ) : form ? (
+        <div className="lead-form lead-form-disabled" data-preview-disabled="lead-form">
+          <strong>{form.name}</strong>
+          <p>Lead capture activates after the site is claimed and published.</p>
+        </div>
       ) : null}
     </section>
   );
@@ -445,66 +481,6 @@ function TrackedLink({ cta, className }: { cta: { label: string; href: string; r
       {cta.label}
     </a>
   );
-}
-
-function makeLocalBusinessJsonLd(business: BusinessProfile) {
-  return {
-    "@context": "https://schema.org",
-    "@type": schemaTypeForBusiness(business),
-    name: business.name,
-    telephone: business.phone,
-    email: business.email,
-    address: business.address
-      ? {
-          "@type": "PostalAddress",
-          streetAddress: business.address.street,
-          addressLocality: business.address.city,
-          addressRegion: business.address.region,
-          postalCode: business.address.postalCode,
-          addressCountry: business.address.country
-        }
-      : undefined,
-    geo: business.geo
-      ? {
-          "@type": "GeoCoordinates",
-          latitude: business.geo.latitude,
-          longitude: business.geo.longitude
-        }
-      : undefined,
-    aggregateRating: business.reviewsSummary?.rating
-      ? {
-          "@type": "AggregateRating",
-          ratingValue: business.reviewsSummary.rating,
-          reviewCount: business.reviewsSummary.count
-        }
-      : undefined,
-    openingHours: business.hours
-      ? Object.entries(business.hours).map(([day, hours]) => `${day} ${hours}`)
-      : undefined,
-    sameAs: business.socialLinks.length ? business.socialLinks : undefined
-  };
-}
-
-function schemaTypeForBusiness(business: BusinessProfile) {
-  switch (business.vertical) {
-    case "restaurant":
-      return "Restaurant";
-    case "dental":
-      return "Dentist";
-    case "law_firm":
-      return "LegalService";
-    case "home_services":
-    case "landscaping":
-      return "HomeAndConstructionBusiness";
-    case "auto_body":
-      return "AutoRepair";
-    case "beauty_salon":
-      return "BeautySalon";
-    case "veterinary":
-      return "VeterinaryCare";
-    default:
-      return "LocalBusiness";
-  }
 }
 
 function stringProp(value: unknown) {

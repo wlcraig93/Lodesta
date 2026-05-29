@@ -1,5 +1,6 @@
 import { runAudit } from "./audit";
 import type { SiteBundle, SiteVersion } from "./models";
+import { approvedVariantsForSection } from "./section-variants";
 import { themeForPreset, type ThemePresetId } from "./theme-presets";
 
 export type UpdateSiteDesignInput = {
@@ -7,6 +8,7 @@ export type UpdateSiteDesignInput = {
   pageId?: string;
   themePreset?: ThemePresetId;
   sectionOrder?: string[];
+  sectionVariants?: Record<string, string>;
 };
 
 export type UpdateSiteDesignResult =
@@ -17,6 +19,7 @@ export type UpdateSiteDesignResult =
       applied: {
         themePreset?: ThemePresetId;
         sectionOrder?: string[];
+        sectionVariants?: Record<string, string>;
       };
     }
   | {
@@ -29,6 +32,7 @@ export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesi
   const applied: {
     themePreset?: ThemePresetId;
     sectionOrder?: string[];
+    sectionVariants?: Record<string, string>;
   } = {};
 
   if (input.themePreset) {
@@ -40,9 +44,10 @@ export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesi
     applied.themePreset = input.themePreset;
   }
 
-  if (input.sectionOrder) {
-    const page = draft.pages.find((candidate) => candidate.id === (input.pageId ?? "page_home")) ?? draft.pages[0];
-    if (!page) return { ok: false, reason: "No editable page found." };
+  const page = draft.pages.find((candidate) => candidate.id === (input.pageId ?? "page_home")) ?? draft.pages[0];
+  if ((input.sectionOrder || input.sectionVariants) && !page) return { ok: false, reason: "No editable page found." };
+
+  if (input.sectionOrder && page) {
     const existingIds = page.sections.map((section) => section.id);
     const requestedIds = input.sectionOrder;
     const existingSet = new Set(existingIds);
@@ -53,6 +58,21 @@ export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesi
     const sectionsById = new Map(page.sections.map((section) => [section.id, section]));
     page.sections = requestedIds.map((id) => sectionsById.get(id)).filter((section): section is NonNullable<typeof section> => Boolean(section));
     applied.sectionOrder = requestedIds;
+  }
+
+  if (input.sectionVariants && page) {
+    const appliedVariants: Record<string, string> = {};
+    for (const [sectionId, variant] of Object.entries(input.sectionVariants)) {
+      const section = page.sections.find((candidate) => candidate.id === sectionId);
+      if (!section) return { ok: false, reason: `Section ${sectionId} was not found on the editable page.` };
+      const approved = approvedVariantsForSection(section.type, section.variant);
+      if (!approved.some((option) => option.id === variant)) {
+        return { ok: false, reason: `Variant ${variant} is not approved for ${section.type} sections.` };
+      }
+      section.variant = variant;
+      appliedVariants[sectionId] = variant;
+    }
+    applied.sectionVariants = appliedVariants;
   }
 
   bundle.optimizationFindings = runAudit(bundle.businessProfile, bundle.siteModel);

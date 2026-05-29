@@ -11,6 +11,8 @@ type DesignControlsProps = {
     id: string;
     type: string;
     label: string;
+    variant: string;
+    variantOptions: Array<{ id: string; label: string }>;
   }>;
 };
 
@@ -31,6 +33,12 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
     });
   }
 
+  function updateSectionVariant(sectionId: string, variant: string) {
+    setSectionOrder((current) =>
+      current.map((section) => (section.id === sectionId ? { ...section, variant } : section))
+    );
+  }
+
   async function saveDesign() {
     setStatus("Saving design draft...");
     const response = await fetch("/api/sites/design", {
@@ -40,7 +48,8 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
         siteId,
         pageId,
         themePreset,
-        sectionOrder: sectionOrder.map((section) => section.id)
+        sectionOrder: sectionOrder.map((section) => section.id),
+        sectionVariants: Object.fromEntries(sectionOrder.map((section) => [section.id, section.variant]))
       })
     });
     const result = await response.json();
@@ -80,6 +89,16 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
           <article key={section.id} className="section-order-row">
             <span className="badge">{section.type}</span>
             <strong>{section.label}</strong>
+            <label className="section-variant-control">
+              <span>Variant</span>
+              <select value={section.variant} onChange={(event) => updateSectionVariant(section.id, event.target.value)}>
+                {section.variantOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="button-row">
               <button
                 className="button secondary"

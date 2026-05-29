@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   if (!hostname) return NextResponse.json({ resolved: false }, { status: 400 });
 
   const domains = await repository.listDomains();
-  const domain = domains.find((candidate) => normalizeHostname(candidate.hostname) === hostname && candidate.status !== "failed");
+  const domain = domains.find((candidate) => normalizeHostname(candidate.hostname) === hostname && isResolvableDomain(candidate));
   if (!domain) return NextResponse.json({ resolved: false }, { status: 404 });
 
   const bundle = await repository.getSiteBundle(domain.siteId);
@@ -22,6 +22,14 @@ export async function GET(request: Request) {
     slug: bundle.siteModel.slug,
     domainStatus: domain.status
   });
+}
+
+type ResolvableDomain = Awaited<ReturnType<typeof repository.listDomains>>[number];
+
+function isResolvableDomain(domain: ResolvableDomain) {
+  if (domain.status === "failed") return false;
+  if (domain.provider === "cloudflare_for_saas") return domain.status === "active";
+  return domain.status === "active" || domain.status === "pending";
 }
 
 function normalizeHostname(hostname: string) {

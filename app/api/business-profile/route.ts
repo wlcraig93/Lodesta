@@ -36,7 +36,15 @@ export async function POST(request: Request) {
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
 
-  const bundle = await repository.updateBusinessProfile(parsed.data);
-  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  return NextResponse.json({ ok: true, businessProfile: bundle.businessProfile, findings: bundle.optimizationFindings });
+  const result = await repository.updateBusinessProfile(parsed.data);
+  if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.reason, issues: result.issues, qa: result.qa }, { status: 400 });
+  }
+  return NextResponse.json({
+    ok: true,
+    businessProfile: result.bundle.businessProfile,
+    findings: result.bundle.optimizationFindings,
+    guardrailWarnings: result.guardrailWarnings
+  });
 }

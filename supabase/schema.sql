@@ -26,6 +26,21 @@ create table business_profiles (
   updated_at timestamptz not null default now()
 );
 
+create table site_assets (
+  id text primary key,
+  site_id text references sites(id) on delete cascade,
+  kind text not null check (kind in ('photo', 'logo', 'mockup', 'screenshot', 'icon', 'document', 'other')),
+  url text,
+  alt text not null,
+  source text not null check (source in ('generated', 'licensed', 'uploaded', 'website_reference', 'placeholder')),
+  rights_status text not null check (rights_status in ('preclaim_safe', 'customer_granted', 'reference_only', 'unknown')),
+  usage_scope text not null check (usage_scope in ('preclaim_preview', 'published_site', 'owner_dashboard', 'internal_planning', 'reference_only')),
+  owner_approved boolean not null default false,
+  provenance jsonb,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
 create table site_versions (
   id text primary key,
   site_id text references sites(id) on delete cascade,
@@ -108,7 +123,34 @@ create table experiments (
   holdout_percent numeric,
   primary_metric text not null,
   status text not null default 'draft',
+  started_at timestamptz,
+  concluded_at timestamptz,
+  rolled_back_at timestamptz,
+  updated_at timestamptz,
   created_at timestamptz not null default now()
+);
+
+create table experiment_learnings (
+  id text primary key,
+  site_id text references sites(id) on delete cascade,
+  experiment_id text references experiments(id) on delete cascade,
+  cohort text not null,
+  surface text not null,
+  primary_metric text not null,
+  winner_variant_id text not null,
+  winner_label text not null,
+  control_variant_id text not null,
+  confidence text not null check (confidence in ('insufficient_data', 'directional', 'strong')),
+  observed_lift numeric not null default 0,
+  winner_action_rate numeric not null default 0,
+  control_action_rate numeric not null default 0,
+  total_assignments int not null default 0,
+  metric_actions int not null default 0,
+  standard_criterion_id text not null,
+  generation_rule text not null,
+  status text not null default 'active' check (status in ('active', 'rolled_back')),
+  created_at timestamptz not null default now(),
+  rolled_back_at timestamptz
 );
 
 create table preview_tokens (
@@ -128,6 +170,48 @@ create table domains (
   provider_hostname_id text,
   verification jsonb not null default '{}',
   created_at timestamptz not null default now()
+);
+
+create table outbound_campaigns (
+  id text primary key,
+  name text not null,
+  channel text not null check (channel in ('direct_mail', 'email', 'phone', 'manual')),
+  status text not null default 'draft' check (status in ('draft', 'running', 'paused', 'completed')),
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  started_at timestamptz,
+  ended_at timestamptz
+);
+
+create table outbound_prospects (
+  id text primary key,
+  campaign_id text references outbound_campaigns(id) on delete cascade,
+  site_id text references sites(id) on delete set null,
+  business_name text not null,
+  vertical text,
+  source_url text,
+  preview_token text references preview_tokens(token) on delete set null,
+  mailing_code text,
+  status text not null default 'queued' check (status in ('queued', 'mailed', 'preview_viewed', 'claim_started', 'claimed', 'published', 'disqualified')),
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  mailed_at timestamptz,
+  first_preview_viewed_at timestamptz,
+  claim_started_at timestamptz,
+  claimed_at timestamptz,
+  published_at timestamptz,
+  disqualified_at timestamptz
+);
+
+create table outbound_events (
+  id text primary key,
+  campaign_id text references outbound_campaigns(id) on delete cascade,
+  prospect_id text references outbound_prospects(id) on delete set null,
+  site_id text references sites(id) on delete set null,
+  type text not null check (type in ('mailer_sent', 'preview_viewed', 'claim_started', 'claim_completed', 'published', 'support_contact', 'disqualified', 'credibility_feedback')),
+  occurred_at timestamptz not null default now(),
+  value numeric,
+  metadata jsonb not null default '{}'
 );
 
 create table claims (
@@ -152,6 +236,10 @@ create table jobs (
   result jsonb,
   error text,
   attempts int not null default 0,
+  max_attempts int not null default 3 check (max_attempts >= 1 and max_attempts <= 10),
+  run_after timestamptz not null default now(),
+  locked_by text,
+  locked_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   started_at timestamptz,
@@ -161,6 +249,8 @@ create table jobs (
 create index analytics_events_site_time_idx on analytics_events(site_id, occurred_at desc);
 create index analytics_events_site_event_time_idx on analytics_events(site_id, event_type, occurred_at desc);
 create unique index business_profiles_site_idx on business_profiles(site_id);
+create index site_assets_site_kind_idx on site_assets(site_id, kind);
+create index site_assets_site_rights_idx on site_assets(site_id, rights_status);
 create index form_submissions_site_time_idx on form_submissions(site_id, submitted_at desc);
 create index form_submissions_site_status_time_idx on form_submissions(site_id, status, submitted_at desc);
 create index forms_site_idx on forms(site_id);
@@ -169,13 +259,60 @@ create index workflow_deliveries_site_time_idx on workflow_deliveries(site_id, c
 create index workflow_deliveries_submission_idx on workflow_deliveries(submission_id);
 create index optimization_findings_site_status_idx on optimization_findings(site_id, status);
 create index experiments_site_status_idx on experiments(site_id, status);
+create index experiment_learnings_status_cohort_idx on experiment_learnings(status, cohort, surface, primary_metric);
+create index experiment_learnings_site_status_idx on experiment_learnings(site_id, status);
 create index preview_tokens_site_created_idx on preview_tokens(site_id, created_at desc);
 create index domains_site_idx on domains(site_id);
 create index claims_site_idx on claims(site_id);
 create index claims_owner_email_idx on claims(owner_email);
 create index claims_owner_user_idx on claims(owner_user_id);
 create index claims_stripe_checkout_session_idx on claims(stripe_checkout_session_id);
+create index outbound_campaigns_status_created_idx on outbound_campaigns(status, created_at desc);
+create index outbound_prospects_campaign_status_idx on outbound_prospects(campaign_id, status);
+create index outbound_prospects_site_idx on outbound_prospects(site_id);
+create index outbound_prospects_preview_token_idx on outbound_prospects(preview_token);
+create index outbound_events_campaign_time_idx on outbound_events(campaign_id, occurred_at desc);
+create index outbound_events_prospect_time_idx on outbound_events(prospect_id, occurred_at desc);
 create index jobs_status_created_idx on jobs(status, created_at);
+create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
+create index jobs_running_lock_idx on jobs(status, locked_at);
+
+create or replace function public.claim_next_job(worker_id text, stale_after_seconds int default 900)
+returns setof jobs
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  with candidate as (
+    select id
+    from jobs
+    where (
+      status = 'queued'
+      and run_after <= now()
+    )
+    or (
+      status = 'running'
+      and locked_at < now() - make_interval(secs => stale_after_seconds)
+      and attempts < max_attempts
+    )
+    order by created_at asc
+    for update skip locked
+    limit 1
+  )
+  update jobs
+  set status = 'running',
+      attempts = jobs.attempts + 1,
+      started_at = now(),
+      locked_at = now(),
+      locked_by = worker_id,
+      updated_at = now()
+  from candidate
+  where jobs.id = candidate.id
+  returning jobs.*;
+end;
+$$;
 
 create or replace function public.is_claimed_site_owner(target_site_id text)
 returns boolean
@@ -199,6 +336,7 @@ $$;
 alter table workspaces enable row level security;
 alter table sites enable row level security;
 alter table business_profiles enable row level security;
+alter table site_assets enable row level security;
 alter table site_versions enable row level security;
 alter table forms enable row level security;
 alter table form_submissions enable row level security;
@@ -206,8 +344,12 @@ alter table workflow_deliveries enable row level security;
 alter table analytics_events enable row level security;
 alter table optimization_findings enable row level security;
 alter table experiments enable row level security;
+alter table experiment_learnings enable row level security;
 alter table preview_tokens enable row level security;
 alter table domains enable row level security;
+alter table outbound_campaigns enable row level security;
+alter table outbound_prospects enable row level security;
+alter table outbound_events enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
 
@@ -217,6 +359,10 @@ using (public.is_claimed_site_owner(id));
 
 create policy "site owners can read claimed business profiles"
 on business_profiles for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed site assets"
+on site_assets for select
 using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed site versions"
@@ -245,6 +391,10 @@ using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed experiments"
 on experiments for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed experiment learnings"
+on experiment_learnings for select
 using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed domains"

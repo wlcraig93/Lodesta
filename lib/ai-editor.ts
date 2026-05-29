@@ -7,6 +7,11 @@ import type {
   SiteBundle,
   SiteVersion
 } from "./models";
+import {
+  guardrailIssueMessages,
+  validateAiEditOutcome,
+  type EditorGuardrailIssue
+} from "./editor-guardrails";
 import { themeForPreset, type ThemePresetId } from "./theme-presets";
 
 export type AiEditOperation = {
@@ -31,6 +36,8 @@ export type AiEditResult = {
   draftVersionId?: string;
   operations: AiEditOperation[];
   warnings: string[];
+  guardrailIssues?: EditorGuardrailIssue[];
+  guardrailWarnings?: EditorGuardrailIssue[];
   findings?: OptimizationFinding[];
   bundle?: SiteBundle;
 };
@@ -47,6 +54,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     };
   }
 
+  const beforeBundle = structuredClone(bundle);
   const lower = message.toLowerCase();
   const draft = clonePublishedAsDraft(bundle);
   const home = draft.pages.find((page) => page.slug === "") ?? draft.pages[0];
@@ -145,6 +153,20 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     operations.push({ type: "no_op", label: "No supported structured edit was detected." });
   }
 
+  const guardrails = validateAiEditOutcome(beforeBundle, bundle);
+  if (!guardrails.ok) {
+    Object.assign(bundle, structuredClone(beforeBundle));
+    return {
+      ok: false,
+      message: guardrails.reason,
+      mutated: false,
+      operations,
+      warnings: guardrailIssueMessages(guardrails.issues),
+      guardrailIssues: guardrails.issues
+    };
+  }
+  warnings.push(...guardrailIssueMessages(guardrails.warnings));
+
   return {
     ok: true,
     message: responseMessage(operations, warnings),
@@ -152,6 +174,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     draftVersionId: draft.id,
     operations,
     warnings,
+    guardrailWarnings: guardrails.warnings,
     bundle
   };
 }

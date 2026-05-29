@@ -6,6 +6,7 @@ export type ClaimFact = {
   id: string;
   label: string;
   value: string;
+  required: boolean;
   verified: boolean;
 };
 
@@ -20,6 +21,8 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedManagement, setAcceptedManagement] = useState(false);
   const [status, setStatus] = useState("");
+  const missingRequiredFacts = facts.filter((fact) => fact.required && !verifiedFacts.includes(fact.id));
+  const canSubmit = acceptedTerms && acceptedManagement && missingRequiredFacts.length === 0;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -77,6 +80,7 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
             <span>
               <strong>
                 {fact.label}
+                {fact.required ? <em className="inline-status">Required</em> : null}
                 {fact.verified ? <em className="inline-status">Verified</em> : <em className="inline-status pending">Needs review</em>}
               </strong>
               <small>{fact.value}</small>
@@ -118,9 +122,14 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
         </label>
       </div>
 
-      <button className="button primary" type="submit" disabled={!acceptedTerms || !acceptedManagement}>
+      <button className="button primary" type="submit" disabled={!canSubmit}>
         Claim and continue
       </button>
+      {missingRequiredFacts.length ? (
+        <p className="form-status">
+          Verify required facts: {missingRequiredFacts.map((fact) => fact.label).join(", ")}.
+        </p>
+      ) : null}
       {status ? <p className="form-status">{status}</p> : null}
     </form>
   );

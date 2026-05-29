@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
 import { executeFormSubmissionWorkflows } from "@/lib/workflows";
+import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "@/lib/privacy";
+import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { claimGateForBundle } from "@/lib/site-publication";
+import { validateFormSubmission } from "@/lib/form-validation";
 
 export async function POST(request: Request) {
   const parsedSubmission = await parseSubmissionRequest(request);
@@ -14,19 +18,63 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing siteId or formId" }, { status: 400 });
   }
 
-  const tooFast = renderedAt > 0 && Date.now() - renderedAt < 800;
-  if (honeypot || tooFast) {
-    return NextResponse.json({ accepted: true, status: "ignored" });
+  const limit = rateLimit(request, {
+    bucket: "form_submit",
+    keyParts: [siteId, formId],
+    ...rateLimitConfig("LODESTA_FORM_SUBMIT", { limit: 12, windowMs: 10 * 60_000 })
+  });
+  if (!limit.ok) return limit.response;
+
+  const bundle = await repository.getSiteBundle(siteId);
+  if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
+
+  const claimGate = claimGateForBundle(bundle, await repository.listClaims(siteId));
+  if (!claimGate.ok) {
+    return applyRateLimitHeaders(
+      NextResponse.json({
+        accepted: false,
+        status: "inactive",
+        reason: "Lead capture starts after claim and publish.",
+        claimGate: claimGate.code
+      }),
+      limit
+    );
   }
 
+  const form = bundle.extensionModel.forms.find((candidate) => candidate.id === formId && candidate.siteId === siteId);
+  if (!form) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown form" }, { status: 404 }), limit);
+
+  const tooFast = renderedAt > 0 && Date.now() - renderedAt < 800;
+  if (honeypot || tooFast) {
+    return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "ignored" }), limit);
+  }
+
+  const validation = validateFormSubmission(form, payload);
+  if (!validation.ok) {
+    return applyRateLimitHeaders(
+      NextResponse.json(
+        {
+          error: validation.error,
+          missingFields: validation.missingFields,
+          invalidFields: validation.invalidFields,
+          ignoredFields: validation.ignoredFields
+        },
+        { status: 400 }
+      ),
+      limit
+    );
+  }
+
+  const submittedAt = new Date();
   const submission = await repository.recordFormSubmission({
     siteId,
     formId,
     pageId: parsedSubmission.pageId || "unknown",
-    payload,
+    payload: validation.payload,
     metadata: parsedSubmission.metadata,
-    sourceUrl: parsedSubmission.sourceUrl || request.headers.get("referer") || undefined,
-    userAgent: request.headers.get("user-agent") ?? undefined
+    sourceUrl: sanitizeAttributionUrl(parsedSubmission.sourceUrl || request.headers.get("referer") || undefined),
+    userAgent: request.headers.get("user-agent") ?? undefined,
+    ipHash: ipHashForRequest(request, { siteId, at: submittedAt })
   });
 
   await repository.recordAnalyticsEvent({
@@ -39,12 +87,11 @@ export async function POST(request: Request) {
     metadata: { formId, ...submission.metadata }
   });
 
-  const bundle = await repository.getSiteBundle(siteId);
   const workflowDeliveries = bundle
     ? await executeFormSubmissionWorkflows(bundle, submission, (delivery) => repository.recordWorkflowDelivery(delivery))
     : [];
 
-  return NextResponse.json({ ...submission, workflowDeliveries });
+  return applyRateLimitHeaders(NextResponse.json({ ...submission, workflowDeliveries }), limit);
 }
 
 type ParsedSubmission =
@@ -157,7 +204,7 @@ function attributionMetadata(source: FormData | Record<string, unknown>) {
   if (sessionId) metadata.sessionId = sessionId;
   const sessionStartedAt = numberValue(getValue(source, "sessionStartedAt"));
   if (Number.isFinite(sessionStartedAt) && sessionStartedAt > 0) metadata.sessionStartedAt = sessionStartedAt;
-  return metadata;
+  return sanitizeAnalyticsMetadata(metadata) ?? {};
 }
 
 function getValue(source: FormData | Record<string, unknown>, key: string) {

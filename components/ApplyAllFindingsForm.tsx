@@ -4,14 +4,17 @@ import { useState } from "react";
 
 type ApplyAllFindingsFormProps = {
   siteId: string;
+  siteSlug: string;
   safeFindingCount: number;
 };
 
-export function ApplyAllFindingsForm({ siteId, safeFindingCount }: ApplyAllFindingsFormProps) {
+export function ApplyAllFindingsForm({ siteId, siteSlug, safeFindingCount }: ApplyAllFindingsFormProps) {
   const [status, setStatus] = useState("");
+  const [reviewReady, setReviewReady] = useState(false);
 
-  async function applyAll(mode: "draft" | "publish_after_qa") {
+  async function applyAll(mode: "draft" | "qa") {
     setStatus(mode === "draft" ? "Applying safe findings..." : "Applying safe findings and running QA...");
+    setReviewReady(false);
     const response = await fetch("/api/action-list/apply-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -25,14 +28,16 @@ export function ApplyAllFindingsForm({ siteId, safeFindingCount }: ApplyAllFindi
 
     const applied = result.results?.filter((item: { applied: boolean }) => item.applied).length ?? 0;
     const failedChecks = result.qa?.checks?.filter((check: { severity: string }) => check.severity === "fail").length ?? 0;
-    if (mode === "publish_after_qa") {
+    if (mode === "qa") {
+      setReviewReady(failedChecks === 0);
       setStatus(
-        result.published
-          ? `Applied ${applied} findings, QA passed, and draft published.`
-          : `Applied ${applied} findings. QA has ${failedChecks} failing checks.`
+        failedChecks
+          ? `Applied ${applied} findings. QA has ${failedChecks} failing checks.`
+          : `Applied ${applied} findings, QA passed, and draft is ready for publish confirmation.`
       );
       return;
     }
+    setReviewReady(failedChecks === 0);
     setStatus(`Applied ${applied} findings to draft. QA ${failedChecks ? `has ${failedChecks} failing checks` : "passed"}.`);
   }
 
@@ -47,9 +52,14 @@ export function ApplyAllFindingsForm({ siteId, safeFindingCount }: ApplyAllFindi
         <button className="button secondary" type="button" onClick={() => void applyAll("draft")}>
           Apply safe findings
         </button>
-        <button className="button primary" type="button" onClick={() => void applyAll("publish_after_qa")}>
-          Apply + QA publish
+        <button className="button primary" type="button" onClick={() => void applyAll("qa")}>
+          Apply + run QA
         </button>
+        {reviewReady ? (
+          <a className="button secondary" href={`/versions/${siteSlug}`}>
+            Review draft
+          </a>
+        ) : null}
       </div>
       {status ? <p className="form-status">{status}</p> : null}
     </div>

@@ -2,27 +2,50 @@ import type {
   BusinessProfile,
   ConversionGoal,
   Experiment,
+  ExperimentLearning,
   FieldPolicy,
   FieldProvenance,
   PageModel,
   PresenceAssessment,
+  CreativeMockupArtifact,
+  RenderInspectionResult,
   SectionModel,
+  SiteAsset,
   SiteBundle,
   SiteModel,
   Theme,
-  Vertical
+  Vertical,
+  VisualQaResult
 } from "./models";
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
 import { sampleExtensionModel } from "./sample-data";
 import { runAudit } from "./audit";
 import { verticalRecipes, type VerticalRecipe } from "./recipes";
-import { evaluateCrawlAgainstStandard } from "./standard-evaluation";
+import { evaluateCrawlAgainstStandard, evaluateSiteAgainstStandard } from "./standard-evaluation";
 import { createCreativeBrief } from "./creative-brief";
+import {
+  createBrandAssessment,
+  createDesignDirections,
+  createPresenceQualityScore,
+  selectedDesignDirection,
+  type GenerationPlanningOverride
+} from "./generation-planning";
+import { createMockupAssets, createPromptOnlyMockupArtifacts } from "./image-generation";
+import type { PublicPresenceEnrichment } from "./public-presence";
+import { themeForPreset } from "./theme-presets";
+import { createDeterministicVisualQa } from "./visual-qa";
+import { applyExperimentLearningsToVariants, activeLearningFor } from "./experiment-learning";
 
-type IntakeInput = {
+export type IntakeInput = {
   url?: string;
   prompt?: string;
   crawl?: CrawlAssessment;
+  renderInspection?: RenderInspectionResult;
+  aiPlanning?: GenerationPlanningOverride;
+  mockupArtifacts?: CreativeMockupArtifact[];
+  publicPresence?: PublicPresenceEnrichment;
+  visualQa?: VisualQaResult;
+  experimentLearnings?: ExperimentLearning[];
 };
 
 export function inferVertical(input: IntakeInput): Vertical {
@@ -44,7 +67,7 @@ export function inferVertical(input: IntakeInput): Vertical {
 
 export function createSiteFromInput(input: IntakeInput): SiteBundle {
   const vertical = inferVertical(input);
-  const facts = input.crawl?.extractedFacts;
+  const facts = mergeExtractedFacts(input.crawl?.extractedFacts, input.publicPresence?.facts);
   const sourceHostname = input.url ? new URL(input.url).hostname.replace(/^www\./, "") : undefined;
   const name = inferBusinessName(input, facts, sourceHostname);
   const siteId = `site_${slugify(name)}`;
@@ -70,6 +93,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     phone,
     email,
     address: facts?.address,
+    geo: facts?.geo,
     hours: facts?.hours,
     services,
     serviceAreas,
@@ -96,11 +120,33 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
         }
       : undefined,
     reviewsSummary: facts?.reviewsSummary,
-    pressLinks: [],
-    provenance: buildProvenance(input, facts, now)
+    pressLinks: facts?.pressLinks ?? [],
+    provenance: {
+      ...buildProvenance(input, facts, now),
+      ...(input.publicPresence?.provenance ?? {})
+    }
   };
 
   const recipe = verticalRecipes[vertical];
+  const currentEvaluation = input.crawl ? evaluateCrawlAgainstStandard(input.crawl) : undefined;
+  const brandAssessment = createBrandAssessment({
+    business: businessProfile,
+    recipe,
+    crawl: input.crawl,
+    renderInspection: input.renderInspection,
+    currentEvaluation,
+    aiPlanning: input.aiPlanning
+  });
+  const designDirections = createDesignDirections({
+    business: businessProfile,
+    recipe,
+    crawl: input.crawl,
+    renderInspection: input.renderInspection,
+    currentEvaluation,
+    aiPlanning: input.aiPlanning
+  });
+  const selectedDirection = selectedDesignDirection(designDirections);
+  const selectedTheme = themeForPreset(vertical, selectedDirection.themePreset, themeForVertical(vertical, recipe.mood));
   const primaryCta =
     recipe.primaryGoal === "calls" && businessProfile.phone
       ? { label: "Call Now", href: `tel:${businessProfile.phone}`, role: "tel" }
@@ -114,7 +160,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     id: siteId,
     slug: slugify(name),
     pinList: [],
-    theme: themeForVertical(vertical, recipe.mood),
+    theme: selectedTheme,
     versions: [
       {
         id: `version_${slugify(name)}_published`,
@@ -130,7 +176,13 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
               description: `${name} is a ${recipe.label.toLowerCase()} built for fast local action, clear trust signals, and simple customer contact.`,
               canonicalPath: "/"
             },
-            sections: buildHomeSections({ business: businessProfile, recipe, primaryCta, name })
+            sections: buildHomeSections({
+              business: businessProfile,
+              recipe,
+              primaryCta,
+              name,
+              sectionOrder: selectedDirection.sectionEmphasis
+            })
           },
           {
             id: "page_services",
@@ -152,15 +204,21 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
   const presenceAssessment: PresenceAssessment = {
     siteId,
     sourceUrl: input.url,
-    standardEvaluation: input.crawl ? evaluateCrawlAgainstStandard(input.crawl) : undefined,
+    standardEvaluation: currentEvaluation,
+    renderInspection: input.renderInspection,
+    publicPresenceSignals: input.publicPresence?.signals.map((signal) => ({ ...signal, siteId })),
+    brandAssessment,
+    designDirections,
+    selectedDesignDirectionId: selectedDirection.id,
+    generationPlanningSource: input.aiPlanning?.source ?? "deterministic_fallback",
     technicalNotes: buildTechnicalNotes(input.crawl),
-    visualNotes: ["Screenshot analysis will identify CTA clarity, visual hierarchy, brand cues, and mobile usability."],
+    visualNotes: buildVisualNotes(input.renderInspection),
     brandNotes: buildBrandNotes(input.crawl),
-    publicPresenceNotes: buildPublicPresenceNotes(input.crawl),
+    publicPresenceNotes: buildPublicPresenceNotes(input.crawl, input.publicPresence),
     creativeBrief: createCreativeBrief({ business: businessProfile, recipe, crawl: input.crawl })
   };
 
-  return {
+  const bundle: SiteBundle = {
     businessProfile,
     siteModel,
     extensionModel: {
@@ -168,9 +226,30 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
       forms: sampleExtensionModel.forms.map((form) => ({ ...form, siteId }))
     },
     optimizationFindings: runAudit(businessProfile, siteModel),
-    experiments: defaultExperimentsForBusiness(businessProfile, recipe),
+    experiments: defaultExperimentsForBusiness(businessProfile, recipe, input.experimentLearnings),
     presenceAssessment
   };
+  presenceAssessment.qualityScore = createPresenceQualityScore({
+    business: businessProfile,
+    recipe,
+    crawl: input.crawl,
+    renderInspection: input.renderInspection,
+    currentEvaluation,
+    generatedEvaluation: evaluateSiteAgainstStandard(bundle),
+    aiPlanning: input.aiPlanning
+  });
+  presenceAssessment.mockupArtifacts =
+    input.mockupArtifacts ?? createPromptOnlyMockupArtifacts({ bundle, directions: designDirections });
+  presenceAssessment.assetInventory = buildAssetInventory({
+    business: businessProfile,
+    input,
+    mockups: presenceAssessment.mockupArtifacts,
+    now
+  });
+  presenceAssessment.visualQa =
+    input.visualQa ?? createDeterministicVisualQa({ bundle, renderInspection: input.renderInspection });
+
+  return bundle;
 }
 
 type Cta = { label: string; href: string; role: string };
@@ -180,10 +259,12 @@ type SectionBuildContext = {
   recipe: VerticalRecipe;
   primaryCta: Cta;
   name: string;
+  sectionOrder?: SectionModel["type"][];
 };
 
 function buildHomeSections(context: SectionBuildContext): SectionModel[] {
-  return context.recipe.defaultSections.map((type, index) => sectionForType(type, context, "home", index));
+  const sectionOrder = context.sectionOrder?.length ? context.sectionOrder : context.recipe.defaultSections;
+  return sectionOrder.map((type, index) => sectionForType(type, context, "home", index));
 }
 
 function buildServicesPageSections(context: SectionBuildContext): SectionModel[] {
@@ -228,32 +309,110 @@ function buildLocalSeoPages(context: SectionBuildContext): PageModel[] {
   return [...dedupePages(servicePages), ...dedupePages(areaPages)];
 }
 
-function defaultExperimentsForBusiness(business: BusinessProfile, recipe: VerticalRecipe): Experiment[] {
+function defaultExperimentsForBusiness(
+  business: BusinessProfile,
+  recipe: VerticalRecipe,
+  learnings: ExperimentLearning[] = []
+): Experiment[] {
   const primaryMetric = experimentMetricForGoal(recipe.primaryGoal);
-  const actionLabel =
-    primaryMetric === "tel_clicks"
-      ? "call"
-      : primaryMetric === "order_clicks"
-        ? "order"
-        : primaryMetric === "booking_clicks"
-          ? "booking"
-          : "form";
-
+  const actionLabel = actionLabelForMetric(primaryMetric);
   return [
-    {
-      id: `exp_sticky_cta_${business.siteId}`,
-      cohort: business.vertical,
-      hypothesis: `A persistent mobile ${actionLabel} action increases ${actionLabel} conversions.`,
+    makeExperimentCandidate({
+      business,
+      learnings,
       surface: "sticky_cta",
+      primaryMetric,
+      hypothesis: `A persistent mobile ${actionLabel} action increases ${actionLabel} conversions.`,
       variants: [
         { id: "control", label: "Inline CTAs only" },
         { id: "sticky_action", label: "Sticky mobile action" }
-      ],
-      holdoutPercent: 0.1,
+      ]
+    }),
+    makeExperimentCandidate({
+      business,
+      learnings,
+      surface: "cta_placement",
       primaryMetric,
-      status: "running"
-    }
+      hypothesis: "More prominent conversion actions above and after proof sections increase primary actions.",
+      variants: [
+        { id: "control", label: "Standard CTA prominence" },
+        { id: "hero_cta_prominent", label: "Hero CTA emphasis" },
+        { id: "cta_section_prominent", label: "Mid-page CTA emphasis" }
+      ]
+    }),
+    makeExperimentCandidate({
+      business,
+      learnings,
+      surface: "form_length",
+      primaryMetric: "form_submits",
+      hypothesis: "Shorter or contact-first forms reduce lead friction and increase form submissions.",
+      variants: [
+        { id: "control", label: "Standard form" },
+        { id: "required_only", label: "Required fields only" },
+        { id: "phone_first", label: "Phone-first field order" }
+      ]
+    }),
+    makeExperimentCandidate({
+      business,
+      learnings,
+      surface: "hero_layout",
+      primaryMetric,
+      hypothesis: "A more compact or proof-forward hero layout increases primary actions without changing claims.",
+      variants: [
+        { id: "control", label: "Standard hero layout" },
+        { id: "compact_hero", label: "Compact above-fold hero" },
+        { id: "media_first", label: "Visual proof first" }
+      ]
+    })
   ];
+}
+
+function makeExperimentCandidate(input: {
+  business: BusinessProfile;
+  learnings: ExperimentLearning[];
+  surface: Experiment["surface"];
+  primaryMetric: Experiment["primaryMetric"];
+  hypothesis: string;
+  variants: Array<Record<string, unknown>>;
+}): Experiment {
+  const variants = applyExperimentLearningsToVariants({
+    cohort: input.business.vertical,
+    surface: input.surface,
+    primaryMetric: input.primaryMetric,
+    learnings: input.learnings,
+    variants: input.variants
+  });
+  const learning = activeLearningFor(input.learnings, {
+    cohort: input.business.vertical,
+    surface: input.surface,
+    primaryMetric: input.primaryMetric
+  });
+
+  return {
+    id: `exp_${input.surface}_${input.business.siteId}`,
+    cohort: input.business.vertical,
+    hypothesis: learning
+      ? `${learning.winnerLabel} is the learned default for ${input.surface.replaceAll("_", " ")} with holdout validation available.`
+      : input.hypothesis,
+    surface: input.surface,
+    variants,
+    holdoutPercent: 0.1,
+    primaryMetric: input.primaryMetric,
+    status: "draft"
+  };
+}
+
+function actionLabelForMetric(metric: Experiment["primaryMetric"]) {
+  switch (metric) {
+    case "tel_clicks":
+      return "call";
+    case "order_clicks":
+      return "order";
+    case "booking_clicks":
+      return "booking";
+    case "form_submits":
+      return "form";
+  }
 }
 
 function experimentMetricForGoal(goal: ConversionGoal): Experiment["primaryMetric"] {
@@ -1298,6 +1457,30 @@ function sentenceCase(value: string) {
   return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 }
 
+function mergeExtractedFacts(
+  websiteFacts?: ExtractedBusinessFacts,
+  publicFacts?: PublicPresenceEnrichment["facts"]
+): ExtractedBusinessFacts | undefined {
+  if (!websiteFacts && !publicFacts) return undefined;
+  return {
+    name: websiteFacts?.name ?? publicFacts?.name,
+    description: websiteFacts?.description ?? publicFacts?.description,
+    phone: websiteFacts?.phone ?? publicFacts?.phone,
+    email: websiteFacts?.email ?? publicFacts?.email,
+    address: websiteFacts?.address ?? publicFacts?.address,
+    geo: websiteFacts?.geo ?? publicFacts?.geo,
+    hours: websiteFacts?.hours ?? publicFacts?.hours,
+    categories: unique([...(websiteFacts?.categories ?? []), ...(publicFacts?.categories ?? [])]).slice(0, 8),
+    services: unique([...(websiteFacts?.services ?? []), ...(publicFacts?.services ?? [])]).slice(0, 12),
+    serviceAreas: unique([...(websiteFacts?.serviceAreas ?? []), ...(publicFacts?.serviceAreas ?? [])]).slice(0, 12),
+    socialLinks: unique([...(websiteFacts?.socialLinks ?? []), ...(publicFacts?.socialLinks ?? [])]).slice(0, 10),
+    bookingLinks: unique([...(websiteFacts?.bookingLinks ?? []), ...(publicFacts?.bookingLinks ?? [])]).slice(0, 6),
+    orderingLinks: unique([...(websiteFacts?.orderingLinks ?? []), ...(publicFacts?.orderingLinks ?? [])]).slice(0, 6),
+    pressLinks: unique([...(websiteFacts?.pressLinks ?? []), ...(publicFacts?.pressLinks ?? [])]).slice(0, 8),
+    reviewsSummary: websiteFacts?.reviewsSummary ?? publicFacts?.reviewsSummary
+  };
+}
+
 function buildProvenance(input: IntakeInput, facts: ExtractedBusinessFacts | undefined, observedAt: string): Record<string, FieldProvenance> {
   const source = input.url ? ("website" as const) : ("manual" as const);
   const sourceUrl = input.url;
@@ -1305,8 +1488,10 @@ function buildProvenance(input: IntakeInput, facts: ExtractedBusinessFacts | und
     name: { source, sourceUrl, confidence: facts?.name ? 0.82 : 0.65, verified: false, observedAt },
     phone: { source, sourceUrl, confidence: facts?.phone ? 0.78 : 0.45, verified: false, observedAt },
     address: { source, sourceUrl, confidence: facts?.address ? 0.72 : 0.25, verified: false, observedAt },
+    geo: { source, sourceUrl, confidence: facts?.geo ? 0.72 : 0.25, verified: false, observedAt },
     hours: { source, sourceUrl, confidence: facts?.hours ? 0.7 : 0.25, verified: false, observedAt },
-    services: { source, sourceUrl, confidence: facts?.services?.length ? 0.65 : 0.45, verified: false, observedAt }
+    services: { source, sourceUrl, confidence: facts?.services?.length ? 0.65 : 0.45, verified: false, observedAt },
+    reviewsSummary: { source, sourceUrl, confidence: facts?.reviewsSummary ? 0.65 : 0.25, verified: false, observedAt }
   };
 }
 
@@ -1332,12 +1517,111 @@ function buildBrandNotes(crawl?: CrawlAssessment) {
   ];
 }
 
-function buildPublicPresenceNotes(crawl?: CrawlAssessment) {
-  if (!crawl) return ["Public presence data is ingested with provenance and verified on claim."];
+function buildVisualNotes(renderInspection?: RenderInspectionResult) {
+  if (!renderInspection) {
+    return ["Screenshot analysis will identify CTA clarity, visual hierarchy, brand cues, and mobile usability."];
+  }
+  const failed = renderInspection.findings.filter((finding) => finding.severity === "fail").length;
+  const warnings = renderInspection.findings.filter((finding) => finding.severity === "warning").length;
+  return [
+    `Render inspection used ${renderInspection.adapter} with ${renderInspection.screenshots.length} screenshot artifact${renderInspection.screenshots.length === 1 ? "" : "s"}.`,
+    `${failed} render failures and ${warnings} render warnings were detected for CTA, form, tel, blank-page, and above-fold checks.`,
+    ...(renderInspection.unavailableReason ? [`Browser screenshot capture fallback reason: ${renderInspection.unavailableReason}`] : [])
+  ];
+}
+
+function buildPublicPresenceNotes(crawl?: CrawlAssessment, publicPresence?: PublicPresenceEnrichment) {
+  if (!crawl && !publicPresence) return ["Public presence data is ingested with provenance and verified on claim."];
+  const officialNotes = publicPresence?.signals.length
+    ? [
+        `${publicPresence.signals.length} official/public presence candidate${publicPresence.signals.length === 1 ? "" : "s"} captured from ${publicPresence.provider}.`
+      ]
+    : (publicPresence?.notes ?? []).slice(0, 1);
+  if (!crawl) {
+    return [...officialNotes, "Official/public facts remain unverified until claim; owner-truth fields are confirmed before publishing or sync."];
+  }
   return [
     `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, and ${crawl.extractedFacts.orderingLinks.length} ordering links were detected.`,
+    ...officialNotes,
     "Facts from website/schema remain unverified until claim; owner-truth fields are confirmed before publishing or sync."
   ];
+}
+
+function buildAssetInventory({
+  business,
+  input,
+  mockups,
+  now
+}: {
+  business: BusinessProfile;
+  input: IntakeInput;
+  mockups: CreativeMockupArtifact[];
+  now: string;
+}): SiteAsset[] {
+  const websiteProvenance = input.url
+    ? {
+        source: "website" as const,
+        sourceUrl: input.url,
+        confidence: 0.7,
+        verified: false,
+        observedAt: now
+      }
+    : undefined;
+  const referencedPhotos = business.photos.map((asset, index) => ({
+    id: `site_asset_photo_reference_${index + 1}`,
+    siteId: business.siteId,
+    kind: "photo" as const,
+    url: asset.url,
+    alt: asset.alt,
+    source: asset.source,
+    rightsStatus: asset.rightsStatus,
+    usageScope: "reference_only" as const,
+    ownerApproved: false,
+    provenance: websiteProvenance,
+    metadata: { referenceAssetId: asset.id, preclaimUse: "reference_only" },
+    createdAt: now
+  }));
+  const logo: SiteAsset[] = business.logo
+    ? [
+        {
+          id: "site_asset_logo_reference",
+          siteId: business.siteId,
+          kind: "logo",
+          url: business.logo.url,
+          alt: business.logo.alt,
+          source: business.logo.source,
+          rightsStatus: business.logo.rightsStatus,
+          usageScope: "reference_only",
+          ownerApproved: false,
+          provenance: websiteProvenance,
+          metadata: { referenceAssetId: business.logo.id, preclaimUse: "reference_only" },
+          createdAt: now
+        }
+      ]
+    : [];
+  const screenshots: SiteAsset[] =
+    input.renderInspection?.screenshots.map((screenshot) => ({
+      id: `site_asset_current_screenshot_${screenshot.viewport}`,
+      siteId: business.siteId,
+      kind: "screenshot",
+      url: screenshot.path,
+      alt: `Current site ${screenshot.viewport} screenshot`,
+      source: "website_reference",
+      rightsStatus: "reference_only",
+      usageScope: "internal_planning",
+      ownerApproved: false,
+      provenance: websiteProvenance,
+      metadata: {
+        viewport: screenshot.viewport,
+        width: screenshot.width,
+        height: screenshot.height,
+        bytes: screenshot.bytes,
+        capturedAt: screenshot.capturedAt
+      },
+      createdAt: now
+    })) ?? [];
+
+  return [...referencedPhotos, ...logo, ...screenshots, ...createMockupAssets(mockups)];
 }
 
 function unique(items: string[]) {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { FormSettingsForm } from "@/components/FormSettingsForm";
 import { LeadStatusControls } from "@/components/LeadStatusControls";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
@@ -45,6 +46,19 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
         <Metric label="Reviewed" value={leads.filter((lead) => lead.status === "reviewed").length} />
         <Metric label="Spam" value={leads.filter((lead) => lead.status === "spam").length} />
         <Metric label="Workflow deliveries" value={workflowDeliveries.length} />
+      </section>
+
+      <section className="panel">
+        <h2>Form Settings</h2>
+        {bundle.extensionModel.forms.map((form) => (
+          <FormSettingsForm
+            key={form.id}
+            siteId={bundle.businessProfile.siteId}
+            form={form}
+            workflows={bundle.extensionModel.workflows}
+          />
+        ))}
+        {bundle.extensionModel.forms.length === 0 ? <p className="muted">No forms are configured for this site.</p> : null}
       </section>
 
       <section className="panel">

@@ -7,6 +7,19 @@ type BusinessProfileFormProps = {
   profile: BusinessProfile;
 };
 
+type GuardrailIssue = {
+  severity: "block" | "warning";
+  title: string;
+  detail: string;
+};
+
+type BusinessProfileResponse = {
+  ok?: boolean;
+  error?: string;
+  issues?: GuardrailIssue[];
+  guardrailWarnings?: GuardrailIssue[];
+};
+
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
@@ -28,10 +41,12 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
   const [bookingLinks, setBookingLinks] = useState(profile.bookingLinks.join(", "));
   const [socialLinks, setSocialLinks] = useState(profile.socialLinks.join(", "));
   const [status, setStatus] = useState("");
+  const [issues, setIssues] = useState<GuardrailIssue[]>([]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus("Saving business facts...");
+    setIssues([]);
     const response = await fetch("/api/business-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -48,12 +63,18 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
         socialLinks: splitList(socialLinks)
       })
     });
-    const result = await response.json();
+    const result = (await response.json()) as BusinessProfileResponse;
     if (!response.ok || !result.ok) {
+      setIssues(result.issues ?? []);
       setStatus(result.error ?? "Unable to save business facts.");
       return;
     }
-    setStatus("Business facts saved and marked owner-verified.");
+    setIssues(result.guardrailWarnings ?? []);
+    setStatus(
+      result.guardrailWarnings?.length
+        ? "Business facts saved with guardrail warnings."
+        : "Business facts saved and marked owner-verified."
+    );
   }
 
   return (
@@ -120,6 +141,16 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
         Save business facts
       </button>
       {status ? <p className="form-status">{status}</p> : null}
+      {issues.length ? (
+        <ul className="guardrail-list" aria-label="Business fact guardrail issues">
+          {issues.map((issue, index) => (
+            <li key={`${issue.title}-${index}`} className={`guardrail-${issue.severity}`}>
+              <strong>{issue.title}</strong>
+              <span>{issue.detail}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </form>
   );
 }

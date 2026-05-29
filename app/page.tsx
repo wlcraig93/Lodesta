@@ -46,6 +46,10 @@ export default async function HomePage() {
   const summary = await repository.analyticsSummary(primaryBundle.businessProfile.siteId);
   const leads = await repository.listFormSubmissions(primaryBundle.businessProfile.siteId);
   const criticalFindings = primaryBundle.optimizationFindings.filter((finding) => finding.severity === "critical");
+  const openFindings = primaryBundle.optimizationFindings.filter((finding) => finding.status === "open");
+  const trackedClicks = summary.clicks + summary.telClicks + summary.outboundClicks;
+  const topSource = summary.outcomesBySource[0]?.label ?? "collecting";
+  const versions = [...primaryBundle.siteModel.versions].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const previewToken = (await repository.listPreviewTokens(primaryBundle.businessProfile.siteId))[0];
   const previewHref = previewToken ? `/preview/${previewToken.token}` : `/sites/${primaryBundle.siteModel.slug}`;
 
@@ -88,6 +92,9 @@ export default async function HomePage() {
           <Link className="button secondary" href={`/leads/${primaryBundle.siteModel.slug}`}>
             Leads
           </Link>
+          <Link className="button secondary" href="/outbound">
+            Outbound
+          </Link>
           <Link className="button secondary" href="/account">
             Account
           </Link>
@@ -96,39 +103,39 @@ export default async function HomePage() {
 
       <section className="metric-row">
         <div className="metric-card">
-          <strong>{standardCriteria.length}</strong>
-          <span>Standard criteria</span>
+          <strong>{summary.sessions}</strong>
+          <span>Sessions</span>
         </div>
         <div className="metric-card">
-          <strong>{primaryBundle.siteModel.versions[0].pages.length}</strong>
-          <span>Generated pages</span>
+          <strong>{summary.telClicks}</strong>
+          <span>Calls</span>
         </div>
         <div className="metric-card">
-          <strong>{leads.length}</strong>
-          <span>Captured leads</span>
+          <strong>{summary.formSubmits}</strong>
+          <span>Forms</span>
         </div>
         <div className="metric-card">
-          <strong>{summary.events}</strong>
-          <span>Analytics events</span>
+          <strong>{trackedClicks}</strong>
+          <span>Tracked clicks</span>
         </div>
       </section>
 
       <section className="metric-row">
         <div className="metric-card">
-          <strong>{primaryBundle.extensionModel.forms.length}</strong>
-          <span>Lead forms</span>
+          <strong>{primaryBundle.siteModel.versions[0].pages.length}</strong>
+          <span>Pages</span>
         </div>
         <div className="metric-card">
-          <strong>{primaryBundle.experiments.length}</strong>
-          <span>Experiment loops</span>
+          <strong>{leads.length}</strong>
+          <span>Leads</span>
         </div>
         <div className="metric-card">
-          <strong>{summary.sessions}</strong>
-          <span>Sessions tracked</span>
+          <strong>{openFindings.length}</strong>
+          <span>Open recommendations</span>
         </div>
         <div className="metric-card">
-          <strong>{Math.round(summary.engagedMs / 1000)}</strong>
-          <span>Engaged seconds</span>
+          <strong>{topSource}</strong>
+          <span>Top source</span>
         </div>
       </section>
 
@@ -161,14 +168,91 @@ export default async function HomePage() {
           </div>
         </section>
 
+        <section className="panel">
+          <h2>Owner Summary</h2>
+          <div className="dashboard-split">
+            <div>
+              <h3>Top Pages</h3>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Page</th>
+                    <th>Sessions</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.outcomesByPage.slice(0, 5).map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.label}</td>
+                      <td>{row.sessions}</td>
+                      <td>{row.primaryActions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {summary.outcomesByPage.length === 0 ? <p className="muted">No page traffic yet.</p> : null}
+            </div>
+            <div>
+              <h3>Traffic Sources</h3>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Sessions</th>
+                    <th>Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.outcomesBySource.slice(0, 5).map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.label}</td>
+                      <td>{row.sessions}</td>
+                      <td>{Math.round(row.actionRate * 100)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {summary.outcomesBySource.length === 0 ? <p className="muted">No source attribution yet.</p> : null}
+            </div>
+          </div>
+        </section>
+
         <aside className="panel">
+          <h2>Recent Changes</h2>
+          <div className="finding-list">
+            {versions.slice(0, 4).map((version) => (
+              <article key={version.id} className="finding-card compact-card">
+                <span className={`badge ${version.status === "published" ? "severity-pass" : ""}`}>{version.status}</span>
+                <h3>{version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Site version"}</h3>
+                <p>{formatDate(version.createdAt)}</p>
+              </article>
+            ))}
+          </div>
+          <div className="button-row">
+            <Link className="button secondary" href={`/versions/${primaryBundle.siteModel.slug}`}>
+              View versions
+            </Link>
+          </div>
           <h2>Presence Intake</h2>
           <p>{primaryBundle.presenceAssessment.visualNotes[0]}</p>
           <p>{primaryBundle.presenceAssessment.publicPresenceNotes[0]}</p>
           <h2>Locked decisions</h2>
-          <p>Next.js + TypeScript, Railway workers, Cloudflare for SaaS at scale, structured renderer, curated editing.</p>
+          <p>
+            {standardCriteria.length} Standard criteria, {primaryBundle.extensionModel.forms.length} lead form(s),{" "}
+            {primaryBundle.experiments.length} experiment loop(s).
+          </p>
         </aside>
       </div>
     </main>
   );
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
 }

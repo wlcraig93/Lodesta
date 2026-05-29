@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { DomainConnectForm } from "@/components/DomainConnectForm";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { claimGateForBundle } from "@/lib/site-publication";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,12 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/domains/${slug}`);
 
-  const domains = await repository.listDomains(bundle.businessProfile.siteId);
+  const siteId = bundle.businessProfile.siteId;
+  const [domains, claims] = await Promise.all([
+    repository.listDomains(siteId),
+    repository.listClaims(siteId)
+  ]);
+  const claimGate = claimGateForBundle(bundle, claims);
 
   return (
     <main className="admin-page">
@@ -38,7 +44,11 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
       <div className="admin-grid">
         <section className="panel">
           <h2>Connect domain</h2>
-          <DomainConnectForm siteId={bundle.businessProfile.siteId} />
+          <DomainConnectForm
+            siteId={siteId}
+            disabled={!claimGate.ok}
+            disabledReason={claimGate.ok ? undefined : claimGate.reason}
+          />
         </section>
 
         <aside className="panel">

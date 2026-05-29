@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ClaimSiteForm, type ClaimFact } from "@/components/ClaimSiteForm";
 import { repository } from "@/lib/repository";
 import type { BusinessProfile } from "@/lib/models";
+import { requiredClaimFactIds } from "@/lib/fact-verification";
 
 export const dynamic = "force-dynamic";
 
@@ -64,31 +65,41 @@ export default async function ClaimPage({ params }: { params: Promise<{ slug: st
 }
 
 function claimFacts(profile: BusinessProfile): ClaimFact[] {
-  const facts: ClaimFact[] = [claimFact(profile, "name", "Business name", profile.name)];
-  if (profile.phone) facts.push(claimFact(profile, "phone", "Phone", profile.phone));
-  if (profile.email) facts.push(claimFact(profile, "email", "Email", profile.email));
+  const requiredFacts = new Set(requiredClaimFactIds(profile));
+  const facts: ClaimFact[] = [claimFact(profile, "name", "Business name", profile.name, requiredFacts)];
+  if (profile.phone) facts.push(claimFact(profile, "phone", "Phone", profile.phone, requiredFacts));
+  if (profile.email) facts.push(claimFact(profile, "email", "Email", profile.email, requiredFacts));
   const address = [profile.address?.street, profile.address?.city, profile.address?.region, profile.address?.postalCode]
     .filter(Boolean)
     .join(", ");
-  if (address) facts.push(claimFact(profile, "address", "Address", address));
-  if (profile.services.length) facts.push(claimFact(profile, "services", "Services", profile.services.join(", ")));
+  if (address) facts.push(claimFact(profile, "address", "Address", address, requiredFacts));
+  if (profile.services.length) {
+    facts.push(claimFact(profile, "services", "Services", profile.services.join(", "), requiredFacts));
+  }
   if (profile.serviceAreas.length) {
-    facts.push(claimFact(profile, "service_areas", "Service areas", profile.serviceAreas.join(", ")));
+    facts.push(claimFact(profile, "service_areas", "Service areas", profile.serviceAreas.join(", "), requiredFacts));
   }
   if (profile.hours && Object.keys(profile.hours).length) {
     facts.push(
-      claimFact(profile, "hours", "Hours", Object.entries(profile.hours).map(([day, value]) => `${day}: ${value}`).join("; "))
+      claimFact(
+        profile,
+        "hours",
+        "Hours",
+        Object.entries(profile.hours).map(([day, value]) => `${day}: ${value}`).join("; "),
+        requiredFacts
+      )
     );
   }
   return facts;
 }
 
-function claimFact(profile: BusinessProfile, id: string, label: string, value: string): ClaimFact {
+function claimFact(profile: BusinessProfile, id: string, label: string, value: string, requiredFacts: Set<string>): ClaimFact {
   const provenanceKey = id === "service_areas" ? "serviceAreas" : id;
   return {
     id,
     label,
     value,
+    required: requiredFacts.has(id),
     verified: profile.provenance[provenanceKey]?.verified ?? false
   };
 }

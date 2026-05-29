@@ -1,5 +1,5 @@
 import type { CrawlAssessment } from "./crawler";
-import type { SiteBundle, StandardCheckResult, StandardEvaluation } from "./models";
+import type { SiteBundle, StandardCheckResult, StandardCriterion, StandardEvaluation } from "./models";
 import { getCriteriaForVertical, getStandardCriterion } from "./standard";
 import { getPublishedVersion } from "./sample-data";
 
@@ -77,6 +77,14 @@ export function evaluateSiteAgainstStandard(
   };
 }
 
+export function isColdUrlCheckableMethod(checkMethod: StandardCriterion["checkMethod"]) {
+  return checkMethod === "crawl" || checkMethod === "dom";
+}
+
+export function coldUrlCheckableChecks(checks: StandardCheckResult[]) {
+  return checks.filter((check) => isColdUrlCheckableMethod(check.checkMethod));
+}
+
 function evaluateCriterion(
   criterionId: string,
   bundle: SiteBundle,
@@ -85,6 +93,8 @@ function evaluateCriterion(
 ) {
   const business = bundle.businessProfile;
   switch (criterionId) {
+    case "technical.https":
+      return result(true, "fail", "Generated customer sites are served through HTTPS-capable Railway or Cloudflare hostnames.");
     case "seo.title.unique":
       return result(
         pages.every((page) => page.seo.title.length >= 25),
@@ -96,6 +106,12 @@ function evaluateCriterion(
         pages.every((page) => page.seo.description.length >= 80),
         "warning",
         "All page meta descriptions should be at least 80 characters."
+      );
+    case "seo.clean_urls":
+      return result(
+        pages.every((page) => cleanSlug(page.slug) && cleanCanonicalPath(page.seo.canonicalPath)),
+        "fail",
+        "Generated page slugs and canonical paths should be extensionless and query-free."
       );
     case "seo.local_business_schema":
       return result(Boolean(business.name && business.phone && (business.address || business.serviceAreas.length)), "fail", "BusinessProfile needs name, phone, and address or service area for LocalBusiness schema.");
@@ -157,6 +173,14 @@ function evaluateCriterion(
 
 function result(passed: boolean, severity: "warning" | "fail", evidence: string) {
   return { passed, severity, evidence };
+}
+
+function cleanSlug(slug: string) {
+  return !slug.includes("?") && !/\.(php|asp|aspx|jsp|cfm|cgi|html?)$/i.test(slug);
+}
+
+function cleanCanonicalPath(path: string) {
+  return path.startsWith("/") && !path.includes("?") && !/\.(php|asp|aspx|jsp|cfm|cgi|html?)$/i.test(path);
 }
 
 function hasSection(pages: SiteBundle["siteModel"]["versions"][number]["pages"], sectionType: string) {

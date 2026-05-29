@@ -364,7 +364,49 @@ export const sampleSiteBundle: SiteBundle = {
       ],
       holdoutPercent: 0.1,
       primaryMetric: "order_clicks",
-      status: "running"
+      status: "draft"
+    },
+    {
+      id: "exp_cta_placement_restaurant",
+      cohort: "restaurant",
+      hypothesis: "More prominent order CTAs increase online-order clicks.",
+      surface: "cta_placement",
+      variants: [
+        { id: "control", label: "Standard CTA prominence" },
+        { id: "hero_cta_prominent", label: "Hero CTA emphasis" },
+        { id: "cta_section_prominent", label: "Mid-page CTA emphasis" }
+      ],
+      holdoutPercent: 0.1,
+      primaryMetric: "order_clicks",
+      status: "draft"
+    },
+    {
+      id: "exp_form_length_restaurant",
+      cohort: "restaurant",
+      hypothesis: "Shorter or contact-first forms increase catering form submissions.",
+      surface: "form_length",
+      variants: [
+        { id: "control", label: "Standard form" },
+        { id: "required_only", label: "Required fields only" },
+        { id: "phone_first", label: "Phone-first field order" }
+      ],
+      holdoutPercent: 0.1,
+      primaryMetric: "form_submits",
+      status: "draft"
+    },
+    {
+      id: "exp_hero_layout_restaurant",
+      cohort: "restaurant",
+      hypothesis: "A compact or visual-first hero increases online-order clicks without changing claims.",
+      surface: "hero_layout",
+      variants: [
+        { id: "control", label: "Standard hero layout" },
+        { id: "compact_hero", label: "Compact above-fold hero" },
+        { id: "media_first", label: "Visual proof first" }
+      ],
+      holdoutPercent: 0.1,
+      primaryMetric: "order_clicks",
+      status: "draft"
     }
   ],
   presenceAssessment: {

@@ -1,4 +1,6 @@
 import { repository } from "./repository";
+import { hasConfiguredIpHashSalt } from "./privacy";
+import { getRenderInspectionRuntimeStatus } from "./render-inspection";
 
 export type HealthState = "ok" | "warning" | "error";
 
@@ -24,11 +26,18 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkStripeConfig(),
     checkCloudflareConfig(),
     checkWorkflowEmailConfig(),
+    checkIpHashConfig(),
+    checkAnalyticsRetentionConfig(),
+    checkRateLimitConfig(),
+    checkCrawlUrlSafetyConfig(),
+    checkRenderBrowserConfig(),
+    checkGooglePlacesConfig(),
+    checkAssetStorageConfig(),
     checkOpenAiConfig()
   ];
 
   if (options.deep) {
-    checks.push(await checkRepositoryReadiness());
+    checks.push(await checkRepositoryReadiness(), await checkRenderBrowserReadiness());
   }
 
   return {
@@ -75,8 +84,8 @@ function checkAdminToken(): HealthCheck {
     return ok("admin_token", "Admin token", "Admin token is configured.");
   }
 
-  if (process.env.NODE_ENV === "production") {
-    return error("admin_token", "Admin token", "LODESTA_ADMIN_TOKEN is required in production for operator-only APIs.");
+  if (process.env.NODE_ENV === "production" || process.env.LODESTA_REQUIRE_AUTH === "true") {
+    return error("admin_token", "Admin token", "LODESTA_ADMIN_TOKEN is required when production auth enforcement is active.");
   }
 
   return warning("admin_token", "Admin token", "Admin APIs are open because LODESTA_ADMIN_TOKEN is not set.");
@@ -127,9 +136,104 @@ function checkWorkflowEmailConfig(): HealthCheck {
   return warning("workflow_email", "Workflow email", "RESEND_API_KEY is not set; email workflow deliveries are logged but not sent.");
 }
 
+function checkIpHashConfig(): HealthCheck {
+  if (hasConfiguredIpHashSalt()) return ok("ip_hash_salt", "IP hash salt", "Privacy-preserving lead IP hashing has a deployment salt.");
+  if (process.env.NODE_ENV === "production") {
+    return error("ip_hash_salt", "IP hash salt", "Set LODESTA_IP_HASH_SALT in production before recording lead IP hashes.");
+  }
+  return warning("ip_hash_salt", "IP hash salt", "Using the development IP hash salt; set LODESTA_IP_HASH_SALT for deployed environments.");
+}
+
+function checkAnalyticsRetentionConfig(): HealthCheck {
+  const configured = Number(process.env.LODESTA_ANALYTICS_RETENTION_DAYS ?? 395);
+  if (!Number.isFinite(configured)) {
+    return error("analytics_retention", "Analytics retention", "LODESTA_ANALYTICS_RETENTION_DAYS must be a number of days.");
+  }
+  if (configured < 30 || configured > 3650) {
+    return error("analytics_retention", "Analytics retention", "Set LODESTA_ANALYTICS_RETENTION_DAYS between 30 and 3650 days.");
+  }
+  return ok(
+    "analytics_retention",
+    "Analytics retention",
+    `Raw analytics retention is configured for ${Math.trunc(configured)} day(s).`
+  );
+}
+
+function checkRateLimitConfig(): HealthCheck {
+  if (process.env.LODESTA_RATE_LIMIT_SALT || process.env.LODESTA_IP_HASH_SALT) {
+    return ok("rate_limit", "Rate limiting", "Public write endpoint rate limits use a deployment salt.");
+  }
+  if (process.env.NODE_ENV === "production") {
+    return error("rate_limit", "Rate limiting", "Set LODESTA_RATE_LIMIT_SALT or LODESTA_IP_HASH_SALT in production.");
+  }
+  return warning("rate_limit", "Rate limiting", "Using the development rate-limit salt; set LODESTA_RATE_LIMIT_SALT for deployed environments.");
+}
+
+function checkCrawlUrlSafetyConfig(): HealthCheck {
+  if (process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS === "true") {
+    const state = process.env.NODE_ENV === "production" ? error : warning;
+    return state(
+      "crawl_url_safety",
+      "Crawl URL safety",
+      "Private/internal crawl URLs are explicitly allowed; keep this disabled outside controlled local testing."
+    );
+  }
+  return ok("crawl_url_safety", "Crawl URL safety", "Crawler and render jobs block private/internal target URLs.");
+}
+
+function checkRenderBrowserConfig(): HealthCheck {
+  if (process.env.LODESTA_RENDER_BROWSER_REQUIRED === "true") {
+    return ok(
+      "render_browser_config",
+      "Render browser config",
+      "Render browser execution is required; deep health verifies Chromium launch."
+    );
+  }
+  return warning(
+    "render_browser_config",
+    "Render browser config",
+    "Render inspection falls back to HTML fetch when Chromium is unavailable; run npm run verify:render-browser before launch."
+  );
+}
+
+function checkGooglePlacesConfig(): HealthCheck {
+  if (process.env.GOOGLE_PLACES_API_KEY) {
+    return ok("google_places", "Google Places", "Google Places Text Search enrichment is configured for permitted public presence signals.");
+  }
+  return warning(
+    "google_places",
+    "Google Places",
+    "GOOGLE_PLACES_API_KEY is not set; presence enrichment will use website-derived public links and schema facts only."
+  );
+}
+
+function checkAssetStorageConfig(): HealthCheck {
+  if (process.env.LODESTA_REPOSITORY === "supabase" && process.env.LODESTA_ASSET_BUCKET) {
+    return ok("asset_storage", "Asset storage", "Generated asset bytes will upload to the configured Supabase Storage bucket.");
+  }
+  if (process.env.LODESTA_REPOSITORY === "supabase") {
+    return warning(
+      "asset_storage",
+      "Asset storage",
+      "LODESTA_ASSET_BUCKET is not set; generated asset bytes will fall back to local .data storage."
+    );
+  }
+  return warning("asset_storage", "Asset storage", "Using local .data asset storage for generated planning assets.");
+}
+
 function checkOpenAiConfig(): HealthCheck {
-  if (process.env.OPENAI_API_KEY) return ok("openai", "OpenAI", "OPENAI_API_KEY is configured for future AI generation calls.");
-  return warning("openai", "OpenAI", "OPENAI_API_KEY is not set; current deterministic generation still works, but hosted AI calls are unavailable.");
+  if (process.env.OPENAI_API_KEY) {
+    return ok(
+      "openai",
+      "OpenAI",
+      `OPENAI_API_KEY is configured for generation planning with ${process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5"}, visual QA with ${process.env.OPENAI_VISUAL_QA_MODEL ?? process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5"}, and mockup planning with ${process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2"}.`
+    );
+  }
+  return warning(
+    "openai",
+    "OpenAI",
+    "OPENAI_API_KEY is not set; deterministic generation and prompt-only mockup artifacts still work, but hosted AI calls are unavailable."
+  );
 }
 
 async function checkRepositoryReadiness(): Promise<HealthCheck> {
@@ -140,6 +244,20 @@ async function checkRepositoryReadiness(): Promise<HealthCheck> {
     const message = caught instanceof Error ? caught.message : String(caught);
     return error("repository_readiness", "Repository readiness", `Repository check failed: ${message}`);
   }
+}
+
+async function checkRenderBrowserReadiness(): Promise<HealthCheck> {
+  const status = await getRenderInspectionRuntimeStatus({ launch: true });
+  if (status.browserLaunchable) {
+    return ok("render_browser_readiness", "Render browser readiness", status.message);
+  }
+
+  const state = process.env.NODE_ENV === "production" || process.env.LODESTA_RENDER_BROWSER_REQUIRED === "true" ? error : warning;
+  return state(
+    "render_browser_readiness",
+    "Render browser readiness",
+    `${status.message} Run npm run install:browsers, or set LODESTA_BROWSER_EXECUTABLE_PATH.`
+  );
 }
 
 function missingEnv(names: string[]) {

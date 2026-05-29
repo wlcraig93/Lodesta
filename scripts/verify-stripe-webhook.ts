@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { repository } from "../lib/repository";
+import { requiredClaimFactIds } from "../lib/fact-verification";
 import {
   asStripeCheckoutSession,
   parseStripeWebhookEvent,
@@ -11,10 +12,12 @@ const secret = "whsec_local_verification";
 const ownerEmail = `stripe-verify-${Date.now()}@example.com`;
 
 async function main() {
+  const bundle = await repository.getSiteBundle("site_joes_pizza");
+  if (!bundle) throw new Error("Unable to load Joe's Pizza bundle.");
   const claim = await repository.createClaim({
     siteId: "site_joes_pizza",
     ownerEmail,
-    verifiedFacts: ["name", "phone"],
+    verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
     acceptedTerms: true,
     acceptedManagement: true
   });

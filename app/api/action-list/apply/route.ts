@@ -7,7 +7,7 @@ import { requireAdminOrSiteOwner } from "@/lib/security";
 const applySchema = z.object({
   siteId: z.string().min(1),
   findingId: z.string().min(1),
-  mode: z.enum(["draft", "publish_after_qa"]).default("draft")
+  mode: z.enum(["draft", "qa"]).default("draft")
 });
 
 export async function POST(request: Request) {
@@ -26,11 +26,12 @@ export async function POST(request: Request) {
 
   const bundle = await repository.getSiteBundle(parsed.data.siteId);
   const qa = bundle ? runSiteQa(bundle, { versionStatus: "draft" }) : null;
-  if (parsed.data.mode === "publish_after_qa") {
-    if (!qa?.passed) return NextResponse.json({ ...result, qa, published: false });
-    const publish = await repository.publishDraft(parsed.data.siteId);
-    return NextResponse.json({ ...result, qa, published: Boolean(publish?.ok), publish });
-  }
 
-  return NextResponse.json({ ...result, qa });
+  return NextResponse.json({
+    ...result,
+    qa,
+    published: false,
+    publishConfirmationRequired: Boolean(qa?.passed),
+    nextAction: qa?.passed ? "review_and_confirm_publish" : "fix_qa_before_publish"
+  });
 }

@@ -1,6 +1,15 @@
-import type { AnalyticsEvent, AnalyticsOutcomeRow, AnalyticsOutcomeTotals, AnalyticsSummary } from "./models";
+import type {
+  AnalyticsClickMapPoint,
+  AnalyticsEvent,
+  AnalyticsOutcomeRow,
+  AnalyticsOutcomeTotals,
+  AnalyticsStandardCorrelation,
+  AnalyticsSummary
+} from "./models";
+import { getStandardCriterion } from "./standard";
 
 const primaryActionEvents = new Set<AnalyticsEvent["eventType"]>(["tel_click", "form_submit", "outbound_click"]);
+const clickEventTypes = new Set<AnalyticsEvent["eventType"]>(["click", "tel_click", "outbound_click"]);
 
 export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): AnalyticsSummary {
   const siteEvents = events.filter((event) => event.siteId === siteId);
@@ -38,6 +47,9 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
       (key) => key
     ),
     outcomesByExperimentVariant: summarizeExperimentVariants(siteEvents),
+    outcomesBySource: summarizeSources(siteEvents),
+    clickMap: summarizeClickMap(siteEvents),
+    standardCorrelations: summarizeStandardCorrelations(siteEvents, totals),
     baselineComparison: baselineComparison(siteEvents)
   };
 }
@@ -62,23 +74,174 @@ function summarizeBy(
 }
 
 function summarizeExperimentVariants(events: AnalyticsEvent[]): AnalyticsOutcomeRow[] {
-  const assignments = new Map<string, { experimentId: string; variantId: string }>();
+  const assignments = new Map<string, Array<{ experimentId: string; variantId: string; surface?: string }>>();
   for (const event of events) {
     if (event.eventType !== "experiment_assignment") continue;
     const experimentId = String(event.metadata?.experimentId ?? "unknown");
     const variantId = String(event.metadata?.variantId ?? "unknown");
-    assignments.set(event.sessionId, { experimentId, variantId });
+    const surface = typeof event.metadata?.surface === "string" ? event.metadata.surface : undefined;
+    const sessionAssignments = assignments.get(event.sessionId) ?? [];
+    if (!sessionAssignments.some((assignment) => assignment.experimentId === experimentId && assignment.variantId === variantId)) {
+      sessionAssignments.push({ experimentId, variantId, surface });
+    }
+    assignments.set(event.sessionId, sessionAssignments);
   }
 
-  const assignedEvents = events.filter((event) => assignments.has(event.sessionId));
-  return summarizeBy(
-    assignedEvents,
-    (event) => {
-      const assignment = assignments.get(event.sessionId);
-      return `${assignment?.experimentId ?? "unknown"}:${assignment?.variantId ?? "unknown"}`;
-    },
-    (key) => key.replace(":", " / ")
+  const groups = new Map<string, AnalyticsEvent[]>();
+  const labels = new Map<string, string>();
+  for (const event of events) {
+    const sessionAssignments = assignments.get(event.sessionId);
+    if (!sessionAssignments) continue;
+    for (const assignment of sessionAssignments) {
+      const key = `${assignment.experimentId}:${assignment.variantId}`;
+      const group = groups.get(key) ?? [];
+      group.push(event);
+      groups.set(key, group);
+      labels.set(
+        key,
+        `${assignment.experimentId} / ${assignment.variantId}${assignment.surface ? ` / ${assignment.surface}` : ""}`
+      );
+    }
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, group]) => ({ key, label: labels.get(key) ?? key.replace(":", " / "), events: group.length, ...outcomeTotals(group) }))
+    .sort((a, b) => b.primaryActions - a.primaryActions || b.events - a.events)
+    .slice(0, 12);
+}
+
+function summarizeSources(events: AnalyticsEvent[]): AnalyticsOutcomeRow[] {
+  const sourceBySession = new Map<string, string>();
+  const sorted = [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  for (const event of sorted) {
+    if (sourceBySession.has(event.sessionId)) continue;
+    sourceBySession.set(event.sessionId, sourceLabel(event));
+  }
+
+  const groups = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    const key = sourceBySession.get(event.sessionId) ?? "direct / unknown";
+    const group = groups.get(key) ?? [];
+    group.push(event);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, group]) => ({ key, label: key, events: group.length, ...outcomeTotals(group) }))
+    .sort((a, b) => b.sessions - a.sessions || b.primaryActions - a.primaryActions || b.events - a.events)
+    .slice(0, 12);
+}
+
+function summarizeClickMap(events: AnalyticsEvent[]): AnalyticsClickMapPoint[] {
+  type ClickGroup = {
+    events: AnalyticsEvent[];
+    xTotal: number;
+    yTotal: number;
+    sample: AnalyticsEvent;
+  };
+  const groups = new Map<string, ClickGroup>();
+
+  for (const event of events) {
+    if (!clickEventTypes.has(event.eventType)) continue;
+    if (typeof event.normalizedX !== "number" || typeof event.normalizedY !== "number") continue;
+    const bucketX = coordinateBucket(event.normalizedX);
+    const bucketY = coordinateBucket(event.normalizedY);
+    const role = event.elementRole ?? "unknown";
+    const hrefType = event.hrefType ?? "unknown";
+    const key = [
+      event.pageId ?? "unknown",
+      event.sectionId ?? "unknown",
+      role,
+      hrefType,
+      event.deviceType ?? "unknown",
+      bucketX,
+      bucketY
+    ].join(":");
+    const group = groups.get(key) ?? { events: [], xTotal: 0, yTotal: 0, sample: event };
+    group.events.push(event);
+    group.xTotal += event.normalizedX;
+    group.yTotal += event.normalizedY;
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, group]) => {
+      const primaryActions = group.events.filter((event) => primaryActionEvents.has(event.eventType)).length;
+      const count = group.events.length;
+      return {
+        key,
+        label: `${group.sample.elementRole ?? "unknown"} / ${group.sample.hrefType ?? group.sample.eventType}`,
+        count,
+        primaryActions,
+        pageId: group.sample.pageId,
+        sectionId: group.sample.sectionId,
+        elementRole: group.sample.elementRole,
+        hrefType: group.sample.hrefType,
+        deviceType: group.sample.deviceType,
+        normalizedX: round(group.xTotal / count, 3),
+        normalizedY: round(group.yTotal / count, 3)
+      };
+    })
+    .sort((left, right) => right.primaryActions - left.primaryActions || right.count - left.count)
+    .slice(0, 20);
+}
+
+function summarizeStandardCorrelations(
+  events: AnalyticsEvent[],
+  totals: AnalyticsOutcomeTotals
+): AnalyticsStandardCorrelation[] {
+  const sessions = totals.sessions;
+  const mobileEvents = events.filter((event) => event.deviceType === "mobile");
+  const telEvents = events.filter((event) => event.eventType === "tel_click");
+  const formStartEvents = events.filter((event) => event.eventType === "form_start");
+  const formSubmitEvents = events.filter((event) => event.eventType === "form_submit");
+  const aboveFoldClicks = events.filter(
+    (event) => clickEventTypes.has(event.eventType) && typeof event.normalizedY === "number" && event.normalizedY <= 0.35
   );
+  const stickyActions = events.filter((event) => event.elementRole === "sticky-tel");
+
+  return [
+    standardCorrelation({
+      criterionId: "conversion.mobile_click_to_call",
+      metric: "Mobile call actions",
+      events: telEvents.length,
+      primaryActions: telEvents.length,
+      rate: rate(telEvents.length, Math.max(mobileEvents.length ? new Set(mobileEvents.map((event) => event.sessionId)).size : sessions, 1)),
+      insight: telEvents.length
+        ? "Tracked call clicks are proving the click-to-call path."
+        : "No tracked call clicks yet; keep watching mobile sessions."
+    }),
+    standardCorrelation({
+      criterionId: "conversion.lead_form",
+      metric: "Form submit rate after starts",
+      events: formStartEvents.length + formSubmitEvents.length,
+      primaryActions: formSubmitEvents.length,
+      rate: formStartEvents.length ? rate(formSubmitEvents.length, formStartEvents.length) : rate(formSubmitEvents.length, sessions),
+      insight: formStartEvents.length && formSubmitEvents.length === 0
+        ? "Visitors are starting forms without submitting, which should feed form-friction recommendations."
+        : "Form starts and submits are being measured for the lead-form Standard."
+    }),
+    standardCorrelation({
+      criterionId: "conversion.primary_action_above_fold",
+      metric: "Above-fold click share",
+      events: aboveFoldClicks.length,
+      primaryActions: aboveFoldClicks.filter((event) => primaryActionEvents.has(event.eventType)).length,
+      rate: rate(aboveFoldClicks.length, Math.max(events.filter((event) => clickEventTypes.has(event.eventType)).length, 1)),
+      insight: aboveFoldClicks.length
+        ? "Early clicks are visible enough to connect above-fold CTA decisions to outcomes."
+        : "No above-fold clicks have been tracked yet."
+    }),
+    standardCorrelation({
+      criterionId: "conversion.mobile_sticky_action",
+      metric: "Sticky action usage",
+      events: stickyActions.length,
+      primaryActions: stickyActions.filter((event) => primaryActionEvents.has(event.eventType)).length,
+      rate: rate(stickyActions.length, Math.max(mobileEvents.length ? new Set(mobileEvents.map((event) => event.sessionId)).size : sessions, 1)),
+      insight: stickyActions.length
+        ? "Sticky mobile action usage is measurable for Experiment Mode and monthly recommendations."
+        : "No sticky action clicks yet; this remains a watch item for mobile traffic."
+    })
+  ];
 }
 
 function baselineComparison(events: AnalyticsEvent[]): AnalyticsSummary["baselineComparison"] {
@@ -114,6 +277,59 @@ function baselineComparison(events: AnalyticsEvent[]): AnalyticsSummary["baselin
       actionRate: Number((current.actionRate - baseline.actionRate).toFixed(4))
     }
   };
+}
+
+function standardCorrelation(input: {
+  criterionId: string;
+  metric: string;
+  events: number;
+  primaryActions: number;
+  rate: number;
+  insight: string;
+}): AnalyticsStandardCorrelation {
+  const criterion = getStandardCriterion(input.criterionId);
+  return {
+    criterionId: input.criterionId,
+    title: criterion?.title ?? input.criterionId,
+    layer: criterion?.layer ?? "conversion",
+    metric: input.metric,
+    events: input.events,
+    primaryActions: input.primaryActions,
+    rate: input.rate,
+    signal: analyticsSignal(input),
+    insight: input.insight
+  };
+}
+
+function analyticsSignal(input: { events: number; primaryActions: number; rate: number }): AnalyticsStandardCorrelation["signal"] {
+  if (input.events === 0) return "collecting";
+  if (input.primaryActions > 0 && input.rate >= 0.15) return "positive";
+  if (input.primaryActions === 0) return "weak";
+  return "watch";
+}
+
+function sourceLabel(event: AnalyticsEvent) {
+  const utmSource = stringMetadata(event, "utmSource");
+  const utmCampaign = stringMetadata(event, "utmCampaign");
+  if (utmSource) return `utm:${utmSource}${utmCampaign ? ` / ${utmCampaign}` : ""}`;
+
+  const referrerHost = stringMetadata(event, "referrerHost");
+  if (referrerHost) return `referrer:${referrerHost}`;
+
+  return "direct / unknown";
+}
+
+function stringMetadata(event: AnalyticsEvent, key: string) {
+  const value = event.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function coordinateBucket(value: number) {
+  return round(Math.max(0, Math.min(1, value)) * 20, 0) / 20;
+}
+
+function rate(numerator: number, denominator: number) {
+  return denominator ? Number((numerator / denominator).toFixed(4)) : 0;
 }
 
 function outcomeTotals(events: AnalyticsEvent[]): AnalyticsOutcomeTotals {

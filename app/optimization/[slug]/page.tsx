@@ -29,7 +29,7 @@ export default async function OptimizationPage({ params }: { params: Promise<{ s
           <h1>{bundle.businessProfile.name}</h1>
           <p>
             Review-mode action list with concrete mutations. One-click and auto-fix findings edit drafts, run QA, and
-            can publish only when the QA gate passes.
+            require explicit publish confirmation after the QA gate passes.
           </p>
         </div>
         <div className="button-row">
@@ -55,7 +55,11 @@ export default async function OptimizationPage({ params }: { params: Promise<{ s
       <div className="admin-grid">
         <section className="panel">
           <h2>Action List</h2>
-          <ApplyAllFindingsForm siteId={bundle.businessProfile.siteId} safeFindingCount={safeFindingCount} />
+          <ApplyAllFindingsForm
+            siteId={bundle.businessProfile.siteId}
+            siteSlug={bundle.siteModel.slug}
+            safeFindingCount={safeFindingCount}
+          />
           <div className="finding-list">
             {bundle.optimizationFindings.map((finding) => (
               <article key={finding.id} className="finding-card">
@@ -75,6 +79,7 @@ export default async function OptimizationPage({ params }: { params: Promise<{ s
                 ) : null}
                 <FindingApplyForm
                   siteId={bundle.businessProfile.siteId}
+                  siteSlug={bundle.siteModel.slug}
                   findingId={finding.id}
                   applyMode={finding.applyMode}
                   findingStatus={finding.status}
@@ -87,7 +92,7 @@ export default async function OptimizationPage({ params }: { params: Promise<{ s
 
         <aside className="panel">
           <h2>QA Gate</h2>
-          <p>{qa.passed ? "Draft QA is passing." : "Draft QA has failures that block auto-publish."}</p>
+          <p>{qa.passed ? "Draft QA is passing." : "Draft QA has failures that block publish confirmation."}</p>
           <div className="finding-list">
             {qa.checks.map((check) => (
               <article key={check.id} className="finding-card">

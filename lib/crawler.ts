@@ -1,4 +1,5 @@
 import { getStandardCriterion } from "./standard";
+import { validatePublicFetchUrl } from "./url-safety";
 
 export type CrawlAssessment = {
   url: string;
@@ -38,6 +39,10 @@ export type ExtractedBusinessFacts = {
     region?: string;
     postalCode?: string;
     country?: string;
+  };
+  geo?: {
+    latitude: number;
+    longitude: number;
   };
   hours?: Record<string, string>;
   categories: string[];
@@ -81,7 +86,6 @@ export type CrawlQualityCheck = {
 };
 
 export async function crawlUrl(url: string): Promise<CrawlAssessment> {
-  const base = new URL(url);
   const assessment: CrawlAssessment = {
     url,
     fetched: false,
@@ -102,9 +106,24 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
     score: emptyScore(),
     findings: []
   };
+  const urlSafety = await validatePublicFetchUrl(url);
+  if (!urlSafety.ok) {
+    const failed = {
+      ...assessment,
+      error: urlSafety.error,
+      findings: [urlSafety.error]
+    };
+    return {
+      ...failed,
+      score: scoreCrawlAssessment(failed)
+    };
+  }
+
+  const safeUrl = urlSafety.url;
+  const base = new URL(safeUrl);
 
   try {
-    const response = await fetchWithPresenceHeaders(url);
+    const response = await fetchWithPresenceHeaders(safeUrl);
     const html = await response.text();
     assessment.fetched = true;
     assessment.status = response.status;
@@ -120,11 +139,11 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
     assessment.imagesWithoutAlt = countImagesWithoutAlt(html);
     assessment.jsonLdTypes = extractJsonLdTypes(html);
     assessment.extractedFacts = extractBusinessFacts(html, assessment, base);
-    assessment.assetReferences = extractAssetReferences(html, assessment.finalUrl ?? url).slice(0, 12);
+    assessment.assetReferences = extractAssetReferences(html, assessment.finalUrl ?? safeUrl).slice(0, 12);
 
     for (const href of extractHrefs(html)) {
       try {
-        const resolved = new URL(href, assessment.finalUrl ?? url);
+        const resolved = new URL(href, assessment.finalUrl ?? safeUrl);
         if (!["http:", "https:"].includes(resolved.protocol)) continue;
         if (resolved.hostname === base.hostname) {
           assessment.internalLinkCount += 1;
@@ -137,7 +156,7 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
       }
     }
     assessment.sampledInternalPages = unique(assessment.sampledInternalPages);
-    const crawlBase = new URL(assessment.finalUrl ?? url);
+    const crawlBase = new URL(assessment.finalUrl ?? safeUrl);
     const [robots, sitemap] = await Promise.all([
       probeUrl(new URL("/robots.txt", crawlBase).href),
       probeUrl(new URL("/sitemap.xml", crawlBase).href)
@@ -163,12 +182,14 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
 
 export function scoreCrawlAssessment(assessment: CrawlAssessment): CrawlQualityScore {
   const checks: CrawlQualityCheck[] = [
+    check("technical.https", "technical", isHttpsUrl(assessment.finalUrl ?? assessment.url), 10),
     check("technical.healthy_response", "technical", Boolean(assessment.fetched && assessment.status && assessment.status < 400), 10),
     check("technical.mobile_viewport", "technical", assessment.hasViewportMeta, 10),
     check("seo.local_business_schema", "seo", assessment.hasLocalBusinessSchema, 15),
     check("seo.title.unique", "seo", Boolean(assessment.title && assessment.title.length >= 25), 10),
     check("seo.meta_description", "seo", Boolean(assessment.metaDescription && assessment.metaDescription.length >= 80), 10),
     check("seo.canonical", "seo", Boolean(assessment.canonical), 5),
+    check("seo.clean_urls", "seo", hasCleanUrl(assessment.finalUrl ?? assessment.url, assessment.canonical), 5),
     check("seo.robots_txt", "technical", assessment.robotsFound, 5),
     check("seo.sitemap", "technical", assessment.sitemapFound, 5),
     check("conversion.mobile_click_to_call", "conversion", assessment.hasTelLink, 15),
@@ -189,10 +210,12 @@ export function scoreCrawlAssessment(assessment: CrawlAssessment): CrawlQualityS
 
 function makeFindings(assessment: CrawlAssessment) {
   const findings: string[] = [];
+  if (!isHttpsUrl(assessment.finalUrl ?? assessment.url)) findings.push("Site is not served over HTTPS.");
   if (!assessment.fetched || (assessment.status && assessment.status >= 400)) findings.push("Site did not return a healthy HTML response.");
   if (!assessment.title || assessment.title.length < 25) findings.push("Title is missing or too short.");
   if (!assessment.metaDescription || assessment.metaDescription.length < 80) findings.push("Meta description is missing or too short.");
   if (!assessment.canonical) findings.push("Canonical link is missing.");
+  if (!hasCleanUrl(assessment.finalUrl ?? assessment.url, assessment.canonical)) findings.push("Public URL or canonical URL is not clean and readable.");
   if (!assessment.robotsFound) findings.push("robots.txt was not detected.");
   if (!assessment.sitemapFound) findings.push("sitemap.xml was not detected.");
   if (!assessment.hasViewportMeta) findings.push("Mobile viewport meta tag is missing.");
@@ -201,6 +224,29 @@ function makeFindings(assessment: CrawlAssessment) {
   if (assessment.formCount === 0) findings.push("No lead/contact form was detected.");
   if (assessment.imageCount > 0 && assessment.imagesWithoutAlt > 0) findings.push("Some images are missing alt text.");
   return findings;
+}
+
+function isHttpsUrl(value: string | undefined) {
+  try {
+    return Boolean(value && new URL(value).protocol === "https:");
+  } catch {
+    return false;
+  }
+}
+
+function hasCleanUrl(url: string | undefined, canonical?: string) {
+  return cleanUrlCandidate(url) && (!canonical || cleanUrlCandidate(canonical));
+}
+
+function cleanUrlCandidate(value: string | undefined) {
+  try {
+    if (!value) return false;
+    const url = new URL(value);
+    if (url.search) return false;
+    return !/\.(php|asp|aspx|jsp|cfm|cgi|html?)$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function emptyScore(): CrawlQualityScore {
@@ -311,6 +357,7 @@ function extractBusinessFacts(html: string, assessment: CrawlAssessment, base: U
     facts.phone = normalizePhone(normalizeFact(localNode.telephone));
     facts.email = normalizeEmail(normalizeFact(localNode.email));
     facts.address = extractAddress(localNode.address);
+    facts.geo = extractGeo(localNode.geo);
     facts.hours = extractHours(localNode);
     facts.categories = unique([...facts.categories, ...typesToCategories(localNode["@type"])]);
     facts.services = unique([...facts.services, ...extractServices(localNode)]);
@@ -436,6 +483,14 @@ function extractAddress(value: unknown): ExtractedBusinessFacts["address"] | und
     postalCode: normalizeFact(address.postalCode),
     country: normalizeFact(address.addressCountry)
   };
+}
+
+function extractGeo(value: unknown): ExtractedBusinessFacts["geo"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const geo = value as Record<string, unknown>;
+  const latitude = toNumber(geo.latitude);
+  const longitude = toNumber(geo.longitude);
+  return latitude === undefined || longitude === undefined ? undefined : { latitude, longitude };
 }
 
 function extractHours(node: Record<string, unknown>) {

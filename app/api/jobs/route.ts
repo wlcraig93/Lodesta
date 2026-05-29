@@ -6,7 +6,14 @@ import { requireAdmin } from "@/lib/security";
 export const runtime = "nodejs";
 
 const jobSchema = z.object({
-  kind: z.enum(["presence_assessment", "audit_site", "generate_site", "monthly_action_list", "import_batch"]),
+  kind: z.enum([
+    "presence_assessment",
+    "audit_site",
+    "generate_site",
+    "monthly_action_list",
+    "import_batch",
+    "analytics_retention"
+  ]),
   payload: z.record(z.unknown()).default({})
 });
 

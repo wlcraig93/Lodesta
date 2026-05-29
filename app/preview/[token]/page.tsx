@@ -35,6 +35,9 @@ export default async function PreviewPage({ params }: { params: Promise<{ token:
         business={bundle.businessProfile}
         site={bundle.siteModel}
         extensions={bundle.extensionModel}
+        experiments={bundle.experiments}
+        tracking={false}
+        formsEnabled={false}
       />
     </>
   );

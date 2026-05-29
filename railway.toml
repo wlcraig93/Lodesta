@@ -1,0 +1,14 @@
+$schema = "https://railway.com/railway.schema.json"
+
+[build]
+builder = "RAILPACK"
+buildCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browsers && npm run build"
+
+[deploy]
+startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+overlapSeconds = 30
+drainingSeconds = 30

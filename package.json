@@ -12,7 +12,10 @@
     "smoke:dev": "bash scripts/smoke.sh --start-server",
     "cli": "node scripts/lodesta.mjs",
     "worker": "node --import tsx workers/runner.ts",
+    "install:browsers": "node --import tsx scripts/install-browsers.ts",
+    "verify:deployment-config": "node --import tsx scripts/verify-deployment-config.ts",
     "verify:launch-boundaries": "node --import tsx scripts/verify-launch-boundaries.ts",
+    "verify:render-browser": "node --import tsx scripts/verify-render-browser.ts",
     "verify:stripe-webhook": "node --import tsx scripts/verify-stripe-webhook.ts",
     "verify:supabase": "node --import tsx scripts/verify-supabase.ts"
   },
@@ -20,6 +23,7 @@
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
     "next": "^15.0.0",
+    "playwright": "^1.60.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "^3.24.0"

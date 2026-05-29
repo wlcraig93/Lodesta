@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
+import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { claimGateForBundle } from "@/lib/site-publication";
 
 const analyticsEventSchema = z.object({
   siteId: z.string().min(1),
@@ -41,12 +43,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid analytics event", issues: parsed.error.issues }, { status: 400 });
   }
 
+  const limit = rateLimit(request, {
+    bucket: "analytics_ingest",
+    keyParts: [parsed.data.siteId],
+    ...rateLimitConfig("LODESTA_ANALYTICS_INGEST", { limit: 600, windowMs: 60_000 })
+  });
+  if (!limit.ok) return limit.response;
+
+  const bundle = await repository.getSiteBundle(parsed.data.siteId);
+  if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
+
+  const claimGate = claimGateForBundle(bundle, await repository.listClaims(parsed.data.siteId));
+  if (!claimGate.ok) {
+    return applyRateLimitHeaders(
+      NextResponse.json({
+        accepted: false,
+        status: "inactive",
+        reason: "Site analytics collection starts after claim and publish.",
+        claimGate: claimGate.code
+      }),
+      limit
+    );
+  }
+
   const event = await repository.recordAnalyticsEvent({
     ...parsed.data,
     timestamp: parsed.data.timestamp ?? new Date().toISOString()
   });
 
-  return NextResponse.json({ accepted: true, event });
+  return applyRateLimitHeaders(NextResponse.json({ accepted: true, event }), limit);
 }
 
 export async function GET(request: Request) {

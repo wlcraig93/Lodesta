@@ -3,24 +3,44 @@ import type {
   ClaimRecord,
   DomainRecord,
   Experiment,
+  ExperimentLearning,
   FormDefinition,
   LeadSubmission,
   OptimizationFinding,
+  OutboundCampaign,
+  OutboundEvent,
+  OutboundProspect,
   PreviewToken,
   SiteBundle,
   WorkflowDelivery
 } from "./models";
 import { runAudit } from "./audit";
 import { createSiteFromInput } from "./intake";
-import { applySuggestedEdit } from "./optimization";
+import { applySuggestedEdit, preserveFindingLifecycle } from "./optimization";
 import { sampleSiteBundle } from "./sample-data";
 import { summarizeAnalytics } from "./analytics";
 import { mergeFindings, recommendFromAnalytics } from "./analytics-insights";
+import { analyzeExperiment } from "./experiment-analysis";
+import { createExperimentLearning } from "./experiment-learning";
 import { applyAiEditToBundle } from "./ai-editor";
+import { validateBusinessProfileUpdate, validateSectionUpdate } from "./editor-guardrails";
 import { updateSiteDesignBundle, type UpdateSiteDesignInput } from "./design";
 import { applySiteIdentity, makeUniqueSlug } from "./site-identity";
 import { applyVerifiedFacts } from "./fact-verification";
 import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
+import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-settings";
+import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
+import { sanitizeAnalyticsMetadata } from "./privacy";
+import {
+  applyOutboundEventToProspect,
+  newOutboundCampaign,
+  newOutboundEvent,
+  newOutboundProspect,
+  summarizeOutbound,
+  type CreateOutboundCampaignInput,
+  type RecordOutboundEventInput,
+  type UpsertOutboundProspectInput
+} from "./outbound";
 
 type StoreState = {
   bundles: Map<string, SiteBundle>;
@@ -31,6 +51,10 @@ type StoreState = {
   domains: DomainRecord[];
   previewTokens: PreviewToken[];
   workflowDeliveries: WorkflowDelivery[];
+  outboundCampaigns: OutboundCampaign[];
+  outboundProspects: OutboundProspect[];
+  outboundEvents: OutboundEvent[];
+  experimentLearnings: ExperimentLearning[];
 };
 
 const globalStore = globalThis as typeof globalThis & {
@@ -48,6 +72,10 @@ function createInitialState(): StoreState {
     submissions: [],
     analyticsEvents: [],
     workflowDeliveries: [],
+    outboundCampaigns: [],
+    outboundProspects: [],
+    outboundEvents: [],
+    experimentLearnings: [],
     claims: [],
     previewTokens: [
       {
@@ -76,6 +104,10 @@ function state() {
   globalStore.__lodestaStore.domains ??= [];
   globalStore.__lodestaStore.previewTokens ??= [];
   globalStore.__lodestaStore.workflowDeliveries ??= [];
+  globalStore.__lodestaStore.outboundCampaigns ??= [];
+  globalStore.__lodestaStore.outboundProspects ??= [];
+  globalStore.__lodestaStore.outboundEvents ??= [];
+  globalStore.__lodestaStore.experimentLearnings ??= [];
   return globalStore.__lodestaStore;
 }
 
@@ -92,8 +124,8 @@ export function getSiteBundleBySlug(slug: string) {
   return siteId ? getSiteBundle(siteId) : null;
 }
 
-export function createAndStoreSite(input: { url?: string; prompt?: string; crawl?: Parameters<typeof createSiteFromInput>[0]["crawl"] }) {
-  const bundle = createSiteFromInput(input);
+export function createAndStoreSite(input: Parameters<typeof createSiteFromInput>[0]) {
+  const bundle = createSiteFromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) });
   const store = state();
   applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
   store.bundles.set(bundle.businessProfile.siteId, bundle);
@@ -130,7 +162,10 @@ export function listPreviewTokens(siteId?: string) {
 export function runAndStoreAudit(siteId: string) {
   const bundle = getSiteBundle(siteId);
   if (!bundle) return null;
-  bundle.optimizationFindings = buildOptimizationFindings(bundle);
+  bundle.optimizationFindings = preserveFindingLifecycle(
+    buildOptimizationFindings(bundle),
+    bundle.optimizationFindings
+  );
   return bundle.optimizationFindings;
 }
 
@@ -142,6 +177,16 @@ export function updateSectionProps(input: {
 }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
+  const guardrails = validateSectionUpdate(bundle, input);
+  if (!guardrails.ok) {
+    return {
+      ok: false as const,
+      reason: guardrails.reason,
+      issues: guardrails.issues,
+      qa: guardrails.qa
+    };
+  }
+
   const draftVersion =
     bundle.siteModel.versions.find((version) => version.status === "draft") ??
     clonePublishedAsDraft(bundle);
@@ -163,7 +208,8 @@ export function updateSectionProps(input: {
   bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return {
     ok: true as const,
-    bundle
+    bundle,
+    guardrailWarnings: guardrails.warnings
   };
 }
 
@@ -198,7 +244,26 @@ export function publishVersion(input: { siteId: string; versionId: string }) {
 export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  return applyBusinessProfileUpdate(bundle, input);
+  const guardrails = validateBusinessProfileUpdate(bundle, input);
+  if (!guardrails.ok) {
+    return {
+      ok: false as const,
+      reason: guardrails.reason,
+      issues: guardrails.issues,
+      qa: guardrails.qa
+    };
+  }
+  return {
+    ok: true as const,
+    bundle: applyBusinessProfileUpdate(bundle, input),
+    guardrailWarnings: guardrails.warnings
+  };
+}
+
+export function updateOwnerAssets(input: UpdateOwnerAssetsInput) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  return applyOwnerAssetsUpdate(bundle, input);
 }
 
 export function recordFormSubmission(input: {
@@ -271,35 +336,61 @@ export function listAnalyticsEvents(siteId?: string) {
   return state().analyticsEvents.filter((event) => !siteId || event.siteId === siteId);
 }
 
+export function pruneAnalyticsEvents(input: { before: string; siteId?: string }) {
+  const cutoff = new Date(input.before).getTime();
+  if (!Number.isFinite(cutoff)) return { deleted: 0, before: input.before, siteId: input.siteId };
+  const store = state();
+  const beforeCount = store.analyticsEvents.length;
+  store.analyticsEvents = store.analyticsEvents.filter((event) => {
+    if (input.siteId && event.siteId !== input.siteId) return true;
+    return new Date(event.timestamp).getTime() >= cutoff;
+  });
+  return {
+    deleted: beforeCount - store.analyticsEvents.length,
+    before: input.before,
+    siteId: input.siteId
+  };
+}
+
 export function analyticsSummary(siteId: string) {
   return summarizeAnalytics(siteId, listAnalyticsEvents(siteId));
 }
 
 function buildOptimizationFindings(bundle: SiteBundle) {
-  return mergeFindings(
+  const nextFindings = mergeFindings(
     runAudit(bundle.businessProfile, bundle.siteModel),
     recommendFromAnalytics(bundle, analyticsSummary(bundle.businessProfile.siteId))
   );
+  return preserveFindingLifecycle(nextFindings, bundle.optimizationFindings);
 }
 
 export function assignExperiment(input: { siteId: string; sessionId: string; experimentId?: string }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return { assigned: false as const, reason: "Unknown site" };
-  const experiment =
-    bundle.experiments.find((candidate) => candidate.id === input.experimentId) ??
-    bundle.experiments.find((candidate) => candidate.status === "running");
+  const experiment = input.experimentId
+    ? bundle.experiments.find((candidate) => candidate.id === input.experimentId)
+    : bundle.experiments.find((candidate) => candidate.status === "running");
   if (!experiment) return { assigned: false as const, reason: "No running experiment" };
+  if (experiment.status !== "running") return { assigned: false as const, reason: "Experiment is not opted in." };
   const hash = hashString(`${input.siteId}:${input.sessionId}:${experiment.id}`);
   const holdoutPercent = clampHoldout(experiment.holdoutPercent);
   const bucket = (hash % 10000) / 10000;
   const control = experiment.variants.find((variant) => String(variant.id ?? "") === "control") ?? experiment.variants[0];
   const treatmentVariants = experiment.variants.filter((variant) => String(variant.id ?? "") !== String(control?.id ?? ""));
   const holdout = Boolean(control && holdoutPercent > 0 && bucket < holdoutPercent);
-  const availableVariants = holdout ? [control] : treatmentVariants.length ? treatmentVariants : experiment.variants;
+  const learnedDefaults = treatmentVariants.filter((variant) => variant.learnedDefault === true);
+  const availableVariants = holdout
+    ? [control]
+    : learnedDefaults.length
+      ? learnedDefaults
+      : treatmentVariants.length
+        ? treatmentVariants
+        : experiment.variants;
   const variant = availableVariants[hash % availableVariants.length];
   return {
     assigned: true as const,
     experimentId: experiment.id,
+    surface: experiment.surface,
     primaryMetric: experiment.primaryMetric,
     holdout,
     variant
@@ -310,8 +401,79 @@ export function listExperiments(siteId: string): Experiment[] {
   return getSiteBundle(siteId)?.experiments ?? [];
 }
 
+export function listExperimentLearnings(filter: { siteId?: string; status?: ExperimentLearning["status"] } = {}) {
+  return state()
+    .experimentLearnings.filter(
+      (learning) => (!filter.siteId || learning.siteId === filter.siteId) && (!filter.status || learning.status === filter.status)
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function updateExperiment(input: {
+  siteId: string;
+  experimentId: string;
+  status: Experiment["status"];
+  holdoutPercent?: number;
+}) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const experiment = bundle.experiments.find((candidate) => candidate.id === input.experimentId);
+  if (!experiment) return { ok: false as const, reason: "Experiment not found." };
+
+  const now = new Date().toISOString();
+  experiment.status = input.status;
+  experiment.updatedAt = now;
+  if (typeof input.holdoutPercent === "number") experiment.holdoutPercent = clampHoldout(input.holdoutPercent);
+
+  if (input.status === "running") {
+    experiment.startedAt ??= now;
+    experiment.rolledBackAt = undefined;
+  }
+  if (input.status === "concluded") experiment.concludedAt = now;
+  if (input.status === "rolled_back") {
+    experiment.rolledBackAt = now;
+    rollbackExperimentLearnings(input.experimentId, now);
+  }
+
+  return { ok: true as const, experiment };
+}
+
+export function concludeExperimentWithLearning(input: { siteId: string; experimentId: string }) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const experiment = bundle.experiments.find((candidate) => candidate.id === input.experimentId);
+  if (!experiment) return { ok: false as const, reason: "Experiment not found." };
+  const analysis = analyzeExperiment(experiment, listAnalyticsEvents(input.siteId));
+  const createdAt = new Date().toISOString();
+  const learningResult = createExperimentLearning({ siteId: input.siteId, experiment, analysis, createdAt });
+  if (!learningResult.ok) return learningResult;
+
+  experiment.status = "concluded";
+  experiment.concludedAt = createdAt;
+  experiment.updatedAt = createdAt;
+  const existingIndex = state().experimentLearnings.findIndex((learning) => learning.id === learningResult.learning.id);
+  if (existingIndex >= 0) state().experimentLearnings[existingIndex] = learningResult.learning;
+  else state().experimentLearnings.push(learningResult.learning);
+  bundle.experimentLearnings = listExperimentLearnings({ siteId: input.siteId });
+  return { ok: true as const, experiment, learning: learningResult.learning, analysis };
+}
+
+function rollbackExperimentLearnings(experimentId: string, rolledBackAt: string) {
+  for (const learning of state().experimentLearnings) {
+    if (learning.experimentId !== experimentId || learning.status === "rolled_back") continue;
+    learning.status = "rolled_back";
+    learning.rolledBackAt = rolledBackAt;
+  }
+}
+
 export function getForms(siteId: string): FormDefinition[] {
   return getSiteBundle(siteId)?.extensionModel.forms ?? [];
+}
+
+export function updateFormSettings(input: UpdateFormSettingsInput) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  return applyFormSettingsUpdate(bundle, input);
 }
 
 export function applyFindingToDraft(input: { siteId: string; findingId: string }) {
@@ -328,6 +490,16 @@ export function applyFindingToDraft(input: { siteId: string; findingId: string }
     qaRequired: true,
     finding: applied.finding
   };
+}
+
+export function dismissFinding(input: { siteId: string; findingId: string }) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
+  if (!finding) return { ok: false as const, reason: "Finding not found." };
+  if (finding.status === "applied") return { ok: false as const, reason: "Applied findings cannot be dismissed." };
+  finding.status = "dismissed";
+  return { ok: true as const, finding };
 }
 
 export function applyAiEditToSite(input: { siteId: string; message: string }) {
@@ -417,13 +589,14 @@ export function registerDomain(input: {
     configured: false,
     note: "Cloudflare for SaaS hostname verification will replace this placeholder."
   };
+  const provider = input.provider ?? ("cloudflare_for_saas" as const);
   const domain = {
     id: crypto.randomUUID(),
     siteId: input.siteId,
     hostname: input.hostname.toLowerCase(),
     kind: "custom" as const,
-    status: "pending" as const,
-    provider: input.provider ?? ("cloudflare_for_saas" as const),
+    status: provider === "railway" ? ("active" as const) : ("pending" as const),
+    provider,
     providerHostnameId: input.providerHostnameId,
     verification,
     createdAt: new Date().toISOString()
@@ -437,6 +610,75 @@ export function registerDomain(input: {
 
 export function listDomains(siteId?: string) {
   return state().domains.filter((domain) => !siteId || domain.siteId === siteId);
+}
+
+export function updateDomain(input: {
+  domainId: string;
+  status?: DomainRecord["status"];
+  verification?: DomainRecord["verification"];
+  providerHostnameId?: string;
+}) {
+  const domain = state().domains.find((candidate) => candidate.id === input.domainId);
+  if (!domain) return null;
+  if (input.status) domain.status = input.status;
+  if (input.verification) domain.verification = input.verification;
+  if (input.providerHostnameId) domain.providerHostnameId = input.providerHostnameId;
+  return { ...domain };
+}
+
+export function createOutboundCampaign(input: CreateOutboundCampaignInput) {
+  const campaign = newOutboundCampaign(input);
+  state().outboundCampaigns.push(campaign);
+  return campaign;
+}
+
+export function listOutboundCampaigns() {
+  return [...state().outboundCampaigns].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function upsertOutboundProspect(input: UpsertOutboundProspectInput) {
+  const existing = input.id
+    ? state().outboundProspects.find((candidate) => candidate.id === input.id)
+    : undefined;
+  if (existing) {
+    Object.assign(existing, {
+      ...input,
+      businessName: input.businessName.trim(),
+      metadata: input.metadata ?? existing.metadata
+    });
+    return existing;
+  }
+  const prospect = newOutboundProspect(input);
+  state().outboundProspects.push(prospect);
+  return prospect;
+}
+
+export function listOutboundProspects(campaignId?: string) {
+  return state()
+    .outboundProspects.filter((prospect) => !campaignId || prospect.campaignId === campaignId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function recordOutboundEvent(input: RecordOutboundEventInput) {
+  const event = newOutboundEvent(input);
+  state().outboundEvents.push(event);
+  const prospect = event.prospectId
+    ? state().outboundProspects.find((candidate) => candidate.id === event.prospectId)
+    : event.siteId
+      ? state().outboundProspects.find((candidate) => candidate.campaignId === event.campaignId && candidate.siteId === event.siteId)
+      : undefined;
+  if (prospect) applyOutboundEventToProspect(prospect, event);
+  return event;
+}
+
+export function listOutboundEvents(campaignId?: string) {
+  return state()
+    .outboundEvents.filter((event) => !campaignId || event.campaignId === campaignId)
+    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+}
+
+export function outboundSummary(campaignId?: string) {
+  return summarizeOutbound(state().outboundCampaigns, state().outboundProspects, state().outboundEvents, campaignId);
 }
 
 function clonePublishedAsDraft(bundle: SiteBundle) {
@@ -456,13 +698,7 @@ function clonePublishedAsDraft(bundle: SiteBundle) {
 }
 
 function sanitizeMetadata(metadata: AnalyticsEvent["metadata"]) {
-  if (!metadata) return undefined;
-  const sanitized: NonNullable<AnalyticsEvent["metadata"]> = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (/password|token|secret|email|phone|name|message/i.test(key)) continue;
-    sanitized[key] = value;
-  }
-  return sanitized;
+  return sanitizeAnalyticsMetadata(metadata);
 }
 
 function hashString(value: string) {

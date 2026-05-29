@@ -1,5 +1,6 @@
-import type { PresenceAssessment, Vertical } from "./models";
+import type { PresenceAssessment, RenderInspectionResult, Vertical } from "./models";
 import type { CrawlAssessment } from "./crawler";
+import type { PublicPresenceEnrichment } from "./public-presence";
 import { inferVertical, slugify } from "./intake";
 import { evaluateCrawlAgainstStandard } from "./standard-evaluation";
 
@@ -8,6 +9,8 @@ export type PresenceIntakeResult = {
   inferredVertical: Vertical;
   assessment: PresenceAssessment;
   crawl?: CrawlAssessment;
+  renderInspection?: RenderInspectionResult;
+  publicPresence?: PublicPresenceEnrichment;
   crawlPlan: Array<{
     adapter: "fetch" | "playwright" | "external_browser";
     purpose: string;
@@ -15,7 +18,12 @@ export type PresenceIntakeResult = {
   designDirectionPrompts: string[];
 };
 
-export function createPresenceIntakePlan(sourceUrl: string, crawl?: CrawlAssessment): PresenceIntakeResult {
+export function createPresenceIntakePlan(
+  sourceUrl: string,
+  crawl?: CrawlAssessment,
+  renderInspection?: RenderInspectionResult,
+  publicPresence?: PublicPresenceEnrichment
+): PresenceIntakeResult {
   const inferredVertical = inferVertical({ url: sourceUrl });
   const siteId = `site_${slugify(new URL(sourceUrl).hostname.replace(/^www\./, ""))}`;
 
@@ -26,10 +34,18 @@ export function createPresenceIntakePlan(sourceUrl: string, crawl?: CrawlAssessm
       siteId,
       sourceUrl,
       standardEvaluation: crawl ? evaluateCrawlAgainstStandard(crawl) : undefined,
+      renderInspection,
+      publicPresenceSignals: publicPresence?.signals.map((signal) => ({ ...signal, siteId })),
       technicalNotes: [
         "Fetch crawler checks status, metadata, canonicals, robots, sitemap references, links, and schema.",
         "Playwright crawler captures desktop and mobile screenshots for render and vision checks.",
         ...(crawl ? [`Initial technical/conversion quality score: ${crawl.score.percent}/100 (${crawl.score.grade}).`] : []),
+        ...(renderInspection
+          ? [
+              `Render inspection used ${renderInspection.adapter}; ${renderInspection.screenshots.length} screenshot artifact${renderInspection.screenshots.length === 1 ? "" : "s"} captured.`,
+              `${renderInspection.findings.filter((finding) => finding.severity === "fail").length} render failures and ${renderInspection.findings.filter((finding) => finding.severity === "warning").length} render warnings detected.`
+            ]
+          : []),
         ...(crawl?.extractedFacts.name ? [`Extracted business name candidate: ${crawl.extractedFacts.name}.`] : []),
         ...(crawl?.extractedFacts.phone ? ["Detected a click-to-call or text phone candidate."] : []),
         ...(crawl?.jsonLdTypes.length ? [`Detected schema types: ${crawl.jsonLdTypes.join(", ")}.`] : []),
@@ -48,10 +64,17 @@ export function createPresenceIntakePlan(sourceUrl: string, crawl?: CrawlAssessm
               `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, and ${crawl.extractedFacts.orderingLinks.length} ordering/order links were detected from the source site.`
             ]
           : []),
+        ...(publicPresence?.signals.length
+          ? [
+              `${publicPresence.signals.length} official/public presence candidate${publicPresence.signals.length === 1 ? "" : "s"} captured from ${publicPresence.provider}.`
+            ]
+          : publicPresence?.notes.slice(0, 1) ?? []),
         "Official/public presence signals are stored with provenance and confidence, then verified on claim."
       ]
     },
     crawl,
+    renderInspection,
+    publicPresence,
     crawlPlan: [
       { adapter: "fetch", purpose: "Cheap crawl for technical SEO and text facts." },
       { adapter: "playwright", purpose: "Screenshot, responsive, and visual assessment." },

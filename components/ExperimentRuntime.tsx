@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect } from "react";
+import type { Experiment } from "@/lib/models";
 
 type ExperimentRuntimeProps = {
   siteId: string;
+  experiments?: Experiment[];
 };
 
 const sessionKey = "lodesta_session_id";
+const surfaceDatasetKeys: Record<Experiment["surface"], string> = {
+  sticky_cta: "stickyCtaVariant",
+  cta_placement: "ctaPlacementVariant",
+  form_length: "formLengthVariant",
+  hero_layout: "heroLayoutVariant"
+};
 
 declare global {
   interface Window {
@@ -14,49 +22,76 @@ declare global {
   }
 }
 
-export function ExperimentRuntime({ siteId }: ExperimentRuntimeProps) {
+export function ExperimentRuntime({ siteId, experiments = [] }: ExperimentRuntimeProps) {
   useEffect(() => {
     const sessionId = getSessionId();
-    void fetch("/api/experiments/assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId, sessionId })
-    })
-      .then((response) => response.json())
-      .then((assignment) => {
-        if (!assignment.assigned) return;
-        const variantId = String(assignment.variant?.id ?? "unknown");
-        if (assignment.experimentId && variantId) {
-          document.documentElement.dataset.stickyCtaVariant = variantId;
-          sendExperimentAssignment(siteId, sessionId, assignment.experimentId, variantId, assignment.primaryMetric, Boolean(assignment.holdout));
-        }
+    const runningExperiments = experiments.filter((experiment) => experiment.status === "running");
+    const targets = runningExperiments.length ? runningExperiments : [undefined];
+
+    for (const experiment of targets) {
+      void fetch("/api/experiments/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteId, sessionId, experimentId: experiment?.id })
       })
-      .catch(() => {
-        // Experiment assignment is non-critical for rendering.
-      });
-  }, [siteId]);
+        .then((response) => response.json())
+        .then((assignment) => {
+          if (!assignment.assigned) return;
+          const surface = surfaceForAssignment(assignment.surface, experiment?.surface);
+          const variantId = String(assignment.variant?.id ?? "unknown");
+          if (assignment.experimentId && surface && variantId) {
+            applyVariant(surface, variantId);
+            sendExperimentAssignment({
+              siteId,
+              sessionId,
+              experimentId: assignment.experimentId,
+              surface,
+              variantId,
+              primaryMetric: assignment.primaryMetric,
+              holdout: Boolean(assignment.holdout)
+            });
+          }
+        })
+        .catch(() => {
+          // Experiment assignment is non-critical for rendering.
+        });
+    }
+  }, [siteId, experiments]);
 
   return null;
 }
 
-function sendExperimentAssignment(
-  siteId: string,
-  sessionId: string,
-  experimentId: string,
-  variantId: string,
-  primaryMetric?: string,
-  holdout = false
-) {
+function applyVariant(surface: Experiment["surface"], variantId: string) {
+  document.documentElement.dataset[surfaceDatasetKeys[surface]] = variantId;
+}
+
+function surfaceForAssignment(surface: unknown, fallback?: Experiment["surface"]): Experiment["surface"] | undefined {
+  if (surface === "sticky_cta" || surface === "cta_placement" || surface === "form_length" || surface === "hero_layout") {
+    return surface;
+  }
+  return fallback;
+}
+
+function sendExperimentAssignment(input: {
+  siteId: string;
+  sessionId: string;
+  experimentId: string;
+  surface: Experiment["surface"];
+  variantId: string;
+  primaryMetric?: string;
+  holdout: boolean;
+}) {
   const payload = JSON.stringify({
-    siteId,
-    sessionId,
+    siteId: input.siteId,
+    sessionId: input.sessionId,
     eventType: "experiment_assignment",
     timestamp: new Date().toISOString(),
     metadata: {
-      experimentId,
-      variantId,
-      primaryMetric: primaryMetric ?? "",
-      holdout
+      experimentId: input.experimentId,
+      surface: input.surface,
+      variantId: input.variantId,
+      primaryMetric: input.primaryMetric ?? "",
+      holdout: input.holdout
     }
   });
 

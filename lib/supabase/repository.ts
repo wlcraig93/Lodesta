@@ -4,14 +4,19 @@ import type {
   ClaimRecord,
   DomainRecord,
   Experiment,
+  ExperimentLearning,
   ExtensionModel,
   FormDefinition,
   JobKind,
   JobRecord,
   LeadSubmission,
   OptimizationFinding,
+  OutboundCampaign,
+  OutboundEvent,
+  OutboundProspect,
   PresenceAssessment,
   PreviewToken,
+  SiteAsset,
   SiteBundle,
   SiteModel,
   SiteVersion,
@@ -29,19 +34,38 @@ import type {
 import { runAudit } from "../audit";
 import { updateSiteDesignBundle } from "../design";
 import { createCheckoutSession } from "../billing";
-import { registerCustomHostname } from "../domains";
+import { refreshCustomHostnameStatus, registerCustomHostname } from "../domains";
 import { createSiteFromInput } from "../intake";
-import { executeJob, type JobExecutionContext } from "../jobs";
-import { crawlUrl } from "../crawler";
+import {
+  defaultJobStaleAfterMs,
+  executeJob,
+  maxAttemptsFromPayload,
+  retryDelayMs,
+  runAfterFromPayload,
+  type JobExecutionContext
+} from "../jobs";
 import { summarizeAnalytics } from "../analytics";
 import { mergeFindings, recommendFromAnalytics } from "../analytics-insights";
-import { analyzeExperiments } from "../experiment-analysis";
-import { applySuggestedEdit } from "../optimization";
+import { analyzeExperiment, analyzeExperiments } from "../experiment-analysis";
+import { createExperimentLearning } from "../experiment-learning";
+import { applySuggestedEdit, preserveFindingLifecycle } from "../optimization";
 import { applyAiEditToBundle } from "../ai-editor";
+import { validateBusinessProfileUpdate, validateSectionUpdate } from "../editor-guardrails";
+import { applyFormSettingsUpdate } from "../form-settings";
+import { applyOwnerAssetsUpdate } from "../owner-assets";
 import { applySiteIdentity, makeUniqueSlug } from "../site-identity";
 import { applyVerifiedFacts } from "../fact-verification";
 import { applyBusinessProfileUpdate } from "../business-profile-update";
+import { sanitizeAnalyticsMetadata } from "../privacy";
 import { getSupabaseAdminClient } from "./client";
+import { prepareIntakeInput } from "../intake-pipeline";
+import {
+  applyOutboundEventToProspect,
+  newOutboundCampaign,
+  newOutboundEvent,
+  newOutboundProspect,
+  summarizeOutbound
+} from "../outbound";
 
 type SiteRow = {
   id: string;
@@ -60,6 +84,21 @@ type BusinessProfileRow = {
   vertical: string;
   profile: unknown;
   provenance: unknown;
+};
+
+type SiteAssetRow = {
+  id: string;
+  site_id: string;
+  kind: SiteAsset["kind"];
+  url: string | null;
+  alt: string;
+  source: SiteAsset["source"];
+  rights_status: SiteAsset["rightsStatus"];
+  usage_scope: SiteAsset["usageScope"];
+  owner_approved: boolean;
+  provenance: unknown;
+  metadata: unknown;
+  created_at: string;
 };
 
 type SiteVersionRow = {
@@ -102,6 +141,33 @@ type ExperimentRow = {
   holdout_percent: number | null;
   primary_metric: Experiment["primaryMetric"];
   status: Experiment["status"];
+  started_at: string | null;
+  concluded_at: string | null;
+  rolled_back_at: string | null;
+  updated_at: string | null;
+};
+
+type ExperimentLearningRow = {
+  id: string;
+  site_id: string;
+  experiment_id: string;
+  cohort: string;
+  surface: Experiment["surface"];
+  primary_metric: Experiment["primaryMetric"];
+  winner_variant_id: string;
+  winner_label: string;
+  control_variant_id: string;
+  confidence: ExperimentLearning["confidence"];
+  observed_lift: number;
+  winner_action_rate: number;
+  control_action_rate: number;
+  total_assignments: number;
+  metric_actions: number;
+  standard_criterion_id: string;
+  generation_rule: string;
+  status: ExperimentLearning["status"];
+  created_at: string;
+  rolled_back_at: string | null;
 };
 
 type SubmissionRow = {
@@ -167,6 +233,48 @@ type DomainRow = {
   created_at: string;
 };
 
+type OutboundCampaignRow = {
+  id: string;
+  name: string;
+  channel: OutboundCampaign["channel"];
+  status: OutboundCampaign["status"];
+  metadata: unknown;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+};
+
+type OutboundProspectRow = {
+  id: string;
+  campaign_id: string;
+  site_id: string | null;
+  business_name: string;
+  vertical: OutboundProspect["vertical"] | null;
+  source_url: string | null;
+  preview_token: string | null;
+  mailing_code: string | null;
+  status: OutboundProspect["status"];
+  metadata: unknown;
+  created_at: string;
+  mailed_at: string | null;
+  first_preview_viewed_at: string | null;
+  claim_started_at: string | null;
+  claimed_at: string | null;
+  published_at: string | null;
+  disqualified_at: string | null;
+};
+
+type OutboundEventRow = {
+  id: string;
+  campaign_id: string;
+  prospect_id: string | null;
+  site_id: string | null;
+  type: OutboundEvent["type"];
+  occurred_at: string;
+  value: number | null;
+  metadata: unknown;
+};
+
 type JobRow = {
   id: string;
   kind: JobKind;
@@ -175,6 +283,10 @@ type JobRow = {
   result: unknown;
   error: string | null;
   attempts: number;
+  max_attempts: number;
+  run_after: string;
+  locked_by: string | null;
+  locked_at: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -217,8 +329,10 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async createAndStoreSite(input) {
-    const crawl = input.url ? await crawlUrl(input.url) : undefined;
-    const bundle = createSiteFromInput({ ...input, crawl });
+    const bundle = createSiteFromInput({
+      ...(await prepareIntakeInput(input)),
+      experimentLearnings: await this.listExperimentLearnings({ status: "active" })
+    });
     const existingRows = await requireData<Array<{ slug: string }>>(
       getSupabaseAdminClient().from("sites").select("slug"),
       "Load existing slugs"
@@ -278,12 +392,21 @@ export const supabaseRepository: LodestaRepository = {
   async updateSectionProps(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
+    const guardrails = validateSectionUpdate(bundle, input);
+    if (!guardrails.ok) {
+      return {
+        ok: false as const,
+        reason: guardrails.reason,
+        issues: guardrails.issues,
+        qa: guardrails.qa
+      };
+    }
     const result = updateBundleSection(bundle, input);
     if (!result.ok) return result;
     await persistVersions(bundle);
     const findings = await buildOptimizationFindings(bundle);
     await persistFindings(input.siteId, findings);
-    return { ok: true as const, bundle: { ...bundle, optimizationFindings: findings } };
+    return { ok: true as const, bundle: { ...bundle, optimizationFindings: findings }, guardrailWarnings: guardrails.warnings };
   },
 
   async updateSiteDesign(input) {
@@ -323,9 +446,27 @@ export const supabaseRepository: LodestaRepository = {
   async updateBusinessProfile(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
+    const guardrails = validateBusinessProfileUpdate(bundle, input);
+    if (!guardrails.ok) {
+      return {
+        ok: false as const,
+        reason: guardrails.reason,
+        issues: guardrails.issues,
+        qa: guardrails.qa
+      };
+    }
     const updated = applyBusinessProfileUpdate(bundle, input);
     await persistBundle(updated);
-    return updated;
+    return { ok: true as const, bundle: updated, guardrailWarnings: guardrails.warnings };
+  },
+
+  async updateOwnerAssets(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const result = applyOwnerAssetsUpdate(bundle, input);
+    if (!result.ok) return result;
+    await persistBundle(bundle);
+    return result;
   },
 
   async recordFormSubmission(input) {
@@ -445,6 +586,20 @@ export const supabaseRepository: LodestaRepository = {
     return rows.map(rowToAnalyticsEvent);
   },
 
+  async pruneAnalyticsEvents(input) {
+    let query = getSupabaseAdminClient()
+      .from("analytics_events")
+      .delete()
+      .lt("occurred_at", input.before);
+    if (input.siteId) query = query.eq("site_id", input.siteId);
+    const rows = await requireData<Array<{ id: string }>>(query.select("id"), "Prune analytics events");
+    return {
+      deleted: rows.length,
+      before: input.before,
+      siteId: input.siteId
+    };
+  },
+
   async analyticsSummary(siteId) {
     const events = await this.listAnalyticsEvents(siteId);
     return summarizeAnalytics(siteId, events);
@@ -453,20 +608,29 @@ export const supabaseRepository: LodestaRepository = {
   async assignExperiment(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return { assigned: false as const, reason: "Unknown site" };
-    const experiment =
-      bundle.experiments.find((candidate) => candidate.id === input.experimentId) ??
-      bundle.experiments.find((candidate) => candidate.status === "running");
+    const experiment = input.experimentId
+      ? bundle.experiments.find((candidate) => candidate.id === input.experimentId)
+      : bundle.experiments.find((candidate) => candidate.status === "running");
     if (!experiment) return { assigned: false as const, reason: "No running experiment" };
+    if (experiment.status !== "running") return { assigned: false as const, reason: "Experiment is not opted in." };
     const hash = hashString(`${input.siteId}:${input.sessionId}:${experiment.id}`);
     const holdoutPercent = clampHoldout(experiment.holdoutPercent);
     const bucket = (hash % 10000) / 10000;
     const control = experiment.variants.find((variant) => String(variant.id ?? "") === "control") ?? experiment.variants[0];
     const treatmentVariants = experiment.variants.filter((variant) => String(variant.id ?? "") !== String(control?.id ?? ""));
     const holdout = Boolean(control && holdoutPercent > 0 && bucket < holdoutPercent);
-    const availableVariants = holdout ? [control] : treatmentVariants.length ? treatmentVariants : experiment.variants;
+    const learnedDefaults = treatmentVariants.filter((variant) => variant.learnedDefault === true);
+    const availableVariants = holdout
+      ? [control]
+      : learnedDefaults.length
+        ? learnedDefaults
+        : treatmentVariants.length
+          ? treatmentVariants
+          : experiment.variants;
     return {
       assigned: true as const,
       experimentId: experiment.id,
+      surface: experiment.surface,
       primaryMetric: experiment.primaryMetric,
       holdout,
       variant: availableVariants[hash % availableVariants.length]
@@ -485,12 +649,83 @@ export const supabaseRepository: LodestaRepository = {
     return bundle?.experiments ?? [];
   },
 
+  async updateExperiment(input) {
+    const now = new Date().toISOString();
+    const updates: Partial<ExperimentRow> = {
+      status: input.status,
+      updated_at: now
+    };
+    if (typeof input.holdoutPercent === "number") updates.holdout_percent = clampHoldout(input.holdoutPercent);
+    if (input.status === "running") updates.started_at = now;
+    if (input.status === "concluded") updates.concluded_at = now;
+    if (input.status === "rolled_back") updates.rolled_back_at = now;
+
+    const row = await requireMaybe<ExperimentRow>(
+      getSupabaseAdminClient()
+        .from("experiments")
+        .update(updates)
+        .eq("site_id", input.siteId)
+        .eq("id", input.experimentId)
+        .select("*")
+        .maybeSingle(),
+      "Update experiment"
+    );
+    if (!row) return { ok: false as const, reason: "Experiment not found." };
+    if (input.status === "rolled_back") await rollbackExperimentLearnings(input.experimentId, now);
+    return { ok: true as const, experiment: rowToExperiment(row) };
+  },
+
+  async concludeExperimentWithLearning(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const experiment = bundle.experiments.find((candidate) => candidate.id === input.experimentId);
+    if (!experiment) return { ok: false as const, reason: "Experiment not found." };
+    const events = await this.listAnalyticsEvents(input.siteId);
+    const analysis = analyzeExperiment(experiment, events);
+    const createdAt = new Date().toISOString();
+    const learningResult = createExperimentLearning({ siteId: input.siteId, experiment, analysis, createdAt });
+    if (!learningResult.ok) return learningResult;
+
+    const experimentRow = await requireData<ExperimentRow>(
+      getSupabaseAdminClient()
+        .from("experiments")
+        .update({ status: "concluded", concluded_at: createdAt, updated_at: createdAt })
+        .eq("site_id", input.siteId)
+        .eq("id", input.experimentId)
+        .select("*")
+        .single(),
+      "Conclude experiment"
+    );
+    const learning = await persistExperimentLearning(learningResult.learning);
+    return { ok: true as const, experiment: rowToExperiment(experimentRow), learning, analysis };
+  },
+
+  async listExperimentLearnings(filter) {
+    let query = getSupabaseAdminClient()
+      .from("experiment_learnings")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (filter?.siteId) query = query.eq("site_id", filter.siteId);
+    if (filter?.status) query = query.eq("status", filter.status);
+    const rows = await requireData<ExperimentLearningRow[]>(query, "List experiment learnings");
+    return rows.map(rowToExperimentLearning);
+  },
+
   async getForms(siteId) {
     const rows = await requireData<FormRow[]>(
       getSupabaseAdminClient().from("forms").select("*").eq("site_id", siteId).order("created_at"),
       "Get forms"
     );
     return rows.map(rowToForm);
+  },
+
+  async updateFormSettings(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const result = applyFormSettingsUpdate(bundle, input);
+    if (!result.ok) return result;
+    await persistBundle(bundle);
+    return result;
   },
 
   async applyFindingToDraft(input) {
@@ -503,6 +738,26 @@ export const supabaseRepository: LodestaRepository = {
     await persistVersions(bundle);
     await persistFindings(input.siteId, bundle.optimizationFindings);
     return { ok: true as const, draftCreated: true, qaRequired: true, finding: applied.finding };
+  },
+
+  async dismissFinding(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
+    if (!finding) return { ok: false as const, reason: "Finding not found." };
+    if (finding.status === "applied") return { ok: false as const, reason: "Applied findings cannot be dismissed." };
+
+    const row = await requireData<FindingRow>(
+      getSupabaseAdminClient()
+        .from("optimization_findings")
+        .update({ status: "dismissed" })
+        .eq("site_id", input.siteId)
+        .eq("id", input.findingId)
+        .select("*")
+        .single(),
+      "Dismiss finding"
+    );
+    return { ok: true as const, finding: rowToFinding(row) };
   },
 
   async applyAiEdit(input) {
@@ -609,7 +864,15 @@ export const supabaseRepository: LodestaRepository = {
   async registerDomain(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
-    const verification = await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
+    const provider = input.provider ?? "cloudflare_for_saas";
+    const verification = provider === "railway"
+      ? {
+          type: "cname" as const,
+          value: process.env.CLOUDFLARE_FALLBACK_ORIGIN ?? "customers.lodesta.example",
+          configured: true,
+          note: "Railway/manual custom domain. Configure DNS/custom domain in Railway, then traffic can resolve through the app."
+        }
+      : await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
     const row = await requireData<DomainRow>(
       getSupabaseAdminClient()
         .from("domains")
@@ -618,8 +881,8 @@ export const supabaseRepository: LodestaRepository = {
           site_id: input.siteId,
           hostname: input.hostname.toLowerCase(),
           kind: "custom",
-          status: "pending",
-          provider: input.provider ?? "cloudflare_for_saas",
+          status: provider === "railway" ? "active" : "pending",
+          provider,
           provider_hostname_id: verification.providerHostnameId,
           verification
         })
@@ -630,11 +893,155 @@ export const supabaseRepository: LodestaRepository = {
     return { ...rowToDomain(row), verification };
   },
 
+  async refreshDomain(input) {
+    const existing = await requireMaybe<DomainRow>(
+      getSupabaseAdminClient().from("domains").select("*").eq("id", input.domainId).maybeSingle(),
+      "Find domain"
+    );
+    if (!existing) return null;
+    const domain = rowToDomain(existing);
+    const providerStatus = await refreshCustomHostnameStatus({
+      provider: domain.provider,
+      hostname: domain.hostname,
+      providerHostnameId: domain.providerHostnameId,
+      verification: domain.verification
+    });
+    const row = await requireData<DomainRow>(
+      getSupabaseAdminClient()
+        .from("domains")
+        .update({
+          status: providerStatus.status,
+          provider_hostname_id: providerStatus.verification?.providerHostnameId ?? domain.providerHostnameId ?? null,
+          verification: providerStatus.verification ?? domain.verification ?? {}
+        })
+        .eq("id", input.domainId)
+        .select("*")
+        .single(),
+      "Refresh domain"
+    );
+    return rowToDomain(row);
+  },
+
   async listDomains(siteId) {
     let query = getSupabaseAdminClient().from("domains").select("*").order("created_at", { ascending: false });
     if (siteId) query = query.eq("site_id", siteId);
     const rows = await requireData<DomainRow[]>(query, "List domains");
     return rows.map(rowToDomain);
+  },
+
+  async createOutboundCampaign(input) {
+    const campaign = newOutboundCampaign(input);
+    const row = await requireData<OutboundCampaignRow>(
+      getSupabaseAdminClient()
+        .from("outbound_campaigns")
+        .insert({
+          id: campaign.id,
+          name: campaign.name,
+          channel: campaign.channel,
+          status: campaign.status,
+          metadata: campaign.metadata ?? {},
+          created_at: campaign.createdAt,
+          started_at: campaign.startedAt,
+          ended_at: campaign.endedAt
+        })
+        .select("*")
+        .single(),
+      "Create outbound campaign"
+    );
+    return rowToOutboundCampaign(row);
+  },
+
+  async listOutboundCampaigns() {
+    const rows = await requireData<OutboundCampaignRow[]>(
+      getSupabaseAdminClient().from("outbound_campaigns").select("*").order("created_at", { ascending: false }),
+      "List outbound campaigns"
+    );
+    return rows.map(rowToOutboundCampaign);
+  },
+
+  async upsertOutboundProspect(input) {
+    const prospect = newOutboundProspect(input);
+    const row = await requireData<OutboundProspectRow>(
+      getSupabaseAdminClient()
+        .from("outbound_prospects")
+        .upsert({
+          id: prospect.id,
+          campaign_id: prospect.campaignId,
+          site_id: prospect.siteId,
+          business_name: prospect.businessName,
+          vertical: prospect.vertical,
+          source_url: prospect.sourceUrl,
+          preview_token: prospect.previewToken,
+          mailing_code: prospect.mailingCode,
+          status: prospect.status,
+          metadata: prospect.metadata ?? {},
+          created_at: prospect.createdAt
+        })
+        .select("*")
+        .single(),
+      "Upsert outbound prospect"
+    );
+    return rowToOutboundProspect(row);
+  },
+
+  async listOutboundProspects(campaignId) {
+    let query = getSupabaseAdminClient().from("outbound_prospects").select("*").order("created_at", { ascending: false });
+    if (campaignId) query = query.eq("campaign_id", campaignId);
+    const rows = await requireData<OutboundProspectRow[]>(query, "List outbound prospects");
+    return rows.map(rowToOutboundProspect);
+  },
+
+  async recordOutboundEvent(input) {
+    const event = newOutboundEvent(input);
+    const row = await requireData<OutboundEventRow>(
+      getSupabaseAdminClient()
+        .from("outbound_events")
+        .insert({
+          id: event.id,
+          campaign_id: event.campaignId,
+          prospect_id: event.prospectId,
+          site_id: event.siteId,
+          type: event.type,
+          occurred_at: event.occurredAt,
+          value: event.value,
+          metadata: event.metadata ?? {}
+        })
+        .select("*")
+        .single(),
+      "Record outbound event"
+    );
+    const eventRow = rowToOutboundEvent(row);
+    if (event.prospectId) {
+      await applyOutboundEventToProspectRow(event.prospectId, eventRow);
+    } else if (event.siteId) {
+      const prospect = await requireMaybe<OutboundProspectRow>(
+        getSupabaseAdminClient()
+          .from("outbound_prospects")
+          .select("*")
+          .eq("campaign_id", event.campaignId)
+          .eq("site_id", event.siteId)
+          .maybeSingle(),
+        "Load outbound prospect by site"
+      );
+      if (prospect) await applyOutboundEventToProspectRow(prospect.id, eventRow);
+    }
+    return eventRow;
+  },
+
+  async listOutboundEvents(campaignId) {
+    let query = getSupabaseAdminClient().from("outbound_events").select("*").order("occurred_at", { ascending: false });
+    if (campaignId) query = query.eq("campaign_id", campaignId);
+    const rows = await requireData<OutboundEventRow[]>(query, "List outbound events");
+    return rows.map(rowToOutboundEvent);
+  },
+
+  async outboundSummary(campaignId) {
+    const [campaigns, prospects, events] = await Promise.all([
+      this.listOutboundCampaigns(),
+      this.listOutboundProspects(campaignId),
+      this.listOutboundEvents(campaignId)
+    ]);
+    return summarizeOutbound(campaigns, prospects, events, campaignId);
   },
 
   async enqueueJob(kind, payload) {
@@ -648,6 +1055,8 @@ export const supabaseRepository: LodestaRepository = {
           status: "queued",
           payload,
           attempts: 0,
+          max_attempts: maxAttemptsFromPayload(payload),
+          run_after: runAfterFromPayload(payload, now),
           created_at: now,
           updated_at: now
         })
@@ -674,45 +1083,32 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async processNextJob() {
-    const row = await requireMaybe<JobRow>(
-      getSupabaseAdminClient()
-        .from("jobs")
-        .select("*")
-        .eq("status", "queued")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle(),
-      "Load queued job"
+    const workerId = process.env.LODESTA_WORKER_ID ?? `worker_${crypto.randomUUID()}`;
+    const claimed = await requireData<unknown>(
+      getSupabaseAdminClient().rpc("claim_next_job", {
+        worker_id: workerId,
+        stale_after_seconds: Math.round(defaultJobStaleAfterMs / 1000)
+      }),
+      "Claim queued job"
     );
+    const rows = Array.isArray(claimed) ? (claimed.filter(Boolean) as JobRow[]) : claimed ? [claimed as JobRow] : [];
+    const row = rows[0];
     if (!row) return null;
-
-    const startedAt = new Date().toISOString();
-    const running = await requireData<JobRow>(
-      getSupabaseAdminClient()
-        .from("jobs")
-        .update({
-          status: "running",
-          attempts: row.attempts + 1,
-          started_at: startedAt,
-          updated_at: startedAt
-        })
-        .eq("id", row.id)
-        .select("*")
-        .single(),
-      "Mark job running"
-    );
 
     try {
       const jobContext: JobExecutionContext = {
+        workerId,
         createAndStoreSite: (input) => this.createAndStoreSite(input),
         createPreviewToken: (input) => this.createPreviewToken(input),
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
         runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
         analyticsSummary: (siteId) => this.analyticsSummary(siteId),
+        pruneAnalyticsEvents: (input) => this.pruneAnalyticsEvents(input),
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
+        listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
         listFormSubmissions: (siteId) => this.listFormSubmissions(siteId)
       };
-      const result = await executeJob(rowToJob(running), jobContext);
+      const result = await executeJob(rowToJob(row), jobContext);
       const completedAt = new Date().toISOString();
       const completed = await requireData<JobRow>(
         getSupabaseAdminClient()
@@ -721,9 +1117,12 @@ export const supabaseRepository: LodestaRepository = {
             status: "completed",
             result,
             completed_at: completedAt,
+            locked_by: null,
+            locked_at: null,
             updated_at: completedAt
           })
-          .eq("id", running.id)
+          .eq("id", row.id)
+          .eq("locked_by", workerId)
           .select("*")
           .single(),
         "Mark job completed"
@@ -731,19 +1130,24 @@ export const supabaseRepository: LodestaRepository = {
       return rowToJob(completed);
     } catch (error) {
       const completedAt = new Date().toISOString();
+      const retryable = row.attempts < row.max_attempts;
       const failed = await requireData<JobRow>(
         getSupabaseAdminClient()
           .from("jobs")
           .update({
-            status: "failed",
+            status: retryable ? "queued" : "failed",
             error: error instanceof Error ? error.message : "Unknown job error",
-            completed_at: completedAt,
+            run_after: retryable ? new Date(Date.now() + retryDelayMs(row.attempts)).toISOString() : row.run_after,
+            completed_at: retryable ? null : completedAt,
+            locked_by: null,
+            locked_at: null,
             updated_at: completedAt
           })
-          .eq("id", running.id)
+          .eq("id", row.id)
+          .eq("locked_by", workerId)
           .select("*")
           .single(),
-        "Mark job failed"
+        retryable ? "Requeue failed job attempt" : "Mark job failed"
       );
       return rowToJob(failed);
     }
@@ -762,10 +1166,14 @@ export const supabaseRepository: LodestaRepository = {
 
 async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
   const supabase = getSupabaseAdminClient();
-  const [profileRow, versionRows, formRows, findingRows, experimentRows] = await Promise.all([
+  const [profileRow, assetRows, versionRows, formRows, findingRows, experimentRows, learningRows] = await Promise.all([
     requireData<BusinessProfileRow>(
       supabase.from("business_profiles").select("*").eq("site_id", siteRow.id).single(),
       "Load business profile"
+    ),
+    requireData<SiteAssetRow[]>(
+      supabase.from("site_assets").select("*").eq("site_id", siteRow.id).order("created_at"),
+      "Load site assets"
     ),
     requireData<SiteVersionRow[]>(
       supabase.from("site_versions").select("*").eq("site_id", siteRow.id).order("created_at", { ascending: false }),
@@ -779,6 +1187,10 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
     requireData<ExperimentRow[]>(
       supabase.from("experiments").select("*").eq("site_id", siteRow.id).order("created_at"),
       "Load experiments"
+    ),
+    requireData<ExperimentLearningRow[]>(
+      supabase.from("experiment_learnings").select("*").eq("site_id", siteRow.id).order("created_at", { ascending: false }),
+      "Load experiment learnings"
     )
   ]);
 
@@ -787,6 +1199,7 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
     workflows: [],
     customBlocks: []
   };
+  const presenceAssessment = siteRow.presence_assessment as PresenceAssessment;
 
   return {
     businessProfile: profileRow.profile as BusinessProfile,
@@ -801,7 +1214,11 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
     },
     optimizationFindings: findingRows.map(rowToFinding),
     experiments: experimentRows.map(rowToExperiment),
-    presenceAssessment: siteRow.presence_assessment as PresenceAssessment
+    experimentLearnings: learningRows.map(rowToExperimentLearning),
+    presenceAssessment: {
+      ...presenceAssessment,
+      assetInventory: assetRows.length ? assetRows.map(rowToSiteAsset) : presenceAssessment.assetInventory
+    }
   };
 }
 
@@ -828,6 +1245,7 @@ async function persistBundle(bundle: SiteBundle) {
 
   await Promise.all([
     persistBusinessProfile(bundle.businessProfile),
+    persistAssets(bundle.businessProfile.siteId, bundle.presenceAssessment.assetInventory ?? []),
     persistVersions(bundle),
     persistForms(bundle.businessProfile.siteId, bundle.extensionModel.forms),
     persistFindings(bundle.businessProfile.siteId, bundle.optimizationFindings),
@@ -887,6 +1305,34 @@ async function persistForms(siteId: string, forms: FormDefinition[]) {
   );
 }
 
+async function persistAssets(siteId: string, assets: SiteAsset[]) {
+  const supabase = getSupabaseAdminClient();
+  await requireData<unknown>(supabase.from("site_assets").delete().eq("site_id", siteId), "Clear site assets");
+  if (assets.length === 0) return;
+  await requireData<SiteAssetRow[]>(
+    supabase
+      .from("site_assets")
+      .insert(
+        assets.map((asset) => ({
+          id: asset.id,
+          site_id: siteId,
+          kind: asset.kind,
+          url: asset.url,
+          alt: asset.alt,
+          source: asset.source,
+          rights_status: asset.rightsStatus,
+          usage_scope: asset.usageScope,
+          owner_approved: asset.ownerApproved,
+          provenance: asset.provenance,
+          metadata: asset.metadata ?? {},
+          created_at: asset.createdAt
+        }))
+      )
+      .select("*"),
+    "Persist site assets"
+  );
+}
+
 async function persistFindings(siteId: string, findings: OptimizationFinding[]) {
   const supabase = getSupabaseAdminClient();
   await requireData<unknown>(supabase.from("optimization_findings").delete().eq("site_id", siteId), "Clear findings");
@@ -932,11 +1378,59 @@ async function persistExperiments(siteId: string, experiments: Experiment[]) {
           variants: experiment.variants,
           holdout_percent: experiment.holdoutPercent,
           primary_metric: experiment.primaryMetric,
-          status: experiment.status
+          status: experiment.status,
+          started_at: experiment.startedAt,
+          concluded_at: experiment.concludedAt,
+          rolled_back_at: experiment.rolledBackAt,
+          updated_at: experiment.updatedAt
         }))
       )
       .select("*"),
     "Persist experiments"
+  );
+}
+
+async function persistExperimentLearning(learning: ExperimentLearning) {
+  const row = await requireData<ExperimentLearningRow>(
+    getSupabaseAdminClient()
+      .from("experiment_learnings")
+      .upsert({
+        id: learning.id,
+        site_id: learning.siteId,
+        experiment_id: learning.experimentId,
+        cohort: learning.cohort,
+        surface: learning.surface,
+        primary_metric: learning.primaryMetric,
+        winner_variant_id: learning.winnerVariantId,
+        winner_label: learning.winnerLabel,
+        control_variant_id: learning.controlVariantId,
+        confidence: learning.confidence,
+        observed_lift: learning.observedLift,
+        winner_action_rate: learning.winnerActionRate,
+        control_action_rate: learning.controlActionRate,
+        total_assignments: learning.totalAssignments,
+        metric_actions: learning.metricActions,
+        standard_criterion_id: learning.standardCriterionId,
+        generation_rule: learning.generationRule,
+        status: learning.status,
+        created_at: learning.createdAt,
+        rolled_back_at: learning.rolledBackAt
+      })
+      .select("*")
+      .single(),
+    "Persist experiment learning"
+  );
+  return rowToExperimentLearning(row);
+}
+
+async function rollbackExperimentLearnings(experimentId: string, rolledBackAt: string) {
+  await requireData<unknown>(
+    getSupabaseAdminClient()
+      .from("experiment_learnings")
+      .update({ status: "rolled_back", rolled_back_at: rolledBackAt })
+      .eq("experiment_id", experimentId)
+      .eq("status", "active"),
+    "Rollback experiment learnings"
   );
 }
 
@@ -982,6 +1476,23 @@ function rowToForm(row: FormRow): FormDefinition {
   return row.schema as FormDefinition;
 }
 
+function rowToSiteAsset(row: SiteAssetRow): SiteAsset {
+  return {
+    id: row.id,
+    siteId: row.site_id,
+    kind: row.kind,
+    url: row.url ?? undefined,
+    alt: row.alt,
+    source: row.source,
+    rightsStatus: row.rights_status,
+    usageScope: row.usage_scope,
+    ownerApproved: row.owner_approved,
+    provenance: row.provenance as SiteAsset["provenance"],
+    metadata: row.metadata as Record<string, unknown> | undefined,
+    createdAt: row.created_at
+  };
+}
+
 function rowToPreviewToken(row: PreviewTokenRow): PreviewToken {
   return {
     token: row.token,
@@ -1017,7 +1528,36 @@ function rowToExperiment(row: ExperimentRow): Experiment {
     variants: row.variants as Array<Record<string, unknown>>,
     holdoutPercent: row.holdout_percent ?? undefined,
     primaryMetric: row.primary_metric,
-    status: row.status
+    status: row.status,
+    startedAt: row.started_at ?? undefined,
+    concludedAt: row.concluded_at ?? undefined,
+    rolledBackAt: row.rolled_back_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined
+  };
+}
+
+function rowToExperimentLearning(row: ExperimentLearningRow): ExperimentLearning {
+  return {
+    id: row.id,
+    siteId: row.site_id,
+    experimentId: row.experiment_id,
+    cohort: row.cohort,
+    surface: row.surface,
+    primaryMetric: row.primary_metric,
+    winnerVariantId: row.winner_variant_id,
+    winnerLabel: row.winner_label,
+    controlVariantId: row.control_variant_id,
+    confidence: row.confidence,
+    observedLift: row.observed_lift,
+    winnerActionRate: row.winner_action_rate,
+    controlActionRate: row.control_action_rate,
+    totalAssignments: row.total_assignments,
+    metricActions: row.metric_actions,
+    standardCriterionId: row.standard_criterion_id,
+    generationRule: row.generation_rule,
+    status: row.status,
+    createdAt: row.created_at,
+    rolledBackAt: row.rolled_back_at ?? undefined
   };
 }
 
@@ -1103,6 +1643,82 @@ function rowToDomain(row: DomainRow): DomainRecord {
   };
 }
 
+function rowToOutboundCampaign(row: OutboundCampaignRow): OutboundCampaign {
+  return {
+    id: row.id,
+    name: row.name,
+    channel: row.channel,
+    status: row.status,
+    metadata: row.metadata as Record<string, string | number | boolean> | undefined,
+    createdAt: row.created_at,
+    startedAt: row.started_at ?? undefined,
+    endedAt: row.ended_at ?? undefined
+  };
+}
+
+function rowToOutboundProspect(row: OutboundProspectRow): OutboundProspect {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    siteId: row.site_id ?? undefined,
+    businessName: row.business_name,
+    vertical: row.vertical ?? undefined,
+    sourceUrl: row.source_url ?? undefined,
+    previewToken: row.preview_token ?? undefined,
+    mailingCode: row.mailing_code ?? undefined,
+    status: row.status,
+    metadata: row.metadata as Record<string, string | number | boolean> | undefined,
+    createdAt: row.created_at,
+    mailedAt: row.mailed_at ?? undefined,
+    firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined,
+    claimStartedAt: row.claim_started_at ?? undefined,
+    claimedAt: row.claimed_at ?? undefined,
+    publishedAt: row.published_at ?? undefined,
+    disqualifiedAt: row.disqualified_at ?? undefined
+  };
+}
+
+function rowToOutboundEvent(row: OutboundEventRow): OutboundEvent {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    prospectId: row.prospect_id ?? undefined,
+    siteId: row.site_id ?? undefined,
+    type: row.type,
+    occurredAt: row.occurred_at,
+    value: row.value ?? undefined,
+    metadata: row.metadata as Record<string, string | number | boolean> | undefined
+  };
+}
+
+async function applyOutboundEventToProspectRow(prospectId: string, event: OutboundEvent) {
+  const row = await requireMaybe<OutboundProspectRow>(
+    getSupabaseAdminClient().from("outbound_prospects").select("*").eq("id", prospectId).maybeSingle(),
+    "Load outbound prospect for event"
+  );
+  if (!row) return;
+  const prospect = rowToOutboundProspect(row);
+  applyOutboundEventToProspect(prospect, event);
+  await requireData<OutboundProspectRow>(
+    getSupabaseAdminClient()
+      .from("outbound_prospects")
+      .update({
+        site_id: prospect.siteId,
+        status: prospect.status,
+        mailed_at: prospect.mailedAt,
+        first_preview_viewed_at: prospect.firstPreviewViewedAt,
+        claim_started_at: prospect.claimStartedAt,
+        claimed_at: prospect.claimedAt,
+        published_at: prospect.publishedAt,
+        disqualified_at: prospect.disqualifiedAt
+      })
+      .eq("id", prospectId)
+      .select("*")
+      .single(),
+    "Update outbound prospect from event"
+  );
+}
+
 async function buildOptimizationFindings(bundle: SiteBundle) {
   const rows = await requireData<AnalyticsRow[]>(
     getSupabaseAdminClient()
@@ -1113,10 +1729,11 @@ async function buildOptimizationFindings(bundle: SiteBundle) {
     "List analytics events for optimization"
   );
   const events = rows.map(rowToAnalyticsEvent);
-  return mergeFindings(
+  const nextFindings = mergeFindings(
     runAudit(bundle.businessProfile, bundle.siteModel),
     recommendFromAnalytics(bundle, summarizeAnalytics(bundle.businessProfile.siteId, events))
   );
+  return preserveFindingLifecycle(nextFindings, bundle.optimizationFindings);
 }
 
 function rowToJob(row: JobRow): JobRecord {
@@ -1128,6 +1745,10 @@ function rowToJob(row: JobRow): JobRecord {
     result: row.result ? (row.result as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
     attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+    runAfter: row.run_after,
+    lockedBy: row.locked_by ?? undefined,
+    lockedAt: row.locked_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at ?? undefined,
@@ -1136,13 +1757,7 @@ function rowToJob(row: JobRow): JobRecord {
 }
 
 function sanitizeMetadata(metadata: AnalyticsEvent["metadata"]) {
-  if (!metadata) return undefined;
-  const sanitized: NonNullable<AnalyticsEvent["metadata"]> = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (/password|token|secret|email|phone|name|message/i.test(key)) continue;
-    sanitized[key] = value;
-  }
-  return sanitized;
+  return sanitizeAnalyticsMetadata(metadata);
 }
 
 function hashString(value: string) {

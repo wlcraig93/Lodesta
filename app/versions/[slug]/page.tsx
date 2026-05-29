@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { VersionPublishForm } from "@/components/VersionPublishForm";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { claimGateForBundle } from "@/lib/site-publication";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export default async function VersionsPage({ params }: { params: Promise<{ slug:
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/versions/${slug}`);
 
+  const claims = await repository.listClaims(bundle.businessProfile.siteId);
+  const claimGate = claimGateForBundle(bundle, claims);
   const versions = [...bundle.siteModel.versions].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
   return (
@@ -59,6 +62,8 @@ export default async function VersionsPage({ params }: { params: Promise<{ slug:
                     siteId={bundle.businessProfile.siteId}
                     versionId={version.id}
                     current={version.status === "published"}
+                    disabled={!claimGate.ok}
+                    disabledReason={claimGate.ok ? undefined : claimGate.reason}
                   />
                 </td>
               </tr>

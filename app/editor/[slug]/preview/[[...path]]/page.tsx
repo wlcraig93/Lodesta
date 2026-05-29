@@ -38,6 +38,7 @@ export default async function DraftPreviewPage({
       page={page}
       theme={version.theme ?? bundle.siteModel.theme}
       tracking={false}
+      formsEnabled={false}
     />
   );
 }

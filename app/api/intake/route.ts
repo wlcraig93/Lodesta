@@ -3,6 +3,11 @@ import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
+import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { validatePublicFetchUrl } from "@/lib/url-safety";
+import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
+
+export const runtime = "nodejs";
 
 const intakeSchema = z
   .object({
@@ -22,7 +27,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid intake request", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const bundle = await repository.createAndStoreSite(parsed.data);
+  const limit = rateLimit(request, {
+    bucket: "site_intake",
+    ...rateLimitConfig("LODESTA_SITE_INTAKE", { limit: 30, windowMs: 10 * 60_000 })
+  });
+  if (!limit.ok) return limit.response;
+
+  try {
+    assertLaunchMarket(parsed.data);
+  } catch (error) {
+    if (isLaunchMarketError(error)) {
+      return applyRateLimitHeaders(NextResponse.json({ error: error.message, code: error.code }, { status: 400 }), limit);
+    }
+    throw error;
+  }
+
+  if (parsed.data.url) {
+    const urlSafety = await validatePublicFetchUrl(parsed.data.url);
+    if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
+  }
+
+  let bundle: Awaited<ReturnType<typeof repository.createAndStoreSite>>;
+  try {
+    bundle = await repository.createAndStoreSite(parsed.data);
+  } catch (error) {
+    if (isLaunchMarketError(error)) {
+      return applyRateLimitHeaders(NextResponse.json({ error: error.message, code: error.code }, { status: 400 }), limit);
+    }
+    throw error;
+  }
   const previewToken = await repository.createPreviewToken({
     siteId: bundle.businessProfile.siteId,
     expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
@@ -31,29 +64,34 @@ export async function POST(request: Request) {
   const replacementEvaluation = evaluateSiteAgainstStandard(bundle);
   const currentEvaluation = bundle.presenceAssessment.standardEvaluation;
 
-  return NextResponse.json({
-    bundle,
-    preview: previewToken
-      ? {
-          token: previewToken.token,
-          url: previewUrl,
-          expiresAt: previewToken.expiresAt
-        }
-      : undefined,
-    qualityScore: {
-      sourceUrl: bundle.presenceAssessment.sourceUrl ?? currentEvaluation?.sourceUrl,
-      current: currentEvaluation?.score,
-      generated: replacementEvaluation.score,
-      currentFailedChecks: currentEvaluation?.checks.filter((check) => !check.passed).length ?? null,
-      generatedPassingChecks: replacementEvaluation.checks.filter((check) => check.passed).length
-    },
-    nextSteps: [
-      parsed.data.url ? "Review extracted website facts and crawl findings" : "Add source URL or owner-verified facts",
-      "Capture desktop and mobile screenshots for render and vision checks",
-      "Verify facts on claim",
-      previewUrl ? `Send tokenized noindex preview: ${previewUrl}` : "Create tokenized noindex preview"
-    ]
-  });
+  return applyRateLimitHeaders(
+    NextResponse.json({
+      bundle,
+      preview: previewToken
+        ? {
+            token: previewToken.token,
+            url: previewUrl,
+            expiresAt: previewToken.expiresAt
+          }
+        : undefined,
+      qualityScore: {
+        sourceUrl: bundle.presenceAssessment.sourceUrl ?? currentEvaluation?.sourceUrl,
+        current: currentEvaluation?.score,
+        generated: replacementEvaluation.score,
+        currentFailedChecks: currentEvaluation?.checks.filter((check) => !check.passed).length ?? null,
+        generatedPassingChecks: replacementEvaluation.checks.filter((check) => check.passed).length
+      },
+      nextSteps: [
+        parsed.data.url ? "Review extracted website facts and crawl findings" : "Add source URL or owner-verified facts",
+        bundle.presenceAssessment.renderInspection
+          ? "Review render inspection findings and screenshot artifacts when available"
+          : "Capture desktop and mobile screenshots for render and vision checks",
+        "Verify facts on claim",
+        previewUrl ? `Send tokenized noindex preview: ${previewUrl}` : "Create tokenized noindex preview"
+      ]
+    }),
+    limit
+  );
 }
 
 function appOrigin(request: Request) {

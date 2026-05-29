@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { cachePolicyForPathname, cachePolicyHeaders } from "./lib/cache-policy";
 
 const skippedPrefixes = [
   "/api/",
@@ -11,6 +12,7 @@ const skippedPrefixes = [
   "/experiments/",
   "/domains/",
   "/leads/",
+  "/outbound",
   "/claim/",
   "/account",
   "/robots.txt",
@@ -20,27 +22,27 @@ const skippedPrefixes = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const hostname = normalizeHostname(request.headers.get("host") ?? "");
   if (skippedPrefixes.some((prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix))) {
-    return NextResponse.next();
+    return withCachePolicy(NextResponse.next(), pathname, false);
   }
 
-  const hostname = normalizeHostname(request.headers.get("host") ?? "");
-  if (!hostname || isPlatformHost(hostname)) return NextResponse.next();
+  if (!hostname || isPlatformHost(hostname)) return withCachePolicy(NextResponse.next(), pathname, false);
 
-  const resolveUrl = new URL("/api/domains/resolve", request.url);
+  const resolveUrl = new URL("/api/domains/resolve", domainResolveOrigin(request));
   resolveUrl.searchParams.set("hostname", hostname);
 
   try {
     const response = await fetch(resolveUrl);
-    if (!response.ok) return NextResponse.next();
+    if (!response.ok) return withCachePolicy(NextResponse.next(), pathname, false);
     const payload = (await response.json()) as { resolved?: boolean; slug?: string };
-    if (!payload.resolved || !payload.slug) return NextResponse.next();
+    if (!payload.resolved || !payload.slug) return withCachePolicy(NextResponse.next(), pathname, false);
 
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = `/sites/${payload.slug}${pathname === "/" ? "" : pathname}`;
-    return NextResponse.rewrite(rewriteUrl);
+    return withCachePolicy(NextResponse.rewrite(rewriteUrl), rewriteUrl.pathname, true);
   } catch {
-    return NextResponse.next();
+    return withCachePolicy(NextResponse.next(), pathname, false);
   }
 }
 
@@ -62,4 +64,24 @@ function isPlatformHost(hostname: string) {
     .filter(Boolean);
   if (configuredHosts.includes(hostname)) return true;
   return hostname.endsWith(".railway.app") || hostname.endsWith(".up.railway.app");
+}
+
+function domainResolveOrigin(request: NextRequest) {
+  const configuredOrigin = process.env.LODESTA_INTERNAL_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  if (configuredOrigin) {
+    try {
+      return new URL(configuredOrigin).origin;
+    } catch {
+      // Fall back to the request origin so malformed config does not break public rendering.
+    }
+  }
+  return request.nextUrl.origin;
+}
+
+function withCachePolicy(response: NextResponse, pathname: string, customDomain: boolean) {
+  const headers = cachePolicyHeaders(cachePolicyForPathname(pathname, { customDomain }));
+  for (const [name, value] of Object.entries(headers)) {
+    response.headers.set(name, value);
+  }
+  return response;
 }

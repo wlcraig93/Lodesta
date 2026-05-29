@@ -1,0 +1,12 @@
+$schema = "https://railway.com/railway.schema.json"
+
+[build]
+builder = "RAILPACK"
+buildCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browsers && npm run build"
+
+[deploy]
+startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run worker -- work"
+healthcheckPath = null
+restartPolicyType = "ALWAYS"
+restartPolicyMaxRetries = 10
+drainingSeconds = 30

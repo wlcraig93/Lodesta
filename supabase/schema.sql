@@ -174,6 +174,7 @@ create index domains_site_idx on domains(site_id);
 create index claims_site_idx on claims(site_id);
 create index claims_owner_email_idx on claims(owner_email);
 create index claims_owner_user_idx on claims(owner_user_id);
+create index claims_stripe_checkout_session_idx on claims(stripe_checkout_session_id);
 create index jobs_status_created_idx on jobs(status, created_at);
 
 create or replace function public.is_claimed_site_owner(target_site_id text)
@@ -187,6 +188,7 @@ as $$
     select 1
     from claims
     where claims.site_id = target_site_id
+      and claims.status = 'claimed'
       and (
         claims.owner_user_id = auth.uid()
         or lower(claims.owner_email) = lower(nullif(auth.jwt() ->> 'email', ''))

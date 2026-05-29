@@ -7,11 +7,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit --incremental false",
     "smoke": "bash scripts/smoke.sh",
     "smoke:dev": "bash scripts/smoke.sh --start-server",
     "cli": "node scripts/lodesta.mjs",
     "worker": "node --import tsx workers/runner.ts",
+    "verify:launch-boundaries": "node --import tsx scripts/verify-launch-boundaries.ts",
+    "verify:stripe-webhook": "node --import tsx scripts/verify-stripe-webhook.ts",
     "verify:supabase": "node --import tsx scripts/verify-supabase.ts"
   },
   "dependencies": {

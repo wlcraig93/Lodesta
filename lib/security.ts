@@ -25,7 +25,9 @@ export async function requireAdminOrSiteOwner(request: Request, siteId: string) 
 
   const claims = await repository.listClaims(siteId);
   const ownsSite = claims.some(
-    (claim) => (userId && claim.ownerUserId === userId) || (email && claim.ownerEmail?.toLowerCase() === email)
+    (claim) =>
+      claim.status === "claimed" &&
+      ((userId && claim.ownerUserId === userId) || (email && claim.ownerEmail?.toLowerCase() === email))
   );
   if (ownsSite) return null;
   return NextResponse.json({ error: "Site owner authorization required" }, { status: 403 });

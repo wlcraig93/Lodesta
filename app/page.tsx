@@ -9,12 +9,18 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const auth = await requireOwnerAccess("/");
   const [allBundles, claims] = await Promise.all([repository.listSiteBundles(), repository.listClaims()]);
+  const userId = auth.user?.id;
   const userEmail = auth.user?.email?.toLowerCase();
   const bundles = !auth.configured
     ? allBundles
-    : userEmail
+    : userId || userEmail
       ? allBundles.filter((bundle) =>
-          claims.some((claim) => claim.siteId === bundle.businessProfile.siteId && claim.ownerEmail?.toLowerCase() === userEmail)
+          claims.some(
+            (claim) =>
+              claim.siteId === bundle.businessProfile.siteId &&
+              claim.status === "claimed" &&
+              ((userId && claim.ownerUserId === userId) || (userEmail && claim.ownerEmail?.toLowerCase() === userEmail))
+          )
         )
       : [];
   const primaryBundle = bundles[0];

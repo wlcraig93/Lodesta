@@ -14,11 +14,16 @@ export async function requireOwnerAccess(nextPath: string) {
 export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: string) {
   const auth = await requireOwnerAccess(nextPath);
   if (!auth.configured) return auth;
+  const userId = auth.user?.id;
   const email = auth.user?.email?.toLowerCase();
-  if (!email) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
+  if (!userId && !email) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
 
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
-  const ownsSite = claims.some((claim) => claim.ownerEmail?.toLowerCase() === email);
+  const ownsSite = claims.some(
+    (claim) =>
+      claim.status === "claimed" &&
+      ((userId && claim.ownerUserId === userId) || (email && claim.ownerEmail?.toLowerCase() === email))
+  );
   if (!ownsSite) notFound();
   return auth;
 }

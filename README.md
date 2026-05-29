@@ -43,6 +43,13 @@ If a server is already running, use:
 npm run smoke
 ```
 
+To verify the local Stripe webhook signature and claim-completion logic without calling Stripe:
+
+```bash
+npm run verify:launch-boundaries
+npm run verify:stripe-webhook
+```
+
 Open:
 
 - `http://localhost:3000` for the operator dashboard
@@ -106,6 +113,7 @@ LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
 
 The CLI calls the same HTTP API as the app. It is intended for operator/admin workflows from Codex, Claude Code, or a terminal.
 If `LODESTA_ADMIN_TOKEN` is set on the server, set the same variable in the CLI environment; the CLI sends it as a bearer token.
+Local Node entry points (`npm run cli`, `npm run worker`, and verification scripts) automatically load `.env` and `.env.local` from the repository root. Shell-provided variables still take precedence.
 The batch-import job generates structured sites and tokenized previews for outbound lists. The monthly action-list job runs the Standard audit, analytics summary, lead count, QA checks, and experiment analysis through the same repository boundary used by the web app.
 
 ## Deployment Readiness
@@ -126,7 +134,7 @@ Minimum Railway web service environment:
 
 Optional launch integrations:
 
-- `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID` for checkout
+- `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` for checkout and claim completion
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
 - `RESEND_API_KEY` and `WORKFLOW_FROM_EMAIL` for lead notifications
 - `OPENAI_API_KEY` for future hosted AI generation calls
@@ -145,7 +153,7 @@ Recommended Railway services:
 - Keep public sites structured and multi-tenant instead of generating one app/codebase per customer.
 - Treat scraped photos/logos/copy as source references before claim. Generated previews use extracted facts, licensed/generated assets, and owner-granted uploads only.
 - Serve speculative previews from random repository-backed tokens, not slugs. Preview routes are noindex and default generated tokens expire after 30 days.
-- Keep unclaimed generated sites out of `sitemap.xml` and render their slug routes with `noindex`; tokenized previews are the pre-claim surface.
+- Keep unclaimed generated sites out of `sitemap.xml` and render their slug routes with `noindex`; only completed `claimed` sites are indexable, and tokenized previews are the pre-claim surface.
 - Custom domains resolve by host header through middleware: registered customer hostnames rewrite to the same structured `/sites/{slug}` renderer.
 
 ## Persistence Boundary
@@ -178,14 +186,16 @@ The verifier disables Stripe and Cloudflare calls by default so it only tests da
 
 Owner login uses Supabase magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, and configure Supabase redirect URLs to include `/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
 
-Operator/admin APIs are open in local development when `LODESTA_ADMIN_TOKEN` is blank. In deployed environments, set `LODESTA_ADMIN_TOKEN` to require bearer-token authorization for operator-only generation, jobs, site listing, preview token management, and cross-site exports. Owner-facing site APIs also accept the authenticated claim owner through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
+Operator/admin APIs are open in local development when `LODESTA_ADMIN_TOKEN` is blank. In deployed environments, set `LODESTA_ADMIN_TOKEN` to require bearer-token authorization for operator-only generation, jobs, site listing, preview token management, and cross-site exports. Owner-facing site APIs also accept the authenticated owner of a completed `claimed` site through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email after Stripe completion. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
 
 ## Billing And Domains
 
 Claim checkout uses Stripe only when both `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID` are set. Without those variables, the claim API returns an explicit unconfigured checkout object so local demos can continue without live billing.
+Set Stripe's webhook endpoint to `https://YOUR_APP_URL/api/stripe/webhook` and configure `STRIPE_WEBHOOK_SECRET`. The webhook handles `checkout.session.completed` and marks the claim as `claimed`, persisting the Stripe customer, subscription, and checkout session ids.
+Use `npm run verify:stripe-webhook` for local signature/claim-completion verification before testing a live Stripe webhook.
 Verified facts selected during claim update the site's `BusinessProfile.provenance` as owner-confirmed fields, which keeps later schema, optimization, and presence-sync decisions gated on explicit confirmation.
 
-Custom-domain registration uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`.
+Custom-domain registration uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Host-header domain resolution serves only completed `claimed` sites, so pending checkout records do not expose customer domains.
 
 Set `LODESTA_PLATFORM_HOSTS` to a comma-separated list of app/dashboard hostnames that should not be treated as customer domains. `localhost`, `127.0.0.1`, Railway hostnames, and `NEXT_PUBLIC_APP_URL` are already treated as platform hosts.
 

@@ -1,3 +1,5 @@
+import "./load-env";
+
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
 

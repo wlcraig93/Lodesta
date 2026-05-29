@@ -1,3 +1,5 @@
+import "../scripts/load-env";
+
 import { createSiteFromInput } from "../lib/intake";
 import { repository } from "../lib/repository";
 import { runAudit } from "../lib/audit";

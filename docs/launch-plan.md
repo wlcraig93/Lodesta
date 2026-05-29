@@ -93,7 +93,7 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
    - Claim requires terms, management authority, and fact verification.
    - Claims store the authenticated Supabase user id when available plus owner email, so later owner access can be authorized through Supabase Auth rather than an operator token.
    - Verified claim facts update canonical provenance.
-   - Stripe checkout is used when configured.
+   - Stripe checkout is used when configured; `checkout.session.completed` webhooks mark claims as paid/claimed.
    - Cloudflare for SaaS custom hostname registration persists DNS/verification instructions.
 
 11. CLI and Workers

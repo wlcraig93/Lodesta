@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
+import { isIndexableSite } from "@/lib/site-publication";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,6 +13,8 @@ export async function GET(request: Request) {
 
   const bundle = await repository.getSiteBundle(domain.siteId);
   if (!bundle) return NextResponse.json({ resolved: false }, { status: 404 });
+  const claims = await repository.listClaims(domain.siteId);
+  if (!isIndexableSite(bundle, claims)) return NextResponse.json({ resolved: false }, { status: 403 });
 
   return NextResponse.json({
     resolved: true,

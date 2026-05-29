@@ -1,3 +1,5 @@
+import "./load-env.mjs";
+
 const baseUrl = (process.env.LODESTA_API_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:4330").replace(
   /\/$/,
   ""

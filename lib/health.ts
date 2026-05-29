@@ -99,7 +99,11 @@ function checkSupabaseAuthConfig(): HealthCheck {
 function checkStripeConfig(): HealthCheck {
   const hasSecret = Boolean(process.env.STRIPE_SECRET_KEY);
   const hasPrice = Boolean(process.env.STRIPE_PRICE_ID);
-  if (hasSecret && hasPrice) return ok("stripe", "Stripe", "Stripe checkout is configured.");
+  const hasWebhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
+  if (hasSecret && hasPrice && hasWebhook) return ok("stripe", "Stripe", "Stripe checkout and webhook completion are configured.");
+  if (hasSecret && hasPrice && !hasWebhook) {
+    return error("stripe", "Stripe", "Stripe checkout is configured but STRIPE_WEBHOOK_SECRET is missing, so paid claims will not auto-complete.");
+  }
   if (!hasSecret && !hasPrice) return warning("stripe", "Stripe", "Stripe checkout is not configured; claims will return local fallback checkout.");
   return error("stripe", "Stripe", "Stripe is partially configured; set both STRIPE_SECRET_KEY and STRIPE_PRICE_ID.");
 }

@@ -79,7 +79,7 @@ export const config = {
 };
 
 function domainResolveOrigin(request: NextRequest) {
-  const configuredOrigin = process.env.LODESTA_INTERNAL_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL;
   if (configuredOrigin) {
     try {
       return new URL(configuredOrigin).origin;

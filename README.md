@@ -148,7 +148,6 @@ Optional launch integrations:
 
 - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` for checkout and claim completion
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
-- `LODESTA_INTERNAL_APP_URL` when middleware should call domain-resolution APIs through an internal/platform origin instead of the incoming customer host
 - `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true` only for controlled local testing against localhost/private targets; leave unset or `false` in deployed environments
 - `LODESTA_RENDER_BROWSER_REQUIRED=true` for launch environments where screenshot capture must be treated as a readiness requirement
 - Optional `LODESTA_BROWSER_EXECUTABLE_PATH`, `LODESTA_RENDER_BROWSER_ARGS`, and `LODESTA_RENDER_ARTIFACT_ROOT` for Playwright/Chromium render inspection
@@ -233,7 +232,7 @@ Publishing through `/api/sites/publish` or `/api/sites/versions` is blocked unti
 
 Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution serves only completed `claimed` sites, so pending checkout records do not expose customer domains.
 
-Set `LODESTA_PLATFORM_HOSTS` to a comma-separated list of app/dashboard hostnames that should not be treated as customer domains. `localhost`, `127.0.0.1`, Railway hostnames, and `NEXT_PUBLIC_APP_URL` are already treated as platform hosts. Set `LODESTA_INTERNAL_APP_URL` to the Railway/platform origin when custom-domain middleware should resolve registered hostnames without fetching the customer hostname itself.
+Set `LODESTA_PLATFORM_HOSTS` to a comma-separated list of app/dashboard hostnames that should not be treated as customer domains. `localhost`, `127.0.0.1`, Railway hostnames, and `NEXT_PUBLIC_APP_URL` are already treated as platform hosts.
 
 ## Lead Workflows
 

@@ -22,12 +22,14 @@ assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm 
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
 
+assert(!webConfig.includes("$schema"), "Web Railway config must not include a $schema key; Railway rejects it as invalid TOML.");
 assertIncludes(webConfig, 'builder = "RAILPACK"', "Web Railway config must use Railpack.");
 assertIncludes(webConfig, "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browsers && npm run build", "Web build must install Chromium into the image.");
 assertIncludes(webConfig, 'startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"', "Web service must start Next.js.");
 assertIncludes(webConfig, 'healthcheckPath = "/api/health"', "Web service must use the public health endpoint.");
 assertIncludes(webConfig, 'restartPolicyType = "ON_FAILURE"', "Web service should restart on failure.");
 
+assert(!workerConfig.includes("$schema"), "Worker Railway config must not include a $schema key; Railway rejects it as invalid TOML.");
 assertIncludes(workerConfig, 'builder = "RAILPACK"', "Worker Railway config must use Railpack.");
 assertIncludes(workerConfig, "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browsers && npm run build", "Worker build must install Chromium into the image.");
 assertIncludes(workerConfig, 'startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run worker -- work"', "Worker service must run the long-lived worker loop.");

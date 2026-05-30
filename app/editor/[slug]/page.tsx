@@ -7,6 +7,7 @@ import { SectionEditorForm, type EditableField } from "@/components/SectionEdito
 import { getEditingVersion } from "@/lib/sample-data";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { runSiteQa } from "@/lib/qa";
 import { approvedVariantsForSection } from "@/lib/section-variants";
 import { claimGateForBundle } from "@/lib/site-publication";
 import type { ThemePresetId } from "@/lib/theme-presets";
@@ -27,12 +28,24 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
     .map((section) => ({ section, fields: editableFields(section, bundle.businessProfile) }))
     .filter((item) => item.fields.length > 0);
   const siteId = bundle.businessProfile.siteId;
-  const [summary, leads, claims] = await Promise.all([
+  const [summary, leads, claims, domains] = await Promise.all([
     repository.analyticsSummary(siteId),
     repository.listFormSubmissions(siteId),
-    repository.listClaims(siteId)
+    repository.listClaims(siteId),
+    repository.listDomains(siteId)
   ]);
   const claimGate = claimGateForBundle(bundle, claims);
+  const qa = runSiteQa(bundle, { versionStatus: "draft" });
+  const readiness = ownerReadinessItems({
+    slug: bundle.siteModel.slug,
+    claimReady: claimGate.ok,
+    claimReason: claimGate.ok ? undefined : claimGate.reason,
+    qaPassed: qa.passed,
+    qaFailures: qa.checks.filter((check) => check.severity === "fail").length,
+    formCount: bundle.extensionModel.forms.length,
+    domainCount: domains.filter((domain) => domain.status === "active").length,
+    openFindings: bundle.optimizationFindings.filter((finding) => finding.status === "open").length
+  });
 
   return (
     <main className="admin-page">
@@ -137,6 +150,22 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
             publishDisabledReason={claimGate.ok ? undefined : claimGate.reason}
           />
 
+          <h2>Owner readiness</h2>
+          <div className="finding-list">
+            {readiness.map((item) => (
+              <article key={item.label} className="finding-card">
+                <div className="button-row">
+                  <span className="badge">{item.status}</span>
+                  <Link className="button secondary" href={item.href}>
+                    Open
+                  </Link>
+                </div>
+                <h3>{item.label}</h3>
+                <p>{item.detail}</p>
+              </article>
+            ))}
+          </div>
+
           <h2>Guardrails</h2>
           <p>System-only and pinned fields cannot be edited here. Owner-truth copy is saved to draft before publish.</p>
           <h2>Action List</h2>
@@ -158,6 +187,50 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
 function presetFromMood(mood: string): ThemePresetId {
   if (mood === "premium" || mood === "bold" || mood === "clinical" || mood === "warm") return mood;
   return "warm";
+}
+
+function ownerReadinessItems(input: {
+  slug: string;
+  claimReady: boolean;
+  claimReason?: string;
+  qaPassed: boolean;
+  qaFailures: number;
+  formCount: number;
+  domainCount: number;
+  openFindings: number;
+}) {
+  return [
+    {
+      label: "Claim",
+      status: input.claimReady ? "ready" : "needs review",
+      href: `/claim/${input.slug}`,
+      detail: input.claimReady ? "Owner facts and management acceptance are ready for publish." : input.claimReason ?? "Claim facts need confirmation."
+    },
+    {
+      label: "Draft QA",
+      status: input.qaPassed ? "pass" : `${input.qaFailures} fail`,
+      href: `/versions/${input.slug}`,
+      detail: input.qaPassed ? "The current draft passes the Standard checks needed before publish." : "Resolve failing checks before confirming publish."
+    },
+    {
+      label: "Lead Capture",
+      status: input.formCount ? "ready" : "missing",
+      href: `/leads/${input.slug}`,
+      detail: input.formCount ? `${input.formCount} managed form${input.formCount === 1 ? "" : "s"} configured.` : "Add a managed form before using the site as a lead endpoint."
+    },
+    {
+      label: "Domain",
+      status: input.domainCount ? "active" : "pending",
+      href: `/domains/${input.slug}`,
+      detail: input.domainCount ? `${input.domainCount} active domain route${input.domainCount === 1 ? "" : "s"} configured.` : "Register or verify a custom domain when the owner is ready."
+    },
+    {
+      label: "Action List",
+      status: input.openFindings ? `${input.openFindings} open` : "clear",
+      href: `/optimization/${input.slug}`,
+      detail: input.openFindings ? "Review safe recommendations before publishing the next draft." : "No open recommendations are waiting."
+    }
+  ];
 }
 
 function editableFields(section: SectionModel, business: BusinessProfile): EditableField[] {

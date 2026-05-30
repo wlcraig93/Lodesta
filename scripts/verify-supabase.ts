@@ -3,6 +3,7 @@ import "./load-env";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
 import { requiredClaimFactIds } from "../lib/fact-verification";
+import { ASSET_BUCKET_NAME, imageMimeTypeMatchesBytes, storeAssetBytes } from "../lib/asset-storage";
 
 type CheckResult = {
   name: string;
@@ -13,6 +14,7 @@ type CheckResult = {
 const args = new Set(process.argv.slice(2));
 const keep = args.has("--keep");
 const liveIntegrations = args.has("--live-integrations");
+const storageOnly = args.has("--storage-only");
 const runId = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 17)}${crypto.randomUUID().slice(0, 8)}`;
 const prompt = [
   `Build a website for Lodesta Verify ${runId}.`,
@@ -28,10 +30,13 @@ if (!liveIntegrations) {
   process.env.CLOUDFLARE_API_TOKEN = "";
   process.env.CLOUDFLARE_ZONE_ID = "";
 }
+process.env.LODESTA_REPOSITORY = "supabase";
 
 const checks: CheckResult[] = [];
 let createdSiteId: string | undefined;
-let createdJobId: string | undefined;
+const createdJobIds = new Set<string>();
+let createdCampaignId: string | undefined;
+let uploadedStoragePath: string | undefined;
 
 async function main() {
   requireEnv("SUPABASE_URL");
@@ -40,6 +45,11 @@ async function main() {
   const supabase = getSupabaseAdminClient();
   await requireSupabase(supabase.from("sites").select("id", { count: "exact", head: true }), "Connect to Supabase");
   checks.push({ name: "connect", ok: true, detail: "Supabase service-role client can query the schema." });
+  await verifyAssetStorage(supabase);
+  if (storageOnly) {
+    process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
+    return;
+  }
 
   const bundle = await supabaseRepository.createAndStoreSite({ prompt });
   createdSiteId = bundle.businessProfile.siteId;
@@ -59,6 +69,31 @@ async function main() {
   assert(bySlug?.businessProfile.siteId === createdSiteId, "Persisted site could not be loaded by slug.");
   checks.push({ name: "load_by_slug", ok: true, detail: "Loaded persisted site by slug." });
 
+  const ownerAssets = await supabaseRepository.updateOwnerAssets({
+    siteId: createdSiteId,
+    rightsAccepted: true,
+    logo: {
+      url: `https://assets.example/verify-${runId}-logo.png`,
+      alt: "Lodesta verification logo"
+    },
+    photos: [
+      {
+        url: `https://assets.example/verify-${runId}-truck.webp`,
+        alt: "Lodesta verification service truck"
+      }
+    ]
+  });
+  assert(ownerAssets?.ok, "Owner-approved assets were not accepted.");
+  const assetReload = await supabaseRepository.getSiteBundle(createdSiteId);
+  assert(assetReload?.businessProfile.logo?.rightsStatus === "customer_granted", "Owner logo did not persist.");
+  assert(
+    assetReload.presenceAssessment.assetInventory?.some(
+      (asset) => asset.ownerApproved && asset.usageScope === "published_site" && asset.rightsStatus === "customer_granted"
+    ),
+    "Owner-approved site assets did not persist to the asset registry."
+  );
+  checks.push({ name: "owner_assets", ok: true, detail: `Persisted ${ownerAssets.assets.length} owner-approved asset(s).` });
+
   const preview = await supabaseRepository.createPreviewToken({
     siteId: createdSiteId,
     expiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString()
@@ -66,11 +101,34 @@ async function main() {
   assert(preview?.token, "Preview token was not created.");
   const resolvedPreview = await supabaseRepository.resolvePreviewToken(preview.token);
   assert(resolvedPreview?.bundle.businessProfile.siteId === createdSiteId, "Preview token did not resolve to the created site.");
-  checks.push({ name: "preview_token", ok: true, detail: `Created and resolved ${preview.token}.` });
+  const expiredPreview = await supabaseRepository.createPreviewToken({
+    siteId: createdSiteId,
+    expiresAt: new Date(Date.now() - 1000 * 60).toISOString()
+  });
+  assert(expiredPreview?.token, "Expired preview token probe was not created.");
+  assert(
+    (await supabaseRepository.resolvePreviewToken(expiredPreview.token)) === null,
+    "Expired Supabase preview tokens must not resolve."
+  );
+  checks.push({ name: "preview_token", ok: true, detail: `Created active ${preview.token} and rejected an expired preview token.` });
 
   const findings = await supabaseRepository.runAndStoreAudit(createdSiteId);
   assert(Array.isArray(findings), "Audit did not return findings.");
   checks.push({ name: "audit", ok: true, detail: `Stored ${findings.length} finding(s).` });
+
+  const sourceVersionId = loaded.siteModel.versions[0]?.id;
+  assert(sourceVersionId, "No version is available to restore.");
+  const restored = await supabaseRepository.restoreVersionToDraft({
+    siteId: createdSiteId,
+    versionId: sourceVersionId
+  });
+  assert(restored?.ok, "Version restore did not create a draft.");
+  const restoredReload = await supabaseRepository.getSiteBundle(createdSiteId);
+  assert(
+    restoredReload?.siteModel.versions.some((version) => version.id === restored.draftVersionId && version.status === "draft"),
+    "Restored draft version did not persist."
+  );
+  checks.push({ name: "version_restore", ok: true, detail: `Restored ${sourceVersionId} into draft ${restored.draftVersionId}.` });
 
   await supabaseRepository.recordAnalyticsEvent({
     siteId: createdSiteId,
@@ -96,14 +154,31 @@ async function main() {
     timestamp: "2020-01-01T00:00:00.000Z",
     metadata: { runId }
   });
+  await supabaseRepository.recordAnalyticsEvent({
+    siteId: createdSiteId,
+    sessionId: `verify_agent_${runId}`,
+    pageId: "page_home",
+    eventType: "agent_readable_request",
+    timestamp: new Date().toISOString(),
+    metadata: {
+      resource: "llms.txt",
+      path: "/llms.txt",
+      runId
+    }
+  });
   const analytics = await supabaseRepository.analyticsSummary(createdSiteId);
   assert(analytics.sessions >= 1, "Analytics summary did not include the recorded session.");
+  assert(analytics.agentReadableRequests >= 1, "Agent-readable analytics did not include the recorded request.");
   const prunedAnalytics = await supabaseRepository.pruneAnalyticsEvents({
     siteId: createdSiteId,
     before: "2021-01-01T00:00:00.000Z"
   });
   assert(prunedAnalytics.deleted >= 1, "Analytics retention prune did not delete the old verification event.");
-  checks.push({ name: "analytics", ok: true, detail: `Analytics summary has ${analytics.sessions} session(s); pruned ${prunedAnalytics.deleted} old event(s).` });
+  checks.push({
+    name: "analytics",
+    ok: true,
+    detail: `Analytics summary has ${analytics.sessions} session(s) and ${analytics.agentReadableRequests} agent-readable request(s); pruned ${prunedAnalytics.deleted} old event(s).`
+  });
 
   const forms = await supabaseRepository.getForms(createdSiteId);
   const form = forms[0];
@@ -126,7 +201,24 @@ async function main() {
   });
   const leads = await supabaseRepository.listFormSubmissions(createdSiteId);
   assert(leads.some((candidate) => candidate.id === lead.id), "Lead submission was not persisted.");
-  checks.push({ name: "lead", ok: true, detail: `Recorded lead ${lead.id}.` });
+  const reviewedLead = await supabaseRepository.updateLeadStatus({
+    siteId: createdSiteId,
+    submissionId: lead.id,
+    status: "reviewed"
+  });
+  assert(reviewedLead?.status === "reviewed", "Lead status update did not persist.");
+  const delivery = await supabaseRepository.recordWorkflowDelivery({
+    siteId: createdSiteId,
+    workflowId: "verify_workflow_email",
+    submissionId: lead.id,
+    destination: "email",
+    target: `owner-${runId}@example.com`,
+    status: "skipped",
+    message: "Verification delivery recorded without sending external email."
+  });
+  const deliveries = await supabaseRepository.listWorkflowDeliveries(createdSiteId);
+  assert(deliveries.some((candidate) => candidate.id === delivery.id), "Workflow delivery was not persisted.");
+  checks.push({ name: "lead", ok: true, detail: `Recorded lead ${lead.id}, marked it reviewed, and stored delivery ${delivery.id}.` });
 
   const draftAssignment = await supabaseRepository.assignExperiment({
     siteId: createdSiteId,
@@ -184,7 +276,54 @@ async function main() {
     acceptedManagement: true
   });
   assert(claim?.ownerEmail === `owner-${runId}@example.com`, "Claim was not persisted with the expected owner email.");
-  checks.push({ name: "claim", ok: true, detail: `Created claim ${claim.id}; checkout configured=${claim.checkout.configured}.` });
+  const expectedCheckoutSessionId = claim.stripeCheckoutSessionId ?? `cs_verify_${runId}`;
+  if (!claim.stripeCheckoutSessionId) {
+    await requireSupabase(
+      supabase.from("claims").update({ stripe_checkout_session_id: expectedCheckoutSessionId }).eq("id", claim.id),
+      "Seed checkout session"
+    );
+  }
+  const duplicateCheckoutClaimId = `verify_duplicate_checkout_${runId}`;
+  const duplicateCheckout = await supabase.from("claims").insert({
+    id: duplicateCheckoutClaimId,
+    site_id: createdSiteId,
+    owner_email: `duplicate-${runId}@example.com`,
+    status: "checkout_required",
+    stripe_checkout_session_id: expectedCheckoutSessionId,
+    fact_verification: { verifier: "duplicate_checkout_session" }
+  });
+  if (!duplicateCheckout.error) {
+    await requireSupabase(supabase.from("claims").delete().eq("id", duplicateCheckoutClaimId), "Cleanup duplicate checkout claim");
+    throw new Error("Supabase schema accepted a duplicate Stripe checkout session id.");
+  }
+  const mismatchedClaim = await supabaseRepository.completeClaimCheckout({
+    claimId: claim.id,
+    siteId: createdSiteId,
+    checkoutSessionId: `cs_wrong_${runId}`,
+    stripeCustomerId: `cus_wrong_${runId}`,
+    stripeSubscriptionId: `sub_wrong_${runId}`,
+    completedAt: new Date().toISOString()
+  });
+  assert(mismatchedClaim === null, "Claim checkout completion accepted a mismatched Stripe checkout session.");
+  const wrongSiteClaim = await supabaseRepository.completeClaimCheckout({
+    claimId: claim.id,
+    siteId: `site_wrong_${runId}`,
+    checkoutSessionId: expectedCheckoutSessionId,
+    stripeCustomerId: `cus_wrong_site_${runId}`,
+    stripeSubscriptionId: `sub_wrong_site_${runId}`,
+    completedAt: new Date().toISOString()
+  });
+  assert(wrongSiteClaim === null, "Claim checkout completion accepted mismatched site metadata.");
+  const completedClaim = await supabaseRepository.completeClaimCheckout({
+    claimId: claim.id,
+    siteId: createdSiteId,
+    checkoutSessionId: expectedCheckoutSessionId,
+    stripeCustomerId: `cus_verify_${runId}`,
+    stripeSubscriptionId: `sub_verify_${runId}`,
+    completedAt: new Date().toISOString()
+  });
+  assert(completedClaim?.status === "claimed", "Claim checkout completion did not persist.");
+  checks.push({ name: "claim", ok: true, detail: `Created and completed claim ${claim.id}; checkout configured=${claim.checkout.configured}.` });
 
   const domain = await supabaseRepository.registerDomain({
     siteId: createdSiteId,
@@ -192,10 +331,47 @@ async function main() {
     provider: "cloudflare_for_saas"
   });
   assert(domain?.hostname === `verify-${runId}.example.com`, "Domain registration did not persist.");
-  checks.push({ name: "domain", ok: true, detail: `Registered fallback domain ${domain.hostname}.` });
+  const domainByHostname = await supabaseRepository.getDomainByHostname(domain.hostname);
+  assert(domainByHostname?.id === domain.id, "Domain lookup by hostname did not return the registered domain.");
+  const refreshedDomain = await supabaseRepository.refreshDomain({ domainId: domain.id });
+  assert(refreshedDomain?.id === domain.id, "Domain refresh did not return the registered domain.");
+  checks.push({ name: "domain", ok: true, detail: `Registered, looked up, and refreshed domain ${domain.hostname}.` });
+
+  const campaign = await supabaseRepository.createOutboundCampaign({
+    name: `Supabase verification ${runId}`,
+    status: "running",
+    channel: "direct_mail",
+    metadata: { plannedRecipients: 1 }
+  });
+  createdCampaignId = campaign.id;
+  const prospect = await supabaseRepository.upsertOutboundProspect({
+    campaignId: campaign.id,
+    siteId: createdSiteId,
+    businessName: bundle.businessProfile.name,
+    vertical: "home_services",
+    previewToken: preview.token,
+    mailingCode: `VERIFY-${runId.slice(-6)}`
+  });
+  await supabaseRepository.recordOutboundEvent({
+    campaignId: campaign.id,
+    prospectId: prospect.id,
+    siteId: createdSiteId,
+    type: "preview_viewed",
+    value: 1
+  });
+  await supabaseRepository.recordOutboundEvent({
+    campaignId: campaign.id,
+    prospectId: prospect.id,
+    siteId: createdSiteId,
+    type: "claim_completed",
+    value: 1
+  });
+  const outbound = await supabaseRepository.outboundSummary(campaign.id);
+  assert(outbound.mailerToPreviewRate >= 1 && outbound.mailerToClaimRate >= 1, "Outbound summary did not include verification events.");
+  checks.push({ name: "outbound", ok: true, detail: `Recorded outbound campaign ${campaign.id} with prospect ${prospect.id}.` });
 
   const job = await supabaseRepository.enqueueJob("monthly_action_list", { siteId: createdSiteId });
-  createdJobId = job.id;
+  createdJobIds.add(job.id);
   assert(job.maxAttempts >= 1 && Boolean(job.runAfter), "Queued job did not include retry/backoff metadata.");
   const processed = await supabaseRepository.processNextJob();
   assert(
@@ -203,6 +379,34 @@ async function main() {
     "Queued job did not complete and release its worker lock."
   );
   checks.push({ name: "job", ok: true, detail: `Processed monthly action-list job ${job.id}.` });
+
+  const staleJobId = `verify_stale_${runId}`;
+  createdJobIds.add(staleJobId);
+  const staleLockedAt = new Date(Date.now() - 1000 * 60 * 60).toISOString();
+  await requireSupabase(
+    supabase.from("jobs").insert({
+      id: staleJobId,
+      kind: "monthly_action_list",
+      status: "running",
+      payload: { siteId: createdSiteId, verifier: "stale_exhausted_job" },
+      attempts: 1,
+      max_attempts: 1,
+      run_after: staleLockedAt,
+      locked_by: `verify-stale-${runId}`,
+      locked_at: staleLockedAt,
+      started_at: staleLockedAt,
+      created_at: staleLockedAt,
+      updated_at: staleLockedAt
+    }),
+    "Insert stale exhausted job"
+  );
+  await supabaseRepository.processNextJob();
+  const staleJob = await supabaseRepository.getJob(staleJobId);
+  assert(
+    staleJob?.status === "failed" && !staleJob.lockedBy && !staleJob.lockedAt && staleJob.error?.includes("Job lock expired"),
+    "Stale exhausted running job was not failed and unlocked by claim_next_job."
+  );
+  checks.push({ name: "stale_job", ok: true, detail: `Failed and unlocked stale exhausted job ${staleJobId}.` });
 
   if (!keep) {
     await cleanup(supabase);
@@ -213,12 +417,59 @@ async function main() {
 }
 
 async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  await cleanupStorageProbe(supabase);
+  if (createdCampaignId) {
+    await requireSupabase(supabase.from("outbound_campaigns").delete().eq("id", createdCampaignId), "Cleanup outbound campaign");
+  }
   if (createdSiteId) {
     await requireSupabase(supabase.from("sites").delete().eq("id", createdSiteId), "Cleanup site");
   }
-  if (createdJobId) {
-    await requireSupabase(supabase.from("jobs").delete().eq("id", createdJobId), "Cleanup job");
+  if (createdJobIds.size) {
+    await requireSupabase(supabase.from("jobs").delete().in("id", Array.from(createdJobIds)), "Cleanup jobs");
   }
+}
+
+async function verifyAssetStorage(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  const probeBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mP8z8AABQMBgGIY4YAAAAAASUVORK5CYII=",
+    "base64"
+  );
+  assert(imageMimeTypeMatchesBytes("image/png", probeBytes), "Asset storage probe PNG fixture is invalid.");
+  const stored = await storeAssetBytes({
+    siteId: `verify-assets-${runId}`,
+    assetId: `probe-${runId}`,
+    bytes: probeBytes,
+    mimeType: "image/png",
+    publicUrl: false
+  });
+  uploadedStoragePath = stored.storagePath;
+
+  try {
+    assert(stored.provider === "supabase", `Asset storage probe used ${stored.provider} storage instead of Supabase.`);
+    assert(stored.bytes === probeBytes.byteLength, "Asset storage probe reported the wrong byte count.");
+
+    const { data, error } = await supabase.storage.from(ASSET_BUCKET_NAME).download(stored.storagePath);
+    if (error || !data) {
+      throw new Error(`Download asset storage probe: ${error?.message ?? "no object returned"}`);
+    }
+    const downloaded = Buffer.from(await data.arrayBuffer());
+    assert(downloaded.equals(probeBytes), "Downloaded asset storage probe bytes did not match the upload.");
+
+    checks.push({
+      name: "asset_storage",
+      ok: true,
+      detail: `Uploaded, downloaded, and removed a probe image from ${ASSET_BUCKET_NAME}/${stored.storagePath}.`
+    });
+  } finally {
+    await cleanupStorageProbe(supabase);
+  }
+}
+
+async function cleanupStorageProbe(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  if (!uploadedStoragePath) return;
+  const storagePath = uploadedStoragePath;
+  await requireSupabase(supabase.storage.from(ASSET_BUCKET_NAME).remove([storagePath]), "Cleanup asset storage probe");
+  uploadedStoragePath = undefined;
 }
 
 function requireEnv(name: string) {
@@ -239,7 +490,9 @@ function assert(condition: unknown, message: string): asserts condition {
 
 main().catch(async (error) => {
   try {
-    if (!keep) await cleanup(getSupabaseAdminClient());
+    const supabase = getSupabaseAdminClient();
+    await cleanupStorageProbe(supabase);
+    if (!keep) await cleanup(supabase);
   } catch {
     // Keep the original failure visible.
   }

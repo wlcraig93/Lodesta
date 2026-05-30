@@ -46,7 +46,9 @@ export function sanitizeAnalyticsMetadata(metadata: AnalyticsEvent["metadata"]) 
 
 export function sanitizeAttributionUrl(value: string | undefined) {
   if (!value) return undefined;
-  const sanitized = sanitizeUrlValue(value);
+  const trimmed = value.trim();
+  if (!isAttributionUrlCandidate(trimmed)) return undefined;
+  const sanitized = sanitizeUrlValue(trimmed);
   return typeof sanitized === "string" && sanitized ? sanitized : undefined;
 }
 
@@ -68,6 +70,7 @@ function sanitizeUrlValue(value: string) {
     const base = "https://lodesta.local";
     const url = new URL(trimmed, base);
     if (!["http:", "https:"].includes(url.protocol)) return undefined;
+    if (url.username || url.password || looksLikeSensitivePath(url.pathname)) return undefined;
     const keptParams = new URLSearchParams();
     for (const [key, paramValue] of url.searchParams.entries()) {
       if (isAllowedAttributionParam(key) && !looksLikeSensitiveValue(paramValue)) keptParams.append(key, paramValue.slice(0, 160));
@@ -76,7 +79,19 @@ function sanitizeUrlValue(value: string) {
     const path = `${url.pathname}${query ? `?${query}` : ""}`;
     return trimmed.startsWith("/") ? path : `${url.origin}${path}`;
   } catch {
-    return trimmed.split("?")[0].slice(0, 500);
+    return undefined;
+  }
+}
+
+function isAttributionUrlCandidate(value: string) {
+  return /^https?:\/\//i.test(value) || (value.startsWith("/") && !value.startsWith("//"));
+}
+
+function looksLikeSensitivePath(value: string) {
+  try {
+    return looksLikeSensitiveValue(decodeURIComponent(value));
+  } catch {
+    return looksLikeSensitiveValue(value);
   }
 }
 

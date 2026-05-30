@@ -40,7 +40,8 @@ export async function POST(request: Request) {
       findingId: finding.id,
       title: finding.title,
       applied: Boolean(result?.ok),
-      reason: result && !result.ok ? result.reason : undefined
+      reason: result && !result.ok ? result.reason : undefined,
+      changeSummary: result?.ok ? result.changeSummary : undefined
     });
   }
 

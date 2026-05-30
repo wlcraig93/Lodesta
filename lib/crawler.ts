@@ -21,11 +21,39 @@ export type CrawlAssessment = {
   externalLinkCount: number;
   jsonLdTypes: string[];
   extractedFacts: ExtractedBusinessFacts;
+  formReferences: CrawlFormReference[];
+  linkReferences: CrawlLinkReference[];
   assetReferences: CrawlAssetReference[];
   sampledInternalPages: string[];
+  pageSummaries: CrawlPageSummary[];
   score: CrawlQualityScore;
   findings: string[];
   error?: string;
+};
+
+export type CrawlPageSummary = {
+  url: string;
+  source: "primary" | "sampled_internal";
+  title?: string;
+  metaDescription?: string;
+  canonical?: string;
+  hasViewportMeta: boolean;
+  hasLocalBusinessSchema: boolean;
+  hasTelLink: boolean;
+  formCount: number;
+  imageCount: number;
+  imagesWithoutAlt: number;
+  internalLinkCount: number;
+  externalLinkCount: number;
+  jsonLdTypes: string[];
+  extractedFacts: ExtractedBusinessFacts;
+  formReferences: CrawlFormReference[];
+  linkReferences: CrawlLinkReference[];
+  assetReferences: CrawlAssetReference[];
+};
+
+export type CrawlUrlOptions = {
+  maxInternalPages?: number;
 };
 
 export type ExtractedBusinessFacts = {
@@ -66,6 +94,23 @@ export type CrawlAssetReference = {
   rightsStatus: "reference_only";
 };
 
+export type CrawlFormReference = {
+  action?: string;
+  method: "get" | "post" | "dialog" | "unknown";
+  fieldNames: string[];
+  fieldTypes: string[];
+  requiredFields: string[];
+  hasEmailField: boolean;
+  hasPhoneField: boolean;
+  hasTextarea: boolean;
+};
+
+export type CrawlLinkReference = {
+  href: string;
+  text?: string;
+  kind: "internal" | "external" | "tel" | "mailto" | "booking" | "ordering" | "social" | "press_video";
+};
+
 export type CrawlQualityScore = {
   overall: number;
   max: number;
@@ -85,7 +130,7 @@ export type CrawlQualityCheck = {
   consequence: string;
 };
 
-export async function crawlUrl(url: string): Promise<CrawlAssessment> {
+export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Promise<CrawlAssessment> {
   const assessment: CrawlAssessment = {
     url,
     fetched: false,
@@ -101,8 +146,11 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
     externalLinkCount: 0,
     jsonLdTypes: [],
     extractedFacts: emptyExtractedFacts(),
+    formReferences: [],
+    linkReferences: [],
     assetReferences: [],
     sampledInternalPages: [],
+    pageSummaries: [],
     score: emptyScore(),
     findings: []
   };
@@ -120,42 +168,47 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
   }
 
   const safeUrl = urlSafety.url;
-  const base = new URL(safeUrl);
+  const maxInternalPages = clampInteger(options.maxInternalPages ?? 3, 0, 8);
 
   try {
     const response = await fetchWithPresenceHeaders(safeUrl);
     const html = await response.text();
+    const finalUrl = response.url || safeUrl;
+    const primarySummary = summarizeCrawlPage(html, finalUrl, "primary");
+
     assessment.fetched = true;
     assessment.status = response.status;
-    assessment.finalUrl = response.url;
-    assessment.title = extractTagContent(html, "title");
-    assessment.metaDescription = extractMetaContent(html, "description");
-    assessment.canonical = extractLinkHref(html, "canonical");
-    assessment.hasViewportMeta = /<meta[^>]+name=["']viewport["'][^>]*>/i.test(html);
-    assessment.hasLocalBusinessSchema = /LocalBusiness|Restaurant|Dentist|LegalService|HomeAndConstructionBusiness/i.test(html);
-    assessment.hasTelLink = /href=["']tel:/i.test(html);
-    assessment.formCount = countMatches(html, /<form\b/gi);
-    assessment.imageCount = countMatches(html, /<img\b/gi);
-    assessment.imagesWithoutAlt = countImagesWithoutAlt(html);
-    assessment.jsonLdTypes = extractJsonLdTypes(html);
-    assessment.extractedFacts = extractBusinessFacts(html, assessment, base);
-    assessment.assetReferences = extractAssetReferences(html, assessment.finalUrl ?? safeUrl).slice(0, 12);
+    assessment.finalUrl = finalUrl;
+    assessment.title = primarySummary.title;
+    assessment.metaDescription = primarySummary.metaDescription;
+    assessment.canonical = primarySummary.canonical;
+    assessment.hasViewportMeta = primarySummary.hasViewportMeta;
+    assessment.hasLocalBusinessSchema = primarySummary.hasLocalBusinessSchema;
+    assessment.hasTelLink = primarySummary.hasTelLink;
+    assessment.formCount = primarySummary.formCount;
+    assessment.imageCount = primarySummary.imageCount;
+    assessment.imagesWithoutAlt = primarySummary.imagesWithoutAlt;
+    assessment.internalLinkCount = primarySummary.internalLinkCount;
+    assessment.externalLinkCount = primarySummary.externalLinkCount;
+    assessment.jsonLdTypes = primarySummary.jsonLdTypes;
+    assessment.extractedFacts = primarySummary.extractedFacts;
+    assessment.formReferences = primarySummary.formReferences.slice(0, 12);
+    assessment.linkReferences = primarySummary.linkReferences.slice(0, 40);
+    assessment.assetReferences = primarySummary.assetReferences.slice(0, 12);
+    assessment.sampledInternalPages = primarySummary.linkReferences
+      .filter((reference) => reference.kind === "internal")
+      .map((reference) => stripHash(reference.href))
+      .slice(0, 12);
+    assessment.pageSummaries = [primarySummary];
 
-    for (const href of extractHrefs(html)) {
-      try {
-        const resolved = new URL(href, assessment.finalUrl ?? safeUrl);
-        if (!["http:", "https:"].includes(resolved.protocol)) continue;
-        if (resolved.hostname === base.hostname) {
-          assessment.internalLinkCount += 1;
-          if (assessment.sampledInternalPages.length < 12) assessment.sampledInternalPages.push(stripHash(resolved.href));
-        } else {
-          assessment.externalLinkCount += 1;
-        }
-      } catch {
-        // Ignore malformed hrefs during the cheap crawl pass.
-      }
-    }
     assessment.sampledInternalPages = unique(assessment.sampledInternalPages);
+    const internalTargets = selectInternalCrawlTargets(assessment.sampledInternalPages, assessment.finalUrl ?? safeUrl, maxInternalPages);
+    const sampledSummaries = await Promise.all(internalTargets.map((target) => fetchInternalPageSummary(target)));
+    for (const summary of sampledSummaries.filter((item): item is CrawlPageSummary => Boolean(item))) {
+      assessment.pageSummaries.push(summary);
+      mergePageSummaryIntoAssessment(assessment, summary);
+    }
+
     const crawlBase = new URL(assessment.finalUrl ?? safeUrl);
     const [robots, sitemap] = await Promise.all([
       probeUrl(new URL("/robots.txt", crawlBase).href),
@@ -178,6 +231,91 @@ export async function crawlUrl(url: string): Promise<CrawlAssessment> {
       score: scoreCrawlAssessment(failed)
     };
   }
+}
+
+export function extractCrawlPageSignals(html: string, sourceUrl: string) {
+  const source = new URL(sourceUrl);
+  return {
+    jsonLdTypes: extractJsonLdTypes(html),
+    formReferences: extractFormReferences(html, source.href),
+    linkReferences: extractLinkReferences(html, source.href, source.hostname),
+    assetReferences: extractAssetReferences(html, source.href)
+  };
+}
+
+function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSummary["source"]): CrawlPageSummary {
+  const sourcePage = new URL(sourceUrl);
+  const title = extractTagContent(html, "title");
+  const metaDescription = extractMetaContent(html, "description");
+  const summary: CrawlPageSummary = {
+    url: sourcePage.href,
+    source,
+    title,
+    metaDescription,
+    canonical: extractLinkHref(html, "canonical"),
+    hasViewportMeta: /<meta[^>]+name=["']viewport["'][^>]*>/i.test(html),
+    hasLocalBusinessSchema: /LocalBusiness|Restaurant|Dentist|LegalService|HomeAndConstructionBusiness/i.test(html),
+    hasTelLink: /href=["']tel:/i.test(html),
+    formCount: countMatches(html, /<form\b/gi),
+    imageCount: countMatches(html, /<img\b/gi),
+    imagesWithoutAlt: countImagesWithoutAlt(html),
+    internalLinkCount: 0,
+    externalLinkCount: 0,
+    jsonLdTypes: [],
+    extractedFacts: emptyExtractedFacts(),
+    formReferences: [],
+    linkReferences: [],
+    assetReferences: []
+  };
+  const signals = extractCrawlPageSignals(html, sourcePage.href);
+  summary.jsonLdTypes = signals.jsonLdTypes;
+  summary.extractedFacts = extractBusinessFacts(html, { url: sourcePage.href, finalUrl: sourcePage.href, title }, sourcePage);
+  summary.formReferences = signals.formReferences.slice(0, 12);
+  summary.linkReferences = signals.linkReferences.slice(0, 40);
+  summary.assetReferences = signals.assetReferences.slice(0, 12);
+
+  for (const href of extractHrefs(html)) {
+    try {
+      const resolved = new URL(href, sourcePage.href);
+      if (!["http:", "https:"].includes(resolved.protocol)) continue;
+      if (sameHostname(resolved.hostname, sourcePage.hostname)) {
+        summary.internalLinkCount += 1;
+      } else {
+        summary.externalLinkCount += 1;
+      }
+    } catch {
+      // Ignore malformed hrefs during the cheap crawl pass.
+    }
+  }
+  return summary;
+}
+
+async function fetchInternalPageSummary(url: string) {
+  try {
+    const response = await fetchWithPresenceHeaders(url);
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) return null;
+    const html = await response.text();
+    return summarizeCrawlPage(html, response.url || url, "sampled_internal");
+  } catch {
+    return null;
+  }
+}
+
+function mergePageSummaryIntoAssessment(assessment: CrawlAssessment, summary: CrawlPageSummary) {
+  assessment.hasLocalBusinessSchema ||= summary.hasLocalBusinessSchema;
+  assessment.hasTelLink ||= summary.hasTelLink;
+  assessment.formCount += summary.formCount;
+  assessment.imageCount += summary.imageCount;
+  assessment.imagesWithoutAlt += summary.imagesWithoutAlt;
+  assessment.internalLinkCount += summary.internalLinkCount;
+  assessment.externalLinkCount += summary.externalLinkCount;
+  assessment.jsonLdTypes = unique([...assessment.jsonLdTypes, ...summary.jsonLdTypes]);
+  assessment.extractedFacts = mergeExtractedBusinessFacts(assessment.extractedFacts, summary.extractedFacts);
+  assessment.formReferences = uniqueBy([...assessment.formReferences, ...summary.formReferences], formReferenceKey).slice(0, 12);
+  assessment.linkReferences = uniqueBy([...assessment.linkReferences, ...summary.linkReferences], (reference) => `${reference.kind}:${reference.href}`).slice(0, 40);
+  assessment.assetReferences = uniqueBy([...assessment.assetReferences, ...summary.assetReferences], (reference) => reference.url).slice(0, 12);
 }
 
 export function scoreCrawlAssessment(assessment: CrawlAssessment): CrawlQualityScore {
@@ -344,7 +482,114 @@ function extractHrefs(html: string) {
   return hrefs;
 }
 
-function extractBusinessFacts(html: string, assessment: CrawlAssessment, base: URL): ExtractedBusinessFacts {
+function extractFormReferences(html: string, sourceUrl: string): CrawlFormReference[] {
+  const references: CrawlFormReference[] = [];
+  const regex = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html)) !== null) {
+    const attributes = match[1] ?? "";
+    const body = match[2] ?? "";
+    const action = normalizeOptionalUrl(extractAttribute(attributes, "action"), sourceUrl);
+    const method = normalizeFormMethod(extractAttribute(attributes, "method"));
+    const fields = extractFormFields(body);
+    const fieldNames = unique(fields.map((field) => field.name).filter((name): name is string => Boolean(name))).slice(0, 20);
+    const fieldTypes = unique(fields.map((field) => field.type)).slice(0, 16);
+    const requiredFields = unique(fields.filter((field) => field.required && field.name).map((field) => field.name as string)).slice(0, 20);
+    references.push({
+      action,
+      method,
+      fieldNames,
+      fieldTypes,
+      requiredFields,
+      hasEmailField: fieldTypes.includes("email") || fieldNames.some((name) => /email/i.test(name)),
+      hasPhoneField: fieldTypes.includes("tel") || fieldNames.some((name) => /phone|tel/i.test(name)),
+      hasTextarea: fieldTypes.includes("textarea")
+    });
+  }
+  return references.slice(0, 12);
+}
+
+function extractFormFields(html: string) {
+  const fields: Array<{ name?: string; type: string; required: boolean }> = [];
+  for (const tag of html.match(/<(?:input|textarea|select)\b[^>]*>/gi) ?? []) {
+    const tagName = tag.match(/^<([a-z]+)/i)?.[1]?.toLowerCase() ?? "input";
+    const name =
+      cleanText(extractAttribute(tag, "name")) ??
+      cleanText(extractAttribute(tag, "id")) ??
+      cleanText(extractAttribute(tag, "aria-label")) ??
+      cleanText(extractAttribute(tag, "placeholder"));
+    const type = tagName === "input" ? (extractAttribute(tag, "type") ?? "text").toLowerCase() : tagName;
+    fields.push({
+      name,
+      type,
+      required: /\srequired(?:[\s=>]|$)/i.test(tag)
+    });
+  }
+  return fields;
+}
+
+function normalizeFormMethod(value?: string): CrawlFormReference["method"] {
+  const method = value?.toLowerCase();
+  return method === "get" || method === "post" || method === "dialog" ? method : "unknown";
+}
+
+function extractLinkReferences(html: string, sourceUrl: string, sourceHostname: string): CrawlLinkReference[] {
+  const references: CrawlLinkReference[] = [];
+  const regex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(html)) !== null) {
+    const attributes = match[1] ?? "";
+    const rawHref = extractAttribute(attributes, "href");
+    if (!rawHref) continue;
+    const text = cleanText(match[2]);
+    const reference = normalizeLinkReference(rawHref, sourceUrl, sourceHostname, text);
+    if (reference) references.push(reference);
+  }
+  return uniqueBy(references, (reference) => `${reference.kind}:${reference.href}`).slice(0, 60);
+}
+
+function normalizeLinkReference(
+  rawHref: string,
+  sourceUrl: string,
+  sourceHostname: string,
+  text?: string
+): CrawlLinkReference | null {
+  const href = rawHref.trim();
+  if (!href) return null;
+  const lowerHref = href.toLowerCase();
+  if (lowerHref.startsWith("tel:")) return { href, text, kind: "tel" };
+  if (lowerHref.startsWith("mailto:")) return { href: href.split("?")[0], text, kind: "mailto" };
+
+  try {
+    const url = new URL(href, sourceUrl);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    const normalized = stripTracking(url);
+    const host = normalized.hostname.replace(/^www\./, "");
+    const sourceHost = sourceHostname.replace(/^www\./, "");
+    const pathAndText = `${normalized.pathname} ${text ?? ""}`;
+    const kind: CrawlLinkReference["kind"] =
+      isOrderingHost(host) || /order|menu|takeout|delivery/i.test(pathAndText)
+        ? "ordering"
+        : isBookingHost(host) || /book|appointment|reserve|schedule/i.test(pathAndText)
+          ? "booking"
+          : isPressOrVideoHost(host)
+            ? "press_video"
+            : isSocialHost(host)
+              ? "social"
+              : host === sourceHost
+                ? "internal"
+                : "external";
+    return { href: normalized.href, text, kind };
+  } catch {
+    return null;
+  }
+}
+
+function extractBusinessFacts(
+  html: string,
+  page: { url: string; finalUrl?: string; title?: string },
+  base: URL
+): ExtractedBusinessFacts {
   const facts = emptyExtractedFacts();
   const jsonLdNodes = flattenJsonLd(extractJsonLd(html));
   const localNode =
@@ -365,13 +610,13 @@ function extractBusinessFacts(html: string, assessment: CrawlAssessment, base: U
     facts.reviewsSummary = extractRating(localNode);
   }
 
-  facts.name ||= cleanText(extractMetaContent(html, "og:site_name")) ?? inferNameFromTitle(assessment.title, base.hostname);
+  facts.name ||= cleanText(extractMetaContent(html, "og:site_name")) ?? inferNameFromTitle(page.title, base.hostname);
   facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
   for (const href of extractHrefs(html)) {
     try {
-      const resolved = new URL(href, assessment.finalUrl ?? assessment.url);
+      const resolved = new URL(href, page.finalUrl ?? page.url);
       const normalized = stripTracking(resolved);
       const host = normalized.hostname.replace(/^www\./, "");
       if (isSocialHost(host)) facts.socialLinks.push(normalized.href);
@@ -611,6 +856,16 @@ function stripHash(value: string) {
   return url.href;
 }
 
+function normalizeOptionalUrl(value: string | undefined, sourceUrl: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value, sourceUrl);
+    return stripTracking(url).href;
+  } catch {
+    return value.trim() || undefined;
+  }
+}
+
 function toArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (value === undefined || value === null) return [];
@@ -629,6 +884,96 @@ function countMatches(html: string, regex: RegExp) {
 function countImagesWithoutAlt(html: string) {
   const imgTags = html.match(/<img\b[^>]*>/gi) ?? [];
   return imgTags.filter((tag) => !/\balt=["'][^"']*["']/i.test(tag)).length;
+}
+
+function selectInternalCrawlTargets(urls: string[], sourceUrl: string, limit: number) {
+  if (limit <= 0) return [];
+  const source = new URL(sourceUrl);
+  return unique(urls)
+    .map((value) => {
+      try {
+        const url = new URL(value, source.href);
+        url.hash = "";
+        return url;
+      } catch {
+        return null;
+      }
+    })
+    .filter((url): url is URL => Boolean(url))
+    .filter((url) => ["http:", "https:"].includes(url.protocol))
+    .filter((url) => sameHostname(url.hostname, source.hostname))
+    .filter((url) => normalizePath(url.pathname) !== normalizePath(source.pathname))
+    .filter((url) => !isNonHtmlPath(url.pathname))
+    .sort((left, right) => internalCrawlPriority(left) - internalCrawlPriority(right))
+    .map((url) => stripTracking(url).href)
+    .slice(0, limit);
+}
+
+function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts): ExtractedBusinessFacts {
+  return {
+    name: left.name ?? right.name,
+    description: left.description ?? right.description,
+    phone: left.phone ?? right.phone,
+    email: left.email ?? right.email,
+    address: mergeAddress(left.address, right.address),
+    geo: left.geo ?? right.geo,
+    hours: left.hours ?? right.hours,
+    categories: unique([...left.categories, ...right.categories]).slice(0, 8),
+    services: unique([...left.services, ...right.services]).slice(0, 12),
+    serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]).slice(0, 12),
+    socialLinks: unique([...left.socialLinks, ...right.socialLinks]).slice(0, 10),
+    bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]).slice(0, 6),
+    orderingLinks: unique([...left.orderingLinks, ...right.orderingLinks]).slice(0, 6),
+    pressLinks: unique([...left.pressLinks, ...right.pressLinks]).slice(0, 8),
+    reviewsSummary: left.reviewsSummary ?? right.reviewsSummary
+  };
+}
+
+function mergeAddress(left: ExtractedBusinessFacts["address"], right: ExtractedBusinessFacts["address"]) {
+  if (!left && !right) return undefined;
+  return {
+    street: left?.street ?? right?.street,
+    city: left?.city ?? right?.city,
+    region: left?.region ?? right?.region,
+    postalCode: left?.postalCode ?? right?.postalCode,
+    country: left?.country ?? right?.country
+  };
+}
+
+function formReferenceKey(reference: CrawlFormReference) {
+  return [
+    reference.action ?? "",
+    reference.method,
+    reference.fieldNames.join(","),
+    reference.fieldTypes.join(","),
+    reference.requiredFields.join(",")
+  ].join(":");
+}
+
+function internalCrawlPriority(url: URL) {
+  const value = `${url.pathname} ${url.search}`.toLowerCase();
+  if (/contact|get-in-touch|quote|estimate|request/.test(value)) return 0;
+  if (/service|menu|order|book|appointment|schedule|reserve/.test(value)) return 1;
+  if (/location|hours|about|team|staff/.test(value)) return 2;
+  if (/faq|review|testimonial|gallery|work/.test(value)) return 3;
+  return 9;
+}
+
+function isNonHtmlPath(pathname: string) {
+  return /\.(?:pdf|zip|jpg|jpeg|png|gif|webp|svg|ico|css|js|json|xml|mp4|mov|mp3|webmanifest)$/i.test(pathname);
+}
+
+function normalizePath(pathname: string) {
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
+function sameHostname(left: string, right: string) {
+  return left.replace(/^www\./, "") === right.replace(/^www\./, "");
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(Math.floor(value), min), max);
 }
 
 function unique<T>(items: T[]) {

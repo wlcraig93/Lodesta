@@ -25,14 +25,14 @@ const eventSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
   const { searchParams } = new URL(request.url);
   return NextResponse.json({ events: await repository.listOutboundEvents(searchParams.get("campaignId") ?? undefined) });
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
   const body = await request.json().catch(() => null);
   const parsed = eventSchema.safeParse(body);

@@ -2,28 +2,28 @@ import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
 import { executeFormSubmissionWorkflows } from "@/lib/workflows";
 import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "@/lib/privacy";
-import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { validateFormSubmission } from "@/lib/form-validation";
 
 export async function POST(request: Request) {
+  const limit = rateLimit(request, {
+    bucket: "form_submit",
+    limit: 12,
+    windowMs: 10 * 60_000
+  });
+  if (!limit.ok) return limit.response;
+
   const parsedSubmission = await parseSubmissionRequest(request);
   if (!parsedSubmission.ok) {
-    return NextResponse.json({ error: parsedSubmission.error }, { status: 400 });
+    return applyRateLimitHeaders(NextResponse.json({ error: parsedSubmission.error }, { status: 400 }), limit);
   }
 
   const { siteId, formId, honeypot, renderedAt, payload } = parsedSubmission;
 
   if (!siteId || !formId) {
-    return NextResponse.json({ error: "Missing siteId or formId" }, { status: 400 });
+    return applyRateLimitHeaders(NextResponse.json({ error: "Missing siteId or formId" }, { status: 400 }), limit);
   }
-
-  const limit = rateLimit(request, {
-    bucket: "form_submit",
-    keyParts: [siteId, formId],
-    ...rateLimitConfig("LODESTA_FORM_SUBMIT", { limit: 12, windowMs: 10 * 60_000 })
-  });
-  if (!limit.ok) return limit.response;
 
   const bundle = await repository.getSiteBundle(siteId);
   if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);

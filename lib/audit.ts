@@ -14,6 +14,17 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   );
   const hasReviews = Boolean(business.reviewsSummary?.rating || business.reviewsSummary?.count);
   const hasContactSection = pages.some((page) => page.sections.some((section) => section.type === "contact"));
+  const hasFaqSection = hasSection(pages, "faq");
+  const hasTrustProof =
+    hasReviews ||
+    hasSection(pages, "trust_bar") ||
+    hasSection(pages, "testimonials") ||
+    hasSection(pages, "team") ||
+    pagesContainText(
+      pages,
+      /credential|certified|licensed|insured|years|award|provider|attorney|trainer|veterinarian|doctor|portfolio|project proof|results/i
+    );
+  const hasServiceAreaClarity = hasLocation || hasSection(pages, "map") || pages.some((page) => page.slug.startsWith("areas/"));
   const homePage = pages.find((page) => page.slug === "") ?? pages[0];
   const homeHero = homePage?.sections.find((section) => section.type === "hero");
   const hasHeroCta = Boolean(homeHero?.props.primaryCta);
@@ -24,6 +35,10 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
 
   if (!hasLocation) {
     findings.push(makeFinding(business.siteId, "missing_address", "seo", "critical", "Address or service area is missing", "Local visitors and search engines need location clarity.", "Verify address or service area.", "manual_service", "engaged_sessions", undefined, "seo.local_business_schema"));
+  }
+
+  if (!hasServiceAreaClarity) {
+    findings.push(makeFinding(business.siteId, "missing_service_area_clarity", "content", "recommended", "Service area is unclear", "Local visitors may not know whether the business serves their area.", "Verify the address, service area, map, or local area pages.", "manual_service", "engaged_sessions", undefined, "content.service_area_clarity"));
   }
 
   if (!hasContactSection) {
@@ -46,8 +61,18 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
     } : undefined, "conversion.primary_action_above_fold"));
   }
 
-  if (!hasReviews) {
-    findings.push(makeFinding(business.siteId, "missing_reviews", "trust", "recommended", "Trust proof is weak", "Visitors may hesitate without ratings, testimonials, credentials, or project proof.", "Add verified review summary or testimonials.", "manual_service", "forms", undefined, "trust.reviews_visible"));
+  if (!hasTrustProof) {
+    findings.push(makeFinding(business.siteId, "missing_trust_proof", "trust", "recommended", "Trust proof is weak", "Visitors may hesitate without ratings, testimonials, credentials, years in business, or project proof.", "Add owner-verified reviews, credentials, testimonials, team proof, or project outcomes.", "manual_service", "forms", undefined, "trust.credentials_or_years"));
+  } else if (!hasReviews) {
+    findings.push(makeFinding(business.siteId, "missing_reviews", "trust", "recommended", "Reviews are not visible", "Visitors may hesitate without ratings or testimonials near conversion paths.", "Add verified review summary or testimonials.", "manual_service", "forms", undefined, "trust.reviews_visible"));
+  }
+
+  if (!hasFaqSection) {
+    findings.push(makeFinding(business.siteId, "missing_faq", "content", "recommended", "Common customer questions are missing", "Unanswered questions create friction before calls, bookings, orders, or form submissions.", "Add a concise FAQ section using owner-reviewable business facts.", "one_click", "forms", {
+      action: "add_faq_section",
+      pageId: homePage?.id ?? pages[0]?.id ?? "page_home",
+      items: faqItemsForBusiness(business)
+    }, "content.faqs"));
   }
 
   for (const page of pages) {
@@ -69,6 +94,33 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   }
 
   return findings;
+}
+
+function hasSection(pages: SiteModel["versions"][number]["pages"], sectionType: string) {
+  return pages.some((page) => page.sections.some((section) => section.type === sectionType));
+}
+
+function pagesContainText(pages: SiteModel["versions"][number]["pages"], pattern: RegExp) {
+  return pattern.test(JSON.stringify(pages));
+}
+
+function faqItemsForBusiness(business: BusinessProfile) {
+  const service = business.services[0] || business.categories[0] || "service";
+  const area = business.address?.city || business.serviceAreas.find((item) => !/^local area$/i.test(item.trim())) || "the local area";
+  return [
+    {
+      question: `Do you serve ${area}?`,
+      answer: `Yes. ${business.name} works with customers in ${area}; confirm your address or service area details during intake.`
+    },
+    {
+      question: `How do I request ${service}?`,
+      answer: "Use the contact form or primary call button and include the service you need, timing, and any useful project details."
+    },
+    {
+      question: "Can I verify business details before starting?",
+      answer: "Yes. Owner-confirmed phone, location, services, and trust proof should be reviewed before publishing."
+    }
+  ];
 }
 
 function makeFinding(

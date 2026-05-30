@@ -51,7 +51,7 @@ async function main() {
   }
 
   if (command === "work") {
-    const idleMs = Number(process.argv[3] ?? process.env.LODESTA_WORKER_IDLE_MS ?? 5000);
+    const idleMs = Number(process.argv[3] ?? 5000);
     const maxLoops = process.argv[4] ? Number(process.argv[4]) : undefined;
     let loops = 0;
     while (!shuttingDown && (!maxLoops || loops < maxLoops)) {

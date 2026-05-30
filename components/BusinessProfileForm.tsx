@@ -40,6 +40,7 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
   const [orderingLinks, setOrderingLinks] = useState(profile.orderingLinks.join(", "));
   const [bookingLinks, setBookingLinks] = useState(profile.bookingLinks.join(", "));
   const [socialLinks, setSocialLinks] = useState(profile.socialLinks.join(", "));
+  const [pressLinks, setPressLinks] = useState(profile.pressLinks.join(", "));
   const [status, setStatus] = useState("");
   const [issues, setIssues] = useState<GuardrailIssue[]>([]);
 
@@ -60,7 +61,8 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
         serviceAreas: splitList(serviceAreas),
         orderingLinks: splitList(orderingLinks),
         bookingLinks: splitList(bookingLinks),
-        socialLinks: splitList(socialLinks)
+        socialLinks: splitList(socialLinks),
+        pressLinks: splitList(pressLinks)
       })
     });
     const result = (await response.json()) as BusinessProfileResponse;
@@ -135,6 +137,10 @@ export function BusinessProfileForm({ profile }: BusinessProfileFormProps) {
       <label>
         <span>Social links</span>
         <textarea value={socialLinks} onChange={(event) => setSocialLinks(event.target.value)} />
+      </label>
+      <label>
+        <span>Press and video links</span>
+        <textarea value={pressLinks} onChange={(event) => setPressLinks(event.target.value)} />
       </label>
 
       <button className="button primary" type="submit">

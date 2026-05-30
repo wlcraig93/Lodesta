@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 import { getPublishedVersion } from "@/lib/sample-data";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { repository } from "@/lib/repository";
 import { isIndexableSite } from "@/lib/site-publication";
+import { canonicalUrlForPage } from "@/lib/public-site-seo";
+import { markdownUrlForPage } from "@/lib/public-site-markdown";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +23,9 @@ export async function generateMetadata({
   const page = version.pages.find((candidate) => candidate.slug === pageSlug);
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
   const indexable = isIndexableSite(bundle, claims);
+  const requestHeaders = await headers();
+  const canonical = page ? canonicalUrlForPage(bundle, page, requestHeaders) : undefined;
+  const markdown = page && indexable ? markdownUrlForPage(bundle, page, requestHeaders) : undefined;
   return {
     title: page?.seo.title,
     description: page?.seo.description,
@@ -28,7 +34,8 @@ export async function generateMetadata({
       follow: indexable
     },
     alternates: {
-      canonical: page?.seo.canonicalPath
+      canonical,
+      types: markdown ? { "text/markdown": markdown } : undefined
     },
     openGraph: {
       title: page?.seo.title,

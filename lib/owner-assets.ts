@@ -1,4 +1,5 @@
 import type { AssetReference, SiteAsset, SiteBundle } from "./models";
+import { validatePublicHostname } from "./url-safety";
 
 export type OwnerAssetInput = {
   url: string;
@@ -125,9 +126,14 @@ function ownerAssetProvenance() {
 function cleanAssetUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
+  if (/^\/api\/assets\/[a-z0-9][a-z0-9_-]*\/[a-z0-9][a-z0-9_-]*\.(png|jpe?g|webp)$/i.test(trimmed)) {
+    return trimmed;
+  }
   try {
     const url = new URL(trimmed);
     if (!["http:", "https:"].includes(url.protocol)) return "";
+    if (url.username || url.password) return "";
+    if (!validatePublicHostname(url.hostname).ok) return "";
     if (!/\.(png|jpe?g|webp|gif|avif)(\?.*)?$/i.test(url.href)) return "";
     return url.href;
   } catch {

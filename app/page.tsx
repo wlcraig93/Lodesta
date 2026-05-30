@@ -1,28 +1,21 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { IntakeCreateForm } from "@/components/IntakeCreateForm";
 import { standardCriteria } from "@/lib/standard";
 import { repository } from "@/lib/repository";
-import { requireOwnerAccess } from "@/lib/page-access";
+import { requireAdminPageAccess } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false
+  }
+};
 
 export default async function HomePage() {
-  const auth = await requireOwnerAccess("/");
-  const [allBundles, claims] = await Promise.all([repository.listSiteBundles(), repository.listClaims()]);
-  const userId = auth.user?.id;
-  const userEmail = auth.user?.email?.toLowerCase();
-  const bundles = !auth.configured
-    ? allBundles
-    : userId || userEmail
-      ? allBundles.filter((bundle) =>
-          claims.some(
-            (claim) =>
-              claim.siteId === bundle.businessProfile.siteId &&
-              claim.status === "claimed" &&
-              ((userId && claim.ownerUserId === userId) || (userEmail && claim.ownerEmail?.toLowerCase() === userEmail))
-          )
-        )
-      : [];
+  await requireAdminPageAccess("/");
+  const bundles = await repository.listSiteBundles();
   const primaryBundle = bundles[0];
   if (!primaryBundle) {
     return (

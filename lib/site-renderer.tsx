@@ -2,7 +2,7 @@ import type { BusinessProfile, Experiment, ExtensionModel, PageModel, SectionMod
 import { getPublishedVersion } from "./sample-data";
 import { AnalyticsTracker } from "@/components/AnalyticsTracker";
 import { ExperimentRuntime } from "@/components/ExperimentRuntime";
-import { makeLocalBusinessJsonLd } from "./structured-data";
+import { makeLocalBusinessJsonLd, serializeJsonLd } from "./structured-data";
 
 type SiteRendererProps = {
   business: BusinessProfile;
@@ -51,7 +51,7 @@ export function SiteRenderer({
       {localBusinessJson ? (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessJson) }}
+          dangerouslySetInnerHTML={{ __html: serializeJsonLd(localBusinessJson) }}
         />
       ) : null}
       {activePage.sections.map((section) => (

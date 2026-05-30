@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cachePolicyForPathname, cachePolicyHeaders } from "./lib/cache-policy";
+import { isPlatformHost, normalizeHostname, requestHostname } from "./lib/host-routing";
 
 const skippedPrefixes = [
   "/api/",
@@ -10,24 +11,34 @@ const skippedPrefixes = [
   "/analytics/",
   "/optimization/",
   "/experiments/",
+  "/business/",
   "/domains/",
   "/leads/",
+  "/versions/",
   "/outbound",
   "/claim/",
   "/account",
-  "/robots.txt",
-  "/sitemap.xml",
   "/favicon.ico"
 ];
+const siteSeoPaths = new Set(["/robots.txt", "/sitemap.xml", "/llms.txt"]);
+const forwardedHostRewriteParam = "__lodesta_forwarded_host";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hostname = normalizeHostname(request.headers.get("host") ?? "");
+  const directHostname = normalizeHostname(request.headers.get("host") ?? "");
+  const hostname = requestHostname(request.headers);
+  const forwardedHostRouted =
+    request.nextUrl.searchParams.get(forwardedHostRewriteParam) === "1" ||
+    request.headers.get("x-lodesta-forwarded-host-routed") === "1" ||
+    (Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname);
+  if (siteSeoPaths.has(pathname) && (!hostname || isPlatformHost(hostname))) {
+    return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
+  }
   if (skippedPrefixes.some((prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix))) {
-    return withCachePolicy(NextResponse.next(), pathname, false);
+    return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
   }
 
-  if (!hostname || isPlatformHost(hostname)) return withCachePolicy(NextResponse.next(), pathname, false);
+  if (!hostname || isPlatformHost(hostname)) return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
 
   const resolveUrl = new URL("/api/domains/resolve", domainResolveOrigin(request));
   resolveUrl.searchParams.set("hostname", hostname);
@@ -38,9 +49,26 @@ export async function middleware(request: NextRequest) {
     const payload = (await response.json()) as { resolved?: boolean; slug?: string };
     if (!payload.resolved || !payload.slug) return withCachePolicy(NextResponse.next(), pathname, false);
 
+    const rewrittenSitePrefix = `/sites/${payload.slug}`;
+    if (pathname === rewrittenSitePrefix || pathname.startsWith(`${rewrittenSitePrefix}/`)) {
+      return withCachePolicy(NextResponse.next(), pathname, true, forwardedHostRouted);
+    }
+
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = `/sites/${payload.slug}${pathname === "/" ? "" : pathname}`;
-    return withCachePolicy(NextResponse.rewrite(rewriteUrl), rewriteUrl.pathname, true);
+    if (forwardedHostRouted) rewriteUrl.searchParams.set(forwardedHostRewriteParam, "1");
+    const rewriteHeaders = new Headers(request.headers);
+    if (forwardedHostRouted) rewriteHeaders.set("x-lodesta-forwarded-host-routed", "1");
+    return withCachePolicy(
+      NextResponse.rewrite(rewriteUrl, {
+        request: {
+          headers: rewriteHeaders
+        }
+      }),
+      rewriteUrl.pathname,
+      true,
+      forwardedHostRouted
+    );
   } catch {
     return withCachePolicy(NextResponse.next(), pathname, false);
   }
@@ -49,22 +77,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: ["/((?!_next/static|_next/image).*)"]
 };
-
-function normalizeHostname(hostname: string) {
-  return hostname.toLowerCase().split(":")[0].replace(/\.$/, "");
-}
-
-function isPlatformHost(hostname: string) {
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true;
-  const appHost = process.env.NEXT_PUBLIC_APP_URL ? normalizeHostname(new URL(process.env.NEXT_PUBLIC_APP_URL).host) : "";
-  if (appHost && hostname === appHost) return true;
-  const configuredHosts = (process.env.LODESTA_PLATFORM_HOSTS ?? "")
-    .split(",")
-    .map((host) => normalizeHostname(host.trim()))
-    .filter(Boolean);
-  if (configuredHosts.includes(hostname)) return true;
-  return hostname.endsWith(".railway.app") || hostname.endsWith(".up.railway.app");
-}
 
 function domainResolveOrigin(request: NextRequest) {
   const configuredOrigin = process.env.LODESTA_INTERNAL_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL;
@@ -78,8 +90,13 @@ function domainResolveOrigin(request: NextRequest) {
   return request.nextUrl.origin;
 }
 
-function withCachePolicy(response: NextResponse, pathname: string, customDomain: boolean) {
+function withCachePolicy(response: NextResponse, pathname: string, customDomain: boolean, forwardedHostRouted = false) {
   const headers = cachePolicyHeaders(cachePolicyForPathname(pathname, { customDomain }));
+  if (forwardedHostRouted) {
+    Object.assign(headers, cachePolicyHeaders(cachePolicyForPathname("/__forwarded-host-no-store")));
+    headers["Cloudflare-CDN-Cache-Control"] = "no-store";
+    headers["X-Lodesta-Forwarded-Host-Cache"] = "no-store";
+  }
   for (const [name, value] of Object.entries(headers)) {
     response.headers.set(name, value);
   }

@@ -1,6 +1,8 @@
 import { repository } from "./repository";
 import { hasConfiguredIpHashSalt } from "./privacy";
 import { getRenderInspectionRuntimeStatus } from "./render-inspection";
+import { ASSET_BUCKET_NAME } from "./asset-storage";
+import { getSupabaseAdminClient } from "./supabase/client";
 
 export type HealthState = "ok" | "warning" | "error";
 
@@ -18,6 +20,7 @@ export type HealthReport = {
 };
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
+  const assetStorageCheck = options.deep ? await checkAssetStorageReadiness() : checkAssetStorageConfig();
   const checks = [
     checkAppUrl(),
     checkRepositoryConfig(),
@@ -32,7 +35,7 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkCrawlUrlSafetyConfig(),
     checkRenderBrowserConfig(),
     checkGooglePlacesConfig(),
-    checkAssetStorageConfig(),
+    assetStorageCheck,
     checkOpenAiConfig()
   ];
 
@@ -50,6 +53,9 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
 function checkAppUrl(): HealthCheck {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
   if (!appUrl) {
+    if (requiresDeploymentConfig()) {
+      return error("app_url", "Application URL", "NEXT_PUBLIC_APP_URL is required for deployed environments.");
+    }
     return warning("app_url", "Application URL", "NEXT_PUBLIC_APP_URL is not set; generated links will fall back to the request origin.");
   }
 
@@ -64,6 +70,9 @@ function checkAppUrl(): HealthCheck {
 function checkRepositoryConfig(): HealthCheck {
   const backend = process.env.LODESTA_REPOSITORY ?? "local";
   if (backend === "local") {
+    if (process.env.NODE_ENV === "production") {
+      return error("repository", "Repository", "Production deployments must use LODESTA_REPOSITORY=supabase for persistent data.");
+    }
     return warning("repository", "Repository", "Using the in-memory local repository; use LODESTA_REPOSITORY=supabase for deployed persistence.");
   }
 
@@ -96,6 +105,14 @@ function checkSupabaseAuthConfig(): HealthCheck {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
   if (url && anonKey) {
     return ok("supabase_auth", "Supabase Auth", "Public Supabase Auth environment is configured.");
+  }
+
+  if (requiresDeploymentConfig()) {
+    return error(
+      "supabase_auth",
+      "Supabase Auth",
+      "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required for deployed owner login."
+    );
   }
 
   return warning(
@@ -208,17 +225,35 @@ function checkGooglePlacesConfig(): HealthCheck {
 }
 
 function checkAssetStorageConfig(): HealthCheck {
-  if (process.env.LODESTA_REPOSITORY === "supabase" && process.env.LODESTA_ASSET_BUCKET) {
-    return ok("asset_storage", "Asset storage", "Generated asset bytes will upload to the configured Supabase Storage bucket.");
-  }
   if (process.env.LODESTA_REPOSITORY === "supabase") {
-    return warning(
+    return ok(
       "asset_storage",
       "Asset storage",
-      "LODESTA_ASSET_BUCKET is not set; generated asset bytes will fall back to local .data storage."
+      `Generated asset bytes will upload to Supabase Storage bucket ${ASSET_BUCKET_NAME}.`
     );
   }
   return warning("asset_storage", "Asset storage", "Using local .data asset storage for generated planning assets.");
+}
+
+async function checkAssetStorageReadiness(): Promise<HealthCheck> {
+  if (process.env.LODESTA_REPOSITORY !== "supabase") {
+    return checkAssetStorageConfig();
+  }
+
+  try {
+    const { data, error: bucketError } = await getSupabaseAdminClient().storage.getBucket(ASSET_BUCKET_NAME);
+    if (bucketError || !data) {
+      return error(
+        "asset_storage",
+        "Asset storage",
+        `Supabase Storage bucket ${ASSET_BUCKET_NAME} is missing or inaccessible: ${bucketError?.message ?? "bucket not found"}.`
+      );
+    }
+    return ok("asset_storage", "Asset storage", `Supabase Storage bucket ${ASSET_BUCKET_NAME} is accessible.`);
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    return error("asset_storage", "Asset storage", `Supabase Storage bucket ${ASSET_BUCKET_NAME} check failed: ${message}`);
+  }
 }
 
 function checkOpenAiConfig(): HealthCheck {
@@ -234,6 +269,10 @@ function checkOpenAiConfig(): HealthCheck {
     "OpenAI",
     "OPENAI_API_KEY is not set; deterministic generation and prompt-only mockup artifacts still work, but hosted AI calls are unavailable."
   );
+}
+
+function requiresDeploymentConfig() {
+  return process.env.NODE_ENV === "production" || process.env.LODESTA_REPOSITORY === "supabase";
 }
 
 async function checkRepositoryReadiness(): Promise<HealthCheck> {

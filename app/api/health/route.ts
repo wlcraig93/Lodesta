@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const deep = searchParams.get("deep") === "1" || searchParams.get("ready") === "1";
 
   if (deep) {
-    const unauthorized = requireAdmin(request);
+    const unauthorized = await requireAdmin(request);
     if (unauthorized) return unauthorized;
   }
 

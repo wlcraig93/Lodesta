@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { repository } from "@/lib/repository";
 import { authRequired } from "@/lib/auth-policy";
+import { filterSiteBundlesForOwner } from "@/lib/page-access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,20 +12,14 @@ export default async function AccountPage() {
     repository.listSiteBundles(),
     repository.listClaims()
   ]);
-  const userId = user?.id;
-  const userEmail = user?.email?.toLowerCase();
   const localOpenMode = !configured && !authRequired();
-  const visibleBundles = localOpenMode
-    ? bundles
-    : userId || userEmail
-      ? bundles.filter((bundle) =>
-          claims.some(
-            (claim) =>
-              claim.siteId === bundle.businessProfile.siteId &&
-              ((userId && claim.ownerUserId === userId) || (userEmail && claim.ownerEmail?.toLowerCase() === userEmail))
-          )
-        )
-      : [];
+  const visibleBundles = filterSiteBundlesForOwner({
+    bundles,
+    claims,
+    authConfigured: !localOpenMode,
+    userId: user?.id,
+    userEmail: user?.email
+  });
 
   return (
     <main className="admin-page">

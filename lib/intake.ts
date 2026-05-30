@@ -89,7 +89,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     name,
     vertical,
     categories: coalesceList(facts?.categories, [vertical.replace("_", " ")]),
-    description: input.prompt ?? facts?.description ?? `Generated local-business profile for ${sourceHostname ?? name}; owner verification required.`,
+    description: profileDescriptionForBusiness({ name, vertical, services, serviceAreas, sourceHostname }),
     phone,
     email,
     address: facts?.address,
@@ -1491,15 +1491,41 @@ function buildProvenance(input: IntakeInput, facts: ExtractedBusinessFacts | und
     geo: { source, sourceUrl, confidence: facts?.geo ? 0.72 : 0.25, verified: false, observedAt },
     hours: { source, sourceUrl, confidence: facts?.hours ? 0.7 : 0.25, verified: false, observedAt },
     services: { source, sourceUrl, confidence: facts?.services?.length ? 0.65 : 0.45, verified: false, observedAt },
-    reviewsSummary: { source, sourceUrl, confidence: facts?.reviewsSummary ? 0.65 : 0.25, verified: false, observedAt }
+    reviewsSummary: { source, sourceUrl, confidence: facts?.reviewsSummary ? 0.65 : 0.25, verified: false, observedAt },
+    description: {
+      source: input.prompt ? "manual" : "other",
+      sourceUrl,
+      confidence: 0.55,
+      verified: false,
+      observedAt
+    }
   };
+}
+
+function profileDescriptionForBusiness(input: {
+  name: string;
+  vertical: Vertical;
+  services: string[];
+  serviceAreas: string[];
+  sourceHostname?: string;
+}) {
+  const services = input.services.slice(0, 3).join(", ");
+  const area = input.serviceAreas.slice(0, 2).join(" and ");
+  const category = input.vertical.replace(/_/g, " ");
+  const servicePhrase = services || category;
+  const areaPhrase = area && area !== "Local area" ? ` in ${area}` : "";
+  const sourcePhrase = input.sourceHostname ? ` based on public facts from ${input.sourceHostname}` : "";
+  return `${input.name} is a ${category} profile focused on ${servicePhrase}${areaPhrase}${sourcePhrase}. Key business details remain owner-verified before publishing.`;
 }
 
 function buildTechnicalNotes(crawl?: CrawlAssessment) {
   if (!crawl) return ["Crawl adapter will inspect metadata, schema, sitemap, robots, links, and mobile basics."];
+  const pageSummaryCount = crawl.pageSummaries?.length ?? 0;
   return [
     `Fetched ${crawl.finalUrl ?? crawl.url} with status ${crawl.status ?? "unknown"}.`,
     `Initial technical/conversion quality score: ${crawl.score.percent}/100 (${crawl.score.grade}).`,
+    `${pageSummaryCount} crawl page summar${pageSummaryCount === 1 ? "y" : "ies"} captured for homepage, service, contact, menu, and trust-signal context.`,
+    `${crawl.formReferences.length} form reference${crawl.formReferences.length === 1 ? "" : "s"} and ${crawl.linkReferences.length} link reference${crawl.linkReferences.length === 1 ? "" : "s"} were captured for import context.`,
     crawl.hasLocalBusinessSchema ? "LocalBusiness-style schema was detected." : "LocalBusiness structured data was not detected.",
     crawl.hasViewportMeta ? "Mobile viewport meta tag was detected." : "Mobile viewport meta tag was not detected.",
     crawl.hasTelLink ? "Click-to-call tel link was detected." : "Click-to-call tel link was not detected.",
@@ -1540,8 +1566,9 @@ function buildPublicPresenceNotes(crawl?: CrawlAssessment, publicPresence?: Publ
   if (!crawl) {
     return [...officialNotes, "Official/public facts remain unverified until claim; owner-truth fields are confirmed before publishing or sync."];
   }
+  const pageSummaryCount = crawl.pageSummaries?.length ?? 0;
   return [
-    `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, and ${crawl.extractedFacts.orderingLinks.length} ordering links were detected.`,
+    `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, ${crawl.extractedFacts.orderingLinks.length} ordering links, and ${crawl.linkReferences.length} crawl links were detected across ${pageSummaryCount || 1} crawl page${pageSummaryCount === 1 ? "" : "s"}.`,
     ...officialNotes,
     "Facts from website/schema remain unverified until claim; owner-truth fields are confirmed before publishing or sync."
   ];

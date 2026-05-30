@@ -38,6 +38,18 @@ export const standardCriteria: StandardCriterion[] = [
     experimentEligible: false
   },
   {
+    id: "technical.mobile_performance",
+    layer: "technical_seo",
+    vertical: "universal",
+    title: "Mobile Core Web Vitals stay within launch thresholds",
+    checkMethod: "analytics",
+    threshold: { lcpMaxMs: 2500, clsMax: 0.1, inpMaxMs: 200, ttfbMaxMs: 800 },
+    businessConsequence: "Slow or unstable mobile pages make local visitors leave before calling, booking, or submitting a form.",
+    generationRule: "Keep public pages lightweight, cacheable, image-optimized, and measured after publish with LCP, CLS, INP, and TTFB analytics.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
     id: "seo.title.unique",
     layer: "technical_seo",
     vertical: "universal",
@@ -190,6 +202,42 @@ export const standardCriteria: StandardCriterion[] = [
     threshold: { minimumSignals: 1 },
     businessConsequence: "Visitors lack confidence that the business is credible.",
     generationRule: "Surface ratings, review count, testimonials, years in business, or credentials near conversion paths.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
+    id: "trust.credentials_or_years",
+    layer: "trust",
+    vertical: "universal",
+    title: "Credentials, years, or equivalent trust proof are present",
+    checkMethod: "dom",
+    threshold: { trustProofRequired: true },
+    businessConsequence: "Visitors hesitate when they cannot see why the business is credible enough to contact.",
+    generationRule: "Include owner-verifiable proof such as credentials, years in business, team proof, testimonials, ratings, or project outcomes.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
+    id: "content.service_area_clarity",
+    layer: "content_structure",
+    vertical: "universal",
+    title: "Service area or location clarity is present",
+    checkMethod: "dom",
+    threshold: { locationOrServiceAreaRequired: true },
+    businessConsequence: "Local visitors may abandon if they cannot tell whether the business serves their area.",
+    generationRule: "Show address, map, service areas, or local area pages from BusinessProfile facts.",
+    auditEligible: true,
+    experimentEligible: false
+  },
+  {
+    id: "content.faqs",
+    layer: "content_structure",
+    vertical: "universal",
+    title: "Common customer questions are answered",
+    checkMethod: "dom",
+    threshold: { minimumFaqSections: 1 },
+    businessConsequence: "Unanswered questions create friction before calls, bookings, orders, or form submissions.",
+    generationRule: "Include FAQ sections on service, local-area, or home pages using fresh copy from structured facts.",
     auditEligible: true,
     experimentEligible: false
   },

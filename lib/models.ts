@@ -290,6 +290,7 @@ export type OptimizationFinding = {
 export type QACheck = {
   id: string;
   siteId: string;
+  standardCriterionId?: string;
   category: "seo" | "conversion" | "accessibility" | "forms" | "technical" | "trust" | "content";
   severity: "pass" | "warning" | "fail";
   title: string;
@@ -376,7 +377,8 @@ export type AnalyticsEvent = {
     | "engagement"
     | "scroll_depth"
     | "web_vital"
-    | "experiment_assignment";
+    | "experiment_assignment"
+    | "agent_readable_request";
   timestamp: string;
   sectionId?: string;
   elementRole?: string;
@@ -415,14 +417,52 @@ export type AnalyticsSummary = {
     value?: number;
     timestamp: string;
   }>;
+  agentReadableRequests: number;
+  agentReadableByResource: AnalyticsAgentReadableResource[];
   outcomesByPage: AnalyticsOutcomeRow[];
   outcomesByCtaRole: AnalyticsOutcomeRow[];
   outcomesBySection: AnalyticsOutcomeRow[];
+  funnelDropoffs: AnalyticsFunnelDropoff[];
+  sectionConversionPaths: AnalyticsSectionConversionPath[];
   outcomesByExperimentVariant: AnalyticsOutcomeRow[];
   outcomesBySource: AnalyticsOutcomeRow[];
   clickMap: AnalyticsClickMapPoint[];
   standardCorrelations: AnalyticsStandardCorrelation[];
   baselineComparison: AnalyticsBaselineComparison;
+};
+
+export type AnalyticsAgentReadableResource = {
+  key: string;
+  label: string;
+  requests: number;
+  sessions: number;
+  latestAt?: string;
+};
+
+export type AnalyticsFunnelDropoff = {
+  key: string;
+  from: string;
+  to: string;
+  fromCount: number;
+  toCount: number;
+  dropoffCount: number;
+  conversionRate: number;
+  dropoffRate: number;
+};
+
+export type AnalyticsSectionConversionPath = {
+  key: string;
+  sectionId: string;
+  exposedSessions: number;
+  exposures: number;
+  actionSessions: number;
+  primaryActions: number;
+  telClicks: number;
+  formSubmits: number;
+  outboundClicks: number;
+  actionRate: number;
+  avgTimeToActionMs?: number;
+  medianTimeToActionMs?: number;
 };
 
 export type AnalyticsClickMapPoint = {

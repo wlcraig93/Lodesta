@@ -120,7 +120,7 @@ export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
     document.querySelectorAll<HTMLElement>("[data-section-id]").forEach((section) => observer.observe(section));
 
     const onClick = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest<HTMLElement>("a,button") : null;
+      const target = clickTargetFor(event.target);
       if (!target) return;
 
       const rect = document.documentElement.getBoundingClientRect();
@@ -136,7 +136,7 @@ export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
         pageId,
         eventType,
         sectionId,
-        elementRole: target.dataset.analyticsRole ?? target.getAttribute("aria-label") ?? target.tagName.toLowerCase(),
+        elementRole: elementRoleFor(target),
         elementType: target.tagName.toLowerCase(),
         hrefType,
         normalizedX: clamp(event.clientX / Math.max(rect.width, 1)),
@@ -327,6 +327,31 @@ function classifyHref(href: string, role?: string) {
   if (role === "ordering") return "ordering";
   if (!href || href.startsWith(window.location.origin)) return "internal";
   return "external";
+}
+
+function clickTargetFor(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  return target.closest<HTMLElement>("a,button,[data-analytics-role]") ?? target.closest<HTMLElement>("[data-section-id] *") ?? target.closest<HTMLElement>("[data-section-id]");
+}
+
+function elementRoleFor(target: HTMLElement) {
+  return (
+    sanitizedAnalyticsToken(target.dataset.analyticsRole) ||
+    sanitizedAnalyticsToken(target.getAttribute("aria-label")) ||
+    sanitizedAnalyticsToken(target.getAttribute("role")) ||
+    sanitizedAnalyticsToken(target.getAttribute("type")) ||
+    target.tagName.toLowerCase()
+  );
+}
+
+function sanitizedAnalyticsToken(value: string | null | undefined) {
+  const cleaned = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return cleaned || undefined;
 }
 
 function getDeviceType(width: number) {

@@ -5,16 +5,17 @@ import { runSiteQa } from "@/lib/qa";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { claimGateForBundle } from "@/lib/site-publication";
 
-const publishVersionSchema = z.object({
+const versionActionSchema = z.object({
   siteId: z.string().min(1),
   versionId: z.string().min(1),
+  action: z.enum(["publish", "restore_draft"]).default("publish"),
   confirmed: z.boolean().default(false)
 });
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? undefined;
-  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : requireAdmin(request);
+  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const bundles = siteId ? [await repository.getSiteBundle(siteId)] : await repository.listSiteBundles();
@@ -35,13 +36,21 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
-  const parsed = publishVersionSchema.safeParse(body);
+  const parsed = versionActionSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid version publish request", issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json({ error: "Invalid version action request", issues: parsed.error.issues }, { status: 400 });
   }
 
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
+  if (parsed.data.action === "restore_draft") {
+    const result = await repository.restoreVersionToDraft(parsed.data);
+    if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+    if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 400 });
+    const qa = runSiteQa(result.bundle, { versionId: result.draftVersionId });
+    return NextResponse.json({ ...result, qa });
+  }
+
   if (!parsed.data.confirmed) {
     return NextResponse.json(
       { error: "Publish confirmation required.", confirmationRequired: true },

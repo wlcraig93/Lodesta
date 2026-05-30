@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
+import { assertOutboundCompliance } from "@/lib/outbound";
 
 export const runtime = "nodejs";
 
@@ -13,18 +14,28 @@ const campaignSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
   return NextResponse.json({ campaigns: await repository.listOutboundCampaigns() });
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
   const body = await request.json().catch(() => null);
   const parsed = campaignSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid outbound campaign request", issues: parsed.error.issues }, { status: 400 });
+  }
+  const compliance = assertOutboundCompliance(parsed.data);
+  if (!compliance.ok) {
+    return NextResponse.json(
+      {
+        error: compliance.status.reason,
+        compliance: compliance.status
+      },
+      { status: 409 }
+    );
   }
   return NextResponse.json(await repository.createOutboundCampaign(parsed.data));
 }

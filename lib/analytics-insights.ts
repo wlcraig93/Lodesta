@@ -1,5 +1,6 @@
 import type { AnalyticsSummary, OptimizationFinding, SiteBundle } from "./models";
 import { primaryCtaForBusiness } from "./optimization";
+import { formatWebVitalValue, normalizeWebVitalMetric, webVitalWithinThreshold } from "./web-vitals-standard";
 
 export function recommendFromAnalytics(bundle: SiteBundle, summary: AnalyticsSummary): OptimizationFinding[] {
   const findings: OptimizationFinding[] = [];
@@ -79,6 +80,23 @@ export function recommendFromAnalytics(bundle: SiteBundle, summary: AnalyticsSum
     });
   }
 
+  const webVitalIssue = latestWebVitalIssue(summary);
+  if (webVitalIssue) {
+    findings.push({
+      id: "analytics_mobile_performance",
+      siteId: bundle.businessProfile.siteId,
+      standardCriterionId: "technical.mobile_performance",
+      category: "performance",
+      severity: webVitalIssue.failing.length >= 2 ? "critical" : "recommended",
+      title: "Mobile performance needs attention",
+      rationale: `${webVitalIssue.failing.join(", ")} exceeded launch Core Web Vitals thresholds.`,
+      recommendedAction: "Review image weight, render-blocking assets, scripts, cache behavior, and layout shifts before the next publish.",
+      status: "open",
+      applyMode: "manual_service",
+      expectedOutcomeMetric: "engaged_sessions"
+    });
+  }
+
   return findings;
 }
 
@@ -95,4 +113,18 @@ function actionHeading(role: string) {
   if (role === "booking") return "Ready to book?";
   if (role === "ordering") return "Ready to order?";
   return "Ready for the next step?";
+}
+
+function latestWebVitalIssue(summary: AnalyticsSummary) {
+  const latest = new Map<string, { metric: NonNullable<ReturnType<typeof normalizeWebVitalMetric>>; value: number; timestamp: string }>();
+  for (const sample of summary.webVitals) {
+    const metric = normalizeWebVitalMetric(sample.metric);
+    if (!metric || typeof sample.value !== "number") continue;
+    const existing = latest.get(metric);
+    if (!existing || sample.timestamp > existing.timestamp) latest.set(metric, { metric, value: sample.value, timestamp: sample.timestamp });
+  }
+  const failing = Array.from(latest.values())
+    .filter((sample) => !webVitalWithinThreshold(sample.metric, sample.value))
+    .map((sample) => `${sample.metric} ${formatWebVitalValue(sample.metric, sample.value)}`);
+  return failing.length ? { failing } : undefined;
 }

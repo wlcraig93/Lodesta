@@ -11,7 +11,7 @@ const retentionSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const body = await request.json().catch(() => ({}));

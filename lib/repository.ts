@@ -25,6 +25,7 @@ import type { UpdateSiteDesignInput, UpdateSiteDesignResult } from "./design";
 import type { EditorGuardrailIssue } from "./editor-guardrails";
 import type { UpdateFormSettingsInput, UpdateFormSettingsResult } from "./form-settings";
 import type { UpdateOwnerAssetsInput, UpdateOwnerAssetsResult } from "./owner-assets";
+import type { OptimizationChangeSummary } from "./optimization";
 import {
   updateBusinessProfile,
   analyticsSummary,
@@ -39,6 +40,8 @@ import {
   createPreviewToken,
   createOutboundCampaign,
   getForms,
+  getDomainById,
+  getDomainByHostname,
   getSiteBundle,
   getSiteBundleBySlug,
   listAnalyticsEvents,
@@ -58,10 +61,12 @@ import {
   publishDraft,
   publishVersion,
   recordAnalyticsEvent,
+  recordClaimCheckoutSession,
   recordFormSubmission,
   recordOutboundEvent,
   recordWorkflowDelivery,
   registerDomain,
+  restoreVersionToDraft,
   resolvePreviewToken,
   runAndStoreAudit,
   updateExperiment,
@@ -132,6 +137,7 @@ export type RegisterDomainInput = {
 
 export type CompleteClaimCheckoutInput = {
   claimId?: string;
+  siteId?: string;
   checkoutSessionId?: string;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
@@ -177,7 +183,17 @@ type ExperimentAssignment =
     };
 type ApplyFindingResult =
   | { ok: false; reason: string }
-  | { ok: true; draftCreated: boolean; qaRequired: boolean; finding: OptimizationFinding }
+  | {
+      ok: true;
+      draftCreated: boolean;
+      qaRequired: boolean;
+      finding: OptimizationFinding;
+      changeSummary: OptimizationChangeSummary;
+    }
+  | null;
+type RestoreVersionResult =
+  | { ok: false; reason: string }
+  | { ok: true; bundle: SiteBundle; draftVersionId: string; restoredFromVersionId: string }
   | null;
 type DismissFindingResult =
   | { ok: false; reason: string }
@@ -210,6 +226,7 @@ export type LodestaRepository = {
   updateSiteDesign(input: UpdateSiteDesignInput): Promise<DesignUpdateResult>;
   publishDraft(siteId: string): Promise<PublishResult>;
   publishVersion(input: { siteId: string; versionId: string }): Promise<PublishResult>;
+  restoreVersionToDraft(input: { siteId: string; versionId: string }): Promise<RestoreVersionResult>;
   updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<BusinessProfileUpdateResult>;
   updateOwnerAssets(input: UpdateOwnerAssetsInput): Promise<UpdateOwnerAssetsResult | null>;
   recordFormSubmission(input: RecordSubmissionInput): Promise<LeadSubmission>;
@@ -243,6 +260,8 @@ export type LodestaRepository = {
   registerDomain(input: RegisterDomainInput): Promise<DomainResult>;
   refreshDomain(input: { domainId: string }): Promise<DomainRecord | null>;
   listDomains(siteId?: string): Promise<DomainRecord[]>;
+  getDomainById(domainId: string): Promise<DomainRecord | null>;
+  getDomainByHostname(hostname: string): Promise<DomainRecord | null>;
   createOutboundCampaign(input: CreateOutboundCampaignInput): Promise<OutboundCampaign>;
   listOutboundCampaigns(): Promise<OutboundCampaign[]>;
   upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
@@ -293,6 +312,9 @@ export const localRepository: LodestaRepository = {
   },
   async publishVersion(input) {
     return publishVersion(input);
+  },
+  async restoreVersionToDraft(input) {
+    return restoreVersionToDraft(input);
   },
   async updateBusinessProfile(input) {
     return updateBusinessProfile(input);
@@ -366,15 +388,23 @@ export const localRepository: LodestaRepository = {
     const claim = createClaim(input);
     const bundle = claim ? getSiteBundle(input.siteId) : null;
     if (!claim || !bundle) return null;
+    const checkout = await createCheckoutSession({
+      claimId: claim.id,
+      siteId: input.siteId,
+      siteSlug: bundle.siteModel.slug,
+      siteName: bundle.businessProfile.name,
+      ownerEmail: input.ownerEmail
+    });
+    let storedClaim: ClaimRecord = claim;
+    if (checkout.sessionId) {
+      const recordedClaim = recordClaimCheckoutSession(claim.id, checkout.sessionId);
+      if (!recordedClaim) return null;
+      storedClaim = recordedClaim;
+    }
     return {
-      ...claim,
-      checkout: await createCheckoutSession({
-        claimId: claim.id,
-        siteId: input.siteId,
-        siteSlug: bundle.siteModel.slug,
-        siteName: bundle.businessProfile.name,
-        ownerEmail: input.ownerEmail
-      })
+      ...storedClaim,
+      stripeCheckoutSessionId: checkout.sessionId ?? claim.stripeCheckoutSessionId,
+      checkout
     };
   },
   async completeClaimCheckout(input) {
@@ -401,7 +431,7 @@ export const localRepository: LodestaRepository = {
     return domain ? { ...domain, verification } : null;
   },
   async refreshDomain(input) {
-    const domain = listDomains().find((candidate) => candidate.id === input.domainId);
+    const domain = getDomainById(input.domainId);
     if (!domain) return null;
     const providerStatus = await refreshCustomHostnameStatus({
       provider: domain.provider,
@@ -418,6 +448,12 @@ export const localRepository: LodestaRepository = {
   },
   async listDomains(siteId) {
     return listDomains(siteId);
+  },
+  async getDomainById(domainId) {
+    return getDomainById(domainId);
+  },
+  async getDomainByHostname(hostname) {
+    return getDomainByHostname(hostname);
   },
   async createOutboundCampaign(input) {
     return createOutboundCampaign(input);

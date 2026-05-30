@@ -43,6 +43,15 @@ export function makeLocalBusinessJsonLd(business: BusinessProfile) {
   });
 }
 
+export function serializeJsonLd(value: unknown) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 function verified(business: BusinessProfile, field: string) {
   return business.provenance[field]?.verified === true;
 }

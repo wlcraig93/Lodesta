@@ -22,6 +22,15 @@ export async function POST(request: Request) {
 
   const bundle = await repository.getSiteBundle(parsed.data.siteId);
   if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  if (parsed.data.provider === "railway" && !manualCustomDomainsAllowed()) {
+    return NextResponse.json(
+      {
+        error:
+          "Railway/manual custom domains are disabled in deployed mode. Use Cloudflare for SaaS or set LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true for an explicitly managed exception."
+      },
+      { status: 400 }
+    );
+  }
   const claimGate = claimGateForBundle(bundle, await repository.listClaims(parsed.data.siteId));
   if (!claimGate.ok) {
     const verificationRequired = claimGate.code === "verification_required";
@@ -44,15 +53,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid hostname" }, { status: 400 });
   }
 
+  const existingDomain = await repository.getDomainByHostname(hostname);
+  if (existingDomain) {
+    if (existingDomain.siteId === parsed.data.siteId) return NextResponse.json(existingDomain);
+    return NextResponse.json({ error: "Hostname is already connected to another site." }, { status: 409 });
+  }
+
   const domain = await repository.registerDomain({ ...parsed.data, hostname });
   if (!domain) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
   return NextResponse.json(domain);
 }
 
+function manualCustomDomainsAllowed() {
+  if (process.env.LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS === "true") return true;
+  return process.env.NODE_ENV !== "production" && process.env.LODESTA_REQUIRE_AUTH !== "true";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? undefined;
-  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : requireAdmin(request);
+  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   return NextResponse.json({ domains: await repository.listDomains(siteId) });

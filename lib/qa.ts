@@ -1,5 +1,6 @@
 import type { QACheck, SiteBundle } from "./models";
 import { getPublishedVersion } from "./sample-data";
+import { evaluateSiteAgainstStandard } from "./standard-evaluation";
 
 export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; versionStatus?: "draft" | "published" } = {}) {
   const version =
@@ -238,6 +239,21 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     )
   );
 
+  for (const check of evaluateSiteAgainstStandard(bundle, {
+    versionId: options.versionId,
+    versionStatus: options.versionStatus
+  }).checks) {
+    addCheck(checks, {
+      id: `standard_${slugId(check.criterionId)}`,
+      siteId: bundle.businessProfile.siteId,
+      standardCriterionId: check.criterionId,
+      category: qaCategoryForStandard(check.criterionId, check.layer),
+      severity: check.severity,
+      title: `Standard: ${check.title}`,
+      detail: check.passed ? check.evidence : `${check.evidence} ${check.businessConsequence}`
+    });
+  }
+
   return {
     siteId: bundle.businessProfile.siteId,
     versionId: version.id,
@@ -248,6 +264,18 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
 
 function addCheck(checks: QACheck[], check: QACheck) {
   checks.push(check);
+}
+
+function qaCategoryForStandard(
+  criterionId: string,
+  layer: ReturnType<typeof evaluateSiteAgainstStandard>["checks"][number]["layer"]
+): QACheck["category"] {
+  if (criterionId.startsWith("seo.")) return "seo";
+  if (criterionId.startsWith("accessibility.")) return "accessibility";
+  if (layer === "conversion") return "conversion";
+  if (layer === "trust") return "trust";
+  if (layer === "content_structure") return "content";
+  return "technical";
 }
 
 function targetIdsForVersion(version: SiteBundle["siteModel"]["versions"][number]) {
@@ -327,10 +355,16 @@ function referenceOnlyAssetUrlsUsedInSiteModel(
 
   for (const asset of bundle.presenceAssessment.assetInventory ?? []) {
     if (!asset.url) continue;
-    if (asset.ownerApproved || asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe") {
+    const publicUsage = asset.usageScope === "published_site" || asset.usageScope === "preclaim_preview";
+    if (publicUsage && (asset.ownerApproved || asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe")) {
       allowedUrls.add(asset.url);
     }
-    if (asset.source === "website_reference" || asset.rightsStatus === "reference_only" || asset.usageScope === "reference_only") {
+    if (
+      asset.source === "website_reference" ||
+      asset.rightsStatus === "reference_only" ||
+      asset.usageScope === "reference_only" ||
+      asset.usageScope === "internal_planning"
+    ) {
       referenceUrls.add(asset.url);
     }
   }
@@ -356,7 +390,7 @@ function referenceOnlyAssetUrlsUsedInSiteModel(
 }
 
 function collectUrlStrings(value: unknown): string[] {
-  if (typeof value === "string") return /^https?:\/\//i.test(value) ? [value] : [];
+  if (typeof value === "string") return /^https?:\/\//i.test(value) || value.startsWith("/api/assets/") ? [value] : [];
   if (Array.isArray(value)) return value.flatMap(collectUrlStrings);
   if (value && typeof value === "object") return Object.values(value).flatMap(collectUrlStrings);
   return [];

@@ -9,7 +9,7 @@ const previewTokenSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const body = await request.json().catch(() => null);
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const { searchParams } = new URL(request.url);

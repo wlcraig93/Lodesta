@@ -14,6 +14,7 @@ const businessProfileSchema = z.object({
   bookingLinks: z.array(z.string()).optional(),
   orderingLinks: z.array(z.string()).optional(),
   socialLinks: z.array(z.string()).optional(),
+  pressLinks: z.array(z.string()).optional(),
   hours: z.record(z.string()).optional(),
   address: z
     .object({

@@ -19,38 +19,6 @@ type LaunchMarketInput = {
 };
 
 const allowedUsCountries = new Set(["us", "usa", "u.s.", "u.s.a.", "united states", "united states of america"]);
-const unsupportedCountryTlds = new Set([
-  "ar",
-  "au",
-  "be",
-  "br",
-  "ca",
-  "ch",
-  "cl",
-  "cn",
-  "co",
-  "de",
-  "dk",
-  "es",
-  "fi",
-  "fr",
-  "ie",
-  "in",
-  "it",
-  "jp",
-  "kr",
-  "mx",
-  "nl",
-  "no",
-  "nz",
-  "pl",
-  "pt",
-  "se",
-  "sg",
-  "uk",
-  "za"
-]);
-
 const unsupportedMarketTerms = [
   "argentina",
   "australia",
@@ -92,7 +60,7 @@ export function assertLaunchMarket(input: LaunchMarketInput) {
 export function validateLaunchMarket(input: LaunchMarketInput): { ok: true } | { ok: false; reason: string } {
   const hostname = input.url ? safeHostname(input.url) : "";
   const tld = hostname.split(".").at(-1) ?? "";
-  if (unsupportedCountryTlds.has(tld)) {
+  if (isUnsupportedCountryCodeTld(tld)) {
     return {
       ok: false,
       reason: `Lodesta launch intake is US-only; ${hostname} appears to use a non-US country-code domain.`
@@ -138,6 +106,10 @@ function safeHostname(url: string) {
   } catch {
     return "";
   }
+}
+
+function isUnsupportedCountryCodeTld(tld: string) {
+  return /^[a-z]{2}$/i.test(tld) && tld.toLowerCase() !== "us";
 }
 
 function containsTerm(text: string, term: string) {

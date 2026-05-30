@@ -12,12 +12,14 @@ type FindingApplyFormProps = {
 
 export function FindingApplyForm({ siteId, siteSlug, findingId, applyMode, findingStatus }: FindingApplyFormProps) {
   const [status, setStatus] = useState("");
+  const [changeSummary, setChangeSummary] = useState("");
   const [reviewReady, setReviewReady] = useState(false);
   const [dismissed, setDismissed] = useState(findingStatus === "dismissed");
   const effectiveStatus = dismissed ? "dismissed" : findingStatus;
 
   async function apply(mode: "draft" | "qa") {
     setStatus(mode === "draft" ? "Applying to draft..." : "Applying to draft and running QA...");
+    setChangeSummary("");
     setReviewReady(false);
     const response = await fetch("/api/action-list/apply", {
       method: "POST",
@@ -30,6 +32,7 @@ export function FindingApplyForm({ siteId, siteSlug, findingId, applyMode, findi
       return;
     }
     const failed = result.qa?.checks?.filter((check: { severity: string }) => check.severity === "fail").length ?? 0;
+    setChangeSummary(result.changeSummary?.summary ?? "");
     if (mode === "qa") {
       setReviewReady(failed === 0);
       setStatus(
@@ -57,6 +60,7 @@ export function FindingApplyForm({ siteId, siteSlug, findingId, applyMode, findi
     }
     setDismissed(true);
     setReviewReady(false);
+    setChangeSummary("");
     setStatus("Dismissed.");
   }
 
@@ -101,6 +105,7 @@ export function FindingApplyForm({ siteId, siteSlug, findingId, applyMode, findi
         Dismiss
       </button>
       {status ? <p className="form-status">{status}</p> : null}
+      {changeSummary ? <p className="form-status">Change: {changeSummary}</p> : null}
     </div>
   );
 }

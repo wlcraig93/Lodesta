@@ -241,6 +241,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
           medianTimeToActionMs: analytics.medianTimeToActionMs
         },
         leads: leads.length,
+        leadSummary: summarizeLeads(leads),
         qa: qaSummary(qa),
         findings: {
           total: findings?.length ?? 0,
@@ -421,6 +422,56 @@ function parseBatchUrls(input: unknown) {
         .filter((url) => /^https?:\/\//i.test(url))
     )
   );
+}
+
+function summarizeLeads(leads: LeadSubmission[]) {
+  const byStatus = {
+    new: 0,
+    reviewed: 0,
+    spam: 0
+  };
+  const forms = new Map<string, number>();
+  for (const lead of leads) {
+    byStatus[lead.status] += 1;
+    forms.set(lead.formId, (forms.get(lead.formId) ?? 0) + 1);
+  }
+
+  return {
+    total: leads.length,
+    ...byStatus,
+    byForm: Array.from(forms.entries())
+      .map(([formId, total]) => ({ formId, total }))
+      .sort((left, right) => right.total - left.total || left.formId.localeCompare(right.formId)),
+    recent: [...leads]
+      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
+      .slice(0, 5)
+      .map((lead) => ({
+        id: lead.id,
+        formId: lead.formId,
+        pageId: lead.pageId,
+        status: lead.status,
+        submittedAt: lead.submittedAt,
+        sourceHost: leadSourceHost(lead),
+        utmSource: stringMetadata(lead.metadata, "utmSource"),
+        utmCampaign: stringMetadata(lead.metadata, "utmCampaign")
+      }))
+  };
+}
+
+function leadSourceHost(lead: LeadSubmission) {
+  const referrerHost = stringMetadata(lead.metadata, "referrerHost");
+  if (referrerHost) return referrerHost;
+  if (!lead.sourceUrl) return undefined;
+  try {
+    return new URL(lead.sourceUrl).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+function stringMetadata(metadata: LeadSubmission["metadata"], key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function qaSummary(qa: ReturnType<typeof runSiteQa>) {

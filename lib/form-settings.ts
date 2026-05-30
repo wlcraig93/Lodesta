@@ -1,4 +1,5 @@
 import type { FormDefinition, SiteBundle, WorkflowDefinition } from "./models";
+import { validatePublicHostname } from "./url-safety";
 
 export type FormFieldSettingsInput = {
   id: string;
@@ -38,6 +39,8 @@ export function applyFormSettingsUpdate(bundle: SiteBundle, input: UpdateFormSet
   if (cleanedFields.some((field) => sensitiveFieldPattern.test(field.label))) {
     return { ok: false, reason: "Forms cannot collect sensitive credentials, government IDs, cards, bank details, tokens, or secrets." };
   }
+  const webhook = validateWebhookUrl(input.webhookUrl);
+  if (!webhook.ok) return { ok: false, reason: webhook.reason };
 
   const existing = bundle.extensionModel.forms[formIndex];
   const updatedForm: FormDefinition = {
@@ -47,7 +50,7 @@ export function applyFormSettingsUpdate(bundle: SiteBundle, input: UpdateFormSet
     fields: cleanedFields
   };
   bundle.extensionModel.forms[formIndex] = updatedForm;
-  bundle.extensionModel.workflows = updateNotificationWorkflows(bundle.extensionModel.workflows, input);
+  bundle.extensionModel.workflows = updateNotificationWorkflows(bundle.extensionModel.workflows, input, webhook.url);
 
   return {
     ok: true,
@@ -78,7 +81,7 @@ function cleanFields(fields: FormFieldSettingsInput[]) {
     .filter((field): field is FormDefinition["fields"][number] => Boolean(field));
 }
 
-function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: UpdateFormSettingsInput) {
+function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: UpdateFormSettingsInput, webhookUrl?: string) {
   const next = workflows.filter((workflow) => workflow.trigger !== "form_submission" || workflow.destination === "crm_placeholder");
   const email = cleanString(input.notificationEmail);
   if (email) {
@@ -90,7 +93,6 @@ function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: Upd
     });
   }
 
-  const webhookUrl = cleanString(input.webhookUrl);
   if (webhookUrl) {
     next.push({
       id: `workflow_${input.formId}_webhook`,
@@ -101,6 +103,29 @@ function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: Upd
   }
 
   return next;
+}
+
+function validateWebhookUrl(value: string | undefined): { ok: true; url?: string } | { ok: false; reason: string } {
+  const cleaned = cleanString(value);
+  if (!cleaned) return { ok: true };
+
+  let url: URL;
+  try {
+    url = new URL(cleaned);
+  } catch {
+    return { ok: false, reason: "Webhook URL must be a valid absolute URL." };
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return { ok: false, reason: "Webhook URL must use HTTPS or HTTP." };
+  }
+  if (url.username || url.password) {
+    return { ok: false, reason: "Webhook URL credentials are not allowed." };
+  }
+
+  const hostnameCheck = validatePublicHostname(url.hostname);
+  if (!hostnameCheck.ok) return { ok: false, reason: `Webhook URL is not allowed: ${hostnameCheck.error}` };
+  return { ok: true, url: url.href };
 }
 
 function cleanString(value: string | undefined) {

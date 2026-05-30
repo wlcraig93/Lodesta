@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
-import type { SiteBundle } from "./models";
+import type { ClaimRecord, SiteBundle } from "./models";
 import { repository } from "./repository";
 import { getCurrentUser } from "./supabase/server";
 import { authRequired, hasValidAdminToken, isAdminEmail } from "./auth-policy";
@@ -32,6 +32,10 @@ export async function requireAdminPageAccess(nextPath: string) {
 }
 
 export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: string) {
+  if (hasValidAdminToken(await headers())) {
+    return { configured: true as const, user: null, admin: true as const };
+  }
+
   const auth = await requireOwnerAccess(nextPath);
   if (!auth.configured) return auth;
   const userId = auth.user?.id;
@@ -46,4 +50,26 @@ export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: strin
   );
   if (!ownsSite) notFound();
   return auth;
+}
+
+export function filterSiteBundlesForOwner(input: {
+  bundles: SiteBundle[];
+  claims: ClaimRecord[];
+  authConfigured: boolean;
+  userId?: string;
+  userEmail?: string;
+}) {
+  if (!input.authConfigured) return input.bundles;
+
+  const email = input.userEmail?.toLowerCase();
+  if (!input.userId && !email) return [];
+
+  return input.bundles.filter((bundle) =>
+    input.claims.some(
+      (claim) =>
+        claim.siteId === bundle.businessProfile.siteId &&
+        claim.status === "claimed" &&
+        ((input.userId && claim.ownerUserId === input.userId) || (email && claim.ownerEmail?.toLowerCase() === email))
+    )
+  );
 }

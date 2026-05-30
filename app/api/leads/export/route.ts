@@ -5,7 +5,7 @@ import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? undefined;
-  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : requireAdmin(request);
+  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const leads = await repository.listFormSubmissions(siteId);

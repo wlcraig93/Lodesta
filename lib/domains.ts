@@ -18,6 +18,11 @@ type RegisterCustomHostnameInput = {
   hostname: string;
 };
 
+type ResolvableCustomDomainInput = {
+  status: DomainProviderStatus["status"];
+  provider: "railway" | "cloudflare_for_saas";
+};
+
 type CloudflareCustomHostnameResponse = {
   success?: boolean;
   errors?: Array<{ message?: string }>;
@@ -197,6 +202,10 @@ export function normalizeCustomHostname(value: string) {
     throw new Error("Enter a valid hostname, such as www.example.com.");
   }
   return hostname;
+}
+
+export function isResolvableCustomDomain(domain: ResolvableCustomDomainInput) {
+  return domain.status === "active";
 }
 
 function verificationFromCloudflareResult(

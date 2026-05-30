@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
-import { requireAdminOrSiteOwner } from "@/lib/security";
+import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 
 const learnSchema = z.object({
   siteId: z.string().min(1),
@@ -11,10 +11,8 @@ const learnSchema = z.object({
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get("siteId") ?? undefined;
-  if (siteId) {
-    const unauthorized = await requireAdminOrSiteOwner(request, siteId);
-    if (unauthorized) return unauthorized;
-  }
+  const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request);
+  if (unauthorized) return unauthorized;
 
   return NextResponse.json({
     learnings: await repository.listExperimentLearnings({ siteId })

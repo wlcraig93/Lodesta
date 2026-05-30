@@ -153,7 +153,8 @@ async function generateDirectionMockup({
       siteId: bundle.businessProfile.siteId,
       assetId,
       base64: image.base64,
-      mimeType: mimeTypeForFormat(config.outputFormat)
+      mimeType: mimeTypeForFormat(config.outputFormat),
+      publicUrl: false
     });
     return {
       ...base,
@@ -162,16 +163,18 @@ async function generateDirectionMockup({
       assetId,
       storageProvider: stored.provider,
       storagePath: stored.storagePath,
-      image: {
-        id: assetId,
-        url: stored.url,
-        alt: `${direction.label} creative planning mockup for ${bundle.businessProfile.name}`,
-        source: "generated",
-        rightsStatus: "preclaim_safe"
-      },
+      image: stored.url
+        ? {
+            id: assetId,
+            url: stored.url,
+            alt: `${direction.label} creative planning mockup for ${bundle.businessProfile.name}`,
+            source: "generated" as const,
+            rightsStatus: "preclaim_safe" as const
+          }
+        : undefined,
       notes: [
         "Generated image is a creative planning layer only.",
-        `Image bytes stored with ${stored.provider} asset storage at ${stored.storagePath}.`,
+        `Image bytes stored privately with ${stored.provider} asset storage at ${stored.storagePath}.`,
         "The production website must still be rendered from SiteModel sections, not from this mockup."
       ]
     };

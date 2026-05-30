@@ -1,4 +1,5 @@
 import type { LeadSubmission, SiteBundle, WorkflowDelivery, WorkflowDefinition } from "./models";
+import { validatePublicFetchUrl } from "./url-safety";
 
 type WorkflowRecorder = (delivery: Omit<WorkflowDelivery, "id" | "createdAt">) => Promise<WorkflowDelivery>;
 
@@ -74,7 +75,7 @@ async function deliverEmail(bundle: SiteBundle, submission: LeadSubmission, work
   }
 
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.WORKFLOW_FROM_EMAIL ?? "Lodesta <notifications@lodesta.example>";
+  const from = "Lodesta <notifications@mail.lodesta.com>";
   if (!apiKey) {
     return {
       target,
@@ -85,6 +86,7 @@ async function deliverEmail(bundle: SiteBundle, submission: LeadSubmission, work
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
+    signal: workflowTimeoutSignal(),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json"
@@ -115,9 +117,19 @@ async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, wo
       message: "Webhook workflow skipped because no URL is configured."
     };
   }
+  const safeTarget = await validatePublicFetchUrl(target, { allowPrivateOverride: false });
+  if (!safeTarget.ok) {
+    return {
+      target,
+      status: "failed" as const,
+      message: "Webhook delivery blocked by URL safety guardrails.",
+      error: safeTarget.error
+    };
+  }
 
-  const response = await fetch(target, {
+  const response = await fetch(safeTarget.url, {
     method: "POST",
+    signal: workflowTimeoutSignal(),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       type: "form_submission",
@@ -154,4 +166,14 @@ function leadSummaryText(bundle: SiteBundle, submission: LeadSubmission) {
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");
+}
+
+function workflowTimeoutSignal() {
+  return AbortSignal.timeout(workflowTimeoutMs());
+}
+
+function workflowTimeoutMs() {
+  const parsed = Number(process.env.LODESTA_WORKFLOW_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 5000;
+  return Math.min(Math.max(Math.trunc(parsed), 1000), 30000);
 }

@@ -56,6 +56,7 @@ import { applyOwnerAssetsUpdate } from "../owner-assets";
 import { applySiteIdentity, makeUniqueSlug } from "../site-identity";
 import { applyVerifiedFacts } from "../fact-verification";
 import { applyBusinessProfileUpdate } from "../business-profile-update";
+import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
@@ -443,6 +444,17 @@ export const supabaseRepository: LodestaRepository = {
     return { ok: true as const, bundle };
   },
 
+  async restoreVersionToDraft(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const result = restoreVersionToDraftBundle(bundle, { versionId: input.versionId });
+    if (!result.ok) return result;
+    const findings = await buildOptimizationFindings(bundle);
+    bundle.optimizationFindings = findings;
+    await persistBundle(bundle);
+    return result;
+  },
+
   async updateBusinessProfile(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
@@ -737,7 +749,13 @@ export const supabaseRepository: LodestaRepository = {
     if (!applied.ok) return applied;
     await persistVersions(bundle);
     await persistFindings(input.siteId, bundle.optimizationFindings);
-    return { ok: true as const, draftCreated: true, qaRequired: true, finding: applied.finding };
+    return {
+      ok: true as const,
+      draftCreated: true,
+      qaRequired: true,
+      finding: applied.finding,
+      changeSummary: applied.changeSummary
+    };
   },
 
   async dismissFinding(input) {
@@ -834,6 +852,17 @@ export const supabaseRepository: LodestaRepository = {
     }
     const existing = await requireMaybe<ClaimRow>(query.maybeSingle(), "Find claim for checkout completion");
     if (!existing) return null;
+    if (input.siteId && existing.site_id !== input.siteId) return null;
+    if (input.checkoutSessionId) {
+      if (existing.stripe_checkout_session_id && existing.stripe_checkout_session_id !== input.checkoutSessionId) {
+        return null;
+      }
+      const sessionOwner = await requireMaybe<ClaimRow>(
+        supabase.from("claims").select("*").eq("stripe_checkout_session_id", input.checkoutSessionId).maybeSingle(),
+        "Find claim by checkout session"
+      );
+      if (sessionOwner && sessionOwner.id !== existing.id) return null;
+    }
 
     const claimedAt = input.completedAt ?? new Date().toISOString();
     const row = await requireData<ClaimRow>(
@@ -927,6 +956,22 @@ export const supabaseRepository: LodestaRepository = {
     if (siteId) query = query.eq("site_id", siteId);
     const rows = await requireData<DomainRow[]>(query, "List domains");
     return rows.map(rowToDomain);
+  },
+
+  async getDomainById(domainId) {
+    const row = await requireMaybe<DomainRow>(
+      getSupabaseAdminClient().from("domains").select("*").eq("id", domainId).maybeSingle(),
+      "Find domain by id"
+    );
+    return row ? rowToDomain(row) : null;
+  },
+
+  async getDomainByHostname(hostname) {
+    const row = await requireMaybe<DomainRow>(
+      getSupabaseAdminClient().from("domains").select("*").eq("hostname", hostname.toLowerCase()).maybeSingle(),
+      "Find domain by hostname"
+    );
+    return row ? rowToDomain(row) : null;
   },
 
   async createOutboundCampaign(input) {
@@ -1273,7 +1318,7 @@ async function persistBusinessProfile(profile: BusinessProfile) {
 
 async function persistVersions(bundle: SiteBundle) {
   const supabase = getSupabaseAdminClient();
-  await requireData<unknown>(supabase.from("site_versions").delete().eq("site_id", bundle.businessProfile.siteId), "Clear versions");
+  await requireSuccess(supabase.from("site_versions").delete().eq("site_id", bundle.businessProfile.siteId), "Clear versions");
   if (bundle.siteModel.versions.length === 0) return;
   await requireData<SiteVersionRow[]>(
     supabase
@@ -1294,7 +1339,7 @@ async function persistVersions(bundle: SiteBundle) {
 
 async function persistForms(siteId: string, forms: FormDefinition[]) {
   const supabase = getSupabaseAdminClient();
-  await requireData<unknown>(supabase.from("forms").delete().eq("site_id", siteId), "Clear forms");
+  await requireSuccess(supabase.from("forms").delete().eq("site_id", siteId), "Clear forms");
   if (forms.length === 0) return;
   await requireData<FormRow[]>(
     supabase
@@ -1307,7 +1352,7 @@ async function persistForms(siteId: string, forms: FormDefinition[]) {
 
 async function persistAssets(siteId: string, assets: SiteAsset[]) {
   const supabase = getSupabaseAdminClient();
-  await requireData<unknown>(supabase.from("site_assets").delete().eq("site_id", siteId), "Clear site assets");
+  await requireSuccess(supabase.from("site_assets").delete().eq("site_id", siteId), "Clear site assets");
   if (assets.length === 0) return;
   await requireData<SiteAssetRow[]>(
     supabase
@@ -1335,7 +1380,7 @@ async function persistAssets(siteId: string, assets: SiteAsset[]) {
 
 async function persistFindings(siteId: string, findings: OptimizationFinding[]) {
   const supabase = getSupabaseAdminClient();
-  await requireData<unknown>(supabase.from("optimization_findings").delete().eq("site_id", siteId), "Clear findings");
+  await requireSuccess(supabase.from("optimization_findings").delete().eq("site_id", siteId), "Clear findings");
   if (findings.length === 0) return;
   await requireData<FindingRow[]>(
     supabase
@@ -1363,7 +1408,7 @@ async function persistFindings(siteId: string, findings: OptimizationFinding[]) 
 
 async function persistExperiments(siteId: string, experiments: Experiment[]) {
   const supabase = getSupabaseAdminClient();
-  await requireData<unknown>(supabase.from("experiments").delete().eq("site_id", siteId), "Clear experiments");
+  await requireSuccess(supabase.from("experiments").delete().eq("site_id", siteId), "Clear experiments");
   if (experiments.length === 0) return;
   await requireData<ExperimentRow[]>(
     supabase
@@ -1779,6 +1824,11 @@ async function requireData<T>(responsePromise: PromiseLike<{ data: T | null; err
   if (response.error) throw new Error(`${action}: ${response.error.message}`);
   if (response.data === null) throw new Error(`${action}: no data returned`);
   return response.data;
+}
+
+async function requireSuccess(responsePromise: PromiseLike<{ error: { message: string } | null }>, action: string) {
+  const response = await responsePromise;
+  if (response.error) throw new Error(`${action}: ${response.error.message}`);
 }
 
 async function requireMaybe<T>(

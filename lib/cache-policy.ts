@@ -13,6 +13,7 @@ export type CachePolicy = {
 };
 
 const noStore = "no-store, no-cache, must-revalidate, proxy-revalidate";
+export const publicHostVary = "Host, X-Forwarded-Host";
 
 export function cachePolicyForPathname(pathname: string, options: { customDomain?: boolean } = {}): CachePolicy {
   if (pathname.startsWith("/_next/static/") || pathname.startsWith("/_next/image")) {
@@ -27,11 +28,12 @@ export function cachePolicyForPathname(pathname: string, options: { customDomain
     };
   }
 
-  if (pathname === "/robots.txt" || pathname === "/sitemap.xml" || pathname === "/favicon.ico") {
+  if (pathname === "/robots.txt" || pathname === "/sitemap.xml" || pathname === "/llms.txt" || pathname === "/favicon.ico") {
     return {
       kind: "metadata",
       cacheControl: "public, max-age=300, s-maxage=300",
-      cdnCacheControl: "public, s-maxage=300"
+      cdnCacheControl: "public, s-maxage=300",
+      vary: publicHostVary
     };
   }
 
@@ -40,7 +42,7 @@ export function cachePolicyForPathname(pathname: string, options: { customDomain
       kind: "public_site",
       cacheControl: "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
       cdnCacheControl: "public, s-maxage=300, stale-while-revalidate=86400",
-      vary: "Host"
+      vary: publicHostVary
     };
   }
 

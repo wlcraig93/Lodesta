@@ -3,6 +3,9 @@ import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 const auditSchema = z.object({
   siteId: z.string().optional()
 });

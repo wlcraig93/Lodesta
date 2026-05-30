@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
-import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { claimGateForBundle } from "@/lib/site-publication";
 
 const analyticsEventSchema = z.object({
@@ -20,7 +20,8 @@ const analyticsEventSchema = z.object({
     "engagement",
     "scroll_depth",
     "web_vital",
-    "experiment_assignment"
+    "experiment_assignment",
+    "agent_readable_request"
   ]),
   timestamp: z.string().datetime().optional(),
   sectionId: z.string().optional(),
@@ -36,19 +37,19 @@ const analyticsEventSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const limit = rateLimit(request, {
+    bucket: "analytics_ingest",
+    limit: 600,
+    windowMs: 60_000
+  });
+  if (!limit.ok) return limit.response;
+
   const body = await request.json().catch(() => null);
   const parsed = analyticsEventSchema.safeParse(body);
 
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid analytics event", issues: parsed.error.issues }, { status: 400 });
+    return applyRateLimitHeaders(NextResponse.json({ error: "Invalid analytics event", issues: parsed.error.issues }, { status: 400 }), limit);
   }
-
-  const limit = rateLimit(request, {
-    bucket: "analytics_ingest",
-    keyParts: [parsed.data.siteId],
-    ...rateLimitConfig("LODESTA_ANALYTICS_INGEST", { limit: 600, windowMs: 60_000 })
-  });
-  if (!limit.ok) return limit.response;
 
   const bundle = await repository.getSiteBundle(parsed.data.siteId);
   if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);

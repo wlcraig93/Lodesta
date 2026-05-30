@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
 import { isIndexableSite } from "@/lib/site-publication";
+import { isResolvableCustomDomain } from "@/lib/domains";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const hostname = normalizeHostname(searchParams.get("hostname") ?? "");
   if (!hostname) return NextResponse.json({ resolved: false }, { status: 400 });
 
-  const domains = await repository.listDomains();
-  const domain = domains.find((candidate) => normalizeHostname(candidate.hostname) === hostname && isResolvableDomain(candidate));
+  const domain = await repository.getDomainByHostname(hostname);
+  if (domain && !isResolvableDomain(domain)) return NextResponse.json({ resolved: false }, { status: 404 });
   if (!domain) return NextResponse.json({ resolved: false }, { status: 404 });
 
   const bundle = await repository.getSiteBundle(domain.siteId);
@@ -24,12 +25,10 @@ export async function GET(request: Request) {
   });
 }
 
-type ResolvableDomain = Awaited<ReturnType<typeof repository.listDomains>>[number];
+type ResolvableDomain = NonNullable<Awaited<ReturnType<typeof repository.getDomainByHostname>>>;
 
 function isResolvableDomain(domain: ResolvableDomain) {
-  if (domain.status === "failed") return false;
-  if (domain.provider === "cloudflare_for_saas") return domain.status === "active";
-  return domain.status === "active" || domain.status === "pending";
+  return isResolvableCustomDomain(domain);
 }
 
 function normalizeHostname(hostname: string) {

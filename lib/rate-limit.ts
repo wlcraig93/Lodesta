@@ -31,16 +31,6 @@ const globalStore = globalThis as typeof globalThis & {
   __lodestaRateLimits?: Map<string, RateLimitState>;
 };
 
-export function rateLimitConfig(
-  prefix: string,
-  defaults: { limit: number; windowMs: number }
-): Pick<RateLimitOptions, "limit" | "windowMs"> {
-  return {
-    limit: positiveInteger(process.env[`${prefix}_LIMIT`], defaults.limit),
-    windowMs: positiveInteger(process.env[`${prefix}_WINDOW_MS`], defaults.windowMs)
-  };
-}
-
 export function rateLimit(request: Request, options: RateLimitOptions): RateLimitResult {
   const limit = Math.max(1, Math.floor(options.limit));
   const windowMs = Math.max(1000, Math.floor(options.windowMs));
@@ -131,10 +121,4 @@ function pruneRateLimits(store: Map<string, RateLimitState>, now: number) {
   for (const [key, state] of store.entries()) {
     if (state.resetAt <= now) store.delete(key);
   }
-}
-
-function positiveInteger(value: string | undefined, fallback: number) {
-  if (!value) return fallback;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }

@@ -1,4 +1,5 @@
 import "./load-env.mjs";
+import { fileURLToPath } from "node:url";
 
 const baseUrl = (process.env.LODESTA_API_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:4330").replace(
   /\/$/,
@@ -37,6 +38,10 @@ async function main() {
     case "publish":
       requireArgs(command, args, 1);
       await printJson(post("/api/sites/publish", { siteId: args[0], confirmed: true }));
+      return;
+    case "restore-version":
+      requireArgs(command, args, 2);
+      await printJson(post("/api/sites/versions", { siteId: args[0], versionId: args[1], action: "restore_draft" }));
       return;
     case "apply-safe-findings":
       requireArgs(command, args, 1);
@@ -79,9 +84,7 @@ async function main() {
       return;
     case "import-batch": {
       requireArgs(command, args, 1);
-      const payload = args.length === 1 && args[0].trim().startsWith("{")
-        ? JSON.parse(args[0])
-        : { urls: args.filter((arg) => /^https?:\/\//i.test(arg)) };
+      const payload = parseImportBatchPayload(args);
       const job = await post("/api/jobs", { kind: "import_batch", payload });
       const processed = await post("/api/jobs/process", { limit: 1 });
       await printJson(Promise.resolve({ job, processed }));
@@ -109,6 +112,17 @@ async function main() {
     case "outbound-summary":
       await printJson(get(`/api/outbound/summary${args[0] ? `?campaignId=${encodeURIComponent(args[0])}` : ""}`));
       return;
+    case "outbound-manifest": {
+      const csv = args.includes("csv");
+      const campaignId = args.find((arg) => arg !== "csv");
+      const query = new URLSearchParams();
+      if (campaignId) query.set("campaignId", campaignId);
+      if (csv) query.set("format", "csv");
+      const path = `/api/outbound/export${query.size ? `?${query.toString()}` : ""}`;
+      if (csv) process.stdout.write(await getText(path));
+      else await printJson(get(path));
+      return;
+    }
     case "prune-analytics": {
       const payload = {};
       if (args[0] && !/^\d+$/.test(args[0])) payload.siteId = args[0];
@@ -146,6 +160,15 @@ async function get(path) {
   return parseResponse(response);
 }
 
+async function getText(path) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: authHeaders() });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}: ${text}`);
+  }
+  return text;
+}
+
 async function post(path, body) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: "POST",
@@ -179,6 +202,22 @@ function parsePayload(args) {
     payload[key] = valueParts.join("=");
   }
   return payload;
+}
+
+export function parseImportBatchPayload(args) {
+  const raw = args.join(" ").trim();
+  if (args.length === 1 && /^[{[]/.test(raw)) {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { urls: parsed.filter(isHttpUrl) };
+    if (parsed && typeof parsed === "object") return parsed;
+    throw new Error("import-batch JSON must be an object payload or an array of URLs.");
+  }
+  if (args.length === 1 && /[\n,]/.test(raw)) return { text: raw };
+  return { urls: args.filter(isHttpUrl) };
+}
+
+function isHttpUrl(value) {
+  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
 }
 
 function parseScheduleArgs(args) {
@@ -217,6 +256,7 @@ Commands:
   run-audit <siteId>                       Run the optimization audit
   run-qa <siteId> [published|draft]         Run QA checks
   publish <siteId>                         Confirm and publish the current QA-passing draft
+  restore-version <siteId> <versionId>      Restore a historical version into a QA-checkable draft
   apply-safe-findings <siteId> [qa]         Apply auto-fix/one-click findings and optionally run QA
   dismiss-finding <siteId> <findingId>      Dismiss an action-list finding after review
   create-preview <siteId>                  Create a tokenized noindex preview URL
@@ -233,6 +273,7 @@ Commands:
   add-outbound-prospect <campaignId> <json> Add or update an outbound prospect
   record-outbound-event <campaignId> <json> Record outbound test event
   outbound-summary [campaignId]             Summarize outbound wedge metrics
+  outbound-manifest [campaignId] [csv]      Export outbound mailer/prospect manifest
   prune-analytics [siteId] [days]           Delete raw analytics events older than the retention window
   analytics-retention-job [days]            Queue and process the analytics-retention worker job
   schedule-maintenance [task] [siteId] [days] Queue cron maintenance jobs without processing them
@@ -244,7 +285,9 @@ Set LODESTA_API_URL to target a non-local deployment.
 `);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((error) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  });
+}

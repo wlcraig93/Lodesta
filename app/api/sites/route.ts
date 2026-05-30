@@ -3,7 +3,7 @@ import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 
 export async function GET(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const sites = await repository.listSiteBundles();

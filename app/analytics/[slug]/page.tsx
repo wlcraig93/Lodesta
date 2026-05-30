@@ -89,7 +89,7 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
         <Metric label="Tracked clicks" value={summary.clicks + summary.telClicks + summary.outboundClicks} />
         <Metric label="Median time to action" value={formatDuration(summary.medianTimeToActionMs)} />
         <Metric label="Avg time to action" value={formatDuration(summary.avgTimeToActionMs)} />
-        <Metric label="Web vital samples" value={summary.webVitals.length} />
+        <Metric label="Agent-readable" value={summary.agentReadableRequests} />
       </section>
 
       <div className="admin-grid">
@@ -115,6 +115,61 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
           </div>
         </aside>
       </div>
+
+      <section className="panel">
+        <h2>Funnel Dropoff</h2>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Step</th>
+              <th>Start</th>
+              <th>Reached</th>
+              <th>Dropoff</th>
+              <th>Conversion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.funnelDropoffs.map((row) => (
+              <tr key={row.key}>
+                <td>
+                  {row.from} to {row.to}
+                </td>
+                <td>{row.fromCount}</td>
+                <td>{row.toCount}</td>
+                <td>{row.dropoffCount}</td>
+                <td>{Math.round(row.conversionRate * 100)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="panel">
+        <h2>Agent-Readable Requests</h2>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Resource</th>
+              <th>Requests</th>
+              <th>Sessions</th>
+              <th>Latest</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.agentReadableByResource.map((row) => (
+              <tr key={row.key}>
+                <td>{row.label}</td>
+                <td>{row.requests}</td>
+                <td>{row.sessions}</td>
+                <td>{row.latestAt ? formatDate(row.latestAt) : "n/a"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {summary.agentReadableByResource.length === 0 ? (
+          <p className="muted">No llms.txt or Markdown alternate requests yet.</p>
+        ) : null}
+      </section>
 
       <div className="admin-grid">
         <section className="panel">
@@ -188,6 +243,37 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
           </div>
         </aside>
       </div>
+
+      <section className="panel">
+        <h2>Section Conversion Paths</h2>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Exposed section</th>
+              <th>Sessions</th>
+              <th>Action sessions</th>
+              <th>Actions</th>
+              <th>Median time</th>
+              <th>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.sectionConversionPaths.map((row) => (
+              <tr key={row.key}>
+                <td>{sectionNames.get(row.sectionId) ?? row.sectionId}</td>
+                <td>{row.exposedSessions}</td>
+                <td>{row.actionSessions}</td>
+                <td>{row.primaryActions}</td>
+                <td>{formatDuration(row.medianTimeToActionMs)}</td>
+                <td>{Math.round(row.actionRate * 100)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {summary.sectionConversionPaths.length === 0 ? (
+          <p className="muted">No section-to-action paths yet.</p>
+        ) : null}
+      </section>
 
       <div className="admin-grid">
         <section className="panel">

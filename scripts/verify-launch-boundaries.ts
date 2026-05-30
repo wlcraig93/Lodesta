@@ -1,33 +1,65 @@
 import "./load-env";
 
-import type { AnalyticsEvent, ClaimRecord, JobRecord, OptimizationFinding } from "../lib/models";
+import { readFileSync } from "node:fs";
+import platformRobots from "../app/robots";
+import type { AnalyticsEvent, ClaimRecord, JobRecord, LeadSubmission, OptimizationFinding } from "../lib/models";
 import { summarizeAnalytics } from "../lib/analytics";
-import { readLocalAsset, storeGeneratedAssetBytes } from "../lib/asset-storage";
+import { readLocalAsset, storeAssetBytes, storeGeneratedAssetBytes } from "../lib/asset-storage";
 import { cachePolicyForPathname } from "../lib/cache-policy";
-import { scoreCrawlAssessment, type CrawlAssessment } from "../lib/crawler";
-import { normalizeCustomHostname, refreshCustomHostnameStatus } from "../lib/domains";
+import { extractCrawlPageSignals, scoreCrawlAssessment, type CrawlAssessment } from "../lib/crawler";
+import { isResolvableCustomDomain, normalizeCustomHostname, refreshCustomHostnameStatus } from "../lib/domains";
 import { createExperimentLearning } from "../lib/experiment-learning";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "../lib/editor-guardrails";
+import { applyBusinessProfileUpdate } from "../lib/business-profile-update";
 import { applyFormSettingsUpdate } from "../lib/form-settings";
 import { validateFormSubmission } from "../lib/form-validation";
+import { executeFormSubmissionWorkflows } from "../lib/workflows";
 import { createSiteFromInput } from "../lib/intake";
+import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
 import { isAdminEmail } from "../lib/auth-policy";
 import { applyOwnerAssetsUpdate } from "../lib/owner-assets";
 import { updateSiteDesignBundle } from "../lib/design";
 import { applySuggestedEdit, preserveFindingLifecycle } from "../lib/optimization";
-import { newOutboundCampaign, newOutboundEvent, newOutboundProspect, applyOutboundEventToProspect, summarizeOutbound } from "../lib/outbound";
+import { recommendFromAnalytics } from "../lib/analytics-insights";
+import {
+  assertOutboundCompliance,
+  newOutboundCampaign,
+  newOutboundEvent,
+  newOutboundProspect,
+  applyOutboundEventToProspect,
+  buildOutboundMailerManifest,
+  outboundMailerManifestCsv,
+  summarizeOutbound
+} from "../lib/outbound";
 import { hashIpAddress, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "../lib/privacy";
 import { rateLimit } from "../lib/rate-limit";
 import { getRenderInspectionRuntimeStatus, inspectUrlRender } from "../lib/render-inspection";
+import { runAudit } from "../lib/audit";
 import { executeJob, retentionCutoffFromPayload, retentionDaysFromPayload } from "../lib/jobs";
 import { scheduleLaunchJobs } from "../lib/job-scheduler";
 import { validateLaunchMarket } from "../lib/launch-market";
 import { runSiteQa } from "../lib/qa";
+import { getHealthReport } from "../lib/health";
+import { resolveClaimOwner } from "../lib/claim-ownership";
+import { isPublicLocalAssetPath } from "../lib/public-assets";
+import { canonicalUrlForPage, siteRobotsTxt, siteSitemapXml } from "../lib/public-site-seo";
+import { markdownCanonicalLinkHeader, markdownForPage, markdownUrlForPage, siteLlmsTxt } from "../lib/public-site-markdown";
+import { requestHostname, requestOrigin } from "../lib/host-routing";
+import { getPublishedVersion } from "../lib/sample-data";
 import { coldUrlCheckableChecks, evaluateSiteAgainstStandard } from "../lib/standard-evaluation";
 import { applyVerifiedFacts, requiredClaimFactIds } from "../lib/fact-verification";
 import { claimGateForBundle, isIndexableSite } from "../lib/site-publication";
-import { makeLocalBusinessJsonLd } from "../lib/structured-data";
+import { makeLocalBusinessJsonLd, serializeJsonLd } from "../lib/structured-data";
+import { restoreVersionToDraftBundle } from "../lib/site-versions";
+import {
+  completeClaimCheckout as completeLocalClaimCheckout,
+  createAndStoreSite as createLocalStoreSite,
+  createPreviewToken as createLocalPreviewToken,
+  createClaim as createLocalClaim,
+  recordClaimCheckoutSession,
+  resolvePreviewToken as resolveLocalPreviewToken
+} from "../lib/store";
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
 
 const bundle = createSiteFromInput({
@@ -52,6 +84,26 @@ const claimedClaim: ClaimRecord = {
   status: "claimed",
   claimedAt: new Date().toISOString()
 };
+const checkoutOnlyBundle = createSiteFromInput({
+  prompt: "Build a website for Boundary Checkout HVAC, a call-first HVAC company in Austin."
+});
+const checkoutOnlyClaim: ClaimRecord = {
+  ...checkoutRequiredClaim,
+  id: "claim_checkout_only",
+  siteId: checkoutOnlyBundle.businessProfile.siteId
+};
+const expiringPreviewBundle = createLocalStoreSite({
+  prompt: "Build a website for Boundary Expiring Preview HVAC in Austin. phone: 512-555-0132"
+});
+const expiredPreviewToken = createLocalPreviewToken({
+  siteId: expiringPreviewBundle.businessProfile.siteId,
+  expiresAt: new Date(Date.now() - 1000 * 60).toISOString()
+});
+assert(expiredPreviewToken, "Expired preview-token verifier should create a local token.");
+assert(
+  resolveLocalPreviewToken(expiredPreviewToken.token) === null,
+  "Expired preview tokens must not resolve to private pre-claim pages."
+);
 
 assert(!isIndexableSite(bundle, []), "Generated sites without claims must not be indexable.");
 assert(!isIndexableSite(bundle, [checkoutRequiredClaim]), "Checkout-required claims must not be indexable.");
@@ -75,14 +127,189 @@ assert(
   claimGateForBundle(bundle, [claimedClaim]).ok,
   "Publish/domain gates should pass after a completed claim."
 );
+const unauthenticatedClaimOwner = resolveClaimOwner({ requestedOwnerEmail: "Owner@Example.com" });
+assert(
+  unauthenticatedClaimOwner.ok && unauthenticatedClaimOwner.ownerEmail === "owner@example.com",
+  "Unauthenticated claim requests should require and normalize the submitted owner email."
+);
+assert(
+  resolveClaimOwner({
+    authUser: { id: "user_claim_owner", email: "Signed-In@Example.com" },
+    requestedOwnerEmail: "signed-in@example.com"
+  }).ok,
+  "Authenticated claim requests may include the same owner email as the signed-in Supabase user."
+);
+const checkoutGuardBundle = createLocalStoreSite({
+  prompt: "Build a website for Boundary Checkout Guard HVAC in Austin. phone: 512-555-0199"
+});
+const checkoutGuardClaim = createLocalClaim({
+  siteId: checkoutGuardBundle.businessProfile.siteId,
+  ownerEmail: "checkout-guard@example.com",
+  verifiedFacts: requiredClaimFactIds(checkoutGuardBundle.businessProfile),
+  acceptedTerms: true,
+  acceptedManagement: true
+});
+assert(checkoutGuardClaim, "Checkout guard verifier should create a local claim.");
+recordClaimCheckoutSession(checkoutGuardClaim.id, "cs_boundary_expected");
+const duplicateSessionClaim = createLocalClaim({
+  siteId: checkoutGuardBundle.businessProfile.siteId,
+  ownerEmail: "checkout-guard-duplicate@example.com",
+  verifiedFacts: requiredClaimFactIds(checkoutGuardBundle.businessProfile),
+  acceptedTerms: true,
+  acceptedManagement: true
+});
+assert(duplicateSessionClaim, "Checkout guard verifier should create a duplicate-session probe claim.");
+assert(
+  recordClaimCheckoutSession(duplicateSessionClaim.id, "cs_boundary_expected") === null,
+  "Stored Stripe checkout session ids should be unique across local claims."
+);
+assert(
+  completeLocalClaimCheckout({ claimId: checkoutGuardClaim.id, checkoutSessionId: "cs_boundary_wrong" }) === null,
+  "Claim checkout completion should reject mismatched stored Stripe checkout sessions."
+);
+assert(
+  completeLocalClaimCheckout({
+    claimId: checkoutGuardClaim.id,
+    siteId: "site_other_checkout_guard",
+    checkoutSessionId: "cs_boundary_expected"
+  }) === null,
+  "Claim checkout completion should reject Stripe checkout events whose site metadata targets a different site."
+);
+assert(
+  completeLocalClaimCheckout({
+    claimId: checkoutGuardClaim.id,
+    siteId: checkoutGuardBundle.businessProfile.siteId,
+    checkoutSessionId: "cs_boundary_expected",
+    stripeCustomerId: "cus_boundary_expected",
+    stripeSubscriptionId: "sub_boundary_expected"
+  })?.status === "claimed",
+  "Claim checkout completion should accept the matching stored Stripe checkout session."
+);
+assert(
+  !resolveClaimOwner({
+    authUser: { id: "user_claim_owner", email: "signed-in@example.com" },
+    requestedOwnerEmail: "other-owner@example.com"
+  }).ok,
+  "Authenticated claim requests must not bind completed owner access to a different submitted email."
+);
+assert(
+  filterSiteBundlesForOwner({
+    bundles: [bundle, checkoutOnlyBundle],
+    claims: [claimedClaim, checkoutOnlyClaim],
+    authConfigured: true,
+    userEmail: "owner@example.com"
+  }).map((visibleBundle) => visibleBundle.businessProfile.siteId).join(",") === bundle.businessProfile.siteId,
+  "Owner dashboards should list only completed claimed sites, not checkout-required previews."
+);
+const platformRobotsRules = platformRobots().rules;
+const rootDashboardPage = readFileSync("app/page.tsx", "utf8");
+const experimentLearningRoute = readFileSync("app/api/experiments/learn/route.ts", "utf8");
+const middlewareSource = readFileSync("middleware.ts", "utf8");
+const securitySource = readFileSync("lib/security.ts", "utf8");
+const domainRouteSource = readFileSync("app/api/domains/route.ts", "utf8");
+const platformRobotsDisallow = new Set(
+  (Array.isArray(platformRobotsRules) ? platformRobotsRules : [platformRobotsRules]).flatMap((rule) =>
+    Array.isArray(rule.disallow) ? rule.disallow : rule.disallow ? [rule.disallow] : []
+  )
+);
+const supabaseSchema = readFileSync("supabase/schema.sql", "utf8");
+assert(
+  supabaseSchema.includes("Job lock expired after all retry attempts.") &&
+    supabaseSchema.includes("and attempts >= max_attempts") &&
+    supabaseSchema.indexOf("and attempts >= max_attempts") < supabaseSchema.indexOf("return query"),
+  "Supabase workers should fail stale max-attempt running jobs before claiming the next queued job."
+);
+assert(
+  rootDashboardPage.includes("requireAdminPageAccess(\"/\")") && !rootDashboardPage.includes("requireOwnerAccess(\"/\")"),
+  "The root operator dashboard should use the admin page access policy, not owner dashboard access."
+);
+assert(
+  rootDashboardPage.includes("index: false") && rootDashboardPage.includes("follow: false"),
+  "The root operator dashboard should emit noindex/nofollow metadata."
+);
+assert(
+  experimentLearningRoute.includes("siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request)"),
+  "Unscoped experiment-learning reads should require admin authorization instead of exposing cross-site learnings."
+);
+assert(
+  securitySource.includes("isAdminEmail(auth.user?.email)") &&
+    securitySource.includes("export async function requireAdmin") &&
+    securitySource.includes("export async function requireAdminOrSiteOwner"),
+  "Admin APIs should authorize Supabase-authenticated admin emails as well as bearer-token CLI access."
+);
+assert(
+  domainRouteSource.includes("manualCustomDomainsAllowed()") &&
+    domainRouteSource.includes("LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS") &&
+    domainRouteSource.includes('parsed.data.provider === "railway"'),
+  "Deployed custom-domain registration should require Cloudflare for SaaS unless a manual-domain exception is explicit."
+);
+for (const privatePath of [
+  "/api/",
+  "/auth/",
+  "/account",
+  "/preview/",
+  "/editor/",
+  "/analytics/",
+  "/optimization/",
+  "/experiments/",
+  "/business/",
+  "/leads/",
+  "/versions/",
+  "/claim/",
+  "/domains/",
+  "/outbound",
+  "/"
+]) {
+  assert(platformRobotsDisallow.has(privatePath), `Platform robots.txt should disallow private/admin path ${privatePath}.`);
+  if (privatePath !== "/" && privatePath !== "/api/" && privatePath !== "/auth/") {
+    assert(
+      middlewareSource.includes(`"${privatePath}"`),
+      `Middleware should not rewrite private/admin path ${privatePath} through custom-domain public-site routing.`
+    );
+  }
+}
+for (const [routePath, parseMarker] of [
+  ["app/api/forms/submit/route.ts", "parseSubmissionRequest(request)"],
+  ["app/api/analytics/route.ts", "analyticsEventSchema.safeParse(body)"],
+  ["app/api/experiments/assign/route.ts", "assignmentSchema.safeParse(body)"],
+  ["app/api/claim/route.ts", "claimSchema.safeParse(body)"],
+  ["app/api/intake/route.ts", "intakeSchema.safeParse(body)"],
+  ["app/api/presence/assess/route.ts", "presenceSchema.safeParse(body)"],
+  ["app/api/assets/owner/route.ts", "parseOwnerAssetsRequest(request)"],
+  ["app/api/stripe/webhook/route.ts", "request.text()"]
+] as const) {
+  assertRateLimitBeforeParse(routePath, parseMarker);
+}
+for (const [command, markers] of [
+  ["create-site-from-url", ['post("/api/intake"', "url: args[0]"]],
+  ["import-batch", ['post("/api/jobs"', 'kind: "import_batch"', 'post("/api/jobs/process"']],
+  ["run-presence", ['post("/api/presence/assess"']],
+  ["run-audit", ['post("/api/audits/run"']],
+  ["run-qa", ['post("/api/qa/run"']],
+  ["create-preview", ['post("/api/preview-tokens"']],
+  ["publish", ['post("/api/sites/publish"', "confirmed: true"]],
+  ["apply-safe-findings", ['post("/api/action-list/apply-all"']],
+  ["inspect-leads", ["get(`/api/leads"]],
+  ["connect-domain", ['post("/api/domains"', 'provider: "cloudflare_for_saas"']],
+  ["monthly-action-list", ['post("/api/jobs"', 'kind: "monthly_action_list"', 'post("/api/jobs/process"']],
+  ["process-jobs", ['post("/api/jobs/process"']]
+] as const) {
+  assertCliCommand(command, markers);
+}
+assertCliTransportUsesHttpApis();
 
 const authEnvSnapshot = {
   nodeEnv: process.env.NODE_ENV,
   requireAuth: process.env.LODESTA_REQUIRE_AUTH,
+  repository: process.env.LODESTA_REPOSITORY,
+  appUrl: process.env.NEXT_PUBLIC_APP_URL,
   adminToken: process.env.LODESTA_ADMIN_TOKEN,
   adminEmails: process.env.LODESTA_ADMIN_EMAILS,
+  ipHashSalt: process.env.LODESTA_IP_HASH_SALT,
+  rateLimitSalt: process.env.LODESTA_RATE_LIMIT_SALT,
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   nextSupabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   nextSupabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 };
@@ -90,7 +317,10 @@ try {
   setEnv("NODE_ENV", "development");
   delete process.env.LODESTA_REQUIRE_AUTH;
   delete process.env.LODESTA_ADMIN_TOKEN;
-  assert(requireAdmin(new Request("https://app.example/api/intake")) === null, "Local development may bypass admin auth when no token is configured.");
+  assert(
+    (await requireAdmin(new Request("https://app.example/api/intake"))) === null,
+    "Local development may bypass admin auth when no token is configured."
+  );
   assert(
     (await requireAdminOrSiteOwner(new Request("https://app.example/api/sites/publish"), bundle.businessProfile.siteId)) === null,
     "Local development may bypass owner auth when no token is configured."
@@ -101,7 +331,7 @@ try {
   delete process.env.SUPABASE_ANON_KEY;
   delete process.env.NEXT_PUBLIC_SUPABASE_URL;
   delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const forcedAdminAuth = requireAdmin(new Request("https://app.example/api/intake"));
+  const forcedAdminAuth = await requireAdmin(new Request("https://app.example/api/intake"));
   assert(forcedAdminAuth?.status === 401, "Admin routes must reject unauthenticated requests when auth enforcement is enabled.");
   const forcedOwnerAuth = await requireAdminOrSiteOwner(
     new Request("https://app.example/api/sites/publish"),
@@ -111,29 +341,82 @@ try {
 
   setEnv("NODE_ENV", "production");
   delete process.env.LODESTA_REQUIRE_AUTH;
-  const productionAdminAuth = requireAdmin(new Request("https://app.example/api/intake"));
+  const productionAdminAuth = await requireAdmin(new Request("https://app.example/api/intake"));
   assert(productionAdminAuth?.status === 401, "Production admin routes must fail closed without LODESTA_ADMIN_TOKEN.");
 
   process.env.LODESTA_ADMIN_TOKEN = "boundary-secret";
   assert(
-    requireAdmin(new Request("https://app.example/api/intake", { headers: { authorization: "Bearer boundary-secret" } })) === null,
+    (await requireAdmin(new Request("https://app.example/api/intake", { headers: { authorization: "Bearer boundary-secret" } }))) === null,
     "Admin bearer token should authorize operator-only routes."
   );
   assert(
-    requireAdmin(new Request("https://app.example/api/intake", { headers: { authorization: "Bearer wrong" } }))?.status === 401,
+    (await requireAdminOrSiteOwner(
+      new Request("https://app.example/api/sites/publish", { headers: { authorization: "Bearer boundary-secret" } }),
+      bundle.businessProfile.siteId
+    )) === null,
+    "Admin bearer token should authorize owner/admin site APIs."
+  );
+  assert(
+    (await requireAdmin(new Request("https://app.example/api/intake", { headers: { authorization: "Bearer wrong" } })))?.status === 401,
     "Invalid admin bearer token should be rejected."
+  );
+  assert(
+    (await requireAdminOrSiteOwner(
+      new Request("https://app.example/api/sites/publish", { headers: { authorization: "Bearer wrong" } }),
+      bundle.businessProfile.siteId
+    ))?.status === 401,
+    "Invalid admin bearer token should not authorize owner/admin site APIs."
   );
 
   process.env.LODESTA_ADMIN_EMAILS = "Admin@Example.com,ops@example.com";
   assert(isAdminEmail("admin@example.com"), "Admin page policy should match Supabase admin emails case-insensitively.");
   assert(!isAdminEmail("owner@example.com"), "Admin page policy should reject Supabase emails outside the admin allowlist.");
+
+  process.env.LODESTA_IP_HASH_SALT = "boundary-health-ip-salt";
+  process.env.LODESTA_RATE_LIMIT_SALT = "boundary-health-rate-salt";
+  delete process.env.LODESTA_REPOSITORY;
+  delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_ANON_KEY;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const productionHealth = await getHealthReport();
+  assert(
+    healthCheckState(productionHealth, "repository") === "error",
+    "Production health must fail closed when the local repository would be selected."
+  );
+  assert(
+    healthCheckState(productionHealth, "app_url") === "error",
+    "Production health must require NEXT_PUBLIC_APP_URL."
+  );
+  assert(
+    healthCheckState(productionHealth, "supabase_auth") === "error",
+    "Production health must require public Supabase Auth environment."
+  );
+
+  process.env.LODESTA_REPOSITORY = "supabase";
+  process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon";
+  const configuredHealth = await getHealthReport();
+  assert(healthCheckState(configuredHealth, "repository") === "ok", "Configured Supabase repository health should pass.");
+  assert(healthCheckState(configuredHealth, "app_url") === "ok", "Configured application URL health should pass.");
+  assert(healthCheckState(configuredHealth, "supabase_auth") === "ok", "Configured Supabase Auth health should pass.");
 } finally {
   restoreEnv("NODE_ENV", authEnvSnapshot.nodeEnv);
   restoreEnv("LODESTA_REQUIRE_AUTH", authEnvSnapshot.requireAuth);
+  restoreEnv("LODESTA_REPOSITORY", authEnvSnapshot.repository);
+  restoreEnv("NEXT_PUBLIC_APP_URL", authEnvSnapshot.appUrl);
   restoreEnv("LODESTA_ADMIN_TOKEN", authEnvSnapshot.adminToken);
   restoreEnv("LODESTA_ADMIN_EMAILS", authEnvSnapshot.adminEmails);
+  restoreEnv("LODESTA_IP_HASH_SALT", authEnvSnapshot.ipHashSalt);
+  restoreEnv("LODESTA_RATE_LIMIT_SALT", authEnvSnapshot.rateLimitSalt);
   restoreEnv("SUPABASE_URL", authEnvSnapshot.supabaseUrl);
   restoreEnv("SUPABASE_ANON_KEY", authEnvSnapshot.supabaseAnonKey);
+  restoreEnv("SUPABASE_SERVICE_ROLE_KEY", authEnvSnapshot.supabaseServiceRoleKey);
   restoreEnv("NEXT_PUBLIC_SUPABASE_URL", authEnvSnapshot.nextSupabaseUrl);
   restoreEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", authEnvSnapshot.nextSupabaseAnonKey);
 }
@@ -172,10 +455,66 @@ const storedAsset = await storeGeneratedAssetBytes({
   localRoot: assetProbeRoot,
   forceLocal: true
 });
+const privatePlanningAsset = await storeGeneratedAssetBytes({
+  siteId: "site_boundary_asset_probe",
+  assetId: "asset_private_mockup_probe",
+  base64: Buffer.from("private planning asset").toString("base64"),
+  mimeType: "image/jpeg",
+  localRoot: assetProbeRoot,
+  forceLocal: true,
+  publicUrl: false
+});
 const readBackAsset = await readLocalAsset(storedAsset.storagePath, assetProbeRoot);
 assert(
   storedAsset.url === "/api/assets/site_boundary_asset_probe/asset_mockup_probe.jpg" && readBackAsset?.bytes.length === 11,
   "Generated asset bytes should store outside model JSON and be readable through the local asset adapter."
+);
+assert(
+  !privatePlanningAsset.url && (await readLocalAsset(privatePlanningAsset.storagePath, assetProbeRoot))?.bytes.length === 22,
+  "Internal-planning generated asset bytes should be stored without returning a public URL."
+);
+const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
+assert(
+  imageGenerationSource.includes("publicUrl: false") &&
+    imageGenerationSource.includes("Image bytes stored privately"),
+  "Generated mockup planning artifacts should store bytes without exposing public storage URLs."
+);
+const crawlPageSignals = extractCrawlPageSignals(
+  `<html>
+    <head>
+      <script type="application/ld+json">{"@type":"LocalBusiness","name":"Boundary Crawl Signals"}</script>
+    </head>
+    <body>
+      <a href="tel:+15125550101">Call</a>
+      <a href="/schedule">Book service</a>
+      <a href="https://www.youtube.com/watch?v=owner-proof">Video proof</a>
+      <img src="/brand-logo.png" alt="Boundary Crawl Signals logo">
+      <form action="/contact" method="post">
+        <input type="text" name="name" required>
+        <input type="email" name="email" required>
+        <input type="tel" name="phone">
+        <textarea name="message"></textarea>
+      </form>
+    </body>
+  </html>`,
+  "https://boundary-crawl.example/"
+);
+assert(
+  crawlPageSignals.jsonLdTypes.includes("LocalBusiness") &&
+    crawlPageSignals.formReferences.some(
+      (form) =>
+        form.action === "https://boundary-crawl.example/contact" &&
+        form.method === "post" &&
+        form.hasEmailField &&
+        form.hasPhoneField &&
+        form.hasTextarea &&
+        form.requiredFields.includes("email")
+    ) &&
+    crawlPageSignals.linkReferences.some((link) => link.kind === "tel" && link.href.startsWith("tel:")) &&
+    crawlPageSignals.linkReferences.some((link) => link.kind === "booking" && link.href === "https://boundary-crawl.example/schedule") &&
+    crawlPageSignals.linkReferences.some((link) => link.kind === "press_video" && link.href.includes("youtube.com")) &&
+    crawlPageSignals.assetReferences.some((asset) => asset.kind === "logo" && asset.rightsStatus === "reference_only"),
+  "URL crawl extraction should preserve schema types, structured forms, categorized links, and reference-only image signals."
 );
 const ipHash = hashIpAddress("203.0.113.10", {
   siteId: bundle.businessProfile.siteId,
@@ -210,6 +549,14 @@ assert(
     "https://example.com/landing?utm_source=mailer",
   "Stored attribution URLs should keep only safe attribution parameters."
 );
+assert(
+  sanitizeAttributionUrl("owner@example.com") === undefined &&
+    sanitizeAttributionUrl("Call 512-555-0101") === undefined &&
+    sanitizeAttributionUrl("not a url") === undefined &&
+    sanitizeAttributionUrl("https://example.com/owner@example.com?utm_source=mailer") === undefined &&
+    sanitizeAttributionUrl("/sites/joes-pizza?utm_source=mailer&token=secret") === "/sites/joes-pizza?utm_source=mailer",
+  "Stored attribution URLs should reject non-URL/contact-like values and preserve only safe HTTP(S) or root-relative attribution URLs."
+);
 const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
@@ -225,6 +572,16 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
     sessionId: "analytics_probe_1",
     pageId: "page_home",
     sectionId: "hero_home",
+    eventType: "section_view",
+    timestamp: "2026-05-29T12:00:01.000Z",
+    deviceType: "mobile",
+    metadata: { elapsedMs: 1000 }
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "analytics_probe_1",
+    pageId: "page_home",
+    sectionId: "hero_home",
     eventType: "tel_click",
     timestamp: "2026-05-29T12:00:03.000Z",
     elementRole: "sticky-tel",
@@ -232,7 +589,28 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
     hrefType: "tel",
     normalizedX: 0.82,
     normalizedY: 0.18,
-    deviceType: "mobile"
+    deviceType: "mobile",
+    metadata: { elapsedMs: 3000 }
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "analytics_probe_1",
+    pageId: "page_home",
+    eventType: "web_vital",
+    timestamp: "2026-05-29T12:00:04.000Z",
+    value: 4200,
+    deviceType: "mobile",
+    metadata: { metric: "LCP" }
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "analytics_probe_1",
+    pageId: "page_home",
+    eventType: "web_vital",
+    timestamp: "2026-05-29T12:00:05.000Z",
+    value: 0.18,
+    deviceType: "mobile",
+    metadata: { metric: "CLS" }
   },
   {
     siteId: bundle.businessProfile.siteId,
@@ -251,6 +629,36 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
     eventType: "form_start",
     timestamp: "2026-05-29T12:02:10.000Z",
     deviceType: "desktop"
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "analytics_probe_2",
+    pageId: "page_home",
+    sectionId: "services_home",
+    eventType: "click",
+    timestamp: "2026-05-29T12:02:12.000Z",
+    elementRole: "div",
+    elementType: "div",
+    hrefType: "internal",
+    normalizedX: 0.42,
+    normalizedY: 0.52,
+    deviceType: "desktop"
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "agent_probe_1",
+    pageId: "page_home",
+    eventType: "agent_readable_request",
+    timestamp: "2026-05-29T12:03:00.000Z",
+    metadata: { resource: "llms_txt", path: "/llms.txt", agentFamily: "gptbot", verifiedBot: true }
+  },
+  {
+    siteId: bundle.businessProfile.siteId,
+    sessionId: "agent_probe_2",
+    pageId: "page_home",
+    eventType: "agent_readable_request",
+    timestamp: "2026-05-29T12:03:05.000Z",
+    metadata: { resource: "markdown_alternate", path: "/md", agentFamily: "chatgpt-user", acceptMarkdown: true }
   }
 ];
 const analyticsProbe = summarizeAnalytics(bundle.businessProfile.siteId, analyticsProbeEvents);
@@ -265,10 +673,129 @@ assert(
   "Analytics summary should aggregate normalized all-click coordinates into a click map."
 );
 assert(
+  analyticsProbe.clickMap.some(
+    (point) => point.sectionId === "services_home" && point.elementRole === "div" && point.count === 1
+  ),
+  "Analytics summary should include sanitized non-link/non-button clicks in all-click aggregation."
+);
+assert(
+  analyticsProbe.sectionConversionPaths.some(
+    (row) =>
+      row.sectionId === "hero_home" &&
+      row.exposedSessions === 1 &&
+      row.actionSessions === 1 &&
+      row.primaryActions === 1 &&
+      row.medianTimeToActionMs === 2000
+  ),
+  "Analytics summary should connect section exposure to later primary actions in the same session."
+);
+assert(
+  analyticsProbe.funnelDropoffs.some(
+    (row) => row.key === "form_start_to_submit" && row.fromCount === 1 && row.toCount === 0 && row.dropoffRate === 1
+  ) &&
+    analyticsProbe.funnelDropoffs.some(
+      (row) => row.key === "section_view_to_primary_action" && row.fromCount === 1 && row.toCount === 1 && row.conversionRate === 1
+    ),
+  "Analytics summary should expose funnel dropoff rows for internal conversion-path analysis."
+);
+assert(
   analyticsProbe.standardCorrelations.some(
     (row) => row.criterionId === "conversion.mobile_sticky_action" && row.primaryActions === 1
   ),
   "Analytics summary should correlate tracked outcomes to matching Standard criteria."
+);
+assert(
+  analyticsProbe.standardCorrelations.some(
+    (row) => row.criterionId === "technical.mobile_performance" && row.signal === "weak" && row.rate === 0
+  ),
+  "Analytics summary should correlate mobile Web Vitals to the mobile performance Standard criterion."
+);
+assert(
+  analyticsProbe.agentReadableRequests === 2 &&
+    analyticsProbe.agentReadableByResource.some((row) => row.key === "llms_txt" && row.requests === 1) &&
+    analyticsProbe.agentReadableByResource.some((row) => row.key === "markdown_alternate" && row.requests === 1),
+  "Analytics summary should track llms.txt and Markdown alternate requests for agent-readable publishing experiments."
+);
+assert(
+  recommendFromAnalytics(bundle, analyticsProbe).some(
+    (finding) => finding.id === "analytics_mobile_performance" && finding.standardCriterionId === "technical.mobile_performance"
+  ),
+  "Monthly recommendations should turn poor Web Vitals into a Standard-backed performance Action List item."
+);
+const monthlyLeadSubmissions: LeadSubmission[] = [
+  {
+    id: "lead_monthly_new",
+    siteId: bundle.businessProfile.siteId,
+    formId: "form_contact",
+    pageId: "page_home",
+    payload: { name: "New Lead", email: "new@example.com" },
+    metadata: { utmSource: "mailer", utmCampaign: "postcard" },
+    sourceUrl: "https://boundary-verify.example/?utm_source=mailer&utm_campaign=postcard",
+    submittedAt: "2026-05-29T12:03:00.000Z",
+    status: "new"
+  },
+  {
+    id: "lead_monthly_reviewed",
+    siteId: bundle.businessProfile.siteId,
+    formId: "form_contact",
+    pageId: "page_home",
+    payload: { name: "Reviewed Lead", email: "reviewed@example.com" },
+    metadata: { referrerHost: "search.example" },
+    submittedAt: "2026-05-29T12:04:00.000Z",
+    status: "reviewed"
+  },
+  {
+    id: "lead_monthly_spam",
+    siteId: bundle.businessProfile.siteId,
+    formId: "form_quote",
+    pageId: "page_contact",
+    payload: { name: "Spam Lead" },
+    submittedAt: "2026-05-29T12:05:00.000Z",
+    status: "spam"
+  }
+];
+const monthlyActionListResult = (await executeJob(
+  {
+    id: "job_monthly_boundary",
+    kind: "monthly_action_list",
+    status: "running",
+    payload: { siteId: bundle.businessProfile.siteId },
+    attempts: 1,
+    maxAttempts: 1,
+    runAfter: "2026-05-29T12:00:00.000Z",
+    createdAt: "2026-05-29T12:00:00.000Z",
+    updatedAt: "2026-05-29T12:00:00.000Z"
+  },
+  {
+    getSiteBundle: async () => bundle,
+    runAndStoreAudit: async () => runAudit(bundle.businessProfile, bundle.siteModel),
+    analyticsSummary: async () => analyticsProbe,
+    analyzeExperiments: async () => [],
+    listExperimentLearnings: async () => [],
+    listFormSubmissions: async () => monthlyLeadSubmissions
+  }
+)) as {
+  leads?: number;
+  leadSummary?: {
+    total?: number;
+    new?: number;
+    reviewed?: number;
+    spam?: number;
+    byForm?: Array<{ formId: string; total: number }>;
+    recent?: Array<{ id: string; sourceHost?: string; utmSource?: string; utmCampaign?: string }>;
+  };
+};
+assert(
+  monthlyActionListResult.leads === 3 &&
+    monthlyActionListResult.leadSummary?.total === 3 &&
+    monthlyActionListResult.leadSummary.new === 1 &&
+    monthlyActionListResult.leadSummary.reviewed === 1 &&
+    monthlyActionListResult.leadSummary.spam === 1 &&
+    monthlyActionListResult.leadSummary.byForm?.some((row) => row.formId === "form_contact" && row.total === 2) &&
+    monthlyActionListResult.leadSummary.recent?.some(
+      (lead) => lead.id === "lead_monthly_new" && lead.sourceHost === "boundary-verify.example" && lead.utmSource === "mailer"
+    ),
+  "Monthly action-list jobs should include a lead summary with status counts, form counts, and safe attribution."
 );
 const unsafeUrlChecks = await Promise.all([
   validatePublicFetchUrl("http://localhost:3000", { resolveDns: false }),
@@ -294,15 +821,16 @@ assert(
 assert(
   !validateLaunchMarket({ prompt: "Build a website for a plumber in Toronto, Canada." }).ok &&
     !validateLaunchMarket({ url: "https://example.ca" }).ok &&
+    !validateLaunchMarket({ url: "https://example.ae" }).ok &&
     !validateLaunchMarket({ facts: { address: { country: "CA" } } }).ok,
-  "Launch market guard should reject explicit non-US prompt, domain, and extracted-country signals."
+  "Launch market guard should reject explicit non-US prompt, country-code domain, and extracted-country signals."
 );
 assert(
   validateLaunchMarket({
     prompt: "Build a call-first HVAC site in Tulsa, Oklahoma.",
     facts: { address: { country: "US" } }
-  }).ok,
-  "Launch market guard should allow US launch-market prompts and extracted US country facts."
+  }).ok && validateLaunchMarket({ url: "https://example.us" }).ok,
+  "Launch market guard should allow US launch-market prompts, US country facts, and .us domains."
 );
 const previousPrivateCrawlOverride = process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
 process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = "true";
@@ -450,12 +978,103 @@ assert(
 
 const publicSiteCache = cachePolicyForPathname("/sites/boundary-verify-hvac");
 assert(
-  publicSiteCache.kind === "public_site" && publicSiteCache.cacheControl?.includes("s-maxage=300"),
-  "Public site HTML should be CDN-cacheable with a bounded shared cache TTL."
+  publicSiteCache.kind === "public_site" &&
+    publicSiteCache.cacheControl?.includes("s-maxage=300") &&
+    publicSiteCache.vary === "Host, X-Forwarded-Host",
+  "Public site HTML should be CDN-cacheable with a bounded shared cache TTL and vary by host plus forwarded host."
 );
 assert(
-  cachePolicyForPathname("/", { customDomain: true }).kind === "public_site",
+  cachePolicyForPathname("/", { customDomain: true }).kind === "public_site" &&
+    cachePolicyForPathname("/", { customDomain: true }).vary === "Host, X-Forwarded-Host",
   "Custom-domain root traffic should receive the public-site cache policy after host-header routing."
+);
+assert(
+  cachePolicyForPathname("/llms.txt").kind === "metadata" &&
+    cachePolicyForPathname("/llms.txt").vary === "Host, X-Forwarded-Host",
+  "llms.txt should receive short metadata caching that varies by host plus forwarded host."
+);
+const seoHeaders = new Headers({ host: "www.boundary-verify.example", "x-forwarded-proto": "https" });
+const platformSeoHeaders = new Headers({ host: "localhost:3000", "x-forwarded-proto": "http" });
+const chainedForwardedHeaders = new Headers({
+  host: "internal.proxy",
+  "x-forwarded-host": "www.boundary-verify.example, edge.proxy",
+  "x-forwarded-proto": "https, http"
+});
+const malformedForwardedHeaders = new Headers({
+  host: "internal.proxy",
+  "x-forwarded-host": "HTTPS://WWW.BOUNDARY-VERIFY.EXAMPLE./bad-path?utm=bad, edge.proxy",
+  "x-forwarded-proto": "javascript, https"
+});
+const seoHome = getPublishedVersion(bundle.siteModel).pages[0];
+assert(seoHome, "SEO verifier needs a generated home page.");
+assert(
+  canonicalUrlForPage(bundle, seoHome, seoHeaders) === "https://www.boundary-verify.example/",
+  "Custom-domain canonical URLs should resolve to the customer host root."
+);
+assert(
+  requestHostname(chainedForwardedHeaders) === "www.boundary-verify.example" &&
+    requestOrigin(chainedForwardedHeaders) === "https://www.boundary-verify.example" &&
+    canonicalUrlForPage(bundle, seoHome, chainedForwardedHeaders) === "https://www.boundary-verify.example/",
+  "Forwarded host/proto chains should use the public customer-facing origin for canonical URLs."
+);
+assert(
+  requestHostname(malformedForwardedHeaders) === "www.boundary-verify.example" &&
+    requestOrigin(malformedForwardedHeaders) === "https://www.boundary-verify.example" &&
+    canonicalUrlForPage(bundle, seoHome, malformedForwardedHeaders) === "https://www.boundary-verify.example/",
+  "Forwarded host/proto parsing should strip schemes, paths, and unsupported protocols before creating public URLs."
+);
+assert(
+  middlewareSource.includes('import { isPlatformHost, normalizeHostname, requestHostname } from "./lib/host-routing";') &&
+    middlewareSource.includes("const hostname = requestHostname(request.headers);") &&
+    middlewareSource.includes('const forwardedHostRewriteParam = "__lodesta_forwarded_host";') &&
+    middlewareSource.includes("request.nextUrl.searchParams.get(forwardedHostRewriteParam) === \"1\"") &&
+    middlewareSource.includes('request.headers.get("x-lodesta-forwarded-host-routed") === "1"') &&
+    middlewareSource.includes('Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname') &&
+    middlewareSource.includes("const rewrittenSitePrefix = `/sites/${payload.slug}`") &&
+    middlewareSource.includes("pathname.startsWith(`${rewrittenSitePrefix}/`)") &&
+    middlewareSource.includes('rewriteUrl.searchParams.set(forwardedHostRewriteParam, "1")') &&
+    middlewareSource.includes('rewriteHeaders.set("x-lodesta-forwarded-host-routed", "1")') &&
+    middlewareSource.includes('cachePolicyForPathname("/__forwarded-host-no-store")') &&
+    middlewareSource.includes('"Cloudflare-CDN-Cache-Control"') &&
+    middlewareSource.includes('"X-Lodesta-Forwarded-Host-Cache"'),
+  "Custom-domain middleware should resolve route hosts through the shared forwarded-host parser, avoid double-rewriting internal site paths, and disable CDN caching when routing depends on X-Forwarded-Host."
+);
+assert(
+  canonicalUrlForPage(bundle, seoHome, platformSeoHeaders).includes(`/sites/${bundle.siteModel.slug}`),
+  "Platform-host canonical URLs should keep the /sites/{slug} prefix."
+);
+const claimedRobots = siteRobotsTxt(bundle, [claimedClaim], seoHeaders);
+assert(
+  claimedRobots.includes("Allow: /") && claimedRobots.includes("Sitemap: https://www.boundary-verify.example/sitemap.xml"),
+  "Claimed custom domains should serve an allow-all robots.txt with a customer-host sitemap URL."
+);
+assert(
+  siteRobotsTxt(bundle, [], seoHeaders).includes("Disallow: /"),
+  "Unclaimed sites should serve disallow-all site robots output."
+);
+const claimedSitemap = siteSitemapXml(bundle, [claimedClaim], seoHeaders);
+assert(
+  claimedSitemap.includes("<loc>https://www.boundary-verify.example/</loc>") &&
+    !claimedSitemap.includes("/sites/"),
+  "Custom-domain sitemap URLs should use customer-host URLs rather than platform /sites paths."
+);
+const claimedLlmsTxt = siteLlmsTxt(bundle, [claimedClaim], seoHeaders);
+assert(
+  claimedLlmsTxt?.includes(`# ${bundle.businessProfile.name}`) &&
+    claimedLlmsTxt.includes("## Core Pages") &&
+    claimedLlmsTxt.includes("https://www.boundary-verify.example/md"),
+  "Claimed sites should expose an agent-readable llms.txt with custom-domain Markdown alternates."
+);
+assert(siteLlmsTxt(bundle, [], seoHeaders) === null, "Unclaimed sites should not expose llms.txt content.");
+const claimedMarkdown = markdownForPage(bundle, seoHome, seoHeaders);
+assert(
+  claimedMarkdown.includes(`# ${seoHome.title}`) &&
+    claimedMarkdown.includes("Canonical: https://www.boundary-verify.example/") &&
+    claimedMarkdown.includes("## Business") &&
+    markdownUrlForPage(bundle, seoHome, seoHeaders) === "https://www.boundary-verify.example/md" &&
+    markdownCanonicalLinkHeader(bundle, seoHome, seoHeaders) ===
+      '<https://www.boundary-verify.example/>; rel="canonical"; type="text/html"',
+  "Markdown alternates should summarize public page content and point back to the canonical HTML URL."
 );
 for (const privatePath of [
   "/",
@@ -467,7 +1086,9 @@ for (const privatePath of [
   "/editor/boundary-verify-hvac",
   "/editor/boundary-verify-hvac/preview",
   "/analytics/boundary-verify-hvac",
+  "/business/boundary-verify-hvac",
   "/leads/boundary-verify-hvac",
+  "/versions/boundary-verify-hvac",
   "/outbound"
 ]) {
   const policy = cachePolicyForPathname(privatePath);
@@ -494,6 +1115,12 @@ const railwayDomainStatus = await refreshCustomHostnameStatus({
 assert(
   railwayDomainStatus.status === "active" && railwayDomainStatus.verification?.configured === true,
   "Railway/manual custom domains should refresh to active after operator DNS setup."
+);
+assert(
+  isResolvableCustomDomain({ provider: "railway", status: "active" }) &&
+    !isResolvableCustomDomain({ provider: "railway", status: "pending" }) &&
+    !isResolvableCustomDomain({ provider: "cloudflare_for_saas", status: "pending" }),
+  "Host-header custom-domain routing should serve only active domains after claim and DNS/provider setup."
 );
 const cloudflareMissingConfigStatus = await refreshCustomHostnameStatus({
   provider: "cloudflare_for_saas",
@@ -529,6 +1156,33 @@ assert(
     outboundSummary.supportBurdenRate === 1,
   "Outbound wedge metrics should measure mailer-to-claim, claim-to-publish, preview credibility, and support burden."
 );
+const outboundManifest = buildOutboundMailerManifest(
+  [outboundCampaign],
+  [outboundProspect],
+  outboundCampaign.id,
+  "https://lodesta.example"
+);
+const outboundManifestCsv = outboundMailerManifestCsv(outboundManifest);
+assert(
+  outboundManifest.length === 1 &&
+    outboundManifest[0].previewUrl === "https://lodesta.example/preview/demo-token" &&
+    outboundManifestCsv.includes("campaignId,campaignName,campaignStatus,complianceStatus") &&
+    outboundManifestCsv.includes(bundle.businessProfile.name),
+  "Outbound wedge tooling should export a mailer manifest with preview URLs and campaign/prospect reconciliation fields."
+);
+assert(
+  !assertOutboundCompliance({
+    name: "High Volume Mailer",
+    status: "running",
+    metadata: { plannedRecipients: 250 }
+  }).ok &&
+    assertOutboundCompliance({
+      name: "Reviewed High Volume Mailer",
+      status: "running",
+      metadata: { plannedRecipients: 250, legalReviewedAt: "2026-05-29", legalReviewer: "counsel@example.com" }
+    }).ok,
+  "High-volume outbound campaigns should require IP/legal review metadata before launch."
+);
 assert(
   bundle.presenceAssessment.designDirections.filter((direction) => direction.selected).length === 1,
   "Exactly one generated design direction should be selected."
@@ -545,8 +1199,85 @@ assert(
 );
 const standardCriterionIds = generatedEvaluation.checks.map((check) => check.criterionId);
 assert(
-  standardCriterionIds.includes("technical.https") && standardCriterionIds.includes("seo.clean_urls"),
-  "The launch Standard should cover HTTPS and clean public URLs."
+  standardCriterionIds.includes("technical.https") &&
+    standardCriterionIds.includes("seo.clean_urls") &&
+    standardCriterionIds.includes("trust.credentials_or_years") &&
+    standardCriterionIds.includes("content.service_area_clarity") &&
+    standardCriterionIds.includes("content.faqs"),
+  "The launch Standard should cover HTTPS, clean URLs, trust proof, service-area clarity, and FAQs."
+);
+assert(
+  generatedEvaluation.checks.some((check) => check.criterionId === "trust.credentials_or_years" && check.passed) &&
+    generatedEvaluation.checks.some((check) => check.criterionId === "content.service_area_clarity" && check.passed) &&
+    generatedEvaluation.checks.some((check) => check.criterionId === "content.faqs" && check.passed),
+  "Generated launch sites should pass universal trust, service-area, and FAQ Standard criteria."
+);
+assert(
+  [
+    "technical.healthy_response",
+    "technical.mobile_viewport",
+    "seo.canonical",
+    "seo.robots_txt",
+    "seo.sitemap",
+    "accessibility.image_alt"
+  ].every((criterionId) =>
+    generatedEvaluation.checks.some(
+      (check) => check.criterionId === criterionId && check.passed && !check.evidence.includes("not yet evaluated")
+    )
+  ),
+  "Generated launch sites should explicitly evaluate response, viewport, canonical, robots, sitemap, and image-alt Standard criteria."
+);
+const missingUniversalStandardBundle = structuredClone(bundle);
+missingUniversalStandardBundle.businessProfile.address = undefined;
+missingUniversalStandardBundle.businessProfile.serviceAreas = ["Local area"];
+missingUniversalStandardBundle.businessProfile.reviewsSummary = undefined;
+for (const version of missingUniversalStandardBundle.siteModel.versions) {
+  version.pages = version.pages.filter((page) => !page.slug.startsWith("areas/"));
+  for (const page of version.pages) {
+    page.sections = page.sections.filter(
+      (section) => !["faq", "trust_bar", "testimonials", "team", "map"].includes(section.type)
+    );
+    for (const section of page.sections) section.props = scrubTrustProofTerms(section.props);
+  }
+}
+const universalStandardFindings = runAudit(
+  missingUniversalStandardBundle.businessProfile,
+  missingUniversalStandardBundle.siteModel
+);
+const faqFinding = universalStandardFindings.find((finding) => finding.standardCriterionId === "content.faqs");
+assert(
+  faqFinding?.applyMode === "one_click" &&
+    universalStandardFindings.some(
+      (finding) => finding.standardCriterionId === "content.service_area_clarity" && finding.applyMode === "manual_service"
+    ) &&
+    universalStandardFindings.some(
+      (finding) => finding.standardCriterionId === "trust.credentials_or_years" && finding.applyMode === "manual_service"
+    ),
+  "Audits should create Standard-backed findings for missing FAQs, service-area clarity, and trust proof."
+);
+const universalStandardQa = runSiteQa(missingUniversalStandardBundle);
+assert(
+  universalStandardQa.checks.some(
+    (check) => check.standardCriterionId === "content.faqs" && check.severity === "warning"
+  ) &&
+    universalStandardQa.checks.some(
+      (check) => check.standardCriterionId === "content.service_area_clarity" && check.severity === "warning"
+    ) &&
+    universalStandardQa.checks.some(
+      (check) => check.standardCriterionId === "trust.credentials_or_years" && check.severity === "warning"
+    ),
+  "QA should include Standard-backed checks for missing FAQs, service-area clarity, and trust proof."
+);
+const faqApplyResult = applySuggestedEdit(missingUniversalStandardBundle, faqFinding);
+assert(
+  faqApplyResult.ok &&
+    evaluateSiteAgainstStandard(missingUniversalStandardBundle, { versionStatus: "draft" }).checks.some(
+      (check) => check.criterionId === "content.faqs" && check.passed
+    ) &&
+    runSiteQa(missingUniversalStandardBundle, { versionStatus: "draft" }).checks.some(
+      (check) => check.standardCriterionId === "content.faqs" && check.severity === "pass"
+    ),
+  "The FAQ Standard finding should be one-click applicable and produce a draft that passes the FAQ criterion in Standard evaluation and QA."
 );
 const insecureCrawl = crawlFixture("http://example.com/services.php?ref=ad");
 assert(
@@ -559,6 +1290,20 @@ assert(
   cleanHttpsCrawl.score.checks.some((check) => check.standardCriterionId === "technical.https" && check.passed) &&
     cleanHttpsCrawl.score.checks.some((check) => check.standardCriterionId === "seo.clean_urls" && check.passed),
   "Current-site crawl scoring should pass HTTPS and clean URL patterns."
+);
+const copiedSourceCopy = "Exact source marketing sentence that should never be reused verbatim in generated previews.";
+const copyRiskCrawl = crawlFixture("https://boundary-copy.example/services", "https://boundary-copy.example/services");
+copyRiskCrawl.extractedFacts = {
+  ...copyRiskCrawl.extractedFacts,
+  name: "Boundary Copy HVAC",
+  description: copiedSourceCopy,
+  services: ["Emergency HVAC repair"]
+};
+const copySafeBundle = createSiteFromInput({ url: "https://boundary-copy.example/services", crawl: copyRiskCrawl });
+assert(
+  copySafeBundle.businessProfile.description !== copiedSourceCopy &&
+    !JSON.stringify(copySafeBundle.siteModel.versions).includes(copiedSourceCopy),
+  "Generated pre-claim previews must not reuse source-site marketing descriptions verbatim."
 );
 assert(bundle.presenceAssessment.visualQa, "Generated launch sites should include visual QA results.");
 assert(
@@ -575,6 +1320,10 @@ assert(
   "Generated experiments must default to draft so Experiment Mode remains opt-in only."
 );
 assert(
+  bundle.experiments.every((experiment) => (experiment.holdoutPercent ?? 0) >= 0 && (experiment.holdoutPercent ?? 0) <= 0.5),
+  "Generated experiment candidates should keep holdout controls inside the governed 0-50% range."
+);
+assert(
   ["sticky_cta", "cta_placement", "form_length", "hero_layout"].every((surface) =>
     bundle.experiments.some((experiment) => experiment.surface === surface)
   ),
@@ -586,7 +1335,13 @@ const qaBundle = createSiteFromInput({
     "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin. services: Emergency HVAC repair, AC maintenance phone: 512-555-0101"
 });
 const qa = runSiteQa(qaBundle);
-assert(qa.passed, "Generated launch sites with phone and location should pass blocking QA guardrails.");
+assert(
+  qa.passed &&
+    qa.checks.some((check) => check.standardCriterionId === "content.faqs" && check.severity === "pass") &&
+    qa.checks.some((check) => check.standardCriterionId === "content.service_area_clarity" && check.severity === "pass") &&
+    qa.checks.some((check) => check.standardCriterionId === "trust.credentials_or_years" && check.severity === "pass"),
+  "Generated launch sites with phone and location should pass blocking QA guardrails and universal Standard-backed QA checks."
+);
 
 const brokenCtaBundle = structuredClone(qaBundle);
 const brokenHero = brokenCtaBundle.siteModel.versions[0]?.pages[0]?.sections.find((section) => section.type === "hero");
@@ -645,6 +1400,17 @@ assert(
   !blockedProfileEdit.ok && blockedProfileEdit.issues.some((issue) => issue.checkId === "phone_path"),
   "Business fact guardrails must block removing the click-to-call path."
 );
+const pressLinkBundle = structuredClone(qaBundle);
+applyBusinessProfileUpdate(pressLinkBundle, {
+  siteId: pressLinkBundle.businessProfile.siteId,
+  pressLinks: ["https://www.youtube.com/watch?v=owner-approved", "https://news.example/profile"]
+});
+assert(
+  pressLinkBundle.businessProfile.pressLinks.length === 2 &&
+    pressLinkBundle.businessProfile.provenance.pressLinks?.source === "owner" &&
+    pressLinkBundle.businessProfile.provenance.pressLinks.verified,
+  "Owners should be able to curate press/video links as verified business profile facts."
+);
 const structuredDataBundle = structuredClone(qaBundle);
 structuredDataBundle.businessProfile.address = {
   street: "100 Congress Ave",
@@ -674,6 +1440,13 @@ assert(
     Boolean(fullyVerifiedSchema?.aggregateRating) &&
     Array.isArray(fullyVerifiedSchema?.sameAs),
   "LocalBusiness JSON-LD should include optional hours, ratings, and profile links only after those facts are verified."
+);
+const serializedJsonLd = serializeJsonLd({ name: "</script><script>alert(1)</script>", sameAs: ["https://example.com?a=1&b=2"] });
+assert(
+  !serializedJsonLd.includes("</script>") &&
+    serializedJsonLd.includes("\\u003c/script\\u003e") &&
+    serializedJsonLd.includes("\\u0026"),
+  "LocalBusiness JSON-LD serialization must escape script-breaking characters."
 );
 const approvedCtaEdit = validateSectionUpdate(qaBundle, {
   siteId: qaBundle.businessProfile.siteId,
@@ -765,6 +1538,74 @@ assert(
   !blockedSensitiveForm.ok,
   "Managed launch forms should reject sensitive credential, government ID, payment, token, or secret fields."
 );
+const blockedPrivateWebhook = applyFormSettingsUpdate(structuredClone(qaBundle), {
+  siteId: qaBundle.businessProfile.siteId,
+  formId: qaBundle.extensionModel.forms[0]?.id ?? "form_contact",
+  webhookUrl: "http://127.0.0.1:3000/private-leads",
+  fields: [
+    { id: "name", label: "Name", type: "text", required: true },
+    { id: "email", label: "Email", type: "email", required: true }
+  ]
+});
+assert(
+  !blockedPrivateWebhook.ok,
+  "Managed launch forms should reject private-network webhook URLs before saving notification workflows."
+);
+const unsafeWebhookBundle = structuredClone(qaBundle);
+unsafeWebhookBundle.extensionModel.workflows = [
+  {
+    id: "workflow_unsafe_webhook",
+    trigger: "form_submission",
+    destination: "webhook",
+    config: { url: "http://127.0.0.1:3000/private-leads" }
+  }
+];
+const unsafeWebhookLead: LeadSubmission = {
+  id: "lead_unsafe_webhook",
+  siteId: unsafeWebhookBundle.businessProfile.siteId,
+  formId: unsafeWebhookBundle.extensionModel.forms[0]?.id ?? "form_contact",
+  pageId: "page_home",
+  payload: { name: "Boundary Owner", email: "owner@example.com" },
+  submittedAt: new Date().toISOString(),
+  status: "new"
+};
+const unsafeWebhookDeliveries = await executeFormSubmissionWorkflows(unsafeWebhookBundle, unsafeWebhookLead, async (delivery) => ({
+  id: "delivery_unsafe_webhook",
+  createdAt: new Date().toISOString(),
+  ...delivery
+}));
+assert(
+  unsafeWebhookDeliveries.some((delivery) => delivery.status === "failed" && delivery.message.includes("URL safety")),
+  "Webhook delivery should fail closed if an existing workflow points at a private or reserved network target."
+);
+const previousWebhookPrivateOverride = process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
+process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = "true";
+const unsafeWebhookWithCrawlOverride = await executeFormSubmissionWorkflows(
+  unsafeWebhookBundle,
+  { ...unsafeWebhookLead, id: "lead_unsafe_webhook_override" },
+  async (delivery) => ({
+    id: "delivery_unsafe_webhook_override",
+    createdAt: new Date().toISOString(),
+    ...delivery
+  })
+);
+if (previousWebhookPrivateOverride === undefined) {
+  delete process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
+} else {
+  process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = previousWebhookPrivateOverride;
+}
+assert(
+  unsafeWebhookWithCrawlOverride.some((delivery) => delivery.status === "failed" && delivery.message.includes("URL safety")),
+  "The private-crawl fixture override must not allow visitor-triggered lead webhooks to private/internal targets."
+);
+const workflowSource = readFileSync("lib/workflows.ts", "utf8");
+assert(
+  workflowSource.includes("AbortSignal.timeout(workflowTimeoutMs())") &&
+    workflowSource.includes("LODESTA_WORKFLOW_TIMEOUT_MS") &&
+    workflowSource.includes("allowPrivateOverride: false") &&
+    workflowSource.includes("Math.min(Math.max(Math.trunc(parsed), 1000), 30000)"),
+  "External workflow delivery fetches should use a bounded timeout and ignore private-crawl URL overrides."
+);
 const ownerAssetBundle = createSiteFromInput({
   prompt: "Build a website for Boundary Verify Salon, a beauty salon in Austin. phone: 512-555-0141"
 });
@@ -790,6 +1631,34 @@ assert(
     ),
   "Owner-approved photos and logos should become customer-granted published-site assets and feed gallery sections."
 );
+const ownerUploadedAsset = await storeAssetBytes({
+  siteId: ownerAssetBundle.businessProfile.siteId,
+  assetId: "owner-uploaded-logo-probe",
+  bytes: Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64"
+  ),
+  mimeType: "image/png",
+  localRoot: assetProbeRoot,
+  forceLocal: true
+});
+assert(ownerUploadedAsset.url, "Owner upload storage should return a public URL.");
+const ownerUploadedAssets = applyOwnerAssetsUpdate(ownerAssetBundle, {
+  siteId: ownerAssetBundle.businessProfile.siteId,
+  rightsAccepted: true,
+  logo: { url: ownerUploadedAsset.url, alt: "Uploaded Boundary Verify Salon logo" }
+});
+assert(
+  ownerUploadedAssets.ok &&
+    ownerUploadedAssets.logo?.url.startsWith("/api/assets/") &&
+    ownerUploadedAssets.logo.rightsStatus === "customer_granted" &&
+    ownerUploadedAssets.assets.some((asset) => asset.url === ownerUploadedAsset.url && asset.ownerApproved),
+  "Storage-backed owner uploads should be accepted as customer-granted published-site assets."
+);
+assert(
+  isPublicLocalAssetPath(ownerAssetBundle, ownerUploadedAsset.storagePath),
+  "Public local asset serving should allow owner-approved published-site uploads."
+);
 const blockedOwnerAssets = applyOwnerAssetsUpdate(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
   rightsAccepted: false,
@@ -799,8 +1668,23 @@ assert(
   !blockedOwnerAssets.ok,
   "Owner assets must require explicit rights confirmation before becoming published-site content."
 );
+const blockedPrivateOwnerAssets = applyOwnerAssetsUpdate(structuredClone(qaBundle), {
+  siteId: qaBundle.businessProfile.siteId,
+  rightsAccepted: true,
+  logo: { url: "http://127.0.0.1/private-logo.png", alt: "Private network logo" }
+});
+assert(
+  !blockedPrivateOwnerAssets.ok,
+  "Owner-provided remote asset URLs should reject localhost, private, and reserved network hosts."
+);
+const ownerAssetsRouteSource = readFileSync("app/api/assets/owner/route.ts", "utf8");
+assert(
+  ownerAssetsRouteSource.includes("validatePublicHostname(url.hostname)") && ownerAssetsRouteSource.includes("!url.username"),
+  "Owner asset API validation should reject private-host and credentialed remote asset URLs before publishing."
+);
 const referenceOnlyAssetBundle = structuredClone(qaBundle);
-const referenceOnlyUrl = "https://customer.example/original-job-photo.jpg";
+const referenceOnlyLocalStoragePath = `${referenceOnlyAssetBundle.businessProfile.siteId}/source-reference.jpg`;
+const referenceOnlyUrl = `/api/assets/${referenceOnlyLocalStoragePath}`;
 referenceOnlyAssetBundle.presenceAssessment.assetInventory = [
   ...(referenceOnlyAssetBundle.presenceAssessment.assetInventory ?? []),
   {
@@ -817,6 +1701,28 @@ referenceOnlyAssetBundle.presenceAssessment.assetInventory = [
     createdAt: new Date().toISOString()
   }
 ];
+assert(
+  !isPublicLocalAssetPath(referenceOnlyAssetBundle, referenceOnlyLocalStoragePath),
+  "Public local asset serving should not expose reference-only scraped assets."
+);
+const internalPlanningLocalStoragePath = `${referenceOnlyAssetBundle.businessProfile.siteId}/mockup-planning.jpg`;
+referenceOnlyAssetBundle.presenceAssessment.assetInventory.push({
+  id: "site_asset_internal_planning_probe",
+  siteId: referenceOnlyAssetBundle.businessProfile.siteId,
+  kind: "mockup",
+  url: `/api/assets/${internalPlanningLocalStoragePath}`,
+  alt: "Internal planning mockup",
+  source: "generated",
+  rightsStatus: "preclaim_safe",
+  usageScope: "internal_planning",
+  ownerApproved: false,
+  metadata: { planningOnly: true },
+  createdAt: new Date().toISOString()
+});
+assert(
+  !isPublicLocalAssetPath(referenceOnlyAssetBundle, internalPlanningLocalStoragePath),
+  "Public local asset serving should not expose internal-planning mockups even when the bytes are generated."
+);
 const referenceOnlyHero = referenceOnlyAssetBundle.siteModel.versions[0]?.pages[0]?.sections.find(
   (section) => section.type === "hero"
 );
@@ -1013,6 +1919,10 @@ const actionListFinding: OptimizationFinding = {
 const actionListApply = applySuggestedEdit(actionListBundle, actionListFinding);
 assert(actionListApply.ok, "Action-list suggested edits should apply to a draft.");
 assert(
+  actionListApply.ok && actionListApply.changeSummary.summary.includes("SEO title and description"),
+  "Action-list suggested edits should return owner-reviewable change evidence before publish confirmation."
+);
+assert(
   actionListBundle.siteModel.versions.some((version) => version.status === "published") &&
     actionListBundle.siteModel.versions.some((version) => version.status === "draft"),
   "Action-list applies should stage a draft while leaving the published version unchanged until explicit confirmation."
@@ -1020,6 +1930,28 @@ assert(
 assert(
   runSiteQa(actionListBundle, { versionStatus: "draft" }).checks.length > 0,
   "Action-list applies should leave a draft that can be QA-checked before publish confirmation."
+);
+const publishedBeforeRestore = actionListBundle.siteModel.versions.find((version) => version.status === "published");
+const existingDraftBeforeRestore = actionListBundle.siteModel.versions.find((version) => version.status === "draft");
+assert(publishedBeforeRestore && existingDraftBeforeRestore, "Rollback verifier needs published and draft versions.");
+const restoredDraft = restoreVersionToDraftBundle(actionListBundle, {
+  versionId: publishedBeforeRestore.id,
+  createdAt: "2026-01-01T00:00:00.000Z"
+});
+assert(restoredDraft.ok, "Version history should restore any selected version into a fresh draft.");
+assert(
+  actionListBundle.siteModel.versions.find((version) => version.id === publishedBeforeRestore.id)?.status === "published",
+  "Restoring a version should leave the current published version live until explicit publish confirmation."
+);
+assert(
+  actionListBundle.siteModel.versions.some(
+    (version) => version.id === restoredDraft.draftVersionId && version.status === "draft"
+  ),
+  "Version history restore should create a QA-checkable draft version."
+);
+assert(
+  runSiteQa(actionListBundle, { versionId: restoredDraft.draftVersionId }).checks.length > 0,
+  "Restored drafts should be addressable by QA before publish."
 );
 assert(
   preserveFindingLifecycle([{ ...actionListFinding, status: "open" }], [{ ...actionListFinding, status: "dismissed" }])[0]
@@ -1118,6 +2050,62 @@ function restoreEnv(key: string, value: string | undefined) {
   setEnv(key, value);
 }
 
+function healthCheckState(report: Awaited<ReturnType<typeof getHealthReport>>, id: string) {
+  return report.checks.find((check) => check.id === id)?.state;
+}
+
+function assertRateLimitBeforeParse(routePath: string, parseMarker: string) {
+  const source = readFileSync(routePath, "utf8");
+  const rateLimitIndex = source.indexOf("rateLimit(request");
+  const parseIndex = source.indexOf(parseMarker);
+  assert(
+    rateLimitIndex >= 0 && parseIndex >= 0 && rateLimitIndex < parseIndex,
+    `${routePath} should apply its endpoint rate limit before parsing request bodies.`
+  );
+}
+
+function assertCliCommand(command: string, markers: readonly string[]) {
+  const source = readFileSync("scripts/lodesta.mjs", "utf8");
+  const caseIndex = source.indexOf(`case "${command}":`);
+  assert(caseIndex >= 0, `Launch CLI should expose ${command}.`);
+  const nextCaseIndex = source.indexOf("\n    case ", caseIndex + 1);
+  const defaultIndex = source.indexOf("\n    default:", caseIndex + 1);
+  const endIndex = nextCaseIndex >= 0 ? nextCaseIndex : defaultIndex >= 0 ? defaultIndex : source.length;
+  const commandSource = source.slice(caseIndex, endIndex);
+  for (const marker of markers) {
+    assert(commandSource.includes(marker), `Launch CLI command ${command} should call the app API marker ${marker}.`);
+  }
+}
+
+function assertCliTransportUsesHttpApis() {
+  const source = readFileSync("scripts/lodesta.mjs", "utf8");
+  assert(source.includes("async function get(path)") && source.includes("async function post(path, body)"), "Launch CLI should use HTTP helpers.");
+  assert(source.includes("fetch(`${baseUrl}${path}`"), "Launch CLI should call configured app API URLs through fetch.");
+  assert(source.includes("authHeaders()"), "Launch CLI should attach admin auth headers when configured.");
+  assert(
+    !source.includes("../lib/repository") && !source.includes("../lib/store") && !source.includes("../lib/supabase/repository"),
+    "Launch CLI should not bypass the app API by importing repository internals."
+  );
+}
+
+function scrubTrustProofTerms(value: unknown): Record<string, unknown> {
+  return scrubValue(value) as Record<string, unknown>;
+}
+
+function scrubValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(
+      /credential|certified|licensed|insured|years|award|provider|attorney|trainer|veterinarian|doctor|portfolio|project proof|results/gi,
+      "service detail"
+    );
+  }
+  if (Array.isArray(value)) return value.map(scrubValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, scrubValue(item)]));
+  }
+  return value;
+}
+
 function crawlFixture(url: string, canonical?: string): CrawlAssessment {
   const assessment: CrawlAssessment = {
     url,
@@ -1148,8 +2136,11 @@ function crawlFixture(url: string, canonical?: string): CrawlAssessment {
       orderingLinks: [],
       pressLinks: []
     },
+    formReferences: [],
+    linkReferences: [],
     assetReferences: [],
     sampledInternalPages: [],
+    pageSummaries: [],
     score: {
       overall: 0,
       max: 0,

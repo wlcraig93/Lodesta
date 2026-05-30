@@ -5,7 +5,7 @@ import { createPresenceIntakePlan } from "@/lib/presence-intake";
 import { gatherPublicPresenceSignals } from "@/lib/public-presence";
 import { inspectUrlRender } from "@/lib/render-inspection";
 import { requireAdmin } from "@/lib/security";
-import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { validatePublicFetchUrl } from "@/lib/url-safety";
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
 
@@ -18,21 +18,25 @@ const presenceSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
+
+  const limit = rateLimit(request, {
+    bucket: "presence_assess",
+    limit: 40,
+    windowMs: 10 * 60_000
+  });
+  if (!limit.ok) return limit.response;
 
   const body = await request.json().catch(() => null);
   const parsed = presenceSchema.safeParse(body);
 
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid presence assessment request", issues: parsed.error.issues }, { status: 400 });
+    return applyRateLimitHeaders(
+      NextResponse.json({ error: "Invalid presence assessment request", issues: parsed.error.issues }, { status: 400 }),
+      limit
+    );
   }
-
-  const limit = rateLimit(request, {
-    bucket: "presence_assess",
-    ...rateLimitConfig("LODESTA_PRESENCE_ASSESS", { limit: 40, windowMs: 10 * 60_000 })
-  });
-  if (!limit.ok) return limit.response;
 
   try {
     assertLaunchMarket({ url: parsed.data.url });

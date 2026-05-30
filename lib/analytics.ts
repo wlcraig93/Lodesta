@@ -1,12 +1,16 @@
 import type {
   AnalyticsClickMapPoint,
+  AnalyticsAgentReadableResource,
   AnalyticsEvent,
+  AnalyticsFunnelDropoff,
   AnalyticsOutcomeRow,
   AnalyticsOutcomeTotals,
+  AnalyticsSectionConversionPath,
   AnalyticsStandardCorrelation,
   AnalyticsSummary
 } from "./models";
 import { getStandardCriterion } from "./standard";
+import { formatWebVitalValue, normalizeWebVitalMetric, webVitalWithinThreshold } from "./web-vitals-standard";
 
 const primaryActionEvents = new Set<AnalyticsEvent["eventType"]>(["tel_click", "form_submit", "outbound_click"]);
 const clickEventTypes = new Set<AnalyticsEvent["eventType"]>(["click", "tel_click", "outbound_click"]);
@@ -35,6 +39,8 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
     webVitals: siteEvents
       .filter((event) => event.eventType === "web_vital")
       .map((event) => ({ metric: event.metadata?.metric, value: event.value, timestamp: event.timestamp })),
+    agentReadableRequests: siteEvents.filter((event) => event.eventType === "agent_readable_request").length,
+    agentReadableByResource: summarizeAgentReadableResources(siteEvents),
     outcomesByPage: summarizeBy(siteEvents, (event) => event.pageId ?? "unknown", (key) => key),
     outcomesByCtaRole: summarizeBy(
       siteEvents.filter((event) => event.eventType === "click" || primaryActionEvents.has(event.eventType)),
@@ -46,12 +52,102 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
       (event) => event.sectionId ?? "unknown",
       (key) => key
     ),
+    funnelDropoffs: summarizeFunnelDropoffs(siteEvents),
+    sectionConversionPaths: summarizeSectionConversionPaths(siteEvents),
     outcomesByExperimentVariant: summarizeExperimentVariants(siteEvents),
     outcomesBySource: summarizeSources(siteEvents),
     clickMap: summarizeClickMap(siteEvents),
     standardCorrelations: summarizeStandardCorrelations(siteEvents, totals),
     baselineComparison: baselineComparison(siteEvents)
   };
+}
+
+function summarizeAgentReadableResources(events: AnalyticsEvent[]): AnalyticsAgentReadableResource[] {
+  const groups = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    if (event.eventType !== "agent_readable_request") continue;
+    const key = stringMetadata(event, "resource") || "unknown";
+    const group = groups.get(key) ?? [];
+    group.push(event);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.entries())
+    .map(([key, group]) => ({
+      key,
+      label: key.replace(/_/g, " "),
+      requests: group.length,
+      sessions: new Set(group.map((event) => event.sessionId)).size,
+      latestAt: group.map((event) => event.timestamp).sort().at(-1)
+    }))
+    .sort((left, right) => right.requests - left.requests || left.label.localeCompare(right.label));
+}
+
+function summarizeFunnelDropoffs(events: AnalyticsEvent[]): AnalyticsFunnelDropoff[] {
+  const allSessions = sessionSet(events);
+  const pageviewSessions = sessionSet(events.filter((event) => event.eventType === "pageview"));
+  const sectionViewSessions = sessionSet(events.filter((event) => event.eventType === "section_view"));
+  const primaryActionSessions = sessionSet(events.filter((event) => primaryActionEvents.has(event.eventType)));
+  const formStartSessions = sessionSet(events.filter((event) => event.eventType === "form_start"));
+  const formSubmitSessions = sessionSet(events.filter((event) => event.eventType === "form_submit"));
+  const sectionActionSessions = sessionsWithSectionExposureBeforeAction(events);
+
+  return [
+    funnelDropoff("visit_to_primary_action", "Sessions", "Primary action sessions", allSessions.size, primaryActionSessions.size),
+    funnelDropoff("pageview_to_section_view", "Pageview sessions", "Section-view sessions", pageviewSessions.size, sectionViewSessions.size),
+    funnelDropoff(
+      "section_view_to_primary_action",
+      "Section-view sessions",
+      "Action after section exposure",
+      sectionViewSessions.size,
+      sectionActionSessions.size
+    ),
+    funnelDropoff("form_start_to_submit", "Form-start sessions", "Form-submit sessions", formStartSessions.size, formSubmitSessions.size)
+  ];
+}
+
+function funnelDropoff(key: string, from: string, to: string, fromCount: number, toCount: number): AnalyticsFunnelDropoff {
+  const boundedTo = Math.min(toCount, fromCount);
+  const dropoffCount = Math.max(fromCount - boundedTo, 0);
+  return {
+    key,
+    from,
+    to,
+    fromCount,
+    toCount,
+    dropoffCount,
+    conversionRate: rate(boundedTo, fromCount),
+    dropoffRate: rate(dropoffCount, fromCount)
+  };
+}
+
+function sessionSet(events: AnalyticsEvent[]) {
+  return new Set(events.map((event) => event.sessionId));
+}
+
+function sessionsWithSectionExposureBeforeAction(events: AnalyticsEvent[]) {
+  const sessions = new Set<string>();
+  const bySession = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    const group = bySession.get(event.sessionId) ?? [];
+    group.push(event);
+    bySession.set(event.sessionId, group);
+  }
+
+  for (const [sessionId, sessionEvents] of bySession.entries()) {
+    const sorted = [...sessionEvents].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+    const firstSectionView = sorted.find((event) => event.eventType === "section_view");
+    if (!firstSectionView) continue;
+    const exposureTime = new Date(firstSectionView.timestamp).getTime();
+    if (!Number.isFinite(exposureTime)) continue;
+    const laterAction = sorted.some((event) => {
+      if (!primaryActionEvents.has(event.eventType)) return false;
+      const actionTime = new Date(event.timestamp).getTime();
+      return Number.isFinite(actionTime) && actionTime >= exposureTime;
+    });
+    if (laterAction) sessions.add(sessionId);
+  }
+  return sessions;
 }
 
 function summarizeBy(
@@ -70,6 +166,99 @@ function summarizeBy(
   return Array.from(groups.entries())
     .map(([key, group]) => ({ key, label: labelFor(key), events: group.length, ...outcomeTotals(group) }))
     .sort((a, b) => b.primaryActions - a.primaryActions || b.events - a.events)
+    .slice(0, 12);
+}
+
+function summarizeSectionConversionPaths(events: AnalyticsEvent[]): AnalyticsSectionConversionPath[] {
+  type SectionPathGroup = {
+    sectionId: string;
+    exposedSessions: Set<string>;
+    actionSessions: Set<string>;
+    exposures: number;
+    primaryActions: number;
+    telClicks: number;
+    formSubmits: number;
+    outboundClicks: number;
+    timeToActionMs: number[];
+  };
+
+  const bySession = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    const sessionEvents = bySession.get(event.sessionId) ?? [];
+    sessionEvents.push(event);
+    bySession.set(event.sessionId, sessionEvents);
+  }
+
+  const groups = new Map<string, SectionPathGroup>();
+  const groupFor = (sectionId: string) => {
+    const existing = groups.get(sectionId);
+    if (existing) return existing;
+    const created: SectionPathGroup = {
+      sectionId,
+      exposedSessions: new Set(),
+      actionSessions: new Set(),
+      exposures: 0,
+      primaryActions: 0,
+      telClicks: 0,
+      formSubmits: 0,
+      outboundClicks: 0,
+      timeToActionMs: []
+    };
+    groups.set(sectionId, created);
+    return created;
+  };
+
+  for (const [sessionId, sessionEvents] of bySession.entries()) {
+    const sorted = [...sessionEvents].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+    const firstExposureBySection = new Map<string, AnalyticsEvent>();
+    for (const event of sorted) {
+      if (event.eventType !== "section_view" || !event.sectionId) continue;
+      const group = groupFor(event.sectionId);
+      group.exposures += 1;
+      group.exposedSessions.add(sessionId);
+      if (!firstExposureBySection.has(event.sectionId)) firstExposureBySection.set(event.sectionId, event);
+    }
+
+    const primaryActions = sorted.filter((event) => primaryActionEvents.has(event.eventType));
+    for (const [sectionId, exposure] of firstExposureBySection.entries()) {
+      const exposureTime = new Date(exposure.timestamp).getTime();
+      if (!Number.isFinite(exposureTime)) continue;
+      const laterActions = primaryActions.filter((event) => {
+        const actionTime = new Date(event.timestamp).getTime();
+        return Number.isFinite(actionTime) && actionTime >= exposureTime;
+      });
+      if (laterActions.length === 0) continue;
+      const group = groupFor(sectionId);
+      group.actionSessions.add(sessionId);
+      group.primaryActions += laterActions.length;
+      group.telClicks += laterActions.filter((event) => event.eventType === "tel_click").length;
+      group.formSubmits += laterActions.filter((event) => event.eventType === "form_submit").length;
+      group.outboundClicks += laterActions.filter((event) => event.eventType === "outbound_click").length;
+      const firstAction = laterActions[0];
+      const firstActionTime = new Date(firstAction.timestamp).getTime();
+      const explicit = numericMetadata(firstAction, "elapsedMs");
+      const exposureElapsed = numericMetadata(exposure, "elapsedMs");
+      const delta = explicit !== undefined && exposureElapsed !== undefined ? explicit - exposureElapsed : firstActionTime - exposureTime;
+      if (Number.isFinite(delta) && delta >= 0) group.timeToActionMs.push(delta);
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      key: group.sectionId,
+      sectionId: group.sectionId,
+      exposedSessions: group.exposedSessions.size,
+      exposures: group.exposures,
+      actionSessions: group.actionSessions.size,
+      primaryActions: group.primaryActions,
+      telClicks: group.telClicks,
+      formSubmits: group.formSubmits,
+      outboundClicks: group.outboundClicks,
+      actionRate: rate(group.actionSessions.size, group.exposedSessions.size),
+      avgTimeToActionMs: average(group.timeToActionMs),
+      medianTimeToActionMs: median(group.timeToActionMs)
+    }))
+    .sort((left, right) => right.primaryActions - left.primaryActions || right.actionRate - left.actionRate || right.exposures - left.exposures)
     .slice(0, 12);
 }
 
@@ -200,7 +389,7 @@ function summarizeStandardCorrelations(
   );
   const stickyActions = events.filter((event) => event.elementRole === "sticky-tel");
 
-  return [
+  const correlations: AnalyticsStandardCorrelation[] = [
     standardCorrelation({
       criterionId: "conversion.mobile_click_to_call",
       metric: "Mobile call actions",
@@ -242,6 +431,9 @@ function summarizeStandardCorrelations(
         : "No sticky action clicks yet; this remains a watch item for mobile traffic."
     })
   ];
+  const performance = webVitalPerformanceCorrelation(events);
+  if (performance) correlations.push(performance);
+  return correlations;
 }
 
 function baselineComparison(events: AnalyticsEvent[]): AnalyticsSummary["baselineComparison"] {
@@ -306,6 +498,48 @@ function analyticsSignal(input: { events: number; primaryActions: number; rate: 
   if (input.primaryActions > 0 && input.rate >= 0.15) return "positive";
   if (input.primaryActions === 0) return "weak";
   return "watch";
+}
+
+function webVitalPerformanceCorrelation(events: AnalyticsEvent[]): AnalyticsStandardCorrelation | undefined {
+  const webVitalEvents = events.filter((event) => event.eventType === "web_vital");
+  if (webVitalEvents.length === 0) return undefined;
+
+  const mobileEvents = webVitalEvents.filter((event) => event.deviceType === "mobile");
+  const scopedEvents = mobileEvents.length ? mobileEvents : webVitalEvents;
+  const latest = new Map<string, { metric: ReturnType<typeof normalizeWebVitalMetric>; value: number; timestamp: string }>();
+  for (const event of scopedEvents) {
+    const metric = normalizeWebVitalMetric(event.metadata?.metric);
+    if (!metric || typeof event.value !== "number") continue;
+    const existing = latest.get(metric);
+    if (!existing || event.timestamp > existing.timestamp) {
+      latest.set(metric, { metric, value: event.value, timestamp: event.timestamp });
+    }
+  }
+  const values = Array.from(latest.values()).filter(
+    (item): item is { metric: NonNullable<ReturnType<typeof normalizeWebVitalMetric>>; value: number; timestamp: string } =>
+      Boolean(item.metric)
+  );
+  if (values.length === 0) return undefined;
+
+  const passing = values.filter((item) => webVitalWithinThreshold(item.metric, item.value));
+  const failing = values.filter((item) => !webVitalWithinThreshold(item.metric, item.value));
+  const criterion = getStandardCriterion("technical.mobile_performance");
+  const metricLabel = mobileEvents.length ? "Mobile Web Vitals within target" : "Web Vitals within target";
+  const badList = failing.map((item) => `${item.metric} ${formatWebVitalValue(item.metric, item.value)}`).join(", ");
+
+  return {
+    criterionId: "technical.mobile_performance",
+    title: criterion?.title ?? "Mobile Core Web Vitals stay within launch thresholds",
+    layer: criterion?.layer ?? "technical_seo",
+    metric: metricLabel,
+    events: scopedEvents.length,
+    primaryActions: 0,
+    rate: rate(passing.length, values.length),
+    signal: failing.length === 0 ? "positive" : failing.length >= 2 ? "weak" : "watch",
+    insight: failing.length
+      ? `${badList} exceeded launch thresholds and should feed performance recommendations.`
+      : "Latest measured Web Vitals are inside launch thresholds."
+  };
 }
 
 function sourceLabel(event: AnalyticsEvent) {

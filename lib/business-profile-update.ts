@@ -11,6 +11,7 @@ export type BusinessProfileUpdateInput = {
   bookingLinks?: string[];
   orderingLinks?: string[];
   socialLinks?: string[];
+  pressLinks?: string[];
   hours?: Record<string, string>;
   address?: {
     street?: string;
@@ -60,6 +61,10 @@ export function applyBusinessProfileUpdate(bundle: SiteBundle, input: BusinessPr
   if (input.socialLinks !== undefined) {
     profile.socialLinks = cleanList(input.socialLinks);
     changedFacts.push("socialLinks");
+  }
+  if (input.pressLinks !== undefined) {
+    profile.pressLinks = cleanList(input.pressLinks);
+    changedFacts.push("pressLinks");
   }
 
   applyVerifiedFacts(profile, changedFacts);

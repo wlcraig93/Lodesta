@@ -30,6 +30,7 @@ import { applyVerifiedFacts } from "./fact-verification";
 import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
 import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-settings";
 import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
+import { restoreVersionToDraftBundle } from "./site-versions";
 import { sanitizeAnalyticsMetadata } from "./privacy";
 import {
   applyOutboundEventToProspect,
@@ -81,6 +82,7 @@ function createInitialState(): StoreState {
       {
         token: "demo-token",
         siteId: sampleSiteBundle.businessProfile.siteId,
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         createdAt: new Date().toISOString()
       }
     ],
@@ -239,6 +241,15 @@ export function publishVersion(input: { siteId: string; versionId: string }) {
   if (target.theme) bundle.siteModel.theme = structuredClone(target.theme);
   bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return { ok: true as const, bundle };
+}
+
+export function restoreVersionToDraft(input: { siteId: string; versionId: string }) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const result = restoreVersionToDraftBundle(bundle, { versionId: input.versionId });
+  if (!result.ok) return result;
+  bundle.optimizationFindings = buildOptimizationFindings(bundle);
+  return result;
 }
 
 export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
@@ -488,7 +499,8 @@ export function applyFindingToDraft(input: { siteId: string; findingId: string }
     ok: true as const,
     draftCreated: true,
     qaRequired: true,
-    finding: applied.finding
+    finding: applied.finding,
+    changeSummary: applied.changeSummary
   };
 }
 
@@ -525,7 +537,7 @@ export function createClaim(input: {
   if (!bundle) return null;
   const acceptedAt = new Date().toISOString();
   applyVerifiedFacts(bundle.businessProfile, input.verifiedFacts ?? []);
-  const claim = {
+  const claim: ClaimRecord = {
     id: crypto.randomUUID(),
     siteId: input.siteId,
     ownerUserId: input.ownerUserId,
@@ -551,23 +563,40 @@ export function createClaim(input: {
 
 export function completeClaimCheckout(input: {
   claimId?: string;
+  siteId?: string;
   checkoutSessionId?: string;
   stripeCustomerId?: string;
   stripeSubscriptionId?: string;
   completedAt?: string;
 }) {
-  const claim = state().claims.find(
-    (candidate) =>
-      (input.claimId && candidate.id === input.claimId) ||
-      (input.checkoutSessionId && candidate.stripeCheckoutSessionId === input.checkoutSessionId)
-  );
+  if (!input.claimId && !input.checkoutSessionId) return null;
+  const claim = input.claimId
+    ? state().claims.find((candidate) => candidate.id === input.claimId)
+    : state().claims.find((candidate) => candidate.stripeCheckoutSessionId === input.checkoutSessionId);
   if (!claim) return null;
+  if (input.siteId && claim.siteId !== input.siteId) return null;
+  if (input.checkoutSessionId) {
+    const sessionClaim = state().claims.find((candidate) => candidate.stripeCheckoutSessionId === input.checkoutSessionId);
+    if (sessionClaim && sessionClaim.id !== claim.id) return null;
+    if (claim.stripeCheckoutSessionId && claim.stripeCheckoutSessionId !== input.checkoutSessionId) return null;
+  }
 
   claim.status = "claimed";
   claim.claimedAt = input.completedAt ?? new Date().toISOString();
   claim.stripeCustomerId = input.stripeCustomerId ?? claim.stripeCustomerId;
   claim.stripeSubscriptionId = input.stripeSubscriptionId ?? claim.stripeSubscriptionId;
   claim.stripeCheckoutSessionId = input.checkoutSessionId ?? claim.stripeCheckoutSessionId;
+  return claim;
+}
+
+export function recordClaimCheckoutSession(claimId: string, checkoutSessionId: string) {
+  const sessionOwner = state().claims.find(
+    (candidate) => candidate.stripeCheckoutSessionId === checkoutSessionId && candidate.id !== claimId
+  );
+  if (sessionOwner) return null;
+  const claim = state().claims.find((candidate) => candidate.id === claimId);
+  if (!claim) return null;
+  claim.stripeCheckoutSessionId = checkoutSessionId;
   return claim;
 }
 
@@ -610,6 +639,15 @@ export function registerDomain(input: {
 
 export function listDomains(siteId?: string) {
   return state().domains.filter((domain) => !siteId || domain.siteId === siteId);
+}
+
+export function getDomainByHostname(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  return state().domains.find((domain) => domain.hostname.toLowerCase() === normalized) ?? null;
+}
+
+export function getDomainById(domainId: string) {
+  return state().domains.find((domain) => domain.id === domainId) ?? null;
 }
 
 export function updateDomain(input: {

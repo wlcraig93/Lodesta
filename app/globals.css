@@ -724,7 +724,13 @@ textarea {
   gap: 10px;
 }
 
-.owner-asset-row {
+.owner-upload-list {
+  display: grid;
+  gap: 10px;
+}
+
+.owner-asset-row,
+.owner-upload-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
   align-items: end;
@@ -733,6 +739,14 @@ textarea {
   border: 1px solid #d8deea;
   border-radius: 8px;
   background: #fff;
+}
+
+.owner-upload-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) auto;
+}
+
+.owner-upload-row:first-of-type {
+  margin-top: 2px;
 }
 
 .honeypot-field {
@@ -1557,6 +1571,7 @@ html[data-form-length-variant="phone_first"] .lead-form .lead-submit {
   .form-grid-two,
   .form-field-row,
   .owner-asset-row,
+  .owner-upload-row,
   .section-order-row {
     grid-template-columns: 1fr;
   }

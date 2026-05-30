@@ -1,5 +1,6 @@
 import { repository } from "@/lib/repository";
 import { requireAdminPageAccess } from "@/lib/page-access";
+import { outboundComplianceStatus } from "@/lib/outbound";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,14 @@ export default async function OutboundPage() {
           <span className="badge">Outbound wedge</span>
           <h1>Campaign Measurement</h1>
           <p>Track direct-mail and outbound preview tests from mailer sent through claim, publish, credibility feedback, and support burden.</p>
+        </div>
+        <div className="button-row">
+          <a className="button secondary" href="/api/outbound/export">
+            Export manifest
+          </a>
+          <a className="button primary" href="/api/outbound/export?format=csv">
+            Export CSV
+          </a>
         </div>
       </header>
 
@@ -41,13 +50,7 @@ export default async function OutboundPage() {
           <h2>Campaigns</h2>
           <div className="finding-list">
             {campaigns.map((campaign) => (
-              <article key={campaign.id} className="finding-card">
-                <span className="badge">{campaign.status}</span>
-                <h3>{campaign.name}</h3>
-                <p>
-                  {campaign.channel.replace("_", " ")} · {new Date(campaign.createdAt).toLocaleDateString()}
-                </p>
-              </article>
+              <CampaignCard key={campaign.id} campaign={campaign} />
             ))}
             {campaigns.length === 0 ? <p>No outbound campaigns have been created yet.</p> : null}
           </div>
@@ -86,6 +89,37 @@ export default async function OutboundPage() {
         </aside>
       </div>
     </main>
+  );
+}
+
+function CampaignCard({
+  campaign
+}: {
+  campaign: Awaited<ReturnType<typeof repository.listOutboundCampaigns>>[number];
+}) {
+  const compliance = outboundComplianceStatus(campaign);
+  return (
+    <article className="finding-card">
+      <span className="badge">{campaign.status}</span>
+      <h3>{campaign.name}</h3>
+      <p>
+        {campaign.channel.replace("_", " ")} · {new Date(campaign.createdAt).toLocaleDateString()}
+      </p>
+      {compliance.highVolume ? (
+        <small className="muted">
+          {compliance.reviewed ? "Legal/IP review recorded" : "Legal/IP review required before running"} ·{" "}
+          {compliance.plannedRecipients ?? compliance.threshold}+ recipients
+        </small>
+      ) : null}
+      <div className="button-row">
+        <a className="button secondary" href={`/api/outbound/export?campaignId=${encodeURIComponent(campaign.id)}`}>
+          Manifest
+        </a>
+        <a className="button secondary" href={`/api/outbound/export?campaignId=${encodeURIComponent(campaign.id)}&format=csv`}>
+          CSV
+        </a>
+      </div>
+    </article>
   );
 }
 

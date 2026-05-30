@@ -55,8 +55,19 @@ async function main() {
   if (event.type !== "checkout.session.completed") throw new Error("Unexpected event type.");
 
   const session = asStripeCheckoutSession(event.data?.object);
+  const mismatchedSite = await repository.completeClaimCheckout({
+    claimId: session.metadata?.claim_id ?? session.client_reference_id,
+    siteId: "site_wrong_local_verification",
+    checkoutSessionId: session.id,
+    stripeCustomerId: stripeStringId(session.customer),
+    stripeSubscriptionId: stripeStringId(session.subscription),
+    completedAt: new Date().toISOString()
+  });
+  if (mismatchedSite) throw new Error("Claim completion should reject mismatched checkout site metadata.");
+
   const completed = await repository.completeClaimCheckout({
     claimId: session.metadata?.claim_id ?? session.client_reference_id,
+    siteId: session.metadata?.site_id,
     checkoutSessionId: session.id,
     stripeCustomerId: stripeStringId(session.customer),
     stripeSubscriptionId: stripeStringId(session.subscription),

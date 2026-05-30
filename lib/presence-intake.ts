@@ -26,6 +26,7 @@ export function createPresenceIntakePlan(
 ): PresenceIntakeResult {
   const inferredVertical = inferVertical({ url: sourceUrl });
   const siteId = `site_${slugify(new URL(sourceUrl).hostname.replace(/^www\./, ""))}`;
+  const pageSummaryCount = crawl?.pageSummaries?.length ?? 0;
 
   return {
     sourceUrl,
@@ -37,9 +38,14 @@ export function createPresenceIntakePlan(
       renderInspection,
       publicPresenceSignals: publicPresence?.signals.map((signal) => ({ ...signal, siteId })),
       technicalNotes: [
-        "Fetch crawler checks status, metadata, canonicals, robots, sitemap references, links, and schema.",
+        "Fetch crawler checks status, metadata, canonicals, robots, sitemap references, links, schema, and prioritized same-origin pages.",
         "Playwright crawler captures desktop and mobile screenshots for render and vision checks.",
         ...(crawl ? [`Initial technical/conversion quality score: ${crawl.score.percent}/100 (${crawl.score.grade}).`] : []),
+        ...(pageSummaryCount
+          ? [
+              `${pageSummaryCount} crawl page summar${pageSummaryCount === 1 ? "y" : "ies"} captured for homepage, service, contact, menu, and trust-signal context.`
+            ]
+          : []),
         ...(renderInspection
           ? [
               `Render inspection used ${renderInspection.adapter}; ${renderInspection.screenshots.length} screenshot artifact${renderInspection.screenshots.length === 1 ? "" : "s"} captured.`,
@@ -61,7 +67,7 @@ export function createPresenceIntakePlan(
       publicPresenceNotes: [
         ...(crawl
           ? [
-              `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, and ${crawl.extractedFacts.orderingLinks.length} ordering/order links were detected from the source site.`
+              `${crawl.extractedFacts.socialLinks.length} social links, ${crawl.extractedFacts.bookingLinks.length} booking links, and ${crawl.extractedFacts.orderingLinks.length} ordering/order links were detected from ${pageSummaryCount || 1} crawl page${pageSummaryCount === 1 ? "" : "s"}.`
             ]
           : []),
         ...(publicPresence?.signals.length
@@ -76,7 +82,7 @@ export function createPresenceIntakePlan(
     renderInspection,
     publicPresence,
     crawlPlan: [
-      { adapter: "fetch", purpose: "Cheap crawl for technical SEO and text facts." },
+      { adapter: "fetch", purpose: "Cheap crawl for technical SEO, internal-page fact provenance, forms, links, and text facts." },
       { adapter: "playwright", purpose: "Screenshot, responsive, and visual assessment." },
       { adapter: "external_browser", purpose: "Optional fallback for high-volume or anti-bot crawling." }
     ],

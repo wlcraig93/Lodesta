@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/security";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
   const body = await request.json().catch(() => ({}));

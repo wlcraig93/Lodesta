@@ -248,6 +248,7 @@ create table jobs (
 
 create index analytics_events_site_time_idx on analytics_events(site_id, occurred_at desc);
 create index analytics_events_site_event_time_idx on analytics_events(site_id, event_type, occurred_at desc);
+create index sites_workspace_idx on sites(workspace_id);
 create unique index business_profiles_site_idx on business_profiles(site_id);
 create index site_assets_site_kind_idx on site_assets(site_id, kind);
 create index site_assets_site_rights_idx on site_assets(site_id, rights_status);
@@ -261,18 +262,20 @@ create index optimization_findings_site_status_idx on optimization_findings(site
 create index experiments_site_status_idx on experiments(site_id, status);
 create index experiment_learnings_status_cohort_idx on experiment_learnings(status, cohort, surface, primary_metric);
 create index experiment_learnings_site_status_idx on experiment_learnings(site_id, status);
+create index experiment_learnings_experiment_status_idx on experiment_learnings(experiment_id, status);
 create index preview_tokens_site_created_idx on preview_tokens(site_id, created_at desc);
 create index domains_site_idx on domains(site_id);
 create index claims_site_idx on claims(site_id);
 create index claims_owner_email_idx on claims(owner_email);
 create index claims_owner_user_idx on claims(owner_user_id);
-create index claims_stripe_checkout_session_idx on claims(stripe_checkout_session_id);
+create unique index claims_stripe_checkout_session_idx on claims(stripe_checkout_session_id) where stripe_checkout_session_id is not null;
 create index outbound_campaigns_status_created_idx on outbound_campaigns(status, created_at desc);
 create index outbound_prospects_campaign_status_idx on outbound_prospects(campaign_id, status);
 create index outbound_prospects_site_idx on outbound_prospects(site_id);
 create index outbound_prospects_preview_token_idx on outbound_prospects(preview_token);
 create index outbound_events_campaign_time_idx on outbound_events(campaign_id, occurred_at desc);
 create index outbound_events_prospect_time_idx on outbound_events(prospect_id, occurred_at desc);
+create index outbound_events_site_time_idx on outbound_events(site_id, occurred_at desc);
 create index jobs_status_created_idx on jobs(status, created_at);
 create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
 create index jobs_running_lock_idx on jobs(status, locked_at);
@@ -284,6 +287,17 @@ security definer
 set search_path = public
 as $$
 begin
+  update jobs
+  set status = 'failed',
+      error = coalesce(error, 'Job lock expired after all retry attempts.'),
+      completed_at = now(),
+      locked_by = null,
+      locked_at = null,
+      updated_at = now()
+  where status = 'running'
+    and locked_at < now() - make_interval(secs => stale_after_seconds)
+    and attempts >= max_attempts;
+
   return query
   with candidate as (
     select id
@@ -407,3 +421,8 @@ using (
   owner_user_id = auth.uid()
   or lower(owner_email) = lower(nullif(auth.jwt() ->> 'email', ''))
 );
+
+grant usage on schema public to anon, authenticated, service_role;
+grant select on all tables in schema public to authenticated;
+grant all privileges on all tables in schema public to service_role;
+grant execute on all functions in schema public to service_role;

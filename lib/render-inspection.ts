@@ -402,8 +402,7 @@ function parseBrowserArgs(value: string | undefined) {
 }
 
 function renderTimeoutMs() {
-  const configured = Number(process.env.LODESTA_RENDER_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : 15000;
+  return 15000;
 }
 
 function blankToUndefined(value: string | undefined) {

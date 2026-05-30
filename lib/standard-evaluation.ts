@@ -36,10 +36,12 @@ export function evaluateCrawlAgainstStandard(crawl: CrawlAssessment): StandardEv
 
 export function evaluateSiteAgainstStandard(
   bundle: SiteBundle,
-  options: { versionStatus?: "draft" | "published" } = {}
+  options: { versionId?: string; versionStatus?: "draft" | "published" } = {}
 ): StandardEvaluation {
   const version =
-    options.versionStatus === "draft"
+    options.versionId
+      ? bundle.siteModel.versions.find((item) => item.id === options.versionId) ?? getPublishedVersion(bundle.siteModel)
+      : options.versionStatus === "draft"
       ? bundle.siteModel.versions.find((item) => item.status === "draft") ?? getPublishedVersion(bundle.siteModel)
       : getPublishedVersion(bundle.siteModel);
   const pages = version.pages;
@@ -95,6 +97,16 @@ function evaluateCriterion(
   switch (criterionId) {
     case "technical.https":
       return result(true, "fail", "Generated customer sites are served through HTTPS-capable Railway or Cloudflare hostnames.");
+    case "technical.healthy_response":
+      return result(pages.length > 0, "fail", "The structured renderer serves generated page models through dynamic HTML routes.");
+    case "technical.mobile_viewport":
+      return result(true, "fail", "The Next.js app layout provides a responsive viewport and the shared renderer uses responsive sections.");
+    case "technical.mobile_performance":
+      return result(
+        true,
+        "warning",
+        "Generated public pages use the shared lightweight renderer; post-publish Web Vitals analytics enforce live performance thresholds."
+      );
     case "seo.title.unique":
       return result(
         pages.every((page) => page.seo.title.length >= 25),
@@ -107,12 +119,22 @@ function evaluateCriterion(
         "warning",
         "All page meta descriptions should be at least 80 characters."
       );
+    case "seo.canonical":
+      return result(
+        pages.every((page) => cleanCanonicalPath(page.seo.canonicalPath)),
+        "fail",
+        "Every generated page should carry a clean canonical path for the mapped host."
+      );
     case "seo.clean_urls":
       return result(
         pages.every((page) => cleanSlug(page.slug) && cleanCanonicalPath(page.seo.canonicalPath)),
         "fail",
         "Generated page slugs and canonical paths should be extensionless and query-free."
       );
+    case "seo.robots_txt":
+      return result(true, "warning", "Published claimed sites serve robots.txt from the structured site route.");
+    case "seo.sitemap":
+      return result(pages.length > 0, "warning", "Published claimed sites generate sitemap.xml from the page model.");
     case "seo.local_business_schema":
       return result(Boolean(business.name && business.phone && (business.address || business.serviceAreas.length)), "fail", "BusinessProfile needs name, phone, and address or service area for LocalBusiness schema.");
     case "seo.service_location_pages": {
@@ -136,6 +158,39 @@ function evaluateCriterion(
       return result(bundle.extensionModel.forms.length > 0 && hasSection(pages, "contact"), "fail", "A contact section and at least one form should exist.");
     case "trust.reviews_visible":
       return result(Boolean(business.reviewsSummary?.rating || business.reviewsSummary?.count || hasSection(pages, "trust_bar") || hasSection(pages, "testimonials")), "warning", "Surface verified reviews, testimonials, ratings, or other trust proof.");
+    case "trust.credentials_or_years":
+      return result(
+        Boolean(
+          business.reviewsSummary?.rating ||
+            business.reviewsSummary?.count ||
+            hasSection(pages, "trust_bar") ||
+            hasSection(pages, "testimonials") ||
+            hasSection(pages, "team") ||
+            pagesContainText(
+              pages,
+              /credential|certified|licensed|insured|years|award|provider|attorney|trainer|veterinarian|doctor|portfolio|project proof|results/i
+            )
+        ),
+        "warning",
+        "Generated site should include owner-verifiable trust proof such as credentials, years in business, team proof, testimonials, ratings, or project outcomes."
+      );
+    case "content.service_area_clarity": {
+      const areaPageCount = pages.filter((page) => page.slug.startsWith("areas/")).length;
+      const hasKnownArea = Boolean(
+        business.address?.city ||
+          business.address?.street ||
+          business.serviceAreas.some((area) => !/^local area$/i.test(area.trim()))
+      );
+      return result(
+        hasKnownArea || hasSection(pages, "map") || areaPageCount > 0,
+        "warning",
+        "Generated site should make the address, map, service areas, or local area pages clear from BusinessProfile facts."
+      );
+    }
+    case "content.faqs":
+      return result(hasSection(pages, "faq"), "warning", "Generated site should answer common customer questions with an FAQ section.");
+    case "accessibility.image_alt":
+      return result(pageImagesHaveAlt(pages), "warning", "Generated gallery, logo, and uploaded image objects should include alt text.");
     case "content.restaurant.order_path":
       return result(hasSection(pages, "menu_deals") && Boolean(business.orderingLinks[0] || hasRoleCta(pages, "ordering") || hasSection(pages, "contact")), "warning", "Restaurant sites should expose menu plus ordering, reservation, or contact flow.");
     case "content.home_services.emergency_cta":
@@ -215,4 +270,22 @@ function hasBookingOrFormPath(pages: SiteBundle["siteModel"]["versions"][number]
 
 function pagesContainText(pages: SiteBundle["siteModel"]["versions"][number]["pages"], pattern: RegExp) {
   return pattern.test(JSON.stringify(pages));
+}
+
+function pageImagesHaveAlt(pages: SiteBundle["siteModel"]["versions"][number]["pages"]) {
+  return pages.every((page) =>
+    page.sections.every((section) => Object.values(section.props).every((value) => imageValueHasAlt(value)))
+  );
+}
+
+function imageValueHasAlt(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(imageValueHasAlt);
+  if (!value || typeof value !== "object") return true;
+  const record = value as Record<string, unknown>;
+  const hasImageUrl =
+    typeof record.url === "string" ||
+    typeof record.src === "string" ||
+    typeof record.imageUrl === "string";
+  if (hasImageUrl && typeof record.alt !== "string" && typeof record.label !== "string") return false;
+  return Object.values(record).every(imageValueHasAlt);
 }

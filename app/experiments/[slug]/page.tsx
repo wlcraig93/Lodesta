@@ -78,6 +78,16 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
                     <strong>Holdout:</strong> {Math.round(experiment.holdoutPercent * 100)}% of sessions stay on the control variant.
                   </p>
                 ) : null}
+                <p className="muted">
+                  {[
+                    experiment.startedAt ? `Started ${formatDate(experiment.startedAt)}` : null,
+                    experiment.concludedAt ? `Concluded ${formatDate(experiment.concludedAt)}` : null,
+                    experiment.rolledBackAt ? `Rolled back ${formatDate(experiment.rolledBackAt)}` : null,
+                    experiment.updatedAt ? `Updated ${formatDate(experiment.updatedAt)}` : null
+                  ]
+                    .filter(Boolean)
+                    .join(" | ") || "Not started yet."}
+                </p>
                 {analysis?.status === "leader_detected" && analysis.leaderLabel ? (
                   <p>
                     <strong>Current leader:</strong> {analysis.leaderLabel}
@@ -87,6 +97,7 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
                   siteId={bundle.businessProfile.siteId}
                   experimentId={experiment.id}
                   status={experiment.status}
+                  holdoutPercent={experiment.holdoutPercent}
                 />
                 <ExperimentLearningForm
                   siteId={bundle.businessProfile.siteId}
@@ -174,6 +185,15 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 function formatLift(value: number) {
   if (!Number.isFinite(value) || value === 0) return "0%";
   return `${value > 0 ? "+" : ""}${Math.round(value * 100)}%`;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
 }
 
 function learningDisabledReason(

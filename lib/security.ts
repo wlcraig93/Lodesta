@@ -1,26 +1,29 @@
 import { NextResponse } from "next/server";
 import { repository } from "./repository";
 import { getCurrentUser } from "./supabase/server";
-import { adminToken, authRequired, hasValidAdminToken } from "./auth-policy";
+import { adminToken, authRequired, hasValidAdminToken, isAdminEmail } from "./auth-policy";
 
-export function requireAdmin(request: Request) {
+export async function requireAdmin(request: Request) {
   const expected = adminToken();
-  if (!expected) {
-    if (authRequired()) return NextResponse.json({ error: "Admin authorization required" }, { status: 401 });
-    return null;
-  }
+  if (expected && hasValidAdminToken(request.headers)) return null;
+  if (!expected && !authRequired()) return null;
 
-  if (hasValidAdminToken(request.headers)) return null;
+  const auth = await getCurrentUser();
+  if (auth.configured && isAdminEmail(auth.user?.email)) return null;
+
   return NextResponse.json({ error: "Admin authorization required" }, { status: 401 });
 }
 
 export async function requireAdminOrSiteOwner(request: Request, siteId: string) {
   const expected = adminToken();
   if (expected && hasValidAdminToken(request.headers)) return null;
-
   if (!expected && !authRequired()) return null;
 
   const auth = await getCurrentUser();
+  if (auth.configured && isAdminEmail(auth.user?.email)) {
+    return null;
+  }
+
   const userId = auth.user?.id;
   const email = auth.user?.email?.toLowerCase();
   if (!auth.configured || (!userId && !email)) {

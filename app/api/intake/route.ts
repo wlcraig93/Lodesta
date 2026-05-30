@@ -3,7 +3,7 @@ import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
-import { applyRateLimitHeaders, rateLimit, rateLimitConfig } from "@/lib/rate-limit";
+import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { validatePublicFetchUrl } from "@/lib/url-safety";
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
 
@@ -17,21 +17,22 @@ const intakeSchema = z
   .refine((value) => value.url || value.prompt, "Provide a URL or prompt.");
 
 export async function POST(request: Request) {
-  const unauthorized = requireAdmin(request);
+  const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
+
+  const limit = rateLimit(request, {
+    bucket: "site_intake",
+    limit: 30,
+    windowMs: 10 * 60_000
+  });
+  if (!limit.ok) return limit.response;
 
   const body = await request.json().catch(() => null);
   const parsed = intakeSchema.safeParse(body);
 
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid intake request", issues: parsed.error.issues }, { status: 400 });
+    return applyRateLimitHeaders(NextResponse.json({ error: "Invalid intake request", issues: parsed.error.issues }, { status: 400 }), limit);
   }
-
-  const limit = rateLimit(request, {
-    bucket: "site_intake",
-    ...rateLimitConfig("LODESTA_SITE_INTAKE", { limit: 30, windowMs: 10 * 60_000 })
-  });
-  if (!limit.ok) return limit.response;
 
   try {
     assertLaunchMarket(parsed.data);

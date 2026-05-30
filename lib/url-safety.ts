@@ -7,7 +7,7 @@ export type PublicFetchUrlValidation =
 
 export async function validatePublicFetchUrl(
   value: string,
-  options: { resolveDns?: boolean } = {}
+  options: { resolveDns?: boolean; allowPrivateOverride?: boolean } = {}
 ): Promise<PublicFetchUrlValidation> {
   let parsed: URL;
   try {
@@ -25,7 +25,7 @@ export async function validatePublicFetchUrl(
 
   const hostname = normalizeHostname(parsed.hostname);
   if (!hostname) return { ok: false, error: "URL must include a hostname." };
-  if (process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS === "true") {
+  if (options.allowPrivateOverride !== false && process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS === "true") {
     return { ok: true, url: parsed.href, hostname };
   }
 

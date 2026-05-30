@@ -7,6 +7,14 @@ export type CreateOutboundCampaignInput = {
   metadata?: Record<string, string | number | boolean>;
 };
 
+export type OutboundComplianceStatus = {
+  highVolume: boolean;
+  reviewed: boolean;
+  threshold: number;
+  plannedRecipients?: number;
+  reason?: string;
+};
+
 export type UpsertOutboundProspectInput = {
   id?: string;
   campaignId: string;
@@ -30,6 +38,24 @@ export type RecordOutboundEventInput = {
   occurredAt?: string;
 };
 
+export type OutboundMailerManifestRow = {
+  campaignId: string;
+  campaignName: string;
+  campaignStatus: OutboundCampaign["status"];
+  complianceStatus: "ok" | "reviewed_high_volume" | "needs_review";
+  prospectId: string;
+  businessName: string;
+  vertical: Vertical | "unknown";
+  status: OutboundProspect["status"];
+  sourceUrl: string;
+  previewUrl: string;
+  mailingCode: string;
+  mailedAt: string;
+  firstPreviewViewedAt: string;
+  claimedAt: string;
+  publishedAt: string;
+};
+
 export function newOutboundCampaign(input: CreateOutboundCampaignInput): OutboundCampaign {
   const now = new Date().toISOString();
   return {
@@ -41,6 +67,39 @@ export function newOutboundCampaign(input: CreateOutboundCampaignInput): Outboun
     startedAt: input.status === "running" ? now : undefined,
     metadata: cleanMetadata(input.metadata)
   };
+}
+
+export function outboundComplianceStatus(input: {
+  channel?: OutboundCampaign["channel"];
+  status?: OutboundCampaign["status"];
+  metadata?: Record<string, string | number | boolean>;
+}): OutboundComplianceStatus {
+  const threshold = outboundHighVolumeThreshold();
+  const plannedRecipients = plannedRecipientCount(input.metadata);
+  const highVolume = Boolean(input.metadata?.highVolume === true || (plannedRecipients !== undefined && plannedRecipients >= threshold));
+  const reviewed = hasLegalReview(input.metadata);
+  const outreachChannel = input.channel === undefined || input.channel === "direct_mail" || input.channel === "email" || input.channel === "phone";
+  const active = input.status === "running";
+  const reason =
+    active && outreachChannel && highVolume && !reviewed
+      ? "High-volume outbound requires IP/legal review before launch. Add legalReviewedAt and legalReviewer metadata, or keep the campaign in draft/paused."
+      : undefined;
+
+  return {
+    highVolume,
+    reviewed,
+    threshold,
+    plannedRecipients,
+    reason
+  };
+}
+
+export function assertOutboundCompliance(input: CreateOutboundCampaignInput) {
+  const status = outboundComplianceStatus(input);
+  if (status.reason) {
+    return { ok: false as const, status };
+  }
+  return { ok: true as const, status };
 }
 
 export function newOutboundProspect(input: UpsertOutboundProspectInput): OutboundProspect {
@@ -151,6 +210,70 @@ export function summarizeOutbound(
   };
 }
 
+export function buildOutboundMailerManifest(
+  campaigns: OutboundCampaign[],
+  prospects: OutboundProspect[],
+  campaignId: string | undefined,
+  previewBaseUrl: string
+): OutboundMailerManifestRow[] {
+  const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+  return prospects
+    .filter((prospect) => !campaignId || prospect.campaignId === campaignId)
+    .map((prospect) => {
+      const campaign = campaignById.get(prospect.campaignId);
+      const compliance = outboundComplianceStatus(campaign ?? {});
+      const complianceStatus: OutboundMailerManifestRow["complianceStatus"] = compliance.reason
+        ? "needs_review"
+        : compliance.highVolume
+          ? "reviewed_high_volume"
+          : "ok";
+      const vertical: OutboundMailerManifestRow["vertical"] = prospect.vertical ?? "unknown";
+      return {
+        campaignId: prospect.campaignId,
+        campaignName: campaign?.name ?? "Unknown campaign",
+        campaignStatus: campaign?.status ?? "draft",
+        complianceStatus,
+        prospectId: prospect.id,
+        businessName: prospect.businessName,
+        vertical,
+        status: prospect.status,
+        sourceUrl: prospect.sourceUrl ?? "",
+        previewUrl: prospect.previewToken ? previewUrl(previewBaseUrl, prospect.previewToken) : "",
+        mailingCode: prospect.mailingCode ?? "",
+        mailedAt: prospect.mailedAt ?? "",
+        firstPreviewViewedAt: prospect.firstPreviewViewedAt ?? "",
+        claimedAt: prospect.claimedAt ?? "",
+        publishedAt: prospect.publishedAt ?? ""
+      };
+    })
+    .sort((left, right) => `${left.campaignName}:${left.businessName}`.localeCompare(`${right.campaignName}:${right.businessName}`));
+}
+
+export function outboundMailerManifestCsv(rows: OutboundMailerManifestRow[]) {
+  const headers: Array<keyof OutboundMailerManifestRow> = [
+    "campaignId",
+    "campaignName",
+    "campaignStatus",
+    "complianceStatus",
+    "prospectId",
+    "businessName",
+    "vertical",
+    "status",
+    "sourceUrl",
+    "previewUrl",
+    "mailingCode",
+    "mailedAt",
+    "firstPreviewViewedAt",
+    "claimedAt",
+    "publishedAt"
+  ];
+  const lines = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((header) => csvCell(String(row[header] ?? ""))).join(","))
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
 function verticalBreakdown(prospects: OutboundProspect[]): OutboundSummary["verticalBreakdown"] {
   const groups = new Map<Vertical | "unknown", OutboundProspect[]>();
   for (const prospect of prospects) {
@@ -205,4 +328,40 @@ function cleanMetadata(metadata?: Record<string, string | number | boolean>) {
       .filter(([key]) => !/password|token|secret|ssn|card/i.test(key))
       .map(([key, value]) => [key, value])
   );
+}
+
+function outboundHighVolumeThreshold() {
+  const configured = Number(process.env.LODESTA_OUTBOUND_HIGH_VOLUME_THRESHOLD);
+  return Number.isFinite(configured) && configured > 0 ? configured : 100;
+}
+
+function plannedRecipientCount(metadata: Record<string, string | number | boolean> | undefined) {
+  if (!metadata) return undefined;
+  for (const key of ["plannedRecipients", "plannedProspects", "plannedProspectCount", "mailerQuantity", "recipientCount"]) {
+    const value = metadata[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function hasLegalReview(metadata: Record<string, string | number | boolean> | undefined) {
+  if (!metadata) return false;
+  if (metadata.legalApproved === true) return true;
+  return typeof metadata.legalReviewedAt === "string" && metadata.legalReviewedAt.trim().length > 0;
+}
+
+function previewUrl(baseUrl: string, token: string) {
+  try {
+    return new URL(`/preview/${encodeURIComponent(token)}`, baseUrl).href;
+  } catch {
+    return `/preview/${encodeURIComponent(token)}`;
+  }
+}
+
+function csvCell(value: string) {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
 }

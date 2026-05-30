@@ -14,8 +14,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid domain refresh request", issues: parsed.error.issues }, { status: 400 });
   }
 
-  const domains = await repository.listDomains();
-  const domain = domains.find((candidate) => candidate.id === parsed.data.domainId);
+  const domain = await repository.getDomainById(parsed.data.domainId);
   if (!domain) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
 
   const unauthorized = await requireAdminOrSiteOwner(request, domain.siteId);

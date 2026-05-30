@@ -32,25 +32,60 @@ type SuggestedEditPayload =
       action: "add_trust_section";
       pageId: string;
       items: string[];
+    }
+  | {
+      action: "add_faq_section";
+      pageId: string;
+      items: Array<{ question: string; answer: string }>;
     };
+
+export type OptimizationChangeSummary = {
+  action: SuggestedEditPayload["action"];
+  pageId: string;
+  pageTitle?: string;
+  sectionId?: string;
+  summary: string;
+  before?: string;
+  after?: string;
+};
 
 export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFinding) {
   const payload = parseSuggestedEditPayload(finding.suggestedEditPayload);
   if (!payload) return { ok: false as const, reason: "Finding does not include a one-click edit payload." };
 
   const draft = clonePublishedAsDraft(bundle);
+  let changeSummary: OptimizationChangeSummary;
   switch (payload.action) {
     case "update_page_metadata": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        summary: `Updated SEO title and description for ${page.title}.`,
+        before: `${page.seo.title} — ${page.seo.description}`,
+        after: `${payload.title} — ${payload.description}`
+      };
       page.seo.title = payload.title;
       page.seo.description = payload.description;
       break;
     }
     case "set_hero_cta": {
       const page = getPage(draft, payload.pageId);
-      const section = page?.sections.find((candidate) => candidate.id === payload.sectionId && candidate.type === "hero");
+      if (!page) return { ok: false as const, reason: "Target page was not found." };
+      const section = page.sections.find((candidate) => candidate.id === payload.sectionId && candidate.type === "hero");
       if (!section) return { ok: false as const, reason: "Target hero section was not found." };
+      const previousCta = section.props.primaryCta as { label?: string; href?: string } | undefined;
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        sectionId: section.id,
+        summary: `Updated the hero primary CTA on ${page.title}.`,
+        before: formatCta(previousCta),
+        after: formatCta(payload.cta)
+      };
       section.props.primaryCta = payload.cta;
       section.fieldPolicies.primaryCta ??= { editScope: "owner_choice", experimentEligible: true, factField: false };
       break;
@@ -58,26 +93,71 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     case "add_contact_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.sections.some((section) => section.type === "contact")) break;
-      page.sections.push(makeContactSection(bundle.businessProfile, payload));
+      const existing = page.sections.find((section) => section.type === "contact");
+      if (existing) {
+        changeSummary = {
+          action: payload.action,
+          pageId: page.id,
+          pageTitle: page.title,
+          sectionId: existing.id,
+          summary: `${page.title} already has a contact section; no duplicate section was added.`
+        };
+        break;
+      }
+      const section = makeContactSection(bundle.businessProfile, payload);
+      page.sections.push(section);
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        sectionId: section.id,
+        summary: `Added a contact section to ${page.title}.`,
+        after: payload.heading
+      };
       break;
     }
     case "add_cta_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.sections.some((section) => section.id === "cta_analytics_generated")) break;
+      if (page.sections.some((section) => section.id === "cta_analytics_generated")) {
+        changeSummary = {
+          action: payload.action,
+          pageId: page.id,
+          pageTitle: page.title,
+          sectionId: "cta_analytics_generated",
+          summary: `${page.title} already has the recommended CTA section; no duplicate section was added.`
+        };
+        break;
+      }
       const section = makeCtaSection(payload);
       const insertAfterIndex = payload.insertAfterSectionId
         ? page.sections.findIndex((candidate) => candidate.id === payload.insertAfterSectionId)
         : -1;
       page.sections.splice(insertAfterIndex >= 0 ? insertAfterIndex + 1 : page.sections.length, 0, section);
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        sectionId: section.id,
+        summary: `Added a recommended CTA section to ${page.title}.`,
+        after: `${payload.heading} ${formatCta(payload.primaryCta)}`
+      };
       break;
     }
     case "add_trust_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.sections.some((section) => section.id === "trust_generated")) break;
-      page.sections.splice(Math.min(1, page.sections.length), 0, {
+      if (page.sections.some((section) => section.id === "trust_generated")) {
+        changeSummary = {
+          action: payload.action,
+          pageId: page.id,
+          pageTitle: page.title,
+          sectionId: "trust_generated",
+          summary: `${page.title} already has the generated trust section; no duplicate section was added.`
+        };
+        break;
+      }
+      const section: SectionModel = {
         id: "trust_generated",
         type: "trust_bar",
         variant: "generated_proof",
@@ -86,7 +166,42 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
         fieldPolicies: {
           items: { editScope: "system_only", experimentEligible: false, factField: true }
         }
-      });
+      };
+      page.sections.splice(Math.min(1, page.sections.length), 0, section);
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        sectionId: section.id,
+        summary: `Added a trust section to ${page.title}.`,
+        after: payload.items.join(", ")
+      };
+      break;
+    }
+    case "add_faq_section": {
+      const page = getPage(draft, payload.pageId);
+      if (!page) return { ok: false as const, reason: "Target page was not found." };
+      const existing = page.sections.find((section) => section.type === "faq");
+      if (existing) {
+        changeSummary = {
+          action: payload.action,
+          pageId: page.id,
+          pageTitle: page.title,
+          sectionId: existing.id,
+          summary: `${page.title} already has an FAQ section; no duplicate section was added.`
+        };
+        break;
+      }
+      const section = makeFaqSection(payload);
+      page.sections.push(section);
+      changeSummary = {
+        action: payload.action,
+        pageId: page.id,
+        pageTitle: page.title,
+        sectionId: section.id,
+        summary: `Added an FAQ section to ${page.title}.`,
+        after: `${payload.items.length} question${payload.items.length === 1 ? "" : "s"}`
+      };
       break;
     }
     default: {
@@ -96,7 +211,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
   }
 
   finding.status = "applied";
-  return { ok: true as const, draft, finding };
+  return { ok: true as const, draft, finding, changeSummary };
 }
 
 export function preserveFindingLifecycle(
@@ -135,6 +250,25 @@ function makeCtaSection(payload: Extract<SuggestedEditPayload, { action: "add_ct
   };
 }
 
+function makeFaqSection(payload: Extract<SuggestedEditPayload, { action: "add_faq_section" }>): SectionModel {
+  return {
+    id: "faq_generated",
+    type: "faq",
+    variant: "conversion_faq",
+    bindings: {},
+    props: {
+      eyebrow: "Questions",
+      heading: "Common questions before you reach out",
+      items: payload.items
+    },
+    fieldPolicies: {
+      eyebrow: { editScope: "owner_freetext", experimentEligible: false, factField: false },
+      heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
+      items: { editScope: "owner_freetext", experimentEligible: false, factField: true }
+    }
+  };
+}
+
 export function clonePublishedAsDraft(bundle: SiteBundle) {
   const existingDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
   if (existingDraft) return existingDraft;
@@ -169,6 +303,11 @@ export function strongerMetadataForPage(business: BusinessProfile, page: PageMod
 function parseSuggestedEditPayload(payload: Record<string, unknown> | undefined): SuggestedEditPayload | null {
   if (!payload || typeof payload.action !== "string") return null;
   return payload as SuggestedEditPayload;
+}
+
+function formatCta(cta: { label?: string; href?: string } | undefined) {
+  if (!cta?.label && !cta?.href) return "No primary CTA";
+  return `${cta.label ?? "CTA"} -> ${cta.href ?? "no href"}`;
 }
 
 function getPage(version: SiteVersion, pageId: string) {

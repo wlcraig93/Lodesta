@@ -66,6 +66,18 @@ export default async function AccountPage() {
 
       {user ? (
         <section className="panel">
+          <h2>Account identifiers</h2>
+          <p className="muted">
+            Add this Supabase user id to <code>LODESTA_ADMIN_USER_ID</code> to grant admin access.
+          </p>
+          <p>
+            <code>{user.id}</code>
+          </p>
+        </section>
+      ) : null}
+
+      {user ? (
+        <section className="panel">
           <h2>Managed sites</h2>
           <div className="finding-list">
             {visibleBundles.map((bundle) => (

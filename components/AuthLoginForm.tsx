@@ -12,6 +12,28 @@ export function AuthLoginForm({ configured, nextPath = "/" }: AuthLoginFormProps
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(configured ? "" : "Supabase Auth is not configured for this environment.");
 
+  function authRedirectUrl() {
+    return `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+  }
+
+  async function onGoogleSignIn() {
+    if (!configured) {
+      setStatus("Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable login.");
+      return;
+    }
+
+    setStatus("Redirecting to Google...");
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: authRedirectUrl()
+      }
+    });
+
+    if (error) setStatus(error.message);
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!configured) {
@@ -21,11 +43,10 @@ export function AuthLoginForm({ configured, nextPath = "/" }: AuthLoginFormProps
 
     setStatus("Sending login link...");
     const supabase = createSupabaseBrowserClient();
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: redirectTo
+        emailRedirectTo: authRedirectUrl()
       }
     });
 
@@ -38,6 +59,9 @@ export function AuthLoginForm({ configured, nextPath = "/" }: AuthLoginFormProps
 
   return (
     <form className="editor-form" onSubmit={onSubmit}>
+      <button className="button primary" type="button" onClick={onGoogleSignIn} disabled={!configured}>
+        Continue with Google
+      </button>
       <label>
         <span>Email</span>
         <input
@@ -49,7 +73,7 @@ export function AuthLoginForm({ configured, nextPath = "/" }: AuthLoginFormProps
           disabled={!configured}
         />
       </label>
-      <button className="button primary" type="submit" disabled={!configured}>
+      <button className="button secondary" type="submit" disabled={!configured}>
         Send login link
       </button>
       {status ? <p className="form-status">{status}</p> : null}

@@ -17,7 +17,7 @@ import { executeFormSubmissionWorkflows } from "../lib/workflows";
 import { createSiteFromInput } from "../lib/intake";
 import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
-import { isAdminEmail } from "../lib/auth-policy";
+import { isAdminUserId } from "../lib/auth-policy";
 import { applyOwnerAssetsUpdate } from "../lib/owner-assets";
 import { updateSiteDesignBundle } from "../lib/design";
 import { applySuggestedEdit, preserveFindingLifecycle } from "../lib/optimization";
@@ -232,10 +232,10 @@ assert(
   "Unscoped experiment-learning reads should require admin authorization instead of exposing cross-site learnings."
 );
 assert(
-  securitySource.includes("isAdminEmail(auth.user?.email)") &&
+  securitySource.includes("isAdminUserId(auth.user?.id)") &&
     securitySource.includes("export async function requireAdmin") &&
     securitySource.includes("export async function requireAdminOrSiteOwner"),
-  "Admin APIs should authorize Supabase-authenticated admin emails as well as bearer-token CLI access."
+  "Admin APIs should authorize Supabase-authenticated admin user ids as well as bearer-token CLI access."
 );
 assert(
   domainRouteSource.includes("manualCustomDomainsAllowed()") &&
@@ -303,7 +303,7 @@ const authEnvSnapshot = {
   requireAuth: process.env.LODESTA_REQUIRE_AUTH,
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
   adminToken: process.env.LODESTA_ADMIN_TOKEN,
-  adminEmails: process.env.LODESTA_ADMIN_EMAILS,
+  adminUserId: process.env.LODESTA_ADMIN_USER_ID,
   ipHashSalt: process.env.LODESTA_IP_HASH_SALT,
   rateLimitSalt: process.env.LODESTA_RATE_LIMIT_SALT,
   supabaseUrl: process.env.SUPABASE_URL,
@@ -367,9 +367,9 @@ try {
     "Invalid admin bearer token should not authorize owner/admin site APIs."
   );
 
-  process.env.LODESTA_ADMIN_EMAILS = "Admin@Example.com,ops@example.com";
-  assert(isAdminEmail("admin@example.com"), "Admin page policy should match Supabase admin emails case-insensitively.");
-  assert(!isAdminEmail("owner@example.com"), "Admin page policy should reject Supabase emails outside the admin allowlist.");
+  process.env.LODESTA_ADMIN_USER_ID = "admin-user-id";
+  assert(isAdminUserId("admin-user-id"), "Admin page policy should match the configured Supabase admin user id.");
+  assert(!isAdminUserId("owner-user-id"), "Admin page policy should reject Supabase user ids outside the admin setting.");
 
   process.env.LODESTA_IP_HASH_SALT = "boundary-health-ip-salt";
   process.env.LODESTA_RATE_LIMIT_SALT = "boundary-health-rate-salt";
@@ -407,7 +407,7 @@ try {
   restoreEnv("LODESTA_REQUIRE_AUTH", authEnvSnapshot.requireAuth);
   restoreEnv("NEXT_PUBLIC_APP_URL", authEnvSnapshot.appUrl);
   restoreEnv("LODESTA_ADMIN_TOKEN", authEnvSnapshot.adminToken);
-  restoreEnv("LODESTA_ADMIN_EMAILS", authEnvSnapshot.adminEmails);
+  restoreEnv("LODESTA_ADMIN_USER_ID", authEnvSnapshot.adminUserId);
   restoreEnv("LODESTA_IP_HASH_SALT", authEnvSnapshot.ipHashSalt);
   restoreEnv("LODESTA_RATE_LIMIT_SALT", authEnvSnapshot.rateLimitSalt);
   restoreEnv("SUPABASE_URL", authEnvSnapshot.supabaseUrl);

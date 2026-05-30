@@ -18,7 +18,7 @@ export default async function LoginPage({
         <div>
           <span className="badge">Login</span>
           <h1>Access your site</h1>
-          <p>Owners sign in with a secure email link before editing, connecting domains, or managing leads.</p>
+          <p>Owners sign in with Google or a secure email link before editing, connecting domains, or managing leads.</p>
         </div>
         <div className="button-row">
           <Link className="button secondary" href="/">
@@ -28,7 +28,7 @@ export default async function LoginPage({
       </header>
 
       <section className="panel auth-panel">
-        <h2>Email link</h2>
+        <h2>Sign in</h2>
         <AuthLoginForm configured={env.configured} nextPath={params.next ?? "/account"} />
       </section>
     </main>

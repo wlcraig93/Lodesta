@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { repository } from "./repository";
 import { getCurrentUser } from "./supabase/server";
-import { adminToken, authRequired, hasValidAdminToken, isAdminEmail } from "./auth-policy";
+import { adminToken, authRequired, hasValidAdminToken, isAdminUserId } from "./auth-policy";
 
 export async function requireAdmin(request: Request) {
   const expected = adminToken();
@@ -9,7 +9,7 @@ export async function requireAdmin(request: Request) {
   if (!expected && !authRequired()) return null;
 
   const auth = await getCurrentUser();
-  if (auth.configured && isAdminEmail(auth.user?.email)) return null;
+  if (auth.configured && isAdminUserId(auth.user?.id)) return null;
 
   return NextResponse.json({ error: "Admin authorization required" }, { status: 401 });
 }
@@ -20,7 +20,7 @@ export async function requireAdminOrSiteOwner(request: Request, siteId: string) 
   if (!expected && !authRequired()) return null;
 
   const auth = await getCurrentUser();
-  if (auth.configured && isAdminEmail(auth.user?.email)) {
+  if (auth.configured && isAdminUserId(auth.user?.id)) {
     return null;
   }
 

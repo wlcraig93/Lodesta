@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import type { ClaimRecord, SiteBundle } from "./models";
 import { repository } from "./repository";
 import { getCurrentUser } from "./supabase/server";
-import { authRequired, hasValidAdminToken, isAdminEmail } from "./auth-policy";
+import { authRequired, hasValidAdminToken, isAdminUserId } from "./auth-policy";
 
 export async function requireOwnerAccess(nextPath: string) {
   const auth = await getCurrentUser();
@@ -27,7 +27,7 @@ export async function requireAdminPageAccess(nextPath: string) {
   }
   if (!auth.configured) return { ...auth, admin: true as const };
   if (!auth.user) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
-  if (!isAdminEmail(auth.user.email)) notFound();
+  if (!isAdminUserId(auth.user.id)) notFound();
   return { ...auth, admin: true as const };
 }
 

@@ -31,7 +31,7 @@ The working thesis:
 | Chat | Available, user-initiated by default; proactive only after intent signals | Product default | [Production and Operations Management live chat study](https://journals.sagepub.com/doi/abs/10.1111/poms.13320), [Baymard live chat UX](https://baymard.com/blog/live-chat-usability-issues) |
 | Entry popups | No promotional full-screen or content-blocking entry popups | Avoid by default | [Google intrusive interstitial guidance](https://developers.google.com/search/docs/appearance/avoid-intrusive-interstitials), [Baymard live chat UX](https://baymard.com/blog/live-chat-usability-issues) |
 | Location pages | One page per real location; service-area pages only when substantively local | Hard default | [Google spam policies](https://developers.google.com/search/docs/essentials/spam-policies) |
-| Google reviews | Surface visibly for users, but do not expect self-serving LocalBusiness review rich snippets | Hard default | [Google review snippet rules](https://developers.google.com/search/docs/appearance/structured-data/review-snippet?hl=en), [Google Places API Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details) |
+| Google reviews | Use Places UI Kit Query as the default live Google proof module; do not expect self-serving LocalBusiness review rich snippets | Hard default | [Social Proof Agent Brief](social-proof-agent-brief.md), [Google review snippet rules](https://developers.google.com/search/docs/appearance/structured-data/review-snippet?hl=en), [Places UI Kit overview](https://developers.google.com/maps/documentation/javascript/places-ui-kit/overview?hl=en) |
 | Agent-readable publishing | Generate crawlable semantic HTML plus `/llms.txt` and Markdown alternates for key pages, but do not treat them as proven AI ranking signals | Product default | [llms.txt proposal](https://llmstxt.org/), [Cloudflare Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/), [Profound Markdown vs HTML test](https://www.tryprofound.com/blog/does-markdown-increase-ai-bot-traffic) |
 | Performance | Pass Core Web Vitals on real-user 75th percentile where possible | Hard default | [web.dev Core Web Vitals](https://web.dev/articles/vitals?hl=en), [T-Mobile web performance case study](https://web.dev/case-studies/t-mobile-case-study) |
 
@@ -383,13 +383,18 @@ Sources:
 
 - [Google Places API Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details)
 - [Google Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies)
+- [Places UI Kit overview](https://developers.google.com/maps/documentation/javascript/places-ui-kit/overview?hl=en)
+- [Google Maps Platform pricing](https://developers.google.com/maps/billing-and-pricing/pricing?hl=en)
 
 Lodesta default:
 
-- Fetch only fields needed for the rendered feature.
+- Prefer Places UI Kit Query for live Google-powered rating/review display.
+- Use custom Places API rendering only when the customer tier and conversion value justify the higher cost and implementation policy surface.
+- Fetch only fields needed for custom rendered features.
 - Display required Google attribution.
 - Respect caching and display rules.
 - Store provenance for all externally sourced facts.
+- See [Social Proof Agent Brief](social-proof-agent-brief.md) before implementing review or rating modules.
 
 ## Maps, Directions, Hours, And Local Action
 
@@ -858,6 +863,10 @@ Lodesta should not ship:
 - [Google mobile-first indexing best practices](https://developers.google.com/search/docs/crawling-indexing/mobile/mobile-sites-mobile-first-indexing)
 - [Google Places API Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details)
 - [Google Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies)
+- [Google Places UI Kit overview](https://developers.google.com/maps/documentation/javascript/places-ui-kit/overview?hl=en)
+- [Google Places UI Kit Place Details Elements](https://developers.google.com/maps/documentation/javascript/places-ui-kit/place-details)
+- [Google Places UI Kit custom styling](https://developers.google.com/maps/documentation/javascript/places-ui-kit/custom-styling)
+- [Google Maps Platform pricing](https://developers.google.com/maps/billing-and-pricing/pricing?hl=en)
 - [Google review snippet structured data rules](https://developers.google.com/search/docs/appearance/structured-data/review-snippet?hl=en)
 - [Google SEO Starter Guide](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)
 - [Google spam policies](https://developers.google.com/search/docs/essentials/spam-policies)

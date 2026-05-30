@@ -20,6 +20,7 @@ import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 import { prepareIntakeInput } from "./intake-pipeline";
 import { assertLaunchMarket } from "./launch-market";
+import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
 export const defaultJobMaxAttempts = 3;
@@ -71,17 +72,19 @@ export async function getJob(id: string) {
 }
 
 export async function processNextJob(context?: JobExecutionContext) {
+  warnIfDeprecatedWorkerIdEnvSet();
   const file = await readJobsFile();
   if (requeueStaleLocalJobs(file, Date.now())) await writeJobsFile(file);
   const nowMs = Date.now();
   const job = file.jobs.find((candidate) => candidate.status === "queued" && new Date(candidate.runAfter).getTime() <= nowMs);
   if (!job) return null;
+  const workerId = context?.workerId ?? getProcessWorkerId();
 
   job.status = "running";
   job.attempts += 1;
   job.startedAt = new Date().toISOString();
   job.lockedAt = job.startedAt;
-  job.lockedBy = context?.workerId ?? "local-worker";
+  job.lockedBy = workerId;
   job.updatedAt = job.startedAt;
   await writeJobsFile(file);
 

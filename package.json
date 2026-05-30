@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p ${PORT:-4330} -H ${HOST:-127.0.0.1}",
+    "dev:raw": "next dev",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit --incremental false",

@@ -49,7 +49,7 @@ trap cleanup EXIT
 
 if [[ "$START_SERVER" -eq 1 ]]; then
   SERVER_LOG="$(mktemp)"
-  npm run dev -- -p "$PORT" -H 127.0.0.1 >"$SERVER_LOG" 2>&1 &
+  npm run dev:raw -- -p "$PORT" -H 127.0.0.1 >"$SERVER_LOG" 2>&1 &
   SERVER_PID="$!"
 fi
 

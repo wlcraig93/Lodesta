@@ -60,6 +60,7 @@ import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
+import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -1118,7 +1119,8 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async processNextJob() {
-    const workerId = process.env.LODESTA_WORKER_ID ?? `worker_${crypto.randomUUID()}`;
+    warnIfDeprecatedWorkerIdEnvSet();
+    const workerId = getProcessWorkerId();
     const claimed = await requireData<unknown>(
       getSupabaseAdminClient().rpc("claim_next_job", {
         worker_id: workerId,

@@ -89,6 +89,7 @@ import { supabaseRepository } from "./supabase/repository";
 import { createCheckoutSession, type CheckoutSessionResult } from "./billing";
 import { refreshCustomHostnameStatus, registerCustomHostname, type DomainVerification } from "./domains";
 import { prepareIntakeInput } from "./intake-pipeline";
+import { getProcessWorkerId } from "./worker-identity";
 import type {
   CreateOutboundCampaignInput,
   RecordOutboundEventInput,
@@ -474,7 +475,7 @@ export const localRepository: LodestaRepository = {
 
 function createLocalJobContext(): JobExecutionContext {
   return {
-    workerId: process.env.LODESTA_WORKER_ID ?? "local-worker",
+    workerId: getProcessWorkerId(),
     createAndStoreSite: localRepository.createAndStoreSite,
     createPreviewToken: localRepository.createPreviewToken,
     getSiteBundle: localRepository.getSiteBundle,

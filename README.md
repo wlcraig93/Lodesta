@@ -33,6 +33,8 @@ npm install
 npm run dev
 ```
 
+The default local app URL is `http://localhost:4330`. `npm run dev` binds Next to `127.0.0.1:4330`; override with `PORT=4331 npm run dev` only when you intentionally need another port. Keep `NEXT_PUBLIC_APP_URL` aligned with the local URL because generated links and OAuth callback URLs use it.
+
 To run the launch-flow smoke checks against a local dev server:
 
 ```bash
@@ -54,21 +56,22 @@ npm run verify:stripe-webhook
 
 Open:
 
-- `http://localhost:3000` for the operator dashboard
-- `http://localhost:3000/settings` for operator runtime settings
-- `http://localhost:3000/preview/demo-token` for the pre-claim preview
-- `http://localhost:3000/sites/joes-pizza` for the public rendered site
-- `http://localhost:3000/editor/joes-pizza` for curated owner editing
-- `http://localhost:3000/business/joes-pizza` for owner-truth business facts
-- `http://localhost:3000/analytics/joes-pizza` for first-party analytics
-- `http://localhost:3000/optimization/joes-pizza` for action list and QA
-- `http://localhost:3000/experiments/joes-pizza` for experiment opt-in, rollback, and assignment reporting
-- `http://localhost:3000/claim/joes-pizza` for fact verification and checkout
-- `http://localhost:3000/domains/joes-pizza` for custom-domain connection
-- `http://localhost:3000/leads/joes-pizza` for form submissions and CSV export
-- `http://localhost:3000/versions/joes-pizza` for version history and rollback
-- `http://localhost:3000/auth/login` for owner login
-- `http://localhost:3000/account` for the authenticated owner dashboard
+- `http://localhost:4330` for the public Lodesta homepage
+- `http://localhost:4330/dashboard` for the operator dashboard
+- `http://localhost:4330/settings` for operator runtime settings
+- `http://localhost:4330/preview/demo-token` for the pre-claim preview
+- `http://localhost:4330/sites/joes-pizza` for the public rendered site
+- `http://localhost:4330/editor/joes-pizza` for curated owner editing
+- `http://localhost:4330/business/joes-pizza` for owner-truth business facts
+- `http://localhost:4330/analytics/joes-pizza` for first-party analytics
+- `http://localhost:4330/optimization/joes-pizza` for action list and QA
+- `http://localhost:4330/experiments/joes-pizza` for experiment opt-in, rollback, and assignment reporting
+- `http://localhost:4330/claim/joes-pizza` for fact verification and checkout
+- `http://localhost:4330/domains/joes-pizza` for custom-domain connection
+- `http://localhost:4330/leads/joes-pizza` for form submissions and CSV export
+- `http://localhost:4330/versions/joes-pizza` for version history and rollback
+- `http://localhost:4330/auth/login` for owner login
+- `http://localhost:4330/account` for the authenticated owner dashboard
 
 Useful API smoke routes:
 
@@ -154,12 +157,11 @@ Optional launch integrations:
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
 - `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
-- `LODESTA_WORKER_ID` for long-running Railway worker identity
 
 Recommended Railway services:
 
 - Web: use root [railway.toml](/Users/williamcraig/Documents/GitHub/Lodesta/railway.toml), which installs Chromium during build, starts `npm run start`, and health-checks `/api/health`.
-- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`.
+- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically.
 - Cron: schedule a protected `POST /api/jobs/schedule` call with `{ "task": "launch_maintenance" }` for recurring maintenance, or call `npm run cli -- schedule-maintenance launch_maintenance` from a Railway cron command.
 - Run `npm run verify:deployment-config` before deploying after changing package scripts or Railway config.
 
@@ -218,7 +220,7 @@ The verifier disables Stripe and Cloudflare calls by default so it only tests da
 
 ## Auth
 
-Owner login uses Supabase Google OAuth and magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, enable the Google provider in Supabase, and configure Supabase Auth URL Configuration so the Site URL is the deployed app origin, such as `https://dev.lodesta.com`, not `http://localhost:3000`. Add exact redirect URLs for every app origin that signs users in, such as `https://dev.lodesta.com/auth/callback` and `http://localhost:3000/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
+Owner login uses Supabase Google OAuth and magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, enable the Google provider in Supabase, and configure Supabase Auth URL Configuration so the Site URL is the deployed app origin, such as `https://dev.lodesta.com`, not `http://localhost:3000`. Add exact redirect URLs for every app origin that signs users in, such as `https://dev.lodesta.com/auth/callback` and `http://localhost:4330/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
 
 Operator/admin APIs are open only in local development when `LODESTA_ADMIN_TOKEN` is blank and `LODESTA_REQUIRE_AUTH` is not `true`. In deployed/production environments, set `LODESTA_ADMIN_TOKEN` for CLI bearer-token access to operator-only generation, jobs, site listing, preview token management, and cross-site exports; production route guards fail closed if neither a valid token nor the Supabase-authenticated user id in `LODESTA_ADMIN_USER_ID` is present. Admin-only pages such as `/dashboard` and `/outbound` use the same admin user-id setting. Owner-facing site APIs also accept the authenticated owner of a completed `claimed` site through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email after Stripe completion. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
 

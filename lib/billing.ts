@@ -30,7 +30,7 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     };
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:4330";
   const body = new URLSearchParams({
     mode: "subscription",
     client_reference_id: input.claimId,

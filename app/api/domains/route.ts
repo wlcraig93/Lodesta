@@ -4,6 +4,9 @@ import { repository } from "@/lib/repository";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { normalizeCustomHostname } from "@/lib/domains";
 import { claimGateForBundle } from "@/lib/site-publication";
+import { invalidateDomainResolution } from "@/lib/domain-resolution-cache";
+
+const activationNotice = "Domain activation may take up to 30 seconds to apply across all servers.";
 
 const domainSchema = z.object({
   siteId: z.string().min(1),
@@ -55,13 +58,15 @@ export async function POST(request: Request) {
 
   const existingDomain = await repository.getDomainByHostname(hostname);
   if (existingDomain) {
-    if (existingDomain.siteId === parsed.data.siteId) return NextResponse.json(existingDomain);
+    invalidateDomainResolution(hostname);
+    if (existingDomain.siteId === parsed.data.siteId) return NextResponse.json({ ...existingDomain, activationNotice });
     return NextResponse.json({ error: "Hostname is already connected to another site." }, { status: 409 });
   }
 
   const domain = await repository.registerDomain({ ...parsed.data, hostname });
   if (!domain) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  return NextResponse.json(domain);
+  invalidateDomainResolution(domain.hostname);
+  return NextResponse.json({ ...domain, activationNotice });
 }
 
 function manualCustomDomainsAllowed() {

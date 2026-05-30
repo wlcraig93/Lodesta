@@ -123,21 +123,6 @@ async function main() {
       else await printJson(get(path));
       return;
     }
-    case "prune-analytics": {
-      const payload = {};
-      if (args[0] && !/^\d+$/.test(args[0])) payload.siteId = args[0];
-      const daysArg = args.find((arg) => /^\d+$/.test(arg));
-      if (daysArg) payload.retentionDays = Number(daysArg);
-      await printJson(post("/api/analytics/retention", payload));
-      return;
-    }
-    case "analytics-retention-job": {
-      const payload = args[0] ? { retentionDays: Number(args[0]) } : {};
-      const job = await post("/api/jobs", { kind: "analytics_retention", payload });
-      const processed = await post("/api/jobs/process", { limit: 1 });
-      await printJson(Promise.resolve({ job, processed }));
-      return;
-    }
     case "schedule-maintenance":
       await printJson(post("/api/jobs/schedule", parseScheduleArgs(args)));
       return;
@@ -222,12 +207,10 @@ function isHttpUrl(value) {
 
 function parseScheduleArgs(args) {
   const payload = {};
-  const task = args.find((arg) => ["monthly_action_lists", "analytics_retention", "launch_maintenance"].includes(arg));
+  const task = args.find((arg) => ["monthly_action_lists", "launch_maintenance"].includes(arg));
   if (task) payload.task = task;
-  const daysArg = args.find((arg) => /^\d+$/.test(arg));
-  if (daysArg) payload.retentionDays = Number(daysArg);
   const siteIds = args.filter(
-    (arg) => !/^\d+$/.test(arg) && !["monthly_action_lists", "analytics_retention", "launch_maintenance"].includes(arg)
+    (arg) => !["monthly_action_lists", "launch_maintenance"].includes(arg)
   );
   if (siteIds.length) payload.siteIds = siteIds;
   return payload;
@@ -274,9 +257,7 @@ Commands:
   record-outbound-event <campaignId> <json> Record outbound test event
   outbound-summary [campaignId]             Summarize outbound wedge metrics
   outbound-manifest [campaignId] [csv]      Export outbound mailer/prospect manifest
-  prune-analytics [siteId] [days]           Delete raw analytics events older than the retention window
-  analytics-retention-job [days]            Queue and process the analytics-retention worker job
-  schedule-maintenance [task] [siteId] [days] Queue cron maintenance jobs without processing them
+  schedule-maintenance [task] [siteId]      Queue cron maintenance jobs without processing them
   process-jobs [limit]                     Process queued jobs
   list-sites                               List generated sites
   health [deep]                            Check app liveness or admin readiness

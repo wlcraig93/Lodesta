@@ -57,7 +57,6 @@ import {
   listPreviewTokens,
   listSiteBundles,
   outboundSummary,
-  pruneAnalyticsEvents,
   publishDraft,
   publishVersion,
   recordAnalyticsEvent,
@@ -150,17 +149,6 @@ export type UpdateLeadStatusInput = {
   status: LeadSubmission["status"];
 };
 
-export type PruneAnalyticsEventsInput = {
-  before: string;
-  siteId?: string;
-};
-
-export type PruneAnalyticsEventsResult = {
-  deleted: number;
-  before: string;
-  siteId?: string;
-};
-
 type SectionUpdateResult =
   | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
   | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
@@ -236,7 +224,6 @@ export type LodestaRepository = {
   listWorkflowDeliveries(siteId?: string): Promise<WorkflowDelivery[]>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<AnalyticsEvent>;
   listAnalyticsEvents(siteId?: string): Promise<AnalyticsEvent[]>;
-  pruneAnalyticsEvents(input: PruneAnalyticsEventsInput): Promise<PruneAnalyticsEventsResult>;
   analyticsSummary(siteId: string): Promise<AnalyticsSummary>;
   assignExperiment(input: { siteId: string; sessionId: string; experimentId?: string }): Promise<ExperimentAssignment>;
   analyzeExperiments(siteId: string): Promise<ExperimentAnalysis[]>;
@@ -342,9 +329,6 @@ export const localRepository: LodestaRepository = {
   },
   async listAnalyticsEvents(siteId) {
     return listAnalyticsEvents(siteId);
-  },
-  async pruneAnalyticsEvents(input) {
-    return pruneAnalyticsEvents(input);
   },
   async analyticsSummary(siteId) {
     return analyticsSummary(siteId);
@@ -495,7 +479,6 @@ function createLocalJobContext(): JobExecutionContext {
     getSiteBundle: localRepository.getSiteBundle,
     runAndStoreAudit: localRepository.runAndStoreAudit,
     analyticsSummary: localRepository.analyticsSummary,
-    pruneAnalyticsEvents: localRepository.pruneAnalyticsEvents,
     analyzeExperiments: localRepository.analyzeExperiments,
     listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
     listFormSubmissions: localRepository.listFormSubmissions

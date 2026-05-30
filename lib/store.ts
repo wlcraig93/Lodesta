@@ -347,22 +347,6 @@ export function listAnalyticsEvents(siteId?: string) {
   return state().analyticsEvents.filter((event) => !siteId || event.siteId === siteId);
 }
 
-export function pruneAnalyticsEvents(input: { before: string; siteId?: string }) {
-  const cutoff = new Date(input.before).getTime();
-  if (!Number.isFinite(cutoff)) return { deleted: 0, before: input.before, siteId: input.siteId };
-  const store = state();
-  const beforeCount = store.analyticsEvents.length;
-  store.analyticsEvents = store.analyticsEvents.filter((event) => {
-    if (input.siteId && event.siteId !== input.siteId) return true;
-    return new Date(event.timestamp).getTime() >= cutoff;
-  });
-  return {
-    deleted: beforeCount - store.analyticsEvents.length,
-    before: input.before,
-    siteId: input.siteId
-  };
-}
-
 export function analyticsSummary(siteId: string) {
   return summarizeAnalytics(siteId, listAnalyticsEvents(siteId));
 }

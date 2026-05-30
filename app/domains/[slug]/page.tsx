@@ -28,7 +28,8 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
           <h1>{bundle.businessProfile.name}</h1>
           <p>
             Register custom hostnames for claimed sites. In production this path creates Cloudflare for SaaS custom
-            hostnames and returns the verification record the owner needs to add.
+            hostnames and returns the verification record the owner needs to add. Activation may take up to 30 seconds
+            to apply across all servers.
           </p>
         </div>
         <div className="button-row">

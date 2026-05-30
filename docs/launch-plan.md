@@ -23,9 +23,9 @@ Explicit launch stance:
 - Custom domains: Cloudflare for SaaS for scaled customer domains, SSL, and CDN; Railway's Cloudflare integration is not a replacement for multi-tenant custom hostname management.
 - Assets: pre-claim previews use generated/licensed imagery and extracted facts. Scraped photos, logos, and marketing copy are reference-only until owner grant.
 - Workers: use the same repository/API contracts as the web app. Railway workers are acceptable for launch; crawler-heavy or browser-heavy jobs can move to dedicated worker infrastructure later if volume or anti-bot behavior requires it.
-- Cron orchestration: `/api/jobs/schedule` queues recurring maintenance jobs, including monthly action lists and analytics retention, while workers process the queue through the repository boundary.
+- Cron orchestration: `/api/jobs/schedule` queues recurring maintenance jobs, including monthly action lists, while workers process the queue through the repository boundary.
 - Deployment readiness: `/api/health` is the Railway liveness endpoint, `/api/health?deep=1` is the admin readiness endpoint, and `npm run verify:supabase` proves the Supabase repository contract against a live project after `supabase/schema.sql` is applied.
-- Data lifecycle: raw analytics events are pruned through `/api/analytics/retention`, `npm run cli -- prune-analytics`, or the `analytics_retention` worker job using `LODESTA_ANALYTICS_RETENTION_DAYS`.
+- Data lifecycle: analytics events are retained for longitudinal site performance history while the site/account is active; future retention, anonymization, or rollup work should be designed deliberately.
 
 ## Canonical Models
 

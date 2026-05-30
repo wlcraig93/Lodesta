@@ -34,8 +34,6 @@ type PageLike = {
 
 type BrowserLaunchOptions = {
   headless: boolean;
-  executablePath?: string;
-  args?: string[];
   timeout?: number;
 };
 
@@ -55,7 +53,6 @@ export type RenderInspectionRuntimeStatus = {
   packageInstalled: boolean;
   browserLaunchable: boolean;
   provider: "playwright" | "none";
-  executablePath?: string;
   message: string;
 };
 
@@ -344,7 +341,6 @@ export async function getRenderInspectionRuntimeStatus(options: { launch?: boole
       packageInstalled: false,
       browserLaunchable: false,
       provider: "none",
-      executablePath: process.env.LODESTA_BROWSER_EXECUTABLE_PATH,
       message: "Playwright package is not installed."
     };
   }
@@ -354,7 +350,6 @@ export async function getRenderInspectionRuntimeStatus(options: { launch?: boole
       packageInstalled: true,
       browserLaunchable: false,
       provider: "playwright",
-      executablePath: process.env.LODESTA_BROWSER_EXECUTABLE_PATH,
       message: "Playwright package is installed; launch was not checked."
     };
   }
@@ -366,7 +361,6 @@ export async function getRenderInspectionRuntimeStatus(options: { launch?: boole
       packageInstalled: true,
       browserLaunchable: true,
       provider: "playwright",
-      executablePath: process.env.LODESTA_BROWSER_EXECUTABLE_PATH,
       message: "Chromium launched successfully for render inspection."
     };
   } catch (error) {
@@ -374,7 +368,6 @@ export async function getRenderInspectionRuntimeStatus(options: { launch?: boole
       packageInstalled: true,
       browserLaunchable: false,
       provider: "playwright",
-      executablePath: process.env.LODESTA_BROWSER_EXECUTABLE_PATH,
       message: error instanceof Error ? error.message : "Chromium launch failed."
     };
   }
@@ -387,33 +380,19 @@ async function launchRenderBrowser(playwright: BrowserModuleLike) {
 function browserLaunchOptions(): BrowserLaunchOptions {
   return {
     headless: true,
-    executablePath: blankToUndefined(process.env.LODESTA_BROWSER_EXECUTABLE_PATH),
-    args: parseBrowserArgs(process.env.LODESTA_RENDER_BROWSER_ARGS),
     timeout: renderTimeoutMs()
   };
-}
-
-function parseBrowserArgs(value: string | undefined) {
-  const args = value
-    ?.split(",")
-    .map((arg) => arg.trim())
-    .filter(Boolean);
-  return args?.length ? args : undefined;
 }
 
 function renderTimeoutMs() {
   return 15000;
 }
 
-function blankToUndefined(value: string | undefined) {
-  return value?.trim() || undefined;
-}
-
 async function createArtifactDir(input: InspectUrlRenderInput) {
   const parsed = new URL(input.url);
   const host = (parsed.hostname || parsed.protocol.replace(/:$/, "") || "render").replace(/[^a-z0-9.-]+/gi, "-");
   const runId = `${host}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-  const artifactRoot = input.artifactRoot ?? process.env.LODESTA_RENDER_ARTIFACT_ROOT ?? join(process.cwd(), ".data", "render-inspections");
+  const artifactRoot = input.artifactRoot ?? join(process.cwd(), ".data", "render-inspections");
   const artifactDir = join(artifactRoot, runId);
   await mkdir(artifactDir, { recursive: true });
   return artifactDir;

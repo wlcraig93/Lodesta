@@ -23,6 +23,7 @@ done
 
 BASE_URL="${LODESTA_SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 BASE_URL="${BASE_URL%/}"
+export NEXT_PUBLIC_APP_URL="${LODESTA_SMOKE_APP_URL:-$BASE_URL}"
 export STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_smoke}"
 export LODESTA_ADMIN_TOKEN="${LODESTA_ADMIN_TOKEN:-smoke_admin_token}"
 CUSTOM_DOMAIN_HOST="smoke-joes.example"
@@ -229,8 +230,8 @@ fi
 assert_json "non-US presence market gate" 'const data = JSON.parse(process.env.BODY); if (data.code !== "unsupported_launch_market") process.exit(1);'
 echo "ok - non-US presence market gate"
 
-post_check "maintenance scheduler API" "/api/jobs/schedule" "{\"task\":\"launch_maintenance\",\"siteIds\":[\"site_joes_pizza\"],\"retentionDays\":395,\"scheduleKey\":\"${SCHEDULE_KEY}\"}"
-assert_json "maintenance scheduler API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.scheduleKey !== process.env.SCHEDULE_KEY || !Array.isArray(data.queued) || !data.queued.some((job) => job.kind === "monthly_action_list") || !data.queued.some((job) => job.kind === "analytics_retention")) process.exit(1);'
+post_check "maintenance scheduler API" "/api/jobs/schedule" "{\"task\":\"launch_maintenance\",\"siteIds\":[\"site_joes_pizza\"],\"scheduleKey\":\"${SCHEDULE_KEY}\"}"
+assert_json "maintenance scheduler API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.scheduleKey !== process.env.SCHEDULE_KEY || !Array.isArray(data.queued) || !data.queued.some((job) => job.kind === "monthly_action_list") || data.queued.some((job) => job.kind === "analytics_retention")) process.exit(1);'
 
 post_check "worker process jobs API" "/api/jobs/process" '{"limit":200}'
 assert_json "worker process jobs API" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.jobs) || !data.jobs.some((job) => job.status === "completed" && job.payload?.scheduleKey === process.env.SCHEDULE_KEY)) process.exit(1);'
@@ -468,8 +469,8 @@ fi
 post_check "old analytics ingest" "/api/analytics" '{"siteId":"site_joes_pizza","sessionId":"old_session","pageId":"home","eventType":"pageview","timestamp":"2020-01-01T00:00:00.000Z","metadata":{"path":"/sites/joes-pizza","smoke":true}}'
 assert_json "old analytics ingest" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true || data.event?.timestamp !== "2020-01-01T00:00:00.000Z") process.exit(1);'
 
-post_check "analytics retention API" "/api/analytics/retention" '{"siteId":"site_joes_pizza","before":"2021-01-01T00:00:00.000Z"}'
-assert_json "analytics retention API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.deleted < 1 || data.before !== "2021-01-01T00:00:00.000Z") process.exit(1);'
+request GET "/api/analytics?siteId=site_joes_pizza"
+assert_json "old analytics retained" 'const data = JSON.parse(process.env.BODY); if (!data || data.siteId !== "site_joes_pizza" || data.pageviews < 1) process.exit(1);'
 
 post_check "experiment assignment before opt-in" "/api/experiments/assign" '{"siteId":"site_joes_pizza","sessionId":"smoke_session"}'
 assert_json "experiment assignment before opt-in" 'const data = JSON.parse(process.env.BODY); if (data.assigned !== false || !String(data.reason || "").includes("running")) process.exit(1);'

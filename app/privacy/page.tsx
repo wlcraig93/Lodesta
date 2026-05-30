@@ -21,7 +21,7 @@ const privacySections = [
   },
   {
     title: "3. Analytics and cookies",
-    body: "The service may use cookies, local storage, server logs, and privacy-conscious analytics to understand visitor activity, attribution, conversion events, and website performance."
+    body: "The service may use cookies, local storage, server logs, and privacy-conscious analytics to understand visitor activity, attribution, conversion events, and website performance. Analytics events are retained for longitudinal site performance history while the site or account is active."
   },
   {
     title: "4. Sharing and subprocessors",
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
           <Link className="button secondary" href="/terms">
             Terms of Service
           </Link>
-          <Link className="button secondary" href="/">
+          <Link className="button secondary" href="/dashboard">
             Dashboard
           </Link>
         </div>

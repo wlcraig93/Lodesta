@@ -21,7 +21,7 @@ export default async function LoginPage({
           <p>Owners sign in with Google or a secure email link before editing, connecting domains, or managing leads.</p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href="/">
+          <Link className="button secondary" href="/dashboard">
             Dashboard
           </Link>
         </div>

@@ -1,6 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cachePolicyForPathname, cachePolicyHeaders } from "./lib/cache-policy";
-import { isPlatformHost, normalizeHostname, requestHostname } from "./lib/host-routing";
+import {
+  customDomainRoutedHeader,
+  isPlatformHost,
+  normalizeHostname,
+  requestHostname
+} from "./lib/host-routing";
+import {
+  getCachedDomainResolution,
+  rememberDomainResolution,
+  type DomainResolutionCacheValue
+} from "./lib/domain-resolution-cache";
 
 const skippedPrefixes = [
   "/api/",
@@ -16,62 +26,78 @@ const skippedPrefixes = [
   "/leads/",
   "/versions/",
   "/outbound",
+  "/dashboard",
   "/claim/",
   "/account",
   "/favicon.ico"
 ];
-const siteSeoPaths = new Set(["/robots.txt", "/sitemap.xml", "/llms.txt"]);
 const forwardedHostRewriteParam = "__lodesta_forwarded_host";
+const domainResolveBypassHeader = "x-lodesta-domain-resolve";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname === "/api/domains/resolve" && request.headers.get(domainResolveBypassHeader) === "1") {
+    return NextResponse.next();
+  }
+
   const directHostname = normalizeHostname(request.headers.get("host") ?? "");
   const hostname = requestHostname(request.headers);
+  const platformHost = !hostname || isPlatformHost(hostname);
   const forwardedHostRouted =
     request.nextUrl.searchParams.get(forwardedHostRewriteParam) === "1" ||
-    request.headers.get("x-lodesta-forwarded-host-routed") === "1" ||
+    request.headers.get(customDomainRoutedHeader) === "1" ||
     (Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname);
-  if (siteSeoPaths.has(pathname) && (!hostname || isPlatformHost(hostname))) {
-    return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
-  }
   if (skippedPrefixes.some((prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix))) {
-    return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
+    if (platformHost) return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
+    if (!isPublicRuntimeSkippedPath(pathname)) return notFound();
+
+    const payload = await resolveCustomerDomain(request, hostname);
+    if (!payload.resolved || !payload.slug) return notFound();
+    return withCachePolicy(
+      NextResponse.next({
+        request: {
+          headers: routedRequestHeaders(request)
+        }
+      }),
+      pathname,
+      !pathname.startsWith("/api/"),
+      forwardedHostRouted
+    );
   }
 
-  if (!hostname || isPlatformHost(hostname)) return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
+  if (platformHost) return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
 
-  const resolveUrl = new URL("/api/domains/resolve", domainResolveOrigin(request));
-  resolveUrl.searchParams.set("hostname", hostname);
+  const payload = await resolveCustomerDomain(request, hostname);
+  if (!payload.resolved || !payload.slug) return notFound();
 
-  try {
-    const response = await fetch(resolveUrl);
-    if (!response.ok) return withCachePolicy(NextResponse.next(), pathname, false);
-    const payload = (await response.json()) as { resolved?: boolean; slug?: string };
-    if (!payload.resolved || !payload.slug) return withCachePolicy(NextResponse.next(), pathname, false);
-
-    const rewrittenSitePrefix = `/sites/${payload.slug}`;
-    if (pathname === rewrittenSitePrefix || pathname.startsWith(`${rewrittenSitePrefix}/`)) {
-      return withCachePolicy(NextResponse.next(), pathname, true, forwardedHostRouted);
-    }
-
-    const rewriteUrl = request.nextUrl.clone();
-    rewriteUrl.pathname = `/sites/${payload.slug}${pathname === "/" ? "" : pathname}`;
-    if (forwardedHostRouted) rewriteUrl.searchParams.set(forwardedHostRewriteParam, "1");
-    const rewriteHeaders = new Headers(request.headers);
-    if (forwardedHostRouted) rewriteHeaders.set("x-lodesta-forwarded-host-routed", "1");
+  const rewrittenSitePrefix = `/sites/${payload.slug}`;
+  const rewriteHeaders = routedRequestHeaders(request);
+  if (pathname === rewrittenSitePrefix || pathname.startsWith(`${rewrittenSitePrefix}/`)) {
     return withCachePolicy(
-      NextResponse.rewrite(rewriteUrl, {
+      NextResponse.next({
         request: {
           headers: rewriteHeaders
         }
       }),
-      rewriteUrl.pathname,
+      pathname,
       true,
       forwardedHostRouted
     );
-  } catch {
-    return withCachePolicy(NextResponse.next(), pathname, false);
   }
+
+  const rewriteUrl = request.nextUrl.clone();
+  rewriteUrl.pathname = `/sites/${payload.slug}${pathname === "/" ? "" : pathname}`;
+  if (forwardedHostRouted) rewriteUrl.searchParams.set(forwardedHostRewriteParam, "1");
+  return withCachePolicy(
+    NextResponse.rewrite(rewriteUrl, {
+      request: {
+        headers: rewriteHeaders
+      }
+    }),
+    rewriteUrl.pathname,
+    true,
+    forwardedHostRouted
+  );
 }
 
 export const config = {
@@ -88,6 +114,55 @@ function domainResolveOrigin(request: NextRequest) {
     }
   }
   return request.nextUrl.origin;
+}
+
+async function resolveCustomerDomain(request: NextRequest, hostname: string): Promise<DomainResolutionCacheValue> {
+  const cached = getCachedDomainResolution(hostname);
+  if (cached) return cached;
+
+  const resolveUrl = new URL("/api/domains/resolve", domainResolveOrigin(request));
+  resolveUrl.searchParams.set("hostname", hostname);
+
+  try {
+    const response = await fetch(resolveUrl, { headers: { [domainResolveBypassHeader]: "1" } });
+    if (!response.ok) {
+      if (response.status === 403 || response.status === 404) {
+        return rememberDomainResolution(hostname, { resolved: false });
+      }
+      return { resolved: false };
+    }
+    const payload = (await response.json()) as {
+      resolved?: boolean;
+      slug?: string;
+      siteId?: string;
+      domainStatus?: string;
+    };
+    if (!payload.resolved || !payload.slug) {
+      return rememberDomainResolution(hostname, { resolved: false });
+    }
+    return rememberDomainResolution(hostname, {
+      resolved: true,
+      slug: payload.slug,
+      siteId: payload.siteId,
+      domainStatus: payload.domainStatus
+    });
+  } catch {
+    return { resolved: false };
+  }
+}
+
+function routedRequestHeaders(request: NextRequest) {
+  const headers = new Headers(request.headers);
+  headers.set(customDomainRoutedHeader, "1");
+  return headers;
+}
+
+function isPublicRuntimeSkippedPath(pathname: string) {
+  return pathname.startsWith("/api/") || pathname.startsWith("/_next/") || pathname === "/favicon.ico";
+}
+
+function notFound() {
+  return new NextResponse(null, { status: 404 });
 }
 
 function withCachePolicy(response: NextResponse, pathname: string, customDomain: boolean, forwardedHostRouted = false) {

@@ -120,7 +120,6 @@ LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- connect-domain site_joes_pi
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- refresh-domain domain_id
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- update-business site_joes_pizza '{"phone":"+15551234567","services":["Pizza","Catering"]}'
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- monthly-action-list site_joes_pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- prune-analytics site_joes_pizza 395
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- schedule-maintenance launch_maintenance
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
 ```
@@ -128,7 +127,7 @@ LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
 The CLI calls the same HTTP API as the app. It is intended for operator/admin workflows from Codex, Claude Code, or a terminal.
 If `LODESTA_ADMIN_TOKEN` is set on the server, set the same variable in the CLI environment; the CLI sends it as a bearer token.
 Local Node entry points (`npm run cli`, `npm run worker`, and verification scripts) automatically load `.env` and `.env.local` from the repository root. Shell-provided variables still take precedence.
-The batch-import job generates structured sites and tokenized previews for outbound lists. The monthly action-list job runs the Standard audit, analytics summary, lead count, QA checks, and experiment analysis through the same repository boundary used by the web app. The analytics-retention job prunes raw analytics events older than the configured retention window. `POST /api/jobs/schedule` or `npm run cli -- schedule-maintenance` is the cron-safe scheduler for queuing monthly action-list and retention jobs across all sites without immediately processing them. Action-list applies stage a draft and return QA status; publishing is a separate confirmed action.
+The batch-import job generates structured sites and tokenized previews for outbound lists. The monthly action-list job runs the Standard audit, analytics summary, lead count, QA checks, and experiment analysis through the same repository boundary used by the web app. `POST /api/jobs/schedule` or `npm run cli -- schedule-maintenance` is the cron-safe scheduler for queuing monthly action-list jobs across all sites without immediately processing them. Action-list applies stage a draft and return QA status; publishing is a separate confirmed action.
 
 ## Deployment Readiness
 
@@ -150,14 +149,10 @@ Optional launch integrations:
 - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` for checkout and claim completion
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
 - `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true` only for controlled local testing against localhost/private targets; leave unset or `false` in deployed environments
-- `LODESTA_RENDER_BROWSER_REQUIRED=true` for launch environments where screenshot capture must be treated as a readiness requirement
-- Optional `LODESTA_BROWSER_EXECUTABLE_PATH`, `LODESTA_RENDER_BROWSER_ARGS`, and `LODESTA_RENDER_ARTIFACT_ROOT` for Playwright/Chromium render inspection
-- `PLAYWRIGHT_BROWSERS_PATH` when Chromium should be installed in a known cache path; `.env.example` uses ignored `.data/ms-playwright` for local verification
 - `RESEND_API_KEY` for lead notifications
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
 - `LODESTA_IP_HASH_SALT` for privacy-preserving daily lead IP hashes
 - `LODESTA_RATE_LIMIT_SALT` for public write rate-limit fingerprints
-- `LODESTA_ANALYTICS_RETENTION_DAYS` for raw analytics-event retention; default is 395 days
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
 - `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
 - `LODESTA_WORKER_ID` for long-running Railway worker identity
@@ -176,10 +171,10 @@ OpenAI runtime settings:
 
 Browser render inspection:
 
-- Install Chromium in build/deploy setup with `npm run install:browsers`.
-- Run `npm run verify:render-browser` in the deployed image before enabling high-volume intake or screenshot-dependent visual QA.
-- If the platform supplies Chromium separately, set `LODESTA_BROWSER_EXECUTABLE_PATH` and keep `playwright` installed as the control library.
-- Use `LODESTA_RENDER_BROWSER_ARGS` only for platform-required flags such as sandbox or shared-memory settings.
+- Lodesta supports Playwright-installed Chromium as the browser runtime.
+- The Railway web and worker configs install Chromium during build with `npm run install:browsers`.
+- Run `npm run verify:render-browser` locally after browser installation and before enabling high-volume intake or screenshot-dependent visual QA.
+- After deploy, run `LODESTA_API_URL=https://<deployed-app> LODESTA_ADMIN_TOKEN=<token> npm run cli -- health deep` and confirm `render_browser_readiness` is `ok`.
 
 ## Architecture Defaults
 
@@ -235,9 +230,7 @@ Use `npm run verify:stripe-webhook` for local signature/claim-completion verific
 Verified facts selected during claim update the site's `BusinessProfile.provenance` as owner-confirmed fields, which keeps later schema, optimization, and presence-sync decisions gated on explicit confirmation.
 Publishing through `/api/sites/publish` or `/api/sites/versions` is blocked until the site has a completed `claimed` record. A `checkout_required` claim still returns `402 Payment Required`.
 
-Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution serves only completed `claimed` sites, so pending checkout records do not expose customer domains.
-
-Set `LODESTA_PLATFORM_HOSTS` to a comma-separated list of app/dashboard hostnames that should not be treated as customer domains. `localhost`, `127.0.0.1`, Railway hostnames, and `NEXT_PUBLIC_APP_URL` are already treated as platform hosts.
+Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution uses positive customer-domain lookup and serves only completed `claimed` sites, so pending checkout records do not expose customer domains. Unknown non-platform hostnames receive a bare `404`.
 
 ## Lead Workflows
 
@@ -248,7 +241,7 @@ Form submissions are stored as JSON leads and then run through the site's config
 - `crm_placeholder`: records a skipped delivery so CRM destinations can be added without changing the lead model.
 
 Workflow delivery attempts are visible on the leads page and returned from `GET /api/leads?siteId=...`.
-Lead submissions also capture source URL, session id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a salted daily `ip_hash`. Use `POST /api/analytics/retention`, `npm run cli -- prune-analytics`, or the `analytics_retention` worker job to delete raw analytics events older than the configured retention window.
+Lead submissions also capture source URL, session id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a salted daily `ip_hash`. Analytics events are retained for longitudinal site performance history while the site/account is active.
 
 Public write routes have in-process abuse limits with hashed client fingerprints. Defaults cover form submissions, analytics ingestion, experiment assignment, claim creation, site intake, presence assessment, and owner asset uploads; set `LODESTA_RATE_LIMIT_SALT` in deployed environments. Route-specific thresholds are code defaults, not deployment environment variables.
 URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are blocked by default to reduce SSRF risk; use `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true` only for intentional local fixture testing. Lead workflow webhooks always keep private/internal targets blocked.

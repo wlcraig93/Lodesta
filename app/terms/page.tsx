@@ -65,7 +65,7 @@ export default function TermsPage() {
           <Link className="button secondary" href="/privacy">
             Privacy Policy
           </Link>
-          <Link className="button secondary" href="/">
+          <Link className="button secondary" href="/dashboard">
             Dashboard
           </Link>
         </div>

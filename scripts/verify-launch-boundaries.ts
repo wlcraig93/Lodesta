@@ -38,7 +38,7 @@ import { hashIpAddress, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from
 import { rateLimit } from "../lib/rate-limit";
 import { getRenderInspectionRuntimeStatus, inspectUrlRender } from "../lib/render-inspection";
 import { runAudit } from "../lib/audit";
-import { executeJob, retentionCutoffFromPayload, retentionDaysFromPayload } from "../lib/jobs";
+import { executeJob } from "../lib/jobs";
 import { scheduleLaunchJobs } from "../lib/job-scheduler";
 import { validateLaunchMarket } from "../lib/launch-market";
 import { runSiteQa } from "../lib/qa";
@@ -58,7 +58,7 @@ import { resolveClaimOwner } from "../lib/claim-ownership";
 import { isPublicLocalAssetPath } from "../lib/public-assets";
 import { canonicalUrlForPage, siteRobotsTxt, siteSitemapXml } from "../lib/public-site-seo";
 import { markdownCanonicalLinkHeader, markdownForPage, markdownUrlForPage, siteLlmsTxt } from "../lib/public-site-markdown";
-import { requestHostname, requestOrigin } from "../lib/host-routing";
+import { customDomainRoutedHeader, requestHostname, requestOrigin } from "../lib/host-routing";
 import { getPublishedVersion } from "../lib/sample-data";
 import { coldUrlCheckableChecks, evaluateSiteAgainstStandard } from "../lib/standard-evaluation";
 import { applyVerifiedFacts, requiredClaimFactIds } from "../lib/fact-verification";
@@ -215,9 +215,11 @@ assert(
   "Owner dashboards should list only completed claimed sites, not checkout-required previews."
 );
 const platformRobotsRules = platformRobots().rules;
-const rootDashboardPage = readFileSync("app/page.tsx", "utf8");
+const rootHomePage = readFileSync("app/page.tsx", "utf8");
+const dashboardPage = readFileSync("app/dashboard/page.tsx", "utf8");
 const experimentLearningRoute = readFileSync("app/api/experiments/learn/route.ts", "utf8");
 const middlewareSource = readFileSync("middleware.ts", "utf8");
+const hostRoutingSource = readFileSync("lib/host-routing.ts", "utf8");
 const securitySource = readFileSync("lib/security.ts", "utf8");
 const domainRouteSource = readFileSync("app/api/domains/route.ts", "utf8");
 const platformRobotsDisallow = new Set(
@@ -233,12 +235,16 @@ assert(
   "Supabase workers should fail stale max-attempt running jobs before claiming the next queued job."
 );
 assert(
-  rootDashboardPage.includes("requireAdminPageAccess(\"/\")") && !rootDashboardPage.includes("requireOwnerAccess(\"/\")"),
-  "The root operator dashboard should use the admin page access policy, not owner dashboard access."
+  rootHomePage.includes("Lodesta powers your business") && !rootHomePage.includes("requireAdminPageAccess"),
+  "The root page should be a public Lodesta marketing homepage instead of the private operator dashboard."
 );
 assert(
-  rootDashboardPage.includes("index: false") && rootDashboardPage.includes("follow: false"),
-  "The root operator dashboard should emit noindex/nofollow metadata."
+  dashboardPage.includes("requireAdminPageAccess(\"/dashboard\")") && !dashboardPage.includes("requireOwnerAccess(\"/\")"),
+  "The operator dashboard should use the admin page access policy, not owner dashboard access."
+);
+assert(
+  dashboardPage.includes("index: false") && dashboardPage.includes("follow: false"),
+  "The operator dashboard should emit noindex/nofollow metadata."
 );
 assert(
   experimentLearningRoute.includes("siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request)"),
@@ -271,7 +277,7 @@ for (const privatePath of [
   "/claim/",
   "/domains/",
   "/outbound",
-  "/"
+  "/dashboard"
 ]) {
   assert(platformRobotsDisallow.has(privatePath), `Platform robots.txt should disallow private/admin path ${privatePath}.`);
   if (privatePath !== "/" && privatePath !== "/api/" && privatePath !== "/auth/") {
@@ -929,36 +935,6 @@ assert(
     !blockedRateLimitBody.includes("203.0.113.10"),
   "Public write rate limiting should return 429 with retry headers without exposing raw client IPs."
 );
-assert(
-  retentionDaysFromPayload({ retentionDays: 7 }) === 30 &&
-    retentionDaysFromPayload({ retentionDays: 4000 }) === 3650 &&
-    retentionCutoffFromPayload({ before: "2026-01-01T00:00:00.000Z" }) === "2026-01-01T00:00:00.000Z",
-  "Analytics retention windows should clamp unsafe values and accept explicit ISO cutoffs for operator jobs."
-);
-const retentionResult = await executeJob(
-  {
-    id: "job_retention_boundary",
-    kind: "analytics_retention",
-    status: "running",
-    payload: { before: "2026-05-01T00:00:00.000Z", siteId: bundle.businessProfile.siteId },
-    attempts: 1,
-    maxAttempts: 1,
-    runAfter: "2026-05-29T12:00:00.000Z",
-    createdAt: "2026-05-29T12:00:00.000Z",
-    updatedAt: "2026-05-29T12:00:00.000Z"
-  },
-  {
-    pruneAnalyticsEvents: async (input) => ({
-      deleted: input.before === "2026-05-01T00:00:00.000Z" && input.siteId === bundle.businessProfile.siteId ? 2 : 0,
-      before: input.before,
-      siteId: input.siteId
-    })
-  }
-);
-assert(
-  retentionResult.deleted === 2 && retentionResult.siteId === bundle.businessProfile.siteId,
-  "Analytics retention worker jobs should prune old raw analytics events through the repository boundary."
-);
 const scheduledJobs: JobRecord[] = [];
 const scheduleResult = await scheduleLaunchJobs(
   {
@@ -987,15 +963,13 @@ const scheduleResult = await scheduleLaunchJobs(
   {
     task: "launch_maintenance",
     siteIds: [bundle.businessProfile.siteId],
-    retentionDays: 395,
     scheduleKey: "boundary-maintenance"
   },
   new Date("2026-05-29T12:00:00.000Z")
 );
 assert(
-  scheduleResult.queued.some((job) => job.kind === "monthly_action_list") &&
-    scheduleResult.queued.some((job) => job.kind === "analytics_retention"),
-  "Cron scheduler should enqueue monthly action-list and analytics-retention jobs for launch maintenance."
+  scheduleResult.queued.length === 1 && scheduleResult.queued[0]?.kind === "monthly_action_list",
+  "Cron scheduler should enqueue monthly action-list jobs without analytics-retention pruning."
 );
 const duplicateSchedule = await scheduleLaunchJobs(
   {
@@ -1024,13 +998,12 @@ const duplicateSchedule = await scheduleLaunchJobs(
   {
     task: "launch_maintenance",
     siteIds: [bundle.businessProfile.siteId],
-    retentionDays: 395,
     scheduleKey: "boundary-maintenance"
   },
   new Date("2026-05-29T12:00:00.000Z")
 );
 assert(
-  duplicateSchedule.queued.length === 0 && duplicateSchedule.skipped.length === 2,
+  duplicateSchedule.queued.length === 0 && duplicateSchedule.skipped.length === 1,
   "Cron scheduler should skip duplicate non-failed jobs with the same schedule key."
 );
 
@@ -1051,17 +1024,19 @@ assert(
     cachePolicyForPathname("/llms.txt").vary === "Host, X-Forwarded-Host",
   "llms.txt should receive short metadata caching that varies by host plus forwarded host."
 );
-const seoHeaders = new Headers({ host: "www.boundary-verify.example", "x-forwarded-proto": "https" });
+const seoHeaders = new Headers({ host: "www.boundary-verify.example", "x-forwarded-proto": "https", [customDomainRoutedHeader]: "1" });
 const platformSeoHeaders = new Headers({ host: "localhost:3000", "x-forwarded-proto": "http" });
 const chainedForwardedHeaders = new Headers({
   host: "internal.proxy",
   "x-forwarded-host": "www.boundary-verify.example, edge.proxy",
-  "x-forwarded-proto": "https, http"
+  "x-forwarded-proto": "https, http",
+  [customDomainRoutedHeader]: "1"
 });
 const malformedForwardedHeaders = new Headers({
   host: "internal.proxy",
   "x-forwarded-host": "HTTPS://WWW.BOUNDARY-VERIFY.EXAMPLE./bad-path?utm=bad, edge.proxy",
-  "x-forwarded-proto": "javascript, https"
+  "x-forwarded-proto": "javascript, https",
+  [customDomainRoutedHeader]: "1"
 });
 const seoHome = getPublishedVersion(bundle.siteModel).pages[0];
 assert(seoHome, "SEO verifier needs a generated home page.");
@@ -1082,20 +1057,32 @@ assert(
   "Forwarded host/proto parsing should strip schemes, paths, and unsupported protocols before creating public URLs."
 );
 assert(
-  middlewareSource.includes('import { isPlatformHost, normalizeHostname, requestHostname } from "./lib/host-routing";') &&
+  middlewareSource.includes("getCachedDomainResolution") &&
+    middlewareSource.includes("rememberDomainResolution") &&
+    middlewareSource.includes("const platformHost = !hostname || isPlatformHost(hostname);") &&
     middlewareSource.includes("const hostname = requestHostname(request.headers);") &&
     middlewareSource.includes('const forwardedHostRewriteParam = "__lodesta_forwarded_host";') &&
     middlewareSource.includes("request.nextUrl.searchParams.get(forwardedHostRewriteParam) === \"1\"") &&
-    middlewareSource.includes('request.headers.get("x-lodesta-forwarded-host-routed") === "1"') &&
+    middlewareSource.includes("request.headers.get(customDomainRoutedHeader) === \"1\"") &&
     middlewareSource.includes('Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname') &&
+    middlewareSource.includes("isPublicRuntimeSkippedPath(pathname)") &&
+    middlewareSource.includes('pathname.startsWith("/api/")') &&
+    middlewareSource.includes("if (!payload.resolved || !payload.slug) return notFound();") &&
     middlewareSource.includes("const rewrittenSitePrefix = `/sites/${payload.slug}`") &&
     middlewareSource.includes("pathname.startsWith(`${rewrittenSitePrefix}/`)") &&
     middlewareSource.includes('rewriteUrl.searchParams.set(forwardedHostRewriteParam, "1")') &&
-    middlewareSource.includes('rewriteHeaders.set("x-lodesta-forwarded-host-routed", "1")') &&
+    middlewareSource.includes("headers.set(customDomainRoutedHeader, \"1\")") &&
+    middlewareSource.includes("new NextResponse(null, { status: 404 })") &&
     middlewareSource.includes('cachePolicyForPathname("/__forwarded-host-no-store")') &&
     middlewareSource.includes('"Cloudflare-CDN-Cache-Control"') &&
     middlewareSource.includes('"X-Lodesta-Forwarded-Host-Cache"'),
-  "Custom-domain middleware should resolve route hosts through the shared forwarded-host parser, avoid double-rewriting internal site paths, and disable CDN caching when routing depends on X-Forwarded-Host."
+  "Custom-domain middleware should use cached positive host lookup, return bare 404 for unknown non-platform hosts, avoid double-rewriting internal site paths, and disable CDN caching when routing depends on X-Forwarded-Host."
+);
+assert(
+  hostRoutingSource.includes('hostname.endsWith(".railway.app")') &&
+    hostRoutingSource.includes('hostname.endsWith(".up.railway.app")') &&
+    !hostRoutingSource.includes("LODESTA_PLATFORM_HOSTS"),
+  "Host routing should keep local/Railway platform identity checks without LODESTA_PLATFORM_HOSTS."
 );
 assert(
   canonicalUrlForPage(bundle, seoHome, platformSeoHeaders).includes(`/sites/${bundle.siteModel.slug}`),

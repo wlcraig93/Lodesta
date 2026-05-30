@@ -27,7 +27,7 @@ export default async function PreviewPage({ params }: { params: Promise<{ token:
     <>
       <div className="panel" style={{ borderRadius: 0, borderInline: 0, borderTop: 0 }}>
         <strong>Tokenized noindex preview.</strong> This pre-claim page is not indexed and is available only through its token.{" "}
-        <Link href="/">Back to dashboard</Link>{" "}
+        <Link href="/dashboard">Back to dashboard</Link>{" "}
         <Link href={`/claim/${bundle.siteModel.slug}`}>Claim this site</Link>
       </div>
       <PreviewWedge bundle={bundle} replacementEvaluation={replacementEvaluation} />

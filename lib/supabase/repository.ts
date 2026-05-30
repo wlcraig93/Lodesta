@@ -598,20 +598,6 @@ export const supabaseRepository: LodestaRepository = {
     return rows.map(rowToAnalyticsEvent);
   },
 
-  async pruneAnalyticsEvents(input) {
-    let query = getSupabaseAdminClient()
-      .from("analytics_events")
-      .delete()
-      .lt("occurred_at", input.before);
-    if (input.siteId) query = query.eq("site_id", input.siteId);
-    const rows = await requireData<Array<{ id: string }>>(query.select("id"), "Prune analytics events");
-    return {
-      deleted: rows.length,
-      before: input.before,
-      siteId: input.siteId
-    };
-  },
-
   async analyticsSummary(siteId) {
     const events = await this.listAnalyticsEvents(siteId);
     return summarizeAnalytics(siteId, events);
@@ -1148,7 +1134,6 @@ export const supabaseRepository: LodestaRepository = {
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
         runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
         analyticsSummary: (siteId) => this.analyticsSummary(siteId),
-        pruneAnalyticsEvents: (input) => this.pruneAnalyticsEvents(input),
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
         listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
         listFormSubmissions: (siteId) => this.listFormSubmissions(siteId)

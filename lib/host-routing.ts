@@ -2,6 +2,8 @@ export type HeaderReader = {
   get(name: string): string | null;
 };
 
+export const customDomainRoutedHeader = "x-lodesta-forwarded-host-routed";
+
 export function normalizeHostname(hostname: string) {
   const host = cleanHostPort(hostname);
   if (host.startsWith("[")) return host.slice(1).split("]")[0].replace(/\.$/, "");
@@ -23,17 +25,11 @@ export function isPlatformHost(hostname: string) {
   if (isLocalHost(hostname)) return true;
   const appHost = process.env.NEXT_PUBLIC_APP_URL ? normalizeHostname(new URL(process.env.NEXT_PUBLIC_APP_URL).host) : "";
   if (appHost && hostname === appHost) return true;
-  const configuredHosts = (process.env.LODESTA_PLATFORM_HOSTS ?? "")
-    .split(",")
-    .map((host) => normalizeHostname(host.trim()))
-    .filter(Boolean);
-  if (configuredHosts.includes(hostname)) return true;
   return hostname.endsWith(".railway.app") || hostname.endsWith(".up.railway.app");
 }
 
 export function isCustomDomainRequest(headers: HeaderReader) {
-  const hostname = requestHostname(headers);
-  return Boolean(hostname && !isPlatformHost(hostname));
+  return headers.get(customDomainRoutedHeader) === "1";
 }
 
 function isLocalHost(hostname: string) {

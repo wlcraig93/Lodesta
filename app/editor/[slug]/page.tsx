@@ -59,7 +59,7 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
           </p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href="/">
+          <Link className="button secondary" href="/dashboard">
             Dashboard
           </Link>
           <Link className="button secondary" href={`/analytics/${bundle.siteModel.slug}`}>

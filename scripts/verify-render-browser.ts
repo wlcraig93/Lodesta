@@ -10,7 +10,7 @@ const artifactRoot = await mkdtemp(join(tmpdir(), "lodesta-render-browser-"));
 try {
   const runtime = await getRenderInspectionRuntimeStatus({ launch: true });
   if (!runtime.packageInstalled || !runtime.browserLaunchable) {
-    throw new Error(`${runtime.message} Run npm run install:browsers, or set LODESTA_BROWSER_EXECUTABLE_PATH.`);
+    throw new Error(`${runtime.message} Run npm run install:browsers.`);
   }
 
   const html = encodeURIComponent(`

@@ -1,11 +1,10 @@
 import type { JobKind, JobRecord, SiteBundle } from "./models";
 
-export type ScheduleTask = "monthly_action_lists" | "analytics_retention" | "launch_maintenance";
+export type ScheduleTask = "monthly_action_lists" | "launch_maintenance";
 
 export type ScheduleLaunchJobsInput = {
   task?: ScheduleTask;
   siteIds?: string[];
-  retentionDays?: number;
   scheduleKey?: string;
   runAfter?: string;
 };
@@ -45,9 +44,8 @@ export async function scheduleLaunchJobs(
   const { specs, unknownSiteIds } = await buildJobSpecs(repository, input, task, scheduleKey, scheduledAt);
   const existing = await repository.listJobs();
   const queued: JobRecord[] = [];
-  const unknownKind: JobKind = task === "analytics_retention" ? "analytics_retention" : "monthly_action_list";
   const skipped: ScheduleLaunchJobsResult["skipped"] = unknownSiteIds.map((siteId) => ({
-    kind: unknownKind,
+    kind: "monthly_action_list",
     siteId,
     reason: "unknown_site" as const
   }));
@@ -98,17 +96,6 @@ async function buildJobSpecs(
     }
   }
 
-  if (task === "analytics_retention" || task === "launch_maintenance") {
-    const retentionDays = input.retentionDays;
-    const retentionTargets = input.siteIds?.length ? input.siteIds.filter((siteId) => knownSiteIds.has(siteId)) : [undefined];
-    for (const siteId of retentionTargets) {
-      specs.push({
-        kind: "analytics_retention",
-        payload: basePayload({ siteId, scheduleKey, scheduledAt, runAfter: input.runAfter, retentionDays })
-      });
-    }
-  }
-
   return { specs, unknownSiteIds };
 }
 
@@ -117,11 +104,9 @@ function basePayload(input: {
   scheduleKey: string;
   scheduledAt: string;
   runAfter?: string;
-  retentionDays?: number;
 }) {
   return {
     ...(input.siteId ? { siteId: input.siteId } : {}),
-    ...(typeof input.retentionDays === "number" ? { retentionDays: input.retentionDays } : {}),
     ...(input.runAfter ? { runAfter: input.runAfter } : {}),
     scheduleKey: input.scheduleKey,
     scheduledAt: input.scheduledAt,
@@ -140,7 +125,6 @@ function isDuplicateScheduledJob(job: JobRecord, spec: ScheduledJobSpec) {
 
 function defaultScheduleKey(task: ScheduleTask, now: Date) {
   const date = now.toISOString();
-  if (task === "analytics_retention") return `analytics-retention:${date.slice(0, 10)}`;
   if (task === "monthly_action_lists") return `monthly-action-list:${date.slice(0, 7)}`;
   return `launch-maintenance:${date.slice(0, 10)}`;
 }

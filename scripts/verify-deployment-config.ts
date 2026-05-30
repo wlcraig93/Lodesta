@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
   scripts?: Record<string, string>;
@@ -11,17 +11,40 @@ const schemaSql = readFileSync("supabase/schema.sql", "utf8");
 const domainsRoute = readFileSync("app/api/domains/route.ts", "utf8");
 const domainResolveRoute = readFileSync("app/api/domains/resolve/route.ts", "utf8");
 const domainRefreshRoute = readFileSync("app/api/domains/refresh/route.ts", "utf8");
+const analyticsRoute = readFileSync("app/api/analytics/route.ts", "utf8");
+const jobsRoute = readFileSync("app/api/jobs/route.ts", "utf8");
+const scheduleRoute = readFileSync("app/api/jobs/schedule/route.ts", "utf8");
 const stripeWebhookRoute = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+const jobsSource = readFileSync("lib/jobs.ts", "utf8");
+const jobSchedulerSource = readFileSync("lib/job-scheduler.ts", "utf8");
+const modelsSource = readFileSync("lib/models.ts", "utf8");
 const repositorySource = readFileSync("lib/repository.ts", "utf8");
 const supabaseRepositorySource = readFileSync("lib/supabase/repository.ts", "utf8");
 const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
 const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8");
+const cliSource = readFileSync("scripts/lodesta.mjs", "utf8");
 
 assert(packageJson.dependencies?.playwright, "playwright must be a runtime dependency for deployed render inspection.");
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
 assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
+assertRemovedEnv(
+  envExample,
+  ["LODESTA_PLATFORM_HOSTS", "LODESTA_ANALYTICS_RETENTION_DAYS"],
+  ".env.example must not expose removed host-list or analytics-retention configuration."
+);
+assertRemovedEnv(
+  envExample,
+  [
+    "LODESTA_BROWSER_EXECUTABLE_PATH",
+    "LODESTA_RENDER_BROWSER_ARGS",
+    "LODESTA_RENDER_BROWSER_REQUIRED",
+    "LODESTA_RENDER_ARTIFACT_ROOT",
+    "PLAYWRIGHT_BROWSERS_PATH"
+  ],
+  ".env.example must not expose render/browser deployment internals."
+);
 
 assert(!webConfig.includes("$schema"), "Web Railway config must not include a $schema key; Railway rejects it as invalid TOML.");
 assertIncludes(webConfig, 'builder = "RAILPACK"', "Web Railway config must use Railpack.");
@@ -38,6 +61,36 @@ assertIncludes(workerConfig, "healthcheckPath = null", "Worker service should no
 assertIncludes(workerConfig, 'restartPolicyType = "ALWAYS"', "Worker service should restart continuously.");
 
 assertIncludes(schemaSql, "hostname text not null unique", "Supabase domains.hostname must be unique for direct host-header routing.");
+assertIncludes(
+  schemaSql,
+  "site_id text references sites(id) on delete cascade",
+  "Supabase analytics events must remain linked to site deletion through cascading site_id foreign keys."
+);
+assertIncludes(analyticsRoute, "siteId: z.string().min(1)", "Analytics ingest must require siteId for site-scoped retention and cascade semantics.");
+assert(
+  !existsSync("app/api/analytics/retention/route.ts"),
+  "Analytics retention API route must not exist while time-based analytics deletion is not a product surface."
+);
+for (const [label, source] of [
+  ["jobs route", jobsRoute],
+  ["schedule route", scheduleRoute],
+  ["jobs source", jobsSource],
+  ["job scheduler", jobSchedulerSource],
+  ["models", modelsSource],
+  ["repository", repositorySource],
+  ["supabase repository", supabaseRepositorySource],
+  ["CLI", cliSource],
+  ["Supabase verifier", supabaseVerifierSource]
+] as const) {
+  assert(
+    !source.includes("analytics_retention") &&
+      !source.includes("LODESTA_ANALYTICS_RETENTION_DAYS") &&
+      !source.includes("pruneAnalyticsEvents") &&
+      !source.includes("prune-analytics") &&
+      !source.includes("analytics-retention"),
+    `${label} must not expose analytics-retention deletion plumbing.`
+  );
+}
 assertIncludes(
   schemaSql,
   "create unique index claims_stripe_checkout_session_idx on claims(stripe_checkout_session_id) where stripe_checkout_session_id is not null;",
@@ -123,6 +176,11 @@ process.stdout.write(
 
 function assertIncludes(value: string, expected: string, message: string) {
   assert(value.includes(expected), message);
+}
+
+function assertRemovedEnv(value: string, names: string[], message: string) {
+  const present = names.filter((name) => new RegExp(`^${name}=`, "m").test(value));
+  assert(present.length === 0, `${message} Found: ${present.join(", ")}.`);
 }
 
 function assert(condition: unknown, message: string): asserts condition {

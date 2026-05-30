@@ -33,7 +33,11 @@ export function DomainConnectForm({ siteId, disabled = false, disabledReason }: 
       setStatus(result.error ?? "Unable to register domain.");
       return;
     }
-    setStatus(`${result.verification?.note ?? "Domain registered."} Verification value: ${result.verification?.value ?? "pending"}`);
+    setStatus(
+      `${result.verification?.note ?? "Domain registered."} Verification value: ${result.verification?.value ?? "pending"}. ${
+        result.activationNotice ?? "Activation may take up to 30 seconds to apply across all servers."
+      }`
+    );
   }
 
   return (

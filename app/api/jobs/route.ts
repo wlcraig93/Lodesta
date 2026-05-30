@@ -11,8 +11,7 @@ const jobSchema = z.object({
     "audit_site",
     "generate_site",
     "monthly_action_list",
-    "import_batch",
-    "analytics_retention"
+    "import_batch"
   ]),
   payload: z.record(z.unknown()).default({})
 });

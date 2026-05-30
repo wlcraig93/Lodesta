@@ -1,16 +1,20 @@
 import type { Metadata } from "next";
+import { AppHeader } from "@/components/AppHeader";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SMB Presence Autopilot",
-  description: "AI-first managed websites and local-presence optimization for small businesses."
+  title: "Lodesta",
+  description: "Lodesta powers your business's website for you."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <body>
-        <div className="app-shell">{children}</div>
+        <div className="app-shell">
+          <AppHeader />
+          {children}
+        </div>
       </body>
     </html>
   );

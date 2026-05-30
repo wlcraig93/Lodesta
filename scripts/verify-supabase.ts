@@ -170,15 +170,15 @@ async function main() {
   const analytics = await supabaseRepository.analyticsSummary(createdSiteId);
   assert(analytics.sessions >= 1, "Analytics summary did not include the recorded session.");
   assert(analytics.agentReadableRequests >= 1, "Agent-readable analytics did not include the recorded request.");
-  const prunedAnalytics = await supabaseRepository.pruneAnalyticsEvents({
-    siteId: createdSiteId,
-    before: "2021-01-01T00:00:00.000Z"
-  });
-  assert(prunedAnalytics.deleted >= 1, "Analytics retention prune did not delete the old verification event.");
+  const analyticsEvents = await supabaseRepository.listAnalyticsEvents(createdSiteId);
+  assert(
+    analyticsEvents.some((event) => event.sessionId === `verify_old_${runId}` && event.timestamp === "2020-01-01T00:00:00.000Z"),
+    "Analytics events should retain old site performance history."
+  );
   checks.push({
     name: "analytics",
     ok: true,
-    detail: `Analytics summary has ${analytics.sessions} session(s) and ${analytics.agentReadableRequests} agent-readable request(s); pruned ${prunedAnalytics.deleted} old event(s).`
+    detail: `Analytics summary has ${analytics.sessions} session(s), ${analyticsEvents.length} retained event(s), and ${analytics.agentReadableRequests} agent-readable request(s).`
   });
 
   const forms = await supabaseRepository.getForms(createdSiteId);

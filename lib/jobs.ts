@@ -36,7 +36,6 @@ export type JobExecutionContext = {
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
   runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
   analyticsSummary?: (siteId: string) => Promise<AnalyticsSummary>;
-  pruneAnalyticsEvents?: (input: { before: string; siteId?: string }) => Promise<{ deleted: number; before: string; siteId?: string }>;
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
   listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
   listFormSubmissions?: (siteId?: string) => Promise<LeadSubmission[]>;
@@ -268,37 +267,10 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         }
       };
     }
-    case "analytics_retention": {
-      if (!context?.pruneAnalyticsEvents) {
-        throw new Error("analytics_retention requires repository-backed job context");
-      }
-      const before = retentionCutoffFromPayload(job.payload);
-      const siteId = typeof job.payload.siteId === "string" ? job.payload.siteId : undefined;
-      const result = await context.pruneAnalyticsEvents({ before, siteId });
-      return {
-        prunedAt: new Date().toISOString(),
-        retentionDays: retentionDaysFromPayload(job.payload),
-        ...result
-      };
-    }
     default:
       job.kind satisfies never;
       throw new Error(`Unsupported job kind: ${job.kind}`);
   }
-}
-
-export function retentionDaysFromPayload(payload: Record<string, unknown>) {
-  const raw = typeof payload.retentionDays === "number"
-    ? payload.retentionDays
-    : Number(process.env.LODESTA_ANALYTICS_RETENTION_DAYS ?? 395);
-  return Math.max(30, Math.min(Math.trunc(Number.isFinite(raw) ? raw : 395), 3650));
-}
-
-export function retentionCutoffFromPayload(payload: Record<string, unknown>) {
-  if (typeof payload.before === "string" && !Number.isNaN(new Date(payload.before).getTime())) {
-    return new Date(payload.before).toISOString();
-  }
-  return new Date(Date.now() - retentionDaysFromPayload(payload) * 24 * 60 * 60 * 1000).toISOString();
 }
 
 async function updateJob(id: string, patch: Partial<JobRecord>) {

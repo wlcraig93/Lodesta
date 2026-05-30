@@ -874,8 +874,7 @@ export type JobKind =
   | "audit_site"
   | "generate_site"
   | "monthly_action_list"
-  | "import_batch"
-  | "analytics_retention";
+  | "import_batch";
 
 export type JobRecord = {
   id: string;

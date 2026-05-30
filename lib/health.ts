@@ -32,10 +32,8 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkCloudflareConfig(),
     checkWorkflowEmailConfig(),
     checkIpHashConfig(),
-    checkAnalyticsRetentionConfig(),
     checkRateLimitConfig(),
     checkCrawlUrlSafetyConfig(),
-    checkRenderBrowserConfig(),
     checkGooglePlacesConfig(),
     assetStorageCheck,
     openAiCheck
@@ -151,21 +149,6 @@ function checkIpHashConfig(): HealthCheck {
   return warning("ip_hash_salt", "IP hash salt", "Using the development IP hash salt; set LODESTA_IP_HASH_SALT for deployed environments.");
 }
 
-function checkAnalyticsRetentionConfig(): HealthCheck {
-  const configured = Number(process.env.LODESTA_ANALYTICS_RETENTION_DAYS ?? 395);
-  if (!Number.isFinite(configured)) {
-    return error("analytics_retention", "Analytics retention", "LODESTA_ANALYTICS_RETENTION_DAYS must be a number of days.");
-  }
-  if (configured < 30 || configured > 3650) {
-    return error("analytics_retention", "Analytics retention", "Set LODESTA_ANALYTICS_RETENTION_DAYS between 30 and 3650 days.");
-  }
-  return ok(
-    "analytics_retention",
-    "Analytics retention",
-    `Raw analytics retention is configured for ${Math.trunc(configured)} day(s).`
-  );
-}
-
 function checkRateLimitConfig(): HealthCheck {
   if (process.env.LODESTA_RATE_LIMIT_SALT || process.env.LODESTA_IP_HASH_SALT) {
     return ok("rate_limit", "Rate limiting", "Public write endpoint rate limits use a deployment salt.");
@@ -186,21 +169,6 @@ function checkCrawlUrlSafetyConfig(): HealthCheck {
     );
   }
   return ok("crawl_url_safety", "Crawl URL safety", "Crawler and render jobs block private/internal target URLs.");
-}
-
-function checkRenderBrowserConfig(): HealthCheck {
-  if (process.env.LODESTA_RENDER_BROWSER_REQUIRED === "true") {
-    return ok(
-      "render_browser_config",
-      "Render browser config",
-      "Render browser execution is required; deep health verifies Chromium launch."
-    );
-  }
-  return warning(
-    "render_browser_config",
-    "Render browser config",
-    "Render inspection falls back to HTML fetch when Chromium is unavailable; run npm run verify:render-browser before launch."
-  );
 }
 
 function checkGooglePlacesConfig(): HealthCheck {
@@ -284,11 +252,11 @@ async function checkRenderBrowserReadiness(): Promise<HealthCheck> {
     return ok("render_browser_readiness", "Render browser readiness", status.message);
   }
 
-  const state = process.env.NODE_ENV === "production" || process.env.LODESTA_RENDER_BROWSER_REQUIRED === "true" ? error : warning;
+  const state = process.env.NODE_ENV === "production" ? error : warning;
   return state(
     "render_browser_readiness",
     "Render browser readiness",
-    `${status.message} Run npm run install:browsers, or set LODESTA_BROWSER_EXECUTABLE_PATH.`
+    `${status.message} Run npm run install:browsers.`
   );
 }
 

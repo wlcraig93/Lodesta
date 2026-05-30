@@ -68,21 +68,9 @@ function checkAppUrl(): HealthCheck {
 }
 
 function checkRepositoryConfig(): HealthCheck {
-  const backend = process.env.LODESTA_REPOSITORY ?? "local";
-  if (backend === "local") {
-    if (process.env.NODE_ENV === "production") {
-      return error("repository", "Repository", "Production deployments must use LODESTA_REPOSITORY=supabase for persistent data.");
-    }
-    return warning("repository", "Repository", "Using the in-memory local repository; use LODESTA_REPOSITORY=supabase for deployed persistence.");
-  }
-
-  if (backend !== "supabase") {
-    return error("repository", "Repository", `Unsupported LODESTA_REPOSITORY value: ${backend}.`);
-  }
-
   const missing = missingEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
   if (missing.length) {
-    return error("repository", "Repository", `Supabase repository is selected but missing ${missing.join(", ")}.`);
+    return error("repository", "Repository", `Supabase repository is missing ${missing.join(", ")}.`);
   }
 
   return ok("repository", "Repository", "Supabase repository environment is configured.");
@@ -225,21 +213,14 @@ function checkGooglePlacesConfig(): HealthCheck {
 }
 
 function checkAssetStorageConfig(): HealthCheck {
-  if (process.env.LODESTA_REPOSITORY === "supabase") {
-    return ok(
-      "asset_storage",
-      "Asset storage",
-      `Generated asset bytes will upload to Supabase Storage bucket ${ASSET_BUCKET_NAME}.`
-    );
-  }
-  return warning("asset_storage", "Asset storage", "Using local .data asset storage for generated planning assets.");
+  return ok(
+    "asset_storage",
+    "Asset storage",
+    `Generated asset bytes will upload to Supabase Storage bucket ${ASSET_BUCKET_NAME}.`
+  );
 }
 
 async function checkAssetStorageReadiness(): Promise<HealthCheck> {
-  if (process.env.LODESTA_REPOSITORY !== "supabase") {
-    return checkAssetStorageConfig();
-  }
-
   try {
     const { data, error: bucketError } = await getSupabaseAdminClient().storage.getBucket(ASSET_BUCKET_NAME);
     if (bucketError || !data) {
@@ -272,7 +253,7 @@ function checkOpenAiConfig(): HealthCheck {
 }
 
 function requiresDeploymentConfig() {
-  return process.env.NODE_ENV === "production" || process.env.LODESTA_REPOSITORY === "supabase";
+  return process.env.NODE_ENV === "production";
 }
 
 async function checkRepositoryReadiness(): Promise<HealthCheck> {

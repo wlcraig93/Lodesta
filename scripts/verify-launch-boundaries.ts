@@ -301,7 +301,6 @@ assertCliTransportUsesHttpApis();
 const authEnvSnapshot = {
   nodeEnv: process.env.NODE_ENV,
   requireAuth: process.env.LODESTA_REQUIRE_AUTH,
-  repository: process.env.LODESTA_REPOSITORY,
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
   adminToken: process.env.LODESTA_ADMIN_TOKEN,
   adminEmails: process.env.LODESTA_ADMIN_EMAILS,
@@ -374,7 +373,6 @@ try {
 
   process.env.LODESTA_IP_HASH_SALT = "boundary-health-ip-salt";
   process.env.LODESTA_RATE_LIMIT_SALT = "boundary-health-rate-salt";
-  delete process.env.LODESTA_REPOSITORY;
   delete process.env.NEXT_PUBLIC_APP_URL;
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_ANON_KEY;
@@ -384,7 +382,7 @@ try {
   const productionHealth = await getHealthReport();
   assert(
     healthCheckState(productionHealth, "repository") === "error",
-    "Production health must fail closed when the local repository would be selected."
+    "Production health must fail closed when Supabase repository credentials are missing."
   );
   assert(
     healthCheckState(productionHealth, "app_url") === "error",
@@ -395,7 +393,6 @@ try {
     "Production health must require public Supabase Auth environment."
   );
 
-  process.env.LODESTA_REPOSITORY = "supabase";
   process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
   process.env.SUPABASE_URL = "https://supabase.example";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
@@ -408,7 +405,6 @@ try {
 } finally {
   restoreEnv("NODE_ENV", authEnvSnapshot.nodeEnv);
   restoreEnv("LODESTA_REQUIRE_AUTH", authEnvSnapshot.requireAuth);
-  restoreEnv("LODESTA_REPOSITORY", authEnvSnapshot.repository);
   restoreEnv("NEXT_PUBLIC_APP_URL", authEnvSnapshot.appUrl);
   restoreEnv("LODESTA_ADMIN_TOKEN", authEnvSnapshot.adminToken);
   restoreEnv("LODESTA_ADMIN_EMAILS", authEnvSnapshot.adminEmails);

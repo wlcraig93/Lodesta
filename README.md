@@ -138,7 +138,6 @@ Use `/api/health?deep=1` or `npm run cli -- health deep` as the admin readiness 
 Minimum Railway web service environment:
 
 - `NEXT_PUBLIC_APP_URL`
-- `LODESTA_REPOSITORY=supabase`
 - `LODESTA_ADMIN_TOKEN`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -195,19 +194,18 @@ Browser render inspection:
 
 ## Persistence Boundary
 
-Application routes call `lib/repository.ts`, not the local store directly. The current `localRepository` keeps demo data in process memory and durable worker jobs in `.data/jobs.json`; it exists so the launch surface can be built and tested before Supabase credentials are configured. Supabase-backed workers claim queued jobs with a Postgres `claim_next_job` function using `FOR UPDATE SKIP LOCKED`, retry failed attempts with backoff, and recover stale running locks.
+Application routes call `lib/repository.ts`, which now uses the Supabase-backed repository directly. Supabase-backed workers claim queued jobs with a Postgres `claim_next_job` function using `FOR UPDATE SKIP LOCKED`, retry failed attempts with backoff, and recover stale running locks.
 
 Supabase implementation path:
 
 1. Run `supabase/schema.sql` in the target Supabase project.
-2. Set `LODESTA_REPOSITORY=supabase`.
-3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for server-side repository access.
-4. Keep `SUPABASE_ANON_KEY` available for the browser/auth layer when the dashboard auth screens are wired.
-5. Create the Supabase Storage bucket `lodesta-assets` for generated image/mockup bytes; keep the `site_assets` registry and each `AssetReference` rights status as the source of truth.
-6. Run `npm run verify:supabase` against that environment. It creates a unique verification site, uploads and removes a probe image in `lodesta-assets`, verifies persistence flows, and deletes verification rows unless `-- --keep` is passed. Use `npm run verify:supabase -- --storage-only` to verify only the storage bucket path.
-7. Keep worker processing behind the same repository methods so Railway web and worker services share one persistence layer.
+2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for server-side repository access.
+3. Keep `SUPABASE_ANON_KEY` available for the browser/auth layer when the dashboard auth screens are wired.
+4. Create the Supabase Storage bucket `lodesta-assets` for generated image/mockup bytes; keep the `site_assets` registry and each `AssetReference` rights status as the source of truth.
+5. Run `npm run verify:supabase` against that environment. It creates a unique verification site, uploads and removes a probe image in `lodesta-assets`, verifies persistence flows, and deletes verification rows unless `-- --keep` is passed. Use `npm run verify:supabase -- --storage-only` to verify only the storage bucket path.
+6. Keep worker processing behind the same repository methods so Railway web and worker services share one persistence layer.
 
-The local repository remains the default for development and seeded demos. The Supabase repository is server-only and is intended for Railway web/worker services; do not expose the service role key to client components.
+The Supabase repository is server-only and is intended for local development, Railway web, and Railway worker services; do not expose the service role key to client components.
 The schema enables RLS and owner-read policies for claimed site data. Public writes such as analytics and form submissions still go through the Next.js API/repository boundary, which keeps spam checks, attribution capture, and workflow delivery in one place.
 
 Supabase verification examples:

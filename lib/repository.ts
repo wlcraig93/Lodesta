@@ -503,10 +503,7 @@ function createLocalJobContext(): JobExecutionContext {
 }
 
 export function getRepository(): LodestaRepository {
-  const backend = process.env.LODESTA_REPOSITORY ?? "local";
-  if (backend === "supabase") return supabaseRepository;
-  if (backend !== "local") throw new Error(`Unsupported LODESTA_REPOSITORY value: ${backend}`);
-  return localRepository;
+  return supabaseRepository;
 }
 
 export const repository = getRepository();

@@ -30,8 +30,6 @@ if (!liveIntegrations) {
   process.env.CLOUDFLARE_API_TOKEN = "";
   process.env.CLOUDFLARE_ZONE_ID = "";
 }
-process.env.LODESTA_REPOSITORY = "supabase";
-
 const checks: CheckResult[] = [];
 let createdSiteId: string | undefined;
 const createdJobIds = new Set<string>();

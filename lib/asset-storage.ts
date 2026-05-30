@@ -47,7 +47,7 @@ export async function storeAssetBytes(input: StoreAssetBytesInput): Promise<Stor
   const storagePath = `${safeSegment(input.siteId)}/${safeSegment(input.assetId)}.${extension}`;
   const shouldReturnPublicUrl = input.publicUrl !== false;
 
-  if (!input.forceLocal && process.env.LODESTA_REPOSITORY === "supabase") {
+  if (!input.forceLocal) {
     const { error } = await getSupabaseAdminClient().storage.from(ASSET_BUCKET_NAME).upload(storagePath, bytes, {
       contentType: input.mimeType,
       upsert: true

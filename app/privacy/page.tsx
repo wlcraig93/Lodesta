@@ -21,7 +21,7 @@ const privacySections = [
   },
   {
     title: "3. Analytics and cookies",
-    body: "The service may use cookies, local storage, server logs, and privacy-conscious analytics to understand visitor activity, attribution, conversion events, and website performance. Analytics events are retained for longitudinal site performance history while the site or account is active."
+    body: "The service may use cookies, local storage, server logs, pseudonymous visitor identifiers, and IP-derived hashes to understand visitor activity, attribution, conversion events, website performance, fraud, and abuse prevention. Analytics events are retained for longitudinal site performance history while the site or account is active."
   },
   {
     title: "4. Sharing and subprocessors",

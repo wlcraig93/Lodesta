@@ -4,12 +4,7 @@ import { getSupabasePublicEnv } from "@/lib/supabase/env";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage({
-  searchParams
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
-  const params = await searchParams;
+export default async function LoginPage() {
   const env = getSupabasePublicEnv();
 
   return (
@@ -29,7 +24,7 @@ export default async function LoginPage({
 
       <section className="panel auth-panel">
         <h2>Sign in</h2>
-        <AuthLoginForm configured={env.configured} nextPath={params.next ?? "/account"} />
+        <AuthLoginForm configured={env.configured} />
       </section>
     </main>
   );

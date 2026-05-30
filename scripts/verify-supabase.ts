@@ -134,6 +134,7 @@ async function main() {
   await supabaseRepository.recordAnalyticsEvent({
     siteId: createdSiteId,
     sessionId: `verify_${runId}`,
+    visitorId: `visitor_${runId}`,
     pageId: "page_home",
     eventType: "pageview",
     timestamp: new Date().toISOString(),
@@ -142,6 +143,7 @@ async function main() {
   await supabaseRepository.recordAnalyticsEvent({
     siteId: createdSiteId,
     sessionId: `verify_${runId}`,
+    visitorId: `visitor_${runId}`,
     pageId: "page_home",
     eventType: "tel_click",
     timestamp: new Date().toISOString(),
@@ -175,6 +177,10 @@ async function main() {
     analyticsEvents.some((event) => event.sessionId === `verify_old_${runId}` && event.timestamp === "2020-01-01T00:00:00.000Z"),
     "Analytics events should retain old site performance history."
   );
+  assert(
+    analyticsEvents.some((event) => event.sessionId === `verify_${runId}` && event.visitorId === `visitor_${runId}`),
+    "Analytics visitor id was not persisted."
+  );
   checks.push({
     name: "analytics",
     ok: true,
@@ -188,6 +194,7 @@ async function main() {
     siteId: createdSiteId,
     formId: form.id,
     pageId: "page_home",
+    visitorId: `visitor_${runId}`,
     payload: {
       name: "Supabase Verify",
       email: "verify@example.com",
@@ -202,6 +209,7 @@ async function main() {
   });
   const leads = await supabaseRepository.listFormSubmissions(createdSiteId);
   assert(leads.some((candidate) => candidate.id === lead.id), "Lead submission was not persisted.");
+  assert(leads.some((candidate) => candidate.id === lead.id && candidate.visitorId === `visitor_${runId}`), "Lead visitor id was not persisted.");
   const reviewedLead = await supabaseRepository.updateLeadStatus({
     siteId: createdSiteId,
     submissionId: lead.id,

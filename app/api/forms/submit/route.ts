@@ -5,6 +5,7 @@ import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } f
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { validateFormSubmission } from "@/lib/form-validation";
+import { publicLeadSubmission } from "@/lib/lead-privacy";
 
 export async function POST(request: Request) {
   const limit = rateLimit(request, {
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
     siteId,
     formId,
     pageId: parsedSubmission.pageId || "unknown",
+    visitorId: parsedSubmission.visitorId,
     payload: validation.payload,
     metadata: parsedSubmission.metadata,
     sourceUrl: sanitizeAttributionUrl(parsedSubmission.sourceUrl || request.headers.get("referer") || undefined),
@@ -80,6 +82,7 @@ export async function POST(request: Request) {
   await repository.recordAnalyticsEvent({
     siteId,
     sessionId: parsedSubmission.sessionId || `form_${submission.id}`,
+    visitorId: parsedSubmission.visitorId,
     pageId: submission.pageId,
     eventType: "form_submit",
     timestamp: submission.submittedAt,
@@ -91,7 +94,7 @@ export async function POST(request: Request) {
     ? await executeFormSubmissionWorkflows(bundle, submission, (delivery) => repository.recordWorkflowDelivery(delivery))
     : [];
 
-  return applyRateLimitHeaders(NextResponse.json({ ...submission, workflowDeliveries }), limit);
+  return applyRateLimitHeaders(NextResponse.json({ ...publicLeadSubmission(submission), workflowDeliveries }), limit);
 }
 
 type ParsedSubmission =
@@ -103,6 +106,7 @@ type ParsedSubmission =
       pageId: string;
       sectionId?: string;
       sessionId?: string;
+      visitorId?: string;
       honeypot: string;
       renderedAt: number;
       payload: Record<string, unknown>;
@@ -128,6 +132,7 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
       pageId: stringValue(body.pageId),
       sectionId: stringValue(body.sectionId) || undefined,
       sessionId: stringValue(body.sessionId) || undefined,
+      visitorId: identifierValue(body.visitorId),
       honeypot: stringValue(body.companyWebsite),
       renderedAt: numberValue(body.formRenderedAt ?? body.renderedAt ?? body.startedAt),
       payload,
@@ -153,6 +158,7 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
       pageId: stringValue(formData.get("pageId")),
       sectionId: stringValue(formData.get("sectionId")) || undefined,
       sessionId: stringValue(formData.get("sessionId")) || undefined,
+      visitorId: identifierValue(formData.get("visitorId")),
       honeypot: stringValue(formData.get("companyWebsite")),
       renderedAt: numberValue(formData.get("formRenderedAt") ?? formData.get("renderedAt") ?? formData.get("startedAt")),
       payload,
@@ -170,6 +176,7 @@ const systemFormFields = new Set([
   "pageId",
   "sectionId",
   "sessionId",
+  "visitorId",
   "companyWebsite",
   "formRenderedAt",
   "sourceUrl",
@@ -213,6 +220,11 @@ function getValue(source: FormData | Record<string, unknown>, key: string) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function identifierValue(value: unknown) {
+  const text = stringValue(value).trim();
+  return text ? text.slice(0, 120) : undefined;
 }
 
 function numberValue(value: unknown) {

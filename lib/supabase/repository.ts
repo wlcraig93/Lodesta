@@ -176,6 +176,7 @@ type SubmissionRow = {
   site_id: string;
   form_id: string;
   page_id: string | null;
+  visitor_id: string | null;
   payload: unknown;
   metadata: unknown;
   submitted_at: string;
@@ -202,6 +203,7 @@ type WorkflowDeliveryRow = {
 type AnalyticsRow = {
   site_id: string;
   session_id: string;
+  visitor_id: string | null;
   page_id: string | null;
   event_type: AnalyticsEvent["eventType"];
   event: unknown;
@@ -491,6 +493,7 @@ export const supabaseRepository: LodestaRepository = {
           site_id: input.siteId,
           form_id: input.formId,
           page_id: input.pageId,
+          visitor_id: input.visitorId,
           payload: input.payload,
           metadata: input.metadata ?? {},
           submitted_at: submittedAt,
@@ -576,6 +579,7 @@ export const supabaseRepository: LodestaRepository = {
           id: crypto.randomUUID(),
           site_id: sanitized.siteId,
           session_id: sanitized.sessionId,
+          visitor_id: sanitized.visitorId,
           page_id: sanitized.pageId,
           event_type: sanitized.eventType,
           event: sanitized,
@@ -1597,6 +1601,7 @@ function rowToSubmission(row: SubmissionRow): LeadSubmission {
     siteId: row.site_id,
     formId: row.form_id,
     pageId: row.page_id ?? undefined,
+    visitorId: row.visitor_id ?? undefined,
     payload: row.payload as Record<string, unknown>,
     metadata: row.metadata as Record<string, string | number | boolean>,
     submittedAt: row.submitted_at,
@@ -1629,6 +1634,7 @@ function rowToAnalyticsEvent(row: AnalyticsRow): AnalyticsEvent {
     ...event,
     siteId: row.site_id,
     sessionId: row.session_id,
+    visitorId: row.visitor_id ?? event.visitorId,
     pageId: row.page_id ?? event.pageId,
     eventType: row.event_type,
     timestamp: event.timestamp ?? row.occurred_at

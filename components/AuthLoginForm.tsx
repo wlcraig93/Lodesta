@@ -5,15 +5,14 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type AuthLoginFormProps = {
   configured: boolean;
-  nextPath?: string;
 };
 
-export function AuthLoginForm({ configured, nextPath = "/" }: AuthLoginFormProps) {
+export function AuthLoginForm({ configured }: AuthLoginFormProps) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(configured ? "" : "Supabase Auth is not configured for this environment.");
 
   function authRedirectUrl() {
-    return `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
+    return `${window.location.origin}/auth/callback`;
   }
 
   async function onGoogleSignIn() {

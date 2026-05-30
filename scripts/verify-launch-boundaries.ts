@@ -8,7 +8,8 @@ import type { AnalyticsEvent, ClaimRecord, JobRecord, LeadSubmission, Optimizati
 import { summarizeAnalytics } from "../lib/analytics";
 import { readLocalAsset, storeAssetBytes, storeGeneratedAssetBytes } from "../lib/asset-storage";
 import { cachePolicyForPathname } from "../lib/cache-policy";
-import { extractCrawlPageSignals, scoreCrawlAssessment, type CrawlAssessment } from "../lib/crawler";
+import { extractCrawlPageSignals, scoreCrawlAssessment, summarizeCrawlHtml, type CrawlAssessment } from "../lib/crawler";
+import { crawlFixtureHtml, crawlFixturePath } from "../lib/crawl-fixture";
 import { isResolvableCustomDomain, normalizeCustomHostname, refreshCustomHostnameStatus } from "../lib/domains";
 import { createExperimentLearning } from "../lib/experiment-learning";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "../lib/editor-guardrails";
@@ -35,7 +36,7 @@ import {
   summarizeOutbound
 } from "../lib/outbound";
 import { hashIpAddress, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "../lib/privacy";
-import { rateLimit } from "../lib/rate-limit";
+import { rateLimit, rateLimitKey } from "../lib/rate-limit";
 import { getRenderInspectionRuntimeStatus, inspectUrlRender } from "../lib/render-inspection";
 import { runAudit } from "../lib/audit";
 import { executeJob } from "../lib/jobs";
@@ -218,6 +219,7 @@ const platformRobotsRules = platformRobots().rules;
 const rootHomePage = readFileSync("app/page.tsx", "utf8");
 const dashboardPage = readFileSync("app/dashboard/page.tsx", "utf8");
 const experimentLearningRoute = readFileSync("app/api/experiments/learn/route.ts", "utf8");
+const crawlFixtureRouteSource = readFileSync("app/crawl-fixtures/[token]/[page]/route.ts", "utf8");
 const middlewareSource = readFileSync("middleware.ts", "utf8");
 const hostRoutingSource = readFileSync("lib/host-routing.ts", "utf8");
 const securitySource = readFileSync("lib/security.ts", "utf8");
@@ -251,6 +253,13 @@ assert(
   "Unscoped experiment-learning reads should require admin authorization instead of exposing cross-site learnings."
 );
 assert(
+  crawlFixtureRouteSource.includes("LODESTA_CRAWL_FIXTURE_TOKEN") &&
+    crawlFixtureRouteSource.includes('"X-Robots-Tag"') &&
+    crawlFixtureRouteSource.includes("noindex, nofollow") &&
+    crawlFixtureRouteSource.includes("no-store"),
+  "Crawler fixture route should require a token and emit noindex/no-store headers."
+);
+assert(
   securitySource.includes("isAdminUserId(auth.user?.id)") &&
     securitySource.includes("export async function requireAdmin") &&
     securitySource.includes("export async function requireAdminOrSiteOwner"),
@@ -266,6 +275,7 @@ for (const privatePath of [
   "/api/",
   "/auth/",
   "/account",
+  "/crawl-fixtures/",
   "/preview/",
   "/editor/",
   "/analytics/",
@@ -323,8 +333,7 @@ const authEnvSnapshot = {
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
   adminToken: process.env.LODESTA_ADMIN_TOKEN,
   adminUserId: process.env.LODESTA_ADMIN_USER_ID,
-  ipHashSalt: process.env.LODESTA_IP_HASH_SALT,
-  rateLimitSalt: process.env.LODESTA_RATE_LIMIT_SALT,
+  hashSecret: process.env.LODESTA_HASH_SECRET,
   supabaseUrl: process.env.SUPABASE_URL,
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -390,9 +399,8 @@ try {
   assert(isAdminUserId("admin-user-id"), "Admin page policy should match the configured Supabase admin user id.");
   assert(!isAdminUserId("owner-user-id"), "Admin page policy should reject Supabase user ids outside the admin setting.");
 
-  process.env.LODESTA_IP_HASH_SALT = "boundary-health-ip-salt";
-  process.env.LODESTA_RATE_LIMIT_SALT = "boundary-health-rate-salt";
   delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.LODESTA_HASH_SECRET;
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_ANON_KEY;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -411,8 +419,13 @@ try {
     healthCheckState(productionHealth, "supabase_auth") === "error",
     "Production health must require public Supabase Auth environment."
   );
+  assert(
+    healthCheckState(productionHealth, "hash_secret") === "error",
+    "Production health must require LODESTA_HASH_SECRET."
+  );
 
   process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
+  process.env.LODESTA_HASH_SECRET = "boundary-health-hash-secret";
   process.env.SUPABASE_URL = "https://supabase.example";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example";
@@ -421,14 +434,14 @@ try {
   assert(healthCheckState(configuredHealth, "repository") === "ok", "Configured Supabase repository health should pass.");
   assert(healthCheckState(configuredHealth, "app_url") === "ok", "Configured application URL health should pass.");
   assert(healthCheckState(configuredHealth, "supabase_auth") === "ok", "Configured Supabase Auth health should pass.");
+  assert(healthCheckState(configuredHealth, "hash_secret") === "ok", "Configured hash secret health should pass.");
 } finally {
   restoreEnv("NODE_ENV", authEnvSnapshot.nodeEnv);
   restoreEnv("LODESTA_REQUIRE_AUTH", authEnvSnapshot.requireAuth);
   restoreEnv("NEXT_PUBLIC_APP_URL", authEnvSnapshot.appUrl);
   restoreEnv("LODESTA_ADMIN_TOKEN", authEnvSnapshot.adminToken);
   restoreEnv("LODESTA_ADMIN_USER_ID", authEnvSnapshot.adminUserId);
-  restoreEnv("LODESTA_IP_HASH_SALT", authEnvSnapshot.ipHashSalt);
-  restoreEnv("LODESTA_RATE_LIMIT_SALT", authEnvSnapshot.rateLimitSalt);
+  restoreEnv("LODESTA_HASH_SECRET", authEnvSnapshot.hashSecret);
   restoreEnv("SUPABASE_URL", authEnvSnapshot.supabaseUrl);
   restoreEnv("SUPABASE_ANON_KEY", authEnvSnapshot.supabaseAnonKey);
   restoreEnv("SUPABASE_SERVICE_ROLE_KEY", authEnvSnapshot.supabaseServiceRoleKey);
@@ -580,14 +593,81 @@ assert(
     crawlPageSignals.assetReferences.some((asset) => asset.kind === "logo" && asset.rightsStatus === "reference_only"),
   "URL crawl extraction should preserve schema types, structured forms, categorized links, and reference-only image signals."
 );
+const fixtureToken = "boundary-fixture-token";
+const fixtureUrl = `https://dev.lodesta.com${crawlFixturePath(fixtureToken)}`;
+const fixtureSummary = summarizeCrawlHtml(crawlFixtureHtml("https://dev.lodesta.com", fixtureToken), fixtureUrl);
+assert(
+  fixtureSummary.hasViewportMeta &&
+    fixtureSummary.hasLocalBusinessSchema &&
+    fixtureSummary.hasTelLink &&
+    fixtureSummary.jsonLdTypes.includes("Restaurant") &&
+    fixtureSummary.formCount > 0 &&
+    fixtureSummary.internalLinkCount >= 3 &&
+    fixtureSummary.formReferences.some((form) => form.hasEmailField && form.hasPhoneField && form.hasTextarea) &&
+    fixtureSummary.linkReferences.some((link) => link.kind === "booking") &&
+    fixtureSummary.linkReferences.some((link) => link.kind === "ordering") &&
+    fixtureSummary.linkReferences.some((link) => link.kind === "social") &&
+    fixtureSummary.extractedFacts.name === "Boundary Fixture Pizza" &&
+    fixtureSummary.extractedFacts.phone === "+15125550191" &&
+    fixtureSummary.extractedFacts.address?.country === "US",
+  "Protected crawl fixture HTML should exercise schema, phone, form, internal link, booking, ordering, social, and business-fact extraction."
+);
+const fixtureScore = scoreCrawlAssessment({
+  url: fixtureUrl,
+  fetched: true,
+  status: 200,
+  finalUrl: fixtureUrl,
+  title: fixtureSummary.title,
+  metaDescription: fixtureSummary.metaDescription,
+  canonical: fixtureSummary.canonical,
+  hasViewportMeta: fixtureSummary.hasViewportMeta,
+  hasLocalBusinessSchema: fixtureSummary.hasLocalBusinessSchema,
+  hasTelLink: fixtureSummary.hasTelLink,
+  robotsFound: true,
+  sitemapFound: true,
+  formCount: fixtureSummary.formCount,
+  imageCount: fixtureSummary.imageCount,
+  imagesWithoutAlt: fixtureSummary.imagesWithoutAlt,
+  internalLinkCount: fixtureSummary.internalLinkCount,
+  externalLinkCount: fixtureSummary.externalLinkCount,
+  jsonLdTypes: fixtureSummary.jsonLdTypes,
+  extractedFacts: fixtureSummary.extractedFacts,
+  formReferences: fixtureSummary.formReferences,
+  linkReferences: fixtureSummary.linkReferences,
+  assetReferences: fixtureSummary.assetReferences,
+  sampledInternalPages: fixtureSummary.linkReferences.filter((link) => link.kind === "internal").map((link) => link.href),
+  pageSummaries: [fixtureSummary],
+  score: { overall: 0, max: 0, percent: 0, grade: "poor", checks: [] },
+  findings: []
+});
+assert(
+  fixtureScore.percent >= 90 &&
+    fixtureScore.checks.some((check) => check.id === "seo.local_business_schema" && check.passed) &&
+    fixtureScore.checks.some((check) => check.id === "conversion.mobile_click_to_call" && check.passed) &&
+    fixtureScore.checks.some((check) => check.id === "conversion.lead_form" && check.passed),
+  "Protected crawl fixture should provide enough local parser signals for high-confidence crawl scoring."
+);
 const ipHash = hashIpAddress("203.0.113.10", {
   siteId: bundle.businessProfile.siteId,
   at: new Date("2026-05-29T12:00:00.000Z"),
-  salt: "boundary-test-salt"
+  salt: "boundary-test-secret"
+});
+const nextDayIpHash = hashIpAddress("203.0.113.10", {
+  siteId: bundle.businessProfile.siteId,
+  at: new Date("2026-05-30T12:00:00.000Z"),
+  salt: "boundary-test-secret"
+});
+const differentSecretIpHash = hashIpAddress("203.0.113.10", {
+  siteId: bundle.businessProfile.siteId,
+  at: new Date("2026-05-29T12:00:00.000Z"),
+  salt: "boundary-different-secret"
 });
 assert(
-  Boolean(ipHash?.startsWith("v1:2026-05-29:")) && !ipHash?.includes("203.0.113.10"),
-  "Lead IP hashing should persist only a salted daily hash, never the raw IP address."
+  Boolean(ipHash?.startsWith("v2:")) &&
+    ipHash === nextDayIpHash &&
+    ipHash !== differentSecretIpHash &&
+    !ipHash?.includes("203.0.113.10"),
+  "Lead IP hashing should persist only a stable v2 HMAC digest, never the raw IP address."
 );
 const sanitizedAnalyticsMetadata = sanitizeAnalyticsMetadata({
   path: "/contact?email=owner@example.com&utm_source=mailer&token=secret",
@@ -899,8 +979,8 @@ assert(
 const previousPrivateCrawlOverride = process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
 process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = "true";
 assert(
-  (await validatePublicFetchUrl("http://127.0.0.1:3000", { resolveDns: false })).ok,
-  "Local fixture testing should be able to explicitly opt into private crawl URLs."
+  !(await validatePublicFetchUrl("http://127.0.0.1:3000", { resolveDns: false })).ok,
+  "Removed private-crawl environment variable should not allow localhost crawl URLs."
 );
 if (previousPrivateCrawlOverride === undefined) {
   delete process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
@@ -914,6 +994,22 @@ const rateLimitRequest = new Request("https://lodesta.example/api/forms/submit",
     "user-agent": "boundary-verifier"
   }
 });
+const previousRateLimitHashSecret = process.env.LODESTA_HASH_SECRET;
+process.env.LODESTA_HASH_SECRET = "boundary-rate-limit-secret";
+const stableHashForRateLimitProbe = hashIpAddress("203.0.113.10", {
+  siteId: bundle.businessProfile.siteId,
+  salt: "boundary-rate-limit-secret"
+});
+const rateLimitProbeKey = rateLimitKey(rateLimitRequest, {
+  bucket: "boundary_verify_form_submit_probe",
+  keyParts: [bundle.businessProfile.siteId, "form_contact"],
+  limit: 1,
+  windowMs: 60_000
+});
+assert(
+  rateLimitProbeKey !== stableHashForRateLimitProbe && !rateLimitProbeKey.includes("203.0.113.10"),
+  "Rate-limit fingerprints should use a separate HMAC purpose and never expose raw client IPs."
+);
 const firstRateLimit = rateLimit(rateLimitRequest, {
   bucket: "boundary_verify_form_submit",
   keyParts: [bundle.businessProfile.siteId, "form_contact"],
@@ -926,6 +1022,7 @@ const blockedRateLimit = rateLimit(rateLimitRequest, {
   limit: 1,
   windowMs: 60_000
 });
+restoreEnv("LODESTA_HASH_SECRET", previousRateLimitHashSecret);
 const blockedRateLimitBody = blockedRateLimit.ok ? "" : await blockedRateLimit.response.text();
 assert(
   firstRateLimit.ok &&
@@ -1623,33 +1720,13 @@ assert(
   unsafeWebhookDeliveries.some((delivery) => delivery.status === "failed" && delivery.message.includes("URL safety")),
   "Webhook delivery should fail closed if an existing workflow points at a private or reserved network target."
 );
-const previousWebhookPrivateOverride = process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
-process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = "true";
-const unsafeWebhookWithCrawlOverride = await executeFormSubmissionWorkflows(
-  unsafeWebhookBundle,
-  { ...unsafeWebhookLead, id: "lead_unsafe_webhook_override" },
-  async (delivery) => ({
-    id: "delivery_unsafe_webhook_override",
-    createdAt: new Date().toISOString(),
-    ...delivery
-  })
-);
-if (previousWebhookPrivateOverride === undefined) {
-  delete process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS;
-} else {
-  process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS = previousWebhookPrivateOverride;
-}
-assert(
-  unsafeWebhookWithCrawlOverride.some((delivery) => delivery.status === "failed" && delivery.message.includes("URL safety")),
-  "The private-crawl fixture override must not allow visitor-triggered lead webhooks to private/internal targets."
-);
 const workflowSource = readFileSync("lib/workflows.ts", "utf8");
 assert(
   workflowSource.includes("AbortSignal.timeout(workflowTimeoutMs())") &&
     workflowSource.includes("LODESTA_WORKFLOW_TIMEOUT_MS") &&
-    workflowSource.includes("allowPrivateOverride: false") &&
+    !workflowSource.includes("allowPrivateOverride") &&
     workflowSource.includes("Math.min(Math.max(Math.trunc(parsed), 1000), 30000)"),
-  "External workflow delivery fetches should use a bounded timeout and ignore private-crawl URL overrides."
+  "External workflow delivery fetches should use a bounded timeout without private-crawl URL override plumbing."
 );
 const ownerAssetBundle = createSiteFromInput({
   prompt: "Build a website for Boundary Verify Salon, a beauty salon in Austin. phone: 512-555-0141"

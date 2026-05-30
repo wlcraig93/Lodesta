@@ -1,4 +1,5 @@
 import type { LeadSubmission, SiteBundle, WorkflowDelivery, WorkflowDefinition } from "./models";
+import { publicLeadSubmission } from "./lead-privacy";
 import { validatePublicFetchUrl } from "./url-safety";
 
 type WorkflowRecorder = (delivery: Omit<WorkflowDelivery, "id" | "createdAt">) => Promise<WorkflowDelivery>;
@@ -117,7 +118,7 @@ async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, wo
       message: "Webhook workflow skipped because no URL is configured."
     };
   }
-  const safeTarget = await validatePublicFetchUrl(target, { allowPrivateOverride: false });
+  const safeTarget = await validatePublicFetchUrl(target);
   if (!safeTarget.ok) {
     return {
       target,
@@ -135,7 +136,7 @@ async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, wo
       type: "form_submission",
       siteId: bundle.businessProfile.siteId,
       siteName: bundle.businessProfile.name,
-      submission
+      submission: publicLeadSubmission(submission)
     })
   });
 

@@ -1,12 +1,20 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Lodesta | Managed websites for small businesses",
   description: "Lodesta powers your business's website for you."
 };
 
-export default function HomePage() {
+export default async function HomePage({
+  searchParams
+}: {
+  searchParams: Promise<{ code?: string }>;
+}) {
+  const params = await searchParams;
+  if (params.code) redirect(`/auth/callback?code=${encodeURIComponent(params.code)}`);
+
   return (
     <main className="marketing-page">
       <section className="marketing-hero">

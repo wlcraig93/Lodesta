@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { AnalyticsEvent } from "./models";
+import { hmacSha256Hex } from "./hash-secret";
 
 export function ipHashForRequest(request: Request, input: { siteId: string; at?: Date }) {
   const ip = clientIpFromHeaders(request.headers);
@@ -9,14 +9,8 @@ export function ipHashForRequest(request: Request, input: { siteId: string; at?:
 export function hashIpAddress(ipAddress: string, input: { siteId: string; at?: Date; salt?: string }) {
   const normalizedIp = ipAddress.trim().toLowerCase();
   if (!normalizedIp) return undefined;
-  const observedAt = input.at ?? new Date();
-  const dayBucket = observedAt.toISOString().slice(0, 10);
-  const salt = input.salt ?? ipHashSalt();
-  const digest = createHash("sha256")
-    .update([salt, input.siteId, dayBucket, normalizedIp].join("|"))
-    .digest("hex")
-    .slice(0, 32);
-  return `v1:${dayBucket}:${digest}`;
+  const digest = hmacSha256Hex(`stable-ip-v2\n${normalizedIp}`, { secret: input.salt }).slice(0, 32);
+  return `v2:${digest}`;
 }
 
 export function clientIpFromHeaders(headers: Headers) {
@@ -27,10 +21,6 @@ export function clientIpFromHeaders(headers: Headers) {
     forwardedHeaderIp(headers.get("forwarded"))
   ];
   return candidates.map((candidate) => candidate?.trim()).find(Boolean);
-}
-
-export function hasConfiguredIpHashSalt() {
-  return Boolean(process.env.LODESTA_IP_HASH_SALT || process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET);
 }
 
 export function sanitizeAnalyticsMetadata(metadata: AnalyticsEvent["metadata"]) {
@@ -143,15 +133,6 @@ function looksLikeSensitiveValue(value: string) {
   if (/\b\d{3}-\d{2}-\d{4}\b/.test(value)) return true;
   if (/\b(?:\d[ -]*?){13,19}\b/.test(value)) return true;
   return false;
-}
-
-function ipHashSalt() {
-  return (
-    process.env.LODESTA_IP_HASH_SALT ||
-    process.env.AUTH_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    "lodesta-development-ip-hash-salt"
-  );
 }
 
 function firstForwardedFor(value: string | null) {

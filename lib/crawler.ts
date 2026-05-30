@@ -243,6 +243,10 @@ export function extractCrawlPageSignals(html: string, sourceUrl: string) {
   };
 }
 
+export function summarizeCrawlHtml(html: string, sourceUrl: string): CrawlPageSummary {
+  return summarizeCrawlPage(html, sourceUrl, "primary");
+}
+
 function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSummary["source"]): CrawlPageSummary {
   const sourcePage = new URL(sourceUrl);
   const title = extractTagContent(html, "title");

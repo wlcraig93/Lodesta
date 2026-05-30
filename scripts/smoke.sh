@@ -26,6 +26,7 @@ BASE_URL="${BASE_URL%/}"
 export NEXT_PUBLIC_APP_URL="${LODESTA_SMOKE_APP_URL:-$BASE_URL}"
 export STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_smoke}"
 export LODESTA_ADMIN_TOKEN="${LODESTA_ADMIN_TOKEN:-smoke_admin_token}"
+export LODESTA_HASH_SECRET="${LODESTA_HASH_SECRET:-smoke_hash_secret}"
 CUSTOM_DOMAIN_HOST="smoke-joes.example"
 SCHEDULE_KEY="smoke-${PORT}-$$"
 export SCHEDULE_KEY
@@ -518,8 +519,8 @@ request GET "/api/experiments/learn?siteId=site_joes_pizza"
 assert_success "experiment learning rollback list"
 assert_json "experiment learning rollback list" 'const data = JSON.parse(process.env.BODY); const learning = data.learnings?.find((item) => item.experimentId === "exp_sticky_cta_restaurant"); if (!learning || learning.status !== "rolled_back" || !learning.rolledBackAt) process.exit(1);'
 
-post_check "JSON form submission" "/api/forms/submit" '{"siteId":"site_joes_pizza","formId":"form_contact","pageId":"home","sessionId":"smoke_session","sourceUrl":"http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer&email=smoke@example.com&token=secret","payload":{"name":"Smoke Test","email":"smoke@example.com","message":"Testing the core lead path."},"metadata":{"landingPath":"/sites/joes-pizza","referrerHost":"local-smoke","ownerEmail":"smoke@example.com"}}'
-assert_json "JSON form submission" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || data.formId !== "form_contact" || !data.id || !String(data.ipHash || "").startsWith("v1:") || String(data.ipHash).includes("203.0.113.10") || data.sourceUrl !== "http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer" || data.metadata?.ownerEmail) process.exit(1);'
+post_check "JSON form submission" "/api/forms/submit" '{"siteId":"site_joes_pizza","formId":"form_contact","pageId":"home","sessionId":"smoke_session","visitorId":"visitor_smoke","sourceUrl":"http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer&email=smoke@example.com&token=secret","payload":{"name":"Smoke Test","email":"smoke@example.com","message":"Testing the core lead path."},"metadata":{"landingPath":"/sites/joes-pizza","referrerHost":"local-smoke","ownerEmail":"smoke@example.com"}}'
+assert_json "JSON form submission" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || data.formId !== "form_contact" || !data.id || data.ipHash || data.visitorId || data.sourceUrl !== "http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer" || data.metadata?.ownerEmail) process.exit(1);'
 LEAD_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); process.stdout.write(data.id);')"
 
 post_check "lead status API" "/api/leads/status" "{\"siteId\":\"site_joes_pizza\",\"submissionId\":\"${LEAD_ID}\",\"status\":\"reviewed\"}"

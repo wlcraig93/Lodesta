@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
+import { publicLeadSubmission } from "@/lib/lead-privacy";
 
 const leadStatusSchema = z.object({
   siteId: z.string().min(1),
@@ -21,5 +22,5 @@ export async function POST(request: Request) {
 
   const lead = await repository.updateLeadStatus(parsed.data);
   if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-  return NextResponse.json({ ok: true, lead });
+  return NextResponse.json({ ok: true, lead: publicLeadSubmission(lead) });
 }

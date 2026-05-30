@@ -7,6 +7,7 @@ import { claimGateForBundle } from "@/lib/site-publication";
 const assignmentSchema = z.object({
   siteId: z.string().min(1),
   sessionId: z.string().min(1),
+  visitorId: z.string().min(1).max(120).optional(),
   experimentId: z.string().optional()
 });
 

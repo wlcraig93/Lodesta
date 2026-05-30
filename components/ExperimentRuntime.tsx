@@ -2,13 +2,13 @@
 
 import { useEffect } from "react";
 import type { Experiment } from "@/lib/models";
+import { getSessionId, getVisitorId } from "./client-identity";
 
 type ExperimentRuntimeProps = {
   siteId: string;
   experiments?: Experiment[];
 };
 
-const sessionKey = "lodesta_session_id";
 const surfaceDatasetKeys: Record<Experiment["surface"], string> = {
   sticky_cta: "stickyCtaVariant",
   cta_placement: "ctaPlacementVariant",
@@ -16,15 +16,10 @@ const surfaceDatasetKeys: Record<Experiment["surface"], string> = {
   hero_layout: "heroLayoutVariant"
 };
 
-declare global {
-  interface Window {
-    __lodestaSessionId?: string;
-  }
-}
-
 export function ExperimentRuntime({ siteId, experiments = [] }: ExperimentRuntimeProps) {
   useEffect(() => {
     const sessionId = getSessionId();
+    const visitorId = getVisitorId();
     const runningExperiments = experiments.filter((experiment) => experiment.status === "running");
     const targets = runningExperiments.length ? runningExperiments : [undefined];
 
@@ -32,7 +27,7 @@ export function ExperimentRuntime({ siteId, experiments = [] }: ExperimentRuntim
       void fetch("/api/experiments/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteId, sessionId, experimentId: experiment?.id })
+        body: JSON.stringify({ siteId, sessionId, visitorId, experimentId: experiment?.id })
       })
         .then((response) => response.json())
         .then((assignment) => {
@@ -44,6 +39,7 @@ export function ExperimentRuntime({ siteId, experiments = [] }: ExperimentRuntim
             sendExperimentAssignment({
               siteId,
               sessionId,
+              visitorId,
               experimentId: assignment.experimentId,
               surface,
               variantId,
@@ -75,6 +71,7 @@ function surfaceForAssignment(surface: unknown, fallback?: Experiment["surface"]
 function sendExperimentAssignment(input: {
   siteId: string;
   sessionId: string;
+  visitorId?: string;
   experimentId: string;
   surface: Experiment["surface"];
   variantId: string;
@@ -84,6 +81,7 @@ function sendExperimentAssignment(input: {
   const payload = JSON.stringify({
     siteId: input.siteId,
     sessionId: input.sessionId,
+    visitorId: input.visitorId,
     eventType: "experiment_assignment",
     timestamp: new Date().toISOString(),
     metadata: {
@@ -106,33 +104,4 @@ function sendExperimentAssignment(input: {
     body: payload,
     keepalive: true
   });
-}
-
-function getSessionId() {
-  if (window.__lodestaSessionId) return window.__lodestaSessionId;
-  const storage = safeSessionStorage();
-  const existing = storage.getItem(sessionKey);
-  if (existing) {
-    window.__lodestaSessionId = existing;
-    return existing;
-  }
-  const created = crypto.randomUUID();
-  storage.setItem(sessionKey, created);
-  window.__lodestaSessionId = created;
-  return created;
-}
-
-function safeSessionStorage() {
-  try {
-    if (window.sessionStorage) return window.sessionStorage;
-  } catch {
-    // Fall through to an in-memory fallback for restricted browser contexts.
-  }
-  const memory = new Map<string, string>();
-  return {
-    getItem: (key: string) => memory.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      memory.set(key, value);
-    }
-  };
 }

@@ -17,6 +17,7 @@ const skippedPrefixes = [
   "/_next/",
   "/auth/",
   "/preview/",
+  "/crawl-fixtures/",
   "/editor/",
   "/analytics/",
   "/optimization/",

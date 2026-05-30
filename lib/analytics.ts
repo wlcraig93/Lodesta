@@ -301,15 +301,25 @@ function summarizeExperimentVariants(events: AnalyticsEvent[]): AnalyticsOutcome
 
 function summarizeSources(events: AnalyticsEvent[]): AnalyticsOutcomeRow[] {
   const sourceBySession = new Map<string, string>();
+  const sourceByVisitor = new Map<string, string>();
   const sorted = [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
   for (const event of sorted) {
-    if (sourceBySession.has(event.sessionId)) continue;
-    sourceBySession.set(event.sessionId, sourceLabel(event));
+    const label = sourceLabel(event);
+    if (!sourceBySession.has(event.sessionId)) sourceBySession.set(event.sessionId, label);
+    if (event.visitorId && !sourceByVisitor.has(event.visitorId) && label !== "direct / unknown") {
+      sourceByVisitor.set(event.visitorId, label);
+    }
   }
 
   const groups = new Map<string, AnalyticsEvent[]>();
   for (const event of events) {
-    const key = sourceBySession.get(event.sessionId) ?? "direct / unknown";
+    const sessionSource = sourceBySession.get(event.sessionId) ?? "direct / unknown";
+    const key =
+      sessionSource !== "direct / unknown"
+        ? sessionSource
+        : event.visitorId
+          ? sourceByVisitor.get(event.visitorId) ?? sessionSource
+          : sessionSource;
     const group = groups.get(key) ?? [];
     group.push(event);
     groups.set(key, group);

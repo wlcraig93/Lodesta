@@ -1,5 +1,5 @@
 import { repository } from "./repository";
-import { hasConfiguredIpHashSalt } from "./privacy";
+import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
 import { getRenderInspectionRuntimeStatus } from "./render-inspection";
 import { ASSET_BUCKET_NAME } from "./asset-storage";
 import { getSupabaseAdminClient } from "./supabase/client";
@@ -31,9 +31,7 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkStripeConfig(),
     checkCloudflareConfig(),
     checkWorkflowEmailConfig(),
-    checkIpHashConfig(),
-    checkRateLimitConfig(),
-    checkCrawlUrlSafetyConfig(),
+    checkHashSecretConfig(),
     checkGooglePlacesConfig(),
     assetStorageCheck,
     openAiCheck
@@ -141,34 +139,17 @@ function checkWorkflowEmailConfig(): HealthCheck {
   return warning("workflow_email", "Workflow email", "RESEND_API_KEY is not set; email workflow deliveries are logged but not sent.");
 }
 
-function checkIpHashConfig(): HealthCheck {
-  if (hasConfiguredIpHashSalt()) return ok("ip_hash_salt", "IP hash salt", "Privacy-preserving lead IP hashing has a deployment salt.");
-  if (process.env.NODE_ENV === "production") {
-    return error("ip_hash_salt", "IP hash salt", "Set LODESTA_IP_HASH_SALT in production before recording lead IP hashes.");
-  }
-  return warning("ip_hash_salt", "IP hash salt", "Using the development IP hash salt; set LODESTA_IP_HASH_SALT for deployed environments.");
-}
-
-function checkRateLimitConfig(): HealthCheck {
-  if (process.env.LODESTA_RATE_LIMIT_SALT || process.env.LODESTA_IP_HASH_SALT) {
-    return ok("rate_limit", "Rate limiting", "Public write endpoint rate limits use a deployment salt.");
+function checkHashSecretConfig(): HealthCheck {
+  if (hasConfiguredHashSecret()) {
+    return ok("hash_secret", "Hash secret", "Stable visitor hashing and rate-limit fingerprints use a deployment secret.");
   }
   if (process.env.NODE_ENV === "production") {
-    return error("rate_limit", "Rate limiting", "Set LODESTA_RATE_LIMIT_SALT or LODESTA_IP_HASH_SALT in production.");
+    return error("hash_secret", "Hash secret", "Set LODESTA_HASH_SECRET in production before recording visitor attribution hashes.");
   }
-  return warning("rate_limit", "Rate limiting", "Using the development rate-limit salt; set LODESTA_RATE_LIMIT_SALT for deployed environments.");
-}
-
-function checkCrawlUrlSafetyConfig(): HealthCheck {
-  if (process.env.LODESTA_ALLOW_PRIVATE_CRAWL_URLS === "true") {
-    const state = process.env.NODE_ENV === "production" ? error : warning;
-    return state(
-      "crawl_url_safety",
-      "Crawl URL safety",
-      "Private/internal crawl URLs are explicitly allowed; keep this disabled outside controlled local testing."
-    );
+  if (usesDevelopmentHashSecret()) {
+    return warning("hash_secret", "Hash secret", "Using the development hash secret; set LODESTA_HASH_SECRET for deployed environments.");
   }
-  return ok("crawl_url_safety", "Crawl URL safety", "Crawler and render jobs block private/internal target URLs.");
+  return warning("hash_secret", "Hash secret", "Hash secret is not configured.");
 }
 
 function checkGooglePlacesConfig(): HealthCheck {

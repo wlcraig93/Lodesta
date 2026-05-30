@@ -281,6 +281,7 @@ export function recordFormSubmission(input: {
   siteId: string;
   formId: string;
   pageId?: string;
+  visitorId?: string;
   payload: Record<string, unknown>;
   metadata?: Record<string, string | number | boolean>;
   sourceUrl?: string;
@@ -292,6 +293,7 @@ export function recordFormSubmission(input: {
     siteId: input.siteId,
     formId: input.formId,
     pageId: input.pageId,
+    visitorId: input.visitorId,
     payload: input.payload,
     metadata: input.metadata,
     submittedAt: new Date().toISOString(),

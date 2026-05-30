@@ -63,6 +63,7 @@ create table form_submissions (
   site_id text references sites(id) on delete cascade,
   form_id text,
   page_id text,
+  visitor_id text,
   payload jsonb not null,
   metadata jsonb not null default '{}',
   submitted_at timestamptz not null default now(),
@@ -90,6 +91,7 @@ create table analytics_events (
   id text primary key,
   site_id text references sites(id) on delete cascade,
   session_id text not null,
+  visitor_id text,
   page_id text,
   event_type text not null,
   event jsonb not null,
@@ -267,12 +269,14 @@ create table operator_setting_audits (
 
 create index analytics_events_site_time_idx on analytics_events(site_id, occurred_at desc);
 create index analytics_events_site_event_time_idx on analytics_events(site_id, event_type, occurred_at desc);
+create index analytics_events_site_visitor_time_idx on analytics_events(site_id, visitor_id, occurred_at desc) where visitor_id is not null;
 create index sites_workspace_idx on sites(workspace_id);
 create unique index business_profiles_site_idx on business_profiles(site_id);
 create index site_assets_site_kind_idx on site_assets(site_id, kind);
 create index site_assets_site_rights_idx on site_assets(site_id, rights_status);
 create index form_submissions_site_time_idx on form_submissions(site_id, submitted_at desc);
 create index form_submissions_site_status_time_idx on form_submissions(site_id, status, submitted_at desc);
+create index form_submissions_site_visitor_time_idx on form_submissions(site_id, visitor_id, submitted_at desc) where visitor_id is not null;
 create index forms_site_idx on forms(site_id);
 create index site_versions_site_status_idx on site_versions(site_id, status);
 create index workflow_deliveries_site_time_idx on workflow_deliveries(site_id, created_at desc);

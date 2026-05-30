@@ -1,26 +1,19 @@
 "use client";
 
 import { useEffect } from "react";
+import { getSessionId, getSessionStartedAt, getVisitorId } from "./client-identity";
 
 type AnalyticsTrackerProps = {
   siteId: string;
   pageId?: string;
 };
 
-const sessionKey = "lodesta_session_id";
-const sessionStartedKey = "lodesta_session_started_at";
 const scrollDepthThresholds = [25, 50, 75, 90, 100];
-
-declare global {
-  interface Window {
-    __lodestaSessionId?: string;
-    __lodestaSessionStartedAt?: number;
-  }
-}
 
 export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
   useEffect(() => {
     const sessionId = getSessionId();
+    const visitorId = getVisitorId();
     const sessionStartedAt = getSessionStartedAt();
     const viewport = { width: window.innerWidth, height: window.innerHeight };
     const deviceType = getDeviceType(window.innerWidth);
@@ -155,7 +148,7 @@ export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
       const form = event.target instanceof Element ? event.target.closest<HTMLFormElement>("form") : null;
       if (!form || form.dataset.formStarted === "true") return;
       form.dataset.formStarted = "true";
-      enrichLeadForm(form, sessionId, sessionStartedAt, pageId, pageMetadata);
+      enrichLeadForm(form, sessionId, visitorId, sessionStartedAt, pageId, pageMetadata);
       sendEvent({
         siteId,
         sessionId,
@@ -174,7 +167,7 @@ export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
     const onSubmit = (event: SubmitEvent) => {
       const form = event.target instanceof HTMLFormElement ? event.target : null;
       if (!form) return;
-      enrichLeadForm(form, sessionId, sessionStartedAt, pageId, pageMetadata);
+      enrichLeadForm(form, sessionId, visitorId, sessionStartedAt, pageId, pageMetadata);
     };
 
     const recordScrollDepth = () => {
@@ -233,8 +226,10 @@ export function AnalyticsTracker({ siteId, pageId }: AnalyticsTrackerProps) {
 }
 
 function sendEvent(event: Record<string, unknown>) {
+  const visitorId = typeof window === "undefined" ? undefined : window.__lodestaVisitorId;
   const payload = JSON.stringify({
     timestamp: new Date().toISOString(),
+    ...(visitorId ? { visitorId } : {}),
     ...event
   });
 
@@ -250,49 +245,6 @@ function sendEvent(event: Record<string, unknown>) {
     body: payload,
     keepalive: true
   });
-}
-
-function getSessionId() {
-  if (window.__lodestaSessionId) return window.__lodestaSessionId;
-  const existing = safeStorage("session").getItem(sessionKey);
-  if (existing) {
-    window.__lodestaSessionId = existing;
-    return existing;
-  }
-  const created = crypto.randomUUID();
-  safeStorage("session").setItem(sessionKey, created);
-  window.__lodestaSessionId = created;
-  return created;
-}
-
-function getSessionStartedAt() {
-  if (window.__lodestaSessionStartedAt) return window.__lodestaSessionStartedAt;
-  const storage = safeStorage("session");
-  const existing = Number(storage.getItem(sessionStartedKey));
-  if (Number.isFinite(existing) && existing > 0) {
-    window.__lodestaSessionStartedAt = existing;
-    return existing;
-  }
-  const created = Date.now();
-  storage.setItem(sessionStartedKey, String(created));
-  window.__lodestaSessionStartedAt = created;
-  return created;
-}
-
-function safeStorage(kind: "local" | "session") {
-  try {
-    const storage = kind === "local" ? window.localStorage : window.sessionStorage;
-    if (storage) return storage;
-  } catch {
-    // Fall through to an in-memory fallback for restricted browser contexts.
-  }
-  const memory = new Map<string, string>();
-  return {
-    getItem: (key: string) => memory.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      memory.set(key, value);
-    }
-  };
 }
 
 function pageContextMetadata() {
@@ -378,11 +330,13 @@ function ensureHiddenInput(form: HTMLFormElement, name: string, value: string) {
 function enrichLeadForm(
   form: HTMLFormElement,
   sessionId: string,
+  visitorId: string | undefined,
   sessionStartedAt: number,
   pageId: string | undefined,
   pageMetadata: ReturnType<typeof pageContextMetadata>
 ) {
   ensureHiddenInput(form, "sessionId", sessionId);
+  if (visitorId) ensureHiddenInput(form, "visitorId", visitorId);
   ensureHiddenInput(form, "pageId", pageId ?? "unknown");
   ensureHiddenInput(form, "sourceUrl", window.location.href);
   ensureHiddenInput(form, "landingPath", pageMetadata.path);

@@ -1,0 +1,19 @@
+{
+  "checked_at_utc": "2026-05-30T06:09:37.115Z",
+  "candidate_count": 245395,
+  "first_name_count": 100364,
+  "surname_count": 162253,
+  "both_first_and_last_count": 17222,
+  "dns_counts": {
+    "delegated": 211558,
+    "possible": 24706,
+    "dns_error": 9131
+  },
+  "rdap_counts": {
+    "registered": 13935,
+    "available": 19902
+  },
+  "available_count": 19902,
+  "output": "/private/tmp/name_domain_search/available_name_dotcoms.csv",
+  "candidates": "/private/tmp/name_domain_search/candidate_name_domains.csv"
+}

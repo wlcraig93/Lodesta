@@ -365,6 +365,7 @@ export type ExperimentLearning = {
 export type AnalyticsEvent = {
   siteId: string;
   sessionId: string;
+  visitorId?: string;
   pageId?: string;
   eventType:
     | "pageview"
@@ -546,6 +547,7 @@ export type LeadSubmission = {
   siteId: string;
   formId: string;
   pageId?: string;
+  visitorId?: string;
   payload: Record<string, unknown>;
   metadata?: Record<string, string | number | boolean>;
   submittedAt: string;

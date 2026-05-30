@@ -16,6 +16,7 @@
     "install:browsers": "node --import tsx scripts/install-browsers.ts",
     "verify:deployment-config": "node --import tsx scripts/verify-deployment-config.ts",
     "verify:launch-boundaries": "node --import tsx scripts/verify-launch-boundaries.ts",
+    "verify:dev-crawl": "node --import tsx scripts/verify-dev-crawl.mjs",
     "verify:render-browser": "node --import tsx scripts/verify-render-browser.ts",
     "verify:stripe-webhook": "node --import tsx scripts/verify-stripe-webhook.ts",
     "verify:supabase": "node --import tsx scripts/verify-supabase.ts"

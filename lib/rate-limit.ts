@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
+import { hmacSha256Hex } from "./hash-secret";
 
 type RateLimitOptions = {
   bucket: string;
@@ -88,10 +89,9 @@ function rateLimitStore() {
 }
 
 function clientFingerprint(request: Request) {
-  const ip = clientIp(request);
+  const ip = clientIp(request).trim().toLowerCase();
   const userAgent = request.headers.get("user-agent") ?? "";
-  const salt = process.env.LODESTA_RATE_LIMIT_SALT || process.env.LODESTA_IP_HASH_SALT || "lodesta-dev-rate-limit";
-  return createHash("sha256").update(`${salt}\n${ip}\n${userAgent}`).digest("hex");
+  return hmacSha256Hex(`rate-limit-v1\n${ip}\n${userAgent}`);
 }
 
 function clientIp(request: Request) {

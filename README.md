@@ -103,13 +103,13 @@ Useful API smoke routes:
 
 Admin CLI:
 
-The local `127.0.0.1` crawl examples require the running app/worker process to be started with `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true`; keep that setting disabled in deployed environments.
+Crawl and render smoke tests target public URLs only. Use `npm run verify:dev-crawl` against the dev deployment when exercising end-to-end crawler behavior.
 
 ```bash
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- list-sites
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-site-from-url http://127.0.0.1:4330/sites/joes-pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- import-batch http://127.0.0.1:4330/sites/joes-pizza http://127.0.0.1:4330/sites/joes-pizza/menu
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-presence http://127.0.0.1:4330/sites/joes-pizza
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-site-from-url https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- import-batch https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza https://dev.lodesta.com/crawl-fixtures/<fixture-token>/menu
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-presence https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-audit site_joes_pizza
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-qa site_joes_pizza published
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- apply-safe-findings site_joes_pizza
@@ -143,16 +143,15 @@ Minimum Railway web service environment:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `LODESTA_HASH_SECRET`
 
 Optional launch integrations:
 
 - `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` for checkout and claim completion
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
-- `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true` only for controlled local testing against localhost/private targets; leave unset or `false` in deployed environments
+- `LODESTA_CRAWL_FIXTURE_TOKEN` for the protected dev-deployment crawler fixture used by `npm run verify:dev-crawl`
 - `RESEND_API_KEY` for lead notifications
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
-- `LODESTA_IP_HASH_SALT` for privacy-preserving daily lead IP hashes
-- `LODESTA_RATE_LIMIT_SALT` for public write rate-limit fingerprints
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
 - `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
 - `LODESTA_WORKER_ID` for long-running Railway worker identity
@@ -175,6 +174,7 @@ Browser render inspection:
 - The Railway web and worker configs install Chromium during build with `npm run install:browsers`.
 - Run `npm run verify:render-browser` locally after browser installation and before enabling high-volume intake or screenshot-dependent visual QA.
 - After deploy, run `LODESTA_API_URL=https://<deployed-app> LODESTA_ADMIN_TOKEN=<token> npm run cli -- health deep` and confirm `render_browser_readiness` is `ok`.
+- To smoke test public crawl/render behavior after deploy, run `LODESTA_API_URL=https://dev.lodesta.com LODESTA_ADMIN_TOKEN=<token> LODESTA_CRAWL_FIXTURE_TOKEN=<fixture-token> npm run verify:dev-crawl`.
 
 ## Architecture Defaults
 
@@ -218,9 +218,9 @@ The verifier disables Stripe and Cloudflare calls by default so it only tests da
 
 ## Auth
 
-Owner login uses Supabase Google OAuth and magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, enable the Google provider in Supabase, and configure Supabase redirect URLs to include `/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
+Owner login uses Supabase Google OAuth and magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, enable the Google provider in Supabase, and configure Supabase Auth URL Configuration so the Site URL is the deployed app origin, such as `https://dev.lodesta.com`, not `http://localhost:3000`. Add exact redirect URLs for every app origin that signs users in, such as `https://dev.lodesta.com/auth/callback` and `http://localhost:3000/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
 
-Operator/admin APIs are open only in local development when `LODESTA_ADMIN_TOKEN` is blank and `LODESTA_REQUIRE_AUTH` is not `true`. In deployed/production environments, set `LODESTA_ADMIN_TOKEN` for CLI bearer-token access to operator-only generation, jobs, site listing, preview token management, and cross-site exports; production route guards fail closed if neither a valid token nor the Supabase-authenticated user id in `LODESTA_ADMIN_USER_ID` is present. Admin-only pages such as `/` and `/outbound` use the same admin user-id setting. Owner-facing site APIs also accept the authenticated owner of a completed `claimed` site through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email after Stripe completion. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
+Operator/admin APIs are open only in local development when `LODESTA_ADMIN_TOKEN` is blank and `LODESTA_REQUIRE_AUTH` is not `true`. In deployed/production environments, set `LODESTA_ADMIN_TOKEN` for CLI bearer-token access to operator-only generation, jobs, site listing, preview token management, and cross-site exports; production route guards fail closed if neither a valid token nor the Supabase-authenticated user id in `LODESTA_ADMIN_USER_ID` is present. Admin-only pages such as `/dashboard` and `/outbound` use the same admin user-id setting. Owner-facing site APIs also accept the authenticated owner of a completed `claimed` site through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email after Stripe completion. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
 
 ## Billing And Domains
 
@@ -241,7 +241,7 @@ Form submissions are stored as JSON leads and then run through the site's config
 - `crm_placeholder`: records a skipped delivery so CRM destinations can be added without changing the lead model.
 
 Workflow delivery attempts are visible on the leads page and returned from `GET /api/leads?siteId=...`.
-Lead submissions also capture source URL, session id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a salted daily `ip_hash`. Analytics events are retained for longitudinal site performance history while the site/account is active.
+Lead submissions also capture source URL, session id, visitor id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a stable pseudonymous `v2` `ip_hash` derived with `LODESTA_HASH_SECRET`. Analytics events are retained for longitudinal site performance history while the site/account is active.
 
-Public write routes have in-process abuse limits with hashed client fingerprints. Defaults cover form submissions, analytics ingestion, experiment assignment, claim creation, site intake, presence assessment, and owner asset uploads; set `LODESTA_RATE_LIMIT_SALT` in deployed environments. Route-specific thresholds are code defaults, not deployment environment variables.
-URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are blocked by default to reduce SSRF risk; use `LODESTA_ALLOW_PRIVATE_CRAWL_URLS=true` only for intentional local fixture testing. Lead workflow webhooks always keep private/internal targets blocked.
+Public write routes have in-process abuse limits with hashed client fingerprints derived separately from `LODESTA_HASH_SECRET`. Defaults cover form submissions, analytics ingestion, experiment assignment, claim creation, site intake, presence assessment, and owner asset uploads. Route-specific thresholds are code defaults, not deployment environment variables.
+URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are always blocked to reduce SSRF risk. End-to-end crawler smoke tests use the protected public fixture on the dev deployment, and lead workflow webhooks also keep private/internal targets blocked.

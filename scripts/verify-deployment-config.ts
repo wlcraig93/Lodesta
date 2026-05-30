@@ -23,16 +23,26 @@ const supabaseRepositorySource = readFileSync("lib/supabase/repository.ts", "utf
 const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
 const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8");
 const cliSource = readFileSync("scripts/lodesta.mjs", "utf8");
+const devCrawlVerifierSource = readFileSync("scripts/verify-dev-crawl.mjs", "utf8");
 
 assert(packageJson.dependencies?.playwright, "playwright must be a runtime dependency for deployed render inspection.");
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
+assert(packageJson.scripts?.["verify:dev-crawl"], "package.json must expose npm run verify:dev-crawl.");
 assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
+assertIncludes(envExample, "LODESTA_CRAWL_FIXTURE_TOKEN=", ".env.example must document the protected crawl fixture token.");
+assertIncludes(envExample, "LODESTA_HASH_SECRET=", ".env.example must document the canonical hash secret.");
 assertRemovedEnv(
   envExample,
-  ["LODESTA_PLATFORM_HOSTS", "LODESTA_ANALYTICS_RETENTION_DAYS"],
-  ".env.example must not expose removed host-list or analytics-retention configuration."
+  [
+    "LODESTA_PLATFORM_HOSTS",
+    "LODESTA_ANALYTICS_RETENTION_DAYS",
+    "LODESTA_ALLOW_PRIVATE_CRAWL_URLS",
+    "LODESTA_IP_HASH_SALT",
+    "LODESTA_RATE_LIMIT_SALT"
+  ],
+  ".env.example must not expose removed host-list, analytics-retention, private-crawl, or legacy hash-salt configuration."
 );
 assertRemovedEnv(
   envExample,
@@ -66,6 +76,7 @@ assertIncludes(
   "site_id text references sites(id) on delete cascade",
   "Supabase analytics events must remain linked to site deletion through cascading site_id foreign keys."
 );
+assertIncludes(schemaSql, "visitor_id text", "Supabase lead and analytics tables must persist pseudonymous visitor ids.");
 assertIncludes(analyticsRoute, "siteId: z.string().min(1)", "Analytics ingest must require siteId for site-scoped retention and cascade semantics.");
 assert(
   !existsSync("app/api/analytics/retention/route.ts"),
@@ -134,6 +145,9 @@ assertIncludes(
   "Stale exhausted running job was not failed",
   "Supabase verifier must assert stale exhausted jobs fail and unlock."
 );
+assertIncludes(devCrawlVerifierSource, "LODESTA_ADMIN_TOKEN", "Dev crawl verifier must require admin API authorization.");
+assertIncludes(devCrawlVerifierSource, "LODESTA_CRAWL_FIXTURE_TOKEN", "Dev crawl verifier must target the protected public fixture by token.");
+assertIncludes(devCrawlVerifierSource, "Deployment/network failure", "Dev crawl verifier must distinguish deployment/network failures.");
 assertIncludes(
   stripeWebhookRoute,
   "siteId: session.metadata?.site_id",

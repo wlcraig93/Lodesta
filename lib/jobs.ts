@@ -10,6 +10,7 @@ import type {
   OptimizationFinding,
   SiteBundle
 } from "./models";
+import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput } from "./intake";
 import { runAudit } from "./audit";
@@ -32,7 +33,10 @@ type JobsFile = {
 
 export type JobExecutionContext = {
   workerId?: string;
-  createAndStoreSite?: (input: { url?: string; prompt?: string }) => Promise<SiteBundle>;
+  createAndStoreSite?: (
+    input: { url?: string; prompt?: string },
+    options?: { telemetry?: AgentTelemetryRecorder }
+  ) => Promise<SiteBundle>;
   createPreviewToken?: (input: { siteId: string; expiresAt?: string }) => Promise<{ token: string } | null>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
   runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
@@ -40,6 +44,8 @@ export type JobExecutionContext = {
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
   listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
   listFormSubmissions?: (siteId?: string) => Promise<LeadSubmission[]>;
+  startSiteGenerationTelemetry?: (input: { url?: string; prompt?: string }) => Promise<AgentTelemetryRecorder>;
+  cleanupAgentTelemetry?: (input?: { olderThanDays?: number; limit?: number }) => Promise<{ deleted: number; cutoff: string }>;
 };
 
 export async function enqueueJob(kind: JobKind, payload: Record<string, unknown>) {
@@ -133,9 +139,28 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         url: typeof job.payload.url === "string" ? job.payload.url : undefined,
         prompt: typeof job.payload.prompt === "string" ? job.payload.prompt : undefined
       };
-      const bundle = context?.createAndStoreSite
-        ? await context.createAndStoreSite(input)
-        : createSiteFromInput(await prepareIntakeInput(input));
+      const telemetry = await context?.startSiteGenerationTelemetry?.(input);
+      let bundle: SiteBundle;
+      try {
+        bundle = context?.createAndStoreSite
+          ? await context.createAndStoreSite(input, { telemetry })
+          : createSiteFromInput(await prepareIntakeInput(input, { telemetry }));
+        await telemetry?.updateRun({
+          targetType: "site",
+          targetId: bundle.businessProfile.siteId,
+          outputSummary: `${bundle.businessProfile.name} (${bundle.siteModel.slug})`,
+          metadata: {
+            targetName: bundle.businessProfile.name,
+            slug: bundle.siteModel.slug,
+            pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
+            vertical: bundle.businessProfile.vertical
+          }
+        });
+        await telemetry?.completeRun();
+      } catch (error) {
+        await telemetry?.failRun(error);
+        throw error;
+      }
       return {
         siteId: bundle.businessProfile.siteId,
         slug: bundle.siteModel.slug,
@@ -143,6 +168,17 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
         findings: bundle.optimizationFindings.length
       };
+    }
+    case "agent_telemetry_cleanup": {
+      if (!context?.cleanupAgentTelemetry) {
+        return {
+          deleted: 0,
+          skipped: "Telemetry cleanup requires repository-backed job context."
+        };
+      }
+      const olderThanDays = typeof job.payload.olderThanDays === "number" ? job.payload.olderThanDays : 30;
+      const limit = typeof job.payload.limit === "number" ? job.payload.limit : 1000;
+      return context.cleanupAgentTelemetry({ olderThanDays, limit });
     }
     case "import_batch": {
       if (!context?.createAndStoreSite) {
@@ -155,14 +191,41 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       const results = [];
 
       for (const url of urls) {
+        const telemetry = await context.startSiteGenerationTelemetry?.({ url, prompt });
         try {
-          const bundle = await context.createAndStoreSite({ url, prompt });
+          const bundle = await context.createAndStoreSite({ url, prompt }, { telemetry });
+          await telemetry?.updateRun({
+            targetType: "site",
+            targetId: bundle.businessProfile.siteId,
+            outputSummary: `${bundle.businessProfile.name} (${bundle.siteModel.slug})`,
+            metadata: {
+              targetName: bundle.businessProfile.name,
+              slug: bundle.siteModel.slug,
+              pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
+              vertical: bundle.businessProfile.vertical,
+              importBatchJobId: job.id
+            }
+          });
           const preview = createPreviews && context.createPreviewToken
-            ? await context.createPreviewToken({
-                siteId: bundle.businessProfile.siteId,
-                expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
-              })
+            ? telemetry
+              ? await telemetry.withSpan(
+                  {
+                    spanType: "preview_token",
+                    name: "Create preview token",
+                    inputJson: { siteId: bundle.businessProfile.siteId }
+                  },
+                  () =>
+                    context.createPreviewToken!({
+                      siteId: bundle.businessProfile.siteId,
+                      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
+                    })
+                )
+              : await context.createPreviewToken({
+                  siteId: bundle.businessProfile.siteId,
+                  expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
+                })
             : null;
+          await telemetry?.completeRun();
           results.push({
             ok: true,
             url,
@@ -173,6 +236,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             previewToken: preview?.token
           });
         } catch (error) {
+          await telemetry?.failRun(error);
           results.push({
             ok: false,
             url,

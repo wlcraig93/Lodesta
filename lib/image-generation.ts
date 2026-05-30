@@ -1,5 +1,6 @@
 import { storeGeneratedAssetBytes } from "./asset-storage";
 import type { CreativeMockupArtifact, DesignDirection, SiteAsset, SiteBundle } from "./models";
+import { sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
 import {
   defaultOpenAiRuntimeSettings,
   getOpenAiRuntimeSettings,
@@ -8,6 +9,8 @@ import {
 
 type MockupGenerationInput = {
   bundle: SiteBundle;
+  telemetry?: AgentTelemetryRecorder;
+  spanId?: string;
 };
 
 type ImageGenerationConfig = {
@@ -19,7 +22,9 @@ type ImageGenerationConfig = {
 };
 
 export async function createOpenAiMockupArtifacts({
-  bundle
+  bundle,
+  telemetry,
+  spanId
 }: MockupGenerationInput): Promise<CreativeMockupArtifact[]> {
   const config = await imageConfig();
   const directions = mockupDirections(bundle, config.limit);
@@ -37,7 +42,7 @@ export async function createOpenAiMockupArtifacts({
 
   const artifacts: CreativeMockupArtifact[] = [];
   for (const direction of directions) {
-    artifacts.push(await generateDirectionMockup({ apiKey, bundle, direction, config }));
+    artifacts.push(await generateDirectionMockup({ apiKey, bundle, direction, config, telemetry, spanId }));
   }
   return artifacts;
 }
@@ -107,12 +112,16 @@ async function generateDirectionMockup({
   apiKey,
   bundle,
   direction,
-  config
+  config,
+  telemetry,
+  spanId
 }: {
   apiKey: string;
   bundle: SiteBundle;
   direction: DesignDirection;
   config: ImageGenerationConfig;
+  telemetry?: AgentTelemetryRecorder;
+  spanId?: string;
 }): Promise<CreativeMockupArtifact> {
   const generatedAt = new Date().toISOString();
   const prompt = buildMockupPrompt(bundle, direction);
@@ -131,6 +140,17 @@ async function generateDirectionMockup({
     generatedAt
   };
 
+  const requestBody = {
+    model: config.model,
+    prompt,
+    n: 1,
+    size: config.size,
+    quality: config.quality,
+    output_format: config.outputFormat,
+    moderation: "auto"
+  };
+  const startedAt = new Date().toISOString();
+  let recorded = false;
   try {
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
@@ -138,18 +158,26 @@ async function generateDirectionMockup({
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        model: config.model,
-        prompt,
-        n: 1,
-        size: config.size,
-        quality: config.quality,
-        output_format: config.outputFormat,
-        moderation: "auto"
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const payload = (await response.json().catch(() => null)) as unknown;
+    const endedAt = new Date().toISOString();
+    await telemetry?.recordModelCall({
+      spanId,
+      provider: "openai",
+      model: config.model,
+      endpoint: "/v1/images/generations",
+      operation: "mockup_generation",
+      status: response.ok ? "completed" : "failed",
+      requestJson: sanitizeTelemetryPayload(requestBody),
+      responseJson: sanitizeTelemetryPayload(payload),
+      errorMessage: response.ok ? undefined : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+      startedAt,
+      endedAt,
+      durationMs: elapsedMs(startedAt, endedAt)
+    });
+    recorded = true;
     if (!response.ok) {
       throw new Error(openAiErrorMessage(payload) ?? `OpenAI image generation failed with status ${response.status}`);
     }
@@ -187,6 +215,22 @@ async function generateDirectionMockup({
       ]
     };
   } catch (error) {
+    if (!recorded) {
+      const endedAt = new Date().toISOString();
+      await telemetry?.recordModelCall({
+        spanId,
+        provider: "openai",
+        model: config.model,
+        endpoint: "/v1/images/generations",
+        operation: "mockup_generation",
+        status: "failed",
+        requestJson: sanitizeTelemetryPayload(requestBody),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        startedAt,
+        endedAt,
+        durationMs: elapsedMs(startedAt, endedAt)
+      });
+    }
     return {
       ...base,
       status: "failed",
@@ -196,6 +240,10 @@ async function generateDirectionMockup({
       ]
     };
   }
+}
+
+function elapsedMs(startedAt: string, endedAt: string) {
+  return Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
 }
 
 function buildMockupPrompt(bundle: SiteBundle, direction: DesignDirection) {
@@ -210,8 +258,9 @@ function buildMockupPrompt(bundle: SiteBundle, direction: DesignDirection) {
     brand?.colorSignals.length ? `Use color inspiration from: ${brand.colorSignals.slice(0, 4).join(", ")}.` : "",
     direction.mockupPrompt,
     "Show clear hero hierarchy, primary CTA, trust signals, service proof, and contact path.",
-    "Use generated placeholder imagery and generic interface text; do not copy existing marketing text, photos, logos, reviews, prices, awards, credentials, or regulated claims.",
-    "Make it visually useful for compiling into structured sections while keeping all business facts verification-gated."
+    "You may use public source brand, copy, and asset cues for this internal planning preview.",
+    "Do not invent reviews, prices, awards, credentials, regulated claims, or private access details.",
+    "Make it visually useful for compiling into structured sections while keeping provenance for business facts."
   ]
     .filter(Boolean)
     .join("\n");

@@ -4,6 +4,7 @@ import type { CrawlAssessment } from "./crawler";
 import type { RenderInspectionResult } from "./models";
 import type { GenerationPlanningOverride } from "./generation-planning";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
+import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
 
 type OpenAiGenerationInput = {
   bundle: SiteBundle;
@@ -11,6 +12,8 @@ type OpenAiGenerationInput = {
   prompt?: string;
   crawl?: CrawlAssessment;
   renderInspection?: RenderInspectionResult;
+  telemetry?: AgentTelemetryRecorder;
+  spanId?: string;
 };
 
 const sectionTypes = [
@@ -79,8 +82,8 @@ export async function createOpenAiGenerationPlanning(
             text: [
               "You generate SMB website planning data for Lodesta.",
               "Return only schema-valid JSON through Structured Outputs.",
-              "Use source facts and measured findings, but do not copy existing marketing copy.",
-              "Treat scraped assets as reference-only before claim.",
+              "Use public source facts, copy, brand cues, and asset references when useful for internal generated previews.",
+              "Keep provenance and avoid inventing facts not present in source material or operator guidance.",
               "Do not invent credentials, offers, prices, years in business, reviews, awards, or legal/medical claims.",
               "Every direction must be compilable into structured website sections and reversible owner-approved drafts."
             ].join(" ")
@@ -108,6 +111,8 @@ export async function createOpenAiGenerationPlanning(
     }
   };
 
+  const startedAt = new Date().toISOString();
+  let recorded = false;
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -119,6 +124,23 @@ export async function createOpenAiGenerationPlanning(
     });
 
     const payload = (await response.json().catch(() => null)) as unknown;
+    const endedAt = new Date().toISOString();
+    await input.telemetry?.recordModelCall({
+      spanId: input.spanId,
+      provider: "openai",
+      model: body.model,
+      endpoint: "/v1/responses",
+      operation: "generation_planning",
+      status: response.ok ? "completed" : "failed",
+      requestJson: sanitizeTelemetryPayload(body),
+      responseJson: sanitizeTelemetryPayload(payload),
+      ...extractOpenAiUsage(payload),
+      errorMessage: response.ok ? undefined : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+      startedAt,
+      endedAt,
+      durationMs: elapsedMs(startedAt, endedAt)
+    });
+    recorded = true;
     if (!response.ok) {
       throw new Error(openAiErrorMessage(payload) ?? `OpenAI generation planning failed with status ${response.status}`);
     }
@@ -132,6 +154,22 @@ export async function createOpenAiGenerationPlanning(
       ...parsed
     };
   } catch (error) {
+    if (!recorded) {
+      const endedAt = new Date().toISOString();
+      await input.telemetry?.recordModelCall({
+        spanId: input.spanId,
+        provider: "openai",
+        model: body.model,
+        endpoint: "/v1/responses",
+        operation: "generation_planning",
+        status: "failed",
+        requestJson: sanitizeTelemetryPayload(body),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        startedAt,
+        endedAt,
+        durationMs: elapsedMs(startedAt, endedAt)
+      });
+    }
     console.warn(
       `OpenAI generation planning unavailable; using deterministic fallback. ${
         error instanceof Error ? error.message : String(error)
@@ -139,6 +177,10 @@ export async function createOpenAiGenerationPlanning(
     );
     return undefined;
   }
+}
+
+function elapsedMs(startedAt: string, endedAt: string) {
+  return Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
 }
 
 function makePlanningContext({ bundle, sourceUrl, prompt, crawl, renderInspection }: OpenAiGenerationInput) {
@@ -149,7 +191,7 @@ function makePlanningContext({ bundle, sourceUrl, prompt, crawl, renderInspectio
       market: "US SMB launch",
       renderer: "structured multi-tenant Next.js renderer",
       customerEditing: "curated controls only",
-      legalBoundary: "pre-claim previews use facts and licensed/generated/placeholders, not copied photos/logos/copy"
+      sourceMaterialPolicy: "internal previews may use public customer website material and assets with provenance"
     },
     sourceUrl,
     prompt,

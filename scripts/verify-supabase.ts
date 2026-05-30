@@ -33,6 +33,7 @@ if (!liveIntegrations) {
 const checks: CheckResult[] = [];
 let createdSiteId: string | undefined;
 const createdJobIds = new Set<string>();
+const createdAgentRunIds = new Set<string>();
 let createdCampaignId: string | undefined;
 let uploadedStoragePath: string | undefined;
 
@@ -46,6 +47,7 @@ async function main() {
   await requireSupabase(supabase.from("operator_settings").select("key", { count: "exact", head: true }), "Query operator settings");
   await requireSupabase(supabase.from("operator_setting_audits").select("id", { count: "exact", head: true }), "Query operator setting audits");
   checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
+  await verifyAgentTelemetry(supabase);
   await verifyAssetStorage(supabase);
   if (storageOnly) {
     process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
@@ -436,6 +438,89 @@ async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   if (createdJobIds.size) {
     await requireSupabase(supabase.from("jobs").delete().in("id", Array.from(createdJobIds)), "Cleanup jobs");
   }
+  if (createdAgentRunIds.size) {
+    await requireSupabase(supabase.from("agent_runs").delete().in("id", Array.from(createdAgentRunIds)), "Cleanup agent telemetry");
+  }
+}
+
+async function verifyAgentTelemetry(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  await requireSupabase(supabase.from("agent_runs").select("id", { count: "exact", head: true }), "Query agent runs");
+  await requireSupabase(supabase.from("agent_run_spans").select("id", { count: "exact", head: true }), "Query agent run spans");
+  await requireSupabase(supabase.from("agent_model_calls").select("id", { count: "exact", head: true }), "Query agent model calls");
+
+  const run = await supabaseRepository.createAgentRun({
+    runType: "site_generation",
+    agentType: "site_generator",
+    source: "api",
+    sourceUrl: `https://verify-${runId}.example`,
+    sourceHost: `verify-${runId}.example`,
+    inputSummary: "Telemetry verifier",
+    inputJson: { url: `https://verify-${runId}.example`, email: `verify-${runId}@example.com` }
+  });
+  assert(run?.id, "Agent run was not created.");
+  createdAgentRunIds.add(run.id);
+
+  const span = await supabaseRepository.createAgentRunSpan({
+    runId: run.id,
+    spanType: "crawl",
+    name: "Verifier crawl",
+    inputJson: { url: run.sourceUrl },
+    outputJson: { fetched: true }
+  });
+  assert(span?.id, "Agent run span was not created.");
+
+  await supabaseRepository.recordAgentModelCall({
+    runId: run.id,
+    spanId: span.id,
+    provider: "openai",
+    model: "verifier-model",
+    endpoint: "/v1/responses",
+    operation: "verify",
+    status: "completed",
+    inputTokens: 7,
+    outputTokens: 11,
+    cacheReadTokens: 3,
+    startedAt: new Date().toISOString(),
+    endedAt: new Date().toISOString(),
+    durationMs: 1
+  });
+  await supabaseRepository.updateAgentRun({
+    runId: run.id,
+    status: "completed",
+    targetType: "site",
+    targetId: `verify-target-${runId}`,
+    notes: "Verifier note",
+    tags: ["verify"],
+    endedAt: new Date().toISOString()
+  });
+  const detail = await supabaseRepository.getAgentRunDetail(run.id);
+  assert(detail?.spans.length === 1, "Agent run detail did not include the created span.");
+  assert(detail.modelCalls.length === 1, "Agent run detail did not include the created model call.");
+  assert(detail.tokenTotals.totalTokens === 21, "Agent run token totals were not computed from model calls.");
+
+  const oldRunId = `verify_old_agent_${runId}`;
+  createdAgentRunIds.add(oldRunId);
+  await requireSupabase(
+    supabase.from("agent_runs").insert({
+      id: oldRunId,
+      run_type: "site_generation",
+      agent_type: "site_generator",
+      status: "completed",
+      source: "job",
+      input_summary: "Old verifier telemetry",
+      tags: [],
+      metadata: {},
+      started_at: "2020-01-01T00:00:00.000Z",
+      ended_at: "2020-01-01T00:00:01.000Z",
+      created_at: "2020-01-01T00:00:00.000Z",
+      updated_at: "2020-01-01T00:00:01.000Z"
+    }),
+    "Insert old agent telemetry"
+  );
+  const cleanup = await supabaseRepository.cleanupAgentTelemetry({ olderThanDays: 30, limit: 1 });
+  assert(cleanup.deleted === 1, "Agent telemetry cleanup did not delete one bounded old run.");
+  createdAgentRunIds.delete(oldRunId);
+  checks.push({ name: "agent_telemetry", ok: true, detail: `Created run ${run.id} and verified bounded cleanup.` });
 }
 
 async function verifyAssetStorage(supabase: ReturnType<typeof getSupabaseAdminClient>) {

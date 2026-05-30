@@ -1538,8 +1538,8 @@ function buildTechnicalNotes(crawl?: CrawlAssessment) {
 function buildBrandNotes(crawl?: CrawlAssessment) {
   if (!crawl) return ["Generated mockups should guide creative direction, then compile into structured sections."];
   return [
-    `${crawl.assetReferences.length} website asset references were captured as reference-only inputs, not copied into generated preview content.`,
-    "Generated mockups should preserve recognizable brand cues while using licensed, generated, or customer-granted assets."
+    `${crawl.assetReferences.length} website asset references were captured as public source inputs for internal preview context.`,
+    "Generated mockups should preserve recognizable brand cues while retaining provenance for source material."
   ];
 }
 

@@ -1,4 +1,11 @@
 import type {
+  AgentModelCallRecord,
+  AgentRunDetail,
+  AgentRunRecord,
+  AgentRunSource,
+  AgentRunSpanRecord,
+  AgentRunStatus,
+  AgentRunTokenTotals,
   AnalyticsEvent,
   BusinessProfile,
   ClaimRecord,
@@ -25,10 +32,17 @@ import type {
 import type {
   CreateClaimInput,
   CompleteClaimCheckoutInput,
+  CreateAgentRunInput,
+  CreateAgentRunSpanInput,
   CreateSiteInput,
+  ListAgentRunsFilter,
+  ListAgentRunsResult,
   RecordSubmissionInput,
+  RecordAgentModelCallInput,
   RegisterDomainInput,
   LodestaRepository,
+  UpdateAgentRunInput,
+  UpdateAgentRunSpanInput,
   UpdateSectionInput
 } from "../repository";
 import { runAudit } from "../audit";
@@ -61,6 +75,7 @@ import { sanitizeAnalyticsMetadata } from "../privacy";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
+import { startSiteGenerationTelemetry } from "../agent-telemetry";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -304,6 +319,72 @@ type PreviewTokenRow = {
   created_at: string;
 };
 
+type AgentRunRow = {
+  id: string;
+  run_type: string;
+  agent_type: string;
+  status: AgentRunStatus;
+  actor_type: string | null;
+  actor_id: string | null;
+  source: AgentRunSource;
+  source_url: string | null;
+  source_host: string | null;
+  target_type: string | null;
+  target_id: string | null;
+  input_summary: string | null;
+  output_summary: string | null;
+  input_json: unknown;
+  output_json: unknown;
+  metadata: unknown;
+  tags: string[];
+  notes: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type AgentRunSpanRow = {
+  id: string;
+  run_id: string;
+  parent_span_id: string | null;
+  span_type: string;
+  name: string;
+  status: AgentRunStatus;
+  input_json: unknown;
+  output_json: unknown;
+  metadata: unknown;
+  artifact_refs: unknown;
+  error_message: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number | null;
+};
+
+type AgentModelCallRow = {
+  id: string;
+  run_id: string;
+  span_id: string | null;
+  provider: string;
+  model: string;
+  endpoint: string;
+  operation: string;
+  status: AgentRunStatus;
+  request_json: unknown;
+  response_json: unknown;
+  usage_json: unknown;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_creation_tokens: number | null;
+  cache_read_tokens: number | null;
+  error_message: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number | null;
+};
+
 export const supabaseRepository: LodestaRepository = {
   async listSiteBundles() {
     const supabase = getSupabaseAdminClient();
@@ -332,9 +413,9 @@ export const supabaseRepository: LodestaRepository = {
     return row ? hydrateBundle(row) : null;
   },
 
-  async createAndStoreSite(input) {
+  async createAndStoreSite(input, options) {
     const bundle = createSiteFromInput({
-      ...(await prepareIntakeInput(input)),
+      ...(await prepareIntakeInput(input, { telemetry: options?.telemetry })),
       experimentLearnings: await this.listExperimentLearnings({ status: "active" })
     });
     const existingRows = await requireData<Array<{ slug: string }>>(
@@ -342,7 +423,30 @@ export const supabaseRepository: LodestaRepository = {
       "Load existing slugs"
     );
     applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
-    await persistBundle(bundle);
+    const persistenceSpan = await options?.telemetry?.startSpan({
+      spanType: "persistence",
+      name: "Persist generated site",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        slug: bundle.siteModel.slug,
+        businessName: bundle.businessProfile.name
+      }
+    });
+    try {
+      await persistBundle(bundle);
+      await persistenceSpan?.end({
+        outputJson: {
+          siteId: bundle.businessProfile.siteId,
+          slug: bundle.siteModel.slug,
+          versions: bundle.siteModel.versions.length,
+          forms: bundle.extensionModel.forms.length,
+          findings: bundle.optimizationFindings.length
+        }
+      });
+    } catch (error) {
+      await persistenceSpan?.fail(error);
+      throw error;
+    }
     return bundle;
   },
 
@@ -1080,6 +1184,215 @@ export const supabaseRepository: LodestaRepository = {
     return summarizeOutbound(campaigns, prospects, events, campaignId);
   },
 
+  async createAgentRun(input) {
+    const now = new Date().toISOString();
+    const row = await requireData<AgentRunRow>(
+      getSupabaseAdminClient()
+        .from("agent_runs")
+        .insert({
+          id: crypto.randomUUID(),
+          run_type: input.runType,
+          agent_type: input.agentType,
+          status: input.status ?? "running",
+          actor_type: input.actorType,
+          actor_id: input.actorId,
+          source: input.source,
+          source_url: input.sourceUrl,
+          source_host: input.sourceHost,
+          target_type: input.targetType,
+          target_id: input.targetId,
+          input_summary: input.inputSummary,
+          output_summary: input.outputSummary,
+          input_json: input.inputJson,
+          output_json: input.outputJson,
+          metadata: input.metadata ?? {},
+          tags: input.tags ?? [],
+          notes: input.notes,
+          error_code: input.errorCode,
+          error_message: input.errorMessage,
+          started_at: input.startedAt ?? now,
+          ended_at: input.endedAt,
+          created_at: now,
+          updated_at: now
+        })
+        .select("*")
+        .single(),
+      "Create agent run"
+    );
+    return rowToAgentRun(row);
+  },
+
+  async updateAgentRun(input) {
+    const patch = stripUndefined({
+      status: input.status,
+      target_type: input.targetType,
+      target_id: input.targetId,
+      output_summary: input.outputSummary,
+      output_json: input.outputJson,
+      metadata: input.metadata,
+      tags: input.tags,
+      notes: input.notes,
+      error_code: input.errorCode,
+      error_message: input.errorMessage,
+      ended_at: input.endedAt,
+      updated_at: new Date().toISOString()
+    });
+    const row = await requireMaybe<AgentRunRow>(
+      getSupabaseAdminClient().from("agent_runs").update(patch).eq("id", input.runId).select("*").maybeSingle(),
+      "Update agent run"
+    );
+    return row ? rowToAgentRun(row) : null;
+  },
+
+  async createAgentRunSpan(input) {
+    const row = await requireData<AgentRunSpanRow>(
+      getSupabaseAdminClient()
+        .from("agent_run_spans")
+        .insert({
+          id: crypto.randomUUID(),
+          run_id: input.runId,
+          parent_span_id: input.parentSpanId,
+          span_type: input.spanType,
+          name: input.name,
+          status: input.status ?? "running",
+          input_json: input.inputJson,
+          output_json: input.outputJson,
+          metadata: input.metadata ?? {},
+          artifact_refs: input.artifactRefs ?? {},
+          error_message: input.errorMessage,
+          started_at: input.startedAt ?? new Date().toISOString(),
+          ended_at: input.endedAt,
+          duration_ms: input.durationMs
+        })
+        .select("*")
+        .single(),
+      "Create agent run span"
+    );
+    return rowToAgentRunSpan(row);
+  },
+
+  async updateAgentRunSpan(input) {
+    const row = await requireMaybe<AgentRunSpanRow>(
+      getSupabaseAdminClient()
+        .from("agent_run_spans")
+        .update(
+          stripUndefined({
+            status: input.status,
+            output_json: input.outputJson,
+            metadata: input.metadata,
+            artifact_refs: input.artifactRefs,
+            error_message: input.errorMessage,
+            ended_at: input.endedAt,
+            duration_ms: input.durationMs
+          })
+        )
+        .eq("id", input.spanId)
+        .select("*")
+        .maybeSingle(),
+      "Update agent run span"
+    );
+    return row ? rowToAgentRunSpan(row) : null;
+  },
+
+  async recordAgentModelCall(input) {
+    const row = await requireData<AgentModelCallRow>(
+      getSupabaseAdminClient()
+        .from("agent_model_calls")
+        .insert({
+          id: crypto.randomUUID(),
+          run_id: input.runId,
+          span_id: input.spanId,
+          provider: input.provider,
+          model: input.model,
+          endpoint: input.endpoint,
+          operation: input.operation,
+          status: input.status,
+          request_json: input.requestJson,
+          response_json: input.responseJson,
+          usage_json: input.usageJson,
+          input_tokens: input.inputTokens,
+          output_tokens: input.outputTokens,
+          cache_creation_tokens: input.cacheCreationTokens,
+          cache_read_tokens: input.cacheReadTokens,
+          error_message: input.errorMessage,
+          started_at: input.startedAt ?? new Date().toISOString(),
+          ended_at: input.endedAt,
+          duration_ms: input.durationMs
+        })
+        .select("*")
+        .single(),
+      "Record agent model call"
+    );
+    return rowToAgentModelCall(row);
+  },
+
+  async listAgentRuns(filter = {}) {
+    const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
+    const offset = Math.max(0, filter.offset ?? 0);
+    let query = getSupabaseAdminClient()
+      .from("agent_runs")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+    query = applyAgentRunFilters(query, filter);
+    const response = await query;
+    if (response.error) throw new Error(`List agent runs: ${response.error.message}`);
+    const rows = ((response.data ?? []) as AgentRunRow[]).map(rowToAgentRun);
+    const runs = await attachModelCallTotals(rows);
+    return { runs, total: response.count ?? runs.length };
+  },
+
+  async getAgentRunDetail(runId) {
+    const supabase = getSupabaseAdminClient();
+    const [runRow, spanRows, modelRows] = await Promise.all([
+      requireMaybe<AgentRunRow>(supabase.from("agent_runs").select("*").eq("id", runId).maybeSingle(), "Get agent run"),
+      requireData<AgentRunSpanRow[]>(
+        supabase.from("agent_run_spans").select("*").eq("run_id", runId).order("started_at", { ascending: true }),
+        "List agent run spans"
+      ),
+      requireData<AgentModelCallRow[]>(
+        supabase.from("agent_model_calls").select("*").eq("run_id", runId).order("started_at", { ascending: true }),
+        "List agent model calls"
+      )
+    ]);
+    if (!runRow) return null;
+    const modelCalls = modelRows.map(rowToAgentModelCall);
+    const tokenTotals = totalModelCallTokens(modelCalls);
+    return {
+      run: {
+        ...rowToAgentRun(runRow),
+        tokenTotals,
+        modelCallCount: modelCalls.length
+      },
+      spans: spanRows.map(rowToAgentRunSpan),
+      modelCalls,
+      tokenTotals
+    };
+  },
+
+  async updateAgentRunNotes(input) {
+    return this.updateAgentRun({
+      runId: input.runId,
+      notes: input.notes ?? null,
+      tags: input.tags
+    });
+  },
+
+  async cleanupAgentTelemetry(input = {}) {
+    const olderThanDays = Math.max(1, Math.min(input.olderThanDays ?? 30, 3650));
+    const limit = Math.max(1, Math.min(input.limit ?? 1000, 1000));
+    const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+    const supabase = getSupabaseAdminClient();
+    const rows = await requireData<Array<{ id: string }>>(
+      supabase.from("agent_runs").select("id").lt("created_at", cutoff).order("created_at").limit(limit),
+      "Select old agent telemetry runs"
+    );
+    const ids = rows.map((row) => row.id);
+    if (!ids.length) return { deleted: 0, cutoff };
+    await requireSuccess(supabase.from("agent_runs").delete().in("id", ids), "Delete old agent telemetry runs");
+    return { deleted: ids.length, cutoff };
+  },
+
   async enqueueJob(kind, payload) {
     const now = new Date().toISOString();
     const row = await requireData<JobRow>(
@@ -1135,14 +1448,24 @@ export const supabaseRepository: LodestaRepository = {
     try {
       const jobContext: JobExecutionContext = {
         workerId,
-        createAndStoreSite: (input) => this.createAndStoreSite(input),
+        createAndStoreSite: (input, options) => this.createAndStoreSite(input, options),
         createPreviewToken: (input) => this.createPreviewToken(input),
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
         runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
         analyticsSummary: (siteId) => this.analyticsSummary(siteId),
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
         listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
-        listFormSubmissions: (siteId) => this.listFormSubmissions(siteId)
+        listFormSubmissions: (siteId) => this.listFormSubmissions(siteId),
+        startSiteGenerationTelemetry: (input) =>
+          startSiteGenerationTelemetry(this, {
+            ...input,
+            source: "job",
+            metadata: {
+              jobId: row.id,
+              workerId
+            }
+          }),
+        cleanupAgentTelemetry: (input) => this.cleanupAgentTelemetry(input)
       };
       const result = await executeJob(rowToJob(row), jobContext);
       const completedAt = new Date().toISOString();
@@ -1792,6 +2115,165 @@ function rowToJob(row: JobRow): JobRecord {
     startedAt: row.started_at ?? undefined,
     completedAt: row.completed_at ?? undefined
   };
+}
+
+function rowToAgentRun(row: AgentRunRow): AgentRunRecord {
+  const metadata = asRecord(row.metadata);
+  return {
+    id: row.id,
+    runType: row.run_type,
+    agentType: row.agent_type,
+    status: row.status,
+    actorType: row.actor_type ?? undefined,
+    actorId: row.actor_id ?? undefined,
+    source: row.source,
+    sourceUrl: row.source_url ?? undefined,
+    sourceHost: row.source_host ?? undefined,
+    targetType: row.target_type ?? undefined,
+    targetId: row.target_id ?? undefined,
+    inputSummary: row.input_summary ?? undefined,
+    outputSummary: row.output_summary ?? undefined,
+    inputJson: row.input_json ? asRecord(row.input_json) : undefined,
+    outputJson: row.output_json ? asRecord(row.output_json) : undefined,
+    metadata,
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    notes: row.notes ?? undefined,
+    errorCode: row.error_code ?? undefined,
+    errorMessage: row.error_message ?? undefined,
+    startedAt: row.started_at,
+    endedAt: row.ended_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    targetName: typeof metadata.targetName === "string" ? metadata.targetName : undefined,
+    targetSlug: typeof metadata.slug === "string" ? metadata.slug : undefined
+  };
+}
+
+function rowToAgentRunSpan(row: AgentRunSpanRow): AgentRunSpanRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    parentSpanId: row.parent_span_id ?? undefined,
+    spanType: row.span_type,
+    name: row.name,
+    status: row.status,
+    inputJson: row.input_json ? asRecord(row.input_json) : undefined,
+    outputJson: row.output_json ? asRecord(row.output_json) : undefined,
+    metadata: row.metadata ? asRecord(row.metadata) : undefined,
+    artifactRefs: row.artifact_refs ? asRecord(row.artifact_refs) : undefined,
+    errorMessage: row.error_message ?? undefined,
+    startedAt: row.started_at,
+    endedAt: row.ended_at ?? undefined,
+    durationMs: row.duration_ms ?? undefined
+  };
+}
+
+function rowToAgentModelCall(row: AgentModelCallRow): AgentModelCallRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    spanId: row.span_id ?? undefined,
+    provider: row.provider,
+    model: row.model,
+    endpoint: row.endpoint,
+    operation: row.operation,
+    status: row.status,
+    requestJson: row.request_json ? asRecord(row.request_json) : undefined,
+    responseJson: row.response_json ? asRecord(row.response_json) : undefined,
+    usageJson: row.usage_json ? asRecord(row.usage_json) : undefined,
+    inputTokens: row.input_tokens ?? undefined,
+    outputTokens: row.output_tokens ?? undefined,
+    cacheCreationTokens: row.cache_creation_tokens ?? undefined,
+    cacheReadTokens: row.cache_read_tokens ?? undefined,
+    errorMessage: row.error_message ?? undefined,
+    startedAt: row.started_at,
+    endedAt: row.ended_at ?? undefined,
+    durationMs: row.duration_ms ?? undefined
+  };
+}
+
+function totalModelCallTokens(modelCalls: AgentModelCallRecord[]): AgentRunTokenTotals {
+  const totals = modelCalls.reduce(
+    (sum, call) => ({
+      inputTokens: sum.inputTokens + (call.inputTokens ?? 0),
+      outputTokens: sum.outputTokens + (call.outputTokens ?? 0),
+      cacheCreationTokens: sum.cacheCreationTokens + (call.cacheCreationTokens ?? 0),
+      cacheReadTokens: sum.cacheReadTokens + (call.cacheReadTokens ?? 0)
+    }),
+    {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0
+    }
+  );
+  return {
+    ...totals,
+    totalTokens: totals.inputTokens + totals.outputTokens + totals.cacheCreationTokens + totals.cacheReadTokens
+  };
+}
+
+async function attachModelCallTotals(runs: AgentRunRecord[]) {
+  if (!runs.length) return runs;
+  const ids = runs.map((run) => run.id);
+  const rows = await requireData<AgentModelCallRow[]>(
+    getSupabaseAdminClient()
+      .from("agent_model_calls")
+      .select("*")
+      .in("run_id", ids),
+    "List model calls for visible runs"
+  );
+  const byRun = new Map<string, AgentModelCallRecord[]>();
+  for (const row of rows) {
+    const existing = byRun.get(row.run_id) ?? [];
+    existing.push(rowToAgentModelCall(row));
+    byRun.set(row.run_id, existing);
+  }
+  return runs.map((run) => {
+    const calls = byRun.get(run.id) ?? [];
+    return {
+      ...run,
+      tokenTotals: totalModelCallTokens(calls),
+      modelCallCount: calls.length,
+      latestError: run.errorMessage ?? calls.find((call) => call.errorMessage)?.errorMessage
+    };
+  });
+}
+
+function applyAgentRunFilters(query: any, filter: ListAgentRunsFilter) {
+  let next = query;
+  if (filter.status) next = next.eq("status", filter.status);
+  if (filter.runType) next = next.eq("run_type", filter.runType);
+  if (filter.agentType) next = next.eq("agent_type", filter.agentType);
+  if (filter.source) next = next.eq("source", filter.source);
+  if (filter.sourceHost) next = next.ilike("source_host", `%${filter.sourceHost}%`);
+  if (filter.targetType) next = next.eq("target_type", filter.targetType);
+  if (filter.targetId) next = next.eq("target_id", filter.targetId);
+  if (filter.from) next = next.gte("created_at", filter.from);
+  if (filter.to) next = next.lte("created_at", filter.to);
+  if (filter.search) {
+    const escaped = filter.search.replace(/[%_]/g, "\\$&");
+    next = next.or(
+      [
+        `id.ilike.%${escaped}%`,
+        `source_url.ilike.%${escaped}%`,
+        `source_host.ilike.%${escaped}%`,
+        `target_id.ilike.%${escaped}%`,
+        `input_summary.ilike.%${escaped}%`,
+        `output_summary.ilike.%${escaped}%`,
+        `notes.ilike.%${escaped}%`
+      ].join(",")
+    );
+  }
+  return next;
+}
+
+function stripUndefined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function sanitizeMetadata(metadata: AnalyticsEvent["metadata"]) {

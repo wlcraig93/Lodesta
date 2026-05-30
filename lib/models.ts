@@ -871,10 +871,101 @@ export type SiteBundle = {
   presenceAssessment: PresenceAssessment;
 };
 
+export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "canceled";
+
+export type AgentRunSource = "admin_console" | "api" | "job";
+
+export type AgentRunRecord = {
+  id: string;
+  runType: string;
+  agentType: string;
+  status: AgentRunStatus;
+  actorType?: string;
+  actorId?: string;
+  source: AgentRunSource;
+  sourceUrl?: string;
+  sourceHost?: string;
+  targetType?: string;
+  targetId?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  inputJson?: Record<string, unknown>;
+  outputJson?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  tags: string[];
+  notes?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  startedAt: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  tokenTotals?: AgentRunTokenTotals;
+  modelCallCount?: number;
+  latestError?: string;
+  targetName?: string;
+  targetSlug?: string;
+};
+
+export type AgentRunSpanRecord = {
+  id: string;
+  runId: string;
+  parentSpanId?: string;
+  spanType: string;
+  name: string;
+  status: AgentRunStatus;
+  inputJson?: Record<string, unknown>;
+  outputJson?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  artifactRefs?: Record<string, unknown>;
+  errorMessage?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+};
+
+export type AgentModelCallRecord = {
+  id: string;
+  runId: string;
+  spanId?: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  operation: string;
+  status: AgentRunStatus;
+  requestJson?: Record<string, unknown>;
+  responseJson?: Record<string, unknown>;
+  usageJson?: Record<string, unknown>;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+  errorMessage?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+};
+
+export type AgentRunTokenTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+};
+
+export type AgentRunDetail = {
+  run: AgentRunRecord;
+  spans: AgentRunSpanRecord[];
+  modelCalls: AgentModelCallRecord[];
+  tokenTotals: AgentRunTokenTotals;
+};
+
 export type JobKind =
   | "presence_assessment"
   | "audit_site"
   | "generate_site"
+  | "agent_telemetry_cleanup"
   | "monthly_action_list"
   | "import_batch";
 

@@ -28,6 +28,7 @@ const skippedPrefixes = [
   "/versions/",
   "/outbound",
   "/dashboard",
+  "/admin/",
   "/claim/",
   "/account",
   "/favicon.ico"

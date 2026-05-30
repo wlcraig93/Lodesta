@@ -1,0 +1,23 @@
+{
+  "checked_at_utc": "2026-05-30T06:44:46.263Z",
+  "tld": "ai",
+  "whois_server": "whois.nic.ai",
+  "whois_port": 43,
+  "candidate_count": 245395,
+  "first_name_count": 100364,
+  "surname_count": 162253,
+  "both_first_and_last_count": 17222,
+  "dns_counts": {
+    "delegated": 51365,
+    "dns_error": 1142,
+    "possible": 192888
+  },
+  "whois_counts": {
+    "registered": 250,
+    "available": 770,
+    "whois_unknown": 10
+  },
+  "available_count": 770,
+  "output": "/private/tmp/name_ai_domain_search/available_name_dotai.csv",
+  "candidates": "/private/tmp/name_ai_domain_search/candidate_name_ai_domains.csv"
+}

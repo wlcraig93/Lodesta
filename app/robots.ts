@@ -24,7 +24,8 @@ export default function robots(): MetadataRoute.Robots {
           "/claim/",
           "/domains/",
           "/outbound",
-          "/dashboard"
+          "/dashboard",
+          "/admin"
         ]
       }
     ],

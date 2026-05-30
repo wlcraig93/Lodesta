@@ -35,12 +35,12 @@ export function createCreativeBrief({ business, recipe, crawl }: CreativeBriefIn
       "Typography hierarchy makes business category, location, and offer scannable in five seconds.",
       "Trust proof appears before the visitor reaches the contact section.",
       "Mobile layout avoids cramped CTAs, hidden contact paths, and oversized hero media.",
-      "Generated visual direction preserves recognizable brand cues without copying protected assets."
+      "Generated visual direction preserves recognizable public source brand cues with provenance."
     ],
     assetStrategy: [
-      "Pre-claim previews may use facts, generated imagery, licensed imagery, and screenshots for comparison only.",
-      "Scraped customer photos, logos, and marketing copy remain reference-only before claim.",
-      "After claim, owner uploads or approves assets under the product terms before they become hosted site content."
+      "Internal previews may use public customer website facts, copy, photos, logos, and screenshots with provenance.",
+      "Owner approval remains the control for what becomes hosted published site content.",
+      "Keep private credentials and access-controlled material out of generated content."
     ],
     brandCuesToPreserve: brandCues.length ? brandCues : ["Business name", "Primary category", "Local service area"]
   };

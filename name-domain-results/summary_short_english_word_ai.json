@@ -1,0 +1,26 @@
+{
+  "checked_at_utc": "2026-05-30T14:13:45.715Z",
+  "tld": "ai",
+  "word_source": "/usr/share/dict/words",
+  "ranking_source": "/private/tmp/name_ai_domain_search/google_20k_english.txt",
+  "candidate_count": 5623,
+  "length_counts": {
+    "2": 121,
+    "3": 1142,
+    "4": 4360
+  },
+  "dns_counts": {
+    "delegated": 4920,
+    "dns_error": 120,
+    "possible": 583
+  },
+  "whois_counts": {
+    "registered": 274,
+    "whois_unknown": 9,
+    "available": 419,
+    "dropzone": 1
+  },
+  "available_count": 419,
+  "output": "/private/tmp/word_ai_domain_search/available_short_english_word_dotai.csv",
+  "candidates": "/private/tmp/word_ai_domain_search/candidate_short_english_word_ai_domains.csv"
+}

@@ -95,6 +95,16 @@ async function buildJobSpecs(
       });
     }
   }
+  if (task === "launch_maintenance") {
+    specs.push({
+      kind: "agent_telemetry_cleanup",
+      payload: {
+        ...basePayload({ scheduleKey, scheduledAt, runAfter: input.runAfter }),
+        olderThanDays: 30,
+        limit: 1000
+      }
+    });
+  }
 
   return { specs, unknownSiteIds };
 }

@@ -75,6 +75,7 @@ import {
   resolvePreviewToken as resolveLocalPreviewToken
 } from "../lib/store";
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
+import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
 
 const bundle = createSiteFromInput({
   prompt: "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin."
@@ -236,6 +237,39 @@ assert(
     supabaseSchema.indexOf("and attempts >= max_attempts") < supabaseSchema.indexOf("return query"),
   "Supabase workers should fail stale max-attempt running jobs before claiming the next queued job."
 );
+const telemetrySanitized = sanitizeTelemetryPayload({
+  business: {
+    email: "owner@boundaryverify.example",
+    phone: "512-555-0132",
+    url: "https://boundaryverify.example/services/acme-coffee-2024-v3-final-final?utm_source=test",
+    assetId: "asset_4ef3a45b-cdc0-4e31-a2f1-2f45c77e64ab"
+  },
+  credentials: {
+    authorization: "Bearer secret-token-value",
+    cookie: "session=secret",
+    apiKey: "sk-testsecret1234567890"
+  },
+  callbackUrl: "https://example.com/callback?token=secret&return=https://boundaryverify.example/home",
+  rawHtml: "<!doctype html><html><body><script>secret()</script></body></html>".repeat(20),
+  image: "data:image/png;base64,abcd"
+});
+const telemetryRaw = JSON.stringify(telemetrySanitized);
+assert(
+  telemetryRaw.includes("owner@boundaryverify.example") &&
+    telemetryRaw.includes("512-555-0132") &&
+    telemetryRaw.includes("acme-coffee-2024-v3-final-final") &&
+    telemetryRaw.includes("4ef3a45b-cdc0-4e31-a2f1-2f45c77e64ab"),
+  "Telemetry sanitizer should preserve public business contact info, slugs, UUIDs, and asset ids."
+);
+assert(
+    !telemetryRaw.includes("secret-token-value") &&
+    !telemetryRaw.includes("session=secret") &&
+    !telemetryRaw.includes("sk-testsecret") &&
+    telemetryRaw.includes("token=[redacted]") &&
+    telemetryRaw.includes("[omitted:raw_html]") &&
+    telemetryRaw.includes("[omitted:image_bytes]"),
+  "Telemetry sanitizer should redact credentials, sensitive URL params, raw HTML, and image bytes."
+);
 assert(
   rootHomePage.includes("Lodesta powers your business") && !rootHomePage.includes("requireAdminPageAccess"),
   "The root page should be a public Lodesta marketing homepage instead of the private operator dashboard."
@@ -287,12 +321,13 @@ for (const privatePath of [
   "/claim/",
   "/domains/",
   "/outbound",
-  "/dashboard"
+  "/dashboard",
+  "/admin"
 ]) {
   assert(platformRobotsDisallow.has(privatePath), `Platform robots.txt should disallow private/admin path ${privatePath}.`);
   if (privatePath !== "/" && privatePath !== "/api/" && privatePath !== "/auth/") {
     assert(
-      middlewareSource.includes(`"${privatePath}"`),
+      middlewareSource.includes(`"${privatePath}"`) || (privatePath === "/admin" && middlewareSource.includes('"/admin/"')),
       `Middleware should not rewrite private/admin path ${privatePath} through custom-domain public-site routing.`
     );
   }
@@ -941,6 +976,29 @@ assert(
     ),
   "Monthly action-list jobs should include a lead summary with status counts, form counts, and safe attribution."
 );
+const telemetryCleanupResult = (await executeJob(
+  {
+    id: "job_telemetry_cleanup_boundary",
+    kind: "agent_telemetry_cleanup",
+    status: "running",
+    payload: { olderThanDays: 30, limit: 1000 },
+    attempts: 1,
+    maxAttempts: 1,
+    runAfter: "2026-05-29T12:00:00.000Z",
+    createdAt: "2026-05-29T12:00:00.000Z",
+    updatedAt: "2026-05-29T12:00:00.000Z"
+  },
+  {
+    cleanupAgentTelemetry: async (input) => ({
+      deleted: input?.limit === 1000 && input.olderThanDays === 30 ? 7 : 0,
+      cutoff: "2026-04-29T12:00:00.000Z"
+    })
+  }
+)) as { deleted?: number; cutoff?: string };
+assert(
+  telemetryCleanupResult.deleted === 7,
+  "Agent telemetry cleanup job should call the repository cleanup helper with bounded defaults."
+);
 const unsafeUrlChecks = await Promise.all([
   validatePublicFetchUrl("http://localhost:3000", { resolveDns: false }),
   validatePublicFetchUrl("http://127.0.0.1:3000", { resolveDns: false }),
@@ -1065,8 +1123,10 @@ const scheduleResult = await scheduleLaunchJobs(
   new Date("2026-05-29T12:00:00.000Z")
 );
 assert(
-  scheduleResult.queued.length === 1 && scheduleResult.queued[0]?.kind === "monthly_action_list",
-  "Cron scheduler should enqueue monthly action-list jobs without analytics-retention pruning."
+  scheduleResult.queued.length === 2 &&
+    scheduleResult.queued.some((job) => job.kind === "monthly_action_list") &&
+    scheduleResult.queued.some((job) => job.kind === "agent_telemetry_cleanup"),
+  "Cron scheduler should enqueue monthly action-list jobs plus bounded agent telemetry cleanup."
 );
 const duplicateSchedule = await scheduleLaunchJobs(
   {
@@ -1100,7 +1160,7 @@ const duplicateSchedule = await scheduleLaunchJobs(
   new Date("2026-05-29T12:00:00.000Z")
 );
 assert(
-  duplicateSchedule.queued.length === 0 && duplicateSchedule.skipped.length === 1,
+  duplicateSchedule.queued.length === 0 && duplicateSchedule.skipped.length === 2,
   "Cron scheduler should skip duplicate non-failed jobs with the same schedule key."
 );
 
@@ -1433,7 +1493,7 @@ assert(
     cleanHttpsCrawl.score.checks.some((check) => check.standardCriterionId === "seo.clean_urls" && check.passed),
   "Current-site crawl scoring should pass HTTPS and clean URL patterns."
 );
-const copiedSourceCopy = "Exact source marketing sentence that should never be reused verbatim in generated previews.";
+const copiedSourceCopy = "Exact source marketing sentence retained as source context without forcing deterministic verbatim reuse.";
 const copyRiskCrawl = crawlFixture("https://boundary-copy.example/services", "https://boundary-copy.example/services");
 copyRiskCrawl.extractedFacts = {
   ...copyRiskCrawl.extractedFacts,
@@ -1445,7 +1505,7 @@ const copySafeBundle = createSiteFromInput({ url: "https://boundary-copy.example
 assert(
   copySafeBundle.businessProfile.description !== copiedSourceCopy &&
     !JSON.stringify(copySafeBundle.siteModel.versions).includes(copiedSourceCopy),
-  "Generated pre-claim previews must not reuse source-site marketing descriptions verbatim."
+  "Deterministic generation should not force source-site marketing descriptions verbatim when no operator selected that copy."
 );
 assert(bundle.presenceAssessment.visualQa, "Generated launch sites should include visual QA results.");
 assert(

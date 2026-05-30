@@ -248,6 +248,72 @@ create table jobs (
   completed_at timestamptz
 );
 
+create table agent_runs (
+  id text primary key,
+  run_type text not null,
+  agent_type text not null,
+  status text not null default 'queued' check (status in ('queued', 'running', 'completed', 'failed', 'canceled')),
+  actor_type text,
+  actor_id text,
+  source text not null check (source in ('admin_console', 'api', 'job')),
+  source_url text,
+  source_host text,
+  target_type text,
+  target_id text,
+  input_summary text,
+  output_summary text,
+  input_json jsonb,
+  output_json jsonb,
+  metadata jsonb not null default '{}',
+  tags text[] not null default '{}',
+  notes text,
+  error_code text,
+  error_message text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table agent_run_spans (
+  id text primary key,
+  run_id text not null references agent_runs(id) on delete cascade,
+  parent_span_id text references agent_run_spans(id) on delete set null,
+  span_type text not null,
+  name text not null,
+  status text not null default 'running' check (status in ('queued', 'running', 'completed', 'failed', 'canceled')),
+  input_json jsonb,
+  output_json jsonb,
+  metadata jsonb not null default '{}',
+  artifact_refs jsonb not null default '{}',
+  error_message text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  duration_ms int
+);
+
+create table agent_model_calls (
+  id text primary key,
+  run_id text not null references agent_runs(id) on delete cascade,
+  span_id text references agent_run_spans(id) on delete set null,
+  provider text not null,
+  model text not null,
+  endpoint text not null,
+  operation text not null,
+  status text not null default 'running' check (status in ('queued', 'running', 'completed', 'failed', 'canceled')),
+  request_json jsonb,
+  response_json jsonb,
+  usage_json jsonb,
+  input_tokens int,
+  output_tokens int,
+  cache_creation_tokens int,
+  cache_read_tokens int,
+  error_message text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  duration_ms int
+);
+
 create table operator_settings (
   key text primary key,
   value jsonb not null,
@@ -302,6 +368,13 @@ create index outbound_events_site_time_idx on outbound_events(site_id, occurred_
 create index jobs_status_created_idx on jobs(status, created_at);
 create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
 create index jobs_running_lock_idx on jobs(status, locked_at);
+create index agent_runs_created_at_idx on agent_runs(created_at);
+create index agent_runs_source_host_idx on agent_runs(source_host);
+create index agent_runs_target_idx on agent_runs(target_type, target_id);
+create index agent_runs_type_status_created_idx on agent_runs(run_type, status, created_at);
+create index agent_run_spans_run_started_idx on agent_run_spans(run_id, started_at);
+create index agent_model_calls_run_idx on agent_model_calls(run_id);
+create index agent_model_calls_span_idx on agent_model_calls(span_id);
 create index operator_setting_audits_key_time_idx on operator_setting_audits(setting_key, changed_at desc);
 
 create or replace function public.claim_next_job(worker_id text, stale_after_seconds int default 900)
@@ -390,6 +463,9 @@ alter table outbound_prospects enable row level security;
 alter table outbound_events enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
+alter table agent_runs enable row level security;
+alter table agent_run_spans enable row level security;
+alter table agent_model_calls enable row level security;
 alter table operator_settings enable row level security;
 alter table operator_setting_audits enable row level security;
 

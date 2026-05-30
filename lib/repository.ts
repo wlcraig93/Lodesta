@@ -1,4 +1,10 @@
 import type {
+  AgentModelCallRecord,
+  AgentRunDetail,
+  AgentRunRecord,
+  AgentRunSource,
+  AgentRunSpanRecord,
+  AgentRunStatus,
   AnalyticsEvent,
   AnalyticsSummary,
   ClaimRecord,
@@ -19,6 +25,7 @@ import type {
   SiteBundle,
   WorkflowDelivery
 } from "./models";
+import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import type { AiEditResult } from "./ai-editor";
 import type { BusinessProfileUpdateInput } from "./business-profile-update";
 import type { UpdateSiteDesignInput, UpdateSiteDesignResult } from "./design";
@@ -99,6 +106,117 @@ import type {
 export type CreateSiteInput = {
   url?: string;
   prompt?: string;
+};
+
+export type CreateSiteOptions = {
+  telemetry?: AgentTelemetryRecorder;
+};
+
+export type CreateAgentRunInput = {
+  runType: string;
+  agentType: string;
+  status?: AgentRunStatus;
+  actorType?: string;
+  actorId?: string;
+  source: AgentRunSource;
+  sourceUrl?: string;
+  sourceHost?: string;
+  targetType?: string;
+  targetId?: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  inputJson?: Record<string, unknown>;
+  outputJson?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  tags?: string[];
+  notes?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  startedAt?: string;
+  endedAt?: string;
+};
+
+export type UpdateAgentRunInput = {
+  runId: string;
+  status?: AgentRunStatus;
+  targetType?: string | null;
+  targetId?: string | null;
+  outputSummary?: string | null;
+  outputJson?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown>;
+  tags?: string[];
+  notes?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  endedAt?: string | null;
+};
+
+export type CreateAgentRunSpanInput = {
+  runId: string;
+  parentSpanId?: string;
+  spanType: string;
+  name: string;
+  status?: AgentRunStatus;
+  inputJson?: Record<string, unknown>;
+  outputJson?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  artifactRefs?: Record<string, unknown>;
+  errorMessage?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+};
+
+export type UpdateAgentRunSpanInput = {
+  spanId: string;
+  status?: AgentRunStatus;
+  outputJson?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown>;
+  artifactRefs?: Record<string, unknown>;
+  errorMessage?: string | null;
+  endedAt?: string | null;
+  durationMs?: number | null;
+};
+
+export type RecordAgentModelCallInput = {
+  runId: string;
+  spanId?: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  operation: string;
+  status: AgentRunStatus;
+  requestJson?: Record<string, unknown>;
+  responseJson?: Record<string, unknown>;
+  usageJson?: Record<string, unknown>;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+  errorMessage?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+};
+
+export type ListAgentRunsFilter = {
+  search?: string;
+  status?: AgentRunStatus;
+  runType?: string;
+  agentType?: string;
+  source?: AgentRunSource;
+  sourceHost?: string;
+  targetType?: string;
+  targetId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type ListAgentRunsResult = {
+  runs: AgentRunRecord[];
+  total: number;
 };
 
 export type UpdateSectionInput = {
@@ -207,7 +325,7 @@ export type LodestaRepository = {
   listSiteBundles(): Promise<SiteBundle[]>;
   getSiteBundle(siteId: string): Promise<SiteBundle | null>;
   getSiteBundleBySlug(slug: string): Promise<SiteBundle | null>;
-  createAndStoreSite(input: CreateSiteInput): Promise<SiteBundle>;
+  createAndStoreSite(input: CreateSiteInput, options?: CreateSiteOptions): Promise<SiteBundle>;
   createPreviewToken(input: { siteId: string; expiresAt?: string }): Promise<PreviewToken | null>;
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
   listPreviewTokens(siteId?: string): Promise<PreviewToken[]>;
@@ -263,6 +381,15 @@ export type LodestaRepository = {
   getJob(id: string): Promise<JobRecord | null>;
   processNextJob(): Promise<JobRecord | null>;
   processAllQueuedJobs(limit?: number): Promise<JobRecord[]>;
+  createAgentRun(input: CreateAgentRunInput): Promise<AgentRunRecord | null>;
+  updateAgentRun(input: UpdateAgentRunInput): Promise<AgentRunRecord | null>;
+  createAgentRunSpan(input: CreateAgentRunSpanInput): Promise<AgentRunSpanRecord | null>;
+  updateAgentRunSpan(input: UpdateAgentRunSpanInput): Promise<AgentRunSpanRecord | null>;
+  recordAgentModelCall(input: RecordAgentModelCallInput): Promise<AgentModelCallRecord | null>;
+  listAgentRuns(filter?: ListAgentRunsFilter): Promise<ListAgentRunsResult>;
+  getAgentRunDetail(runId: string): Promise<AgentRunDetail | null>;
+  updateAgentRunNotes(input: { runId: string; notes?: string; tags?: string[] }): Promise<AgentRunRecord | null>;
+  cleanupAgentTelemetry(input?: { olderThanDays?: number; limit?: number }): Promise<{ deleted: number; cutoff: string }>;
 };
 
 export const localRepository: LodestaRepository = {
@@ -275,8 +402,27 @@ export const localRepository: LodestaRepository = {
   async getSiteBundleBySlug(slug) {
     return getSiteBundleBySlug(slug);
   },
-  async createAndStoreSite(input) {
-    return createAndStoreSite(await prepareIntakeInput(input));
+  async createAndStoreSite(input, options) {
+    const bundle = createAndStoreSite(await prepareIntakeInput(input, { telemetry: options?.telemetry }));
+    const persistenceSpan = await options?.telemetry?.startSpan({
+      spanType: "persistence",
+      name: "Persist generated site",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        slug: bundle.siteModel.slug,
+        businessName: bundle.businessProfile.name
+      }
+    });
+    await persistenceSpan?.end({
+      outputJson: {
+        siteId: bundle.businessProfile.siteId,
+        slug: bundle.siteModel.slug,
+        versions: bundle.siteModel.versions.length,
+        forms: bundle.extensionModel.forms.length,
+        findings: bundle.optimizationFindings.length
+      }
+    });
+    return bundle;
   },
   async createPreviewToken(input) {
     return createPreviewToken(input);
@@ -470,6 +616,33 @@ export const localRepository: LodestaRepository = {
   },
   async processAllQueuedJobs(limit) {
     return processAllQueuedJobsStore(limit, createLocalJobContext());
+  },
+  async createAgentRun() {
+    return null;
+  },
+  async updateAgentRun() {
+    return null;
+  },
+  async createAgentRunSpan() {
+    return null;
+  },
+  async updateAgentRunSpan() {
+    return null;
+  },
+  async recordAgentModelCall() {
+    return null;
+  },
+  async listAgentRuns() {
+    return { runs: [], total: 0 };
+  },
+  async getAgentRunDetail() {
+    return null;
+  },
+  async updateAgentRunNotes() {
+    return null;
+  },
+  async cleanupAgentTelemetry() {
+    return { deleted: 0, cutoff: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString() };
   }
 };
 
@@ -483,7 +656,8 @@ function createLocalJobContext(): JobExecutionContext {
     analyticsSummary: localRepository.analyticsSummary,
     analyzeExperiments: localRepository.analyzeExperiments,
     listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
-    listFormSubmissions: localRepository.listFormSubmissions
+    listFormSubmissions: localRepository.listFormSubmissions,
+    cleanupAgentTelemetry: (input) => localRepository.cleanupAgentTelemetry(input)
   };
 }
 

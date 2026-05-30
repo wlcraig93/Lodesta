@@ -30,6 +30,9 @@ export default async function HomePage() {
         <section className="panel">
           <h2>No sites yet</h2>
           <p>Create the first structured preview from an existing URL or a short business prompt.</p>
+          <p>
+            <Link href="/admin/generate">Open the admin generation console</Link>
+          </p>
           <IntakeCreateForm />
         </section>
       </main>
@@ -87,6 +90,9 @@ export default async function HomePage() {
           </Link>
           <Link className="button secondary" href="/outbound">
             Outbound
+          </Link>
+          <Link className="button primary" href="/admin/generate">
+            Admin generate
           </Link>
           <Link className="button secondary" href="/account">
             Account

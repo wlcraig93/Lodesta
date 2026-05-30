@@ -2,10 +2,13 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { RenderInspectionResult, SiteBundle, VisualQaFinding, VisualQaResult } from "./models";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
+import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
 
 type VisualQaInput = {
   bundle: SiteBundle;
   renderInspection?: RenderInspectionResult;
+  telemetry?: AgentTelemetryRecorder;
+  spanId?: string;
 };
 
 const findingSchema = z.object({
@@ -84,6 +87,8 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
     }
   };
 
+  const startedAt = new Date().toISOString();
+  let recorded = false;
   try {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -94,6 +99,23 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
       body: JSON.stringify(body)
     });
     const payload = (await response.json().catch(() => null)) as unknown;
+    const endedAt = new Date().toISOString();
+    await input.telemetry?.recordModelCall({
+      spanId: input.spanId,
+      provider: "openai",
+      model,
+      endpoint: "/v1/responses",
+      operation: "visual_qa",
+      status: response.ok ? "completed" : "failed",
+      requestJson: sanitizeTelemetryPayload(body),
+      responseJson: sanitizeTelemetryPayload(payload),
+      ...extractOpenAiUsage(payload),
+      errorMessage: response.ok ? undefined : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+      startedAt,
+      endedAt,
+      durationMs: elapsedMs(startedAt, endedAt)
+    });
+    recorded = true;
     if (!response.ok) {
       throw new Error(openAiErrorMessage(payload) ?? `OpenAI visual QA failed with status ${response.status}`);
     }
@@ -113,11 +135,31 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
       limitations: parsed.limitations
     };
   } catch (error) {
+    if (!recorded) {
+      const endedAt = new Date().toISOString();
+      await input.telemetry?.recordModelCall({
+        spanId: input.spanId,
+        provider: "openai",
+        model,
+        endpoint: "/v1/responses",
+        operation: "visual_qa",
+        status: "failed",
+        requestJson: sanitizeTelemetryPayload(body),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        startedAt,
+        endedAt,
+        durationMs: elapsedMs(startedAt, endedAt)
+      });
+    }
     return createDeterministicVisualQa({
       ...input,
       limitation: `OpenAI visual QA unavailable: ${error instanceof Error ? error.message : String(error)}`
     });
   }
+}
+
+function elapsedMs(startedAt: string, endedAt: string) {
+  return Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
 }
 
 export function createDeterministicVisualQa({
@@ -220,7 +262,7 @@ function visualQaContext({ bundle, renderInspection }: VisualQaInput) {
     productContract: {
       renderer: "structured multi-tenant Next.js renderer",
       editing: "curated controls",
-      legalBoundary: "facts require provenance and owner verification; screenshots are QA evidence only"
+      sourceMaterialPolicy: "public customer website material and assets are allowed in internal previews with provenance"
     },
     business: {
       name: bundle.businessProfile.name,

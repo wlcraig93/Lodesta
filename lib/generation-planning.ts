@@ -58,8 +58,8 @@ export function createBrandAssessment({
   const sourceNotes = [
     crawl?.title ? `Title observed: ${crawl.title}` : undefined,
     crawl?.metaDescription ? "Meta description was available as positioning reference." : undefined,
-    crawl?.assetReferences.some((asset) => asset.kind === "logo") ? "Logo detected but retained as reference-only pre-claim." : undefined,
-    crawl?.assetReferences.some((asset) => asset.kind === "image") ? "Website imagery detected as reference-only pre-claim." : undefined,
+    crawl?.assetReferences.some((asset) => asset.kind === "logo") ? "Logo detected as public source material for internal preview planning." : undefined,
+    crawl?.assetReferences.some((asset) => asset.kind === "image") ? "Website imagery detected as public source material for internal preview planning." : undefined,
     renderInspection ? `Render inspection adapter: ${renderInspection.adapter}.` : undefined,
     aiPlanning ? "OpenAI structured generation planning was applied." : undefined
   ].filter((item): item is string => Boolean(item));
@@ -114,7 +114,7 @@ export function createDesignDirections({
     aiPlanning?.selectedStrategy ?? selectDirectionStrategy(business, recipe, crawl, renderInspection, currentEvaluation);
   const baseRules = [
     "Compile the chosen direction into structured sections; never treat the mockup as source-of-truth UI.",
-    "Use generated, licensed, or placeholder imagery pre-claim.",
+    "Use public source imagery, generated imagery, licensed imagery, or placeholders with provenance.",
     "Keep owner-truth fields pinned or verification-gated.",
     "Retain mobile-first CTA hierarchy and local SEO structure."
   ];
@@ -172,7 +172,7 @@ export function createDesignDirections({
       mockupPrompt: [
         `Create a premium redesign mockup for ${business.name}, a ${recipe.label}.`,
         "Use refined typography, strong proof sections, careful whitespace, and owner-verifiable trust cues.",
-        "Avoid unsupported claims, copied assets, and exaggerated luxury positioning."
+        "Avoid unsupported claims, private credentials, and exaggerated luxury positioning."
       ].join(" "),
       generationRules: [
         ...baseRules,
@@ -288,7 +288,7 @@ function typographySignalsForVertical(vertical: BusinessProfile["vertical"]) {
 
 function imageSignalsForVertical(vertical: BusinessProfile["vertical"]) {
   if (["beauty_salon", "creative_studio", "landscaping", "restaurant"].includes(vertical)) {
-    return ["gallery-forward", "real-work proof after claim", "licensed/generated placeholders pre-claim"];
+    return ["gallery-forward", "public source asset cues", "owner-approved proof after claim"];
   }
   if (["med_spa", "auto_body"].includes(vertical)) return ["before/after proof after verification", "process visuals"];
   if (vertical === "law_firm") return ["minimal decorative imagery", "team/credential proof after claim"];

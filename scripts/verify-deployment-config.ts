@@ -120,6 +120,12 @@ assertIncludes(
 );
 assertIncludes(schemaSql, "create table operator_settings", "Supabase schema must include operator settings.");
 assertIncludes(schemaSql, "create table operator_setting_audits", "Supabase schema must include operator settings audit rows.");
+assertIncludes(schemaSql, "create table agent_runs", "Supabase schema must include agent run telemetry.");
+assertIncludes(schemaSql, "create table agent_run_spans", "Supabase schema must include agent run spans.");
+assertIncludes(schemaSql, "create table agent_model_calls", "Supabase schema must include agent model calls.");
+assertIncludes(schemaSql, "create index agent_runs_target_idx on agent_runs(target_type, target_id);", "Agent telemetry target lookup must be indexed.");
+assertIncludes(schemaSql, "alter table agent_runs enable row level security;", "Agent run telemetry must have RLS enabled.");
+assertIncludes(jobSchedulerSource, '"agent_telemetry_cleanup"', "Launch maintenance must queue bounded agent telemetry cleanup.");
 assertIncludes(
   schemaSql,
   "Job lock expired after all retry attempts.",

@@ -20,6 +20,7 @@ const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8"
 assert(packageJson.dependencies?.playwright, "playwright must be a runtime dependency for deployed render inspection.");
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
+assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
 
 assert(!webConfig.includes("$schema"), "Web Railway config must not include a $schema key; Railway rejects it as invalid TOML.");
@@ -53,6 +54,8 @@ assertIncludes(
   "create index outbound_events_site_time_idx on outbound_events(site_id, occurred_at desc);",
   "Supabase outbound_events.site_id foreign key must be indexed for site cleanup and reporting."
 );
+assertIncludes(schemaSql, "create table operator_settings", "Supabase schema must include operator settings.");
+assertIncludes(schemaSql, "create table operator_setting_audits", "Supabase schema must include operator settings audit rows.");
 assertIncludes(
   schemaSql,
   "Job lock expired after all retry attempts.",

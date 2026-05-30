@@ -43,6 +43,9 @@ async function main() {
   const supabase = getSupabaseAdminClient();
   await requireSupabase(supabase.from("sites").select("id", { count: "exact", head: true }), "Connect to Supabase");
   checks.push({ name: "connect", ok: true, detail: "Supabase service-role client can query the schema." });
+  await requireSupabase(supabase.from("operator_settings").select("key", { count: "exact", head: true }), "Query operator settings");
+  await requireSupabase(supabase.from("operator_setting_audits").select("id", { count: "exact", head: true }), "Query operator setting audits");
+  checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
   await verifyAssetStorage(supabase);
   if (storageOnly) {
     process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);

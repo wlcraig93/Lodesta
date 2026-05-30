@@ -1,5 +1,10 @@
 import { storeGeneratedAssetBytes } from "./asset-storage";
 import type { CreativeMockupArtifact, DesignDirection, SiteAsset, SiteBundle } from "./models";
+import {
+  defaultOpenAiRuntimeSettings,
+  getOpenAiRuntimeSettings,
+  type OpenAiRuntimeSettings
+} from "./operator-settings";
 
 type MockupGenerationInput = {
   bundle: SiteBundle;
@@ -16,7 +21,7 @@ type ImageGenerationConfig = {
 export async function createOpenAiMockupArtifacts({
   bundle
 }: MockupGenerationInput): Promise<CreativeMockupArtifact[]> {
-  const config = imageConfig();
+  const config = await imageConfig();
   const directions = mockupDirections(bundle, config.limit);
   if (!directions.length) return [];
 
@@ -25,6 +30,7 @@ export async function createOpenAiMockupArtifacts({
     return createPromptOnlyMockupArtifacts({
       bundle,
       directions,
+      config,
       reason: "OPENAI_API_KEY is not set; storing planning prompts without generated images."
     });
   }
@@ -38,16 +44,18 @@ export async function createOpenAiMockupArtifacts({
 
 export function createPromptOnlyMockupArtifacts({
   bundle,
-  directions = mockupDirections(bundle, imageConfig().limit),
+  directions,
+  config = imageConfigFromSettings(defaultOpenAiRuntimeSettings()),
   reason = "Generated image provider was not run; this artifact preserves the creative prompt for planning."
 }: {
   bundle: SiteBundle;
   directions?: DesignDirection[];
+  config?: ImageGenerationConfig;
   reason?: string;
 }): CreativeMockupArtifact[] {
   const generatedAt = new Date().toISOString();
-  const config = imageConfig();
-  return directions.map((direction) => ({
+  const selectedDirections = directions ?? mockupDirections(bundle, config.limit);
+  return selectedDirections.map((direction) => ({
     id: mockupId(direction),
     siteId: bundle.businessProfile.siteId,
     designDirectionId: direction.id,
@@ -218,30 +226,18 @@ function mockupId(direction: DesignDirection) {
   return `mockup_${direction.id}`;
 }
 
-function imageConfig(): ImageGenerationConfig {
+async function imageConfig(): Promise<ImageGenerationConfig> {
+  return imageConfigFromSettings((await getOpenAiRuntimeSettings()).settings);
+}
+
+function imageConfigFromSettings(settings: OpenAiRuntimeSettings): ImageGenerationConfig {
   return {
-    model: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2",
-    size: process.env.OPENAI_IMAGE_SIZE ?? "1536x1024",
-    quality: imageQuality(process.env.OPENAI_IMAGE_QUALITY),
-    outputFormat: imageFormat(process.env.OPENAI_IMAGE_FORMAT),
-    limit: imageLimit(process.env.OPENAI_MOCKUP_LIMIT)
+    model: settings.imageModel,
+    size: settings.imageSize,
+    quality: settings.imageQuality,
+    outputFormat: settings.imageFormat,
+    limit: settings.mockupLimit
   };
-}
-
-function imageLimit(value: string | undefined) {
-  const parsed = value ? Number.parseInt(value, 10) : 3;
-  if (!Number.isFinite(parsed)) return 3;
-  return Math.max(1, Math.min(parsed, 3));
-}
-
-function imageQuality(value: string | undefined): ImageGenerationConfig["quality"] {
-  if (value === "medium" || value === "high" || value === "auto") return value;
-  return "low";
-}
-
-function imageFormat(value: string | undefined): ImageGenerationConfig["outputFormat"] {
-  if (value === "png" || value === "webp") return value;
-  return "jpeg";
 }
 
 function mimeTypeForFormat(format: ImageGenerationConfig["outputFormat"]) {

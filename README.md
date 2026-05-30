@@ -55,6 +55,7 @@ npm run verify:stripe-webhook
 Open:
 
 - `http://localhost:3000` for the operator dashboard
+- `http://localhost:3000/settings` for operator runtime settings
 - `http://localhost:3000/preview/demo-token` for the pre-claim preview
 - `http://localhost:3000/sites/joes-pizza` for the public rendered site
 - `http://localhost:3000/editor/joes-pizza` for curated owner editing
@@ -158,8 +159,7 @@ Optional launch integrations:
 - `LODESTA_RATE_LIMIT_SALT` for public write rate-limit fingerprints
 - `LODESTA_ANALYTICS_RETENTION_DAYS` for raw analytics-event retention; default is 395 days
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
-- `OPENAI_API_KEY` plus optional `OPENAI_GENERATION_MODEL` and `OPENAI_VISUAL_QA_MODEL` for model-backed brand assessment, design-direction planning, and screenshot visual QA; deterministic fallback remains available
-- Optional `OPENAI_IMAGE_MODEL`, `OPENAI_IMAGE_SIZE`, `OPENAI_IMAGE_QUALITY`, `OPENAI_IMAGE_FORMAT`, and `OPENAI_MOCKUP_LIMIT` for GPT Image planning mockups; prompt-only artifacts remain available without hosted image calls
+- `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
 - `LODESTA_WORKER_ID` for long-running Railway worker identity
 
 Recommended Railway services:
@@ -168,6 +168,11 @@ Recommended Railway services:
 - Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`.
 - Cron: schedule a protected `POST /api/jobs/schedule` call with `{ "task": "launch_maintenance" }` for recurring maintenance, or call `npm run cli -- schedule-maintenance launch_maintenance` from a Railway cron command.
 - Run `npm run verify:deployment-config` before deploying after changing package scripts or Railway config.
+
+OpenAI runtime settings:
+
+- Use `/settings` to manage generation model, visual QA model, image model, image size, image quality, and mockup limit.
+- Run `npm run seed:openai-settings` before deploying a fresh Supabase environment. Override defaults with `--generation-model`, `--visual-qa-model`, `--image-model`, `--image-size`, `--image-quality`, and `--mockup-limit` when needed.
 
 Browser render inspection:
 

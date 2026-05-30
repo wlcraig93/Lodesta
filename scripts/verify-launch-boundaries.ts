@@ -1,6 +1,8 @@
 import "./load-env";
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import platformRobots from "../app/robots";
 import type { AnalyticsEvent, ClaimRecord, JobRecord, LeadSubmission, OptimizationFinding } from "../lib/models";
 import { summarizeAnalytics } from "../lib/analytics";
@@ -41,6 +43,17 @@ import { scheduleLaunchJobs } from "../lib/job-scheduler";
 import { validateLaunchMarket } from "../lib/launch-market";
 import { runSiteQa } from "../lib/qa";
 import { getHealthReport } from "../lib/health";
+import {
+  OPENAI_IMAGE_OUTPUT_FORMAT,
+  OPENAI_RUNTIME_DEFAULTS,
+  StaleOperatorSettingsError,
+  getOpenAiRuntimeSettings,
+  resetOpenAiRuntimeSettingsCacheForTests,
+  saveOpenAiRuntimeSettings,
+  setOperatorSettingsLocalFileForTests,
+  validateOpenAiImageSize,
+  validateOpenAiRuntimeSettingsInput
+} from "../lib/operator-settings";
 import { resolveClaimOwner } from "../lib/claim-ownership";
 import { isPublicLocalAssetPath } from "../lib/public-assets";
 import { canonicalUrlForPage, siteRobotsTxt, siteSitemapXml } from "../lib/public-site-seo";
@@ -475,6 +488,55 @@ assert(
     imageGenerationSource.includes("Image bytes stored privately"),
   "Generated mockup planning artifacts should store bytes without exposing public storage URLs."
 );
+const validOpenAiSettings = validateOpenAiRuntimeSettingsInput(OPENAI_RUNTIME_DEFAULTS);
+assert(validOpenAiSettings.ok, "OpenAI runtime defaults should satisfy operator-settings validation.");
+assert(
+  validateOpenAiImageSize("1536x1024").ok &&
+    validateOpenAiImageSize("auto").ok &&
+    !validateOpenAiImageSize("99999x99999").ok &&
+    !validateOpenAiImageSize("1000x1000").ok,
+  "OpenAI image size validation should enforce gpt-image-2 constraints."
+);
+assert(
+  OPENAI_IMAGE_OUTPUT_FORMAT === "jpeg" && imageGenerationSource.includes("outputFormat: settings.imageFormat"),
+  "Generated mockup output format should be hard-coded through operator settings defaults."
+);
+const previousRepositoryMode = process.env.LODESTA_REPOSITORY;
+const operatorSettingsProbeFile = join(mkdtempSync(join(tmpdir(), "lodesta-operator-settings-")), "settings.json");
+setEnv("LODESTA_REPOSITORY", "local");
+setOperatorSettingsLocalFileForTests(operatorSettingsProbeFile);
+try {
+  const initialOperatorSettings = await getOpenAiRuntimeSettings({ bypassCache: true });
+  assert(initialOperatorSettings.version === 0 && initialOperatorSettings.source === "default", "Missing local operator settings should use versioned defaults.");
+  const savedOperatorSettings = await saveOpenAiRuntimeSettings({
+    settings: { ...OPENAI_RUNTIME_DEFAULTS, imageQuality: "medium" },
+    expectedVersion: initialOperatorSettings.version,
+    changedBy: "launch-boundary-verifier"
+  });
+  assert(savedOperatorSettings.version === 1 && savedOperatorSettings.source === "file", "Local operator settings should save to the configured file.");
+  let staleSettingsRejected = false;
+  try {
+    await saveOpenAiRuntimeSettings({
+      settings: { ...OPENAI_RUNTIME_DEFAULTS, imageQuality: "high" },
+      expectedVersion: initialOperatorSettings.version,
+      changedBy: "launch-boundary-verifier"
+    });
+  } catch (caught) {
+    staleSettingsRejected = caught instanceof StaleOperatorSettingsError;
+  }
+  assert(staleSettingsRejected, "Operator settings saves should reject stale versions.");
+  assert((await getOpenAiRuntimeSettings()).source === "cache", "Operator settings should use the in-process cache inside the TTL window.");
+  writeFileSync(operatorSettingsProbeFile, "{not-json");
+  const lkgOperatorSettings = await getOpenAiRuntimeSettings({ bypassCache: true });
+  assert(
+    lkgOperatorSettings.source === "lkg" && lkgOperatorSettings.settings.imageQuality === "medium",
+    "Operator settings should use last-known-good values when the backing store becomes unreadable."
+  );
+} finally {
+  restoreEnv("LODESTA_REPOSITORY", previousRepositoryMode);
+  setOperatorSettingsLocalFileForTests(undefined);
+  resetOpenAiRuntimeSettingsCacheForTests();
+}
 const crawlPageSignals = extractCrawlPageSignals(
   `<html>
     <head>

@@ -11,6 +11,7 @@
     "smoke": "bash scripts/smoke.sh",
     "smoke:dev": "bash scripts/smoke.sh --start-server",
     "cli": "node scripts/lodesta.mjs",
+    "seed:openai-settings": "node --import tsx scripts/seed-openai-settings.ts",
     "worker": "node --import tsx workers/runner.ts",
     "install:browsers": "node --import tsx scripts/install-browsers.ts",
     "verify:deployment-config": "node --import tsx scripts/verify-deployment-config.ts",

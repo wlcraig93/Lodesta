@@ -3,6 +3,7 @@ import { hasConfiguredIpHashSalt } from "./privacy";
 import { getRenderInspectionRuntimeStatus } from "./render-inspection";
 import { ASSET_BUCKET_NAME } from "./asset-storage";
 import { getSupabaseAdminClient } from "./supabase/client";
+import { getOpenAiRuntimeSettings } from "./operator-settings";
 
 export type HealthState = "ok" | "warning" | "error";
 
@@ -21,6 +22,7 @@ export type HealthReport = {
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const assetStorageCheck = options.deep ? await checkAssetStorageReadiness() : checkAssetStorageConfig();
+  const openAiCheck = await checkOpenAiConfig({ deep: Boolean(options.deep) });
   const checks = [
     checkAppUrl(),
     checkRepositoryConfig(),
@@ -36,7 +38,7 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkRenderBrowserConfig(),
     checkGooglePlacesConfig(),
     assetStorageCheck,
-    checkOpenAiConfig()
+    openAiCheck
   ];
 
   if (options.deep) {
@@ -237,12 +239,22 @@ async function checkAssetStorageReadiness(): Promise<HealthCheck> {
   }
 }
 
-function checkOpenAiConfig(): HealthCheck {
+async function checkOpenAiConfig({ deep }: { deep: boolean }): Promise<HealthCheck> {
   if (process.env.OPENAI_API_KEY) {
-    return ok(
+    if (!deep) return ok("openai", "OpenAI", "OPENAI_API_KEY is configured; operator settings control model choices.");
+
+    const runtimeSettings = await getOpenAiRuntimeSettings();
+    const state = runtimeSettings.warning ? warning : ok;
+    return state(
       "openai",
       "OpenAI",
-      `OPENAI_API_KEY is configured for generation planning with ${process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5"}, visual QA with ${process.env.OPENAI_VISUAL_QA_MODEL ?? process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5"}, and mockup planning with ${process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2"}.`
+      [
+        `OPENAI_API_KEY is configured with settings_source=${runtimeSettings.source}.`,
+        `Generation ${runtimeSettings.settings.generationModel}; visual QA ${runtimeSettings.settings.visualQaModel}; mockups ${runtimeSettings.settings.imageModel}.`,
+        runtimeSettings.warning
+      ]
+        .filter(Boolean)
+        .join(" ")
     );
   }
   return warning(

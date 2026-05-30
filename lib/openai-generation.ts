@@ -3,6 +3,7 @@ import type { SiteBundle } from "./models";
 import type { CrawlAssessment } from "./crawler";
 import type { RenderInspectionResult } from "./models";
 import type { GenerationPlanningOverride } from "./generation-planning";
+import { getOpenAiRuntimeSettings } from "./operator-settings";
 
 type OpenAiGenerationInput = {
   bundle: SiteBundle;
@@ -63,9 +64,10 @@ export async function createOpenAiGenerationPlanning(
 ): Promise<GenerationPlanningOverride | undefined> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
+  const runtimeSettings = await getOpenAiRuntimeSettings();
 
   const body = {
-    model: process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5",
+    model: runtimeSettings.settings.generationModel,
     reasoning: { effort: "low" },
     max_output_tokens: 3200,
     input: [

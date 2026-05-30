@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { RenderInspectionResult, SiteBundle, VisualQaFinding, VisualQaResult } from "./models";
+import { getOpenAiRuntimeSettings } from "./operator-settings";
 
 type VisualQaInput = {
   bundle: SiteBundle;
@@ -35,7 +36,8 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
     });
   }
 
-  const model = process.env.OPENAI_VISUAL_QA_MODEL ?? process.env.OPENAI_GENERATION_MODEL ?? "gpt-5.5";
+  const runtimeSettings = await getOpenAiRuntimeSettings();
+  const model = runtimeSettings.settings.visualQaModel;
   const body = {
     model,
     reasoning: { effort: "low" },

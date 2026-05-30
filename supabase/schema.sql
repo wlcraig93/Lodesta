@@ -246,6 +246,25 @@ create table jobs (
   completed_at timestamptz
 );
 
+create table operator_settings (
+  key text primary key,
+  value jsonb not null,
+  version int not null default 1 check (version >= 1),
+  updated_by text,
+  updated_at timestamptz not null default now()
+);
+
+create table operator_setting_audits (
+  id text primary key,
+  setting_key text not null,
+  status text not null check (status in ('changed', 'rejected')),
+  changed_by text not null,
+  changed_at timestamptz not null default now(),
+  previous_value jsonb,
+  new_value jsonb,
+  error text
+);
+
 create index analytics_events_site_time_idx on analytics_events(site_id, occurred_at desc);
 create index analytics_events_site_event_time_idx on analytics_events(site_id, event_type, occurred_at desc);
 create index sites_workspace_idx on sites(workspace_id);
@@ -279,6 +298,7 @@ create index outbound_events_site_time_idx on outbound_events(site_id, occurred_
 create index jobs_status_created_idx on jobs(status, created_at);
 create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
 create index jobs_running_lock_idx on jobs(status, locked_at);
+create index operator_setting_audits_key_time_idx on operator_setting_audits(setting_key, changed_at desc);
 
 create or replace function public.claim_next_job(worker_id text, stale_after_seconds int default 900)
 returns setof jobs
@@ -366,6 +386,8 @@ alter table outbound_prospects enable row level security;
 alter table outbound_events enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
+alter table operator_settings enable row level security;
+alter table operator_setting_audits enable row level security;
 
 create policy "site owners can read claimed sites"
 on sites for select

@@ -13,6 +13,7 @@ import type {
   ExperimentAnalysis,
   ExperimentLearning,
   FormDefinition,
+  GenerationArtifactV2,
   JobKind,
   JobRecord,
   LeadSubmission,
@@ -23,6 +24,9 @@ import type {
   OutboundSummary,
   PreviewToken,
   SiteBundle,
+  SiteGenerationRecord,
+  SiteGenerationStatus,
+  SiteVersion,
   WorkflowDelivery
 } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
@@ -45,12 +49,15 @@ import {
   completeClaimCheckout,
   dismissFinding,
   createPreviewToken,
+  createSiteGeneration as createSiteGenerationStore,
+  listGenerationArtifacts as listGenerationArtifactsStore,
   createOutboundCampaign,
   getForms,
   getDomainById,
   getDomainByHostname,
   getSiteBundle,
   getSiteBundleBySlug,
+  getSiteGeneration as getSiteGenerationStore,
   listAnalyticsEvents,
   listClaims,
   listDomains,
@@ -62,10 +69,12 @@ import {
   listOutboundProspects,
   listWorkflowDeliveries,
   listPreviewTokens,
+  listSiteGenerations as listSiteGenerationsStore,
   listSiteBundles,
   outboundSummary,
   publishDraft,
   publishVersion,
+  promoteSiteGeneration as promoteSiteGenerationStore,
   recordAnalyticsEvent,
   recordClaimCheckoutSession,
   recordFormSubmission,
@@ -75,6 +84,7 @@ import {
   restoreVersionToDraft,
   resolvePreviewToken,
   runAndStoreAudit,
+  saveSiteVersion,
   updateExperiment,
   updateFormSettings,
   updateLeadStatus,
@@ -82,6 +92,7 @@ import {
   updateOwnerAssets,
   updateSiteDesign as updateSiteDesignStore,
   updateSectionProps,
+  upsertGenerationArtifact as upsertGenerationArtifactStore,
   upsertOutboundProspect
 } from "./store";
 import {
@@ -110,6 +121,39 @@ export type CreateSiteInput = {
 
 export type CreateSiteOptions = {
   telemetry?: AgentTelemetryRecorder;
+};
+
+export type CreateSiteGenerationInput = {
+  id?: string;
+  agentRunId?: string;
+  bundle: SiteBundle;
+  sourceUrl?: string;
+  sourceHost?: string;
+  status?: SiteGenerationStatus;
+};
+
+export type ListSiteGenerationsFilter = {
+  status?: SiteGenerationStatus;
+  sourceHost?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type ListSiteGenerationsResult = {
+  generations: SiteGenerationRecord[];
+  total: number;
+};
+
+export type ListGenerationArtifactsFilter = {
+  generationId?: string;
+  siteId?: string;
+  scope?: GenerationArtifactV2["scope"];
+  artifactType?: GenerationArtifactV2["artifactType"];
+};
+
+export type PromoteSiteGenerationResult = {
+  generation: SiteGenerationRecord;
+  bundle: SiteBundle;
 };
 
 export type CreateAgentRunInput = {
@@ -226,6 +270,10 @@ export type UpdateSectionInput = {
   props: Record<string, unknown>;
 };
 
+const localAgentRuns = new Map<string, AgentRunRecord>();
+const localAgentRunSpans = new Map<string, AgentRunSpanRecord>();
+const localAgentModelCalls = new Map<string, AgentModelCallRecord>();
+
 export type RecordSubmissionInput = {
   siteId: string;
   formId: string;
@@ -326,9 +374,16 @@ export type LodestaRepository = {
   getSiteBundle(siteId: string): Promise<SiteBundle | null>;
   getSiteBundleBySlug(slug: string): Promise<SiteBundle | null>;
   createAndStoreSite(input: CreateSiteInput, options?: CreateSiteOptions): Promise<SiteBundle>;
-  createPreviewToken(input: { siteId: string; expiresAt?: string }): Promise<PreviewToken | null>;
+  createSiteGeneration(input: CreateSiteGenerationInput): Promise<SiteGenerationRecord>;
+  listSiteGenerations(filter?: ListSiteGenerationsFilter): Promise<ListSiteGenerationsResult>;
+  getSiteGeneration(generationId: string): Promise<SiteGenerationRecord | null>;
+  promoteSiteGeneration(generationId: string): Promise<PromoteSiteGenerationResult | null>;
+  upsertGenerationArtifact(artifact: GenerationArtifactV2): Promise<GenerationArtifactV2>;
+  listGenerationArtifacts(filter?: ListGenerationArtifactsFilter): Promise<GenerationArtifactV2[]>;
+  createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }): Promise<PreviewToken | null>;
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
   listPreviewTokens(siteId?: string): Promise<PreviewToken[]>;
+  saveSiteVersion(input: { siteId: string; version: SiteVersion }): Promise<SiteBundle | null>;
   runAndStoreAudit(siteId: string): Promise<OptimizationFinding[] | null>;
   updateSectionProps(input: UpdateSectionInput): Promise<SectionUpdateResult>;
   updateSiteDesign(input: UpdateSiteDesignInput): Promise<DesignUpdateResult>;
@@ -424,6 +479,24 @@ export const localRepository: LodestaRepository = {
     });
     return bundle;
   },
+  async createSiteGeneration(input) {
+    return createSiteGenerationStore(input);
+  },
+  async listSiteGenerations(filter) {
+    return listSiteGenerationsStore(filter);
+  },
+  async getSiteGeneration(generationId) {
+    return getSiteGenerationStore(generationId);
+  },
+  async promoteSiteGeneration(generationId) {
+    return promoteSiteGenerationStore(generationId);
+  },
+  async upsertGenerationArtifact(artifact) {
+    return upsertGenerationArtifactStore(artifact);
+  },
+  async listGenerationArtifacts(filter) {
+    return listGenerationArtifactsStore(filter);
+  },
   async createPreviewToken(input) {
     return createPreviewToken(input);
   },
@@ -432,6 +505,9 @@ export const localRepository: LodestaRepository = {
   },
   async listPreviewTokens(siteId) {
     return listPreviewTokens(siteId);
+  },
+  async saveSiteVersion(input) {
+    return saveSiteVersion(input);
   },
   async runAndStoreAudit(siteId) {
     return runAndStoreAudit(siteId);
@@ -617,29 +693,164 @@ export const localRepository: LodestaRepository = {
   async processAllQueuedJobs(limit) {
     return processAllQueuedJobsStore(limit, createLocalJobContext());
   },
-  async createAgentRun() {
-    return null;
+  async createAgentRun(input) {
+    const timestamp = new Date().toISOString();
+    const run: AgentRunRecord = {
+      id: `run_${crypto.randomUUID().replace(/-/g, "")}`,
+      runType: input.runType,
+      agentType: input.agentType,
+      status: input.status ?? "running",
+      actorType: input.actorType,
+      actorId: input.actorId,
+      source: input.source,
+      sourceUrl: input.sourceUrl,
+      sourceHost: input.sourceHost,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      inputSummary: input.inputSummary,
+      outputSummary: input.outputSummary,
+      inputJson: input.inputJson,
+      outputJson: input.outputJson,
+      metadata: input.metadata,
+      tags: input.tags ?? [],
+      notes: input.notes,
+      errorCode: input.errorCode,
+      errorMessage: input.errorMessage,
+      startedAt: input.startedAt ?? timestamp,
+      endedAt: input.endedAt,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    localAgentRuns.set(run.id, run);
+    return run;
   },
-  async updateAgentRun() {
-    return null;
+  async updateAgentRun(input) {
+    const existing = localAgentRuns.get(input.runId);
+    if (!existing) return null;
+    const updated: AgentRunRecord = {
+      ...existing,
+      status: input.status ?? existing.status,
+      targetType: input.targetType ?? existing.targetType,
+      targetId: input.targetId ?? existing.targetId,
+      outputSummary: input.outputSummary ?? existing.outputSummary,
+      outputJson: input.outputJson ?? existing.outputJson,
+      metadata: input.metadata ?? existing.metadata,
+      tags: input.tags ?? existing.tags,
+      notes: input.notes ?? existing.notes,
+      errorCode: input.errorCode ?? existing.errorCode,
+      errorMessage: input.errorMessage ?? existing.errorMessage,
+      endedAt: input.endedAt ?? existing.endedAt,
+      updatedAt: new Date().toISOString()
+    };
+    localAgentRuns.set(updated.id, updated);
+    return updated;
   },
-  async createAgentRunSpan() {
-    return null;
+  async createAgentRunSpan(input) {
+    const timestamp = new Date().toISOString();
+    const span: AgentRunSpanRecord = {
+      id: `span_${crypto.randomUUID().replace(/-/g, "")}`,
+      runId: input.runId,
+      parentSpanId: input.parentSpanId,
+      spanType: input.spanType,
+      name: input.name,
+      status: input.status ?? "running",
+      inputJson: input.inputJson,
+      outputJson: input.outputJson,
+      metadata: input.metadata,
+      artifactRefs: input.artifactRefs,
+      errorMessage: input.errorMessage,
+      startedAt: input.startedAt ?? timestamp,
+      endedAt: input.endedAt,
+      durationMs: input.durationMs
+    };
+    localAgentRunSpans.set(span.id, span);
+    return span;
   },
-  async updateAgentRunSpan() {
-    return null;
+  async updateAgentRunSpan(input) {
+    const existing = localAgentRunSpans.get(input.spanId);
+    if (!existing) return null;
+    const updated: AgentRunSpanRecord = {
+      ...existing,
+      status: input.status ?? existing.status,
+      outputJson: input.outputJson ?? existing.outputJson,
+      metadata: input.metadata ?? existing.metadata,
+      artifactRefs: input.artifactRefs ?? existing.artifactRefs,
+      errorMessage: input.errorMessage ?? existing.errorMessage,
+      endedAt: input.endedAt ?? existing.endedAt,
+      durationMs: input.durationMs ?? existing.durationMs
+    };
+    localAgentRunSpans.set(updated.id, updated);
+    return updated;
   },
-  async recordAgentModelCall() {
-    return null;
+  async recordAgentModelCall(input) {
+    const timestamp = new Date().toISOString();
+    const call: AgentModelCallRecord = {
+      id: `model_${crypto.randomUUID().replace(/-/g, "")}`,
+      runId: input.runId,
+      spanId: input.spanId,
+      provider: input.provider,
+      model: input.model,
+      endpoint: input.endpoint,
+      operation: input.operation,
+      status: input.status,
+      requestJson: input.requestJson,
+      responseJson: input.responseJson,
+      usageJson: input.usageJson,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      cacheCreationTokens: input.cacheCreationTokens,
+      cacheReadTokens: input.cacheReadTokens,
+      errorMessage: input.errorMessage,
+      startedAt: input.startedAt ?? timestamp,
+      endedAt: input.endedAt,
+      durationMs: input.durationMs
+    };
+    localAgentModelCalls.set(call.id, call);
+    return call;
   },
-  async listAgentRuns() {
-    return { runs: [], total: 0 };
+  async listAgentRuns(filter = {}) {
+    const search = filter.search?.toLowerCase();
+    const runs = Array.from(localAgentRuns.values())
+      .filter((run) => !filter.status || run.status === filter.status)
+      .filter((run) => !filter.runType || run.runType === filter.runType)
+      .filter((run) => !filter.agentType || run.agentType === filter.agentType)
+      .filter((run) => !filter.source || run.source === filter.source)
+      .filter((run) => !filter.sourceHost || run.sourceHost === filter.sourceHost)
+      .filter((run) => !filter.targetType || run.targetType === filter.targetType)
+      .filter((run) => !filter.targetId || run.targetId === filter.targetId)
+      .filter((run) => !filter.from || run.createdAt >= filter.from)
+      .filter((run) => !filter.to || run.createdAt <= filter.to)
+      .filter(
+        (run) =>
+          !search ||
+          [run.inputSummary, run.outputSummary, run.sourceUrl, run.targetName, run.targetSlug]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(search))
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const offset = filter.offset ?? 0;
+    const limit = filter.limit ?? runs.length;
+    return { runs: runs.slice(offset, offset + limit), total: runs.length };
   },
-  async getAgentRunDetail() {
-    return null;
+  async getAgentRunDetail(runId) {
+    const run = localAgentRuns.get(runId);
+    if (!run) return null;
+    const spans = Array.from(localAgentRunSpans.values()).filter((span) => span.runId === runId);
+    const modelCalls = Array.from(localAgentModelCalls.values()).filter((call) => call.runId === runId);
+    const tokenTotals = tokenTotalsForModelCalls(modelCalls);
+    return { run: { ...run, tokenTotals, modelCallCount: modelCalls.length }, spans, modelCalls, tokenTotals };
   },
-  async updateAgentRunNotes() {
-    return null;
+  async updateAgentRunNotes(input) {
+    const existing = localAgentRuns.get(input.runId);
+    if (!existing) return null;
+    const updated: AgentRunRecord = {
+      ...existing,
+      notes: input.notes,
+      tags: input.tags ?? existing.tags,
+      updatedAt: new Date().toISOString()
+    };
+    localAgentRuns.set(updated.id, updated);
+    return updated;
   },
   async cleanupAgentTelemetry() {
     return { deleted: 0, cutoff: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString() };
@@ -649,8 +860,10 @@ export const localRepository: LodestaRepository = {
 function createLocalJobContext(): JobExecutionContext {
   return {
     workerId: getProcessWorkerId(),
-    createAndStoreSite: localRepository.createAndStoreSite,
-    createPreviewToken: localRepository.createPreviewToken,
+    generateSite: async (options) => {
+      const { generateSite } = await import("./site-generation-service");
+      return generateSite({ ...options, repository: localRepository });
+    },
     getSiteBundle: localRepository.getSiteBundle,
     runAndStoreAudit: localRepository.runAndStoreAudit,
     analyticsSummary: localRepository.analyticsSummary,
@@ -661,7 +874,22 @@ function createLocalJobContext(): JobExecutionContext {
   };
 }
 
+function tokenTotalsForModelCalls(modelCalls: AgentModelCallRecord[]) {
+  const inputTokens = modelCalls.reduce((sum, call) => sum + (call.inputTokens ?? 0), 0);
+  const outputTokens = modelCalls.reduce((sum, call) => sum + (call.outputTokens ?? 0), 0);
+  const cacheCreationTokens = modelCalls.reduce((sum, call) => sum + (call.cacheCreationTokens ?? 0), 0);
+  const cacheReadTokens = modelCalls.reduce((sum, call) => sum + (call.cacheReadTokens ?? 0), 0);
+  return {
+    inputTokens,
+    outputTokens,
+    cacheCreationTokens,
+    cacheReadTokens,
+    totalTokens: inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+  };
+}
+
 export function getRepository(): LodestaRepository {
+  if (process.env.LODESTA_REPOSITORY === "local") return localRepository;
   return supabaseRepository;
 }
 

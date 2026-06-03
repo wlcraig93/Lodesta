@@ -1,23 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { themePresetOptions, type ThemePresetId } from "@/lib/theme-presets";
+import type { DesignPlan, LayoutSectionKind, LayoutSectionPreset } from "@/lib/models";
 
 type DesignControlsProps = {
   siteId: string;
   pageId: string;
-  initialPreset: ThemePresetId;
+  initialDesignPlan: DesignPlan;
   sections: Array<{
     id: string;
-    type: string;
+    kind: LayoutSectionKind;
     label: string;
-    variant: string;
-    variantOptions: Array<{ id: string; label: string }>;
+    preset: LayoutSectionPreset;
+    presetOptions: Array<{ id: LayoutSectionPreset; label: string }>;
   }>;
 };
 
-export function DesignControls({ siteId, pageId, initialPreset, sections }: DesignControlsProps) {
-  const [themePreset, setThemePreset] = useState<ThemePresetId>(initialPreset);
+export function DesignControls({ siteId, pageId, initialDesignPlan, sections }: DesignControlsProps) {
+  const [designPlan, setDesignPlan] = useState(initialDesignPlan);
   const [sectionOrder, setSectionOrder] = useState(sections);
   const [status, setStatus] = useState("");
 
@@ -33,9 +33,9 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
     });
   }
 
-  function updateSectionVariant(sectionId: string, variant: string) {
+  function updateSectionPreset(sectionId: string, preset: LayoutSectionPreset) {
     setSectionOrder((current) =>
-      current.map((section) => (section.id === sectionId ? { ...section, variant } : section))
+      current.map((section) => (section.id === sectionId ? { ...section, preset } : section))
     );
   }
 
@@ -47,9 +47,12 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
       body: JSON.stringify({
         siteId,
         pageId,
-        themePreset,
-        sectionOrder: sectionOrder.map((section) => section.id),
-        sectionVariants: Object.fromEntries(sectionOrder.map((section) => [section.id, section.variant]))
+        designPlan: {
+          stylePack: designPlan.stylePack,
+          typographyPack: designPlan.typographyPack
+        },
+        layoutSectionOrder: sectionOrder.map((section) => section.id),
+        sectionPresets: Object.fromEntries(sectionOrder.map((section) => [section.id, section.preset]))
       })
     });
     const result = await response.json();
@@ -66,33 +69,48 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
       <div className="responsive-preview-header">
         <div>
           <span className="badge">Curated design</span>
-          <h2>Theme and order</h2>
+          <h2>Design plan and sections</h2>
         </div>
       </div>
 
-      <div className="palette-grid" aria-label="Theme palette">
-        {themePresetOptions.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            className={themePreset === option.id ? "active" : ""}
-            onClick={() => setThemePreset(option.id)}
+      <div className="design-plan-grid" aria-label="Design plan">
+        <label>
+          <span>Style pack</span>
+          <select
+            value={designPlan.stylePack}
+            onChange={(event) => setDesignPlan((current) => ({ ...current, stylePack: event.target.value as DesignPlan["stylePack"] }))}
           >
-            <span className={`palette-swatch palette-${option.id}`} aria-hidden="true" />
-            {option.label}
-          </button>
-        ))}
+            {stylePackOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Typography pack</span>
+          <select
+            value={designPlan.typographyPack}
+            onChange={(event) => setDesignPlan((current) => ({ ...current, typographyPack: event.target.value as DesignPlan["typographyPack"] }))}
+          >
+            {typographyPackOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="section-order-list">
         {sectionOrder.map((section, index) => (
           <article key={section.id} className="section-order-row">
-            <span className="badge">{section.type}</span>
+            <span className="badge">{section.kind}</span>
             <strong>{section.label}</strong>
             <label className="section-variant-control">
-              <span>Variant</span>
-              <select value={section.variant} onChange={(event) => updateSectionVariant(section.id, event.target.value)}>
-                {section.variantOptions.map((option) => (
+              <span>Preset</span>
+              <select value={section.preset} onChange={(event) => updateSectionPreset(section.id, event.target.value as LayoutSectionPreset)}>
+                {section.presetOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
@@ -128,3 +146,19 @@ export function DesignControls({ siteId, pageId, initialPreset, sections }: Desi
     </div>
   );
 }
+
+const stylePackOptions: Array<{ id: DesignPlan["stylePack"]; label: string }> = [
+  { id: "local_modern", label: "Local modern" },
+  { id: "premium_editorial", label: "Premium editorial" },
+  { id: "urgent_service", label: "Urgent service" },
+  { id: "warm_neighborhood", label: "Warm neighborhood" },
+  { id: "clinical_trust", label: "Clinical trust" }
+];
+
+const typographyPackOptions: Array<{ id: DesignPlan["typographyPack"]; label: string }> = [
+  { id: "clean_sans", label: "Clean sans" },
+  { id: "editorial_serif", label: "Editorial serif" },
+  { id: "rounded_friendly", label: "Rounded friendly" },
+  { id: "utility_sans", label: "Utility sans" },
+  { id: "premium_sans", label: "Premium sans" }
+];

@@ -1,6 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { AdminButtonLink, AdminButtonRow } from "@/components/admin/AdminButton";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { RunNotesForm } from "@/components/admin/RunNotesForm";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
@@ -20,40 +21,47 @@ export default async function AdminRunDetailPage({ params }: { params: Promise<{
   const detail = await repository.getAgentRunDetail(runId);
   if (!detail) notFound();
 
-  const slug = typeof detail.run.metadata?.slug === "string" ? detail.run.metadata.slug : detail.run.targetSlug;
-  const previewUrl = typeof detail.run.metadata?.previewUrl === "string" ? detail.run.metadata.previewUrl : undefined;
+  const generationUrl = typeof detail.run.metadata?.generationUrl === "string" ? detail.run.metadata.generationUrl : undefined;
+  const generationId = detail.run.targetType === "site_generation" ? detail.run.targetId : undefined;
 
   return (
     <main className="admin-page">
-      <header className="admin-header">
-        <div>
-          <span className={`badge status-${detail.run.status}`}>{detail.run.status}</span>
-          <h1>Run Inspector</h1>
-          <p>{detail.run.outputSummary ?? detail.run.inputSummary ?? detail.run.id}</p>
-        </div>
-        <div className="button-row">
-          <Link className="button secondary" href="/admin/runs">
-            Runs
-          </Link>
-          {previewUrl ? (
-            <Link className="button secondary" href={previewUrl}>
-              Preview
-            </Link>
-          ) : null}
-          {slug ? (
-            <Link className="button secondary" href={`/editor/${slug}`}>
-              Editor
-            </Link>
-          ) : null}
-          {slug ? (
-            <Link className="button secondary" href={`/sites/${slug}`}>
-              Site
-            </Link>
-          ) : null}
-        </div>
-      </header>
+      <AdminPageHeader
+        eyebrow={<span className={`badge status-${detail.run.status}`}>{detail.run.status}</span>}
+        title="Run inspector"
+        description={detail.run.outputSummary ?? detail.run.inputSummary ?? detail.run.id}
+        actions={
+          <AdminButtonRow>
+            <AdminButtonLink variant="secondary" href="/admin/runs">
+              Runs
+            </AdminButtonLink>
+            {generationUrl ? (
+              <AdminButtonLink variant="secondary" href={generationUrl}>
+                Site generation
+              </AdminButtonLink>
+            ) : null}
+          </AdminButtonRow>
+        }
+      />
 
-      <section className="metric-row">
+      <section className="run-inspector-identifiers" aria-label="Run identifiers">
+        <div>
+          <span>Run ID</span>
+          <code>{detail.run.id}</code>
+        </div>
+        {generationId ? (
+          <div>
+            <span>Generation ID</span>
+            <code>{generationId}</code>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="metric-row run-inspector-metrics">
+        <div className="metric-card">
+          <strong>{formatDate(detail.run.startedAt)}</strong>
+          <span>Started</span>
+        </div>
         <div className="metric-card">
           <strong>{detail.spans.length}</strong>
           <span>Spans</span>
@@ -193,6 +201,15 @@ function ModelCallRow({ call }: { call: AgentModelCallRecord }) {
 
 function pretty(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2);
+}
+
+function formatDate(input: string) {
+  const date = new Date(input);
+  if (!Number.isFinite(date.getTime())) return "unknown";
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
 }
 
 function formatDuration(startedAt: string, endedAt?: string) {

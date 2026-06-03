@@ -6,13 +6,13 @@ import { gatherPublicPresenceSignals } from "@/lib/public-presence";
 import { inspectUrlRender } from "@/lib/render-inspection";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { validatePublicFetchUrl } from "@/lib/url-safety";
+import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-safety";
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
 
 export const runtime = "nodejs";
 
 const presenceSchema = z.object({
-  url: z.string().url(),
+  url: z.string().trim().min(1),
   render: z.boolean().default(true),
   screenshots: z.boolean().default(true)
 });
@@ -38,27 +38,28 @@ export async function POST(request: Request) {
     );
   }
 
+  const normalizedUrl = normalizePublicFetchUrlInput(parsed.data.url);
   try {
-    assertLaunchMarket({ url: parsed.data.url });
+    assertLaunchMarket({ url: normalizedUrl });
   } catch (error) {
     if (isLaunchMarketError(error)) {
       return applyRateLimitHeaders(NextResponse.json({ error: error.message, code: error.code }, { status: 400 }), limit);
     }
     throw error;
   }
-
   const urlSafety = await validatePublicFetchUrl(parsed.data.url);
   if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
+  const safeUrl = urlSafety.url;
 
   const [crawl, renderInspection] = await Promise.all([
-    crawlUrl(parsed.data.url),
+    crawlUrl(safeUrl),
     parsed.data.render
-      ? inspectUrlRender({ url: parsed.data.url, captureScreenshots: parsed.data.screenshots })
+      ? inspectUrlRender({ url: safeUrl, captureScreenshots: parsed.data.screenshots })
       : Promise.resolve(undefined)
   ]);
-  const publicPresence = await gatherPublicPresenceSignals({ url: parsed.data.url, crawl });
+  const publicPresence = await gatherPublicPresenceSignals({ url: safeUrl, crawl });
   try {
-    assertLaunchMarket({ url: parsed.data.url, crawl, publicPresence });
+    assertLaunchMarket({ url: safeUrl, crawl, publicPresence });
   } catch (error) {
     if (isLaunchMarketError(error)) {
       return applyRateLimitHeaders(NextResponse.json({ error: error.message, code: error.code }, { status: 400 }), limit);
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     throw error;
   }
   return applyRateLimitHeaders(
-    NextResponse.json(createPresenceIntakePlan(parsed.data.url, crawl, renderInspection, publicPresence)),
+    NextResponse.json(createPresenceIntakePlan(safeUrl, crawl, renderInspection, publicPresence)),
     limit
   );
 }

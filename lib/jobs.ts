@@ -10,7 +10,6 @@ import type {
   OptimizationFinding,
   SiteBundle
 } from "./models";
-import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput } from "./intake";
 import { runAudit } from "./audit";
@@ -19,9 +18,9 @@ import { gatherPublicPresenceSignals } from "./public-presence";
 import { runSiteQa } from "./qa";
 import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
-import { prepareIntakeInput } from "./intake-pipeline";
 import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
+import type { GenerateSiteOptions, GenerateSiteResult } from "./site-generation-service";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
 export const defaultJobMaxAttempts = 3;
@@ -33,18 +32,13 @@ type JobsFile = {
 
 export type JobExecutionContext = {
   workerId?: string;
-  createAndStoreSite?: (
-    input: { url?: string; prompt?: string },
-    options?: { telemetry?: AgentTelemetryRecorder }
-  ) => Promise<SiteBundle>;
-  createPreviewToken?: (input: { siteId: string; expiresAt?: string }) => Promise<{ token: string } | null>;
+  generateSite?: (options: Omit<GenerateSiteOptions, "repository">) => Promise<GenerateSiteResult>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
   runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
   analyticsSummary?: (siteId: string) => Promise<AnalyticsSummary>;
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
   listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
   listFormSubmissions?: (siteId?: string) => Promise<LeadSubmission[]>;
-  startSiteGenerationTelemetry?: (input: { url?: string; prompt?: string }) => Promise<AgentTelemetryRecorder>;
   cleanupAgentTelemetry?: (input?: { olderThanDays?: number; limit?: number }) => Promise<{ deleted: number; cutoff: string }>;
 };
 
@@ -135,37 +129,34 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       return createPresenceIntakePlan(url, crawl, renderInspection, publicPresence) as unknown as Record<string, unknown>;
     }
     case "generate_site": {
-      const input = {
-        url: typeof job.payload.url === "string" ? job.payload.url : undefined,
-        prompt: typeof job.payload.prompt === "string" ? job.payload.prompt : undefined
-      };
-      const telemetry = await context?.startSiteGenerationTelemetry?.(input);
-      let bundle: SiteBundle;
-      try {
-        bundle = context?.createAndStoreSite
-          ? await context.createAndStoreSite(input, { telemetry })
-          : createSiteFromInput(await prepareIntakeInput(input, { telemetry }));
-        await telemetry?.updateRun({
-          targetType: "site",
-          targetId: bundle.businessProfile.siteId,
-          outputSummary: `${bundle.businessProfile.name} (${bundle.siteModel.slug})`,
-          metadata: {
-            targetName: bundle.businessProfile.name,
-            slug: bundle.siteModel.slug,
-            pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
-            vertical: bundle.businessProfile.vertical
-          }
-        });
-        await telemetry?.completeRun();
-      } catch (error) {
-        await telemetry?.failRun(error);
-        throw error;
+      if (!context?.generateSite) {
+        throw new Error("generate_site requires the canonical site-generation service.");
       }
+      const rawUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
+      const prompt = typeof job.payload.prompt === "string" ? job.payload.prompt : undefined;
+      const url = rawUrl ? await assertPublicFetchUrl(rawUrl) : undefined;
+      assertLaunchMarket({ url, prompt });
+      const input = {
+        url,
+        prompt
+      };
+      const generation = await context.generateSite({
+        input,
+        source: "job",
+        metadata: jobGenerationMetadata(job, context)
+      });
+      const bundle = generation.bundle;
+      const version = bundle.siteModel.versions[0];
       return {
-        siteId: bundle.businessProfile.siteId,
-        slug: bundle.siteModel.slug,
+        runId: generation.runId,
+        generationId: generation.generationId,
+        candidateSiteId: bundle.businessProfile.siteId,
+        candidateSlug: bundle.siteModel.slug,
+        businessName: bundle.businessProfile.name,
         vertical: bundle.businessProfile.vertical,
-        pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
+        rendererVersion: version?.rendererVersion,
+        readiness: version?.generationQa?.readiness,
+        pages: version?.rendererVersion === "layout-v2" ? version.compiledPages.length : version?.pages.length ?? 0,
         findings: bundle.optimizationFindings.length
       };
     }
@@ -181,8 +172,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       return context.cleanupAgentTelemetry({ olderThanDays, limit });
     }
     case "import_batch": {
-      if (!context?.createAndStoreSite) {
-        throw new Error("import_batch requires repository-backed job context");
+      if (!context?.generateSite) {
+        throw new Error("import_batch requires the canonical site-generation service.");
       }
       const urls = parseBatchUrls(job.payload.urls ?? job.payload.text);
       if (urls.length === 0) throw new Error("import_batch requires at least one URL");
@@ -191,52 +182,30 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       const results = [];
 
       for (const url of urls) {
-        const telemetry = await context.startSiteGenerationTelemetry?.({ url, prompt });
         try {
-          const bundle = await context.createAndStoreSite({ url, prompt }, { telemetry });
-          await telemetry?.updateRun({
-            targetType: "site",
-            targetId: bundle.businessProfile.siteId,
-            outputSummary: `${bundle.businessProfile.name} (${bundle.siteModel.slug})`,
+          const generation = await context.generateSite({
+            input: { url, prompt },
+            source: "job",
             metadata: {
-              targetName: bundle.businessProfile.name,
-              slug: bundle.siteModel.slug,
-              pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
-              vertical: bundle.businessProfile.vertical,
+              ...jobGenerationMetadata(job, context),
               importBatchJobId: job.id
+            },
+            preview: {
+              create: createPreviews
             }
           });
-          const preview = createPreviews && context.createPreviewToken
-            ? telemetry
-              ? await telemetry.withSpan(
-                  {
-                    spanType: "preview_token",
-                    name: "Create preview token",
-                    inputJson: { siteId: bundle.businessProfile.siteId }
-                  },
-                  () =>
-                    context.createPreviewToken!({
-                      siteId: bundle.businessProfile.siteId,
-                      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
-                    })
-                )
-              : await context.createPreviewToken({
-                  siteId: bundle.businessProfile.siteId,
-                  expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString()
-                })
-            : null;
-          await telemetry?.completeRun();
+          const bundle = generation.bundle;
           results.push({
             ok: true,
             url,
-            siteId: bundle.businessProfile.siteId,
-            slug: bundle.siteModel.slug,
+            runId: generation.runId,
+            generationId: generation.generationId,
+            candidateSiteId: bundle.businessProfile.siteId,
+            candidateSlug: bundle.siteModel.slug,
             vertical: bundle.businessProfile.vertical,
-            pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
-            previewToken: preview?.token
+            pages: bundle.siteModel.versions[0]?.pages.length ?? 0
           });
         } catch (error) {
-          await telemetry?.failRun(error);
           results.push({
             ok: false,
             url,
@@ -340,6 +309,14 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
   }
 }
 
+function jobGenerationMetadata(job: JobRecord, context: JobExecutionContext) {
+  return {
+    ...asRecord(job.payload.metadata),
+    jobId: job.id,
+    workerId: context.workerId
+  };
+}
+
 async function updateJob(id: string, patch: Partial<JobRecord>) {
   const file = await readJobsFile();
   const job = file.jobs.find((candidate) => candidate.id === id);
@@ -416,6 +393,10 @@ async function writeJobsFile(file: JobsFile) {
 function assertString(value: unknown, label: string) {
   if (typeof value !== "string" || !value) throw new Error(`Missing ${label}`);
   return value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 export function retryDelayMs(attempts: number) {

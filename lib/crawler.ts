@@ -75,6 +75,7 @@ export type ExtractedBusinessFacts = {
   hours?: Record<string, string>;
   categories: string[];
   services: string[];
+  serviceHighlights?: string[];
   serviceAreas: string[];
   socialLinks: string[];
   bookingLinks: string[];
@@ -168,9 +169,25 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
   }
 
   const safeUrl = urlSafety.url;
-  const maxInternalPages = clampInteger(options.maxInternalPages ?? 3, 0, 8);
+  const maxInternalPages = clampInteger(options.maxInternalPages ?? 6, 0, 8);
 
   try {
+    const crawlBase = new URL(safeUrl);
+    const robotsPolicy = await fetchRobotsPolicy(crawlBase);
+    assessment.robotsFound = robotsPolicy.found;
+    if (!robotsPolicy.allowed(safeUrl)) {
+      const blocked = {
+        ...assessment,
+        finalUrl: safeUrl,
+        error: "Crawl blocked by robots.txt for this URL.",
+        findings: ["robots.txt disallows crawling the requested URL."]
+      };
+      return {
+        ...blocked,
+        score: scoreCrawlAssessment(blocked)
+      };
+    }
+
     const response = await fetchWithPresenceHeaders(safeUrl);
     const html = await response.text();
     const finalUrl = response.url || safeUrl;
@@ -201,21 +218,18 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
       .slice(0, 12);
     assessment.pageSummaries = [primarySummary];
 
-    assessment.sampledInternalPages = unique(assessment.sampledInternalPages);
-    const internalTargets = selectInternalCrawlTargets(assessment.sampledInternalPages, assessment.finalUrl ?? safeUrl, maxInternalPages);
-    const sampledSummaries = await Promise.all(internalTargets.map((target) => fetchInternalPageSummary(target)));
-    for (const summary of sampledSummaries.filter((item): item is CrawlPageSummary => Boolean(item))) {
+    const sitemapDiscovery = await discoverSitemapCrawlTargets(crawlBase, robotsPolicy, maxInternalPages);
+    assessment.sitemapFound = sitemapDiscovery.found;
+    assessment.sampledInternalPages = unique([...assessment.sampledInternalPages, ...sitemapDiscovery.urls]);
+    const internalTargets = selectInternalCrawlTargets(assessment.sampledInternalPages, assessment.finalUrl ?? safeUrl, maxInternalPages)
+      .filter((target) => robotsPolicy.allowed(target));
+    for (const target of internalTargets) {
+      const summary = await fetchInternalPageSummary(target);
+      if (!summary) continue;
       assessment.pageSummaries.push(summary);
       mergePageSummaryIntoAssessment(assessment, summary);
+      await delay(120);
     }
-
-    const crawlBase = new URL(assessment.finalUrl ?? safeUrl);
-    const [robots, sitemap] = await Promise.all([
-      probeUrl(new URL("/robots.txt", crawlBase).href),
-      probeUrl(new URL("/sitemap.xml", crawlBase).href)
-    ]);
-    assessment.robotsFound = robots;
-    assessment.sitemapFound = sitemap;
 
     assessment.findings = makeFindings(assessment);
     assessment.score = scoreCrawlAssessment(assessment);
@@ -445,10 +459,182 @@ async function probeUrl(url: string) {
   }
 }
 
+async function discoverSitemapCrawlTargets(baseUrl: URL, robotsPolicy: RobotsPolicy, limit: number) {
+  const sitemapUrl = new URL("/sitemap.xml", baseUrl).href;
+  const root = await fetchSitemapText(sitemapUrl);
+  if (!root) return { found: false, urls: [] };
+  const locs = extractSitemapLocs(root, sitemapUrl);
+  const childSitemaps = locs
+    .filter((url) => sameHostname(url.hostname, baseUrl.hostname))
+    .filter((url) => /\.xml(?:$|\?)/i.test(url.pathname))
+    .slice(0, 4);
+  const pageUrls = locs.filter((url) => !/\.xml(?:$|\?)/i.test(url.pathname));
+  for (const child of childSitemaps) {
+    const childXml = await fetchSitemapText(child.href);
+    if (!childXml) continue;
+    pageUrls.push(...extractSitemapLocs(childXml, child.href));
+  }
+
+  return {
+    found: true,
+    urls: unique(
+      pageUrls
+        .filter((url) => sameHostname(url.hostname, baseUrl.hostname))
+        .filter((url) => ["http:", "https:"].includes(url.protocol))
+        .filter((url) => !isNonHtmlPath(url.pathname))
+        .filter((url) => isBusinessFactSitemapPath(url.pathname))
+        .map((url) => stripTracking(url).href)
+        .filter((url) => robotsPolicy.allowed(url))
+    ).slice(0, Math.max(limit * 2, limit))
+  };
+}
+
+async function fetchSitemapText(url: string) {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)",
+        Accept: "application/xml,text/xml,text/plain"
+      },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!response.ok) return undefined;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType && !/xml|text\/plain|octet-stream/i.test(contentType)) return undefined;
+    return response.text();
+  } catch {
+    return undefined;
+  }
+}
+
+function extractSitemapLocs(xml: string, baseUrl: string) {
+  const urls: URL[] = [];
+  const regex = /<loc>\s*([^<]+?)\s*<\/loc>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(xml)) !== null) {
+    const value = decodeHtml(match[1]) ?? match[1];
+    try {
+      urls.push(new URL(value.trim(), baseUrl));
+    } catch {
+      // Ignore malformed sitemap entries.
+    }
+  }
+  return urls;
+}
+
+function isBusinessFactSitemapPath(pathname: string) {
+  if (normalizePath(pathname) === "/") return true;
+  return /contact|location|hours|about|service|menu|order|book|appointment|schedule|reserve|faq|review|testimonial|gallery|portfolio|work/i.test(pathname);
+}
+
+type RobotsRule = {
+  directive: "allow" | "disallow";
+  path: string;
+};
+
+type RobotsPolicy = {
+  found: boolean;
+  allowed(url: string): boolean;
+};
+
+async function fetchRobotsPolicy(base: URL): Promise<RobotsPolicy> {
+  const robotsUrl = new URL("/robots.txt", base).href;
+  try {
+    const response = await fetch(robotsUrl, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)" },
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!response.ok) return allowAllRobotsPolicy(false);
+    return parseRobotsTxt(await response.text(), base);
+  } catch {
+    return allowAllRobotsPolicy(false);
+  }
+}
+
+export function parseRobotsTxt(text: string, base: URL | string): RobotsPolicy {
+  const baseUrl = typeof base === "string" ? new URL(base) : base;
+  const rules: RobotsRule[] = [];
+  let currentApplies = false;
+  let sawDirectiveInGroup = false;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(/#.*/, "").trim();
+    if (!line) {
+      currentApplies = false;
+      sawDirectiveInGroup = false;
+      continue;
+    }
+    const match = line.match(/^([a-z-]+)\s*:\s*(.*)$/i);
+    if (!match) continue;
+    const key = match[1]!.toLowerCase();
+    const value = match[2]!.trim();
+    if (key === "user-agent") {
+      if (sawDirectiveInGroup) {
+        currentApplies = false;
+        sawDirectiveInGroup = false;
+      }
+      const agent = value.toLowerCase();
+      currentApplies ||= agent === "*" || agent.includes("lodestapresencebot") || agent.includes("lodesta");
+      continue;
+    }
+    if (key !== "allow" && key !== "disallow") continue;
+    sawDirectiveInGroup = true;
+    if (!currentApplies || !value) continue;
+    rules.push({
+      directive: key,
+      path: normalizeRobotsPath(value)
+    });
+  }
+
+  return {
+    found: true,
+    allowed(url: string) {
+      const target = new URL(url, baseUrl);
+      if (!sameHostname(target.hostname, baseUrl.hostname)) return true;
+      const path = `${target.pathname}${target.search}`;
+      const matched = rules
+        .filter((rule) => robotsPathMatches(path, rule.path))
+        .sort((left, right) => right.path.length - left.path.length)[0];
+      return matched?.directive !== "disallow";
+    }
+  };
+}
+
+function allowAllRobotsPolicy(found: boolean): RobotsPolicy {
+  return {
+    found,
+    allowed: () => true
+  };
+}
+
+function normalizeRobotsPath(value: string) {
+  return value.trim() || "/";
+}
+
+function robotsPathMatches(path: string, rulePath: string) {
+  if (!rulePath) return false;
+  const escaped = rulePath
+    .split("*")
+    .map((part) => escapeRegExp(part))
+    .join(".*");
+  const suffix = rulePath.endsWith("$") ? "$" : "";
+  const body = suffix ? escaped.slice(0, -2) : escaped;
+  return new RegExp(`^${body}${suffix}`).test(path);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function emptyExtractedFacts(): ExtractedBusinessFacts {
   return {
     categories: [],
     services: [],
+    serviceHighlights: [],
     serviceAreas: [],
     socialLinks: [],
     bookingLinks: [],
@@ -614,7 +800,17 @@ function extractBusinessFacts(
     facts.reviewsSummary = extractRating(localNode);
   }
 
-  facts.name ||= cleanText(extractMetaContent(html, "og:site_name")) ?? inferNameFromTitle(page.title, base.hostname);
+  facts.name = normalizeBusinessNameCandidate(facts.name, base.hostname);
+  facts.name ||= normalizeBusinessNameCandidate(cleanText(extractMetaContent(html, "og:site_name")), base.hostname);
+  facts.name ||= inferNameFromTitle(page.title, base.hostname);
+  facts.hours ||= extractVisibleHours(html);
+  facts.address ||= extractVisibleAddress(html);
+  facts.services = unique([
+    ...facts.services,
+    ...extractVisibleServices(html, page, facts.name),
+    ...extractServiceMentionsFromText(html)
+  ]).slice(0, 12);
+  facts.serviceHighlights = unique([...(facts.serviceHighlights ?? []), ...extractServiceHighlightsFromText(html)]).slice(0, 8);
   facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
@@ -634,6 +830,7 @@ function extractBusinessFacts(
 
   facts.categories = unique(facts.categories).slice(0, 8);
   facts.services = unique(facts.services).slice(0, 12);
+  facts.serviceHighlights = unique(facts.serviceHighlights).slice(0, 8);
   facts.serviceAreas = unique(facts.serviceAreas).slice(0, 12);
   facts.socialLinks = unique(facts.socialLinks).slice(0, 10);
   facts.orderingLinks = unique(facts.orderingLinks).slice(0, 6);
@@ -644,6 +841,19 @@ function extractBusinessFacts(
 
 function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetReference[] {
   const references: CrawlAssetReference[] = [];
+  for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+    const rel = extractAttribute(tag, "rel") ?? "";
+    if (!/\b(?:icon|apple-touch-icon|shortcut icon)\b/i.test(rel)) continue;
+    const href = extractAttribute(tag, "href");
+    if (!href) continue;
+    try {
+      const url = new URL(href, sourceUrl);
+      if (!["http:", "https:"].includes(url.protocol)) continue;
+      references.push({ url: url.href, alt: "Website icon reference", kind: "logo", rightsStatus: "reference_only" });
+    } catch {
+      // Ignore malformed icon URLs.
+    }
+  }
   for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
     const src = extractAttribute(tag, "src") || extractAttribute(tag, "data-src");
     if (!src) continue;
@@ -743,14 +953,17 @@ function extractGeo(value: unknown): ExtractedBusinessFacts["geo"] | undefined {
 }
 
 function extractHours(node: Record<string, unknown>) {
-  const values = toArray(node.openingHours);
+  const values = [
+    ...toArray(node.openingHours).map((value) => String(value)),
+    ...toArray(node.openingHoursSpecification).flatMap(openingHoursSpecificationEntries)
+  ];
   if (values.length === 0) return undefined;
-  return Object.fromEntries(values.map((value, index) => [`hours_${index + 1}`, String(value)]));
+  return Object.fromEntries(unique(values).map((value, index) => [`hours_${index + 1}`, value]));
 }
 
 function extractServices(node: Record<string, unknown>) {
   const services: string[] = [];
-  for (const key of ["knowsAbout", "serviceType", "makesOffer"]) {
+  for (const key of ["knowsAbout", "serviceType", "makesOffer", "offers", "itemOffered", "hasOfferCatalog", "itemListElement"]) {
     for (const value of toArray(node[key])) {
       if (typeof value === "string") services.push(value);
       if (value && typeof value === "object") {
@@ -760,7 +973,291 @@ function extractServices(node: Record<string, unknown>) {
       }
     }
   }
-  return services.map((service) => cleanText(service)).filter((service): service is string => Boolean(service));
+  return services.map(cleanServiceCandidate).filter((service): service is string => Boolean(service));
+}
+
+function openingHoursSpecificationEntries(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const days = toArray(record.dayOfWeek)
+    .map((day) => typeof day === "string" ? dayFromSchemaValue(day) : undefined)
+    .filter((day): day is string => Boolean(day));
+  const opens = formatSchemaTime(record.opens);
+  const closes = formatSchemaTime(record.closes);
+  if (!days.length || !opens) return [];
+  const label = dayRangeLabel(days);
+  const valueText = closes ? `${opens} - ${closes}` : opens;
+  return [`${label}: ${valueText}`];
+}
+
+function dayFromSchemaValue(value: string) {
+  const key = value.split("/").at(-1)?.trim().toLowerCase();
+  const days: Record<string, string> = {
+    monday: "Monday",
+    tuesday: "Tuesday",
+    wednesday: "Wednesday",
+    thursday: "Thursday",
+    friday: "Friday",
+    saturday: "Saturday",
+    sunday: "Sunday"
+  };
+  return key ? days[key] : undefined;
+}
+
+function dayRangeLabel(days: string[]) {
+  const order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const sorted = unique(days).sort((left, right) => order.indexOf(left) - order.indexOf(right));
+  if (sorted.length <= 1) return sorted[0] ?? "Hours";
+  const indexes = sorted.map((day) => order.indexOf(day));
+  const contiguous = indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1);
+  return contiguous ? `${sorted[0]}-${sorted[sorted.length - 1]}` : sorted.join(", ");
+}
+
+function formatSchemaTime(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?/);
+  if (!match) return value.trim();
+  const hour24 = Number.parseInt(match[1], 10);
+  const minutes = match[2] ?? "00";
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return value.trim();
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${minutes} ${suffix}`;
+}
+
+function extractVisibleServices(html: string, page: { url: string; title?: string }, businessName?: string): string[] {
+  const candidates: string[] = [];
+  const pageUrl = new URL(page.url);
+  if (isServicePath(pageUrl.pathname)) {
+    const titleCandidate = page.title?.split(/\s+[|-]\s+/)[0];
+    if (titleCandidate && safeTextId(titleCandidate) !== safeTextId(businessName)) candidates.push(titleCandidate);
+    const pathCandidate = serviceNameFromPath(pageUrl.pathname);
+    if (pathCandidate) candidates.push(pathCandidate);
+  }
+
+  const anchorRegex = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = anchorRegex.exec(html)) !== null) {
+    const href = extractAttribute(match[1] ?? "", "href");
+    const text = cleanText(match[2]);
+    if (!href || !text) continue;
+    try {
+      const url = new URL(href, page.url);
+      if (!isServicePath(url.pathname) && !serviceTextLooksSpecific(text)) continue;
+      candidates.push(text);
+      const pathCandidate = serviceNameFromPath(url.pathname);
+      if (pathCandidate) candidates.push(pathCandidate);
+    } catch {
+      // Ignore malformed service links.
+    }
+  }
+
+  return unique(candidates.map(cleanServiceCandidate).filter((service): service is string => Boolean(service))).slice(0, 12);
+}
+
+function extractVisibleHours(html: string): Record<string, string> | undefined {
+  const lines = htmlToTextLines(html);
+  const entries: Array<[string, string]> = [];
+  for (const line of lines) {
+    if (!/\b(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|hours?)\b/i.test(line)) continue;
+    if (!/\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|closed|by appointment)\b/i.test(line)) continue;
+    const compact = line.replace(/\s+/g, " ").trim();
+    if (compact.length > 120) continue;
+    entries.push([`hours_${entries.length + 1}`, compact]);
+    if (entries.length >= 7) break;
+  }
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function extractVisibleAddress(html: string): ExtractedBusinessFacts["address"] | undefined {
+  const text = htmlToTextLines(html).join(", ");
+  const statePattern =
+    "(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Iowa|Idaho|Illinois|Indiana|Kansas|Kentucky|Louisiana|Massachusetts|Maryland|Maine|Michigan|Minnesota|Missouri|Mississippi|Montana|North Carolina|North Dakota|Nebraska|New Hampshire|New Jersey|New Mexico|Nevada|New York|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Virginia|Vermont|Washington|Wisconsin|West Virginia|Wyoming|District of Columbia)";
+  const match = text.match(
+    new RegExp(
+      "\\b(\\d{2,6}\\s+(?:[A-Za-z0-9'.#-]+\\s+){1,8}(?:Street|St\\.?|Avenue|Ave\\.?|Road|Rd\\.?|Boulevard|Blvd\\.?|Drive|Dr\\.?|Lane|Ln\\.?|Court|Ct\\.?|Circle|Cir\\.?|Way|Highway|Hwy\\.?|Parkway|Pkwy\\.?|Place|Pl\\.?)\\.?(?:\\s+(?:Suite|Ste\\.?|Unit|#)\\s*[A-Za-z0-9-]+)?)\\s*,?\\s+([A-Z][A-Za-z'. -]{2,60}?),?\\s+" +
+        statePattern +
+        "\\s+(\\d{5}(?:-\\d{4})?)\\b",
+      "i"
+    )
+  );
+  if (!match) return undefined;
+  return {
+    street: cleanText(match[1]),
+    city: titleCase(cleanText(match[2]) ?? ""),
+    region: normalizeStateRegion(match[3]),
+    postalCode: match[4],
+    country: "US"
+  };
+}
+
+function normalizeStateRegion(value: string | undefined) {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  const states: Record<string, string> = {
+    alabama: "AL",
+    alaska: "AK",
+    arizona: "AZ",
+    arkansas: "AR",
+    california: "CA",
+    colorado: "CO",
+    connecticut: "CT",
+    delaware: "DE",
+    florida: "FL",
+    georgia: "GA",
+    hawaii: "HI",
+    iowa: "IA",
+    idaho: "ID",
+    illinois: "IL",
+    indiana: "IN",
+    kansas: "KS",
+    kentucky: "KY",
+    louisiana: "LA",
+    massachusetts: "MA",
+    maryland: "MD",
+    maine: "ME",
+    michigan: "MI",
+    minnesota: "MN",
+    missouri: "MO",
+    mississippi: "MS",
+    montana: "MT",
+    "north carolina": "NC",
+    "north dakota": "ND",
+    nebraska: "NE",
+    "new hampshire": "NH",
+    "new jersey": "NJ",
+    "new mexico": "NM",
+    nevada: "NV",
+    "new york": "NY",
+    ohio: "OH",
+    oklahoma: "OK",
+    oregon: "OR",
+    pennsylvania: "PA",
+    "rhode island": "RI",
+    "south carolina": "SC",
+    "south dakota": "SD",
+    tennessee: "TN",
+    texas: "TX",
+    utah: "UT",
+    virginia: "VA",
+    vermont: "VT",
+    washington: "WA",
+    wisconsin: "WI",
+    "west virginia": "WV",
+    wyoming: "WY",
+    "district of columbia": "DC"
+  };
+  return states[normalized] ?? value.toUpperCase();
+}
+
+function extractServiceMentionsFromText(html: string) {
+  const text = htmlToTextLines(html).join(" ");
+  const servicePatterns: Array<[RegExp, string]> = [
+    [/\bpaintless dent repair\b|\bPDR\b/i, "Paintless Dent Repair"],
+    [/\bhail(?: damage)? repair\b|\bhail damage\b/i, "Hail Damage Repair"],
+    [/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i, "Automotive Glass Services"],
+    [/\bcollision repair\b|\bfender benders?\b/i, "Collision Repair"],
+    [/\bpaint\s*(?:and|&)\s*body\b|\bauto(?:motive)? paint\b|\bpaint repair\b/i, "Paint And Body Repair"],
+    [/\bframe repair\b|\bstructural repair\b/i, "Frame Repair"],
+    [/\bbumper repair\b/i, "Bumper Repair"],
+    [/\bdent repair\b/i, "Dent Repair"],
+    [/\bcatering\b/i, "Catering"],
+    [/\btakeout\b|\bpickup\b/i, "Takeout And Pickup"],
+    [/\bdelivery\b/i, "Delivery"],
+    [/\bconsultations?\b/i, "Consultations"],
+    [/\bpreventive care\b|\bdental exams?\b/i, "Preventive Care"],
+    [/\bcosmetic dentistry\b|\bwhitening\b/i, "Cosmetic Dentistry"],
+    [/\blawn care\b/i, "Lawn Care"],
+    [/\blandscape design\b/i, "Landscape Design"],
+    [/\bseasonal cleanup\b/i, "Seasonal Cleanup"],
+    [/\bplumbing repairs?\b/i, "Plumbing Repair"],
+    [/\bhvac\b|\bheating and cooling\b/i, "HVAC Service"],
+    [/\belectrical repairs?\b/i, "Electrical Repair"]
+  ];
+  return servicePatterns.flatMap(([pattern, label]) => (pattern.test(text) ? [label] : []));
+}
+
+function extractServiceHighlightsFromText(html: string) {
+  const text = htmlToTextLines(html).join(" ");
+  const highlights: string[] = [];
+  if (/\bPDR\b|\bpaintless dent repair\b/i.test(text) && /\bhail\b/i.test(text)) {
+    highlights.push("PDR for smaller dents and hail repair");
+  } else if (/\bPDR\b|\bpaintless dent repair\b/i.test(text)) {
+    highlights.push("Paintless dent repair questions");
+  }
+  if (/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i.test(text)) {
+    highlights.push("Automotive glass for windshields and windows");
+  }
+  if (/\bdeductible\b/i.test(text) && /\brental car\b/i.test(text)) {
+    highlights.push("Ask about deductible and rental-car options");
+  } else if (/\bdeductible\b/i.test(text)) {
+    highlights.push("Ask about deductible questions");
+  } else if (/\brental car\b/i.test(text)) {
+    highlights.push("Ask about rental-car options");
+  }
+  if (/\binsurance claims?\b/i.test(html)) {
+    highlights.push("Insurance-claim questions");
+  }
+  return unique(highlights).slice(0, 6);
+}
+
+function isServicePath(pathname: string) {
+  return /\/(?:services?|treatments?|practice-areas?|menu|repairs?|solutions?|what-we-do)(?:\/|$)/i.test(pathname);
+}
+
+function serviceNameFromPath(pathname: string) {
+  const segments = pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const serviceIndex = segments.findIndex((segment) => /^(services?|treatments?|practice-areas?|menu|repairs?|solutions?|what-we-do)$/i.test(segment));
+  const candidate = serviceIndex >= 0 ? segments[serviceIndex + 1] : segments.at(-1);
+  return candidate ? cleanServiceCandidate(candidate.replace(/[-_]+/g, " ")) : undefined;
+}
+
+function serviceTextLooksSpecific(value: string) {
+  if (!/\b(repair|install|clean|cleaning|consult|consultation|treatment|service|menu|catering|delivery|booking|appointment|estate|planning|injury|hvac|plumbing|electrical|landscap|lawn|color|cut|crowns?|whitening|exam|portrait|photography|collision|automotive|paint|body|dent|hail|windshield|glass|pdr)\b/i.test(value)) {
+    return false;
+  }
+  return Boolean(cleanServiceCandidate(value));
+}
+
+function cleanServiceCandidate(value: string | undefined) {
+  const cleaned = cleanText(value)
+    ?.replace(/\b(learn more|read more|view all|all services|our services|services|service|menu|book now|schedule|contact|about|home)\b/gi, " ")
+    .replace(/[|•·]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  if (cleaned.length < 3 || cleaned.length > 64) return undefined;
+  if (/[{}<>@]/.test(cleaned)) return undefined;
+  if (/\b(home|about|contact|gallery|reviews?|testimonials?|blog|careers?|privacy|terms|login|sign in)\b/i.test(cleaned)) return undefined;
+  const words = cleaned.split(/\s+/);
+  if (words.length > 7) return undefined;
+  if (words.every((word) => /^\d+$/.test(word))) return undefined;
+  return cleaned.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function safeTextId(value: string | undefined) {
+  return value?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
+}
+
+function titleCase(value: string) {
+  return value.toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function htmlToTextLines(html: string) {
+  return decodeHtml(
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div|li|tr|section|article|header|footer|h[1-6])>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    ?.split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean) ?? [];
 }
 
 function extractAreas(node: Record<string, unknown>) {
@@ -821,13 +1318,60 @@ function normalizeEmail(value?: string) {
 }
 
 function inferNameFromTitle(title: string | undefined, hostname: string) {
-  const titleName = title?.split(/\s+[|-]\s+/)[0]?.trim();
-  if (titleName && titleName.length >= 2 && titleName.length <= 80) return titleName;
+  const candidates = title
+    ?.split(/\s+(?:[|\u2013\u2014-])\s+/)
+    .map((candidate) => cleanText(candidate))
+    .filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 2 && candidate.length <= 80));
+  const scored = (candidates ?? [])
+    .map((candidate, index) => ({
+      candidate,
+      score: titleNameScore(candidate, hostname, index === (candidates?.length ?? 0) - 1)
+    }))
+    .sort((left, right) => right.score - left.score);
+  const best = scored.find((candidate) => candidate.score > 0);
+  if (best) return best.candidate;
   return hostname
     .replace(/^www\./, "")
     .split(".")[0]
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function normalizeBusinessNameCandidate(value: string | undefined, hostname: string) {
+  if (!value) return undefined;
+  const cleaned = cleanText(value);
+  if (!cleaned) return undefined;
+  const candidates = cleaned
+    .split(/\s+(?:[|\u2013\u2014-])\s+/)
+    .map((candidate) => cleanText(candidate))
+    .filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 2 && candidate.length <= 80))
+    .filter((candidate) => !/^(home|about us|contact us|contact|gallery|portfolio|privacy policy|terms)$/i.test(candidate));
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) return cleaned;
+  return (
+    candidates
+      .map((candidate, index) => ({
+        candidate,
+        score: titleNameScore(candidate, hostname, index === candidates.length - 1)
+      }))
+      .sort((left, right) => right.score - left.score)[0]?.candidate ?? cleaned
+  );
+}
+
+function titleNameScore(candidate: string, hostname: string, lastSegment: boolean) {
+  let score = lastSegment ? 1 : 0;
+  const hostTokens = safeTextId(hostname.replace(/^www\./, "").split(".")[0]);
+  const candidateTokens = safeTextId(candidate);
+  if (hostTokens && (candidateTokens.includes(hostTokens) || hostTokens.includes(candidateTokens))) score += 4;
+  const hostWords = new Set(hostname.replace(/^www\./, "").split(".")[0]?.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3) ?? []);
+  const candidateWords = new Set(candidate.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3));
+  const overlap = Array.from(hostWords).filter((word) => candidateWords.has(word)).length;
+  score += Math.min(overlap * 2, 4);
+  if (/\b(auto|automotive|body|paint|collision|repair|restaurant|cafe|taco|dental|law|salon|spa|clinic|plumbing|hvac|landscap|studio|shop|company|co\.?|llc|inc\.?)\b/i.test(candidate)) score += 2;
+  if (/\b(done right|welcome|official|quality|best|affordable|professional)\b/i.test(candidate)) score -= 3;
+  if (/[!?]/.test(candidate)) score -= 2;
+  if (candidate.split(/\s+/).length < 2) score -= 1;
+  return score;
 }
 
 function isSocialHost(host: string) {
@@ -924,6 +1468,7 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
     hours: left.hours ?? right.hours,
     categories: unique([...left.categories, ...right.categories]).slice(0, 8),
     services: unique([...left.services, ...right.services]).slice(0, 12),
+    serviceHighlights: unique([...(left.serviceHighlights ?? []), ...(right.serviceHighlights ?? [])]).slice(0, 8),
     serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]).slice(0, 12),
     socialLinks: unique([...left.socialLinks, ...right.socialLinks]).slice(0, 10),
     bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]).slice(0, 6),

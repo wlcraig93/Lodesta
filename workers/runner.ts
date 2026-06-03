@@ -3,6 +3,8 @@ import "../scripts/load-env";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createSiteFromInput } from "../lib/intake";
 import { repository } from "../lib/repository";
+import { generateSite } from "../lib/site-generation-service";
+import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
 import { runAudit } from "../lib/audit";
 
 let shuttingDown = false;
@@ -12,6 +14,8 @@ process.once("SIGTERM", () => {
 process.once("SIGINT", () => {
   shuttingDown = true;
 });
+
+setSupabaseJobGenerateSite((options) => generateSite({ ...options, repository }));
 
 async function main() {
   const command = process.argv[2] ?? "demo";

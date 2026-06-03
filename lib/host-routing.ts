@@ -37,7 +37,7 @@ function isLocalHost(hostname: string) {
 }
 
 function forwardedHost(headers: HeaderReader) {
-  return firstForwardedValue(headers.get("x-forwarded-host") ?? headers.get("host") ?? "");
+  return forwardedHeaderHost(headers.get("forwarded")) ?? firstForwardedValue(headers.get("x-forwarded-host") ?? headers.get("host") ?? "");
 }
 
 function forwardedProto(value: string | null, normalizedHostname: string) {
@@ -66,6 +66,19 @@ function cleanHostPort(value: string) {
 
 function firstForwardedValue(value: string) {
   return value.split(",")[0]?.trim() ?? "";
+}
+
+function forwardedHeaderHost(value: string | null) {
+  const first = firstForwardedValue(value ?? "");
+  if (!first) return undefined;
+  for (const part of first.split(";")) {
+    const [rawKey, ...rawValueParts] = part.split("=");
+    if (rawKey?.trim().toLowerCase() !== "host") continue;
+    const rawValue = rawValueParts.join("=").trim();
+    if (!rawValue) return undefined;
+    return rawValue.replace(/^"|"$/g, "");
+  }
+  return undefined;
 }
 
 function isValidPort(value: string) {

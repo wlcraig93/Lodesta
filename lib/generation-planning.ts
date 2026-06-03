@@ -257,6 +257,12 @@ function sectionEmphasisForStrategy(
   strategy: DesignDirection["strategy"],
   defaults: SectionType[]
 ): SectionType[] {
+  if (defaults.includes("menu_deals")) {
+    if (strategy === "premium_redesign") {
+      return prioritize(defaults, ["hero", "gallery", "menu_deals", "trust_bar", "contact", "testimonials", "cta"]);
+    }
+    return prioritize(defaults, ["hero", "trust_bar", "menu_deals", "gallery", "contact", "testimonials", "cta"]);
+  }
   if (strategy === "conversion_optimized") {
     return prioritize(defaults, ["hero", "trust_bar", "services", "cta", "contact"]);
   }

@@ -41,6 +41,7 @@ export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: strin
   const userId = auth.user?.id;
   const email = auth.user?.email?.toLowerCase();
   if (!userId && !email) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
+  if (isAdminUserId(userId)) return { ...auth, admin: true as const };
 
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
   const ownsSite = claims.some(

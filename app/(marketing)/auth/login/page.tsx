@@ -1,0 +1,25 @@
+import { AuthLoginForm } from "@/components/AuthLoginForm";
+import { getSupabasePublicEnv } from "@/lib/supabase/env";
+
+export const dynamic = "force-dynamic";
+
+export default async function LoginPage() {
+  const env = getSupabasePublicEnv();
+
+  return (
+    <main className="admin-page auth-page">
+      <header className="admin-header">
+        <div>
+          <span className="badge">Login</span>
+          <h1>Access your site</h1>
+          <p>Owners sign in with Google or a secure email link before editing, connecting domains, or managing leads.</p>
+        </div>
+      </header>
+
+      <section className="panel auth-panel">
+        <h2>Sign in</h2>
+        <AuthLoginForm configured={env.configured} />
+      </section>
+    </main>
+  );
+}

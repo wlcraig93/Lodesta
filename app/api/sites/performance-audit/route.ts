@@ -1,0 +1,50 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { runPerformanceAuditV2 } from "@/lib/performance-audit-v2";
+import { repository } from "@/lib/repository";
+import { requireAdmin } from "@/lib/security";
+
+export const runtime = "nodejs";
+
+const performanceAuditSchema = z.object({
+  siteId: z.string().trim().min(1),
+  versionId: z.string().trim().min(1).optional()
+});
+
+export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
+  const body = await request.json().catch(() => null);
+  const parsed = performanceAuditSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid performance audit request", issues: parsed.error.issues }, { status: 400 });
+  }
+
+  const bundle = await repository.getSiteBundle(parsed.data.siteId);
+  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  const version = parsed.data.versionId
+    ? bundle.siteModel.versions.find((candidate) => candidate.id === parsed.data.versionId)
+    : bundle.siteModel.versions.find((candidate) => candidate.status === "published") ?? bundle.siteModel.versions[0];
+  if (!version) return NextResponse.json({ error: "No site version is available for performance audit." }, { status: 409 });
+
+  const result = runPerformanceAuditV2({
+    bundle,
+    version,
+    siteId: bundle.businessProfile.siteId
+  });
+  await repository.upsertGenerationArtifact(result.artifact);
+
+  return NextResponse.json({
+    skillId: result.skillId,
+    skillVersion: result.skillVersion,
+    versionId: result.versionId,
+    summary: result.summary,
+    findings: result.findings,
+    artifact: {
+      id: result.artifact.id,
+      scope: result.artifact.scope,
+      artifactType: result.artifact.artifactType
+    }
+  });
+}

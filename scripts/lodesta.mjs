@@ -23,6 +23,10 @@ async function main() {
       requireArgs(command, args, 1);
       await printJson(post("/api/intake", { prompt: args.join(" ") }));
       return;
+    case "generation-job-status":
+      requireArgs(command, args, 1);
+      await printJson(get(`/api/intake/jobs/${encodeURIComponent(args[0])}`));
+      return;
     case "run-presence":
       requireArgs(command, args, 1);
       await printJson(post("/api/presence/assess", { url: args[0] }));
@@ -202,7 +206,11 @@ export function parseImportBatchPayload(args) {
 }
 
 function isHttpUrl(value) {
-  return typeof value === "string" && /^https?:\/\//i.test(value.trim());
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) return true;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return false;
+  return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?::\d{1,5})?(?:[/?#].*)?$/i.test(trimmed);
 }
 
 function parseScheduleArgs(args) {
@@ -233,8 +241,9 @@ function printHelp() {
 Base URL: ${baseUrl}
 
 Commands:
-  create-site-from-url <url> [prompt]       Import a URL and generate a structured site
-  generate-draft <prompt>                  Generate a site from a prompt
+  create-site-from-url <url> [prompt]       Queue async generation from a URL
+  generate-draft <prompt>                  Queue async generation from a prompt
+  generation-job-status <jobId>            Inspect an async generation job
   run-presence <url>                       Crawl and score an existing URL
   run-audit <siteId>                       Run the optimization audit
   run-qa <siteId> [published|draft]         Run QA checks

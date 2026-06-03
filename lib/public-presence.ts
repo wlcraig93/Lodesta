@@ -25,10 +25,7 @@ const placesFieldMask = [
   "places.location",
   "places.primaryTypeDisplayName",
   "places.types",
-  "places.rating",
-  "places.userRatingCount",
   "places.websiteUri",
-  "places.googleMapsUri",
   "places.nationalPhoneNumber",
   "places.internationalPhoneNumber",
   "places.regularOpeningHours",
@@ -36,13 +33,14 @@ const placesFieldMask = [
 ].join(",");
 
 export async function gatherPublicPresenceSignals(input: PublicPresenceInput): Promise<PublicPresenceEnrichment | undefined> {
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  if (!apiKey) return undefined;
-
   const observedAt = new Date().toISOString();
+  const crawlPlaceId = publicPresenceFromCrawlPlaceId(input, observedAt);
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+  if (!apiKey) return crawlPlaceId;
+
   const textQuery = buildTextQuery(input);
   if (!textQuery) {
-    return {
+    return crawlPlaceId ?? {
       provider: "google_places",
       observedAt,
       signals: [],
@@ -83,65 +81,136 @@ export async function gatherPublicPresenceSignals(input: PublicPresenceInput): P
         notes: [`Google Places Text Search returned no candidate for "${textQuery}".`]
       };
     }
-    return placeToEnrichment(place, input, textQuery, observedAt);
-  } catch (error) {
+    const enrichment = placeToPublicPresenceEnrichment(place, input, textQuery, observedAt);
+    if (!crawlPlaceId) return enrichment;
+    const placeIds = new Set(enrichment.signals.map((signal) => signal.placeId).filter(Boolean));
     return {
-      provider: "google_places",
-      observedAt,
-      signals: [],
-      facts: {},
-      provenance: {},
-      notes: [`Google Places enrichment unavailable: ${error instanceof Error ? error.message : String(error)}`]
+      ...enrichment,
+      signals: [...enrichment.signals, ...crawlPlaceId.signals.filter((signal) => !signal.placeId || !placeIds.has(signal.placeId))],
+      notes: [...enrichment.notes, ...crawlPlaceId.notes]
     };
+  } catch (error) {
+    const failureNote = `Google Places enrichment unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    return crawlPlaceId
+      ? {
+          ...crawlPlaceId,
+          notes: [...crawlPlaceId.notes, failureNote]
+        }
+      : {
+          provider: "google_places",
+          observedAt,
+          signals: [],
+          facts: {},
+          provenance: {},
+          notes: [failureNote]
+        };
   }
 }
 
-function placeToEnrichment(
+function publicPresenceFromCrawlPlaceId(input: PublicPresenceInput, observedAt: string): PublicPresenceEnrichment | undefined {
+  const placeId = firstCrawlGooglePlaceId(input.crawl);
+  if (!placeId) return undefined;
+  const confidence = 0.7;
+  const signal: PublicPresenceSignal = {
+    id: `presence_google_places_${safeId(placeId)}`,
+    siteId: input.crawl?.extractedFacts.name ? `site_${safeId(input.crawl.extractedFacts.name)}` : "site_pending",
+    provider: "google_places",
+    source: "google",
+    placeId,
+    confidence,
+    observedAt,
+    fields: {},
+    provenance: {
+      placeId: {
+        source: "website",
+        sourceUrl: input.url,
+        confidence,
+        verified: false,
+        observedAt
+      }
+    },
+    notes: [
+      "Google place_id discovered from a crawled website link.",
+      "Only place_id is retained for compliant live Google link resolution; ratings, review counts, review text, and resolved Maps URLs are not serialized."
+    ]
+  };
+  return {
+    provider: "google_places",
+    observedAt,
+    signals: [signal],
+    facts: {},
+    provenance: signal.provenance,
+    notes: ["Google place_id captured from crawl for live-only proof/link display."]
+  };
+}
+
+function firstCrawlGooglePlaceId(crawl: CrawlAssessment | undefined) {
+  const links = [...(crawl?.linkReferences ?? []), ...(crawl?.pageSummaries ?? []).flatMap((page) => page.linkReferences)];
+  for (const link of links) {
+    const placeId = googlePlaceIdFromHref(link.href);
+    if (placeId) return placeId;
+  }
+  return undefined;
+}
+
+function googlePlaceIdFromHref(href: string) {
+  try {
+    const url = new URL(href);
+    const candidate = url.searchParams.get("query_place_id") ?? url.searchParams.get("placeid") ?? url.searchParams.get("place_id");
+    return candidate && /^[A-Za-z0-9:_-]{8,256}$/.test(candidate) ? candidate : undefined;
+  } catch {
+    const match = href.match(/[?&](?:query_place_id|placeid|place_id)=([A-Za-z0-9:_-]{8,256})/i);
+    return match?.[1];
+  }
+}
+
+export function placeToPublicPresenceEnrichment(
   place: Record<string, unknown>,
   input: PublicPresenceInput,
   textQuery: string,
   observedAt: string
 ): PublicPresenceEnrichment {
-  const googleMapsUri = stringValue(place.googleMapsUri);
   const websiteUri = stringValue(place.websiteUri);
   const displayName = localizedText(place.displayName);
   const address = addressFromPlace(place);
   const geo = geoFromPlace(place.location);
   const categories = categoriesFromPlace(place);
   const phone = stringValue(place.nationalPhoneNumber) ?? stringValue(place.internationalPhoneNumber);
-  const rating = numberValue(place.rating);
-  const userRatingCount = numberValue(place.userRatingCount);
   const hours = hoursFromPlace(place.regularOpeningHours);
-  const confidence = matchConfidence(input.url, websiteUri, displayName, input.crawl?.extractedFacts.name);
-  const sourceUrl = googleMapsUri;
-  const facts: Partial<ExtractedBusinessFacts> = {
-    name: displayName,
-    phone,
-    address,
-    geo,
-    hours,
-    categories,
-    reviewsSummary:
-      rating || userRatingCount
-        ? {
-            rating,
-            count: userRatingCount,
-            sources: ["google_places"]
-          }
-        : undefined
-  };
+  const match = placeMatchAssessment({
+    sourceUrl: input.url,
+    websiteUri,
+    placeName: displayName,
+    crawlName: input.crawl?.extractedFacts.name,
+    placePhone: phone,
+    crawlPhone: input.crawl?.extractedFacts.phone,
+    placeCity: address?.city,
+    crawlCity: input.crawl?.extractedFacts.address?.city,
+    textQuery
+  });
+  const confidence = match.confidence;
+  const sourceUrl = undefined;
+  const acceptedFacts: Partial<ExtractedBusinessFacts> = match.accepted
+    ? {
+        name: displayName,
+        phone,
+        address,
+        geo,
+        hours,
+        categories
+      }
+    : {};
   const provenance = buildPlacesProvenance({
     sourceUrl,
     observedAt,
     confidence,
     fields: {
-      name: displayName,
-      phone,
-      address,
-      geo,
-      hours,
-      categories: categories.length ? categories : undefined,
-      reviewsSummary: facts.reviewsSummary
+      name: acceptedFacts.name,
+      phone: acceptedFacts.phone,
+      address: acceptedFacts.address,
+      geo: acceptedFacts.geo,
+      hours: acceptedFacts.hours,
+      categories: acceptedFacts.categories?.length ? acceptedFacts.categories : undefined
     }
   });
   const signal: PublicPresenceSignal = {
@@ -157,17 +226,16 @@ function placeToEnrichment(
       name: displayName,
       phone,
       websiteUri,
-      googleMapsUri,
       address,
       geo,
       categories,
-      hours,
-      rating,
-      userRatingCount
+      hours
     },
     provenance,
     notes: [
       `Matched from Text Search query "${textQuery}".`,
+      ...match.reasons,
+      ...(match.accepted ? ["Places candidate accepted for fact merge."] : ["Places candidate retained as evidence but not merged into renderable facts."]),
       "Places facts remain unverified owner-truth until claim."
     ]
   };
@@ -176,9 +244,14 @@ function placeToEnrichment(
     provider: "google_places",
     observedAt,
     signals: [signal],
-    facts,
+    facts: acceptedFacts,
     provenance,
-    notes: [`Google Places candidate captured with ${Math.round(confidence * 100)}% confidence.`]
+    notes: [
+      `Google Places candidate captured with ${Math.round(confidence * 100)}% confidence.`,
+      match.accepted
+        ? "Google Places candidate accepted for business fact enrichment."
+        : "Google Places candidate was not merged because it did not confidently match the source business."
+    ]
   };
 }
 
@@ -218,11 +291,65 @@ function buildPlacesProvenance({
   return provenance;
 }
 
-function matchConfidence(sourceUrl: string | undefined, websiteUri: string | undefined, placeName?: string, crawlName?: string) {
-  let confidence = 0.72;
-  if (sourceUrl && websiteUri && hostName(sourceUrl) === hostName(websiteUri)) confidence += 0.12;
-  if (placeName && crawlName && safeId(placeName) === safeId(crawlName)) confidence += 0.08;
-  return Math.min(confidence, 0.92);
+function placeMatchAssessment(input: {
+  sourceUrl?: string;
+  websiteUri?: string;
+  placeName?: string;
+  crawlName?: string;
+  placePhone?: string;
+  crawlPhone?: string;
+  placeCity?: string;
+  crawlCity?: string;
+  textQuery: string;
+}) {
+  const reasons: string[] = [];
+  let confidence = input.sourceUrl || input.crawlName || input.crawlPhone ? 0.42 : 0.56;
+  const sourceHost = input.sourceUrl ? hostName(input.sourceUrl) : "";
+  const placeHost = input.websiteUri ? hostName(input.websiteUri) : "";
+  const hostMatches = Boolean(sourceHost && placeHost && sourceHost === placeHost);
+  const hostConflicts = Boolean(sourceHost && placeHost && sourceHost !== placeHost);
+  const exactNameMatch = Boolean(input.placeName && input.crawlName && safeId(input.placeName) === safeId(input.crawlName));
+  const looseNameMatches = namesLooselyMatch(input.placeName, input.crawlName);
+  const phoneMatches = Boolean(input.placePhone && input.crawlPhone && phoneDigits(input.placePhone) === phoneDigits(input.crawlPhone));
+  const cityMatches = Boolean(input.placeCity && input.crawlCity && safeId(input.placeCity) === safeId(input.crawlCity));
+  const promptNameMatches = Boolean(!input.crawlName && input.placeName && safeId(input.textQuery).includes(safeId(input.placeName)));
+
+  if (hostMatches) {
+    confidence += 0.3;
+    reasons.push("Place website host matches the submitted source URL.");
+  } else if (hostConflicts) {
+    confidence -= 0.2;
+    reasons.push("Place website host differs from the submitted source URL.");
+  }
+  if (exactNameMatch) {
+    confidence += 0.24;
+    reasons.push("Place name exactly matches the crawled business name.");
+  } else if (looseNameMatches) {
+    confidence += 0.16;
+    reasons.push("Place name is similar to the crawled business name.");
+  } else if (input.placeName && input.crawlName) {
+    confidence -= 0.16;
+    reasons.push("Place name differs from the crawled business name.");
+  }
+  if (phoneMatches) {
+    confidence += 0.18;
+    reasons.push("Place phone matches the crawled phone number.");
+  } else if (input.placePhone && input.crawlPhone) {
+    confidence -= 0.08;
+    reasons.push("Place phone differs from the crawled phone number.");
+  }
+  if (cityMatches) {
+    confidence += 0.06;
+    reasons.push("Place city matches the crawled address city.");
+  }
+  if (promptNameMatches) {
+    confidence += 0.16;
+    reasons.push("Place name appears in the prompt/query.");
+  }
+
+  confidence = Math.max(0.1, Math.min(confidence, 0.94));
+  const accepted = confidence >= 0.74 && !(hostConflicts && !exactNameMatch && !looseNameMatches && !phoneMatches);
+  return { confidence, accepted, reasons };
 }
 
 function hostName(value: string) {
@@ -265,7 +392,9 @@ function geoFromPlace(value: unknown): ExtractedBusinessFacts["geo"] | undefined
 function categoriesFromPlace(place: Record<string, unknown>) {
   return [
     localizedText(place.primaryTypeDisplayName),
-    ...stringArray(place.types).map((type) => type.replace(/_/g, " "))
+    ...stringArray(place.types)
+      .map((type) => type.replace(/_/g, " "))
+      .filter((type) => !/^(point of interest|establishment|food)$/i.test(type))
   ]
     .filter((value): value is string => Boolean(value))
     .slice(0, 8);
@@ -302,6 +431,31 @@ function stringValue(value: unknown) {
 function numberValue(value: unknown) {
   const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(number) ? number : undefined;
+}
+
+function namesLooselyMatch(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false;
+  const leftTerms = significantTerms(left);
+  const rightTerms = significantTerms(right);
+  if (!leftTerms.size || !rightTerms.size) return false;
+  const overlap = [...leftTerms].filter((term) => rightTerms.has(term)).length;
+  return overlap >= Math.min(2, leftTerms.size, rightTerms.size);
+}
+
+function significantTerms(value: string) {
+  const stop = new Set(["the", "and", "of", "llc", "inc", "co", "company", "restaurant", "services", "service", "group"]);
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((term) => term.replace(/s$/, ""))
+      .filter((term) => term.length >= 3 && !stop.has(term))
+  );
+}
+
+function phoneDigits(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
 }
 
 function safeId(value: string) {

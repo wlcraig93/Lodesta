@@ -56,15 +56,5 @@ export function themeForPreset(vertical: Vertical, preset: ThemePresetId, base: 
     return theme;
   }
 
-  theme.colors = {
-    background: "#fff8f0",
-    surface: "#ffffff",
-    text: "#261c16",
-    muted: "#6f625a",
-    primary: "#8f3f2a",
-    primaryText: "#ffffff",
-    accent: "#d99a3f",
-    border: "#eadbc9"
-  };
   return theme;
 }

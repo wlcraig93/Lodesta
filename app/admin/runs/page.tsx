@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { AdminButton } from "@/components/admin/AdminButton";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository, type ListAgentRunsFilter } from "@/lib/repository";
 import type { AgentRunSource, AgentRunStatus } from "@/lib/models";
@@ -46,13 +48,11 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
 
   return (
     <main className="admin-page">
-      <header className="admin-header">
-        <div>
-          <span className="badge">Telemetry</span>
-          <h1>Runs</h1>
-          <p>Inspect site generation attempts, spans, model calls, token totals, failures, and target links.</p>
-        </div>
-      </header>
+      <AdminPageHeader
+        eyebrow="Telemetry"
+        title="Runs"
+        description="Inspect site generation attempts, spans, model calls, token totals, failures, and target links."
+      />
 
       <section className="panel">
         <form className="admin-filter-form">
@@ -77,9 +77,9 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
           <input name="targetId" placeholder="Target ID" defaultValue={params.targetId ?? ""} />
           <input name="from" type="date" defaultValue={params.from ?? ""} />
           <input name="to" type="date" defaultValue={params.to ?? ""} />
-          <button className="button secondary" type="submit">
+          <AdminButton variant="secondary" type="submit">
             Filter
-          </button>
+          </AdminButton>
         </form>
       </section>
 
@@ -117,7 +117,11 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
                 <td>
                   {run.targetId ? (
                     <>
-                      {run.targetName ?? run.targetId}
+                      {run.targetType === "site_generation" ? (
+                        <Link href={`/admin/site-generations/${run.targetId}`}>{run.targetName ?? run.targetId}</Link>
+                      ) : (
+                        run.targetName ?? run.targetId
+                      )}
                       <small>{run.targetType ?? "target"}</small>
                     </>
                   ) : (

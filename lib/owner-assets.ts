@@ -1,5 +1,6 @@
 import type { AssetReference, SiteAsset, SiteBundle } from "./models";
 import { validatePublicHostname } from "./url-safety";
+import { applyPropsToLayoutSection, syncVersionLegacySections } from "./layout-registry";
 
 export type OwnerAssetInput = {
   url: string;
@@ -52,7 +53,7 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
     ...ownerAssets
   ];
 
-  if (photos.length) updateGallerySections(bundle, photos);
+  updateGallerySections(bundle, photos);
 
   return {
     ok: true,
@@ -102,15 +103,16 @@ function updateGallerySections(bundle: SiteBundle, photos: AssetReference[]) {
   const galleryImages = photos.map((photo) => ({
     url: photo.url,
     alt: photo.alt,
-    label: "Owner-approved"
+    label: "Business photo"
   }));
   for (const version of bundle.siteModel.versions) {
     for (const page of version.pages) {
-      for (const section of page.sections) {
-        if (section.type !== "gallery") continue;
-        section.props.images = galleryImages;
+      for (const section of page.layoutSections) {
+        if (section.kind !== "gallery") continue;
+        applyPropsToLayoutSection(section, { images: galleryImages });
       }
     }
+    syncVersionLegacySections(version);
   }
 }
 

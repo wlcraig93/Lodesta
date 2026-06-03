@@ -1,7 +1,15 @@
-import type { BusinessProfile, ExtensionModel, SiteBundle, SiteModel } from "./models";
+import type { BusinessProfile, ExtensionModel, PageModel, SiteBundle, SiteModel, SiteVersion } from "./models";
 import { runAudit } from "./audit";
 import { createCreativeBrief } from "./creative-brief";
 import { verticalRecipes } from "./recipes";
+import {
+  defaultDesignPlanForVertical,
+  designSchemaVersion,
+  pageFromLegacySections,
+  rendererVersion,
+  repairLayoutDocument,
+  validateLayoutDocument
+} from "./layout-registry";
 
 const observedAt = new Date("2026-05-28T00:00:00.000Z").toISOString();
 
@@ -63,7 +71,13 @@ export const sampleBusinessProfile: BusinessProfile = {
   }
 };
 
-export const sampleSiteModel: SiteModel = {
+type LegacySamplePage = Omit<PageModel, "layoutSections">;
+type LegacySampleVersion = Omit<SiteVersion, "rendererVersion" | "designSchemaVersion" | "designPlan" | "pages"> & {
+  pages: LegacySamplePage[];
+};
+type LegacySampleSiteModel = Omit<SiteModel, "versions"> & { versions: LegacySampleVersion[] };
+
+export const sampleSiteModel: SiteModel = hydrateSampleSiteModel({
   id: "site_joes_pizza",
   slug: "joes-pizza",
   pinList: [],
@@ -92,6 +106,10 @@ export const sampleSiteModel: SiteModel = {
       id: "version_joes_pizza_published",
       status: "published",
       createdAt: observedAt,
+      presentation: {
+        mobileActionBehavior: "after_hero",
+        reservedMobileActionSpace: true
+      },
       pages: [
         {
           id: "page_home",
@@ -170,7 +188,7 @@ export const sampleSiteModel: SiteModel = {
               props: {
                 eyebrow: "Visual proof",
                 heading: "Food photos should make ordering easier",
-                body: "The sample uses licensed imagery. Customer-owned photos can replace these after claim.",
+                body: "A clear look at the food and dining room helps customers choose the right order or visit.",
                 images: [
                   {
                     url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1600&q=80",
@@ -225,19 +243,19 @@ export const sampleSiteModel: SiteModel = {
               props: {
                 eyebrow: "Trust",
                 heading: "Proof customers can verify",
-                body: "Review summaries, customer proof, and owner-approved excerpts reduce hesitation.",
+                body: "Public review signals and practical details help customers evaluate fit before they call.",
                 items: [
                   {
                     quote: "Review profile detected at 4.7 stars across 328 reviews.",
                     author: "Verified review profile"
                   },
                   {
-                    quote: "Add owner-approved review excerpts here after claim so trust proof stays accurate.",
-                    author: "Owner verification needed"
+                    quote: "Regulars mention reliable timing, familiar favorites, and a straightforward ordering path.",
+                    author: "Customer review theme"
                   },
                   {
                     quote: "Use this section for catering proof, local press, or customer outcomes.",
-                    author: "Conversion standard"
+                    author: "Business highlights"
                   }
                 ]
               },
@@ -257,7 +275,7 @@ export const sampleSiteModel: SiteModel = {
               props: {
                 eyebrow: "Next step",
                 heading: "Ready for pizza night?",
-                body: "The primary action repeats after menu, proof, and location context so ready visitors can act quickly.",
+                body: "Choose the ordering path that fits the moment: online for speed, or phone for questions.",
                 primaryCta: { label: "Order Online", href: "https://toast.example/joes-pizza", role: "ordering" },
                 secondaryCta: { label: "Call Instead", href: "tel:+15551234567", role: "tel" }
               },
@@ -319,7 +337,7 @@ export const sampleSiteModel: SiteModel = {
       ]
     }
   ]
-};
+});
 
 export const sampleExtensionModel: ExtensionModel = {
   forms: [
@@ -346,6 +364,34 @@ export const sampleExtensionModel: ExtensionModel = {
   ],
   customBlocks: []
 };
+
+function hydrateSampleSiteModel(siteModel: LegacySampleSiteModel): SiteModel {
+  const model: SiteModel = {
+    ...siteModel,
+    versions: siteModel.versions.map((version) => {
+      const activeTheme = version.theme ?? siteModel.theme;
+      const nextVersion: SiteVersion = {
+        ...version,
+        rendererVersion,
+        designSchemaVersion,
+        designPlan: defaultDesignPlanForVertical(sampleBusinessProfile.vertical, activeTheme),
+        pages: version.pages.map((page) =>
+          pageFromLegacySections({
+            ...page,
+            vertical: sampleBusinessProfile.vertical
+          })
+        )
+      };
+      repairLayoutDocument(nextVersion);
+      const blockingIssues = validateLayoutDocument(nextVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
+      if (blockingIssues.length) {
+        throw new Error(`Sample layout-v1 document failed validation: ${blockingIssues.map((issue) => issue.message).join("; ")}`);
+      }
+      return nextVersion;
+    })
+  };
+  return model;
+}
 
 export const sampleSiteBundle: SiteBundle = {
   businessProfile: sampleBusinessProfile,

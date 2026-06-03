@@ -1,5 +1,6 @@
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
 import type { PublicPresenceEnrichment } from "./public-presence";
+import { normalizePublicFetchUrlInput } from "./url-safety";
 
 export class LaunchMarketError extends Error {
   code = "unsupported_launch_market" as const;
@@ -102,7 +103,7 @@ function isUsCountry(country: string) {
 
 function safeHostname(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return new URL(normalizePublicFetchUrlInput(url)).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return "";
   }

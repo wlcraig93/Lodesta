@@ -1,5 +1,8 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { AdminButtonLink, AdminButtonRow } from "@/components/admin/AdminButton";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { getEditingVersion } from "@/lib/sample-data";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
 
@@ -13,87 +16,122 @@ export const metadata: Metadata = {
 
 export default async function AdminSitesPage() {
   await requireAdminPageAccess("/admin/sites");
-  const [sites, runs, previewTokens] = await Promise.all([
+  const [sites, runs] = await Promise.all([
     repository.listSiteBundles(),
-    repository.listAgentRuns({ runType: "site_generation", targetType: "site", limit: 100 }),
-    repository.listPreviewTokens()
+    repository.listAgentRuns({ runType: "site_generation", targetType: "site", limit: 100 })
   ]);
-  const latestRunBySite = new Map(runs.runs.filter((run) => run.targetId).map((run) => [run.targetId, run]));
-  const previewBySite = new Map(previewTokens.map((token) => [token.siteId, token]));
+  const latestRunBySite = new Map<string, (typeof runs.runs)[number]>();
+  for (const run of runs.runs) {
+    if (run.targetId && !latestRunBySite.has(run.targetId)) latestRunBySite.set(run.targetId, run);
+  }
 
   return (
     <main className="admin-page">
-      <header className="admin-header">
-        <div>
-          <span className="badge">Generated sites</span>
-          <h1>Sites</h1>
-          <p>Open generated sites, editors, optimization surfaces, analytics, leads, domains, and latest run telemetry.</p>
-        </div>
-        <Link className="button primary" href="/admin/generate">
-          Generate
-        </Link>
-      </header>
+      <AdminPageHeader
+        eyebrow="Managed inventory"
+        title="Sites"
+        description="Open durable managed sites for editing, claiming, preview tokens, publishing, billing, and domains."
+        actions={
+          <AdminButtonLink variant="primary" href="/admin/generate">
+            Generate
+          </AdminButtonLink>
+        }
+      />
 
       <section className="panel">
         <table className="data-table">
           <thead>
             <tr>
-              <th>Site</th>
-              <th>Vertical</th>
-              <th>Pages</th>
-              <th>Latest Run</th>
-              <th>Links</th>
+              <th>Business</th>
+              <th>Source</th>
+              <th>Last Activity</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {sites.map((bundle) => {
               const siteId = bundle.businessProfile.siteId;
               const run = latestRunBySite.get(siteId);
-              const preview = previewBySite.get(siteId);
+              const sourceUrl = bundle.presenceAssessment.sourceUrl ?? bundle.presenceAssessment.standardEvaluation?.sourceUrl ?? run?.sourceUrl;
+              const editingVersion = getEditingVersion(bundle.siteModel);
+              const lastActivity = run
+                ? {
+                    label: run.status,
+                    detail: `Updated ${formatDate(run.updatedAt)}`
+                  }
+                : {
+                    label: "Latest version",
+                    detail: `Created ${formatDate(latestVersionCreatedAt(bundle.siteModel.versions))}`
+                  };
               return (
                 <tr key={siteId}>
                   <td>
                     {bundle.businessProfile.name}
                     <small>{bundle.siteModel.slug}</small>
+                    <span className="badge sites-detected-type">
+                      Detected type: {bundle.businessProfile.vertical.replace(/_/g, " ")}
+                    </span>
                   </td>
-                  <td>{bundle.businessProfile.vertical.replace(/_/g, " ")}</td>
-                  <td>{bundle.siteModel.versions[0]?.pages.length ?? 0}</td>
                   <td>
-                    {run ? (
-                      <Link href={`/admin/runs/${run.id}`}>{run.status}</Link>
+                    {sourceUrl ? (
+                      <a href={sourceUrl}>{sourceHost(sourceUrl)}</a>
                     ) : (
-                      <span className="muted">No telemetry</span>
+                      <span className="muted">No source URL</span>
                     )}
+                    <small>{bundle.siteModel.versions[0]?.pages.length ?? 0} generated pages</small>
                   </td>
                   <td>
-                    <div className="button-row">
-                      <Link className="button secondary" href={preview ? `/preview/${preview.token}` : `/sites/${bundle.siteModel.slug}`}>
+                    <span className={`badge ${run ? `status-${run.status}` : ""}`}>{lastActivity.label}</span>
+                    <small>{lastActivity.detail}</small>
+                  </td>
+                  <td>
+                    <AdminButtonRow>
+                      <AdminButtonLink variant="primary" size="sm" href={`/admin/sites/${bundle.siteModel.slug}`}>
+                        Manage
+                      </AdminButtonLink>
+                      <AdminButtonLink variant="secondary" size="sm" href={`/admin/sites/${bundle.siteModel.slug}?view=report`}>
+                        Report
+                      </AdminButtonLink>
+                      <AdminButtonLink
+                        variant="secondary"
+                        size="sm"
+                        href={`/admin/sites/${bundle.siteModel.slug}?view=site&versionId=${encodeURIComponent(editingVersion.id)}`}
+                      >
                         Preview
-                      </Link>
-                      <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
-                        Editor
-                      </Link>
-                      <Link className="button secondary" href={`/optimization/${bundle.siteModel.slug}`}>
-                        Optimization
-                      </Link>
-                      <Link className="button secondary" href={`/analytics/${bundle.siteModel.slug}`}>
-                        Analytics
-                      </Link>
-                      <Link className="button secondary" href={`/leads/${bundle.siteModel.slug}`}>
-                        Leads
-                      </Link>
-                      <Link className="button secondary" href={`/domains/${bundle.siteModel.slug}`}>
-                        Domains
-                      </Link>
-                    </div>
+                      </AdminButtonLink>
+                      <AdminButtonLink variant="secondary" size="sm" href={`/admin/sites/${bundle.siteModel.slug}?view=runs`}>
+                        Runs
+                      </AdminButtonLink>
+                    </AdminButtonRow>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {sites.length === 0 ? <p className="muted">No generated sites yet.</p> : null}
+        {sites.length === 0 ? <p className="muted">No managed sites yet.</p> : null}
       </section>
     </main>
   );
+}
+
+function latestVersionCreatedAt(versions: { createdAt: string }[]) {
+  return versions.reduce((latest, version) => (version.createdAt > latest ? version.createdAt : latest), versions[0]?.createdAt ?? new Date(0).toISOString());
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function sourceHost(value: string) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
 }

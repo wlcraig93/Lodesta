@@ -1,6 +1,5 @@
 import type {
   AgentModelCallRecord,
-  AgentRunRecord,
   AgentRunSource,
   AgentRunStatus,
   AgentRunSpanRecord
@@ -57,54 +56,46 @@ export type SiteGenerationTelemetryInput = {
   metadata?: Record<string, unknown>;
 };
 
-export async function startSiteGenerationTelemetry(
-  repository: LodestaRepository,
+export type AgentTelemetryRepository = Pick<
+  LodestaRepository,
+  "createAgentRun" | "updateAgentRun" | "createAgentRunSpan" | "updateAgentRunSpan" | "recordAgentModelCall"
+>;
+
+export type RequiredAgentTelemetryRecorder = AgentTelemetryRecorder & {
+  runId: string;
+};
+
+export async function startRequiredSiteGenerationTelemetry(
+  repository: AgentTelemetryRepository,
   input: SiteGenerationTelemetryInput
-): Promise<AgentTelemetryRecorder> {
-  const sourceUrl = input.url;
-  const run = await bestEffort<AgentRunRecord | null>(
-    () =>
-      repository.createAgentRun({
-        runType: "site_generation",
-        agentType: "site_generator",
-        status: "running",
-        source: input.source,
-        sourceUrl,
-        sourceHost: sourceUrl ? hostnameFromUrl(sourceUrl) : undefined,
-        actorType: input.actorType,
-        actorId: input.actorId,
-        inputSummary: input.url ?? input.prompt?.slice(0, 240) ?? "Prompt-only site generation",
-        inputJson: sanitizeTelemetryPayload({
-          url: input.url,
-          prompt: input.prompt
-        }),
-        metadata: sanitizeTelemetryPayload({
-          ...input.metadata,
-          publicCustomerWebsiteMaterialAllowed: true
-        })
-      }),
-    "Create agent telemetry run"
-  );
-  return run?.id ? new RepositoryAgentTelemetry(repository, run.id, input.source) : createNoopTelemetry(input.source);
+): Promise<RequiredAgentTelemetryRecorder> {
+  const run = await repository.createAgentRun(siteGenerationRunInput(input));
+  if (!run?.id) {
+    throw new Error("Required site-generation telemetry run was not created.");
+  }
+  return new RepositoryAgentTelemetry(repository, run.id, input.source);
 }
 
-export function createNoopTelemetry(source: AgentRunSource = "api"): AgentTelemetryRecorder {
-  const span: AgentTelemetrySpan = {
-    async end() {},
-    async fail() {}
-  };
+function siteGenerationRunInput(input: SiteGenerationTelemetryInput): CreateAgentRunInput {
+  const sourceUrl = input.url;
   return {
-    source,
-    async startSpan() {
-      return span;
-    },
-    async withSpan(_input, operation) {
-      return operation(span);
-    },
-    async recordModelCall() {},
-    async updateRun() {},
-    async completeRun() {},
-    async failRun() {}
+    runType: "site_generation",
+    agentType: "site_generator",
+    status: "running",
+    source: input.source,
+    sourceUrl,
+    sourceHost: sourceUrl ? hostnameFromUrl(sourceUrl) : undefined,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    inputSummary: input.url ?? input.prompt?.slice(0, 240) ?? "Prompt-only site generation",
+    inputJson: sanitizeTelemetryPayload({
+      url: input.url,
+      prompt: input.prompt
+    }),
+    metadata: sanitizeTelemetryPayload({
+      ...input.metadata,
+      publicCustomerWebsiteMaterialAllowed: true
+    })
   };
 }
 
@@ -135,7 +126,7 @@ export function extractOpenAiUsage(payload: unknown) {
 
 class RepositoryAgentTelemetry implements AgentTelemetryRecorder {
   constructor(
-    private readonly repository: LodestaRepository,
+    private readonly repository: AgentTelemetryRepository,
     readonly runId: string,
     readonly source: AgentRunSource
   ) {}
@@ -224,7 +215,7 @@ class RepositoryAgentTelemetry implements AgentTelemetryRecorder {
 
 class RepositoryAgentTelemetrySpan implements AgentTelemetrySpan {
   constructor(
-    private readonly repository: LodestaRepository,
+    private readonly repository: AgentTelemetryRepository,
     readonly id: string | undefined,
     private readonly startedAt: string
   ) {}

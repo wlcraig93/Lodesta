@@ -1,19 +1,24 @@
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput, type IntakeInput } from "./intake";
-import { createOpenAiMockupArtifacts } from "./image-generation";
+import { createOpenAiMockupArtifacts, createPromptOnlyMockupArtifacts } from "./image-generation";
 import { createOpenAiGenerationPlanning } from "./openai-generation";
 import { gatherPublicPresenceSignals } from "./public-presence";
 import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 import { createOpenAiVisualQa } from "./visual-qa";
 import { assertLaunchMarket } from "./launch-market";
+import {
+  isMockupImageGenerationAllowed,
+  isModelVisualQaAllowed,
+  planGenerationCost
+} from "./generation-cost";
 import type { AgentTelemetryRecorder, AgentTelemetrySpan } from "./agent-telemetry";
 import type { CreativeMockupArtifact, RenderInspectionResult, SiteBundle, VisualQaResult } from "./models";
 import type { CrawlAssessment } from "./crawler";
 
 export async function prepareIntakeInput(
   input: { url?: string; prompt?: string },
-  options: { telemetry?: AgentTelemetryRecorder } = {}
+  options: { telemetry?: AgentTelemetryRecorder; identity?: IntakeInput["identity"] } = {}
 ): Promise<IntakeInput> {
   const telemetry = options.telemetry;
   const safeUrl = await runSpan(
@@ -112,7 +117,7 @@ export async function prepareIntakeInput(
       name: "Build deterministic baseline",
       inputJson: { url: safeUrl, prompt: input.prompt }
     },
-    async () => createSiteFromInput({ ...input, url: safeUrl, crawl, renderInspection, publicPresence }),
+    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, publicPresence }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
   const aiPlanning = await runSpan(
@@ -148,18 +153,38 @@ export async function prepareIntakeInput(
       name: "Build planned site model",
       inputJson: { planningSource: aiPlanning?.source ?? "deterministic_fallback" }
     },
-    async () => createSiteFromInput({ ...input, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence }),
+    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
+  const generationCostEstimate = planGenerationCost({
+    sourceUrl: safeUrl,
+    crawl,
+    sourceRenderInspection: renderInspection,
+    publicPresence,
+    aiPlanningAttempted: Boolean(process.env.OPENAI_API_KEY),
+    plannedMockupImageCount: plannedMockupCount(plannedBundle),
+    sourceModelVisualQaRequested: Boolean(renderInspection?.screenshots.length),
+    generatedModelVisualQaRequested: true,
+    includeGeneratedRenderQa: true
+  });
   const [mockupArtifacts, visualQa] = await Promise.all([
     runSpan(
       telemetry,
       {
         spanType: "mockup_generation",
         name: "Mockup generation",
-        inputJson: { siteId: plannedBundle.businessProfile.siteId }
+        inputJson: {
+          siteId: plannedBundle.businessProfile.siteId,
+          costGate: generationCostEstimate.gates.mockupImageGeneration
+        }
       },
-      (span) => createOpenAiMockupArtifacts({ bundle: plannedBundle, telemetry, spanId: span.id }),
+      (span) =>
+        isMockupImageGenerationAllowed(generationCostEstimate)
+          ? createOpenAiMockupArtifacts({ bundle: plannedBundle, telemetry, spanId: span.id })
+          : createPromptOnlyMockupArtifacts({
+              bundle: plannedBundle,
+              reason: "Generation cost policy skipped OpenAI mockup image generation; retaining prompt-only planning artifacts."
+            }),
       (artifacts) => ({
         outputJson: summarizeMockups(artifacts),
         artifactRefs: {
@@ -177,23 +202,44 @@ export async function prepareIntakeInput(
       {
         spanType: "visual_qa",
         name: "Visual QA",
-        inputJson: { siteId: plannedBundle.businessProfile.siteId, screenshots: renderInspection?.screenshots.length ?? 0 }
+        inputJson: {
+          siteId: plannedBundle.businessProfile.siteId,
+          screenshots: renderInspection?.screenshots.length ?? 0,
+          target: "source_site",
+          costGate: generationCostEstimate.gates.sourceModelVisualQa
+        }
       },
-      (span) => createOpenAiVisualQa({ bundle: plannedBundle, renderInspection, telemetry, spanId: span.id }),
+      (span) =>
+        createOpenAiVisualQa({
+          bundle: plannedBundle,
+          renderInspection,
+          telemetry,
+          spanId: span.id,
+          modelReview: {
+            allowed: isModelVisualQaAllowed(generationCostEstimate, "source_site"),
+            reason: "Source-site model visual QA was skipped by the generation cost policy; final generated-site visual QA is prioritized."
+          }
+        }),
       (qa) => ({ outputJson: summarizeVisualQa(qa) })
     )
   ]);
 
   return {
     ...input,
+    identity: options.identity,
     url: safeUrl,
     crawl,
     renderInspection,
     publicPresence,
     aiPlanning,
     mockupArtifacts,
-    visualQa
+    visualQa,
+    generationCostEstimate
   };
+}
+
+function plannedMockupCount(bundle: SiteBundle) {
+  return Math.max(1, Math.min(bundle.presenceAssessment.designDirections?.length ?? 0, 3));
 }
 
 async function runSpan<T>(
@@ -247,6 +293,7 @@ function summarizeCrawl(crawl: CrawlAssessment) {
 
 function summarizeRenderInspection(result: RenderInspectionResult) {
   return {
+    target: result.target,
     sourceUrl: result.sourceUrl,
     finalUrl: result.finalUrl,
     adapter: result.adapter,
@@ -271,7 +318,7 @@ function summarizeBundle(bundle: SiteBundle) {
     businessName: bundle.businessProfile.name,
     vertical: bundle.businessProfile.vertical,
     pages: version?.pages.length ?? 0,
-    sections: version?.pages.reduce((sum, page) => sum + page.sections.length, 0) ?? 0,
+    layoutSections: version?.pages.reduce((sum, page) => sum + page.layoutSections.length, 0) ?? 0,
     findings: bundle.optimizationFindings.length,
     designDirections: bundle.presenceAssessment.designDirections?.length ?? 0
   };

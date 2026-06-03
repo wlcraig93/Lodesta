@@ -5,6 +5,7 @@ import type {
   Experiment,
   ExperimentLearning,
   FormDefinition,
+  GenerationArtifactV2,
   LeadSubmission,
   OptimizationFinding,
   OutboundCampaign,
@@ -12,6 +13,8 @@ import type {
   OutboundProspect,
   PreviewToken,
   SiteBundle,
+  SiteGenerationRecord,
+  SiteGenerationStatus,
   WorkflowDelivery
 } from "./models";
 import { runAudit } from "./audit";
@@ -32,6 +35,9 @@ import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-se
 import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
 import { restoreVersionToDraftBundle } from "./site-versions";
 import { sanitizeAnalyticsMetadata } from "./privacy";
+import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "./site-version-metadata";
+import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "./layout-registry";
+import { promoteGenerationArtifactV2 } from "./generated-site-v2-artifacts";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -46,6 +52,7 @@ import {
 type StoreState = {
   bundles: Map<string, SiteBundle>;
   slugToSiteId: Map<string, string>;
+  siteGenerations: Map<string, SiteGenerationRecord>;
   submissions: LeadSubmission[];
   analyticsEvents: AnalyticsEvent[];
   claims: ClaimRecord[];
@@ -56,6 +63,7 @@ type StoreState = {
   outboundProspects: OutboundProspect[];
   outboundEvents: OutboundEvent[];
   experimentLearnings: ExperimentLearning[];
+  generationArtifacts: GenerationArtifactV2[];
 };
 
 const globalStore = globalThis as typeof globalThis & {
@@ -70,6 +78,7 @@ function createInitialState(): StoreState {
   return {
     bundles,
     slugToSiteId,
+    siteGenerations: new Map(),
     submissions: [],
     analyticsEvents: [],
     workflowDeliveries: [],
@@ -77,11 +86,13 @@ function createInitialState(): StoreState {
     outboundProspects: [],
     outboundEvents: [],
     experimentLearnings: [],
+    generationArtifacts: [],
     claims: [],
     previewTokens: [
       {
         token: "demo-token",
         siteId: sampleSiteBundle.businessProfile.siteId,
+        versionId: sampleSiteBundle.siteModel.versions[0]?.id,
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30).toISOString(),
         createdAt: new Date().toISOString()
       }
@@ -102,6 +113,7 @@ function createInitialState(): StoreState {
 
 function state() {
   globalStore.__lodestaStore ??= createInitialState();
+  globalStore.__lodestaStore.siteGenerations ??= new Map();
   globalStore.__lodestaStore.claims ??= [];
   globalStore.__lodestaStore.domains ??= [];
   globalStore.__lodestaStore.previewTokens ??= [];
@@ -110,6 +122,7 @@ function state() {
   globalStore.__lodestaStore.outboundProspects ??= [];
   globalStore.__lodestaStore.outboundEvents ??= [];
   globalStore.__lodestaStore.experimentLearnings ??= [];
+  globalStore.__lodestaStore.generationArtifacts ??= [];
   return globalStore.__lodestaStore;
 }
 
@@ -135,16 +148,144 @@ export function createAndStoreSite(input: Parameters<typeof createSiteFromInput>
   return bundle;
 }
 
-export function createPreviewToken(input: { siteId: string; expiresAt?: string }) {
-  if (!getSiteBundle(input.siteId)) return null;
+export function createSiteGeneration(input: {
+  id?: string;
+  agentRunId?: string;
+  bundle: SiteBundle;
+  sourceUrl?: string;
+  sourceHost?: string;
+  status?: SiteGenerationStatus;
+}) {
+  const now = new Date().toISOString();
+  const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
+  const generation: SiteGenerationRecord = {
+    id: input.id ?? `sitegen_${crypto.randomUUID().replace(/-/g, "")}`,
+    agentRunId: input.agentRunId,
+    sourceUrl,
+    sourceHost: input.sourceHost ?? hostFromUrl(sourceUrl),
+    businessName: input.bundle.businessProfile.name,
+    vertical: input.bundle.businessProfile.vertical,
+    candidateSlug: input.bundle.siteModel.slug,
+    bundle: structuredClone(input.bundle),
+    status: input.status ?? "ready",
+    createdAt: now,
+    updatedAt: now
+  };
+  state().siteGenerations.set(generation.id, generation);
+  return structuredClone(generation);
+}
+
+export function upsertGenerationArtifact(artifact: GenerationArtifactV2) {
+  const artifacts = state().generationArtifacts;
+  const index = artifacts.findIndex((candidate) => candidate.id === artifact.id);
+  const next = structuredClone(artifact);
+  if (index >= 0) artifacts[index] = next;
+  else artifacts.push(next);
+  return structuredClone(next);
+}
+
+export function listGenerationArtifacts(filter: {
+  generationId?: string;
+  siteId?: string;
+  scope?: GenerationArtifactV2["scope"];
+  artifactType?: GenerationArtifactV2["artifactType"];
+} = {}) {
+  return state()
+    .generationArtifacts.filter((artifact) => {
+      if (filter.generationId && artifact.generationId !== filter.generationId) return false;
+      if (filter.siteId && artifact.siteId !== filter.siteId) return false;
+      if (filter.scope && artifact.scope !== filter.scope) return false;
+      if (filter.artifactType && artifact.artifactType !== filter.artifactType) return false;
+      return true;
+    })
+    .map((artifact) => structuredClone(artifact));
+}
+
+export function listSiteGenerations(filter: {
+  status?: SiteGenerationStatus;
+  sourceHost?: string;
+  limit?: number;
+  offset?: number;
+} = {}) {
+  const offset = Math.max(0, filter.offset ?? 0);
+  const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
+  const generations = Array.from(state().siteGenerations.values())
+    .filter((generation) => !filter.status || generation.status === filter.status)
+    .filter((generation) => !filter.sourceHost || generation.sourceHost === filter.sourceHost)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  return {
+    generations: generations.slice(offset, offset + limit).map((generation) => structuredClone(generation)),
+    total: generations.length
+  };
+}
+
+export function getSiteGeneration(generationId: string) {
+  const generation = state().siteGenerations.get(generationId);
+  return generation ? structuredClone(generation) : null;
+}
+
+export function promoteSiteGeneration(generationId: string) {
+  const store = state();
+  const generation = store.siteGenerations.get(generationId);
+  if (!generation) return null;
+  if (generation.status === "promoted" && generation.createdSiteId) {
+    const existingBundle = getSiteBundle(generation.createdSiteId);
+    return existingBundle ? { generation: structuredClone(generation), bundle: existingBundle } : null;
+  }
+
+  const bundle = structuredClone(generation.bundle);
+  applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
+  store.bundles.set(bundle.businessProfile.siteId, bundle);
+  store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
+  const promotedAt = new Date().toISOString();
+  const selectedArtifacts = store.generationArtifacts.filter(
+    (artifact) => artifact.generationId === generationId && artifact.scope === "generation_selected"
+  );
+  for (const artifact of selectedArtifacts) {
+    const promotedArtifact = promoteGenerationArtifactV2({
+      artifact,
+      managedSiteId: bundle.businessProfile.siteId,
+      promotedAt
+    });
+    const existingIndex = store.generationArtifacts.findIndex((candidate) => candidate.id === promotedArtifact.id);
+    if (existingIndex >= 0) store.generationArtifacts[existingIndex] = promotedArtifact;
+    else store.generationArtifacts.push(promotedArtifact);
+  }
+  generation.status = "promoted";
+  generation.createdSiteId = bundle.businessProfile.siteId;
+  generation.promotedAt = promotedAt;
+  generation.updatedAt = generation.promotedAt;
+  return {
+    generation: structuredClone(generation),
+    bundle
+  };
+}
+
+export function createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const versionId =
+    input.versionId ??
+    bundle.siteModel.versions.find((version) => version.status === "draft")?.id ??
+    bundle.siteModel.versions[0]?.id;
   const previewToken: PreviewToken = {
     token: `preview_${crypto.randomUUID().replace(/-/g, "")}`,
     siteId: input.siteId,
+    versionId,
     expiresAt: input.expiresAt,
     createdAt: new Date().toISOString()
   };
   state().previewTokens.push(previewToken);
   return previewToken;
+}
+
+function hostFromUrl(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 export function resolvePreviewToken(token: string) {
@@ -159,6 +300,15 @@ export function listPreviewTokens(siteId?: string) {
   return state()
     .previewTokens.filter((previewToken) => !siteId || previewToken.siteId === siteId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function saveSiteVersion(input: { siteId: string; version: SiteBundle["siteModel"]["versions"][number] }) {
+  const bundle = getSiteBundle(input.siteId);
+  if (!bundle) return null;
+  const index = bundle.siteModel.versions.findIndex((version) => version.id === input.version.id);
+  if (index < 0) return null;
+  bundle.siteModel.versions[index] = input.version;
+  return bundle;
 }
 
 export function runAndStoreAudit(siteId: string) {
@@ -193,8 +343,9 @@ export function updateSectionProps(input: {
     bundle.siteModel.versions.find((version) => version.status === "draft") ??
     clonePublishedAsDraft(bundle);
   const page = draftVersion.pages.find((candidate) => candidate.id === input.pageId);
-  const section = page?.sections.find((candidate) => candidate.id === input.sectionId);
-  if (!section) return null;
+  const layoutSection = page?.layoutSections.find((candidate) => candidate.id === input.sectionId);
+  if (!layoutSection || !page) return null;
+  const section = sectionFromLayoutSection(layoutSection);
 
   for (const [key, value] of Object.entries(input.props)) {
     const policy = section.fieldPolicies[key];
@@ -204,9 +355,11 @@ export function updateSectionProps(input: {
         reason: `Field ${key} is not editable by owner controls.`
       };
     }
-    section.props[key] = value;
   }
 
+  applyPropsToLayoutSection(layoutSection, input.props);
+  syncLegacySectionsFromLayout(page);
+  markVersionOwnerTouched(draftVersion);
   bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return {
     ok: true as const,
@@ -218,7 +371,12 @@ export function updateSectionProps(input: {
 export function updateSiteDesign(input: UpdateSiteDesignInput) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  return updateSiteDesignBundle(bundle, input);
+  const result = updateSiteDesignBundle(bundle, input);
+  if (result.ok) {
+    const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+    if (draft) markVersionOwnerTouched(draft);
+  }
+  return result;
 }
 
 export function publishDraft(siteId: string) {
@@ -248,6 +406,8 @@ export function restoreVersionToDraft(input: { siteId: string; versionId: string
   if (!bundle) return null;
   const result = restoreVersionToDraftBundle(bundle, { versionId: input.versionId });
   if (!result.ok) return result;
+  const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+  if (draft) markVersionOwnerTouched(draft);
   bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return result;
 }
@@ -266,7 +426,7 @@ export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
   }
   return {
     ok: true as const,
-    bundle: applyBusinessProfileUpdate(bundle, input),
+    bundle: markProfileUpdated(applyBusinessProfileUpdate(bundle, input)),
     guardrailWarnings: guardrails.warnings
   };
 }
@@ -274,7 +434,9 @@ export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
 export function updateOwnerAssets(input: UpdateOwnerAssetsInput) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  return applyOwnerAssetsUpdate(bundle, input);
+  const result = applyOwnerAssetsUpdate(bundle, input);
+  if (result.ok) markAllVersionsOwnerTouched(bundle);
+  return result;
 }
 
 export function recordFormSubmission(input: {
@@ -470,7 +632,9 @@ export function getForms(siteId: string): FormDefinition[] {
 export function updateFormSettings(input: UpdateFormSettingsInput) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  return applyFormSettingsUpdate(bundle, input);
+  const result = applyFormSettingsUpdate(bundle, input);
+  if (result.ok) markAllVersionsOwnerTouched(bundle);
+  return result;
 }
 
 export function applyFindingToDraft(input: { siteId: string; findingId: string }) {
@@ -481,6 +645,8 @@ export function applyFindingToDraft(input: { siteId: string; findingId: string }
 
   const applied = applySuggestedEdit(bundle, finding);
   if (!applied.ok) return applied;
+  const draft = bundle.siteModel.versions.find((version) => version.status === "draft");
+  if (draft) markVersionOwnerTouched(draft);
   return {
     ok: true as const,
     draftCreated: true,
@@ -505,10 +671,19 @@ export function applyAiEditToSite(input: { siteId: string; message: string }) {
   if (!bundle) return null;
   const result = applyAiEditToBundle(bundle, input.message);
   if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
+    if (result.mutated && result.draftVersionId) {
+      const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+      if (draft) markVersionOwnerTouched(draft);
+    }
     bundle.optimizationFindings = buildOptimizationFindings(bundle);
     result.findings = bundle.optimizationFindings;
   }
   return result;
+}
+
+function markProfileUpdated(bundle: SiteBundle) {
+  markAllVersionsOwnerTouched(bundle);
+  return bundle;
 }
 
 export function createClaim(input: {

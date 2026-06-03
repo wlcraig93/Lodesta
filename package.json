@@ -18,9 +18,21 @@
     "verify:deployment-config": "node --import tsx scripts/verify-deployment-config.ts",
     "verify:launch-boundaries": "node --import tsx scripts/verify-launch-boundaries.ts",
     "verify:dev-crawl": "node --import tsx scripts/verify-dev-crawl.mjs",
+  "verify:generated-site-quality": "node --import tsx scripts/verify-generated-site-quality.ts",
+  "verify:generated-site-v3-contracts": "node --import tsx scripts/verify-generated-site-v3-contracts.ts",
+  "verify:generated-site-v3-golden-prototypes": "node --import tsx scripts/verify-generated-site-v3-golden-prototypes.ts",
+  "verify:generated-site-v3-benchmark-corpus": "node --import tsx scripts/verify-generated-site-v3-benchmark-corpus.ts",
+  "verify:generated-site-v3-benchmark-reproductions": "node --import tsx scripts/verify-generated-site-v3-benchmark-reproductions.ts",
+  "verify:generated-site-v3-benchmark-holdouts": "node --import tsx scripts/verify-generated-site-v3-benchmark-holdouts.ts",
+  "verify:generated-site-v3-visual-proof": "node --import tsx scripts/verify-generated-site-v3-visual-proof.ts",
+  "verify:generated-site-v2-contracts": "node --import tsx scripts/verify-generated-site-v2-contracts.ts",
+    "verify:generated-site-v2-golden-prototypes": "node --import tsx scripts/verify-generated-site-v2-golden-prototypes.ts",
+    "verify:generated-site-v2-benchmark": "node --import tsx scripts/verify-auto-body-v2-benchmark.ts",
+    "verify:auto-body-v2-benchmark": "node --import tsx scripts/verify-auto-body-v2-benchmark.ts",
     "verify:render-browser": "node --import tsx scripts/verify-render-browser.ts",
     "verify:stripe-webhook": "node --import tsx scripts/verify-stripe-webhook.ts",
-    "verify:supabase": "node --import tsx scripts/verify-supabase.ts"
+    "verify:supabase": "node --import tsx scripts/verify-supabase.ts",
+    "verify:generator-v11": "node --import tsx scripts/verify-generator-v11.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

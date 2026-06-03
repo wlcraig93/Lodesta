@@ -3,12 +3,17 @@ import { z } from "zod";
 import type { RenderInspectionResult, SiteBundle, VisualQaFinding, VisualQaResult } from "./models";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
+import { openAiRequestSignal } from "./openai-timeout";
 
 type VisualQaInput = {
   bundle: SiteBundle;
   renderInspection?: RenderInspectionResult;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
+  modelReview?: {
+    allowed: boolean;
+    reason?: string;
+  };
 };
 
 const findingSchema = z.object({
@@ -18,16 +23,32 @@ const findingSchema = z.object({
   title: z.string().min(1).max(120),
   evidence: z.string().min(1).max(360),
   recommendation: z.string().max(360),
-  viewport: z.enum(["desktop", "mobile", "none"])
+  viewport: z.enum(["desktop", "tablet", "mobile", "none"])
 });
 
 const visualQaSchema = z.object({
   summary: z.string().min(1).max(420),
+  score: z.object({
+    overall: z.number().min(1).max(10),
+    brand: z.number().min(1).max(10),
+    layout: z.number().min(1).max(10),
+    copy: z.number().min(1).max(10),
+    conversion: z.number().min(1).max(10),
+    media: z.number().min(1).max(10),
+    mobile: z.number().min(1).max(10)
+  }),
   findings: z.array(findingSchema).min(3).max(10),
   limitations: z.array(z.string()).min(1).max(6)
 });
 
 export async function createOpenAiVisualQa(input: VisualQaInput): Promise<VisualQaResult> {
+  if (input.modelReview && !input.modelReview.allowed) {
+    return createDeterministicVisualQa({
+      ...input,
+      limitation: input.modelReview.reason ?? "Model-backed visual QA was skipped by the generation cost policy."
+    });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   const screenshots = await screenshotInputs(input.renderInspection);
   if (!apiKey || screenshots.length === 0) {
@@ -54,7 +75,12 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
             text: [
               "You are Lodesta's visual QA reviewer for generated SMB website previews.",
               "Return only schema-valid JSON through Structured Outputs.",
-              "Evaluate hierarchy, mobile usability, CTA clarity, trust proof, brand fit, accessibility risks, and visible content quality.",
+              "Review like a strict agency creative director, not a lenient implementation checker.",
+              "The target is a polished production website that can credibly compete with high-quality Webflow, Framer, Duda, Squarespace, or custom agency work.",
+              "Evaluate hierarchy, mobile usability, CTA clarity, trust proof, brand fit, accessibility risks, visual rhythm, media fit, component depth, and visible copy quality.",
+              "Mark severity fail when copy sounds like template/planning language, media depicts the wrong work, sections repeat the same card pattern, the header feels disconnected, or the site looks like a generic WordPress template even if it renders correctly.",
+              "If the overall score is below 9.5, include at least one fail finding that explains the highest-leverage reason it is not production-grade yet.",
+              "Score harshly: 8 means plausible but agency polish is missing; 9 means strong but still has visible refinements; 9.5+ means a business owner would reasonably prefer this over a typical polished template.",
               "Do not invent business facts, legal claims, offers, prices, credentials, or reviews.",
               "Treat screenshots as QA evidence only; they are not source-of-truth UI."
             ].join(" ")
@@ -96,7 +122,8 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: openAiRequestSignal()
     });
     const payload = (await response.json().catch(() => null)) as unknown;
     const endedAt = new Date().toISOString();
@@ -122,15 +149,20 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
     const text = extractResponseText(payload);
     if (!text) throw new Error("OpenAI visual QA response did not include output text.");
     const parsed = visualQaSchema.parse(JSON.parse(text));
+    const renderInspection = input.renderInspection;
     return {
       siteId: input.bundle.businessProfile.siteId,
       source: "openai",
       model,
-      target: "source_site",
+      target: renderInspection?.target ?? "generated_site_model",
+      versionId: renderInspection?.versionId,
+      siteModelHash: renderInspection?.siteModelHash,
+      qaRunId: renderInspection?.qaRunId,
       evaluatedAt: new Date().toISOString(),
       screenshotCount: screenshots.length,
       selectedDesignDirectionId: input.bundle.presenceAssessment.selectedDesignDirectionId,
       summary: parsed.summary,
+      score: parsed.score,
       findings: normalizeFindings(parsed.findings),
       limitations: parsed.limitations
     };
@@ -169,8 +201,7 @@ export function createDeterministicVisualQa({
 }: VisualQaInput & { limitation?: string }): VisualQaResult {
   const selectedDirection = bundle.presenceAssessment.designDirections?.find((direction) => direction.selected);
   const version = bundle.siteModel.versions.find((item) => item.status === "published") ?? bundle.siteModel.versions[0];
-  const home = version?.pages.find((page) => page.slug === "") ?? version?.pages[0];
-  const sectionTypes = home?.sections.map((section) => section.type) ?? [];
+  const layoutPresets = layoutPresetEvidence(version);
   const metrics = renderInspection?.metrics;
   const findings: VisualQaFinding[] = [
     {
@@ -209,10 +240,10 @@ export function createDeterministicVisualQa({
     {
       id: "visual_qa.direction_alignment",
       category: "brand",
-      severity: selectedDirection && sectionTypes.length >= 3 ? "pass" : "warning",
-      title: "Selected design direction can compile into sections",
+      severity: selectedDirection && layoutPresets.length >= 3 ? "pass" : "warning",
+      title: "Selected design direction can compile into layout presets",
       evidence: selectedDirection
-        ? `${selectedDirection.label} emphasizes ${selectedDirection.sectionEmphasis.slice(0, 4).join(", ")}; home sections are ${sectionTypes.slice(0, 5).join(", ")}.`
+        ? `${selectedDirection.label} emphasizes ${selectedDirection.sectionEmphasis.slice(0, 4).join(", ")}; home presets are ${layoutPresets.slice(0, 5).join(", ")}.`
         : "No selected design direction was attached.",
       recommendation: selectedDirection ? undefined : "Select a design direction before visual QA."
     },
@@ -231,21 +262,35 @@ export function createDeterministicVisualQa({
   return {
     siteId: bundle.businessProfile.siteId,
     source: "deterministic_fallback",
-    target: renderInspection ? "source_site" : "generated_site_model",
+    target: renderInspection?.target ?? "generated_site_model",
+    versionId: renderInspection?.versionId,
+    siteModelHash: renderInspection?.siteModelHash,
+    qaRunId: renderInspection?.qaRunId,
     evaluatedAt: new Date().toISOString(),
     screenshotCount: renderInspection?.screenshots.length ?? 0,
     selectedDesignDirectionId: bundle.presenceAssessment.selectedDesignDirectionId,
     summary: summarizeFindings(findings),
+    score: scoreDeterministicFindings(findings),
     findings,
     limitations: [
       limitation ?? "Deterministic visual QA checks render metrics and structured sections, not raw pixels.",
-      "Model-backed screenshot review runs only when screenshot artifacts and OPENAI_API_KEY are available."
+      "Model-backed screenshot review runs only when the cost policy allows it and screenshot artifacts plus OPENAI_API_KEY are available."
     ]
   };
 }
 
+function layoutPresetEvidence(version: SiteBundle["siteModel"]["versions"][number] | undefined) {
+  if (!version) return [];
+  if (version.rendererVersion === "layout-v2") {
+    const home = version.compiledPages.find((page) => page.slug === "") ?? version.compiledPages[0];
+    return home?.sections.map((section) => section.family) ?? [];
+  }
+  const home = version.pages.find((page) => page.slug === "") ?? version.pages[0];
+  return home?.layoutSections.map((section) => section.preset) ?? [];
+}
+
 async function screenshotInputs(renderInspection?: RenderInspectionResult) {
-  const screenshots = renderInspection?.screenshots.filter((screenshot) => screenshot.path).slice(0, 2) ?? [];
+  const screenshots = renderInspection?.screenshots.filter((screenshot) => screenshot.path).slice(0, 3) ?? [];
   const inputs: Array<{ imageUrl: string }> = [];
   for (const screenshot of screenshots) {
     if (!screenshot.path) continue;
@@ -262,7 +307,9 @@ function visualQaContext({ bundle, renderInspection }: VisualQaInput) {
     productContract: {
       renderer: "structured multi-tenant Next.js renderer",
       editing: "curated controls",
-      sourceMaterialPolicy: "public customer website material and assets are allowed in internal previews with provenance"
+      sourceMaterialPolicy: "public customer website material and assets are allowed in internal previews with provenance",
+      qualityBar:
+        "9.5/10 production-ready local-business website: beautiful, responsive, conversion-focused, source-grounded, visually varied below the hero, and free of generic AI/template copy."
     },
     business: {
       name: bundle.businessProfile.name,
@@ -310,6 +357,21 @@ function summarizeFindings(findings: VisualQaFinding[]) {
   return "Visual QA checks passed for the available render and SiteModel evidence.";
 }
 
+function scoreDeterministicFindings(findings: VisualQaFinding[]): VisualQaResult["score"] {
+  const failures = findings.filter((finding) => finding.severity === "fail").length;
+  const warnings = findings.filter((finding) => finding.severity === "warning").length;
+  const overall = Math.max(1, Math.min(8.2, 8.2 - failures * 1.2 - warnings * 0.35));
+  return {
+    overall,
+    brand: overall,
+    layout: overall,
+    copy: overall,
+    conversion: overall,
+    media: overall,
+    mobile: overall
+  };
+}
+
 function extractResponseText(payload: unknown) {
   if (isRecord(payload) && typeof payload.output_text === "string") return payload.output_text;
   if (!isRecord(payload) || !Array.isArray(payload.output)) return undefined;
@@ -340,9 +402,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const responseJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "findings", "limitations"],
+  required: ["summary", "score", "findings", "limitations"],
   properties: {
     summary: { type: "string", minLength: 1, maxLength: 420 },
+    score: {
+      type: "object",
+      additionalProperties: false,
+      required: ["overall", "brand", "layout", "copy", "conversion", "media", "mobile"],
+      properties: {
+        overall: { type: "number", minimum: 1, maximum: 10 },
+        brand: { type: "number", minimum: 1, maximum: 10 },
+        layout: { type: "number", minimum: 1, maximum: 10 },
+        copy: { type: "number", minimum: 1, maximum: 10 },
+        conversion: { type: "number", minimum: 1, maximum: 10 },
+        media: { type: "number", minimum: 1, maximum: 10 },
+        mobile: { type: "number", minimum: 1, maximum: 10 }
+      }
+    },
     findings: {
       type: "array",
       minItems: 3,
@@ -361,7 +437,7 @@ const responseJsonSchema = {
           title: { type: "string", minLength: 1, maxLength: 120 },
           evidence: { type: "string", minLength: 1, maxLength: 360 },
           recommendation: { type: "string", maxLength: 360 },
-          viewport: { type: "string", enum: ["desktop", "mobile", "none"] }
+          viewport: { type: "string", enum: ["desktop", "tablet", "mobile", "none"] }
         }
       }
     },

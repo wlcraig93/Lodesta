@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/security";
 
 const previewTokenSchema = z.object({
   siteId: z.string().min(1),
+  versionId: z.string().min(1).optional(),
   expiresInDays: z.number().int().positive().max(365).default(30)
 });
 
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   const expiresAt = new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
   const previewToken = await repository.createPreviewToken({
     siteId: parsed.data.siteId,
+    versionId: parsed.data.versionId,
     expiresAt
   });
   if (!previewToken) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
@@ -28,6 +30,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     preview: {
       token: previewToken.token,
+      versionId: previewToken.versionId,
       url: `${appOrigin(request)}/preview/${previewToken.token}`,
       expiresAt: previewToken.expiresAt
     }
@@ -45,6 +48,7 @@ export async function GET(request: Request) {
     previewTokens: tokens.map((previewToken) => ({
       token: previewToken.token,
       siteId: previewToken.siteId,
+      versionId: previewToken.versionId,
       url: `${appOrigin(request)}/preview/${previewToken.token}`,
       expiresAt: previewToken.expiresAt,
       createdAt: previewToken.createdAt

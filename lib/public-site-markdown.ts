@@ -1,8 +1,9 @@
-import type { ClaimRecord, PageModel, SectionModel, SiteBundle } from "./models";
+import type { ClaimRecord, CompiledSectionV2, PageModel, SectionModel, SiteBundle } from "./models";
 import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { canonicalUrlForPage } from "./public-site-seo";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
+import { sectionFromLayoutSection } from "./layout-registry";
 
 export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
   if (!isIndexableSite(bundle, claims)) return null;
@@ -27,6 +28,8 @@ export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: 
 }
 
 export function markdownForPage(bundle: SiteBundle, page: PageModel, headers: HeaderReader) {
+  const version = getPublishedVersion(bundle.siteModel);
+  const compiledPage = version.rendererVersion === "layout-v2" ? version.compiledPages.find((candidate) => candidate.slug === page.slug) : undefined;
   const lines = [
     `# ${markdownText(page.title || bundle.businessProfile.name)}`,
     "",
@@ -37,7 +40,7 @@ export function markdownForPage(bundle: SiteBundle, page: PageModel, headers: He
     "## Business",
     ...businessFactLines(bundle),
     "",
-    ...page.sections.flatMap(sectionMarkdown)
+    ...(compiledPage ? compiledPage.sections.flatMap(compiledSectionMarkdown) : page.layoutSections.map(sectionFromLayoutSection).flatMap(sectionMarkdown))
   ];
   return `${lines.filter((line): line is string => line !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
 }
@@ -71,6 +74,31 @@ function sectionMarkdown(section: SectionModel) {
   const body = stringProp(section.props.body);
   const lines = [`## ${markdownText(heading)}`, body ? markdownText(body) : undefined, ...sectionItems(section)];
   return lines.filter((line): line is string => Boolean(line));
+}
+
+function compiledSectionMarkdown(section: CompiledSectionV2) {
+  const heading = stringProp(section.props.heading) || stringProp(section.props.headline) || section.family.replace(/[._]/g, " ");
+  const body = stringProp(section.props.body) || stringProp(section.props.subheadline) || stringProp(section.props.intro);
+  return [`## ${markdownText(heading)}`, body ? markdownText(body) : undefined, ...compiledSectionItems(section)].filter(
+    (line): line is string => Boolean(line)
+  );
+}
+
+function compiledSectionItems(section: CompiledSectionV2) {
+  const props = section.props as Record<string, unknown>;
+  const items = [
+    ...(Array.isArray(props.services) ? props.services : []),
+    ...(Array.isArray(props.steps) ? props.steps : []),
+    ...(Array.isArray(props.proofItems) ? props.proofItems : [])
+  ];
+  return items.flatMap((item) => {
+    if (typeof item === "string") return [`- ${markdownText(item)}`];
+    if (!isRecord(item)) return [];
+    const title = stringProp(item.title) || stringProp(item.label);
+    const body = stringProp(item.body) || stringProp(item.description);
+    if (!title && !body) return [];
+    return [`- ${markdownText(title || body)}${title && body ? `: ${markdownText(body)}` : ""}`];
+  });
 }
 
 function sectionItems(section: SectionModel) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AdminButton } from "@/components/admin/AdminButton";
 
 export function RunNotesForm({
   runId,
@@ -42,9 +43,9 @@ export function RunNotesForm({
         <span>Notes</span>
         <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Internal debugging notes" />
       </label>
-      <button className="button secondary" type="submit">
+      <AdminButton variant="secondary" type="submit">
         Save notes
-      </button>
+      </AdminButton>
       {status ? <p className="form-status">{status}</p> : null}
     </form>
   );

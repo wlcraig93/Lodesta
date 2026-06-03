@@ -6,6 +6,7 @@ import {
   getOpenAiRuntimeSettings,
   type OpenAiRuntimeSettings
 } from "./operator-settings";
+import { openAiRequestSignal } from "./openai-timeout";
 
 type MockupGenerationInput = {
   bundle: SiteBundle;
@@ -158,7 +159,8 @@ async function generateDirectionMockup({
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
+      signal: openAiRequestSignal(60_000)
     });
 
     const payload = (await response.json().catch(() => null)) as unknown;

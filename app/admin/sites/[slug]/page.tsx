@@ -1,0 +1,694 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import type { Metadata } from "next";
+import { AdminButtonLink, AdminButtonRow } from "@/components/admin/AdminButton";
+import { AdminArtifactFrame } from "@/components/admin/AdminArtifactFrame";
+import {
+  AdminSiteWorkspaceShell,
+  type AdminSiteWorkspaceView,
+  workspaceHref
+} from "@/components/admin/AdminSiteWorkspaceShell";
+import { CurrentWebsiteReportPanel } from "@/components/admin/CurrentWebsiteReportPanel";
+import { GeneratedSiteQaPanel } from "@/components/admin/GeneratedSiteQaPanel";
+import { RunBusinessContextRefreshButton } from "@/components/admin/RunBusinessContextRefreshButton";
+import { RunBusinessIdentityServiceButton } from "@/components/admin/RunBusinessIdentityServiceButton";
+import { RunAssetSelectionButton } from "@/components/admin/RunAssetSelectionButton";
+import { RunBrandDirectionButton } from "@/components/admin/RunBrandDirectionButton";
+import { RunBrandMarkGenerationButton } from "@/components/admin/RunBrandMarkGenerationButton";
+import { RunClaimsPolicyButton } from "@/components/admin/RunClaimsPolicyButton";
+import { RunCopyRefreshButton } from "@/components/admin/RunCopyRefreshButton";
+import { RunDesignSectionAuditsButton } from "@/components/admin/RunDesignSectionAuditsButton";
+import { RunPageOpportunitiesButton } from "@/components/admin/RunPageOpportunitiesButton";
+import { RunPerformanceAuditButton } from "@/components/admin/RunPerformanceAuditButton";
+import { RunOptimizationReportsButton } from "@/components/admin/RunOptimizationReportsButton";
+import { RunSeoMetadataButton } from "@/components/admin/RunSeoMetadataButton";
+import { RunSocialProofButton } from "@/components/admin/RunSocialProofButton";
+import { RunStrategyPlanningButton } from "@/components/admin/RunStrategyPlanningButton";
+import { RunVisualQualityButton } from "@/components/admin/RunVisualQualityButton";
+import { SiteVersionsPanel } from "@/components/SiteVersionsPanel";
+import { requireAdminPageAccess } from "@/lib/page-access";
+import { repository } from "@/lib/repository";
+import { runSiteQa } from "@/lib/qa";
+import { getEditingVersion } from "@/lib/sample-data";
+import { claimGateForBundle } from "@/lib/site-publication";
+import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
+import type { AgentRunRecord, GenerationArtifactV2, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
+
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false
+  }
+};
+
+type AdminSitePageParams = {
+  slug: string;
+};
+
+type AdminSiteSearchParams = {
+  view?: string;
+  versionId?: string;
+};
+
+const views = new Set<AdminSiteWorkspaceView>(["overview", "report", "site", "qa", "versions", "runs"]);
+
+export default async function AdminSiteWorkspacePage({
+  params,
+  searchParams
+}: {
+  params: Promise<AdminSitePageParams>;
+  searchParams: Promise<AdminSiteSearchParams>;
+}) {
+  const { slug } = await params;
+  const query = await searchParams;
+  const view = parseView(query.view);
+  await requireAdminPageAccess(`/admin/sites/${slug}`);
+
+  const bundle = await repository.getSiteBundleBySlug(slug);
+  if (!bundle) notFound();
+
+  const selectedVersion = selectedVersionForView(bundle, view, query.versionId);
+  if (!selectedVersion) notFound();
+
+  const [previewTokens, runsResult, managedSiteArtifacts] = await Promise.all([
+    repository.listPreviewTokens(bundle.businessProfile.siteId),
+    repository.listAgentRuns({
+      runType: "site_generation",
+      targetType: "site",
+      targetId: bundle.businessProfile.siteId,
+      limit: view === "runs" ? 25 : 5
+    }),
+    repository.listGenerationArtifacts({
+      siteId: bundle.businessProfile.siteId,
+      scope: "managed_site_candidate"
+    })
+  ]);
+  const previewToken = previewTokens[0];
+  const latestRun = runsResult.runs[0];
+  const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
+  const generatedEvaluation = evaluateSiteAgainstStandard(bundle, {
+    versionId: selectedVersion.id
+  });
+
+  return (
+    <AdminSiteWorkspaceShell
+      bundle={bundle}
+      view={view}
+      selectedVersion={selectedVersion}
+      previewToken={previewToken}
+      latestRun={latestRun}
+      sourceEvaluation={sourceEvaluation}
+      generatedEvaluation={generatedEvaluation}
+    >
+      {await renderWorkspaceView({
+        bundle,
+        view,
+        selectedVersion,
+        generatedEvaluation,
+        runs: runsResult.runs,
+        managedSiteArtifacts
+      })}
+    </AdminSiteWorkspaceShell>
+  );
+}
+
+async function renderWorkspaceView(input: {
+  bundle: SiteBundle;
+  view: AdminSiteWorkspaceView;
+  selectedVersion: SiteVersion;
+  generatedEvaluation: StandardEvaluation;
+  runs: AgentRunRecord[];
+  managedSiteArtifacts: GenerationArtifactV2[];
+}) {
+  switch (input.view) {
+    case "report":
+      return <CurrentWebsiteReportPanel bundle={input.bundle} generatedEvaluation={input.generatedEvaluation} />;
+    case "site":
+      return <AdminArtifactFrame bundle={input.bundle} version={input.selectedVersion} />;
+    case "qa":
+      return <GeneratedSiteQaPanel bundle={input.bundle} version={input.selectedVersion} qa={runSiteQa(input.bundle, { versionId: input.selectedVersion.id })} />;
+    case "versions": {
+      const claims = await repository.listClaims(input.bundle.businessProfile.siteId);
+      const claimGate = claimGateForBundle(input.bundle, claims);
+      return (
+        <section className="panel">
+          <div className="section-heading-row">
+            <div>
+              <span className="badge">Versions</span>
+              <h2>Version History</h2>
+              <p className="muted">Review generated drafts and rollback safely by making a previous version live.</p>
+            </div>
+          </div>
+          <SiteVersionsPanel
+            siteId={input.bundle.businessProfile.siteId}
+            versions={input.bundle.siteModel.versions}
+            publishDisabled={!claimGate.ok}
+            publishDisabledReason={claimGate.ok ? undefined : claimGate.reason}
+          />
+        </section>
+      );
+    }
+    case "runs":
+      return <RunsPanel runs={input.runs} />;
+    case "overview":
+    default:
+      return (
+        <OverviewPanel
+          bundle={input.bundle}
+          selectedVersion={input.selectedVersion}
+          generatedEvaluation={input.generatedEvaluation}
+          latestRun={input.runs[0]}
+          managedSiteArtifacts={input.managedSiteArtifacts}
+        />
+      );
+  }
+}
+
+function OverviewPanel({
+  bundle,
+  selectedVersion,
+  generatedEvaluation,
+  latestRun,
+  managedSiteArtifacts
+}: {
+  bundle: SiteBundle;
+  selectedVersion: SiteVersion;
+  generatedEvaluation: StandardEvaluation;
+  latestRun?: AgentRunRecord;
+  managedSiteArtifacts: GenerationArtifactV2[];
+}) {
+  const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
+  const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open");
+  const draftVersion = getEditingVersion(bundle.siteModel);
+  const sourceScore = sourceEvaluation ? `${sourceEvaluation.score.percent}/100` : "Not scored";
+  const generatedScore = `${generatedEvaluation.score.percent}/100`;
+
+  return (
+    <div className="workspace-view-stack">
+      <section className="metric-row">
+        <Metric label="Current site" value={sourceScore} />
+        <Metric label="Generated site" value={generatedScore} />
+        <Metric label="Open findings" value={openFindings.length} />
+        <Metric label="Versions" value={bundle.siteModel.versions.length} />
+      </section>
+
+      <div className="admin-grid workspace-grid">
+        <section className="panel">
+          <div className="section-heading-row">
+            <div>
+              <span className="badge">Operator overview</span>
+              <h2>Next best surfaces</h2>
+              <p className="muted">Use the report and generated preview together, but keep them as separate artifacts.</p>
+            </div>
+          </div>
+          <div className="finding-list">
+            <article className="finding-card">
+              <span className="badge">source</span>
+              <h3>Review the current website report</h3>
+              <p>Check crawl-backed gaps, extracted facts, render notes, and reference-only assets before judging the generated site.</p>
+              <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "report")}>
+                Open report
+              </AdminButtonLink>
+            </article>
+            <article className="finding-card">
+              <span className="badge">generated</span>
+              <h3>Inspect the Lodesta version</h3>
+              <p>Open the generated site in the right pane and switch versions without leaving the workspace.</p>
+              <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "site", draftVersion.id)}>
+                Open generated site
+              </AdminButtonLink>
+            </article>
+            <article className="finding-card">
+              <span className="badge">qa</span>
+              <h3>Resolve generated-site QA</h3>
+              <p>{openFindings.length ? `${openFindings.length} optimization finding${openFindings.length === 1 ? "" : "s"} need review.` : "No open optimization findings are waiting."}</p>
+              <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "qa")}>
+                Open QA
+              </AdminButtonLink>
+            </article>
+            <article className="finding-card">
+              <span className="badge">design</span>
+              <h3>Audit visual quality</h3>
+              <p>Persist visual QA findings as a V2 benchmark artifact for review and regression checks.</p>
+              <RunVisualQualityButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">design</span>
+              <h3>Audit design and sections</h3>
+              <p>Check site tokens, header behavior, section depth, services, proof, and contact/hours handling.</p>
+              <RunDesignSectionAuditsButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">performance</span>
+              <h3>Audit performance</h3>
+              <p>Record render-inspection performance proxies and field Web Vitals thresholds for post-publish monitoring.</p>
+              <RunPerformanceAuditButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">optimization</span>
+              <h3>Run optimization reports</h3>
+              <p>Generate conversion, local SEO, page gap, and experiment recommendation reports without changing the site.</p>
+              <RunOptimizationReportsButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">strategy</span>
+              <h3>Audit site strategy</h3>
+              <p>Persist vertical classification, conversion path, and information architecture reports.</p>
+              <RunStrategyPlanningButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">facts</span>
+              <h3>Audit identity and services</h3>
+              <p>Reconcile core business identity and produce a source-backed service catalog for rendering decisions.</p>
+              <RunBusinessIdentityServiceButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">policy</span>
+              <h3>Audit claims and policy</h3>
+              <p>Persist claim verification and Google Places policy reports before promotion or refresh work.</p>
+              <RunClaimsPolicyButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">proof</span>
+              <h3>Audit social proof</h3>
+              <p>Classify reviews, public profiles, and trust signals into durable, live-only, reference-only, or blocked proof.</p>
+              <RunSocialProofButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">seo</span>
+              <h3>Audit SEO metadata</h3>
+              <p>Check titles, descriptions, canonical paths, local context, and Google-proof policy safety.</p>
+              <RunSeoMetadataButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">assets</span>
+              <h3>Audit asset selection</h3>
+              <p>Choose render-safe media slots and record reference-only artwork as non-public planning material.</p>
+              <RunAssetSelectionButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">brand</span>
+              <h3>Prepare brand direction</h3>
+              <p>Extract rights-safe brand cues and store design direction without generating or publishing a logo.</p>
+              <RunBrandDirectionButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">brand</span>
+              <h3>Record brand mark gate</h3>
+              <p>Persist the product/legal gate that blocks generated logo or mark output until the approval path exists.</p>
+              <RunBrandMarkGenerationButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">facts</span>
+              <h3>Refresh business context</h3>
+              <p>Compare managed business facts with the stored source graph and persist review-only change impact reports.</p>
+              <RunBusinessContextRefreshButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+            <article className="finding-card">
+              <span className="badge">skill</span>
+              <h3>Run V2 copy refresh</h3>
+              <p>
+                {selectedVersion.rendererVersion === "layout-v2"
+                  ? "Evaluate compiled copy slots and store proposed diffs without regenerating the whole website."
+                  : "Copy refresh diffs are available after a site is on layout-v2."}
+              </p>
+              <RunCopyRefreshButton
+                siteId={bundle.businessProfile.siteId}
+                versionId={selectedVersion.id}
+                disabled={selectedVersion.rendererVersion !== "layout-v2"}
+              />
+            </article>
+            <article className="finding-card">
+              <span className="badge">strategy</span>
+              <h3>Find page opportunities</h3>
+              <p>Recommend service, location, and FAQ pages from durable service and service-area facts. Recommendations stay review-only.</p>
+              <RunPageOpportunitiesButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
+            </article>
+          </div>
+        </section>
+
+        <aside className="panel">
+          <h2>Latest run</h2>
+          {latestRun ? (
+            <article className="finding-card compact-card">
+              <span className={`badge status-${latestRun.status}`}>{latestRun.status}</span>
+              <h3>{latestRun.outputSummary ?? latestRun.inputSummary ?? latestRun.id}</h3>
+              <p className="muted">{formatDuration(latestRun.startedAt, latestRun.endedAt)}</p>
+              <AdminButtonRow>
+                <AdminButtonLink variant="secondary" size="sm" href={`/admin/runs/${latestRun.id}`}>
+                  Inspect run
+                </AdminButtonLink>
+                <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "runs")}>
+                  Open run history
+                </AdminButtonLink>
+              </AdminButtonRow>
+            </article>
+          ) : (
+            <p className="muted">No run telemetry is attached to this site.</p>
+          )}
+
+          <h2>Source notes</h2>
+          <div className="presence-note-strip workspace-note-strip">
+            {[
+              ...bundle.presenceAssessment.technicalNotes,
+              ...bundle.presenceAssessment.publicPresenceNotes
+            ].slice(0, 4).map((note) => (
+              <span key={note}>{note}</span>
+            ))}
+          </div>
+
+          <h2>Copy refresh proposals</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "copy_diff").slice(0, 4).map((artifact) => {
+              const diff = artifact.payload.diff as { summary?: string; status?: string; targetSlotId?: string } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className={`badge status-${diff?.status ?? "proposed"}`}>{diff?.status ?? "proposed"}</span>
+                  <h3>{diff?.targetSlotId ?? artifact.affectedSlotId ?? "Copy slot"}</h3>
+                  <p>{diff?.summary ?? "Copy refresh proposal is available for review."}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "copy_diff").length === 0 ? (
+              <p className="muted">No copy refresh proposals yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Business context changes</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "change_impact_report").slice(0, 2).map((artifact) => {
+              const impacts = artifact.payload.impacts as Array<{ action?: string; rationale?: string; affectedSectionIds?: string[] }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">facts</span>
+                  <h3>{impacts?.filter((item) => item.action !== "no_action").length ?? 0} material impacts</h3>
+                  <p>{impacts?.slice(0, 2).map((item) => item.rationale).filter(Boolean).join(" ") || "Business context impact report is available for review."}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "change_impact_report").length === 0 ? (
+              <p className="muted">No business context impact report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Identity and services</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "identity_reconcile_report" || artifact.artifactType === "service_catalog_report").slice(0, 4).map((artifact) => {
+              const identity = artifact.payload.identity as Array<{ status?: string }> | undefined;
+              const services = artifact.payload.services as Array<{ status?: string }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">facts</span>
+                  <h3>{artifact.artifactType === "identity_reconcile_report" ? "Identity" : "Services"}</h3>
+                  <p>
+                    {identity
+                      ? `${identity.filter((item) => item.status === "confirmed").length} confirmed fields`
+                      : `${services?.filter((item) => item.status === "render_safe").length ?? 0} render-safe services`}
+                  </p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "identity_reconcile_report" || artifact.artifactType === "service_catalog_report").length === 0 ? (
+              <p className="muted">No identity or service catalog reports yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Brand direction</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "brand_direction_report" || artifact.artifactType === "brand_mark_generation_report").slice(0, 3).map((artifact) => {
+              const report = artifact.payload.directionReport as { label?: string; rationale?: string; riskNotes?: string[] } | undefined;
+              const markReport = artifact.payload.report as { status?: string; reason?: string } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">brand</span>
+                  <h3>{report?.label ?? markReport?.status?.replace(/_/g, " ") ?? "Brand direction"}</h3>
+                  <p>{report?.rationale ?? report?.riskNotes?.[0] ?? markReport?.reason ?? "Brand direction report is available for review."}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "brand_direction_report" || artifact.artifactType === "brand_mark_generation_report").length === 0 ? (
+              <p className="muted">No brand direction report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Asset selection</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "asset_selection_report").slice(0, 2).map((artifact) => {
+              const selections = artifact.payload.selections as Array<{ slotId?: string; status?: string; reason?: string }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">assets</span>
+                  <h3>{selections?.filter((item) => item.status === "selected").length ?? 0} selected slots</h3>
+                  <p>{selections?.slice(0, 2).map((item) => `${item.slotId}: ${item.status}`).join(", ") || "Asset selection report is available for review."}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "asset_selection_report").length === 0 ? (
+              <p className="muted">No asset selection report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Social proof</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "social_proof_report").slice(0, 2).map((artifact) => {
+              const scorecard = artifact.payload.scorecard as { totalItems?: number; durableRenderItems?: number; liveOnlyItems?: number; blockingIssues?: number } | undefined;
+              const recommendedDisplay = artifact.payload.recommendedDisplay as string | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">proof</span>
+                  <h3>{recommendedDisplay?.replace(/_/g, " ") ?? "Social proof"}</h3>
+                  <p>{scorecard?.totalItems ?? 0} items, {scorecard?.durableRenderItems ?? 0} durable, {scorecard?.liveOnlyItems ?? 0} live-only, {scorecard?.blockingIssues ?? 0} blockers.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "social_proof_report").length === 0 ? (
+              <p className="muted">No social proof report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>SEO metadata</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "seo_metadata_report").slice(0, 2).map((artifact) => {
+              const scorecard = artifact.payload.scorecard as { pagesChecked?: number; blockingIssues?: number; warnings?: number } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">seo</span>
+                  <h3>{scorecard?.pagesChecked ?? 0} pages checked</h3>
+                  <p>{scorecard?.blockingIssues ?? 0} blockers, {scorecard?.warnings ?? 0} warnings.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "seo_metadata_report").length === 0 ? (
+              <p className="muted">No SEO metadata report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Claims and policy</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "claim_report" || artifact.artifactType === "policy_report").slice(0, 4).map((artifact) => {
+              const status = artifact.payload.status as string | undefined;
+              const issues = artifact.payload.issues as Array<{ severity?: string }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className={`badge status-${status ?? "pending"}`}>{artifact.artifactType === "claim_report" ? "claims" : "policy"}</span>
+                  <h3>{status ?? "Report"}</h3>
+                  <p>{issues?.filter((item) => item.severity === "blocking").length ?? 0} blockers, {issues?.filter((item) => item.severity === "warning").length ?? 0} warnings.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "claim_report" || artifact.artifactType === "policy_report").length === 0 ? (
+              <p className="muted">No claims or policy reports yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Design and sections</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "design_section_audit_report").slice(0, 6).map((artifact) => {
+              const report = artifact.payload.report as { skillId?: string; status?: string; scorecard?: { blockers?: number; watchItems?: number; passes?: number } } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className={`badge status-${report?.status ?? "pending"}`}>design</span>
+                  <h3>{report?.skillId ?? artifact.producerId}</h3>
+                  <p>{report?.scorecard?.blockers ?? 0} blockers, {report?.scorecard?.watchItems ?? 0} watch items, {report?.scorecard?.passes ?? 0} passes.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "design_section_audit_report").length === 0 ? (
+              <p className="muted">No design or section audits yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Optimization reports</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) =>
+              artifact.artifactType === "conversion_insights_report" ||
+              artifact.artifactType === "local_seo_refresh_report" ||
+              artifact.artifactType === "page_gap_analysis_report" ||
+              artifact.artifactType === "experiment_recommendation_report"
+            ).slice(0, 4).map((artifact) => {
+              const report = artifact.payload.report as { status?: string; scorecard?: { actionItems?: number; watchItems?: number; passes?: number } } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className={`badge status-${report?.status ?? "pending"}`}>optimization</span>
+                  <h3>{artifact.artifactType.replace(/_/g, " ")}</h3>
+                  <p>{report?.scorecard?.actionItems ?? 0} actions, {report?.scorecard?.watchItems ?? 0} watch items, {report?.scorecard?.passes ?? 0} passes.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) =>
+              artifact.artifactType === "conversion_insights_report" ||
+              artifact.artifactType === "local_seo_refresh_report" ||
+              artifact.artifactType === "page_gap_analysis_report" ||
+              artifact.artifactType === "experiment_recommendation_report"
+            ).length === 0 ? (
+              <p className="muted">No optimization reports yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Performance</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "performance_audit_report").slice(0, 2).map((artifact) => {
+              const findings = artifact.payload.findings as Array<{ severity?: string }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">performance</span>
+                  <h3>{findings?.length ?? 0} findings</h3>
+                  <p>{findings?.filter((item) => item.severity === "blocking").length ?? 0} blockers, {findings?.filter((item) => item.severity === "warning").length ?? 0} warnings.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "performance_audit_report").length === 0 ? (
+              <p className="muted">No performance audit report yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Visual quality</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "visual_benchmark").slice(0, 2).map((artifact) => {
+              const visualQa = artifact.payload.visualQa as { findings?: Array<{ severity?: string }> } | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">design</span>
+                  <h3>{visualQa?.findings?.length ?? 0} findings</h3>
+                  <p>{visualQa?.findings?.filter((item) => item.severity === "fail").length ?? 0} failures, {visualQa?.findings?.filter((item) => item.severity === "warning").length ?? 0} warnings.</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "visual_benchmark").length === 0 ? (
+              <p className="muted">No visual quality benchmark yet.</p>
+            ) : null}
+          </div>
+
+          <h2>Page opportunities</h2>
+          <div className="finding-list">
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "vertical_classification_report" || artifact.artifactType === "conversion_path_report" || artifact.artifactType === "information_architecture_report").slice(0, 3).map((artifact) => {
+              const vertical = (artifact.payload.verticalClassification as { selectedVertical?: string } | undefined)?.selectedVertical;
+              const goal = (artifact.payload.conversionPath as { primaryGoal?: string } | undefined)?.primaryGoal;
+              const pages = (artifact.payload.informationArchitecture as { pages?: unknown[] } | undefined)?.pages?.length;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">strategy</span>
+                  <h3>{artifact.artifactType.replace(/_/g, " ")}</h3>
+                  <p>{vertical ?? goal ?? `${pages ?? 0} pages`}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "page_opportunity_report").slice(0, 2).map((artifact) => {
+              const opportunities = artifact.payload.opportunities as Array<{ title?: string; slug?: string; status?: string }> | undefined;
+              return (
+                <article key={artifact.id} className="finding-card compact-card">
+                  <span className="badge">strategy</span>
+                  <h3>{opportunities?.filter((item) => item.status === "candidate").length ?? 0} candidate pages</h3>
+                  <p>{opportunities?.slice(0, 3).map((item) => item.slug ?? item.title).filter(Boolean).join(", ") || "Page opportunity report is available for review."}</p>
+                </article>
+              );
+            })}
+            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "page_opportunity_report").length === 0 ? (
+              <p className="muted">No page-opportunity report yet.</p>
+            ) : null}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function RunsPanel({ runs }: { runs: AgentRunRecord[] }) {
+  return (
+    <section className="panel">
+      <div className="section-heading-row">
+        <div>
+          <span className="badge">Run History</span>
+          <h2>Site run history</h2>
+          <p className="muted">Recent site-generation runs attached to this site.</p>
+        </div>
+      </div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Run</th>
+            <th>Source</th>
+            <th>Duration</th>
+            <th>Tokens</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => (
+            <tr key={run.id}>
+              <td>
+                <span className={`badge status-${run.status}`}>{run.status}</span>
+              </td>
+              <td>
+                <Link href={`/admin/runs/${run.id}`}>{run.outputSummary ?? run.inputSummary ?? run.id}</Link>
+                <small>{run.id}</small>
+              </td>
+              <td>
+                {run.source}
+                <small>{run.sourceHost ?? "no host"}</small>
+              </td>
+              <td>{formatDuration(run.startedAt, run.endedAt)}</td>
+              <td>{run.tokenTotals?.totalTokens ?? 0}</td>
+              <td>{formatDate(run.updatedAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {runs.length === 0 ? <p className="muted">No runs are attached to this site.</p> : null}
+    </section>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="metric-card">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function parseView(input: string | undefined): AdminSiteWorkspaceView {
+  return input && views.has(input as AdminSiteWorkspaceView) ? (input as AdminSiteWorkspaceView) : "overview";
+}
+
+function selectedVersionForView(bundle: SiteBundle, view: AdminSiteWorkspaceView, versionId?: string) {
+  if (view === "site" && versionId) {
+    return bundle.siteModel.versions.find((version) => version.id === versionId);
+  }
+  return getEditingVersion(bundle.siteModel);
+}
+
+function formatDate(input: string) {
+  return new Date(input).toLocaleString();
+}
+
+function formatDuration(startedAt: string, endedAt?: string) {
+  const start = new Date(startedAt).getTime();
+  const end = endedAt ? new Date(endedAt).getTime() : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "unknown";
+  const seconds = Math.max(0, Math.round((end - start) / 1000));
+  return `${seconds}s`;
+}

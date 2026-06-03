@@ -14,6 +14,7 @@ import type {
   ExperimentLearning,
   ExtensionModel,
   FormDefinition,
+  GenerationArtifactV2,
   JobKind,
   JobRecord,
   LeadSubmission,
@@ -25,6 +26,8 @@ import type {
   PreviewToken,
   SiteAsset,
   SiteBundle,
+  SiteGenerationRecord,
+  SiteGenerationStatus,
   SiteModel,
   SiteVersion,
   WorkflowDelivery
@@ -34,7 +37,9 @@ import type {
   CompleteClaimCheckoutInput,
   CreateAgentRunInput,
   CreateAgentRunSpanInput,
+  CreateSiteGenerationInput,
   CreateSiteInput,
+  ListSiteGenerationsFilter,
   ListAgentRunsFilter,
   ListAgentRunsResult,
   RecordSubmissionInput,
@@ -72,10 +77,12 @@ import { applyVerifiedFacts } from "../fact-verification";
 import { applyBusinessProfileUpdate } from "../business-profile-update";
 import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
+import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "../site-version-metadata";
+import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "../layout-registry";
+import { promoteGenerationArtifactV2 } from "../generated-site-v2-artifacts";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
-import { startSiteGenerationTelemetry } from "../agent-telemetry";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -91,6 +98,51 @@ type SiteRow = {
   site_model: unknown;
   extension_model: unknown;
   presence_assessment: unknown;
+  created_at: string;
+};
+
+type SupabaseJobGenerateSite = NonNullable<JobExecutionContext["generateSite"]>;
+
+let supabaseJobGenerateSite: SupabaseJobGenerateSite | undefined;
+
+export function setSupabaseJobGenerateSite(generateSite: SupabaseJobGenerateSite | undefined) {
+  supabaseJobGenerateSite = generateSite;
+}
+
+type SiteGenerationRow = {
+  id: string;
+  agent_run_id: string | null;
+  source_url: string | null;
+  source_host: string | null;
+  business_name: string;
+  vertical: SiteGenerationRecord["vertical"];
+  candidate_slug: string;
+  bundle_json: unknown;
+  status: SiteGenerationStatus;
+  created_site_id: string | null;
+  promoted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type GenerationArtifactRow = {
+  id: string;
+  generation_id: string | null;
+  site_id: string | null;
+  scope: GenerationArtifactV2["scope"];
+  artifact_type: GenerationArtifactV2["artifactType"];
+  artifact_version: string;
+  producer_id: string;
+  producer_version: string;
+  vertical_playbook_version: string | null;
+  section_contract_version: string | null;
+  site_design_system_version: string | null;
+  source_fact_ids: string[];
+  affected_page_id: string | null;
+  affected_section_id: string | null;
+  affected_slot_id: string | null;
+  content_hash: string;
+  payload_json: unknown;
   created_at: string;
 };
 
@@ -315,6 +367,7 @@ type JobRow = {
 type PreviewTokenRow = {
   token: string;
   site_id: string;
+  version_id: string | null;
   expires_at: string | null;
   created_at: string;
 };
@@ -450,15 +503,156 @@ export const supabaseRepository: LodestaRepository = {
     return bundle;
   },
 
+  async createSiteGeneration(input) {
+    const now = new Date().toISOString();
+    const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
+    const row = await requireData<SiteGenerationRow>(
+      getSupabaseAdminClient()
+        .from("site_generations")
+        .insert({
+          id: input.id ?? `sitegen_${crypto.randomUUID().replace(/-/g, "")}`,
+          agent_run_id: input.agentRunId,
+          source_url: sourceUrl,
+          source_host: input.sourceHost ?? hostFromUrl(sourceUrl),
+          business_name: input.bundle.businessProfile.name,
+          vertical: input.bundle.businessProfile.vertical,
+          candidate_slug: input.bundle.siteModel.slug,
+          bundle_json: input.bundle,
+          status: input.status ?? "ready",
+          created_at: now,
+          updated_at: now
+        })
+        .select("*")
+        .single(),
+      "Create site generation"
+    );
+    return rowToSiteGeneration(row);
+  },
+
+  async listSiteGenerations(filter = {}) {
+    const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
+    const offset = Math.max(0, filter.offset ?? 0);
+    let query = getSupabaseAdminClient()
+      .from("site_generations")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+    query = applySiteGenerationFilters(query, filter);
+    const response = await query;
+    if (response.error) throw new Error(`List site generations: ${response.error.message}`);
+    const generations = ((response.data ?? []) as SiteGenerationRow[]).map(rowToSiteGeneration);
+    return { generations, total: response.count ?? generations.length };
+  },
+
+  async getSiteGeneration(generationId) {
+    const row = await requireMaybe<SiteGenerationRow>(
+      getSupabaseAdminClient().from("site_generations").select("*").eq("id", generationId).maybeSingle(),
+      "Get site generation"
+    );
+    return row ? rowToSiteGeneration(row) : null;
+  },
+
+  async promoteSiteGeneration(generationId) {
+    const generation = await this.getSiteGeneration(generationId);
+    if (!generation) return null;
+    if (generation.status === "promoted" && generation.createdSiteId) {
+      const existingBundle = await this.getSiteBundle(generation.createdSiteId);
+      return existingBundle ? { generation, bundle: existingBundle } : null;
+    }
+
+    const existingRows = await requireData<Array<{ slug: string }>>(
+      getSupabaseAdminClient().from("sites").select("slug"),
+      "Load existing slugs"
+    );
+    const bundle = structuredClone(generation.bundle);
+    applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
+    await persistBundle(bundle, { cleanupOnFailure: true });
+    const promotedAt = new Date().toISOString();
+    const selectedArtifacts = await this.listGenerationArtifacts({ generationId, scope: "generation_selected" });
+    for (const artifact of selectedArtifacts) {
+      await this.upsertGenerationArtifact(
+        promoteGenerationArtifactV2({
+          artifact,
+          managedSiteId: bundle.businessProfile.siteId,
+          promotedAt
+        })
+      );
+    }
+    const row = await requireData<SiteGenerationRow>(
+      getSupabaseAdminClient()
+        .from("site_generations")
+        .update({
+          status: "promoted",
+          created_site_id: bundle.businessProfile.siteId,
+          promoted_at: promotedAt,
+          updated_at: promotedAt
+        })
+        .eq("id", generationId)
+        .select("*")
+        .single(),
+      "Mark site generation promoted"
+    );
+    return {
+      generation: rowToSiteGeneration(row),
+      bundle
+    };
+  },
+
+  async upsertGenerationArtifact(artifact) {
+    const row = await requireData<GenerationArtifactRow>(
+      getSupabaseAdminClient()
+        .from("generation_artifacts")
+        .upsert({
+          id: artifact.id,
+          generation_id: artifact.generationId,
+          site_id: artifact.siteId,
+          scope: artifact.scope,
+          artifact_type: artifact.artifactType,
+          artifact_version: artifact.artifactVersion,
+          producer_id: artifact.producerId,
+          producer_version: artifact.producerVersion,
+          vertical_playbook_version: artifact.verticalPlaybookVersion,
+          section_contract_version: artifact.sectionContractVersion,
+          site_design_system_version: artifact.siteDesignSystemVersion,
+          source_fact_ids: artifact.sourceFactIds,
+          affected_page_id: artifact.affectedPageId,
+          affected_section_id: artifact.affectedSectionId,
+          affected_slot_id: artifact.affectedSlotId,
+          content_hash: artifact.contentHash,
+          payload_json: artifact.payload,
+          created_at: artifact.createdAt
+        })
+        .select("*")
+        .single(),
+      "Upsert generation artifact"
+    );
+    return rowToGenerationArtifact(row);
+  },
+
+  async listGenerationArtifacts(filter = {}) {
+    let query = getSupabaseAdminClient().from("generation_artifacts").select("*").order("created_at", { ascending: false });
+    if (filter.generationId) query = query.eq("generation_id", filter.generationId);
+    if (filter.siteId) query = query.eq("site_id", filter.siteId);
+    if (filter.scope) query = query.eq("scope", filter.scope);
+    if (filter.artifactType) query = query.eq("artifact_type", filter.artifactType);
+    const rows = await requireData<GenerationArtifactRow[]>(query, "List generation artifacts");
+    return rows.map(rowToGenerationArtifact);
+  },
+
   async createPreviewToken(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
+    const versionId =
+      input.versionId ??
+      bundle.siteModel.versions.find((version) => version.status === "draft")?.id ??
+      bundle.siteModel.versions[0]?.id;
     const row = await requireData<PreviewTokenRow>(
       getSupabaseAdminClient()
         .from("preview_tokens")
         .insert({
           token: `preview_${crypto.randomUUID().replace(/-/g, "")}`,
           site_id: input.siteId,
+          version_id: versionId,
           expires_at: input.expiresAt
         })
         .select("*")
@@ -487,6 +681,16 @@ export const supabaseRepository: LodestaRepository = {
     if (siteId) query = query.eq("site_id", siteId);
     const rows = await requireData<PreviewTokenRow[]>(query, "List preview tokens");
     return rows.map(rowToPreviewToken);
+  },
+
+  async saveSiteVersion(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    if (!bundle) return null;
+    const index = bundle.siteModel.versions.findIndex((version) => version.id === input.version.id);
+    if (index < 0) return null;
+    bundle.siteModel.versions[index] = input.version;
+    await persistVersions(bundle);
+    return bundle;
   },
 
   async runAndStoreAudit(siteId) {
@@ -522,6 +726,8 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const result = updateSiteDesignBundle(bundle, input);
     if (!result.ok) return result;
+    const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+    if (draft) markVersionOwnerTouched(draft);
     await persistVersions(bundle);
     await persistFindings(input.siteId, bundle.optimizationFindings);
     return result;
@@ -556,6 +762,8 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const result = restoreVersionToDraftBundle(bundle, { versionId: input.versionId });
     if (!result.ok) return result;
+    const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+    if (draft) markVersionOwnerTouched(draft);
     const findings = await buildOptimizationFindings(bundle);
     bundle.optimizationFindings = findings;
     await persistBundle(bundle);
@@ -575,6 +783,7 @@ export const supabaseRepository: LodestaRepository = {
       };
     }
     const updated = applyBusinessProfileUpdate(bundle, input);
+    markAllVersionsOwnerTouched(updated);
     await persistBundle(updated);
     return { ok: true as const, bundle: updated, guardrailWarnings: guardrails.warnings };
   },
@@ -584,6 +793,7 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const result = applyOwnerAssetsUpdate(bundle, input);
     if (!result.ok) return result;
+    markAllVersionsOwnerTouched(bundle);
     await persistBundle(bundle);
     return result;
   },
@@ -831,6 +1041,7 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const result = applyFormSettingsUpdate(bundle, input);
     if (!result.ok) return result;
+    markAllVersionsOwnerTouched(bundle);
     await persistBundle(bundle);
     return result;
   },
@@ -842,6 +1053,8 @@ export const supabaseRepository: LodestaRepository = {
     if (!finding) return { ok: false as const, reason: "Finding not found." };
     const applied = applySuggestedEdit(bundle, finding);
     if (!applied.ok) return applied;
+    const draft = bundle.siteModel.versions.find((version) => version.status === "draft");
+    if (draft) markVersionOwnerTouched(draft);
     await persistVersions(bundle);
     await persistFindings(input.siteId, bundle.optimizationFindings);
     return {
@@ -878,6 +1091,10 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const result = applyAiEditToBundle(bundle, input.message);
     if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
+      if (result.mutated && result.draftVersionId) {
+        const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+        if (draft) markVersionOwnerTouched(draft);
+      }
       const findings = await buildOptimizationFindings(bundle);
       bundle.optimizationFindings = findings;
       await persistBundle(bundle);
@@ -1448,23 +1665,13 @@ export const supabaseRepository: LodestaRepository = {
     try {
       const jobContext: JobExecutionContext = {
         workerId,
-        createAndStoreSite: (input, options) => this.createAndStoreSite(input, options),
-        createPreviewToken: (input) => this.createPreviewToken(input),
+        generateSite: supabaseJobGenerateSite,
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
         runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
         analyticsSummary: (siteId) => this.analyticsSummary(siteId),
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
         listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
         listFormSubmissions: (siteId) => this.listFormSubmissions(siteId),
-        startSiteGenerationTelemetry: (input) =>
-          startSiteGenerationTelemetry(this, {
-            ...input,
-            source: "job",
-            metadata: {
-              jobId: row.id,
-              workerId
-            }
-          }),
         cleanupAgentTelemetry: (input) => this.cleanupAgentTelemetry(input)
       };
       const result = await executeJob(rowToJob(row), jobContext);
@@ -1581,35 +1788,43 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
   };
 }
 
-async function persistBundle(bundle: SiteBundle) {
+async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: boolean } = {}) {
   const siteShell = siteModelShell(bundle.siteModel);
-  await requireData<SiteRow>(
-    getSupabaseAdminClient()
-      .from("sites")
-      .upsert({
-        id: bundle.businessProfile.siteId,
-        slug: bundle.siteModel.slug,
-        status: "draft",
-        site_model: siteShell,
-        extension_model: {
-          workflows: bundle.extensionModel.workflows,
-          customBlocks: bundle.extensionModel.customBlocks
-        },
-        presence_assessment: bundle.presenceAssessment
-      })
-      .select("*")
-      .single(),
-    "Persist site"
-  );
+  try {
+    await requireData<SiteRow>(
+      getSupabaseAdminClient()
+        .from("sites")
+        .upsert({
+          id: bundle.businessProfile.siteId,
+          slug: bundle.siteModel.slug,
+          status: "draft",
+          site_model: siteShell,
+          extension_model: {
+            workflows: bundle.extensionModel.workflows,
+            customBlocks: bundle.extensionModel.customBlocks
+          },
+          presence_assessment: bundle.presenceAssessment
+        })
+        .select("*")
+        .single(),
+      "Persist site"
+    );
 
-  await Promise.all([
-    persistBusinessProfile(bundle.businessProfile),
-    persistAssets(bundle.businessProfile.siteId, bundle.presenceAssessment.assetInventory ?? []),
-    persistVersions(bundle),
-    persistForms(bundle.businessProfile.siteId, bundle.extensionModel.forms),
-    persistFindings(bundle.businessProfile.siteId, bundle.optimizationFindings),
-    persistExperiments(bundle.businessProfile.siteId, bundle.experiments)
-  ]);
+    await persistBusinessProfile(bundle.businessProfile);
+    await persistAssets(bundle.businessProfile.siteId, bundle.presenceAssessment.assetInventory ?? []);
+    await persistVersions(bundle);
+    await persistForms(bundle.businessProfile.siteId, bundle.extensionModel.forms);
+    await persistFindings(bundle.businessProfile.siteId, bundle.optimizationFindings);
+    await persistExperiments(bundle.businessProfile.siteId, bundle.experiments);
+  } catch (error) {
+    if (options.cleanupOnFailure) {
+      await requireSuccess(
+        getSupabaseAdminClient().from("sites").delete().eq("id", bundle.businessProfile.siteId),
+        "Cleanup failed site persistence"
+      );
+    }
+    throw error;
+  }
 }
 
 async function persistBusinessProfile(profile: BusinessProfile) {
@@ -1666,6 +1881,7 @@ async function persistForms(siteId: string, forms: FormDefinition[]) {
 
 async function persistAssets(siteId: string, assets: SiteAsset[]) {
   const supabase = getSupabaseAdminClient();
+  if (assets.length) assertUniqueAssetIds(assets);
   await requireSuccess(supabase.from("site_assets").delete().eq("site_id", siteId), "Clear site assets");
   if (assets.length === 0) return;
   await requireData<SiteAssetRow[]>(
@@ -1690,6 +1906,18 @@ async function persistAssets(siteId: string, assets: SiteAsset[]) {
       .select("*"),
     "Persist site assets"
   );
+}
+
+function assertUniqueAssetIds(assets: SiteAsset[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const asset of assets) {
+    if (seen.has(asset.id)) duplicates.add(asset.id);
+    seen.add(asset.id);
+  }
+  if (duplicates.size) {
+    throw new Error(`Persist site assets: duplicate asset ids in bundle: ${Array.from(duplicates).join(", ")}`);
+  }
 }
 
 async function persistFindings(siteId: string, findings: OptimizationFinding[]) {
@@ -1796,17 +2024,20 @@ async function rollbackExperimentLearnings(experimentId: string, rolledBackAt: s
 function updateBundleSection(bundle: SiteBundle, input: UpdateSectionInput) {
   const draftVersion = bundle.siteModel.versions.find((version) => version.status === "draft") ?? clonePublishedAsDraft(bundle);
   const page = draftVersion.pages.find((candidate) => candidate.id === input.pageId);
-  const section = page?.sections.find((candidate) => candidate.id === input.sectionId);
-  if (!section) return { ok: false as const, reason: "Unknown site, page, or section" };
+  const layoutSection = page?.layoutSections.find((candidate) => candidate.id === input.sectionId);
+  if (!layoutSection || !page) return { ok: false as const, reason: "Unknown site, page, or section" };
+  const section = sectionFromLayoutSection(layoutSection);
 
   for (const [key, value] of Object.entries(input.props)) {
     const policy = section.fieldPolicies[key];
     if (!policy || (policy.editScope !== "owner_choice" && policy.editScope !== "owner_freetext")) {
       return { ok: false as const, reason: `Field ${key} is not editable by owner controls.` };
     }
-    section.props[key] = value;
   }
 
+  applyPropsToLayoutSection(layoutSection, input.props);
+  syncLegacySectionsFromLayout(page);
+  markVersionOwnerTouched(draftVersion);
   return { ok: true as const, bundle };
 }
 
@@ -1852,10 +2083,52 @@ function rowToSiteAsset(row: SiteAssetRow): SiteAsset {
   };
 }
 
+function rowToSiteGeneration(row: SiteGenerationRow): SiteGenerationRecord {
+  return {
+    id: row.id,
+    agentRunId: row.agent_run_id ?? undefined,
+    sourceUrl: row.source_url ?? undefined,
+    sourceHost: row.source_host ?? undefined,
+    businessName: row.business_name,
+    vertical: row.vertical,
+    candidateSlug: row.candidate_slug,
+    bundle: row.bundle_json as SiteBundle,
+    status: row.status,
+    createdSiteId: row.created_site_id ?? undefined,
+    promotedAt: row.promoted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToGenerationArtifact(row: GenerationArtifactRow): GenerationArtifactV2 {
+  return {
+    id: row.id,
+    generationId: row.generation_id ?? undefined,
+    siteId: row.site_id ?? undefined,
+    scope: row.scope,
+    artifactType: row.artifact_type,
+    artifactVersion: row.artifact_version,
+    producerId: row.producer_id,
+    producerVersion: row.producer_version,
+    verticalPlaybookVersion: row.vertical_playbook_version ?? undefined,
+    sectionContractVersion: row.section_contract_version ?? undefined,
+    siteDesignSystemVersion: row.site_design_system_version ?? undefined,
+    sourceFactIds: row.source_fact_ids,
+    affectedPageId: row.affected_page_id ?? undefined,
+    affectedSectionId: row.affected_section_id ?? undefined,
+    affectedSlotId: row.affected_slot_id ?? undefined,
+    contentHash: row.content_hash,
+    payload: asRecord(row.payload_json),
+    createdAt: row.created_at
+  };
+}
+
 function rowToPreviewToken(row: PreviewTokenRow): PreviewToken {
   return {
     token: row.token,
     siteId: row.site_id,
+    versionId: row.version_id ?? undefined,
     expiresAt: row.expires_at ?? undefined,
     createdAt: row.created_at
   };
@@ -2240,6 +2513,13 @@ async function attachModelCallTotals(runs: AgentRunRecord[]) {
   });
 }
 
+function applySiteGenerationFilters(query: any, filter: ListSiteGenerationsFilter) {
+  let next = query;
+  if (filter.status) next = next.eq("status", filter.status);
+  if (filter.sourceHost) next = next.ilike("source_host", `%${filter.sourceHost.replace(/[%_]/g, "\\$&")}%`);
+  return next;
+}
+
 function applyAgentRunFilters(query: any, filter: ListAgentRunsFilter) {
   let next = query;
   if (filter.status) next = next.eq("status", filter.status);
@@ -2274,6 +2554,15 @@ function stripUndefined<T extends Record<string, unknown>>(value: T) {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function hostFromUrl(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 function sanitizeMetadata(metadata: AnalyticsEvent["metadata"]) {

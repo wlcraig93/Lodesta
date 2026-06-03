@@ -5,6 +5,7 @@ import type { RenderInspectionResult } from "./models";
 import type { GenerationPlanningOverride } from "./generation-planning";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
+import { openAiRequestSignal } from "./openai-timeout";
 
 type OpenAiGenerationInput = {
   bundle: SiteBundle;
@@ -120,7 +121,8 @@ export async function createOpenAiGenerationPlanning(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: openAiRequestSignal()
     });
 
     const payload = (await response.json().catch(() => null)) as unknown;

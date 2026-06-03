@@ -31,7 +31,7 @@ export const verticalRecipes: Record<Vertical, VerticalRecipe> = {
   },
   beauty_salon: {
     vertical: "beauty_salon",
-    label: "Nail / Beauty Salon",
+    label: "Beauty Salon",
     primaryGoal: "booking_clicks",
     mood: "premium",
     defaultSections: ["hero", "gallery", "services", "testimonials", "contact", "cta"],

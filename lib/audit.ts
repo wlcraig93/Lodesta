@@ -118,7 +118,7 @@ function faqItemsForBusiness(business: BusinessProfile) {
     },
     {
       question: "Can I verify business details before starting?",
-      answer: "Yes. Owner-confirmed phone, location, services, and trust proof should be reviewed before publishing."
+      answer: "Yes. Check the phone, location, services, and public review details before you reach out."
     }
   ];
 }

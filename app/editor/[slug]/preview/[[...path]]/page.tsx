@@ -16,16 +16,22 @@ export const metadata: Metadata = {
 };
 
 export default async function DraftPreviewPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ slug: string; path?: string[] }>;
+  searchParams: Promise<{ versionId?: string }>;
 }) {
   const { slug, path } = await params;
+  const { versionId } = await searchParams;
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/editor/${slug}`);
 
-  const version = getEditingVersion(bundle.siteModel);
+  const version = versionId
+    ? bundle.siteModel.versions.find((candidate) => candidate.id === versionId)
+    : getEditingVersion(bundle.siteModel);
+  if (!version) notFound();
   const pageSlug = path?.join("/") ?? "";
   const page = version.pages.find((candidate) => candidate.slug === pageSlug);
   if (!page) notFound();
@@ -35,6 +41,7 @@ export default async function DraftPreviewPage({
       business={bundle.businessProfile}
       site={bundle.siteModel}
       extensions={bundle.extensionModel}
+      version={version}
       page={page}
       theme={version.theme ?? bundle.siteModel.theme}
       tracking={false}

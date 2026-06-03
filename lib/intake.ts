@@ -3,11 +3,16 @@ import type {
   ConversionGoal,
   Experiment,
   ExperimentLearning,
+  ExtensionModel,
   FieldPolicy,
   FieldProvenance,
+  GenerationBrief,
+  GenerationCostEstimate,
+  NormalizedBusinessFacts,
   PageModel,
   PresenceAssessment,
   CreativeMockupArtifact,
+  RenderableFact,
   RenderInspectionResult,
   SectionModel,
   SiteAsset,
@@ -35,28 +40,63 @@ import type { PublicPresenceEnrichment } from "./public-presence";
 import { themeForPreset } from "./theme-presets";
 import { createDeterministicVisualQa } from "./visual-qa";
 import { applyExperimentLearningsToVariants, activeLearningFor } from "./experiment-learning";
+import { galleryImageAssetsForBusiness, heroImageAssetForBusiness } from "./image-registry";
+import { computeSiteModelHash, makePendingGenerationQa } from "./site-version-metadata";
+import { createBusinessFactGraph } from "./business-fact-graph";
+import { createGenerationPlanV2 } from "./generation-plan-v2";
+import { applyClaimVerificationToPlan, verifyGenerationClaims } from "./claim-verification";
+import {
+  defaultDesignPlanForVertical,
+  designSchemaVersion,
+  pageFromLegacySections,
+  rendererVersion,
+  repairLayoutDocument,
+  validateLayoutDocument
+} from "./layout-registry";
+import { pruneUnsupportedCatalogSections } from "./section-catalog";
+import { maybeApplyGeneratedSiteV2 } from "./generated-site-v2-pipeline";
+import { planGenerationCost } from "./generation-cost";
 
 export type IntakeInput = {
   url?: string;
   prompt?: string;
+  identity?: {
+    siteId?: string;
+    slug?: string;
+    businessProfileId?: string;
+  };
   crawl?: CrawlAssessment;
   renderInspection?: RenderInspectionResult;
   aiPlanning?: GenerationPlanningOverride;
   mockupArtifacts?: CreativeMockupArtifact[];
   publicPresence?: PublicPresenceEnrichment;
   visualQa?: VisualQaResult;
+  generationCostEstimate?: GenerationCostEstimate;
   experimentLearnings?: ExperimentLearning[];
 };
 
 export function inferVertical(input: IntakeInput): Vertical {
-  const source = `${input.url ?? ""} ${input.prompt ?? ""}`.toLowerCase();
+  const source = [
+    input.url,
+    input.prompt,
+    input.crawl?.title,
+    input.crawl?.metaDescription,
+    input.crawl?.extractedFacts.name,
+    ...(input.crawl?.extractedFacts.categories ?? []),
+    ...(input.crawl?.extractedFacts.services ?? []),
+    ...(input.publicPresence?.facts.categories ?? []),
+    ...(input.publicPresence?.facts.services ?? [])
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
   if (source.includes("pizza") || source.includes("restaurant") || source.includes("cafe")) return "restaurant";
   if (source.includes("med spa") || source.includes("aesthetic") || source.includes("botox") || source.includes("laser facial")) return "med_spa";
   if (source.includes("landscap") || source.includes("lawn care")) return "landscaping";
   if (source.includes("veterinary") || source.includes("veterinarian") || source.includes("vet clinic")) return "veterinary";
   if (source.includes("dentist") || source.includes("dental")) return "dental";
   if (source.includes("plumb") || source.includes("hvac") || source.includes("electric")) return "home_services";
-  if (source.includes("auto") || source.includes("collision") || source.includes("body shop")) return "auto_body";
+  if (/\b(auto|automotive|collision|body shop|paint\s*(and|&)?\s*body|paint repair|dent repair|bumper|fender)\b/.test(source)) return "auto_body";
   if (source.includes("salon") || source.includes("nail") || source.includes("beauty")) return "beauty_salon";
   if (/\blaw\b|\blawyer\b|\battorney\b/.test(source)) return "law_firm";
   if (source.includes("fitness") || source.includes("gym") || source.includes("personal training")) return "fitness";
@@ -67,35 +107,44 @@ export function inferVertical(input: IntakeInput): Vertical {
 
 export function createSiteFromInput(input: IntakeInput): SiteBundle {
   const vertical = inferVertical(input);
-  const facts = mergeExtractedFacts(input.crawl?.extractedFacts, input.publicPresence?.facts);
+  const facts = mergeExtractedFacts(input.crawl?.extractedFacts, durablePublicPresenceFacts(input.publicPresence));
   const sourceHostname = input.url ? new URL(input.url).hostname.replace(/^www\./, "") : undefined;
   const name = inferBusinessName(input, facts, sourceHostname);
-  const siteId = `site_${slugify(name)}`;
+  const baseSlug = slugify(name);
+  const siteSlug = slugify(input.identity?.slug ?? baseSlug) || baseSlug || `site-${Date.now()}`;
+  const siteId = input.identity?.siteId?.trim() || `site_${siteSlug}`;
+  const identityKey = slugify(siteId) || siteSlug;
   const now = new Date().toISOString();
   const promptFacts = extractPromptFacts(input.prompt);
-  const services = coalesceList(facts?.services, promptFacts.services, defaultServicesForVertical(vertical));
+  const serviceCandidates = removeBusinessNameServiceCandidates(
+    dedupeServiceNames(removeBlockedPlaceholders(coalesceList(facts?.services, promptFacts.services, defaultServicesForVertical(vertical)))),
+    name
+  );
+  const services = serviceCandidates.length ? serviceCandidates : defaultServicesForVertical(vertical);
   const serviceAreas = coalesceList(
     facts?.serviceAreas,
     promptFacts.serviceAreas,
-    facts?.address?.city ? [facts.address.city] : [],
-    ["Local area"]
+    facts?.address?.city ? [facts.address.city] : []
   );
   const phone = facts?.phone ?? promptFacts.phone;
   const email = facts?.email ?? promptFacts.email;
+  const address = facts?.address ?? promptFacts.address;
+  const hours = facts?.hours ?? promptFacts.hours;
 
   const businessProfile: BusinessProfile = {
-    id: `bp_${slugify(name)}`,
+    id: input.identity?.businessProfileId?.trim() || `bp_${identityKey}`,
     siteId,
     name,
     vertical,
-    categories: coalesceList(facts?.categories, [vertical.replace("_", " ")]),
+    categories: coalesceList(rankCategoriesBySpecificity(facts?.categories), [vertical.replace("_", " ")]),
     description: profileDescriptionForBusiness({ name, vertical, services, serviceAreas, sourceHostname }),
     phone,
     email,
-    address: facts?.address,
+    address,
     geo: facts?.geo,
-    hours: facts?.hours,
+    hours,
     services,
+    serviceHighlights: facts?.serviceHighlights?.slice(0, 8),
     serviceAreas,
     socialLinks: facts?.socialLinks ?? [],
     bookingLinks: facts?.bookingLinks ?? [],
@@ -122,12 +171,21 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     reviewsSummary: facts?.reviewsSummary,
     pressLinks: facts?.pressLinks ?? [],
     provenance: {
-      ...buildProvenance(input, facts, now),
-      ...(input.publicPresence?.provenance ?? {})
+      ...buildProvenance(input, facts, promptFacts, now),
+      ...durablePublicPresenceProvenance(input.publicPresence)
     }
   };
 
   const recipe = verticalRecipes[vertical];
+  const normalizedBusinessFacts = createNormalizedBusinessFacts({
+    name,
+    vertical,
+    services,
+    serviceAreas,
+    facts,
+    promptFacts,
+    sourceHostname
+  });
   const currentEvaluation = input.crawl ? evaluateCrawlAgainstStandard(input.crawl) : undefined;
   const brandAssessment = createBrandAssessment({
     business: businessProfile,
@@ -147,6 +205,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
   });
   const selectedDirection = selectedDesignDirection(designDirections);
   const selectedTheme = themeForPreset(vertical, selectedDirection.themePreset, themeForVertical(vertical, recipe.mood));
+  const selectedDesignPlan = defaultDesignPlanForVertical(vertical, selectedTheme);
   const primaryCta =
     recipe.primaryGoal === "calls" && businessProfile.phone
       ? { label: "Call Now", href: `tel:${businessProfile.phone}`, role: "tel" }
@@ -154,20 +213,37 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
         ? { label: "Book Now", href: businessProfile.bookingLinks[0], role: "booking" }
         : recipe.primaryGoal === "order_clicks" && businessProfile.orderingLinks[0]
           ? { label: "Order Online", href: businessProfile.orderingLinks[0], role: "ordering" }
-          : { label: recipe.primaryGoal === "order_clicks" ? "Order Online" : "Request a Quote", href: "#contact", role: "form" };
+          : {
+              label:
+                recipe.primaryGoal === "booking_clicks"
+                  ? "Request Appointment"
+                  : recipe.primaryGoal === "order_clicks"
+                    ? "Start Order"
+                    : fallbackFormCtaLabel(vertical),
+              href: "#contact",
+              role: "form"
+            };
 
   const siteModel: SiteModel = {
     id: siteId,
-    slug: slugify(name),
+    slug: siteSlug,
     pinList: [],
     theme: selectedTheme,
     versions: [
       {
-        id: `version_${slugify(name)}_published`,
-        status: "published" as const,
+        id: `version_${identityKey}_draft_1`,
+        status: "draft" as const,
+        rendererVersion,
+        designSchemaVersion,
+        designPlan: selectedDesignPlan,
         createdAt: now,
+        ownerTouched: false,
+        presentation: {
+          mobileActionBehavior: "after_hero",
+          reservedMobileActionSpace: true
+        },
         pages: [
-          {
+          pageFromLegacySections({
             id: "page_home",
             slug: "",
             title: "Home",
@@ -176,6 +252,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
               description: `${name} is a ${recipe.label.toLowerCase()} built for fast local action, clear trust signals, and simple customer contact.`,
               canonicalPath: "/"
             },
+            vertical,
             sections: buildHomeSections({
               business: businessProfile,
               recipe,
@@ -183,8 +260,8 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
               name,
               sectionOrder: selectedDirection.sectionEmphasis
             })
-          },
-          {
+          }),
+          pageFromLegacySections({
             id: "page_services",
             slug: "services",
             title: "Services",
@@ -193,20 +270,42 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
               description: `Explore the primary services offered by ${name}, with clear calls to action for local customers.`,
               canonicalPath: "/services"
             },
+            vertical,
             sections: buildServicesPageSections({ business: businessProfile, recipe, primaryCta, name })
-          },
+          }),
           ...buildLocalSeoPages({ business: businessProfile, recipe, primaryCta, name })
         ]
       }
     ]
   };
+  const initialGeneratedVersion = siteModel.versions[0];
+  if (initialGeneratedVersion) {
+    repairLayoutDocument(initialGeneratedVersion);
+    const blockingLayoutIssues = validateLayoutDocument(initialGeneratedVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
+    if (blockingLayoutIssues.length) {
+      throw new Error(`Generated layout-v1 document failed validation: ${blockingLayoutIssues.map((issue) => issue.message).join("; ")}`);
+    }
+  }
 
   const presenceAssessment: PresenceAssessment = {
     siteId,
     sourceUrl: input.url,
+    normalizedBusinessFacts,
     standardEvaluation: currentEvaluation,
     renderInspection: input.renderInspection,
     publicPresenceSignals: input.publicPresence?.signals.map((signal) => ({ ...signal, siteId })),
+    generationCostEstimate:
+      input.generationCostEstimate ??
+      planGenerationCost({
+        sourceUrl: input.url,
+        crawl: input.crawl,
+        sourceRenderInspection: input.renderInspection,
+        publicPresence: input.publicPresence,
+        plannedMockupImageCount: Math.max(1, Math.min(designDirections.length, 3)),
+        sourceModelVisualQaRequested: Boolean(input.renderInspection?.screenshots.length),
+        generatedModelVisualQaRequested: true,
+        includeGeneratedRenderQa: true
+      }),
     brandAssessment,
     designDirections,
     selectedDesignDirectionId: selectedDirection.id,
@@ -215,20 +314,81 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     visualNotes: buildVisualNotes(input.renderInspection),
     brandNotes: buildBrandNotes(input.crawl),
     publicPresenceNotes: buildPublicPresenceNotes(input.crawl, input.publicPresence),
-    creativeBrief: createCreativeBrief({ business: businessProfile, recipe, crawl: input.crawl })
+    generationBrief: createGenerationBrief({ siteId, business: businessProfile, recipe, normalizedBusinessFacts })
   };
+  presenceAssessment.creativeBrief = createCreativeBrief({
+    business: businessProfile,
+    recipe,
+    crawl: input.crawl,
+    generationBrief: presenceAssessment.generationBrief
+  });
 
   const bundle: SiteBundle = {
     businessProfile,
     siteModel,
     extensionModel: {
       ...sampleExtensionModel,
-      forms: sampleExtensionModel.forms.map((form) => ({ ...form, siteId }))
+      forms: sampleExtensionModel.forms.map((form) => ({
+        ...form,
+        siteId,
+        name: formNameForVertical(vertical),
+        fields: formFieldsForVertical(vertical, form.fields),
+        submitLabel: submitLabelForVertical(vertical, recipe.primaryGoal)
+      }))
     },
     optimizationFindings: runAudit(businessProfile, siteModel),
     experiments: defaultExperimentsForBusiness(businessProfile, recipe, input.experimentLearnings),
     presenceAssessment
   };
+  const initialVersion = bundle.siteModel.versions[0];
+  if (initialVersion) {
+    presenceAssessment.businessFactGraph = createBusinessFactGraph({
+      business: businessProfile,
+      presence: presenceAssessment,
+      observedAt: now
+    });
+    const catalogPruning = pruneUnsupportedCatalogSections({
+      bundle,
+      version: initialVersion,
+      factGraph: presenceAssessment.businessFactGraph,
+      primaryGoal: recipe.primaryGoal
+    });
+    if (catalogPruning.removedSections.length) {
+      presenceAssessment.technicalNotes.push(
+        `Section catalog omitted ${catalogPruning.removedSections.length} unsupported optional section${catalogPruning.removedSections.length === 1 ? "" : "s"} without safe source facts.`
+      );
+    }
+    const v2Plan = createGenerationPlanV2({
+      bundle,
+      version: initialVersion,
+      factGraph: presenceAssessment.businessFactGraph,
+      createdAt: now
+    });
+    presenceAssessment.generationPlanV2 = applyClaimVerificationToPlan(
+      v2Plan,
+      verifyGenerationClaims({ version: initialVersion, factGraph: presenceAssessment.businessFactGraph })
+    );
+    const sourceHost = input.url ? new URL(input.url).hostname.replace(/^www\./, "").toLowerCase() : undefined;
+    const v2Application = maybeApplyGeneratedSiteV2({
+      bundle,
+      sourceHost,
+      explicitOperatorRequest: true
+    });
+    if (v2Application.applied) {
+      presenceAssessment.technicalNotes.push(`Canonical V2 generation path applied during intake creation: ${v2Application.reason}`);
+    }
+    const activeInitialVersion = bundle.siteModel.versions[0] ?? initialVersion;
+    presenceAssessment.generationPlanV2 = applyClaimVerificationToPlan(
+      createGenerationPlanV2({
+        bundle,
+        version: activeInitialVersion,
+        factGraph: presenceAssessment.businessFactGraph,
+        createdAt: now
+      }),
+      verifyGenerationClaims({ version: activeInitialVersion, factGraph: presenceAssessment.businessFactGraph })
+    );
+    activeInitialVersion.generationQa = makePendingGenerationQa(computeSiteModelHash(bundle, activeInitialVersion));
+  }
   presenceAssessment.qualityScore = createPresenceQualityScore({
     business: businessProfile,
     recipe,
@@ -276,7 +436,7 @@ function buildServicesPageSections(context: SectionBuildContext): SectionModel[]
       props: {
         eyebrow: "Services",
         heading: `What ${context.name} can help with`,
-        body: "Each service page becomes more specific as verified facts, photos, and owner-approved details are added.",
+        body: "Review the core services, then call or send details when the fit is clear.",
         primaryCta: context.primaryCta
       },
       bindings: {},
@@ -286,7 +446,7 @@ function buildServicesPageSections(context: SectionBuildContext): SectionModel[]
         primaryCta: policy("owner_choice", true)
       }
     },
-    makeServicesSection(context, "services_page_grid", "Primary services", "Owner-verified details can be added to each service during claim."),
+    makeServicesSection(context, "services_page_grid", "Primary services", "Service details stay focused on what customers can request today."),
     makeFaqSection(context, "services_page_faq"),
     makeCtaSection(context, "services_page_cta")
   ];
@@ -434,7 +594,7 @@ function experimentMetricForGoal(goal: ConversionGoal): Experiment["primaryMetri
 function buildServiceLandingPage(context: SectionBuildContext, service: string): PageModel {
   const serviceSlug = slugify(service) || "service";
   const area = context.business.serviceAreas[0] ?? context.business.address?.city ?? "your area";
-  return {
+  return pageFromLegacySections({
     id: `page_service_${serviceSlug}`,
     slug: `services/${serviceSlug}`,
     title: service,
@@ -443,13 +603,14 @@ function buildServiceLandingPage(context: SectionBuildContext, service: string):
       description: `${context.name} helps local customers with ${service.toLowerCase()} in ${area}. Get clear next steps, trust signals, and a direct way to contact the business.`,
       canonicalPath: `/services/${serviceSlug}`
     },
+    vertical: context.business.vertical,
     sections: [
       makeLandingHeroSection(
         context,
         `service_${serviceSlug}_hero`,
         "Service",
         `${service} in ${area}`,
-        `${serviceDescription(context.business.vertical, service)} This page is structured for local search intent and a fast conversion path.`
+        `${serviceDescription(context.business.vertical, service)} Contact ${context.name} to confirm fit, timing, and next steps.`
       ),
       makeSingleServiceSection(context, `service_${serviceSlug}_detail`, service, area),
       makeTestimonialsSection(context, `service_${serviceSlug}_trust`),
@@ -462,27 +623,28 @@ function buildServiceLandingPage(context: SectionBuildContext, service: string):
       ),
       makeContactSection(context, `service_${serviceSlug}_contact`)
     ]
-  };
+  });
 }
 
 function buildAreaLandingPage(context: SectionBuildContext, area: string): PageModel {
   const areaSlug = slugify(area) || "service-area";
-  return {
+  return pageFromLegacySections({
     id: `page_area_${areaSlug}`,
     slug: `areas/${areaSlug}`,
     title: area,
     seo: {
       title: `${context.name} in ${area}`,
-      description: `${context.name} serves customers in ${area} with ${context.business.services.slice(0, 3).join(", ") || context.recipe.label.toLowerCase()}. Local details, trust proof, and contact paths are built in.`,
+      description: `${context.name} serves customers in ${area} with ${context.business.services.slice(0, 3).join(", ") || context.recipe.label.toLowerCase()}. Service details and contact options are easy to find.`,
       canonicalPath: `/areas/${areaSlug}`
     },
+    vertical: context.business.vertical,
     sections: [
       makeLandingHeroSection(
         context,
         `area_${areaSlug}_hero`,
         "Service area",
         `${context.name} in ${area}`,
-        `This page clarifies availability in ${area}, repeats the primary action, and connects local visitors with the most relevant services.`
+        `Confirm current availability in ${area}, then choose the service that matches the need.`
       ),
       makeAreaServicesSection(context, `area_${areaSlug}_services`, area),
       makeMapSection(
@@ -501,7 +663,7 @@ function buildAreaLandingPage(context: SectionBuildContext, area: string): PageM
       ),
       makeContactSection(context, `area_${areaSlug}_contact`)
     ]
-  };
+  });
 }
 
 function makeLandingHeroSection(
@@ -538,6 +700,7 @@ function makeLandingHeroSection(
 }
 
 function makeSingleServiceSection(context: SectionBuildContext, id: string, service: string, area: string): SectionModel {
+  const audience = audiencePlural(context.business.vertical);
   return {
     id,
     type: "services",
@@ -545,15 +708,15 @@ function makeSingleServiceSection(context: SectionBuildContext, id: string, serv
     props: {
       eyebrow: "Local service detail",
       heading: `${service} without extra friction`,
-      body: `For ${area} customers, this page should answer fit, timing, proof, and next step questions before they call or submit the form.`,
+      body: `For ${area} ${audience}, ${service.toLowerCase()} requests should start with fit, timing, and next-step details.`,
       items: [
         {
-          title: "What customers need to know",
+          title: "What to ask about",
           description: serviceDescription(context.business.vertical, service)
         },
         {
-          title: "Why this page exists",
-          description: `Dedicated ${service.toLowerCase()} pages help search engines and visitors understand the specific service, not just the business category.`
+          title: "Service fit",
+          description: `Confirm whether ${service.toLowerCase()} matches the current need before scheduling or sending details.`
         },
         {
           title: "Best next action",
@@ -574,17 +737,18 @@ function makeSingleServiceSection(context: SectionBuildContext, id: string, serv
 }
 
 function makeAreaServicesSection(context: SectionBuildContext, id: string, area: string): SectionModel {
+  const audience = audiencePlural(context.business.vertical);
   return {
     id,
     type: "services",
     variant: "area_service_grid",
     props: {
       eyebrow: "Available nearby",
-      heading: `Services for ${area} customers`,
-      body: "Each card can become deeper owner-approved content as the business confirms offers, coverage, and proof.",
+      heading: `Services for ${area} ${audience}`,
+      body: "Choose the service that matches the need, then call or send details.",
       items: context.business.services.slice(0, 6).map((service) => ({
         title: service,
-        description: `${serviceDescription(context.business.vertical, service)} Availability for ${area} should be verified during claim.`
+        description: `${serviceDescription(context.business.vertical, service)} Available for ${area} ${audience}.`
       }))
     },
     bindings: {
@@ -616,9 +780,9 @@ function sectionForType(type: SectionModel["type"], context: SectionBuildContext
     case "trust_bar":
       return makeTrustBarSection(context, id);
     case "services":
-      return makeServicesSection(context, id, "Services built around local intent", `Make it obvious what ${context.name} does and how to take action.`);
+      return makeServicesSection(context, id, servicesHeading(context), servicesBody(context));
     case "menu_deals":
-      return makeServicesSection(context, id, "Favorites that make ordering simple", "Menu, specials, and ordering paths are placed close to conversion actions.", "menu_deals");
+      return makeServicesSection(context, id, "Menu favorites, ready to order", "Keep popular items, catering, and takeout paths close to the next click.", "menu_deals");
     case "gallery":
       return makeGallerySection(context, id);
     case "testimonials":
@@ -654,7 +818,7 @@ function makeHeroSection(context: SectionBuildContext, id: string): SectionModel
       body: heroBody(context),
       primaryCta: context.primaryCta,
       secondaryCta,
-      imageUrl: heroImageForVertical(context.business.vertical)
+      imageUrl: heroImageAssetForBusiness(context.business).url
     },
     bindings: {
       heading: "business.name",
@@ -729,8 +893,8 @@ function makeGallerySection(context: SectionBuildContext, id: string): SectionMo
     props: {
       eyebrow: "Visual proof",
       heading: galleryHeading(context.business.vertical),
-      body: "Pre-claim previews use licensed or generated imagery; customer-owned photos can replace these after claim.",
-      images: galleryImagesForVertical(context.business.vertical)
+      body: galleryBody(context.business.vertical),
+      images: galleryImagesForBusiness(context.business)
     },
     bindings: {},
     fieldPolicies: {
@@ -742,14 +906,17 @@ function makeGallerySection(context: SectionBuildContext, id: string): SectionMo
 }
 
 function makeTestimonialsSection(context: SectionBuildContext, id: string): SectionModel {
+  const hasReviewSummary = Boolean(context.business.reviewsSummary?.rating || context.business.reviewsSummary?.count);
   return {
     id,
     type: "testimonials",
     variant: "review_summary",
     props: {
       eyebrow: "Trust",
-      heading: "Proof customers can verify",
-      body: "Verified reviews, credentials, and owner-approved testimonials make the decision easier.",
+      heading: hasReviewSummary ? "Public review profile" : "Proof customers can verify",
+      body: hasReviewSummary
+        ? `Public review signals help ${audiencePlural(context.business.vertical)} evaluate fit before taking the next step.`
+        : "Clear services, contact details, and public proof points make the decision easier.",
       items: testimonialItems(context.business)
     },
     bindings: {
@@ -792,8 +959,8 @@ function makeCtaSection(context: SectionBuildContext, id: string): SectionModel 
     variant: "conversion_band",
     props: {
       eyebrow: "Next step",
-      heading: ctaHeading(context.recipe.primaryGoal),
-      body: "The primary action is repeated after trust and service context so ready visitors do not have to hunt for it.",
+      heading: ctaHeading(context),
+      body: ctaBody(context),
       primaryCta: context.primaryCta,
       secondaryCta: context.primaryCta.role === "tel"
         ? { label: "Request Service", href: "#contact", role: "form" }
@@ -821,6 +988,7 @@ function makeContactSection(context: SectionBuildContext, id: string): SectionMo
     variant: "split",
     props: {
       heading: `Contact ${context.name}`,
+      body: contactBody(context),
       formId: "form_contact",
       primaryCta: context.primaryCta
     },
@@ -831,6 +999,7 @@ function makeContactSection(context: SectionBuildContext, id: string): SectionMo
     },
     fieldPolicies: {
       heading: policy("owner_freetext"),
+      body: policy("owner_freetext"),
       formId: policy("owner_choice"),
       primaryCta: policy("owner_choice", true)
     }
@@ -845,7 +1014,7 @@ function makeMapSection(context: SectionBuildContext, id: string): SectionModel 
     props: {
       eyebrow: "Where we help",
       heading: context.business.address?.city ? `${context.business.name} in ${context.business.address.city}` : "Local service area",
-      body: "Location and service-area information helps visitors decide quickly and feeds local SEO structure.",
+      body: "Use the contact details, hours, and service-area information before making the next call.",
       areas: context.business.serviceAreas.slice(0, 8)
     },
     bindings: {
@@ -869,7 +1038,7 @@ function makeTeamSection(context: SectionBuildContext, id: string): SectionModel
     props: {
       eyebrow: "People",
       heading: teamHeading(context.business.vertical),
-      body: "Names, credentials, and bios stay owner-truth fields and should be verified before publish.",
+      body: "Team content should introduce the people customers will meet without inventing private details.",
       items: teamItems(context.business.vertical)
     },
     bindings: {},
@@ -889,7 +1058,7 @@ function makePressVideoSection(context: SectionBuildContext, id: string): Sectio
     props: {
       eyebrow: "Around the web",
       heading: "Bring outside proof onto the site",
-      body: "Press, YouTube, social profiles, and third-party proof can support conversion when they are real and relevant.",
+      body: "Real press, video, and social links give customers another way to check the business.",
       links: [...context.business.pressLinks, ...context.business.socialLinks].slice(0, 4).map((href, index) => ({
         label: index === 0 ? "Primary profile" : `Proof link ${index + 1}`,
         href
@@ -915,12 +1084,12 @@ function makeBeforeAfterSection(context: SectionBuildContext, id: string): Secti
     props: {
       eyebrow: "Before and after",
       heading: beforeAfterHeading(context.business.vertical),
-      body: "Project proof should use owner-approved photos and descriptions after claim. The preview reserves the conversion-critical slot.",
+      body: "Project examples show the kind of work customers can ask about.",
       items: context.business.services.slice(0, 3).map((service) => ({
         title: service,
         beforeLabel: "Problem",
         afterLabel: "Resolved",
-        description: `Use verified ${service.toLowerCase()} examples here to show customers the outcome.`
+        description: `Use ${service.toLowerCase()} examples to connect the service to a concrete customer need.`
       }))
     },
     bindings: {
@@ -943,7 +1112,7 @@ export function slugify(value: string) {
 }
 
 function inferBusinessName(input: IntakeInput, facts?: ExtractedBusinessFacts, hostname?: string) {
-  return extractPromptName(input.prompt) ?? facts?.name ?? titleCaseHost(hostname) ?? "Sample Local Business";
+  return normalizeBusinessNameForIntake(extractPromptName(input.prompt) ?? facts?.name) ?? titleCaseHost(hostname) ?? "Sample Local Business";
 }
 
 function extractPromptName(prompt?: string) {
@@ -979,12 +1148,49 @@ function extractPromptFacts(prompt?: string) {
     ?.split(/,| and /)
     .map((service) => normalizeServiceName(service.trim()))
     .filter(Boolean);
+  const serviceAreaMatch = prompt?.match(/service areas?:\s*([^.]*)/i);
+  const serviceAreas = serviceAreaMatch?.[1]
+    ?.split(/,| and /)
+    .map((area) => area.trim())
+    .filter(Boolean);
+  const address = parsePromptAddress(prompt);
+  const hours = parsePromptHours(prompt);
   return {
     phone: phone ? normalizePromptPhone(phone) : undefined,
     email: email?.toLowerCase(),
+    address,
+    hours,
     services,
-    serviceAreas: location ? [location.trim()] : undefined
+    serviceAreas: serviceAreas?.length ? serviceAreas : location ? [location.trim()] : undefined
   };
+}
+
+function parsePromptAddress(prompt?: string) {
+  const value = prompt?.match(/\baddress:\s*([^.;\n]+)/i)?.[1]?.trim();
+  if (!value) return undefined;
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  const [street, city, regionPostal] = parts;
+  const regionPostalMatch = regionPostal?.match(/^([A-Z]{2})\s+([0-9]{5}(?:-[0-9]{4})?)$/i);
+  return {
+    street,
+    city,
+    region: regionPostalMatch?.[1]?.toUpperCase() ?? regionPostal,
+    postalCode: regionPostalMatch?.[2],
+    country: "US"
+  };
+}
+
+function parsePromptHours(prompt?: string) {
+  const value = prompt?.match(/\bhours:\s*([^.\n]+)/i)?.[1]?.trim();
+  if (!value) return undefined;
+  const entries = value.split(/;|,/).map((entry) => entry.trim()).filter(Boolean);
+  const hours = Object.fromEntries(
+    entries.flatMap((entry) => {
+      const match = entry.match(/^([A-Za-z][A-Za-z -]{1,24}):?\s+(.+)$/);
+      return match ? [[match[1].trim(), match[2].trim()]] : [];
+    })
+  );
+  return Object.keys(hours).length ? hours : undefined;
 }
 
 function normalizeServiceName(value: string) {
@@ -1009,10 +1215,158 @@ function coalesceList(...lists: Array<string[] | undefined>) {
   return [];
 }
 
+function removeBlockedPlaceholders(values: string[]) {
+  const blocked = new Set(["local area", "core service", "local support"]);
+  return values.filter((value) => !blocked.has(value.trim().toLowerCase()));
+}
+
+function dedupeServiceNames(values: string[]) {
+  const genericTailWords = new Set(["tray", "trays", "option", "options", "service", "services", "request", "requests"]);
+  const cleaned: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeServiceForDedupe(value);
+    if (!normalized) continue;
+    const duplicateIndex = cleaned.findIndex((existing) => {
+      const existingNormalized = normalizeServiceForDedupe(existing);
+      if (existingNormalized === normalized) return true;
+      if (existingNormalized && normalized.startsWith(`${existingNormalized} `)) {
+        const extraWords = normalized.slice(existingNormalized.length).trim().split(/\s+/);
+        return extraWords.every((word) => genericTailWords.has(word));
+      }
+      if (existingNormalized && existingNormalized.startsWith(`${normalized} `)) {
+        const extraWords = existingNormalized.slice(normalized.length).trim().split(/\s+/);
+        return extraWords.every((word) => genericTailWords.has(word));
+      }
+      return false;
+    });
+    if (duplicateIndex >= 0) {
+      if (value.length < cleaned[duplicateIndex]!.length) cleaned[duplicateIndex] = value;
+      continue;
+    }
+    cleaned.push(value);
+  }
+  return cleaned;
+}
+
+function removeBusinessNameServiceCandidates(values: string[], businessName: string) {
+  return values.filter((service) => !serviceLooksLikeBusinessName(service, businessName));
+}
+
+function serviceLooksLikeBusinessName(service: string, businessName: string) {
+  const normalizedService = normalizeServiceForDedupe(service);
+  const normalizedBusiness = normalizeServiceForDedupe(businessName);
+  if (!normalizedService || !normalizedBusiness) return false;
+  if (normalizedService === normalizedBusiness) return true;
+  if (normalizedService.includes(normalizedBusiness) || normalizedBusiness.includes(normalizedService)) return normalizedService.length > 12;
+  const brandWords = normalizedBusiness
+    .split(/\s+/)
+    .filter((word) => !/^(auto|automotive|repair|body|paint|collision|service|services|shop|company|co|llc|inc)$/.test(word));
+  const brandPhrase = brandWords.slice(0, 2).join(" ");
+  return brandPhrase.length >= 4 && normalizedService.includes(brandPhrase);
+}
+
+function normalizeServiceForDedupe(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function createNormalizedBusinessFacts(input: {
+  name: string;
+  vertical: Vertical;
+  services: string[];
+  serviceAreas: string[];
+  facts?: ExtractedBusinessFacts;
+  promptFacts: ReturnType<typeof extractPromptFacts>;
+  sourceHostname?: string;
+}): NormalizedBusinessFacts {
+  const observedCategories = input.facts?.categories ?? [];
+  const categories = observedCategories.length ? observedCategories : [input.vertical.replace("_", " ")];
+  const blockedPlaceholders = ["Local area", "Core service", "Local support"]
+    .filter((text) => !input.services.includes(text) && !input.serviceAreas.includes(text))
+    .map((text) => ({ text, reason: "Suppressed generic intake fallback from visible generated copy." }));
+  const proofSignals: RenderableFact[] = [];
+  if (input.facts?.reviewsSummary?.rating) {
+    proofSignals.push(fact("reviews.rating", `${input.facts.reviewsSummary.rating}`, "crawl", "medium"));
+  }
+  if (input.facts?.reviewsSummary?.count) {
+    proofSignals.push(fact("reviews.count", `${input.facts.reviewsSummary.count}`, "crawl", "medium"));
+  }
+  if (input.facts?.address?.city) proofSignals.push(fact("address.city", input.facts.address.city, "crawl", "high"));
+  if (input.facts?.phone ?? input.promptFacts.phone) proofSignals.push(fact("phone", input.facts?.phone ?? input.promptFacts.phone ?? "", input.facts?.phone ? "crawl" : "prompt", "high"));
+
+  return {
+    name: fact("name", input.name, input.facts?.name ? "crawl" : input.sourceHostname ? "crawl" : "prompt", "high"),
+    vertical: fact("vertical", input.vertical, input.vertical === "general_local" ? "system_default" : "crawl", input.vertical === "general_local" ? "low" : "medium"),
+    categories: categories.map((category) => fact("categories", category, observedCategories.includes(category) ? "crawl" : "system_default", observedCategories.includes(category) ? "high" : "low")),
+    description: input.facts?.description ? fact("description", input.facts.description, "crawl", "medium") : undefined,
+    phone: input.facts?.phone || input.promptFacts.phone ? fact("phone", input.facts?.phone ?? input.promptFacts.phone ?? "", input.facts?.phone ? "crawl" : "prompt", "high") : undefined,
+    email: input.facts?.email || input.promptFacts.email ? fact("email", input.facts?.email ?? input.promptFacts.email ?? "", input.facts?.email ? "crawl" : "prompt", "high") : undefined,
+    address: input.facts?.address ? fact("address", formatAddress(input.facts.address), "crawl", "medium") : undefined,
+    hours: input.facts?.hours ? fact("hours", Object.entries(input.facts.hours).map(([day, value]) => `${day}: ${value}`), "crawl", "medium") : undefined,
+    services: input.services.map((service) => fact("services", service, (input.facts?.services ?? []).includes(service) ? "crawl" : (input.promptFacts.services ?? []).includes(service) ? "prompt" : "system_default", (input.facts?.services ?? []).includes(service) || (input.promptFacts.services ?? []).includes(service) ? "high" : "low")),
+    serviceAreas: input.serviceAreas.map((area) => fact("serviceAreas", area, (input.facts?.serviceAreas ?? []).includes(area) || input.facts?.address?.city === area ? "crawl" : "prompt", "medium")),
+    proofSignals,
+    uncertainFacts: [],
+    blockedPlaceholders
+  };
+}
+
+function createGenerationBrief(input: {
+  siteId: string;
+  business: BusinessProfile;
+  recipe: VerticalRecipe;
+  normalizedBusinessFacts: NormalizedBusinessFacts;
+}): GenerationBrief {
+  const heroAsset = heroImageAssetForBusiness(input.business);
+  const renderableFacts = [
+    input.normalizedBusinessFacts.name,
+    input.normalizedBusinessFacts.vertical,
+    ...input.normalizedBusinessFacts.categories,
+    ...(input.normalizedBusinessFacts.description ? [input.normalizedBusinessFacts.description] : []),
+    ...(input.normalizedBusinessFacts.phone ? [input.normalizedBusinessFacts.phone] : []),
+    ...(input.normalizedBusinessFacts.email ? [input.normalizedBusinessFacts.email] : []),
+    ...(input.normalizedBusinessFacts.address ? [input.normalizedBusinessFacts.address] : []),
+    ...(input.normalizedBusinessFacts.hours ? [input.normalizedBusinessFacts.hours] : []),
+    ...input.normalizedBusinessFacts.services,
+    ...input.normalizedBusinessFacts.serviceAreas,
+    ...input.normalizedBusinessFacts.proofSignals
+  ];
+
+  return {
+    siteId: input.siteId,
+    businessName: input.business.name,
+    vertical: input.business.vertical,
+    primaryGoal: input.recipe.primaryGoal,
+    headline: heroHeading({ business: input.business, recipe: input.recipe, primaryCta: { label: "", href: "", role: "form" }, name: input.business.name }),
+    subheadline: heroBody({ business: input.business, recipe: input.recipe, primaryCta: { label: "", href: "", role: "form" }, name: input.business.name }),
+    proofSignals: input.normalizedBusinessFacts.proofSignals.map((proof) => String(proof.value)),
+    renderableFacts,
+    blockedClaims: input.normalizedBusinessFacts.blockedPlaceholders,
+    imageStrategy: {
+      vertical: input.business.vertical,
+      preferredAssetId: heroAsset.id,
+      fallbackAssetId: heroAsset.id,
+      notes: ["Use curated preclaim-safe registry imagery until customer-owned photos are approved."]
+    }
+  };
+}
+
+function fact(
+  field: string,
+  value: string | string[],
+  source: RenderableFact["source"],
+  confidence: RenderableFact["confidence"]
+): RenderableFact {
+  return { field, value, source, confidence };
+}
+
+function formatAddress(address: NonNullable<ExtractedBusinessFacts["address"]>) {
+  return [address.street, address.city, address.region, address.postalCode, address.country].filter(Boolean).join(", ");
+}
+
 function defaultServicesForVertical(vertical: Vertical) {
   const defaults: Record<Vertical, string[]> = {
     restaurant: ["Menu", "Online ordering", "Catering"],
-    auto_body: ["Collision repair", "Paint repair", "Free estimates"],
+    auto_body: ["Collision repair", "Paint repair", "Dent repair"],
     beauty_salon: ["Services and pricing", "Online booking", "Gallery"],
     med_spa: ["Consultations", "Treatments", "Before and after results"],
     law_firm: ["Practice areas", "Consultations", "Client intake"],
@@ -1023,13 +1377,58 @@ function defaultServicesForVertical(vertical: Vertical) {
     landscaping: ["Lawn care", "Landscape design", "Seasonal cleanup"],
     veterinary: ["Wellness exams", "Vaccinations", "New patient visits"],
     creative_studio: ["Portfolio", "Session booking", "Project inquiries"],
-    general_local: ["Core service", "Consultation", "Local support"]
+    general_local: []
   };
   return defaults[vertical];
 }
 
-function heroTrustSignal(signals: string[]) {
-  return signals[0] ?? "Clear trust signals";
+function formNameForVertical(vertical: Vertical) {
+  return "Contact request";
+}
+
+function formFieldsForVertical(vertical: Vertical, fallback: ExtensionModel["forms"][number]["fields"]): ExtensionModel["forms"][number]["fields"] {
+  return [
+    { id: "name", label: "Name", type: "text", required: true },
+    { id: "phone", label: "Phone", type: "phone", required: false },
+    { id: "email", label: "Email", type: "email", required: false },
+    { id: "message", label: "Message", type: "textarea", required: true }
+  ];
+}
+
+function submitLabelForVertical(vertical: Vertical, goal: ConversionGoal) {
+  return "Send message";
+}
+
+function submitLabelForGoal(goal: ConversionGoal) {
+  switch (goal) {
+    case "calls":
+      return "Request a call";
+    case "forms":
+      return "Send request";
+    case "booking_clicks":
+      return "Request appointment";
+    case "order_clicks":
+      return "Start order";
+    case "directions":
+    case "store_visits":
+      return "Ask for details";
+  }
+}
+
+function fallbackFormCtaLabel(vertical: Vertical) {
+  const labels: Partial<Record<Vertical, string>> = {
+    law_firm: "Request Consultation",
+    med_spa: "Request Consultation",
+    dental: "Request Appointment",
+    veterinary: "Request Appointment",
+    beauty_salon: "Request Appointment",
+    fitness: "Request First Visit",
+    real_estate: "Send Inquiry",
+    creative_studio: "Send Inquiry",
+    restaurant: "Start Order",
+    home_services: "Request Service"
+  };
+  return labels[vertical] ?? "Request a Quote";
 }
 
 function policy(editScope: FieldPolicy["editScope"], experimentEligible = false, factField = false): FieldPolicy {
@@ -1129,14 +1528,14 @@ function themeForVertical(vertical: Vertical, mood: Theme["mood"]): Theme {
       border: "#deded6"
     },
     landscaping: {
-      background: "#f7faf2",
+      background: "#f8f6ef",
       surface: "#ffffff",
-      text: "#1b2617",
-      muted: "#64705c",
+      text: "#1f271d",
+      muted: "#6f6a5d",
       primary: "#315f36",
       primaryText: "#ffffff",
-      accent: "#b6be52",
-      border: "#dae4d2"
+      accent: "#c0773e",
+      border: "#e4ddcf"
     },
     veterinary: {
       background: "#fff9f1",
@@ -1196,82 +1595,143 @@ function heroVariantForVertical(vertical: Vertical) {
 }
 
 function heroEyebrow(context: SectionBuildContext) {
-  const city = context.business.address?.city ?? context.business.serviceAreas[0];
-  return city ? `${context.recipe.label} in ${city}` : context.recipe.label;
+  const city = cleanDisplayPlace(context.business.address?.city ?? context.business.serviceAreas[0]);
+  const category = context.business.categories[0] ?? context.recipe.label;
+  return city ? `${category} in ${city}` : category;
 }
 
 function heroHeading(context: SectionBuildContext) {
+  if (context.business.vertical === "restaurant") return restaurantHeroHeading(context);
+  if (context.business.vertical === "landscaping" || context.business.vertical === "creative_studio") {
+    return serviceLedHeroHeading(context);
+  }
   const headings: Partial<Record<Vertical, string>> = {
-    restaurant: `${context.name} makes ordering simple.`,
-    auto_body: "Get the estimate, repair, and proof you need.",
+    auto_body: "Collision repair with clear damage details.",
     beauty_salon: "Book the look without the back-and-forth.",
     med_spa: "A polished path from interest to consultation.",
-    law_firm: "Clear next steps when the stakes are high.",
+    law_firm: professionalServicesHeroHeading(context),
     dental: "Make the next appointment easy.",
     home_services: "Fast help, clear service areas, easy contact.",
     fitness: "Turn interest into a first visit.",
     real_estate: "Make local expertise easy to trust.",
-    landscaping: "Show the work and make quotes easy.",
+    landscaping: "Project scope made easy to quote.",
     veterinary: "Help pet owners act quickly and confidently.",
-    creative_studio: "Let the work lead, then make inquiry simple."
+    creative_studio: "Portfolio-led project inquiries."
   };
   return headings[context.business.vertical] ?? `${context.name} makes it easy to take the next step.`;
 }
 
 function heroBody(context: SectionBuildContext) {
   const serviceList = context.business.services.slice(0, 3).join(", ");
-  const area = context.business.serviceAreas[0] ?? context.business.address?.city ?? "your area";
-  return `${sentenceCase(heroTrustSignal(context.recipe.trustSignals))}, ${serviceList || "core services"}, and clear contact paths are placed up front for customers in ${area}.`;
+  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
+  const locationPhrase = area ? ` for ${audiencePlural(context.business.vertical)} in ${area}` : "";
+  if (context.business.vertical === "auto_body") {
+    const services = serviceList || "repair services";
+    const areaPhrase = area ? ` for ${area} drivers` : "";
+    return `${services} with quote request and call options up front${areaPhrase}.`;
+  }
+  if (context.business.vertical === "restaurant") {
+    return restaurantHeroBody(context, area);
+  }
+  if (context.business.vertical === "law_firm") {
+    return `Request a consultation with ${context.name}, or call to share the matter type and preferred follow-up${area ? ` in ${area}` : ""}.`;
+  }
+  if (context.business.vertical === "beauty_salon") {
+    return `${serviceList || "Salon services"} with booking and call options up front${locationPhrase}.`;
+  }
+  if (context.business.vertical === "home_services") {
+    return `${serviceList || "Home services"} with service-area details and call options up front${locationPhrase}.`;
+  }
+  if (context.business.vertical === "landscaping") {
+    return `Share project scope with ${context.name}, check service area, or request a quote${area ? ` in ${area}` : ""}.`;
+  }
+  if (context.business.vertical === "creative_studio") {
+    return `Send a brief to ${context.name}, compare portfolio context, or ask about timing${area ? ` in ${area}` : ""}.`;
+  }
+  const servicePhrase = serviceList || context.recipe.label.toLowerCase();
+  return `${servicePhrase} with clear next steps and contact options up front${locationPhrase}.`;
 }
 
-function heroImageForVertical(vertical: Vertical) {
-  const images: Record<Vertical, string> = {
-    restaurant: "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1600&q=80",
-    auto_body: "https://images.unsplash.com/photo-1625047509168-a7026f36de04?auto=format&fit=crop&w=1600&q=80",
-    beauty_salon: "https://images.unsplash.com/photo-1522337660859-02fbefca4702?auto=format&fit=crop&w=1600&q=80",
-    med_spa: "https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=1600&q=80",
-    law_firm: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=1600&q=80",
-    dental: "https://images.unsplash.com/photo-1606811971618-4486d14f3f99?auto=format&fit=crop&w=1600&q=80",
-    home_services: "https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&w=1600&q=80",
-    fitness: "https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=1600&q=80",
-    real_estate: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=80",
-    landscaping: "https://images.unsplash.com/photo-1558904541-efa843a96f01?auto=format&fit=crop&w=1600&q=80",
-    veterinary: "https://images.unsplash.com/photo-1576201836106-db1758fd1c97?auto=format&fit=crop&w=1600&q=80",
-    creative_studio: "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=1600&q=80",
-    general_local: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=1600&q=80"
-  };
-  return images[vertical];
+function serviceLedHeroHeading(context: SectionBuildContext) {
+  const services = context.business.services.slice(0, context.business.vertical === "creative_studio" ? 2 : 3);
+  if (services.length) return `${readableList(services)}.`;
+  return context.business.vertical === "creative_studio" ? "Portfolio-led project inquiries." : "Project scope made easy to quote.";
 }
 
-function galleryImagesForVertical(vertical: Vertical) {
-  const defaults = [
-    { url: heroImageForVertical(vertical), alt: "Licensed visual preview", label: "Preview direction" },
-    { url: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80", alt: "Clean business interior", label: "Trust-building space" },
-    { url: "https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1200&q=80", alt: "Customer conversation", label: "Clear next step" }
-  ];
-  const overrides: Partial<Record<Vertical, typeof defaults>> = {
-    restaurant: [
-      { url: heroImageForVertical(vertical), alt: "Fresh pizza", label: "Menu photography" },
-      { url: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80", alt: "Restaurant table", label: "Dine-in experience" },
-      { url: "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80", alt: "Fresh ingredients", label: "Ingredient story" }
-    ],
-    auto_body: [
-      { url: heroImageForVertical(vertical), alt: "Auto repair shop", label: "Repair capability" },
-      { url: "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&w=1200&q=80", alt: "Tools in shop", label: "Process proof" },
-      { url: "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80", alt: "Clean car exterior", label: "Finished result" }
-    ],
-    beauty_salon: [
-      { url: heroImageForVertical(vertical), alt: "Salon service", label: "Style direction" },
-      { url: "https://images.unsplash.com/photo-1600948836101-f9ffda59d250?auto=format&fit=crop&w=1200&q=80", alt: "Salon interior", label: "Salon atmosphere" },
-      { url: "https://images.unsplash.com/photo-1595476108010-b4d1f102b1b1?auto=format&fit=crop&w=1200&q=80", alt: "Beauty detail", label: "Detail work" }
-    ],
-    landscaping: [
-      { url: heroImageForVertical(vertical), alt: "Landscaped yard", label: "Finished yard" },
-      { url: "https://images.unsplash.com/photo-1598902108854-10e335adac99?auto=format&fit=crop&w=1200&q=80", alt: "Garden path", label: "Project style" },
-      { url: "https://images.unsplash.com/photo-1600566752355-35792bedcfea?auto=format&fit=crop&w=1200&q=80", alt: "Home exterior", label: "Curb appeal" }
-    ]
-  };
-  return overrides[vertical] ?? defaults;
+function restaurantHeroHeading(context: SectionBuildContext) {
+  const services = context.business.services.slice(0, 3);
+  if (services.length) return `${readableList(services)}.`;
+  const category = context.business.categories[0]?.replace(/\s*restaurant$/i, " favorites");
+  return category ? `${category}.` : `${context.name} is ready for online ordering.`;
+}
+
+function restaurantHeroBody(context: SectionBuildContext, area?: string) {
+  const hasTakeout = context.business.services.some((service) => /\b(takeout|pickup|to go)\b/i.test(service));
+  const hasCatering = context.business.services.some((service) => /\bcatering\b/i.test(service));
+  const location = area ? ` in ${area}` : "";
+  if (context.business.orderingLinks.length && context.business.phone) {
+    const callReason = hasCatering ? "catering questions" : "menu questions";
+    const visitReason = hasTakeout ? "pickup" : "a visit";
+    return `Order online from ${context.name}, call with ${callReason}, or check hours before ${visitReason}${location}.`;
+  }
+  if (context.business.orderingLinks.length) return `Order online from ${context.name} and check the menu before the next visit${location}.`;
+  if (context.business.phone) return `Call ${context.name} with menu questions, catering needs, or visit timing${location}.`;
+  return `Menu highlights and next-step details are easy to scan${location}.`;
+}
+
+function professionalServicesHeroHeading(context: SectionBuildContext) {
+  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
+  const location = area ? ` in ${area}` : "";
+  const services = context.business.vertical === "law_firm"
+    ? context.business.services.slice(0, 2).map(lawPracticeHeroLabel)
+    : context.business.services.slice(0, 2);
+  if (context.business.vertical === "law_firm" && services.length >= 2) return `${services[0]} & ${services[1]}.`;
+  if (services.length) return `${readableList(services)}${location}.`;
+  return `${context.name}${location}.`;
+}
+
+function lawPracticeHeroLabel(service: string, index: number) {
+  const label = service
+    .replace(/\b(attorney|lawyer)\b/gi, "law")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return index === 0 ? sentenceCap(label) : label;
+}
+
+function servicesHeading(context: SectionBuildContext) {
+  const primary = context.business.services[0];
+  const secondary = context.business.services[1];
+  if (primary && secondary) return `${primary} and ${secondary}`;
+  if (primary) return primary;
+  return `${context.recipe.label} services`;
+}
+
+function servicesBody(context: SectionBuildContext) {
+  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
+  const areaPhrase = area ? ` in ${area}` : "";
+  const audience = audiencePlural(context.business.vertical);
+  if (context.business.vertical === "auto_body") {
+    return `Compare the repair services customers can request today, then choose the fastest way to reach the shop${areaPhrase}.`;
+  }
+  if (context.business.vertical === "law_firm") {
+    return `Practice areas are listed plainly so clients can choose a consultation path${areaPhrase}.`;
+  }
+  if (context.business.vertical === "landscaping") {
+    return `Compare outdoor services, then send project scope and location for a quote${areaPhrase}.`;
+  }
+  if (context.business.vertical === "creative_studio") {
+    return `Match the project type to a simple inquiry path before sending a brief${areaPhrase}.`;
+  }
+  return `Clear service details and direct contact options help ${audience} decide whether ${context.name} is the right fit${areaPhrase}.`;
+}
+
+function galleryImagesForBusiness(business: Pick<BusinessProfile, "vertical" | "name" | "categories" | "services">) {
+  return galleryImageAssetsForBusiness(business).map((asset) => ({
+    url: asset.url,
+    alt: asset.alt,
+    label: asset.label
+  }));
 }
 
 function galleryVariantForVertical(vertical: Vertical) {
@@ -1282,13 +1742,26 @@ function galleryVariantForVertical(vertical: Vertical) {
 
 function galleryHeading(vertical: Vertical) {
   const headings: Partial<Record<Vertical, string>> = {
-    restaurant: "Real appetite comes from real visuals",
-    beauty_salon: "Show the work before asking for the booking",
-    creative_studio: "Put portfolio quality first",
-    landscaping: "Let project photos carry the quote request",
-    auto_body: "Proof matters when customers are stressed"
+    restaurant: "Photos that make ordering easier",
+    beauty_salon: "A closer look before booking",
+    creative_studio: "Portfolio quality up front",
+    landscaping: "Project context before the quote",
+    auto_body: "Damage and finish details matter"
   };
   return headings[vertical] ?? "Visual proof that supports the next action";
+}
+
+function galleryBody(vertical: Vertical) {
+  const bodies: Partial<Record<Vertical, string>> = {
+    restaurant: "Dish and dining-room photos give guests a clear look before they order, pick up, or ask about catering.",
+    beauty_salon: "Use visual references to compare style, finish, and booking fit before taking the next step.",
+    creative_studio: "Portfolio images make the creative style clear before someone sends a brief.",
+    landscaping: "Project photos help homeowners understand fit, scope, and the kind of work to discuss.",
+    auto_body: "Repair visuals help drivers understand the shop's work before they call.",
+    home_services: "Service photos give homeowners context before they request help.",
+    law_firm: "A restrained visual section supports trust without adding unsupported claims."
+  };
+  return bodies[vertical] ?? "Relevant photos give customers context before they choose a next step.";
 }
 
 function trustItems(context: SectionBuildContext) {
@@ -1300,52 +1773,167 @@ function trustItems(context: SectionBuildContext) {
     items.push(`${context.business.reviewsSummary.count} reviews`);
   }
   if (context.business.serviceAreas[0]) {
-    items.push(`Serves ${context.business.serviceAreas[0]}`);
+    items.push(`Serves ${cleanDisplayPlace(context.business.serviceAreas[0])}`);
   }
   if (context.business.phone) {
-    items.push("Click-to-call ready");
+    items.push(callTrustLabel(context.business.vertical));
   }
   for (const signal of context.recipe.trustSignals) {
     if (items.length >= 4) break;
-    items.push(titleCase(signal));
+    const safeSignal = safeTrustSignal(signal, context);
+    if (safeSignal) items.push(safeSignal);
   }
   return unique(items).slice(0, 4);
 }
 
+function safeTrustSignal(signal: string, context: SectionBuildContext) {
+  const normalized = signal.toLowerCase();
+  if (normalized.includes("rating")) return context.business.reviewsSummary?.rating ? `${context.business.reviewsSummary.rating} public rating` : undefined;
+  if (normalized.includes("review") && context.business.reviewsSummary?.count) return `${context.business.reviewsSummary.count} public reviews`;
+  if (normalized.includes("photo") || normalized.includes("before")) return photoTrustLabel(context.business.vertical);
+  if (normalized.includes("credential") || normalized.includes("certification") || normalized.includes("licensed") || normalized.includes("insured") || normalized.includes("insurance")) return undefined;
+  if (normalized.includes("response")) return "Direct contact";
+  if (normalized.includes("social")) return context.business.socialLinks.length ? "Social profile detected" : undefined;
+  if (normalized.includes("years")) return undefined;
+  return undefined;
+}
+
 function serviceDescription(vertical: Vertical, service: string) {
   const lowered = service.toLowerCase();
+  if (vertical === "restaurant") return restaurantServiceDescription(lowered);
+  if (vertical === "landscaping") return landscapingServiceDescription(lowered);
+  if (vertical === "creative_studio") return creativeServiceDescription(lowered);
+  if (vertical === "auto_body") return autoBodyServiceDescription(lowered);
+  if (vertical === "home_services") return homeServicesServiceDescription(lowered);
+  if (vertical === "beauty_salon") return beautyServiceDescription(lowered);
+  if (vertical === "law_firm") return lawFirmServiceDescription(lowered);
   const descriptions: Partial<Record<Vertical, string>> = {
-    restaurant: `Highlight photos, ordering links, and clear details for ${lowered}.`,
-    auto_body: `Explain the estimate path and proof customers should expect for ${lowered}.`,
-    beauty_salon: `Show pricing, visuals, and booking context for ${lowered}.`,
-    med_spa: `Use verified treatment details, credentials, and consultation prompts for ${lowered}.`,
-    law_firm: `Clarify who this helps and how to request a consultation for ${lowered}.`,
-    dental: `Explain patient fit, insurance context, and appointment options for ${lowered}.`,
-    home_services: `Make availability, service area, and quote/call paths clear for ${lowered}.`,
-    fitness: `Connect schedule, membership context, and trial actions for ${lowered}.`,
-    real_estate: `Tie ${lowered} to local expertise and a direct inquiry path.`,
-    landscaping: `Pair ${lowered} with project visuals, service area, and quote flow.`,
-    veterinary: `Explain care context and appointment paths for ${lowered}.`,
-    creative_studio: `Use portfolio proof and inquiry context for ${lowered}.`
+    med_spa: `Use the consultation path to ask about fit and next steps for ${lowered}.`,
+    dental: `Check appointment options and patient next steps for ${lowered}.`,
+    fitness: `Check schedule, first-visit fit, and membership context for ${lowered}.`,
+    real_estate: `Connect ${lowered} to local market context and a direct inquiry path.`,
+    veterinary: `Check care fit and appointment options for ${lowered}.`
   };
-  return descriptions[vertical] ?? `Clear, conversion-focused content for ${lowered}.`;
+  return descriptions[vertical] ?? `Review fit, timing, and next steps for ${lowered}.`;
+}
+
+function autoBodyServiceDescription(loweredService: string) {
+  if (loweredService.includes("collision")) return "Start with damage photos, vehicle context, and timing so the shop can understand the collision repair need.";
+  if (loweredService.includes("paint")) return "Share affected panels, finish concerns, and timing so paint repair questions start with useful detail.";
+  if (loweredService.includes("bumper")) return "Send bumper damage details and contact preferences so the next step is clear before the call.";
+  if (loweredService.includes("dent")) return "Describe the dent location and severity so repair fit can be confirmed quickly.";
+  return `Send photos, vehicle context, and timing details for ${loweredService}.`;
+}
+
+function homeServicesServiceDescription(loweredService: string) {
+  if (loweredService.includes("hvac")) return "Share the system issue, location, and timing so service fit can be confirmed quickly.";
+  if (loweredService.includes("plumb")) return "Start with the fixture or leak context, urgency, and address details before the call.";
+  if (loweredService.includes("electric")) return "Send the electrical issue, access notes, and timing so the request starts with the right context.";
+  if (loweredService.includes("repair")) return "Describe the issue, location, and timing so the team can route the service request.";
+  return `Confirm location, timing, and service context for ${loweredService}.`;
+}
+
+function beautyServiceDescription(loweredService: string) {
+  if (loweredService.includes("color")) return "Share color goals, current hair context, and timing before requesting an appointment.";
+  if (loweredService.includes("cut")) return "Compare cut goals and availability, then send preferred timing or call the salon.";
+  if (loweredService.includes("styl")) return "Start with the occasion, style reference, and timing so booking fit is clear.";
+  if (loweredService.includes("nail")) return "Compare finish, service type, and appointment timing before booking.";
+  return `Share style goals, timing, and booking context for ${loweredService}.`;
+}
+
+function lawFirmServiceDescription(loweredService: string) {
+  if (loweredService.includes("estate")) return "Start with the planning need and preferred follow-up so the consultation request is clear.";
+  if (loweredService.includes("business")) return "Share the business matter type, timing, and best contact path for consultation follow-up.";
+  if (loweredService.includes("injury")) return "Send matter context and contact preferences so the office can confirm next steps.";
+  return `Share the matter type, timing, and preferred follow-up for ${loweredService}.`;
+}
+
+function restaurantServiceDescription(loweredService: string) {
+  if (loweredService.includes("catering")) return "Catering trays and group orders stay close to online ordering and a quick call.";
+  if (loweredService.includes("takeout") || loweredService.includes("pickup")) return "Takeout options are easy to scan before guests order ahead.";
+  if (loweredService.includes("breakfast") || loweredService.includes("taco")) return "Taco favorites are presented clearly for quick online ordering.";
+  if (loweredService.includes("delivery")) return "Delivery details stay close to the menu and ordering path.";
+  return "Menu favorites are easy to scan before guests choose how to order.";
+}
+
+function landscapingServiceDescription(loweredService: string) {
+  if (loweredService.includes("lawn")) return "Routine lawn care details stay close to service-area and quote options.";
+  if (loweredService.includes("design")) return "Landscape design inquiries start with scope, location, and timing.";
+  if (loweredService.includes("cleanup") || loweredService.includes("seasonal")) return "Seasonal cleanup requests can include property details and preferred timing.";
+  return "Outdoor project requests can include scope, location, and quote details.";
+}
+
+function creativeServiceDescription(loweredService: string) {
+  if (loweredService.includes("portrait")) return "Portrait session inquiries can include style, timing, and usage notes.";
+  if (loweredService.includes("commercial")) return "Commercial shoot requests can include brief, usage, timeline, and deliverables.";
+  if (loweredService.includes("project") || loweredService.includes("inquir")) return "Project inquiries can start with context, timeline, and contact details.";
+  return "Creative inquiries can include brief, timing, and project context.";
+}
+
+function callTrustLabel(vertical: Vertical) {
+  const labels: Partial<Record<Vertical, string>> = {
+    restaurant: "Call the restaurant",
+    law_firm: "Call the office",
+    dental: "Call the practice",
+    med_spa: "Call the clinic",
+    veterinary: "Call the clinic",
+    beauty_salon: "Call the salon",
+    auto_body: "Call the shop",
+    home_services: "Call for service",
+    landscaping: "Call about a project"
+  };
+  return labels[vertical] ?? "Direct phone line";
+}
+
+function photoTrustLabel(vertical: Vertical) {
+  const labels: Partial<Record<Vertical, string>> = {
+    restaurant: "Food photos",
+    beauty_salon: "Style photos",
+    creative_studio: "Portfolio images",
+    landscaping: "Project photos",
+    auto_body: "Repair photos",
+    home_services: "Service photos"
+  };
+  return labels[vertical] ?? "Relevant photos";
+}
+
+function cleanDisplayPlace(value: string | undefined) {
+  return value?.trim().replace(/[.,;:]+$/g, "");
+}
+
+function readableList(values: string[]) {
+  const cleaned = values.map((value) => value.trim()).filter(Boolean);
+  if (cleaned.length <= 1) return cleaned[0] ?? "";
+  if (cleaned.length === 2) return `${cleaned[0]} and ${cleaned[1]}`;
+  return `${cleaned.slice(0, -1).join(", ")}, and ${cleaned[cleaned.length - 1]}`;
+}
+
+function sentenceCap(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }
 
 function testimonialItems(business: BusinessProfile) {
   const items = [];
   if (business.reviewsSummary?.rating || business.reviewsSummary?.count) {
-    items.push({
-      quote: `Review summary detected${business.reviewsSummary.rating ? ` at ${business.reviewsSummary.rating} stars` : ""}${business.reviewsSummary.count ? ` across ${business.reviewsSummary.count} reviews` : ""}.`,
-      author: "Verified review profile"
-    });
+    return [
+      {
+        quote: [
+          business.reviewsSummary.rating ? `${business.reviewsSummary.rating} average rating` : undefined,
+          business.reviewsSummary.count ? `${business.reviewsSummary.count} public reviews` : undefined
+        ]
+          .filter(Boolean)
+          .join(" across "),
+        author: "Google review profile"
+      }
+    ];
   }
   items.push(
     {
-      quote: "Add owner-approved review excerpts here after claim so trust proof stays accurate.",
-      author: "Owner verification needed"
+      quote: "Clear services and direct contact options help customers decide what to do next.",
+      author: "Customer decision path"
     },
     {
-      quote: "Use this section to show credentials, years in business, project proof, or customer outcomes.",
+      quote: "Project examples, public profiles, and service details can support the next action.",
       author: "Conversion standard"
     }
   );
@@ -1354,54 +1942,85 @@ function testimonialItems(business: BusinessProfile) {
 
 function faqItems(context: SectionBuildContext) {
   const service = context.business.services[0] ?? context.recipe.label;
-  const area = context.business.serviceAreas[0] ?? context.business.address?.city ?? "the local area";
+  const area = context.business.serviceAreas[0] ?? context.business.address?.city;
+  const audience = audiencePlural(context.business.vertical);
   return [
     {
-      question: `Do you help customers in ${area}?`,
-      answer: `Yes, this page is structured to make the service area clear and easy to verify before a customer contacts ${context.business.name}.`
+      question: area ? `Do you help ${audience} in ${area}?` : `Do you help local ${audience}?`,
+      answer: `Yes. Contact ${context.business.name} to confirm the current service area and the best next step.`
     },
     {
       question: `How do customers get started with ${service}?`,
-      answer: `The primary action is kept visible above the fold and repeated after trust proof so visitors can act quickly.`
+      answer: context.business.phone ? "Call the business or send the request details through the form." : "Send the request details through the form."
     },
     {
-      question: "Can these details be changed?",
-      answer: "Yes. Owner-truth details, offers, photos, and FAQs are editable and should be verified during claim."
+      question: "What details should customers check before contacting the business?",
+      answer: "Confirm current availability, service fit, timing, and any details needed for the next step."
     }
   ];
 }
 
-function ctaHeading(goal: ConversionGoal) {
-  switch (goal) {
-    case "calls":
-      return "Ready to talk now?";
-    case "booking_clicks":
-      return "Ready to book?";
-    case "order_clicks":
-      return "Ready to order?";
-    case "directions":
-    case "store_visits":
-      return "Ready to visit?";
-    case "forms":
-    default:
-      return "Ready to request more information?";
+function ctaHeading(context: SectionBuildContext) {
+  if (context.business.vertical === "law_firm" || context.business.vertical === "med_spa") {
+    return "Ready to request a consultation?";
   }
+  if (context.business.vertical === "dental" || context.business.vertical === "veterinary" || context.business.vertical === "beauty_salon") {
+    return "Ready to book?";
+  }
+  if (context.business.vertical === "restaurant") return "Ready to order?";
+  if (context.business.vertical === "fitness") return "Ready for a first visit?";
+  if (context.business.vertical === "real_estate" || context.business.vertical === "creative_studio") return "Ready to send an inquiry?";
+  if (context.recipe.primaryGoal === "calls") return "Ready to talk now?";
+  if (context.recipe.primaryGoal === "directions" || context.recipe.primaryGoal === "store_visits") return "Ready to visit?";
+  return "Ready to request an estimate?";
+}
+
+function ctaBody(context: SectionBuildContext) {
+  const bodies: Partial<Record<Vertical, string>> = {
+    restaurant: "Choose the ordering link for the fastest path, or call with catering and pickup questions.",
+    auto_body: "Send repair details once, then let the shop confirm fit, timing, and next steps.",
+    law_firm: "Use the consultation path to share the matter type and preferred way to follow up.",
+    beauty_salon: "Book the service that fits, or call the salon with timing and style questions.",
+    home_services: "Call or send the request details so the team can confirm service fit and timing.",
+    landscaping: "Share the project scope and location so the team can confirm the best next step.",
+    creative_studio: "Send the brief, timeline, and project context so the studio can respond clearly.",
+    dental: "Choose the appointment path or call the practice with patient questions.",
+    veterinary: "Choose the appointment path or call the clinic with care questions.",
+    med_spa: "Start with a consultation request so the team can confirm fit before booking."
+  };
+  return bodies[context.business.vertical] ?? nextActionDescription(context.recipe.primaryGoal);
+}
+
+function contactBody(context: SectionBuildContext) {
+  const bodies: Partial<Record<Vertical, string>> = {
+    restaurant: "Send catering, pickup, or ordering questions directly to the restaurant.",
+    auto_body: "Send repair details, vehicle context, and timing so the shop can follow up.",
+    law_firm: "Share the matter type and preferred contact details for a consultation request.",
+    beauty_salon: "Share the service, timing, and style notes before booking or calling.",
+    home_services: "Send the service need, location, and timing so the team can respond.",
+    landscaping: "Share project scope, property details, and timing for a quote request.",
+    creative_studio: "Send project context, timeline, and contact details for an inquiry.",
+    dental: "Share patient questions and preferred appointment timing.",
+    veterinary: "Share care questions and preferred appointment timing.",
+    med_spa: "Share goals, timing, and consultation preferences."
+  };
+  return bodies[context.business.vertical] ?? nextActionDescription(context.recipe.primaryGoal);
 }
 
 function nextActionDescription(goal: ConversionGoal) {
   switch (goal) {
     case "calls":
-      return "Make the phone action prominent, tappable, and repeated after the proof sections.";
+      return "Call to confirm availability, service fit, and timing.";
     case "booking_clicks":
-      return "Send ready visitors to the booking flow with enough trust context to complete the appointment.";
+      return "Open the booking flow after checking the service details.";
     case "order_clicks":
       return "Keep menu context and ordering links close together so hungry visitors do not have to search.";
     case "directions":
     case "store_visits":
-      return "Show the location, hours, and directions path before the visitor has to leave the page.";
+      return "Check the location, hours, and directions before visiting.";
     case "forms":
     default:
-      return "Use the form as the low-friction next step and keep call options visible for urgent visitors.";
+      return "Send the request details, timing, and contact preferences through the form.";
   }
 }
 
@@ -1427,15 +2046,15 @@ function teamItems(vertical: Vertical) {
   return [
     {
       title: role,
-      description: "Add verified name, credentials, and specialty after claim."
+      description: "Explain the customer-facing role and how that person helps with the service."
     },
     {
       title: "Owner story",
-      description: "Owner-truth content stays approval-gated and should not be generated as fact."
+      description: "Share the local context and service philosophy when that information is available."
     },
     {
       title: "Customer-facing expertise",
-      description: "Use this slot for certifications, experience, or care philosophy once verified."
+      description: "Use this slot for care philosophy, process, or service approach."
     }
   ];
 }
@@ -1449,12 +2068,21 @@ function beforeAfterHeading(vertical: Vertical) {
   return headings[vertical] ?? "Show the outcome customers are buying";
 }
 
-function titleCase(value: string) {
-  return value.replace(/\b\w/g, (character) => character.toUpperCase());
+function audiencePlural(vertical: Vertical) {
+  const labels: Partial<Record<Vertical, string>> = {
+    law_firm: "clients",
+    dental: "patients",
+    veterinary: "pet owners",
+    restaurant: "guests",
+    fitness: "members",
+    real_estate: "clients",
+    creative_studio: "clients"
+  };
+  return labels[vertical] ?? "customers";
 }
 
-function sentenceCase(value: string) {
-  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+function titleCase(value: string) {
+  return value.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function mergeExtractedFacts(
@@ -1463,15 +2091,16 @@ function mergeExtractedFacts(
 ): ExtractedBusinessFacts | undefined {
   if (!websiteFacts && !publicFacts) return undefined;
   return {
-    name: websiteFacts?.name ?? publicFacts?.name,
+    name: selectMergedBusinessName(websiteFacts?.name, publicFacts?.name),
     description: websiteFacts?.description ?? publicFacts?.description,
     phone: websiteFacts?.phone ?? publicFacts?.phone,
     email: websiteFacts?.email ?? publicFacts?.email,
     address: websiteFacts?.address ?? publicFacts?.address,
     geo: websiteFacts?.geo ?? publicFacts?.geo,
     hours: websiteFacts?.hours ?? publicFacts?.hours,
-    categories: unique([...(websiteFacts?.categories ?? []), ...(publicFacts?.categories ?? [])]).slice(0, 8),
+    categories: rankCategoriesBySpecificity(unique([...(publicFacts?.categories ?? []), ...(websiteFacts?.categories ?? [])])).slice(0, 8),
     services: unique([...(websiteFacts?.services ?? []), ...(publicFacts?.services ?? [])]).slice(0, 12),
+    serviceHighlights: unique([...(websiteFacts?.serviceHighlights ?? []), ...(publicFacts?.serviceHighlights ?? [])]).slice(0, 8),
     serviceAreas: unique([...(websiteFacts?.serviceAreas ?? []), ...(publicFacts?.serviceAreas ?? [])]).slice(0, 12),
     socialLinks: unique([...(websiteFacts?.socialLinks ?? []), ...(publicFacts?.socialLinks ?? [])]).slice(0, 10),
     bookingLinks: unique([...(websiteFacts?.bookingLinks ?? []), ...(publicFacts?.bookingLinks ?? [])]).slice(0, 6),
@@ -1481,16 +2110,60 @@ function mergeExtractedFacts(
   };
 }
 
-function buildProvenance(input: IntakeInput, facts: ExtractedBusinessFacts | undefined, observedAt: string): Record<string, FieldProvenance> {
+function durablePublicPresenceFacts(publicPresence: PublicPresenceEnrichment | undefined): PublicPresenceEnrichment["facts"] | undefined {
+  if (!publicPresence) return undefined;
+  if (publicPresence.provider === "google_places") return undefined;
+  return publicPresence.facts;
+}
+
+function durablePublicPresenceProvenance(publicPresence: PublicPresenceEnrichment | undefined): Record<string, FieldProvenance> {
+  if (!publicPresence) return {};
+  if (publicPresence.provider === "google_places") return {};
+  return publicPresence.provenance;
+}
+
+function selectMergedBusinessName(websiteName?: string, publicName?: string) {
+  const cleanedWebsiteName = normalizeBusinessNameForIntake(websiteName);
+  const cleanedPublicName = normalizeBusinessNameForIntake(publicName);
+  if (!cleanedWebsiteName) return cleanedPublicName;
+  if (!cleanedPublicName) return cleanedWebsiteName;
+  if (businessNameLooksLikeSlogan(cleanedWebsiteName) && !businessNameLooksLikeSlogan(cleanedPublicName)) return cleanedPublicName;
+  return cleanedWebsiteName;
+}
+
+function normalizeBusinessNameForIntake(value?: string) {
+  const cleaned = value?.replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  const candidates = cleaned
+    .split(/\s+(?:[|\u2013\u2014-])\s+/)
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => candidate.length >= 2)
+    .filter((candidate) => !/^(home|about us|contact us|contact|gallery|portfolio|privacy policy|terms)$/i.test(candidate));
+  if (candidates.length === 1) return candidates[0];
+  if (candidates.length === 0) return cleaned;
+  const businessLike = candidates.filter((candidate) => !businessNameLooksLikeSlogan(candidate));
+  return businessLike[businessLike.length - 1] ?? candidates[candidates.length - 1] ?? cleaned;
+}
+
+function businessNameLooksLikeSlogan(value: string) {
+  return /[!?]/.test(value) || /\b(done right|welcome|official site|quality|best|affordable|professional)\b/i.test(value);
+}
+
+function buildProvenance(
+  input: IntakeInput,
+  facts: ExtractedBusinessFacts | undefined,
+  promptFacts: ReturnType<typeof extractPromptFacts>,
+  observedAt: string
+): Record<string, FieldProvenance> {
   const source = input.url ? ("website" as const) : ("manual" as const);
   const sourceUrl = input.url;
   return {
     name: { source, sourceUrl, confidence: facts?.name ? 0.82 : 0.65, verified: false, observedAt },
-    phone: { source, sourceUrl, confidence: facts?.phone ? 0.78 : 0.45, verified: false, observedAt },
-    address: { source, sourceUrl, confidence: facts?.address ? 0.72 : 0.25, verified: false, observedAt },
+    phone: { source, sourceUrl, confidence: facts?.phone || promptFacts.phone ? 0.78 : 0.45, verified: false, observedAt },
+    address: { source, sourceUrl, confidence: facts?.address || promptFacts.address ? 0.72 : 0.25, verified: false, observedAt },
     geo: { source, sourceUrl, confidence: facts?.geo ? 0.72 : 0.25, verified: false, observedAt },
-    hours: { source, sourceUrl, confidence: facts?.hours ? 0.7 : 0.25, verified: false, observedAt },
-    services: { source, sourceUrl, confidence: facts?.services?.length ? 0.65 : 0.45, verified: false, observedAt },
+    hours: { source, sourceUrl, confidence: facts?.hours || promptFacts.hours ? 0.7 : 0.25, verified: false, observedAt },
+    services: { source, sourceUrl, confidence: facts?.services?.length || promptFacts.services?.length ? 0.65 : 0.45, verified: false, observedAt },
     reviewsSummary: { source, sourceUrl, confidence: facts?.reviewsSummary ? 0.65 : 0.25, verified: false, observedAt },
     description: {
       source: input.prompt ? "manual" : "other",
@@ -1595,7 +2268,7 @@ function buildAssetInventory({
       }
     : undefined;
   const referencedPhotos = business.photos.map((asset, index) => ({
-    id: `site_asset_photo_reference_${index + 1}`,
+    id: `${business.siteId}_asset_photo_reference_${index + 1}`,
     siteId: business.siteId,
     kind: "photo" as const,
     url: asset.url,
@@ -1611,7 +2284,7 @@ function buildAssetInventory({
   const logo: SiteAsset[] = business.logo
     ? [
         {
-          id: "site_asset_logo_reference",
+          id: `${business.siteId}_asset_logo_reference`,
           siteId: business.siteId,
           kind: "logo",
           url: business.logo.url,
@@ -1628,7 +2301,7 @@ function buildAssetInventory({
     : [];
   const screenshots: SiteAsset[] =
     input.renderInspection?.screenshots.map((screenshot) => ({
-      id: `site_asset_current_screenshot_${screenshot.viewport}`,
+      id: `${business.siteId}_asset_current_screenshot_${screenshot.viewport}`,
       siteId: business.siteId,
       kind: "screenshot",
       url: screenshot.path,
@@ -1653,4 +2326,17 @@ function buildAssetInventory({
 
 function unique(items: string[]) {
   return Array.from(new Set(items));
+}
+
+function rankCategoriesBySpecificity(values: string[] | undefined) {
+  return unique(values ?? [])
+    .filter((value) => !/^(local business|business|point of interest|establishment|food|web page|webpage|website)$/i.test(value.trim()))
+    .map((value, index) => ({ value, index, score: categorySpecificityScore(value) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((item) => item.value);
+}
+
+function categorySpecificityScore(value: string) {
+  const words = value.trim().split(/\s+/).filter(Boolean);
+  return words.length * 8 + value.length;
 }

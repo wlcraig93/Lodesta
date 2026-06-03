@@ -45,10 +45,11 @@ export async function middleware(request: NextRequest) {
   const directHostname = normalizeHostname(request.headers.get("host") ?? "");
   const hostname = requestHostname(request.headers);
   const platformHost = !hostname || isPlatformHost(hostname);
+  const hasForwardedHostSignal = Boolean(request.headers.get("x-forwarded-host") || request.headers.get("forwarded"));
   const forwardedHostRouted =
     request.nextUrl.searchParams.get(forwardedHostRewriteParam) === "1" ||
     request.headers.get(customDomainRoutedHeader) === "1" ||
-    (Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname);
+    (hasForwardedHostSignal && hostname !== directHostname);
   if (skippedPrefixes.some((prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix))) {
     if (platformHost) return withCachePolicy(NextResponse.next(), pathname, false, forwardedHostRouted);
     if (!isPublicRuntimeSkippedPath(pathname)) return notFound();

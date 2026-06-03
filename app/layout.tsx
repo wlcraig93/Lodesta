@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AppHeader } from "@/components/AppHeader";
+import "./product-tokens.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,10 +11,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <div className="app-shell">
-          <AppHeader />
-          {children}
-        </div>
+        {children}
       </body>
     </html>
   );

@@ -1,4 +1,5 @@
 import type { BusinessProfile, OptimizationFinding, PageModel, SectionModel, SiteBundle, SiteVersion } from "./models";
+import { applyPropsToLayoutSection, layoutSectionFromSection, propsForLayoutSection, syncVersionLegacySections } from "./layout-registry";
 
 type SuggestedEditPayload =
   | {
@@ -74,9 +75,9 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     case "set_hero_cta": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const section = page.sections.find((candidate) => candidate.id === payload.sectionId && candidate.type === "hero");
+      const section = page.layoutSections.find((candidate) => candidate.id === payload.sectionId && candidate.kind === "hero");
       if (!section) return { ok: false as const, reason: "Target hero section was not found." };
-      const previousCta = section.props.primaryCta as { label?: string; href?: string } | undefined;
+      const previousCta = propsForLayoutSection(section).primaryCta as { label?: string; href?: string } | undefined;
       changeSummary = {
         action: payload.action,
         pageId: page.id,
@@ -86,14 +87,13 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
         before: formatCta(previousCta),
         after: formatCta(payload.cta)
       };
-      section.props.primaryCta = payload.cta;
-      section.fieldPolicies.primaryCta ??= { editScope: "owner_choice", experimentEligible: true, factField: false };
+      applyPropsToLayoutSection(section, { primaryCta: payload.cta });
       break;
     }
     case "add_contact_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const existing = page.sections.find((section) => section.type === "contact");
+      const existing = page.layoutSections.find((section) => section.kind === "contact");
       if (existing) {
         changeSummary = {
           action: payload.action,
@@ -105,7 +105,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
         break;
       }
       const section = makeContactSection(bundle.businessProfile, payload);
-      page.sections.push(section);
+      page.layoutSections.push(layoutSectionFromSection(section, bundle.businessProfile.vertical));
       changeSummary = {
         action: payload.action,
         pageId: page.id,
@@ -119,7 +119,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     case "add_cta_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.sections.some((section) => section.id === "cta_analytics_generated")) {
+      if (page.layoutSections.some((section) => section.id === "cta_analytics_generated")) {
         changeSummary = {
           action: payload.action,
           pageId: page.id,
@@ -131,9 +131,9 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
       }
       const section = makeCtaSection(payload);
       const insertAfterIndex = payload.insertAfterSectionId
-        ? page.sections.findIndex((candidate) => candidate.id === payload.insertAfterSectionId)
+        ? page.layoutSections.findIndex((candidate) => candidate.id === payload.insertAfterSectionId)
         : -1;
-      page.sections.splice(insertAfterIndex >= 0 ? insertAfterIndex + 1 : page.sections.length, 0, section);
+      page.layoutSections.splice(insertAfterIndex >= 0 ? insertAfterIndex + 1 : page.layoutSections.length, 0, layoutSectionFromSection(section, bundle.businessProfile.vertical));
       changeSummary = {
         action: payload.action,
         pageId: page.id,
@@ -147,7 +147,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     case "add_trust_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.sections.some((section) => section.id === "trust_generated")) {
+      if (page.layoutSections.some((section) => section.id === "trust_generated")) {
         changeSummary = {
           action: payload.action,
           pageId: page.id,
@@ -167,7 +167,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
           items: { editScope: "system_only", experimentEligible: false, factField: true }
         }
       };
-      page.sections.splice(Math.min(1, page.sections.length), 0, section);
+      page.layoutSections.splice(Math.min(1, page.layoutSections.length), 0, layoutSectionFromSection(section, bundle.businessProfile.vertical));
       changeSummary = {
         action: payload.action,
         pageId: page.id,
@@ -181,7 +181,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     case "add_faq_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const existing = page.sections.find((section) => section.type === "faq");
+      const existing = page.layoutSections.find((section) => section.kind === "faq");
       if (existing) {
         changeSummary = {
           action: payload.action,
@@ -193,7 +193,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
         break;
       }
       const section = makeFaqSection(payload);
-      page.sections.push(section);
+      page.layoutSections.push(layoutSectionFromSection(section, bundle.businessProfile.vertical));
       changeSummary = {
         action: payload.action,
         pageId: page.id,
@@ -210,6 +210,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
     }
   }
 
+  syncVersionLegacySections(draft);
   finding.status = "applied";
   return { ok: true as const, draft, finding, changeSummary };
 }
@@ -289,7 +290,7 @@ export function primaryCtaForBusiness(business: BusinessProfile) {
 }
 
 export function strongerMetadataForPage(business: BusinessProfile, page: PageModel) {
-  const location = business.address?.city || business.serviceAreas[0] || "Local Area";
+  const location = business.address?.city || business.serviceAreas[0] || "nearby customers";
   const service = business.services[0] || business.categories[0] || "Local Service";
   const titleBase = page.slug ? `${page.title} | ${business.name}` : `${business.name} | ${service} in ${location}`;
   const title = titleBase.length >= 25 ? titleBase : `${titleBase} | ${location}`;

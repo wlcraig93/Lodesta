@@ -5,15 +5,23 @@ export type PublicFetchUrlValidation =
   | { ok: true; url: string; hostname: string }
   | { ok: false; error: string };
 
+export function normalizePublicFetchUrlInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  return `https://${trimmed}`;
+}
+
 export async function validatePublicFetchUrl(
   value: string,
   options: { resolveDns?: boolean } = {}
 ): Promise<PublicFetchUrlValidation> {
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(normalizePublicFetchUrlInput(value));
   } catch {
-    return { ok: false, error: "URL must be absolute and valid." };
+    return { ok: false, error: "URL must be a valid public website address." };
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {

@@ -1,0 +1,111 @@
+:root {
+  --product-font-display: Aptos, "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --product-font-body: Aptos, "Avenir Next", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --product-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  --product-color-canvas: #f4f6f2;
+  --product-color-canvas-raised: #fafbf8;
+  --product-color-surface: #ffffff;
+  --product-color-surface-translucent: rgba(255, 255, 255, 0.92);
+  --product-color-surface-frosted: rgba(255, 255, 255, 0.78);
+  --product-color-surface-soft: #edf2eb;
+  --product-color-surface-hover: #f6f8f4;
+  --product-color-surface-selected: #e3ebe0;
+  --product-color-surface-disabled: #edf1ea;
+  --product-color-surface-inverse: #121913;
+
+  --product-color-text: #17211b;
+  --product-color-text-subtle: #4e5b52;
+  --product-color-text-muted: #667269;
+  --product-color-text-tertiary: #7a847c;
+  --product-color-text-inverse: #ffffff;
+  --product-color-text-inverse-muted: #e6ebe4;
+  --product-color-nav: #26342d;
+  --product-color-nav-subtle: #526057;
+
+  --product-color-border: #d8e0d5;
+  --product-color-border-subtle: #e7ede4;
+  --product-color-border-strong: #c7d2c4;
+  --product-color-border-emphasis: #aebdac;
+  --product-color-border-dashed: #aab8a8;
+
+  --product-color-primary: #173f35;
+  --product-color-primary-hover: #0f3128;
+  --product-color-primary-pressed: #0a251f;
+  --product-color-primary-text: #ffffff;
+  --product-color-primary-surface: #e3eee8;
+  --product-color-primary-grid: rgba(23, 63, 53, 0.08);
+  --product-color-intelligence: #c7861f;
+  --product-color-intelligence-hover: #a96818;
+  --product-color-intelligence-surface: #fff2d8;
+  --product-color-intelligence-border: #f1d39b;
+  --product-color-intelligence-text: #704812;
+
+  --product-color-success-surface: #dcfce7;
+  --product-color-success-border: #bbf7d0;
+  --product-color-success-text: #166534;
+  --product-color-warning-surface: #fef3c7;
+  --product-color-warning-border: #fde68a;
+  --product-color-warning-text: #92400e;
+  --product-color-error: #b8324f;
+  --product-color-error-surface: #fee2e2;
+  --product-color-error-border: #fecaca;
+  --product-color-error-text: #991b1b;
+  --product-color-danger-surface: #fff1f2;
+  --product-color-info-surface: #eef3eb;
+  --product-color-info-text: #2f4438;
+
+  --product-space-0: 0;
+  --product-space-1: 2px;
+  --product-space-2: 4px;
+  --product-space-3: 6px;
+  --product-space-4: 8px;
+  --product-space-5: 10px;
+  --product-space-6: 12px;
+  --product-space-7: 14px;
+  --product-space-8: 16px;
+  --product-space-9: 18px;
+  --product-space-10: 20px;
+  --product-space-11: 24px;
+  --product-space-12: 32px;
+  --product-space-13: 42px;
+  --product-space-14: 56px;
+  --product-space-15: 72px;
+
+  --product-radius-sm: 6px;
+  --product-radius-md: 8px;
+  --product-radius-full: 999px;
+
+  --product-shadow-card: 0 1px 2px rgba(23, 33, 27, 0.05);
+  --product-shadow-card-soft: 0 1px 2px rgba(23, 33, 27, 0.035);
+  --product-shadow-card-hover: 0 8px 24px rgba(23, 33, 27, 0.08);
+  --product-shadow-preview: 0 18px 44px rgba(23, 33, 27, 0.13);
+  --product-shadow-focus: 0 0 0 3px rgba(23, 63, 53, 0.18);
+  --product-shadow-error: 0 8px 18px rgba(184, 50, 79, 0.28);
+
+  --product-duration-fast: 150ms;
+  --product-duration-normal: 250ms;
+  --product-duration-slow: 400ms;
+  --product-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="dark"] {
+  --product-color-canvas: #171915;
+  --product-color-canvas-raised: #1e211c;
+  --product-color-surface: #22251f;
+  --product-color-surface-translucent: rgba(34, 37, 31, 0.9);
+  --product-color-surface-frosted: rgba(34, 37, 31, 0.72);
+  --product-color-surface-soft: #2b2e27;
+  --product-color-surface-selected: #343a31;
+  --product-color-text: #eeece5;
+  --product-color-text-subtle: #c4c0b6;
+  --product-color-text-muted: #aaa69c;
+  --product-color-border: #3c4037;
+  --product-color-border-subtle: #30342d;
+  --product-color-border-strong: #4b5046;
+  --product-color-primary: #b8d4c3;
+  --product-color-primary-hover: #d1e6d7;
+  --product-color-primary-text: #172019;
+  --product-color-info-surface: #30342d;
+  --product-color-info-text: #d4d0c6;
+}

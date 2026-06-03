@@ -4,7 +4,18 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import platformRobots from "../app/robots";
-import type { AnalyticsEvent, ClaimRecord, JobRecord, LeadSubmission, OptimizationFinding } from "../lib/models";
+import type {
+  AgentModelCallRecord,
+  AgentRunRecord,
+  AgentRunSpanRecord,
+  AnalyticsEvent,
+  ClaimRecord,
+  JobRecord,
+  LeadSubmission,
+  OptimizationFinding,
+  PreviewToken,
+  SiteGenerationRecord
+} from "../lib/models";
 import { summarizeAnalytics } from "../lib/analytics";
 import { readLocalAsset, storeAssetBytes, storeGeneratedAssetBytes } from "../lib/asset-storage";
 import { cachePolicyForPathname } from "../lib/cache-policy";
@@ -68,14 +79,20 @@ import { makeLocalBusinessJsonLd, serializeJsonLd } from "../lib/structured-data
 import { restoreVersionToDraftBundle } from "../lib/site-versions";
 import {
   completeClaimCheckout as completeLocalClaimCheckout,
+  createSiteGeneration as createLocalSiteGeneration,
   createAndStoreSite as createLocalStoreSite,
   createPreviewToken as createLocalPreviewToken,
   createClaim as createLocalClaim,
+  getSiteBundle as getLocalSiteBundle,
+  listSiteBundles as listLocalSiteBundles,
+  promoteSiteGeneration as promoteLocalSiteGeneration,
   recordClaimCheckoutSession,
   resolvePreviewToken as resolveLocalPreviewToken
 } from "../lib/store";
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
 import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
+import { generateSite, type SiteGenerationRepository } from "../lib/site-generation-service";
+import { applyPropsToLayoutSection, propsForLayoutSection, syncLegacySectionsFromLayout } from "../lib/layout-registry";
 
 const bundle = createSiteFromInput({
   prompt: "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin."
@@ -217,8 +234,8 @@ assert(
   "Owner dashboards should list only completed claimed sites, not checkout-required previews."
 );
 const platformRobotsRules = platformRobots().rules;
-const rootHomePage = readFileSync("app/page.tsx", "utf8");
-const dashboardPage = readFileSync("app/dashboard/page.tsx", "utf8");
+const rootHomePage = readFileSync("app/(marketing)/page.tsx", "utf8");
+const dashboardPage = readFileSync("app/(admin-app)/dashboard/page.tsx", "utf8");
 const experimentLearningRoute = readFileSync("app/api/experiments/learn/route.ts", "utf8");
 const crawlFixtureRouteSource = readFileSync("app/crawl-fixtures/[token]/[page]/route.ts", "utf8");
 const middlewareSource = readFileSync("middleware.ts", "utf8");
@@ -270,8 +287,11 @@ assert(
     telemetryRaw.includes("[omitted:image_bytes]"),
   "Telemetry sanitizer should redact credentials, sensitive URL params, raw HTML, and image bytes."
 );
+await verifyCanonicalGenerationService();
 assert(
-  rootHomePage.includes("Lodesta powers your business") && !rootHomePage.includes("requireAdminPageAccess"),
+  rootHomePage.includes("marketing-page") &&
+    rootHomePage.includes("Put your website on autopilot") &&
+    !rootHomePage.includes("requireAdminPageAccess"),
   "The root page should be a public Lodesta marketing homepage instead of the private operator dashboard."
 );
 assert(
@@ -1020,8 +1040,14 @@ assert(
   (await validatePublicFetchUrl("https://www.lodesta.com", { resolveDns: false })).ok,
   "URL intake safety should allow fully qualified public HTTPS hostnames."
 );
+const normalizedUrlCheck = await validatePublicFetchUrl("lodesta.com", { resolveDns: false });
+assert(
+  normalizedUrlCheck.ok && normalizedUrlCheck.url === "https://lodesta.com/" && normalizedUrlCheck.hostname === "lodesta.com",
+  "URL intake safety should normalize domain-only website addresses to HTTPS."
+);
 assert(
   !validateLaunchMarket({ prompt: "Build a website for a plumber in Toronto, Canada." }).ok &&
+    !validateLaunchMarket({ url: "example.ca" }).ok &&
     !validateLaunchMarket({ url: "https://example.ca" }).ok &&
     !validateLaunchMarket({ url: "https://example.ae" }).ok &&
     !validateLaunchMarket({ facts: { address: { country: "CA" } } }).ok,
@@ -1189,6 +1215,11 @@ const chainedForwardedHeaders = new Headers({
   "x-forwarded-proto": "https, http",
   [customDomainRoutedHeader]: "1"
 });
+const rfcForwardedHeaders = new Headers({
+  host: "internal.proxy",
+  forwarded: "for=203.0.113.10;proto=https;host=www.boundary-verify.example",
+  [customDomainRoutedHeader]: "1"
+});
 const malformedForwardedHeaders = new Headers({
   host: "internal.proxy",
   "x-forwarded-host": "HTTPS://WWW.BOUNDARY-VERIFY.EXAMPLE./bad-path?utm=bad, edge.proxy",
@@ -1208,6 +1239,12 @@ assert(
   "Forwarded host/proto chains should use the public customer-facing origin for canonical URLs."
 );
 assert(
+  requestHostname(rfcForwardedHeaders) === "www.boundary-verify.example" &&
+    requestOrigin(rfcForwardedHeaders) === "https://www.boundary-verify.example" &&
+    canonicalUrlForPage(bundle, seoHome, rfcForwardedHeaders) === "https://www.boundary-verify.example/",
+  "RFC Forwarded host headers should use the public customer-facing origin for canonical URLs."
+);
+assert(
   requestHostname(malformedForwardedHeaders) === "www.boundary-verify.example" &&
     requestOrigin(malformedForwardedHeaders) === "https://www.boundary-verify.example" &&
     canonicalUrlForPage(bundle, seoHome, malformedForwardedHeaders) === "https://www.boundary-verify.example/",
@@ -1221,7 +1258,7 @@ assert(
     middlewareSource.includes('const forwardedHostRewriteParam = "__lodesta_forwarded_host";') &&
     middlewareSource.includes("request.nextUrl.searchParams.get(forwardedHostRewriteParam) === \"1\"") &&
     middlewareSource.includes("request.headers.get(customDomainRoutedHeader) === \"1\"") &&
-    middlewareSource.includes('Boolean(request.headers.get("x-forwarded-host")) && hostname !== directHostname') &&
+    middlewareSource.includes('const hasForwardedHostSignal = Boolean(request.headers.get("x-forwarded-host") || request.headers.get("forwarded"));') &&
     middlewareSource.includes("isPublicRuntimeSkippedPath(pathname)") &&
     middlewareSource.includes('pathname.startsWith("/api/")') &&
     middlewareSource.includes("if (!payload.resolved || !payload.slug) return notFound();") &&
@@ -1436,10 +1473,13 @@ missingUniversalStandardBundle.businessProfile.reviewsSummary = undefined;
 for (const version of missingUniversalStandardBundle.siteModel.versions) {
   version.pages = version.pages.filter((page) => !page.slug.startsWith("areas/"));
   for (const page of version.pages) {
-    page.sections = page.sections.filter(
-      (section) => !["faq", "trust_bar", "testimonials", "team", "map"].includes(section.type)
+    page.layoutSections = page.layoutSections.filter(
+      (section) => !["faq", "trust", "proof", "team", "map"].includes(section.kind)
     );
-    for (const section of page.sections) section.props = scrubTrustProofTerms(section.props);
+    for (const section of page.layoutSections) {
+      applyPropsToLayoutSection(section, scrubTrustProofTerms(propsForLayoutSection(section)));
+    }
+    syncLegacySectionsFromLayout(page);
   }
 }
 const universalStandardFindings = runAudit(
@@ -1557,7 +1597,8 @@ assert(
 
 const qaHome = qaBundle.siteModel.versions[0]?.pages[0];
 const qaHero = qaHome?.sections.find((section) => section.type === "hero");
-assert(qaHome && qaHero, "Guardrail verifier needs a generated home hero.");
+const qaLayoutHero = qaHome?.layoutSections.find((section) => section.kind === "hero");
+assert(qaHome && qaHero && qaLayoutHero, "Guardrail verifier needs a generated home hero.");
 const brokenLinkBundle = structuredClone(qaBundle);
 brokenLinkBundle.siteModel.versions[0]?.pages[0]?.sections.push({
   id: "press_bad_link",
@@ -1639,9 +1680,17 @@ applyVerifiedFacts(structuredDataBundle.businessProfile, ["hours", "reviewsSumma
 const fullyVerifiedSchema = makeLocalBusinessJsonLd(structuredDataBundle.businessProfile) as Record<string, unknown> | null;
 assert(
   Array.isArray(fullyVerifiedSchema?.openingHours) &&
-    Boolean(fullyVerifiedSchema?.aggregateRating) &&
+    !("aggregateRating" in fullyVerifiedSchema) &&
     Array.isArray(fullyVerifiedSchema?.sameAs),
-  "LocalBusiness JSON-LD should include optional hours, ratings, and profile links only after those facts are verified."
+  "LocalBusiness JSON-LD should include verified optional hours and profile links, but never emit Google-derived aggregate ratings."
+);
+const firstPartyReviewBundle = structuredClone(structuredDataBundle);
+firstPartyReviewBundle.businessProfile.reviewsSummary = { rating: 4.8, count: 91, sources: ["first_party"] };
+applyVerifiedFacts(firstPartyReviewBundle.businessProfile, ["reviewsSummary"]);
+const firstPartyReviewSchema = makeLocalBusinessJsonLd(firstPartyReviewBundle.businessProfile) as Record<string, unknown> | null;
+assert(
+  Boolean(firstPartyReviewSchema?.aggregateRating),
+  "LocalBusiness JSON-LD may emit aggregate ratings only when the review summary is verified and not Google-derived."
 );
 const serializedJsonLd = serializeJsonLd({ name: "</script><script>alert(1)</script>", sameAs: ["https://example.com?a=1&b=2"] });
 assert(
@@ -1660,23 +1709,23 @@ assert(
   approvedCtaEdit.ok,
   "Editor guardrails should allow approved owner-choice CTA changes that preserve conversion paths."
 );
-const approvedVariantEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
+const approvedPresetEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
   pageId: qaHome.id,
-  sectionVariants: { [qaHero.id]: "compact" }
+  sectionPresets: { [qaLayoutHero.id]: "hero.centered_editorial" }
 });
 assert(
-  approvedVariantEdit.ok && approvedVariantEdit.applied.sectionVariants?.[qaHero.id] === "compact",
-  "Curated editor should allow approved section variant swaps."
+  approvedPresetEdit.ok && approvedPresetEdit.applied.sectionPresets?.[qaLayoutHero.id] === "hero.centered_editorial",
+  "Curated editor should allow approved section preset swaps."
 );
-const blockedVariantEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
+const blockedPresetEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
   pageId: qaHome.id,
-  sectionVariants: { [qaHero.id]: "arbitrary_custom_layout" }
+  sectionPresets: { [qaLayoutHero.id]: "arbitrary_custom_layout" as never }
 });
 assert(
-  !blockedVariantEdit.ok,
-  "Curated editor should reject unapproved arbitrary section variants."
+  !blockedPresetEdit.ok,
+  "Curated editor should reject unapproved arbitrary section presets."
 );
 const formSettingsBundle = structuredClone(qaBundle);
 const formSettingsResult = applyFormSettingsUpdate(formSettingsBundle, {
@@ -2079,6 +2128,7 @@ const actionListBundle = createSiteFromInput({
 });
 const actionListHome = actionListBundle.siteModel.versions[0]?.pages[0];
 assert(actionListHome, "Action-list verifier needs a generated home page.");
+if (actionListBundle.siteModel.versions[0]) actionListBundle.siteModel.versions[0].status = "published";
 const actionListFinding: OptimizationFinding = {
   id: "verify_action_list_metadata",
   siteId: actionListBundle.businessProfile.siteId,
@@ -2215,6 +2265,197 @@ process.stdout.write(
     2
   )}\n`
 );
+
+async function verifyCanonicalGenerationService() {
+  const telemetryFailure = createGenerationServiceProbe({ telemetryUnavailable: true });
+  let rejectedBeforePersistence = false;
+  try {
+    await generateSite({
+      repository: telemetryFailure.repository,
+      input: { prompt: "Build a site for a telemetry failure probe." },
+      source: "api"
+    });
+  } catch {
+    rejectedBeforePersistence = true;
+  }
+  assert(
+    rejectedBeforePersistence && telemetryFailure.state.persisted === 0,
+    "Canonical generation should reject before persistence when the initial telemetry run cannot be created."
+  );
+
+  const success = createGenerationServiceProbe();
+  const generated = await generateSite({
+    repository: success.repository,
+    input: { prompt: "Build a site for a canonical service probe." },
+    source: "api",
+    metadata: { entrypoint: "boundary_verifier" },
+    preview: { create: true, origin: "https://app.example" }
+  });
+  assert(
+    generated.runId === "run_generation_probe" &&
+      success.state.persisted === 1 &&
+      generated.generationId === "sitegen_rungenerationprobe" &&
+      generated.bundle.businessProfile.siteId === generated.generationId &&
+      success.state.runUpdates.some(
+        (update) =>
+          update.status === "completed" &&
+          update.targetType === "site_generation" &&
+          update.targetId === generated.generationId
+      ),
+    "Canonical generation should create telemetry, persist one site generation, attach the generation target, and complete the run."
+  );
+
+  const repeatedFirst = await generateSite({
+    repository: createGenerationServiceProbe({ runId: "run_generation_repeat_a" }).repository,
+    input: { prompt: "Build a repeated source candidate." },
+    source: "api"
+  });
+  const repeatedSecond = await generateSite({
+    repository: createGenerationServiceProbe({ runId: "run_generation_repeat_b" }).repository,
+    input: { prompt: "Build a repeated source candidate." },
+    source: "api"
+  });
+  const firstAssetIds = new Set(repeatedFirst.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
+  const secondAssetIds = new Set(repeatedSecond.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
+  assert(
+    repeatedFirst.generationId !== repeatedSecond.generationId &&
+      [...firstAssetIds].every((assetId) => !secondAssetIds.has(assetId)),
+    "Repeated generation of the same source should create independent site-generation identities and asset ids."
+  );
+
+  const previewRequested = createGenerationServiceProbe();
+  const previewSkipped = await generateSite({
+    repository: previewRequested.repository,
+    input: { prompt: "Build a site for a post-promotion preview probe." },
+    source: "api",
+    preview: { create: true, origin: "https://app.example" }
+  });
+  assert(
+    previewSkipped.preview === undefined &&
+      previewRequested.state.runUpdates.some(
+        (update) =>
+          update.status === "completed" &&
+          update.metadata?.previewStatus === "admin_only_until_promotion"
+      ),
+    "Canonical generation should not create tokenized previews before promotion to a managed site."
+  );
+
+  const localSiteCount = listLocalSiteBundles().length;
+  const candidateBundle = createSiteFromInput({
+    prompt: "Build a site generation promotion candidate.",
+    identity: { siteId: "sitegen_boundary_promotion_candidate" }
+  });
+  const candidate = createLocalSiteGeneration({
+    id: "sitegen_boundary_promotion_candidate",
+    agentRunId: "run_boundary_promotion_candidate",
+    bundle: candidateBundle
+  });
+  assert(
+    listLocalSiteBundles().length === localSiteCount &&
+      !getLocalSiteBundle(candidate.bundle.businessProfile.siteId) &&
+      !resolveLocalPreviewToken(candidate.id),
+    "A site generation should not create a managed site or tokenized preview before promotion."
+  );
+  const promoted = promoteLocalSiteGeneration(candidate.id);
+  const promotedAgain = promoteLocalSiteGeneration(candidate.id);
+  assert(
+    promoted?.bundle.businessProfile.siteId.startsWith("site_") &&
+      promoted.generation.status === "promoted" &&
+      promoted.generation.createdSiteId === promoted.bundle.businessProfile.siteId &&
+      promotedAgain?.bundle.businessProfile.siteId === promoted.bundle.businessProfile.siteId,
+    "Promoting a site generation should create one managed site and remain idempotent."
+  );
+}
+
+function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean; runId?: string } = {}) {
+  const now = new Date("2026-05-29T12:00:00.000Z").toISOString();
+  const state = {
+    persisted: 0,
+    runUpdates: [] as Array<Parameters<SiteGenerationRepository["updateAgentRun"]>[0]>,
+    spanUpdates: [] as Array<Parameters<SiteGenerationRepository["updateAgentRunSpan"]>[0]>
+  };
+  const run: AgentRunRecord = {
+    id: options.runId ?? "run_generation_probe",
+    runType: "site_generation",
+    agentType: "site_generator",
+    status: "running",
+    source: "api",
+    tags: [],
+    startedAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+  const span: AgentRunSpanRecord = {
+    id: "span_generation_probe",
+    runId: run.id,
+    spanType: "preview_token",
+    name: "Create preview token",
+    status: "running",
+    startedAt: now
+  };
+  const repository: SiteGenerationRepository = {
+    async createAgentRun() {
+      return options.telemetryUnavailable ? null : run;
+    },
+    async updateAgentRun(input) {
+      state.runUpdates.push(input);
+      return {
+        ...run,
+        status: input.status ?? run.status,
+        targetType: input.targetType ?? run.targetType,
+        targetId: input.targetId ?? run.targetId,
+        outputSummary: input.outputSummary ?? run.outputSummary,
+        outputJson: input.outputJson ?? run.outputJson,
+        metadata: input.metadata ?? run.metadata,
+        endedAt: input.endedAt ?? run.endedAt,
+        updatedAt: now
+      };
+    },
+    async createAgentRunSpan() {
+      return span;
+    },
+    async updateAgentRunSpan(input) {
+      state.spanUpdates.push(input);
+      return {
+        ...span,
+        status: input.status ?? span.status,
+        outputJson: input.outputJson ?? span.outputJson,
+        metadata: input.metadata ?? span.metadata,
+        artifactRefs: input.artifactRefs ?? span.artifactRefs,
+        errorMessage: input.errorMessage ?? span.errorMessage,
+        endedAt: input.endedAt ?? span.endedAt,
+        durationMs: input.durationMs ?? span.durationMs
+      };
+    },
+    async recordAgentModelCall() {
+      return null as AgentModelCallRecord | null;
+    },
+    async createSiteGeneration(input) {
+      state.persisted += 1;
+      const generation: SiteGenerationRecord = {
+        id: input.id ?? "sitegen_generation_probe",
+        agentRunId: input.agentRunId,
+        sourceUrl: input.sourceUrl,
+        sourceHost: input.sourceHost,
+        businessName: input.bundle.businessProfile.name,
+        vertical: input.bundle.businessProfile.vertical,
+        candidateSlug: input.bundle.siteModel.slug,
+        bundle: input.bundle,
+        status: input.status ?? "ready",
+        createdAt: now,
+        updatedAt: now
+      };
+      return generation;
+    },
+    async upsertGenerationArtifact(artifact) {
+      return artifact;
+    },
+    async listExperimentLearnings() {
+      return [];
+    }
+  };
+  return { repository, state };
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

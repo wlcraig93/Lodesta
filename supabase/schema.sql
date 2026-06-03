@@ -158,6 +158,7 @@ create table experiment_learnings (
 create table preview_tokens (
   token text primary key,
   site_id text references sites(id) on delete cascade,
+  version_id text,
   expires_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -275,6 +276,44 @@ create table agent_runs (
   updated_at timestamptz not null default now()
 );
 
+create table site_generations (
+  id text primary key,
+  agent_run_id text references agent_runs(id) on delete set null,
+  source_url text,
+  source_host text,
+  business_name text not null,
+  vertical text not null,
+  candidate_slug text not null,
+  bundle_json jsonb not null,
+  status text not null default 'ready' check (status in ('ready', 'blocked', 'promoted', 'archived')),
+  created_site_id text references sites(id) on delete set null,
+  promoted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table generation_artifacts (
+  id text primary key,
+  generation_id text references site_generations(id) on delete cascade,
+  site_id text references sites(id) on delete cascade,
+  scope text not null check (scope in ('generation_selected', 'generation_candidate', 'managed_site_selected', 'managed_site_candidate', 'eval_candidate', 'qa_evidence')),
+  artifact_type text not null check (artifact_type in ('copy_artifact', 'copy_diff', 'business_context_report', 'change_impact_report', 'identity_reconcile_report', 'service_catalog_report', 'vertical_classification_report', 'conversion_path_report', 'information_architecture_report', 'brand_cue_report', 'brand_direction_report', 'brand_mark_generation_report', 'asset_selection_report', 'seo_metadata_report', 'performance_audit_report', 'social_proof_report', 'conversion_insights_report', 'local_seo_refresh_report', 'page_gap_analysis_report', 'experiment_recommendation_report', 'design_section_audit_report', 'design_system', 'blueprint', 'compiled_section', 'compiled_page', 'claim_report', 'policy_report', 'page_opportunity_report', 'visual_benchmark', 'art_direction_decision', 'media_asset_decision', 'copy_evaluation_report', 'v3_review_packet', 'generation_cost_report')),
+  artifact_version text not null,
+  producer_id text not null,
+  producer_version text not null,
+  vertical_playbook_version text,
+  section_contract_version text,
+  site_design_system_version text,
+  source_fact_ids text[] not null default '{}',
+  affected_page_id text,
+  affected_section_id text,
+  affected_slot_id text,
+  content_hash text not null,
+  payload_json jsonb not null,
+  created_at timestamptz not null default now(),
+  check (generation_id is not null or site_id is not null)
+);
+
 create table agent_run_spans (
   id text primary key,
   run_id text not null references agent_runs(id) on delete cascade,
@@ -372,6 +411,13 @@ create index agent_runs_created_at_idx on agent_runs(created_at);
 create index agent_runs_source_host_idx on agent_runs(source_host);
 create index agent_runs_target_idx on agent_runs(target_type, target_id);
 create index agent_runs_type_status_created_idx on agent_runs(run_type, status, created_at);
+create index site_generations_status_created_idx on site_generations(status, created_at desc);
+create index site_generations_source_host_idx on site_generations(source_host);
+create index site_generations_agent_run_idx on site_generations(agent_run_id);
+create index site_generations_created_site_idx on site_generations(created_site_id);
+create index generation_artifacts_generation_idx on generation_artifacts(generation_id, scope, artifact_type);
+create index generation_artifacts_site_idx on generation_artifacts(site_id, scope, artifact_type);
+create index generation_artifacts_content_hash_idx on generation_artifacts(content_hash);
 create index agent_run_spans_run_started_idx on agent_run_spans(run_id, started_at);
 create index agent_model_calls_run_idx on agent_model_calls(run_id);
 create index agent_model_calls_span_idx on agent_model_calls(span_id);
@@ -464,6 +510,8 @@ alter table outbound_events enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
 alter table agent_runs enable row level security;
+alter table site_generations enable row level security;
+alter table generation_artifacts enable row level security;
 alter table agent_run_spans enable row level security;
 alter table agent_model_calls enable row level security;
 alter table operator_settings enable row level security;

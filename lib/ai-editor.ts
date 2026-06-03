@@ -1,8 +1,8 @@
 import type {
   BusinessProfile,
   FieldPolicy,
+  LayoutSection,
   OptimizationFinding,
-  PageModel,
   SectionModel,
   SiteBundle,
   SiteVersion
@@ -13,6 +13,12 @@ import {
   type EditorGuardrailIssue
 } from "./editor-guardrails";
 import { themeForPreset, type ThemePresetId } from "./theme-presets";
+import {
+  applyPropsToLayoutSection,
+  layoutSectionFromSection,
+  sectionFromLayoutSection,
+  syncVersionLegacySections
+} from "./layout-registry";
 
 export type AiEditOperation = {
   type:
@@ -88,6 +94,11 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
       appliedTheme,
       draft.theme ?? bundle.siteModel.theme
     );
+    draft.designPlan = {
+      ...draft.designPlan,
+      colorSystem: appliedTheme,
+      stylePack: stylePackFromThemePreset(appliedTheme)
+    };
     operations.push({
       type: "apply_theme",
       label: `Applied ${appliedTheme} theme direction.`,
@@ -98,9 +109,10 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
   if (mentionsCta(lower)) {
     const cta = ctaFromIntent(bundle.businessProfile, lower);
     for (const page of draft.pages) {
-      for (const section of page.sections) {
+      for (const section of page.layoutSections) {
+        const projected = sectionFromLayoutSection(section);
         for (const key of ["primaryCta", "secondaryCta"]) {
-          if (section.props[key]) setEditableProp(section, key, cta);
+          if (projected.props[key]) setEditableLayoutProp(section, key, cta);
         }
       }
     }
@@ -112,11 +124,11 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
   }
 
   if (mentionsHero(lower) || operations.length === 0) {
-    const hero = home?.sections.find((section) => section.type === "hero");
+    const hero = home?.layoutSections.find((section) => section.kind === "hero");
     if (hero) {
       const heroCopy = heroCopyForIntent(bundle.businessProfile, lower);
-      setEditableProp(hero, "heading", heroCopy.heading);
-      setEditableProp(hero, "body", heroCopy.body);
+      setEditableLayoutProp(hero, "heading", heroCopy.heading);
+      setEditableLayoutProp(hero, "body", heroCopy.body);
       operations.push({
         type: "rewrite_hero",
         label: "Rewrote the home hero copy as a draft.",
@@ -133,7 +145,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
       continue;
     }
     const section = makeRequestedSection(sectionType, bundle.businessProfile);
-    insertBeforeContact(home, section);
+    insertBeforeContact(home.layoutSections, layoutSectionFromSection(section, bundle.businessProfile.vertical));
     operations.push({
       type: "add_section",
       label: `Added ${sectionLabel(sectionType)} to the home page draft.`,
@@ -153,6 +165,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     operations.push({ type: "no_op", label: "No supported structured edit was detected." });
   }
 
+  syncVersionLegacySections(draft);
   const guardrails = validateAiEditOutcome(beforeBundle, bundle);
   if (!guardrails.ok) {
     Object.assign(bundle, structuredClone(beforeBundle));
@@ -195,10 +208,11 @@ function clonePublishedAsDraft(bundle: SiteBundle): SiteVersion {
   return draft;
 }
 
-function setEditableProp(section: SectionModel, key: string, value: unknown) {
-  const fieldPolicy = section.fieldPolicies[key];
+function setEditableLayoutProp(section: LayoutSection, key: string, value: unknown) {
+  const projected = sectionFromLayoutSection(section);
+  const fieldPolicy = projected.fieldPolicies[key];
   if (!fieldPolicy || (fieldPolicy.editScope !== "owner_choice" && fieldPolicy.editScope !== "owner_freetext")) return false;
-  section.props[key] = value;
+  applyPropsToLayoutSection(section, { [key]: value });
   return true;
 }
 
@@ -248,9 +262,9 @@ function cleanService(value: string) {
 
 function updateServiceSections(draft: SiteVersion, business: BusinessProfile) {
   for (const page of draft.pages) {
-    for (const section of page.sections) {
-      if (section.type !== "services" && section.type !== "menu_deals") continue;
-      setEditableProp(section, "items", business.services.slice(0, 8).map((service) => ({
+    for (const section of page.layoutSections) {
+      if (section.kind !== "services" && section.kind !== "menu") continue;
+      setEditableLayoutProp(section, "items", business.services.slice(0, 8).map((service) => ({
         title: service,
         description: `Owner-approved details for ${service.toLowerCase()} can be expanded here.`
       })));
@@ -263,6 +277,13 @@ function themePresetFromIntent(message: string): ThemePresetId {
   if (/\bbold|high contrast|contrast\b/.test(message)) return "bold";
   if (/\bblue|clinical\b/.test(message)) return "clinical";
   return "warm";
+}
+
+function stylePackFromThemePreset(preset: ThemePresetId) {
+  if (preset === "premium") return "premium_editorial";
+  if (preset === "clinical") return "clinical_trust";
+  if (preset === "bold") return "local_modern";
+  return "warm_neighborhood";
 }
 
 function ctaFromIntent(business: BusinessProfile, message: string) {
@@ -312,7 +333,7 @@ function heroCopyForIntent(business: BusinessProfile, message: string) {
   }
   return {
     heading: `${business.name} makes it easier for local customers to act.`,
-    body: `The top of the page now clarifies ${serviceList.toLowerCase()}, local fit, and the primary conversion path for customers in ${area}.`
+    body: `The top of the page now clarifies ${serviceList.toLowerCase()}, local fit, and the easiest contact option for customers in ${area}.`
   };
 }
 
@@ -329,11 +350,11 @@ function makeRequestedSection(type: SectionModel["type"], business: BusinessProf
           },
           {
             question: "How do customers get started?",
-            answer: "The site keeps the primary action visible above the fold and repeats it near the contact path."
+            answer: "Use the visible call button or contact form and include the timing, location, and service you need."
           },
           {
             question: "Can these answers be customized?",
-            answer: "Yes. FAQs are owner-truth content and should be reviewed before publishing."
+            answer: "Yes. The business can confirm the final wording before the site goes live."
           }
         ]
       });
@@ -364,10 +385,10 @@ function makeRequestedSection(type: SectionModel["type"], business: BusinessProf
       return baseSection("testimonials", "review_summary", {
         eyebrow: "Trust",
         heading: "Add proof customers can verify",
-        body: "Review excerpts and testimonials should be owner-approved or verified before publishing.",
+        body: "Review excerpts and testimonials can help customers understand the business before they reach out.",
         items: [
-          { quote: "Add owner-approved review excerpts here after claim.", author: "Owner verification needed" },
-          { quote: "Use this slot for credentials, outcomes, or project proof.", author: "Conversion standard" }
+          { quote: "Add a specific customer comment or review theme here.", author: "Customer review" },
+          { quote: "Use this space for credentials, outcomes, or project examples.", author: "Business highlight" }
         ]
       }, true);
     case "map":
@@ -381,10 +402,10 @@ function makeRequestedSection(type: SectionModel["type"], business: BusinessProf
       return baseSection("team", "credential_cards", {
         eyebrow: "People",
         heading: "Show the people behind the business",
-        body: "Names, credentials, and bios are owner-truth content and should be verified.",
+        body: "Names, credentials, and bios can give customers clearer context before they reach out.",
         items: [
           { title: "Team profile", description: "Add verified name, role, and credentials." },
-          { title: "Owner story", description: "Add owner-approved story and local connection." },
+          { title: "Business story", description: "Add the local connection and reason customers choose the team." },
           { title: "Customer-facing expertise", description: "Add certifications or specialties after verification." }
         ]
       }, true);
@@ -392,7 +413,7 @@ function makeRequestedSection(type: SectionModel["type"], business: BusinessProf
       return baseSection("before_after", "proof_cards", {
         eyebrow: "Before and after",
         heading: "Show the outcome customers are buying",
-        body: "Use owner-approved photos and project details before publishing.",
+        body: "Use clear photos and project details so customers can understand the work.",
         items: business.services.slice(0, 3).map((service) => ({
           title: service,
           beforeLabel: "Problem",
@@ -414,7 +435,7 @@ function makeRequestedSection(type: SectionModel["type"], business: BusinessProf
       return baseSection("cta", "conversion_band", {
         eyebrow: "Next step",
         heading: "Ready to take the next step?",
-        body: "Repeat the primary action after context so ready visitors can act quickly.",
+        body: "Choose the fastest contact option and include the details the team needs to respond.",
         primaryCta: business.phone
           ? { label: "Call Now", href: `tel:${business.phone}`, role: "tel" }
           : { label: "Request Information", href: "#contact", role: "form" }
@@ -455,13 +476,13 @@ function baseSection(
   };
 }
 
-function insertBeforeContact(page: PageModel, section: SectionModel) {
-  const contactIndex = page.sections.findIndex((candidate) => candidate.type === "contact");
+function insertBeforeContact(sections: LayoutSection[], section: LayoutSection) {
+  const contactIndex = sections.findIndex((candidate) => candidate.kind === "contact");
   if (contactIndex === -1) {
-    page.sections.push(section);
+    sections.push(section);
     return;
   }
-  page.sections.splice(contactIndex, 0, section);
+  sections.splice(contactIndex, 0, section);
 }
 
 function responseMessage(operations: AiEditOperation[], warnings: string[]) {

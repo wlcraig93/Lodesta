@@ -24,6 +24,8 @@ done
 BASE_URL="${LODESTA_SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 BASE_URL="${BASE_URL%/}"
 export NEXT_PUBLIC_APP_URL="${LODESTA_SMOKE_APP_URL:-$BASE_URL}"
+export LODESTA_REPOSITORY="${LODESTA_REPOSITORY:-local}"
+export LODESTA_ASSET_STORAGE="${LODESTA_ASSET_STORAGE:-local}"
 export STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_smoke}"
 export LODESTA_ADMIN_TOKEN="${LODESTA_ADMIN_TOKEN:-smoke_admin_token}"
 export LODESTA_HASH_SECRET="${LODESTA_HASH_SECRET:-smoke_hash_secret}"
@@ -116,7 +118,7 @@ request_forwarded_host() {
   local headers_file
 
   headers_file="$(mktemp)"
-  response="$(curl -D "$headers_file" -sS -w $'\n%{http_code}' -H "x-forwarded-for: 203.0.113.10" -H "host: internal.proxy" -H "x-forwarded-host: ${host}, edge.proxy" "${BASE_URL}${path}")"
+  response="$(curl -D "$headers_file" -sS -w $'\n%{http_code}' -H "x-forwarded-for: 203.0.113.10" -H "host: internal.proxy" -H "forwarded: for=203.0.113.10;proto=https;host=${host}" -H "x-forwarded-host: ${host}, edge.proxy" "${BASE_URL}${path}")"
   HEADERS="$(cat "$headers_file")"
   rm -f "$headers_file"
   STATUS="${response##*$'\n'}"
@@ -176,7 +178,7 @@ complete_claim_checkout() {
 
 wait_for_server
 
-node --input-type=module -e 'import { parseImportBatchPayload } from "./scripts/lodesta.mjs"; const objectPayload = parseImportBatchPayload(["{\"urls\":[\"https://one.example\"],\"createPreviews\":false}"]); const arrayPayload = parseImportBatchPayload(["[\"https://one.example\",\"ftp://blocked.example\",\"https://two.example\"]"]); const textPayload = parseImportBatchPayload(["https://one.example, https://two.example\nhttps://three.example"]); const argsPayload = parseImportBatchPayload(["https://one.example","not-a-url","https://two.example"]); if (objectPayload.createPreviews !== false || objectPayload.urls?.[0] !== "https://one.example") process.exit(1); if (arrayPayload.urls.length !== 2 || arrayPayload.urls[1] !== "https://two.example") process.exit(1); if (textPayload.text.split(/[\n,]/).length !== 3) process.exit(1); if (argsPayload.urls.length !== 2 || argsPayload.urls[0] !== "https://one.example") process.exit(1);'
+node --input-type=module -e 'import { parseImportBatchPayload } from "./scripts/lodesta.mjs"; const objectPayload = parseImportBatchPayload(["{\"urls\":[\"https://one.example\"],\"createPreviews\":false}"]); const arrayPayload = parseImportBatchPayload(["[\"https://one.example\",\"ftp://blocked.example\",\"two.example\"]"]); const textPayload = parseImportBatchPayload(["one.example, https://two.example\nwww.three.example"]); const argsPayload = parseImportBatchPayload(["https://one.example","not-a-url","two.example"]); if (objectPayload.createPreviews !== false || objectPayload.urls?.[0] !== "https://one.example") process.exit(1); if (arrayPayload.urls.length !== 2 || arrayPayload.urls[1] !== "two.example") process.exit(1); if (textPayload.text.split(/[\n,]/).length !== 3) process.exit(1); if (argsPayload.urls.length !== 2 || argsPayload.urls[1] !== "two.example") process.exit(1);'
 echo "ok - CLI import batch payload parser"
 
 get_check "dashboard" "/"
@@ -411,11 +413,11 @@ assert_json "audit API" 'const data = JSON.parse(process.env.BODY); if (data.sit
 post_check "QA API" "/api/qa/run" '{"siteId":"site_joes_pizza","versionStatus":"published"}'
 assert_json "QA API" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || typeof data.passed !== "boolean") process.exit(1);'
 
-post_check "section variant update API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionVariants":{"hero_home":"compact"}}'
-assert_json "section variant update API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.sectionVariants?.hero_home !== "compact") process.exit(1);'
+post_check "section preset update API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionPresets":{"hero_home":"hero.centered_editorial"}}'
+assert_json "section preset update API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.sectionPresets?.hero_home !== "hero.centered_editorial") process.exit(1);'
 
-post_check "theme and section order API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"page_home","themePreset":"premium","sectionOrder":["hero_home","menu_home","trust_home","gallery_home","contact_home","testimonials_home","cta_home"]}'
-assert_json "theme and section order API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.themePreset !== "premium" || data.applied?.sectionOrder?.[1] !== "menu_home") process.exit(1);'
+post_check "design plan and layout order API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"page_home","designPlan":{"stylePack":"premium_editorial","typographyPack":"editorial_serif"},"layoutSectionOrder":["hero_home","menu_home","trust_home","gallery_home","contact_home","testimonials_home","cta_home"]}'
+assert_json "design plan and layout order API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.designPlan?.stylePack !== "premium_editorial" || data.applied?.layoutSectionOrder?.[1] !== "menu_home") process.exit(1);'
 
 post_check "AI edit dock API" "/api/ai/edit" '{"siteId":"site_joes_pizza","message":"Make the hero more direct, use a call CTA, and run an audit."}'
 assert_json "AI edit dock API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.mutated || !data.operations?.some((operation) => operation.type === "rewrite_hero") || !data.operations?.some((operation) => operation.type === "update_cta") || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
@@ -460,10 +462,10 @@ request GET "/api/analytics?siteId=site_joes_pizza"
 assert_success "analytics summary API"
 assert_json "analytics summary API" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.outcomesBySource) || !data.outcomesBySource.some((row) => row.key === "utm:mailer" && row.primaryActions >= 1) || !Array.isArray(data.clickMap) || !data.clickMap.some((point) => point.sectionId === "hero_home" && point.primaryActions >= 1) || !data.clickMap.some((point) => point.sectionId === "services_home" && point.elementRole === "div" && point.count >= 1) || !Array.isArray(data.sectionConversionPaths) || !data.sectionConversionPaths.some((row) => row.sectionId === "hero_home" && row.primaryActions >= 1 && row.medianTimeToActionMs === 2000) || !Array.isArray(data.funnelDropoffs) || !data.funnelDropoffs.some((row) => row.key === "form_start_to_submit" && row.fromCount >= 1 && row.toCount === 0 && row.dropoffRate === 1) || !Array.isArray(data.standardCorrelations) || !data.standardCorrelations.some((row) => row.criterionId === "conversion.mobile_sticky_action" && row.primaryActions >= 1) || !data.standardCorrelations.some((row) => row.criterionId === "technical.mobile_performance" && row.signal === "weak") || data.agentReadableRequests < 2 || !Array.isArray(data.agentReadableByResource) || !data.agentReadableByResource.some((row) => row.key === "llms_txt" && row.requests >= 1) || !data.agentReadableByResource.some((row) => row.key === "markdown_alternate" && row.requests >= 1)) process.exit(1);'
 
-request GET "/"
+request GET "/analytics/joes-pizza"
 assert_success "owner dashboard summary"
-if [[ "$BODY" != *"Owner Summary"* || "$BODY" != *"Top Pages"* || "$BODY" != *"Traffic Sources"* || "$BODY" != *"Recent Changes"* || "$BODY" != *"utm:mailer"* ]]; then
-  echo "Smoke check failed: owner dashboard did not render traffic, source, recommendations, and changes summaries" >&2
+if [[ "$BODY" != *"Analytics"* || "$BODY" != *"Traffic Sources"* || "$BODY" != *"Click Map"* || "$BODY" != *"Agent-Readable Requests"* || "$BODY" != *"utm:mailer"* ]]; then
+  echo "Smoke check failed: owner analytics did not render traffic, source, click-map, and agent-readable summaries" >&2
   exit 1
 fi
 
@@ -600,11 +602,15 @@ assert_json "business press links update API" 'const data = JSON.parse(process.e
 post_check "curated CTA update API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionId":"hero_home","props":{"primaryCta":{"label":"Call Now","href":"tel:+15551234567","role":"tel"}}}'
 assert_json "curated CTA update API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.bundle?.siteModel?.versions?.[0]?.pages?.[0]?.sections?.find((section) => section.id === "hero_home")?.props?.primaryCta?.role !== "tel") process.exit(1);'
 
-post_check "structured proof update API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionId":"testimonials_home","props":{"items":[{"quote":"Owner-approved catering proof after claim.","author":"Joe'\''s Pizza customer"},{"quote":"Private events and family dinners are supported.","author":"Owner verified"}]}}'
+post_check "structured proof update API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionId":"testimonials_home","props":{"items":[{"quote":"Catering orders can be coordinated directly with the restaurant.","author":"Joe'\''s Pizza customer"},{"quote":"Private events and family dinners are supported.","author":"Owner confirmed"}]}}'
 assert_json "structured proof update API" 'const data = JSON.parse(process.env.BODY); const section = data.bundle?.siteModel?.versions?.[0]?.pages?.[0]?.sections?.find((item) => item.id === "testimonials_home"); if (!data.ok || section?.props?.items?.length !== 2 || section.props.items[0].author !== "Joe'\''s Pizza customer") process.exit(1);'
 
 post_check "draft staging API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"page_home","sectionId":"hero_home","props":{"heading":"Pizza night should still be easy."}}'
 assert_json "draft staging API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.bundle) process.exit(1);'
+DRAFT_VERSION_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); const version = data.bundle?.siteModel?.versions?.find((candidate) => candidate.status === "draft"); if (!version?.id) process.exit(1); process.stdout.write(version.id);')"
+
+post_check "generated preview QA gate" "/api/generated-qa/run" "{\"siteId\":\"site_joes_pizza\",\"versionId\":\"${DRAFT_VERSION_ID}\",\"autoRepair\":true}"
+assert_json "generated preview QA gate" 'const data = JSON.parse(process.env.BODY); if (data.qa?.readiness !== "ready" || !data.previewUrl) process.exit(1);'
 
 post_check "confirmed publish API" "/api/sites/publish" '{"siteId":"site_joes_pizza","confirmed":true}'
 assert_json "confirmed publish API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.confirmed || !data.qa?.passed) process.exit(1);'

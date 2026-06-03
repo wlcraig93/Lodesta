@@ -1,4 +1,4 @@
-import type { BusinessProfile, CreativeBrief, Vertical } from "./models";
+import type { BusinessProfile, CreativeBrief, GenerationBrief, Vertical } from "./models";
 import type { CrawlAssessment } from "./crawler";
 import type { VerticalRecipe } from "./recipes";
 
@@ -6,12 +6,16 @@ type CreativeBriefInput = {
   business: BusinessProfile;
   recipe: VerticalRecipe;
   crawl?: CrawlAssessment;
+  generationBrief?: GenerationBrief;
 };
 
-export function createCreativeBrief({ business, recipe, crawl }: CreativeBriefInput): CreativeBrief {
+export function createCreativeBrief({ business, recipe, crawl, generationBrief }: CreativeBriefInput): CreativeBrief {
   const primaryAction = actionForGoal(recipe.primaryGoal);
   const visualEmphasis = visualEmphasisForVertical(business.vertical);
   const weakPoints = crawl?.findings.slice(0, 4) ?? [];
+  const renderableFactLabels = generationBrief?.renderableFacts
+    .map((fact) => `${fact.field}: ${Array.isArray(fact.value) ? fact.value.join(", ") : fact.value}`)
+    .slice(0, 8);
   const brandCues = [
     business.categories[0],
     business.address?.city ? `${business.address.city} market` : undefined,
@@ -27,8 +31,9 @@ export function createCreativeBrief({ business, recipe, crawl }: CreativeBriefIn
       `Optimize the first viewport for ${primaryAction}; include clear local trust proof, services, and contact path.`,
       `Use ${recipe.mood} styling with strong hierarchy, mobile-first conversion mechanics, and varied section rhythm.`,
       "Do not reproduce scraped photos, logos, or marketing copy; use generated or licensed placeholder visuals and fresh copy from facts only.",
+      renderableFactLabels?.length ? `Only express these concrete facts: ${renderableFactLabels.join("; ")}.` : "",
       weakPoints.length ? `Address current-site weaknesses: ${weakPoints.join("; ")}.` : "Assume the current site needs stronger mobile conversion and local SEO clarity."
-    ].join(" "),
+    ].filter(Boolean).join(" "),
     visualInspectionChecklist: [
       "Primary CTA is visible without scrolling on mobile and desktop.",
       "Phone, booking, ordering, or form path is visually dominant and tappable.",

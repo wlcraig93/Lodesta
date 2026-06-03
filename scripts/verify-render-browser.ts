@@ -38,8 +38,8 @@ try {
   if (result.adapter !== "playwright") {
     throw new Error(`Expected Playwright render inspection, received ${result.adapter}: ${result.unavailableReason ?? "no reason"}`);
   }
-  if (result.screenshots.length !== 2 || result.screenshots.some((screenshot) => (screenshot.bytes ?? 0) <= 0)) {
-    throw new Error("Expected non-empty desktop and mobile screenshot artifacts.");
+  if (result.screenshots.length !== 3 || result.screenshots.some((screenshot) => (screenshot.bytes ?? 0) <= 0)) {
+    throw new Error("Expected non-empty desktop, tablet, and mobile screenshot artifacts.");
   }
   if (!result.findings.some((finding) => finding.id === "render.primary_cta.desktop" && finding.severity === "pass")) {
     throw new Error("Expected desktop CTA detection to pass.");

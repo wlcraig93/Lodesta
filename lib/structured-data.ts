@@ -29,7 +29,7 @@ export function makeLocalBusinessJsonLd(business: BusinessProfile) {
     areaServed: verified(business, "serviceAreas") && business.serviceAreas.length
       ? business.serviceAreas.map((area) => ({ "@type": "Place", name: area }))
       : undefined,
-    aggregateRating: verified(business, "reviewsSummary") && business.reviewsSummary?.rating
+    aggregateRating: verified(business, "reviewsSummary") && schemaSafeReviewSummary(business)
       ? {
           "@type": "AggregateRating",
           ratingValue: business.reviewsSummary.rating,
@@ -54,6 +54,16 @@ export function serializeJsonLd(value: unknown) {
 
 function verified(business: BusinessProfile, field: string) {
   return business.provenance[field]?.verified === true;
+}
+
+function schemaSafeReviewSummary(
+  business: BusinessProfile
+): business is BusinessProfile & { reviewsSummary: { rating: number; count?: number; sources: string[] } } {
+  return Boolean(
+    business.reviewsSummary?.rating &&
+      business.reviewsSummary.sources.length > 0 &&
+      !business.reviewsSummary.sources.includes("google_places")
+  );
 }
 
 function schemaTypeForBusiness(business: BusinessProfile) {

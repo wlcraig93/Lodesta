@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
+import { generateSite } from "@/lib/site-generation-service";
+import { setSupabaseJobGenerateSite } from "@/lib/supabase/repository";
 import { requireAdmin } from "@/lib/security";
 
 export const runtime = "nodejs";
+
+setSupabaseJobGenerateSite((options) => generateSite({ ...options, repository }));
 
 export async function POST(request: Request) {
   const unauthorized = await requireAdmin(request);

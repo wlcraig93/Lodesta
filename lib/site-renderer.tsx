@@ -1,14 +1,20 @@
-import type { BusinessProfile, Experiment, ExtensionModel, PageModel, SectionModel, SiteModel, Theme } from "./models";
+import * as React from "react";
+import type { BusinessProfile, Experiment, ExtensionModel, LayoutSection, PageModel, SectionModel, SiteModel, SiteVersion, SiteVersionPresentation, Theme } from "./models";
 import { getPublishedVersion } from "./sample-data";
 import { AnalyticsTracker } from "@/components/AnalyticsTracker";
 import { ExperimentRuntime } from "@/components/ExperimentRuntime";
 import { makeLocalBusinessJsonLd, serializeJsonLd } from "./structured-data";
+import { defaultDesignPlanForVertical, sectionFromLayoutSection, typographyPacks } from "./layout-registry";
+import { SiteRendererV2 } from "./site-renderer-v2";
+import { SiteRendererV3 } from "./site-renderer-v3";
 
 type SiteRendererProps = {
   business: BusinessProfile;
   site: SiteModel;
   extensions: ExtensionModel;
+  version?: SiteVersion;
   page?: PageModel;
+  pageSlug?: string;
   theme?: Theme;
   experiments?: Experiment[];
   tracking?: boolean;
@@ -19,20 +25,63 @@ export function SiteRenderer({
   business,
   site,
   extensions,
+  version: selectedVersion,
   page,
+  pageSlug,
   theme,
   experiments = [],
   tracking = true,
   formsEnabled = true
 }: SiteRendererProps) {
-  const version = getPublishedVersion(site);
-  const activePage = page ?? version.pages[0];
+  const version = selectedVersion ?? getPublishedVersion(site);
+  if (version.rendererVersion === "layout-v2") {
+    return (
+      <SiteRendererV2
+        business={business}
+        site={site}
+        extensions={extensions}
+        version={version}
+        pageSlug={page?.slug ?? pageSlug}
+        experiments={experiments}
+        tracking={tracking}
+        formsEnabled={formsEnabled}
+      />
+    );
+  }
+  if (version.rendererVersion === "layout-v3") {
+    return (
+      <SiteRendererV3
+        business={business}
+        site={site}
+        version={version}
+        pageSlug={page?.slug ?? pageSlug}
+        experiments={experiments}
+        tracking={tracking}
+        formsEnabled={formsEnabled}
+      />
+    );
+  }
+  const activePage = page ?? (pageSlug ? version.pages.find((candidate) => candidate.slug === pageSlug) : undefined) ?? version.pages[0];
   const activeTheme = theme ?? version.theme ?? site.theme;
+  const activeDesignPlan = version.designPlan ?? defaultDesignPlanForVertical(business.vertical, activeTheme);
+  const typography = typographyPacks[activeDesignPlan.typographyPack];
   const localBusinessJson = makeLocalBusinessJsonLd(business);
+  const mobileActionBehavior = version.presentation?.mobileActionBehavior ?? "always";
+  const inlineMobileAction = mobileActionBehavior === "after_hero";
 
   return (
     <main
+      id="top"
       className="public-site"
+      data-renderer-version={version.rendererVersion}
+      data-design-schema-version={version.designSchemaVersion}
+      data-style-pack={activeDesignPlan.stylePack}
+      data-color-system={activeDesignPlan.colorSystem}
+      data-button-style={activeDesignPlan.buttonStyle}
+      data-radius-style={activeDesignPlan.radiusStyle}
+      data-image-treatment={activeDesignPlan.imageTreatment}
+      data-spacing-density={activeDesignPlan.spacingDensity}
+      data-motion-policy={activeDesignPlan.motionPolicy}
       style={
         {
           "--site-bg": activeTheme.colors.background,
@@ -42,7 +91,13 @@ export function SiteRenderer({
           "--site-primary": activeTheme.colors.primary,
           "--site-primary-text": activeTheme.colors.primaryText,
           "--site-accent": activeTheme.colors.accent,
-          "--site-border": activeTheme.colors.border
+          "--site-border": activeTheme.colors.border,
+          "--site-font-heading": typography.heading,
+          "--site-font-body": typography.body,
+          "--site-font-button": typography.button,
+          "--site-heading-weight": typography.headingWeight,
+          "--site-body-weight": typography.bodyWeight,
+          "--site-button-weight": typography.buttonWeight
         } as React.CSSProperties
       }
     >
@@ -54,18 +109,149 @@ export function SiteRenderer({
           dangerouslySetInnerHTML={{ __html: serializeJsonLd(localBusinessJson) }}
         />
       ) : null}
-      {activePage.sections.map((section) => (
-        <SectionRenderer
+      <SiteHeader business={business} />
+      {activePage.layoutSections.map((section) => (
+        <LayoutSectionRenderer
           key={section.id}
           pageId={activePage.id}
           section={section}
           business={business}
           extensions={extensions}
           formsEnabled={formsEnabled}
+          inlineMobileAction={inlineMobileAction}
+          presentation={version.presentation}
         />
       ))}
-      <MobileActionBar business={business} site={site} />
+      <SiteFooter business={business} />
+      {!inlineMobileAction ? <MobileActionBar business={business} presentation={version.presentation} /> : null}
     </main>
+  );
+}
+
+function SiteHeader({ business }: { business: BusinessProfile }) {
+  const primaryAction = primaryHeaderAction(business);
+  const navItems = siteNavItems(business);
+  return (
+    <header className="public-site-header" data-site-chrome="header">
+      <a className="public-site-brand" href="#top" aria-label={`${business.name} home`}>
+        <span aria-hidden="true">{brandInitials(business.name)}</span>
+        <strong>{business.name}</strong>
+      </a>
+      <nav className="public-site-nav" aria-label={`${business.name} navigation`}>
+        {navItems.map((item) => (
+          <a key={item.href} href={item.href}>
+            {item.label}
+          </a>
+        ))}
+      </nav>
+      <a className="button primary public-site-header-cta" href={primaryAction.href} data-analytics-role={primaryAction.role}>
+        {primaryAction.label}
+      </a>
+    </header>
+  );
+}
+
+function primaryHeaderAction(business: BusinessProfile) {
+  if (business.orderingLinks[0]) {
+    return { label: "Order online", href: business.orderingLinks[0], role: "ordering" };
+  }
+  if (business.bookingLinks[0]) {
+    return { label: "Book now", href: business.bookingLinks[0], role: "booking" };
+  }
+  if (business.phone) {
+    return { label: "Call now", href: `tel:${business.phone}`, role: "tel" };
+  }
+  return { label: "Request details", href: "#contact", role: "form" };
+}
+
+function SiteFooter({ business }: { business: BusinessProfile }) {
+  const hours = formatHoursForDisplay(business.hours).slice(0, 3);
+  const services = business.services.slice(0, 5);
+  const area = business.serviceAreas[0] ?? business.address?.city;
+  return (
+    <footer className="public-site-footer" data-site-chrome="footer">
+      <div className="public-site-footer-brand">
+        <strong>{business.name}</strong>
+        <p>{[business.categories[0], area].filter(Boolean).join(" in ") || "Local business"}</p>
+      </div>
+      <div className="public-site-footer-block">
+        <span>Contact</span>
+        {business.phone ? <a href={`tel:${business.phone}`}>{formatPhoneForDisplay(business.phone)}</a> : null}
+        {business.email ? <a href={`mailto:${business.email}`}>{business.email}</a> : null}
+        {business.address?.street ? (
+          <p>
+            {business.address.street}
+            {business.address.city ? `, ${business.address.city}` : ""}
+            {business.address.region ? `, ${business.address.region}` : ""}
+          </p>
+        ) : null}
+      </div>
+      {services.length ? (
+        <div className="public-site-footer-block">
+          <span>Services</span>
+          <ul>
+            {services.map((service) => (
+              <li key={service}>{service}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {hours.length ? (
+        <div className="public-site-footer-block">
+          <span>Hours</span>
+          <dl className="hours-list footer-hours-list">
+            {hours.map((entry) => (
+              <div key={`${entry.label}-${entry.value}`}>
+                <dt>{entry.label}</dt>
+                <dd>{entry.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+    </footer>
+  );
+}
+
+function LayoutSectionRenderer({
+  section,
+  pageId,
+  business,
+  extensions,
+  formsEnabled,
+  inlineMobileAction,
+  presentation
+}: {
+  section: LayoutSection;
+  pageId: string;
+  business: BusinessProfile;
+  extensions: ExtensionModel;
+  formsEnabled: boolean;
+  inlineMobileAction: boolean;
+  presentation?: SiteVersionPresentation;
+}) {
+  const projectedSection = sectionFromLayoutSection(section);
+  const heroHasPhoneAction = section.kind === "hero" && sectionHasPhoneAction(projectedSection);
+  return (
+    <div
+      className="rendered-section-shell layout-section-shell"
+      data-layout-section-kind={section.kind}
+      data-preset={section.preset}
+      data-background={section.background}
+      data-width={section.width}
+      data-spacing={section.spacing}
+      data-mobile-behavior={section.mobileBehavior}
+      data-visibility={section.visibility}
+    >
+      <SectionRenderer
+        pageId={pageId}
+        section={projectedSection}
+        business={business}
+        extensions={extensions}
+        formsEnabled={formsEnabled}
+      />
+      {inlineMobileAction && section.kind === "hero" && !heroHasPhoneAction ? <MobileActionBar business={business} presentation={presentation} /> : null}
+    </div>
   );
 }
 
@@ -117,15 +303,27 @@ function HeroSection({ section, business }: { section: SectionModel; business: B
   const imageUrl = stringProp(section.props.imageUrl);
   const primaryCta = ctaProp(section.props.primaryCta);
   const secondaryCta = ctaProp(section.props.secondaryCta);
+  const heroMediaMaxHeight = section.responsiveOverrides?.heroMediaMaxHeight;
 
   return (
-    <section className={`site-section hero hero-${section.variant}`} data-section-id={section.id}>
+    <section
+      className={`site-section hero hero-${section.variant}`}
+      data-section-id={section.id}
+      data-hero-scale={section.responsiveOverrides?.heroScale ?? "standard"}
+      data-compact-above-fold={section.responsiveOverrides?.compactAboveFold ? "true" : "false"}
+      style={
+        {
+          "--hero-media-max-height-desktop": heroMediaMaxHeight?.desktop ? `${heroMediaMaxHeight.desktop}px` : undefined,
+          "--hero-media-max-height-mobile": heroMediaMaxHeight?.mobile ? `${heroMediaMaxHeight.mobile}px` : undefined
+        } as React.CSSProperties
+      }
+    >
       <div className="hero-copy">
-        <p className="eyebrow">{stringProp(section.props.eyebrow) || business.categories[0]}</p>
+        <p className="eyebrow" style={{ fontSize: 14 }}>{stringProp(section.props.eyebrow) || business.categories[0]}</p>
         <h1>{stringProp(section.props.heading) || business.name}</h1>
-        <p className="hero-body">{stringProp(section.props.body) || business.description}</p>
+        <p className="hero-body" style={{ fontSize: 16 }}>{stringProp(section.props.body) || business.description}</p>
         <div className="button-row">
-          {primaryCta ? <TrackedLink cta={primaryCta} className="button primary" /> : null}
+          {primaryCta ? <TrackedLink cta={primaryCta} className="button primary" primaryHero /> : null}
           {secondaryCta ? <TrackedLink cta={secondaryCta} className="button secondary" /> : null}
         </div>
       </div>
@@ -154,7 +352,7 @@ function TrustBar({ section }: { section: SectionModel }) {
 function FeatureGrid({ section }: { section: SectionModel }) {
   const items = objectArrayProp(section.props.items);
   return (
-    <section className="site-section" data-section-id={section.id}>
+    <section id="services" className="site-section" data-section-id={section.id}>
       <div className="section-heading">
         <p className="eyebrow">{stringProp(section.props.eyebrow) || "Built for action"}</p>
         <h2>{stringProp(section.props.heading) || "Services designed for local customers"}</h2>
@@ -205,7 +403,7 @@ function TestimonialsSection({ section, business }: { section: SectionModel; bus
         {rating || count ? (
           <p>
             {rating ? `${rating} average rating` : "Review profile detected"}
-            {count ? ` across ${count} reviews` : ""}. Verified excerpts can be connected after claim.
+            {count ? ` across ${count} reviews` : ""}. Public review signals help customers evaluate fit.
           </p>
         ) : stringProp(section.props.body) ? (
           <p>{stringProp(section.props.body)}</p>
@@ -263,6 +461,7 @@ function CtaSection({ section }: { section: SectionModel }) {
 
 function MapSection({ section, business }: { section: SectionModel; business: BusinessProfile }) {
   const areas = arrayProp(section.props.areas);
+  const hours = formatHoursForDisplay(business.hours);
   const addressLabel = business.address?.street
     ? `${business.address.street}, ${business.address.city ?? ""} ${business.address.region ?? ""}`.trim()
     : "";
@@ -281,13 +480,13 @@ function MapSection({ section, business }: { section: SectionModel; business: Bu
       </div>
       <div className="map-card">
         <strong>{business.name}</strong>
-        {addressLabel ? <p>{addressLabel}</p> : <p>Service area details are verified during claim.</p>}
-        {business.hours ? (
+        {addressLabel ? <p>{addressLabel}</p> : <p>Contact the business for current service-area details.</p>}
+        {hours.length ? (
           <dl className="hours-list">
-            {Object.entries(business.hours).slice(0, 7).map(([day, value]) => (
-              <div key={day}>
-                <dt>{day}</dt>
-                <dd>{value}</dd>
+            {hours.map((entry) => (
+              <div key={`${entry.label}-${entry.value}`}>
+                <dt>{entry.label}</dt>
+                <dd>{entry.value}</dd>
               </div>
             ))}
           </dl>
@@ -308,7 +507,7 @@ function TeamSection({ section }: { section: SectionModel }) {
     <section className="site-section team-section" data-section-id={section.id}>
       <div className="section-heading">
         <p className="eyebrow">{stringProp(section.props.eyebrow) || "People"}</p>
-        <h2>{stringProp(section.props.heading) || "Owner-verified expertise belongs here"}</h2>
+        <h2>{stringProp(section.props.heading) || "Meet the people customers work with"}</h2>
         {stringProp(section.props.body) ? <p>{stringProp(section.props.body)}</p> : null}
       </div>
       <div className="team-grid">
@@ -341,7 +540,7 @@ function PressVideoSection({ section, business }: { section: SectionModel; busin
             {link.label}
           </a>
         ))}
-        {visibleLinks.length === 0 ? <p>Press, video, and social proof can be connected after claim.</p> : null}
+        {visibleLinks.length === 0 ? <p>Public profiles and media links can appear here when available.</p> : null}
       </div>
     </section>
   );
@@ -394,6 +593,7 @@ function ContactSection({
   const formId = stringProp(section.props.formId);
   const form = extensions.forms.find((candidate) => candidate.id === formId);
   const primaryCta = ctaProp(section.props.primaryCta);
+  const hours = formatHoursForDisplay(business.hours);
 
   return (
     <section id="contact" className="site-section contact-section" data-section-id={section.id}>
@@ -401,14 +601,21 @@ function ContactSection({
         <p className="eyebrow">Contact</p>
         <h2>{stringProp(section.props.heading) || `Contact ${business.name}`}</h2>
         <div className="contact-facts">
-          {business.phone ? <a href={`tel:${business.phone}`}>{business.phone}</a> : null}
+          {business.phone ? <a href={`tel:${business.phone}`}>{formatPhoneForDisplay(business.phone)}</a> : null}
           {business.address?.street ? (
             <p>
               {business.address.street}, {business.address.city}, {business.address.region}
             </p>
           ) : null}
-          {business.hours ? (
-            <p>{Object.entries(business.hours)[0]?.join(": ")}</p>
+          {hours.length ? (
+            <dl className="hours-list contact-hours-list">
+              {hours.slice(0, 4).map((entry) => (
+                <div key={`${entry.label}-${entry.value}`}>
+                  <dt>{entry.label}</dt>
+                  <dd>{entry.value}</dd>
+                </div>
+              ))}
+            </dl>
           ) : null}
         </div>
         {primaryCta ? <TrackedLink cta={primaryCta} className="button primary" /> : null}
@@ -447,7 +654,12 @@ function ContactSection({
       ) : form ? (
         <div className="lead-form lead-form-disabled" data-preview-disabled="lead-form">
           <strong>{form.name}</strong>
-          <p>Lead capture activates after the site is claimed and published.</p>
+          <p>{stringProp(section.props.body) || "Send the details and preferred contact path so the business can respond clearly."}</p>
+          <ul className="lead-form-preview-fields" aria-label={`${form.name} fields`}>
+            {form.fields.slice(0, 4).map((field) => (
+              <li key={field.id}>{field.label}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </section>
@@ -459,15 +671,19 @@ function SimpleSection({ section, fallbackHeading }: { section: SectionModel; fa
     <section className="site-section simple-section" data-section-id={section.id}>
       <p className="eyebrow">{section.type.replace("_", " ")}</p>
       <h2>{stringProp(section.props.heading) || fallbackHeading}</h2>
-      <p>{stringProp(section.props.body) || "This section is ready for generated content and owner-approved edits."}</p>
+      <p>{stringProp(section.props.body) || "Clear context and a direct next step are available here."}</p>
     </section>
   );
 }
 
-function MobileActionBar({ business }: { business: BusinessProfile; site: SiteModel }) {
-  if (!business.phone) return null;
+function MobileActionBar({ business, presentation }: { business: BusinessProfile; presentation?: SiteVersionPresentation }) {
+  if (!business.phone || presentation?.mobileActionBehavior === "disabled") return null;
   return (
-    <div className="mobile-action-bar">
+    <div
+      className="mobile-action-bar"
+      data-behavior={presentation?.mobileActionBehavior ?? "always"}
+      data-reserved-space={presentation?.reservedMobileActionSpace ? "true" : "false"}
+    >
       <a href={`tel:${business.phone}`} data-analytics-role="sticky-tel">
         Call now
       </a>
@@ -475,9 +691,22 @@ function MobileActionBar({ business }: { business: BusinessProfile; site: SiteMo
   );
 }
 
-function TrackedLink({ cta, className }: { cta: { label: string; href: string; role?: string }; className: string }) {
+function TrackedLink({
+  cta,
+  className,
+  primaryHero = false
+}: {
+  cta: { label: string; href: string; role?: string };
+  className: string;
+  primaryHero?: boolean;
+}) {
   return (
-    <a className={className} href={cta.href} data-analytics-role={cta.role ?? "cta"}>
+    <a
+      className={className}
+      href={cta.href}
+      data-analytics-role={cta.role ?? "cta"}
+      data-primary-hero-cta={primaryHero ? "true" : undefined}
+    >
       {cta.label}
     </a>
   );
@@ -565,4 +794,73 @@ function ctaProp(value: unknown) {
     href: String(value.href),
     role: "role" in value ? String(value.role) : undefined
   };
+}
+
+function sectionHasPhoneAction(section: SectionModel) {
+  return [section.props.primaryCta, section.props.secondaryCta].some((value) => ctaProp(value)?.role === "tel");
+}
+
+function siteNavItems(business: BusinessProfile) {
+  return [
+    { label: "Services", href: "#services" },
+    ...(business.hours ? [{ label: "Hours", href: "#contact" }] : []),
+    { label: "Contact", href: "#contact" }
+  ];
+}
+
+function brandInitials(name: string) {
+  const parts = name.split(/\s+/).filter(Boolean);
+  const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  return initials || "L";
+}
+
+function formatHoursForDisplay(hours: BusinessProfile["hours"]) {
+  if (!hours) return [];
+  return Object.entries(hours)
+    .map(([key, value]) => formatHoursEntry(key, value))
+    .filter((entry): entry is { label: string; value: string } => Boolean(entry))
+    .slice(0, 7);
+}
+
+function formatHoursEntry(key: string, value: string) {
+  const rawValue = value.trim();
+  if (!rawValue) return undefined;
+  const normalizedKey = key.trim();
+  const colonMatch = rawValue.match(/^([A-Za-z][A-Za-z ,/&-]{1,32}):\s*(.+)$/);
+  if (/^(hours|weekday)_\d+$/i.test(normalizedKey)) {
+    if (colonMatch) return { label: colonMatch[1]!.trim(), value: colonMatch[2]!.trim() };
+    return { label: "Hours", value: prettifyHoursValue(rawValue) };
+  }
+  return { label: prettifyHoursLabel(normalizedKey), value: prettifyHoursValue(rawValue) };
+}
+
+function prettifyHoursLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b(mon|tue|wed|thu|fri|sat|sun)\b/gi, (match) => dayAbbreviation(match))
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function prettifyHoursValue(value: string) {
+  return value.replace(/\bMo-Fr\b/g, "Mon-Fri").replace(/\bSa-Su\b/g, "Sat-Sun");
+}
+
+function dayAbbreviation(value: string) {
+  const days: Record<string, string> = {
+    mon: "Mon",
+    tue: "Tue",
+    wed: "Wed",
+    thu: "Thu",
+    fri: "Fri",
+    sat: "Sat",
+    sun: "Sun"
+  };
+  return days[value.toLowerCase()] ?? value;
+}
+
+function formatPhoneForDisplay(value: string) {
+  const digits = value.replace(/\D/g, "");
+  const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (national.length !== 10) return value;
+  return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
 }

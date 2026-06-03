@@ -4,6 +4,7 @@ import { repository } from "@/lib/repository";
 import { runSiteQa } from "@/lib/qa";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { claimGateForBundle } from "@/lib/site-publication";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 
 const publishSchema = z.object({
   siteId: z.string().min(1),
@@ -44,6 +45,19 @@ export async function POST(request: Request) {
   const qa = runSiteQa(bundle, { versionStatus: "draft" });
   if (!qa.passed) {
     return NextResponse.json({ error: "Draft QA failed. Fix blocking checks before publishing.", qa }, { status: 400 });
+  }
+  const draftVersion = bundle.siteModel.versions.find((version) => version.status === "draft");
+  if (!draftVersion) return NextResponse.json({ error: "No draft version exists." }, { status: 400 });
+  const publishReadiness = getEffectiveGenerationQaReadiness(bundle, draftVersion);
+  if (publishReadiness !== "ready") {
+    return NextResponse.json(
+      {
+        error: "Generated preview QA must pass before publishing.",
+        publishReadiness,
+        blockers: draftVersion.generationQa?.blockers ?? []
+      },
+      { status: 400 }
+    );
   }
   const result = await repository.publishDraft(parsed.data.siteId);
   if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });

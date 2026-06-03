@@ -1,14 +1,14 @@
 import { runAudit } from "./audit";
-import type { SiteBundle, SiteVersion } from "./models";
-import { approvedVariantsForSection } from "./section-variants";
-import { themeForPreset, type ThemePresetId } from "./theme-presets";
+import type { DesignPlan, LayoutSectionPreset, SiteBundle, SiteVersion } from "./models";
+import { applyPresetToLayoutSection, syncVersionLegacySections, validateDesignPlan } from "./layout-registry";
+import { themeForPreset } from "./theme-presets";
 
 export type UpdateSiteDesignInput = {
   siteId: string;
   pageId?: string;
-  themePreset?: ThemePresetId;
-  sectionOrder?: string[];
-  sectionVariants?: Record<string, string>;
+  designPlan?: Partial<DesignPlan>;
+  layoutSectionOrder?: string[];
+  sectionPresets?: Record<string, LayoutSectionPreset>;
 };
 
 export type UpdateSiteDesignResult =
@@ -17,9 +17,9 @@ export type UpdateSiteDesignResult =
       bundle: SiteBundle;
       draftVersionId: string;
       applied: {
-        themePreset?: ThemePresetId;
-        sectionOrder?: string[];
-        sectionVariants?: Record<string, string>;
+        designPlan?: Partial<DesignPlan>;
+        layoutSectionOrder?: string[];
+        sectionPresets?: Record<string, LayoutSectionPreset>;
       };
     }
   | {
@@ -30,51 +30,60 @@ export type UpdateSiteDesignResult =
 export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesignInput): UpdateSiteDesignResult {
   const draft = clonePublishedAsDraft(bundle);
   const applied: {
-    themePreset?: ThemePresetId;
-    sectionOrder?: string[];
-    sectionVariants?: Record<string, string>;
+    designPlan?: Partial<DesignPlan>;
+    layoutSectionOrder?: string[];
+    sectionPresets?: Record<string, LayoutSectionPreset>;
   } = {};
 
-  if (input.themePreset) {
+  if (input.designPlan) {
+    const nextDesignPlan = {
+      ...draft.designPlan,
+      ...input.designPlan
+    };
+    const designIssues = validateDesignPlan(nextDesignPlan);
+    if (designIssues.length) return { ok: false, reason: designIssues.join(" ") };
+    draft.designPlan = nextDesignPlan;
+    applied.designPlan = input.designPlan;
+  }
+
+  if (input.designPlan?.colorSystem) {
     draft.theme = themeForPreset(
       bundle.businessProfile.vertical,
-      input.themePreset,
+      input.designPlan.colorSystem,
       draft.theme ?? bundle.siteModel.theme
     );
-    applied.themePreset = input.themePreset;
   }
 
   const page = draft.pages.find((candidate) => candidate.id === (input.pageId ?? "page_home")) ?? draft.pages[0];
-  if ((input.sectionOrder || input.sectionVariants) && !page) return { ok: false, reason: "No editable page found." };
+  if ((input.layoutSectionOrder || input.sectionPresets) && !page) return { ok: false, reason: "No editable page found." };
 
-  if (input.sectionOrder && page) {
-    const existingIds = page.sections.map((section) => section.id);
-    const requestedIds = input.sectionOrder;
+  if (input.layoutSectionOrder && page) {
+    const existingIds = page.layoutSections.map((section) => section.id);
+    const requestedIds = input.layoutSectionOrder;
     const existingSet = new Set(existingIds);
     const requestedSet = new Set(requestedIds);
     if (existingIds.length !== requestedIds.length || existingIds.some((id) => !requestedSet.has(id)) || requestedIds.some((id) => !existingSet.has(id))) {
-      return { ok: false, reason: "Section order must include every current section exactly once." };
+      return { ok: false, reason: "Layout section order must include every current layout section exactly once." };
     }
-    const sectionsById = new Map(page.sections.map((section) => [section.id, section]));
-    page.sections = requestedIds.map((id) => sectionsById.get(id)).filter((section): section is NonNullable<typeof section> => Boolean(section));
-    applied.sectionOrder = requestedIds;
+    const sectionsById = new Map(page.layoutSections.map((section) => [section.id, section]));
+    page.layoutSections = requestedIds.map((id) => sectionsById.get(id)).filter((section): section is NonNullable<typeof section> => Boolean(section));
+    applied.layoutSectionOrder = requestedIds;
   }
 
-  if (input.sectionVariants && page) {
-    const appliedVariants: Record<string, string> = {};
-    for (const [sectionId, variant] of Object.entries(input.sectionVariants)) {
-      const section = page.sections.find((candidate) => candidate.id === sectionId);
-      if (!section) return { ok: false, reason: `Section ${sectionId} was not found on the editable page.` };
-      const approved = approvedVariantsForSection(section.type, section.variant);
-      if (!approved.some((option) => option.id === variant)) {
-        return { ok: false, reason: `Variant ${variant} is not approved for ${section.type} sections.` };
+  if (input.sectionPresets && page) {
+    const appliedPresets: Record<string, LayoutSectionPreset> = {};
+    for (const [sectionId, preset] of Object.entries(input.sectionPresets)) {
+      const section = page.layoutSections.find((candidate) => candidate.id === sectionId);
+      if (!section) return { ok: false, reason: `Layout section ${sectionId} was not found on the editable page.` };
+      if (!applyPresetToLayoutSection(section, preset)) {
+        return { ok: false, reason: `Preset ${preset} is not approved for ${section.kind} sections.` };
       }
-      section.variant = variant;
-      appliedVariants[sectionId] = variant;
+      appliedPresets[sectionId] = preset;
     }
-    applied.sectionVariants = appliedVariants;
+    applied.sectionPresets = appliedPresets;
   }
 
+  syncVersionLegacySections(draft);
   bundle.optimizationFindings = runAudit(bundle.businessProfile, bundle.siteModel);
   return {
     ok: true,

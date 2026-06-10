@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 
 export type SeoMetadataIssueV2 = {
   id: string;
@@ -20,7 +20,7 @@ export type SeoMetadataAuditV2Result = {
     warnings: number;
     passes: number;
   };
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -45,10 +45,10 @@ export function runSeoMetadataAuditV2(input: {
     scorecard
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_seo_metadata_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "seo_metadata_report",
     artifactVersion: "seo-metadata-report-v2",
     producerId: "seo.metadata",

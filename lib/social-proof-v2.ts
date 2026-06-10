@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, PublicPresenceSignal, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
+import type { SiteArtifactRecord, PublicPresenceSignal, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
 
 export type SocialProofDisplayPolicyV2 = "durable_render" | "live_only" | "reference_only" | "blocked";
 
@@ -36,7 +36,7 @@ export type SocialProofAuditV2Result = {
     warnings: number;
   };
   recommendedDisplay: "durable_proof_section" | "live_google_link_or_widget" | "omit_static_proof";
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -73,10 +73,10 @@ export function runSocialProofAuditV2(input: {
     recommendedDisplay
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_social_proof_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "social_proof_report",
     artifactVersion: "social-proof-report-v2",
     producerId: "proof.social-proof",

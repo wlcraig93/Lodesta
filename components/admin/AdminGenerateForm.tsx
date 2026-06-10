@@ -18,12 +18,18 @@ type IntakeJobStatus = {
     errorCode: string | null;
     failureReason: string | null;
     runId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
   };
-  generation?: {
+  candidate?: {
     id?: string;
     businessName?: string;
     readiness?: string | null;
     adminReviewUrl?: string;
+    createdAt?: string;
+    updatedAt?: string;
   };
   worker?: {
     state: "active" | "not_processing";
@@ -50,13 +56,13 @@ export function AdminGenerateForm() {
         const response = await fetch(statusUrl, { headers: { Accept: "application/json" } });
         const payload = (await response.json().catch(() => ({}))) as IntakeJobStatus;
         if (cancelled) return;
-        setJobStatus(response.ok ? payload : { error: payload.error ?? "Unable to load generation job status." });
+        setJobStatus(response.ok ? payload : { error: payload.error ?? "Unable to load candidate job status." });
         const status = payload.job?.status;
         if (status === "queued" || status === "running") {
           timer = setTimeout(poll, 2500);
         }
       } catch (error) {
-        if (!cancelled) setJobStatus({ error: error instanceof Error ? error.message : "Unable to load generation job status." });
+        if (!cancelled) setJobStatus({ error: error instanceof Error ? error.message : "Unable to load candidate job status." });
       }
     }
 
@@ -84,30 +90,30 @@ export function AdminGenerateForm() {
         })
       });
       const payload = (await response.json().catch(() => ({}))) as IntakeResponse;
-      setResult(response.ok ? payload : { error: payload.error ?? "Generation failed." });
+      setResult(response.ok ? payload : { error: payload.error ?? "Candidate failed." });
     } catch (error) {
-      setResult({ error: error instanceof Error ? error.message : "Generation failed." });
+      setResult({ error: error instanceof Error ? error.message : "Candidate failed." });
     } finally {
       setSubmitting(false);
     }
   }
 
-  const reviewUrl = jobStatus?.generation?.adminReviewUrl;
+  const reviewUrl = jobStatus?.candidate?.adminReviewUrl;
   const telemetryUrl = jobStatus?.job?.runId ? `/admin/runs/${jobStatus.job.runId}` : undefined;
   const jobState = jobStatus?.job?.status;
   const failureReason = jobStatus?.job?.failureReason;
   const statusText = jobStatus?.worker?.state === "not_processing"
     ? "Queued; no worker has picked this up yet."
     : jobState === "queued"
-      ? "Queued for generation."
+      ? "Queued for candidate."
       : jobState === "running"
-        ? "Generation is running."
+        ? "Candidate is running."
         : jobState === "completed"
-          ? "Generation completed."
+          ? "Candidate completed."
           : jobState === "failed"
-            ? failureReason ?? "Generation failed."
+            ? failureReason ?? "Candidate failed."
             : result?.jobId
-              ? "Generation job created."
+              ? "Candidate job created."
               : undefined;
 
   return (
@@ -135,23 +141,30 @@ export function AdminGenerateForm() {
         />
       </label>
       {submitting ? (
-        <div className="generation-progress" role="status" aria-live="polite">
+        <div className="candidate-progress" role="status" aria-live="polite">
           <span className="loading-spinner" aria-hidden="true" />
           <div>
-            <strong>Queueing site generation</strong>
-            <span>The worker will run crawl, model planning, visual QA, and candidate persistence.</span>
+            <strong>Queueing candidate</strong>
+            <span>The worker will crawl, plan, render, QA, and persist a candidate snapshot.</span>
           </div>
         </div>
       ) : (
         <AdminButton variant="primary" type="submit" disabled={!canSubmit}>
-          Create site generation
+          Create candidate
         </AdminButton>
       )}
       {result?.error ? <p className="form-status error-text">{result.error}</p> : null}
       {result && !result.error ? (
-        <div className="generation-result">
-          <strong>{jobStatus?.generation?.businessName ?? "Site generation queued"}</strong>
+        <div className="candidate-result">
+          <strong>{jobStatus?.candidate?.businessName ?? "Candidate queued"}</strong>
           {statusText ? <p className={jobState === "failed" ? "form-status error-text" : "muted"}>{statusText}</p> : null}
+          <div className="candidate-result-meta" aria-label="Candidate timing">
+            {jobStatus?.job?.createdAt ? <span>Job queued {formatDate(jobStatus.job.createdAt)}</span> : null}
+            {jobStatus?.job?.startedAt ? <span>Started {formatDate(jobStatus.job.startedAt)}</span> : null}
+            {jobStatus?.job?.completedAt ? <span>Completed {formatDate(jobStatus.job.completedAt)}</span> : null}
+            {jobStatus?.candidate?.createdAt ? <span>Candidate created {formatDate(jobStatus.candidate.createdAt)}</span> : null}
+            {jobStatus?.candidate?.id ? <span>{jobStatus.candidate.id}</span> : result.jobId ? <span>Job {result.jobId}</span> : null}
+          </div>
           <AdminButtonRow>
             {reviewUrl ? (
               <AdminButtonLink variant="secondary" size="sm" href={reviewUrl}>
@@ -160,7 +173,7 @@ export function AdminGenerateForm() {
             ) : null}
             {telemetryUrl ? (
               <AdminButtonLink variant="secondary" size="sm" href={telemetryUrl}>
-                Telemetry
+                Activity
               </AdminButtonLink>
             ) : null}
           </AdminButtonRow>
@@ -168,4 +181,13 @@ export function AdminGenerateForm() {
       ) : null}
     </form>
   );
+}
+
+function formatDate(input: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(input));
 }

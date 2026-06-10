@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 
 export type BrandMarkGenerationGateV2Result = {
   skillId: "brand.mark-generation";
@@ -15,7 +15,7 @@ export type BrandMarkGenerationGateV2Result = {
     requiredApproval: string[];
     prohibitedActions: string[];
   };
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -41,7 +41,7 @@ export function runBrandMarkGenerationGateV2(input: {
     prohibitedActions: [
       "Do not copy or trace scraped favicons, logos, or trademarked marks.",
       "Do not publish generated marks from scraped reference cues.",
-      "Do not serialize generated marks into public site output without an approved artifact and promotion path."
+      "Do not serialize generated marks into public site output without an approved artifact and acceptance path."
     ]
   };
   const payload = {
@@ -49,10 +49,10 @@ export function runBrandMarkGenerationGateV2(input: {
     report
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_brand_mark_generation_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "brand_mark_generation_report",
     artifactVersion: "brand-mark-generation-gate-v1",
     producerId: "brand.mark-generation",

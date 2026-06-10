@@ -1,3 +1,5 @@
+import { configuredAppOrigin } from "./app-origin";
+
 export type HeaderReader = {
   get(name: string): string | null;
 };
@@ -23,7 +25,8 @@ export function requestOrigin(headers: HeaderReader) {
 
 export function isPlatformHost(hostname: string) {
   if (isLocalHost(hostname)) return true;
-  const appHost = process.env.NEXT_PUBLIC_APP_URL ? normalizeHostname(new URL(process.env.NEXT_PUBLIC_APP_URL).host) : "";
+  const origin = configuredAppOrigin();
+  const appHost = origin ? normalizeHostname(new URL(origin).host) : "";
   if (appHost && hostname === appHost) return true;
   return hostname.endsWith(".railway.app") || hostname.endsWith(".up.railway.app");
 }

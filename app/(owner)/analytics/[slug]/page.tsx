@@ -14,10 +14,10 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
   await requireSiteOwnerAccess(bundle, `/analytics/${slug}`);
 
   const siteId = bundle.businessProfile.siteId;
-  const [summary, events, leads] = await Promise.all([
+  const [summary, events, inquiries] = await Promise.all([
     repository.analyticsSummary(siteId),
     repository.listAnalyticsEvents(siteId),
-    repository.listFormSubmissions(siteId)
+    repository.listInquiries(siteId)
   ]);
   const version = getPublishedVersion(bundle.siteModel);
   const sectionNames = new Map(
@@ -38,7 +38,7 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
   const latestVitals = latestWebVitals(events);
   const primaryActions = summary.primaryActions;
   const primaryActionRate = summary.actionRate;
-  const leadRate = summary.sessions ? leads.length / summary.sessions : 0;
+  const leadRate = summary.sessions ? inquiries.length / summary.sessions : 0;
 
   return (
     <main className="admin-page">
@@ -76,7 +76,7 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
       </section>
 
       <section className="metric-row">
-        <Metric label="Leads" value={leads.length} />
+        <Metric label="Leads" value={inquiries.length} />
         <Metric label="Lead rate" value={`${Math.round(leadRate * 100)}%`} />
         <Metric label="Avg engaged/session" value={`${summary.avgEngagedSeconds}s`} />
         <Metric label="Avg scroll depth" value={`${summary.avgScrollDepth}%`} />

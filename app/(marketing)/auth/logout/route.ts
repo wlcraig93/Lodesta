@@ -9,5 +9,5 @@ export async function POST(request: Request) {
     await supabase.auth.signOut();
   }
 
-  return NextResponse.redirect(new URL("/auth/login", request.url));
+  return NextResponse.redirect(new URL("/auth/login", request.url), 303);
 }

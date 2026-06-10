@@ -275,7 +275,7 @@ async function writeCoverageReport(results: ReferenceInspectionResult[]) {
     "",
     "These gaps are inferred from the benchmark matrix and should drive the next renderer/component pass. They are not one-off fixes for any single business.",
     "",
-    "- First viewport composition needs richer hero anatomy controls: media collage, atmospheric masthead, quiet centerpiece, and text-first professional grid should be selectable without custom CSS.",
+    "- First viewport composition needs richer hero template controls: media collage, atmospheric masthead, quiet centerpiece, and text-first professional grid should be selectable without custom CSS.",
     "- Header integration needs explicit compatibility rules with hero mode: transparent overlay, compact sticky, solid editorial, minimal wordmark, and utility-call variants cannot all share the same visual treatment.",
     "- Media rhythm needs section-level controls for full-bleed slabs, mosaics, asymmetric image/text rows, calm lifestyle crops, and text-first no-media fallbacks.",
     "- Service presentation needs multiple horizontal patterns: problem-led service rows, warm tiles, editorial capability rows, hospitality/menu previews, program cards, and premium showcase blocks.",
@@ -287,8 +287,8 @@ async function writeCoverageReport(results: ReferenceInspectionResult[]) {
     "",
     `- Screenshotted references in this run: ${successful.length}`,
     `- Failed references in this run: ${failed.length}`,
-    "- Manual reproduction of representative references is verified separately by `npm run verify:generated-site-v3-benchmark-reproductions`.",
-    "- Holdout mapping without one-off CSS is verified separately by `npm run verify:generated-site-v3-benchmark-holdouts`.",
+    "- Canonical section-template rendering is verified separately by `npm run verify:generated-site-v3-section-template-library`.",
+    "- Historical benchmark references remain evidence for gaps and visual targets; executable benchmark reproduction fixtures have been removed from the go-forward renderer path.",
     ""
   ];
   await writeFile(reportPath, lines.join("\n"), "utf8");

@@ -1,5 +1,5 @@
 -- Lodesta Agent Telemetry V1
--- Additive migration for internal site-generation run telemetry.
+-- Additive migration for internal site-candidate run telemetry.
 
 create table if not exists agent_runs (
   id text primary key,

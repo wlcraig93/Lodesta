@@ -1,8 +1,6 @@
 import type { GeneratedSiteV3Mode, SiteArtDirectionRecipeV3 } from "./models";
 
-export const defaultGeneratedSiteV3Mode: GeneratedSiteV3Mode = "fixture_only";
-
-export const generatedSiteV3AllNewGenerationsConfirmation = "confirm_layout_v3_all_new_generations";
+export const defaultGeneratedSiteV3Mode: GeneratedSiteV3Mode = "all_new_generations";
 
 export function getGeneratedSiteV3Mode(env: NodeJS.ProcessEnv = process.env): GeneratedSiteV3Mode {
   const value = env.GENERATED_SITE_V3_MODE;
@@ -34,7 +32,7 @@ export function isGeneratedSiteV3Allowed(input: {
     if (!input.explicitOperatorRequest || !input.sourceHost) return false;
     return input.allowlistHosts?.includes(input.sourceHost.toLowerCase()) ?? false;
   }
-  return env.GENERATED_SITE_V3_CONFIRM_ALL_NEW_GENERATIONS === generatedSiteV3AllNewGenerationsConfirmation;
+  return true;
 }
 
 export const generatedSiteV3ArtifactTypes = [

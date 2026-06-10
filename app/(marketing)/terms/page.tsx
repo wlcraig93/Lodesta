@@ -17,7 +17,7 @@ const termsSections = [
   },
   {
     title: "2. Service description",
-    body: "Lodesta provides managed website, local presence, analytics, lead capture, and related operational tools for small businesses. Features may change as the product evolves."
+    body: "Lodesta provides managed website, local presence, analytics, inquiry and lead capture, AI triage, and related operational tools for small businesses. Features may change as the product evolves."
   },
   {
     title: "3. Accounts and access",

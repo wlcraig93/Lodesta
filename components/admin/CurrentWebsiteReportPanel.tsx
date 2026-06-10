@@ -40,7 +40,7 @@ export function CurrentWebsiteReportPanel({ bundle, generatedEvaluation }: Curre
 
         <div className="score-compare workspace-score-compare">
           <ScoreCard label="Current site" evaluation={sourceEvaluation} emptyLabel="Not scored" />
-          <ScoreCard label="Generated site" evaluation={generatedEvaluation} />
+          <ScoreCard label="Preview" evaluation={generatedEvaluation} />
         </div>
       </section>
 
@@ -61,15 +61,15 @@ export function CurrentWebsiteReportPanel({ bundle, generatedEvaluation }: Curre
         </section>
 
         <section className="panel">
-          <h2>Generated improvements</h2>
+          <h2>Preview improvements</h2>
           <div className="finding-list">
             {passedGeneratedChecks.length ? (
               passedGeneratedChecks.map((check) => <StandardCheckCard key={check.criterionId} check={check} />)
             ) : (
               <article className="finding-card compact-card">
                 <span className="badge">pending</span>
-                <h3>No generated-site improvements are attached</h3>
-                <p>Generated scoring will populate here after a site version is available.</p>
+                <h3>No preview improvements are attached</h3>
+                <p>Preview scoring will populate here after a site version is available.</p>
               </article>
             )}
           </div>

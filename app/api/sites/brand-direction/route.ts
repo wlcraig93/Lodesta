@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     version,
     siteId: bundle.businessProfile.siteId
   });
-  for (const artifact of result.artifacts) await repository.upsertGenerationArtifact(artifact);
+  for (const artifact of result.artifacts) await repository.upsertSiteArtifact(artifact);
 
   return NextResponse.json({
     skillId: result.skillId,

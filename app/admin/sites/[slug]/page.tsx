@@ -16,7 +16,6 @@ import { RunAssetSelectionButton } from "@/components/admin/RunAssetSelectionBut
 import { RunBrandDirectionButton } from "@/components/admin/RunBrandDirectionButton";
 import { RunBrandMarkGenerationButton } from "@/components/admin/RunBrandMarkGenerationButton";
 import { RunClaimsPolicyButton } from "@/components/admin/RunClaimsPolicyButton";
-import { RunCopyRefreshButton } from "@/components/admin/RunCopyRefreshButton";
 import { RunDesignSectionAuditsButton } from "@/components/admin/RunDesignSectionAuditsButton";
 import { RunPageOpportunitiesButton } from "@/components/admin/RunPageOpportunitiesButton";
 import { RunPerformanceAuditButton } from "@/components/admin/RunPerformanceAuditButton";
@@ -32,7 +31,7 @@ import { runSiteQa } from "@/lib/qa";
 import { getEditingVersion } from "@/lib/sample-data";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
-import type { AgentRunRecord, GenerationArtifactV2, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
+import type { AgentRunRecord, SiteArtifactRecord, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -79,9 +78,9 @@ export default async function AdminSiteWorkspacePage({
       targetId: bundle.businessProfile.siteId,
       limit: view === "runs" ? 25 : 5
     }),
-    repository.listGenerationArtifacts({
+    repository.listSiteArtifacts({
       siteId: bundle.businessProfile.siteId,
-      scope: "managed_site_candidate"
+      scope: "site_alternative"
     })
   ]);
   const previewToken = previewTokens[0];
@@ -119,7 +118,7 @@ async function renderWorkspaceView(input: {
   selectedVersion: SiteVersion;
   generatedEvaluation: StandardEvaluation;
   runs: AgentRunRecord[];
-  managedSiteArtifacts: GenerationArtifactV2[];
+  managedSiteArtifacts: SiteArtifactRecord[];
 }) {
   switch (input.view) {
     case "report":
@@ -176,7 +175,7 @@ function OverviewPanel({
   selectedVersion: SiteVersion;
   generatedEvaluation: StandardEvaluation;
   latestRun?: AgentRunRecord;
-  managedSiteArtifacts: GenerationArtifactV2[];
+  managedSiteArtifacts: SiteArtifactRecord[];
 }) {
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
   const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open");
@@ -188,7 +187,7 @@ function OverviewPanel({
     <div className="workspace-view-stack">
       <section className="metric-row">
         <Metric label="Current site" value={sourceScore} />
-        <Metric label="Generated site" value={generatedScore} />
+        <Metric label="Preview" value={generatedScore} />
         <Metric label="Open findings" value={openFindings.length} />
         <Metric label="Versions" value={bundle.siteModel.versions.length} />
       </section>
@@ -199,20 +198,20 @@ function OverviewPanel({
             <div>
               <span className="badge">Operator overview</span>
               <h2>Next best surfaces</h2>
-              <p className="muted">Use the report and generated preview together, but keep them as separate artifacts.</p>
+              <p className="muted">Use the source report and preview together, but keep them as separate artifacts.</p>
             </div>
           </div>
           <div className="finding-list">
             <article className="finding-card">
               <span className="badge">source</span>
               <h3>Review the current website report</h3>
-              <p>Check crawl-backed gaps, extracted facts, render notes, and reference-only assets before judging the generated site.</p>
+              <p>Check crawl-backed gaps, extracted facts, render notes, and reference-only assets before judging the preview.</p>
               <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "report")}>
                 Open report
               </AdminButtonLink>
             </article>
             <article className="finding-card">
-              <span className="badge">generated</span>
+              <span className="badge">preview</span>
               <h3>Inspect the Lodesta version</h3>
               <p>Open the generated site in the right pane and switch versions without leaving the workspace.</p>
               <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "site", draftVersion.id)}>
@@ -266,7 +265,7 @@ function OverviewPanel({
             <article className="finding-card">
               <span className="badge">policy</span>
               <h3>Audit claims and policy</h3>
-              <p>Persist claim verification and Google Places policy reports before promotion or refresh work.</p>
+              <p>Persist claim verification and Google Places policy reports before acceptance or refresh work.</p>
               <RunClaimsPolicyButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
             </article>
             <article className="finding-card">
@@ -306,20 +305,6 @@ function OverviewPanel({
               <RunBusinessContextRefreshButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
             </article>
             <article className="finding-card">
-              <span className="badge">skill</span>
-              <h3>Run V2 copy refresh</h3>
-              <p>
-                {selectedVersion.rendererVersion === "layout-v2"
-                  ? "Evaluate compiled copy slots and store proposed diffs without regenerating the whole website."
-                  : "Copy refresh diffs are available after a site is on layout-v2."}
-              </p>
-              <RunCopyRefreshButton
-                siteId={bundle.businessProfile.siteId}
-                versionId={selectedVersion.id}
-                disabled={selectedVersion.rendererVersion !== "layout-v2"}
-              />
-            </article>
-            <article className="finding-card">
               <span className="badge">strategy</span>
               <h3>Find page opportunities</h3>
               <p>Recommend service, location, and FAQ pages from durable service and service-area facts. Recommendations stay review-only.</p>
@@ -329,7 +314,7 @@ function OverviewPanel({
         </section>
 
         <aside className="panel">
-          <h2>Latest run</h2>
+          <h2>Latest activity</h2>
           {latestRun ? (
             <article className="finding-card compact-card">
               <span className={`badge status-${latestRun.status}`}>{latestRun.status}</span>
@@ -337,15 +322,15 @@ function OverviewPanel({
               <p className="muted">{formatDuration(latestRun.startedAt, latestRun.endedAt)}</p>
               <AdminButtonRow>
                 <AdminButtonLink variant="secondary" size="sm" href={`/admin/runs/${latestRun.id}`}>
-                  Inspect run
+                  Inspect activity
                 </AdminButtonLink>
                 <AdminButtonLink variant="secondary" size="sm" href={workspaceHref(bundle.siteModel.slug, "runs")}>
-                  Open run history
+                  Open activity
                 </AdminButtonLink>
               </AdminButtonRow>
             </article>
           ) : (
-            <p className="muted">No run telemetry is attached to this site.</p>
+            <p className="muted">No activity is attached to this site.</p>
           )}
 
           <h2>Source notes</h2>
@@ -619,20 +604,21 @@ function RunsPanel({ runs }: { runs: AgentRunRecord[] }) {
     <section className="panel">
       <div className="section-heading-row">
         <div>
-          <span className="badge">Run History</span>
-          <h2>Site run history</h2>
-          <p className="muted">Recent site-generation runs attached to this site.</p>
+          <span className="badge">Activity</span>
+          <h2>Site activity</h2>
+          <p className="muted">Recent generation activity attached to this site.</p>
         </div>
       </div>
       <table className="data-table">
         <thead>
           <tr>
             <th>Status</th>
-            <th>Run</th>
+            <th>Activity</th>
             <th>Source</th>
             <th>Duration</th>
             <th>Tokens</th>
-            <th>Updated</th>
+            <th>Started</th>
+            <th>Ended</th>
           </tr>
         </thead>
         <tbody>
@@ -651,7 +637,8 @@ function RunsPanel({ runs }: { runs: AgentRunRecord[] }) {
               </td>
               <td>{formatDuration(run.startedAt, run.endedAt)}</td>
               <td>{run.tokenTotals?.totalTokens ?? 0}</td>
-              <td>{formatDate(run.updatedAt)}</td>
+              <td>{formatDate(run.startedAt)}</td>
+              <td>{run.endedAt ? formatDate(run.endedAt) : <span className="muted">In progress</span>}</td>
             </tr>
           ))}
         </tbody>

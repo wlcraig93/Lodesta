@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   BusinessFactKind,
-  GenerationArtifactV2,
+  SiteArtifactRecord,
   SiteBundle,
   SiteVersion,
   SourceAwareFactPolicy,
@@ -42,7 +42,7 @@ export type BusinessContextRefreshV2Result = {
   versionId?: string;
   changes: BusinessContextChangeV2[];
   impacts: BusinessChangeImpactV2[];
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -206,7 +206,7 @@ function businessContextArtifactsV2(input: {
   changes: BusinessContextChangeV2[];
   impacts: BusinessChangeImpactV2[];
   createdAt?: string;
-}): GenerationArtifactV2[] {
+}): SiteArtifactRecord[] {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const sourceFactIds = Array.from(new Set(input.changes.flatMap((change) => [...change.currentFactIds, ...change.observedFactIds])));
   const contextPayload = {
@@ -223,7 +223,7 @@ function businessContextArtifactsV2(input: {
     {
       id: `artifact_${input.siteId}_business_context_${contextHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "business_context_report",
       artifactVersion: "business-context-report-v2",
       producerId: "business.context-refresh",
@@ -236,7 +236,7 @@ function businessContextArtifactsV2(input: {
     {
       id: `artifact_${input.siteId}_change_impact_${impactHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "change_impact_report",
       artifactVersion: "change-impact-report-v2",
       producerId: "business.change-impact",

@@ -29,7 +29,7 @@ export function IntakeCreateForm() {
         return;
       }
       setStatus("Site generation ready.");
-      window.location.assign(result.adminReviewUrl ?? `/admin/site-generations/${result.generationId ?? ""}`);
+      window.location.assign(result.adminReviewUrl ?? `/admin/site-candidates/${result.siteCandidateId ?? ""}`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to generate site.");
     } finally {
@@ -65,13 +65,13 @@ export function IntakeCreateForm() {
         <div className="generation-progress" role="status" aria-live="polite">
           <span className="loading-spinner" aria-hidden="true" />
           <div>
-            <strong>Creating site generation</strong>
+            <strong>Creating site candidate</strong>
             <span>Running intake, crawl, model planning, visual QA, and candidate persistence.</span>
           </div>
         </div>
       ) : (
         <button className="button primary" type="submit" disabled={!canSubmit}>
-          Create site generation
+          Create site candidate
         </button>
       )}
       {status ? <p className="form-status">{status}</p> : null}

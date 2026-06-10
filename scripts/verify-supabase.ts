@@ -31,7 +31,7 @@ if (!liveIntegrations) {
   process.env.CLOUDFLARE_ZONE_ID = "";
 }
 const checks: CheckResult[] = [];
-let createdSiteId: string | undefined;
+let acceptedSiteId: string | undefined;
 const createdJobIds = new Set<string>();
 const createdAgentRunIds = new Set<string>();
 let createdCampaignId: string | undefined;
@@ -46,6 +46,7 @@ async function main() {
   checks.push({ name: "connect", ok: true, detail: "Supabase service-role client can query the schema." });
   await requireSupabase(supabase.from("operator_settings").select("key", { count: "exact", head: true }), "Query operator settings");
   await requireSupabase(supabase.from("operator_setting_audits").select("id", { count: "exact", head: true }), "Query operator setting audits");
+  await requireSupabase(supabase.from("site_locations").select("role", { count: "exact", head: true }), "Query site location roles");
   checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
   await verifyAgentTelemetry(supabase);
   await verifyAssetStorage(supabase);
@@ -55,7 +56,7 @@ async function main() {
   }
 
   const bundle = await supabaseRepository.createAndStoreSite({ prompt });
-  createdSiteId = bundle.businessProfile.siteId;
+  acceptedSiteId = bundle.businessProfile.siteId;
   assert(bundle.siteModel.versions.length > 0, "Generated site has no versions.");
   checks.push({
     name: "create_site",
@@ -63,17 +64,21 @@ async function main() {
     detail: `Created ${bundle.businessProfile.name} (${bundle.businessProfile.siteId}) with slug ${bundle.siteModel.slug}.`
   });
 
-  const loaded = await supabaseRepository.getSiteBundle(createdSiteId);
-  assert(loaded?.businessProfile.siteId === createdSiteId, "Persisted site could not be loaded by id.");
+  const loaded = await supabaseRepository.getSiteBundle(acceptedSiteId);
+  assert(loaded?.businessProfile.siteId === acceptedSiteId, "Persisted site could not be loaded by id.");
   assert(loaded.extensionModel.forms.length > 0, "Persisted site is missing forms.");
+  if (loaded.locations?.length) {
+    assert(loaded.locationBindings?.length === loaded.locations.length, "Persisted site did not hydrate coherent location bindings.");
+    assert(loaded.locationBindings?.[0]?.role === "primary", "Persisted site did not hydrate a primary location binding.");
+  }
   checks.push({ name: "load_site", ok: true, detail: `Loaded persisted site with ${loaded.siteModel.versions[0]?.pages.length ?? 0} page(s).` });
 
   const bySlug = await supabaseRepository.getSiteBundleBySlug(bundle.siteModel.slug);
-  assert(bySlug?.businessProfile.siteId === createdSiteId, "Persisted site could not be loaded by slug.");
+  assert(bySlug?.businessProfile.siteId === acceptedSiteId, "Persisted site could not be loaded by slug.");
   checks.push({ name: "load_by_slug", ok: true, detail: "Loaded persisted site by slug." });
 
   const ownerAssets = await supabaseRepository.updateOwnerAssets({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     rightsAccepted: true,
     logo: {
       url: `https://assets.example/verify-${runId}-logo.png`,
@@ -87,7 +92,7 @@ async function main() {
     ]
   });
   assert(ownerAssets?.ok, "Owner-approved assets were not accepted.");
-  const assetReload = await supabaseRepository.getSiteBundle(createdSiteId);
+  const assetReload = await supabaseRepository.getSiteBundle(acceptedSiteId);
   assert(assetReload?.businessProfile.logo?.rightsStatus === "customer_granted", "Owner logo did not persist.");
   assert(
     assetReload.presenceAssessment.assetInventory?.some(
@@ -98,14 +103,14 @@ async function main() {
   checks.push({ name: "owner_assets", ok: true, detail: `Persisted ${ownerAssets.assets.length} owner-approved asset(s).` });
 
   const preview = await supabaseRepository.createPreviewToken({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     expiresAt: new Date(Date.now() + 1000 * 60 * 60).toISOString()
   });
   assert(preview?.token, "Preview token was not created.");
   const resolvedPreview = await supabaseRepository.resolvePreviewToken(preview.token);
-  assert(resolvedPreview?.bundle.businessProfile.siteId === createdSiteId, "Preview token did not resolve to the created site.");
+  assert(resolvedPreview?.bundle.businessProfile.siteId === acceptedSiteId, "Preview token did not resolve to the created site.");
   const expiredPreview = await supabaseRepository.createPreviewToken({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     expiresAt: new Date(Date.now() - 1000 * 60).toISOString()
   });
   assert(expiredPreview?.token, "Expired preview token probe was not created.");
@@ -115,18 +120,18 @@ async function main() {
   );
   checks.push({ name: "preview_token", ok: true, detail: `Created active ${preview.token} and rejected an expired preview token.` });
 
-  const findings = await supabaseRepository.runAndStoreAudit(createdSiteId);
+  const findings = await supabaseRepository.runAndStoreAudit(acceptedSiteId);
   assert(Array.isArray(findings), "Audit did not return findings.");
   checks.push({ name: "audit", ok: true, detail: `Stored ${findings.length} finding(s).` });
 
   const sourceVersionId = loaded.siteModel.versions[0]?.id;
   assert(sourceVersionId, "No version is available to restore.");
   const restored = await supabaseRepository.restoreVersionToDraft({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     versionId: sourceVersionId
   });
   assert(restored?.ok, "Version restore did not create a draft.");
-  const restoredReload = await supabaseRepository.getSiteBundle(createdSiteId);
+  const restoredReload = await supabaseRepository.getSiteBundle(acceptedSiteId);
   assert(
     restoredReload?.siteModel.versions.some((version) => version.id === restored.draftVersionId && version.status === "draft"),
     "Restored draft version did not persist."
@@ -134,7 +139,7 @@ async function main() {
   checks.push({ name: "version_restore", ok: true, detail: `Restored ${sourceVersionId} into draft ${restored.draftVersionId}.` });
 
   await supabaseRepository.recordAnalyticsEvent({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_${runId}`,
     visitorId: `visitor_${runId}`,
     pageId: "page_home",
@@ -143,7 +148,7 @@ async function main() {
     metadata: { smoke: true, runId }
   });
   await supabaseRepository.recordAnalyticsEvent({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_${runId}`,
     visitorId: `visitor_${runId}`,
     pageId: "page_home",
@@ -152,7 +157,7 @@ async function main() {
     metadata: { role: "tel", runId }
   });
   await supabaseRepository.recordAnalyticsEvent({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_old_${runId}`,
     pageId: "page_home",
     eventType: "pageview",
@@ -160,7 +165,7 @@ async function main() {
     metadata: { runId }
   });
   await supabaseRepository.recordAnalyticsEvent({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_agent_${runId}`,
     pageId: "page_home",
     eventType: "agent_readable_request",
@@ -171,10 +176,10 @@ async function main() {
       runId
     }
   });
-  const analytics = await supabaseRepository.analyticsSummary(createdSiteId);
+  const analytics = await supabaseRepository.analyticsSummary(acceptedSiteId);
   assert(analytics.sessions >= 1, "Analytics summary did not include the recorded session.");
   assert(analytics.agentReadableRequests >= 1, "Agent-readable analytics did not include the recorded request.");
-  const analyticsEvents = await supabaseRepository.listAnalyticsEvents(createdSiteId);
+  const analyticsEvents = await supabaseRepository.listAnalyticsEvents(acceptedSiteId);
   assert(
     analyticsEvents.some((event) => event.sessionId === `verify_old_${runId}` && event.timestamp === "2020-01-01T00:00:00.000Z"),
     "Analytics events should retain old site performance history."
@@ -189,12 +194,12 @@ async function main() {
     detail: `Analytics summary has ${analytics.sessions} session(s), ${analyticsEvents.length} retained event(s), and ${analytics.agentReadableRequests} agent-readable request(s).`
   });
 
-  const forms = await supabaseRepository.getForms(createdSiteId);
+  const forms = await supabaseRepository.getForms(acceptedSiteId);
   const form = forms[0];
   assert(form, "Created site has no form to submit.");
-  const lead = await supabaseRepository.recordFormSubmission({
-    siteId: createdSiteId,
-    formId: form.id,
+  const inquiryResult = await supabaseRepository.createInquiryFromForm({
+    siteId: acceptedSiteId,
+    form,
     pageId: "page_home",
     visitorId: `visitor_${runId}`,
     payload: {
@@ -209,30 +214,43 @@ async function main() {
     sourceUrl: `https://example.test/${bundle.siteModel.slug}`,
     userAgent: "lodesta-supabase-verifier"
   });
-  const leads = await supabaseRepository.listFormSubmissions(createdSiteId);
-  assert(leads.some((candidate) => candidate.id === lead.id), "Lead submission was not persisted.");
-  assert(leads.some((candidate) => candidate.id === lead.id && candidate.visitorId === `visitor_${runId}`), "Lead visitor id was not persisted.");
-  const reviewedLead = await supabaseRepository.updateLeadStatus({
-    siteId: createdSiteId,
-    submissionId: lead.id,
-    status: "reviewed"
+  const inquiries = await supabaseRepository.listInquiries(acceptedSiteId);
+  assert(inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id), "Inquiry was not persisted.");
+  assert(
+    inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id && candidate.contactEmail === "verify@example.com"),
+    "Inquiry contact snapshot was not persisted."
+  );
+  const events = await supabaseRepository.listInquiryEvents(inquiryResult.inquiry.id);
+  assert(
+    events.some((event) => event.id === inquiryResult.event.id && event.metadata?.visitorId === `visitor_${runId}`),
+    "Inquiry event visitor metadata was not persisted."
+  );
+  const reviewedInquiry = await supabaseRepository.updateInquiryStatus({
+    siteId: acceptedSiteId,
+    inquiryId: inquiryResult.inquiry.id,
+    status: "needs_reply"
   });
-  assert(reviewedLead?.status === "reviewed", "Lead status update did not persist.");
-  const delivery = await supabaseRepository.recordWorkflowDelivery({
-    siteId: createdSiteId,
+  assert(reviewedInquiry?.status === "needs_reply", "Inquiry status update did not persist.");
+  const delivery = await supabaseRepository.recordInquiryDelivery({
+    siteId: acceptedSiteId,
+    inquiryId: inquiryResult.inquiry.id,
+    eventId: inquiryResult.event.id,
     workflowId: "verify_workflow_email",
-    submissionId: lead.id,
     destination: "email",
     target: `owner-${runId}@example.com`,
     status: "skipped",
     message: "Verification delivery recorded without sending external email."
   });
-  const deliveries = await supabaseRepository.listWorkflowDeliveries(createdSiteId);
-  assert(deliveries.some((candidate) => candidate.id === delivery.id), "Workflow delivery was not persisted.");
-  checks.push({ name: "lead", ok: true, detail: `Recorded lead ${lead.id}, marked it reviewed, and stored delivery ${delivery.id}.` });
+  const deliveries = await supabaseRepository.listInquiryDeliveries(acceptedSiteId);
+  assert(deliveries.some((candidate) => candidate.id === delivery.id), "Inquiry delivery was not persisted.");
+  checks.push({
+    name: "inquiry",
+    ok: true,
+    detail: `Recorded inquiry ${inquiryResult.inquiry.id}, marked it needs_reply, and stored delivery ${delivery.id}.`
+  });
 
   const draftAssignment = await supabaseRepository.assignExperiment({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_${runId}`
   });
   assert(!draftAssignment.assigned, "Experiment assignment should not run before owner opt-in.");
@@ -240,21 +258,21 @@ async function main() {
   const experiment = bundle.experiments[0];
   assert(experiment, "Created site has no experiment candidate.");
   const optIn = await supabaseRepository.updateExperiment({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     experimentId: experiment.id,
     status: "running"
   });
   assert(optIn?.ok && optIn.experiment.status === "running", "Experiment opt-in did not persist.");
 
   const assignment = await supabaseRepository.assignExperiment({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     sessionId: `verify_${runId}`
   });
   assert(assignment.assigned, "Experiment assignment failed.");
   for (let index = 1; index <= 20; index += 1) {
     const variantId = index <= 10 ? "control" : "sticky_action";
     await supabaseRepository.recordAnalyticsEvent({
-      siteId: createdSiteId,
+      siteId: acceptedSiteId,
       sessionId: `verify_experiment_${runId}_${index}`,
       pageId: "page_home",
       eventType: "experiment_assignment",
@@ -264,7 +282,7 @@ async function main() {
   }
   for (let index = 11; index <= 14; index += 1) {
     await supabaseRepository.recordAnalyticsEvent({
-      siteId: createdSiteId,
+      siteId: acceptedSiteId,
       sessionId: `verify_experiment_${runId}_${index}`,
       pageId: "page_home",
       eventType: "tel_click",
@@ -273,14 +291,14 @@ async function main() {
     });
   }
   const learning = await supabaseRepository.concludeExperimentWithLearning({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     experimentId: experiment.id
   });
   assert(learning?.ok && learning.learning.status === "active", "Experiment learning was not adopted.");
   checks.push({ name: "experiment", ok: true, detail: `Opted in, assigned, and adopted learning ${learning.learning.id}.` });
 
   const claim = await supabaseRepository.createClaim({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     ownerEmail: `owner-${runId}@example.com`,
     verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
     acceptedTerms: true,
@@ -297,7 +315,7 @@ async function main() {
   const duplicateCheckoutClaimId = `verify_duplicate_checkout_${runId}`;
   const duplicateCheckout = await supabase.from("claims").insert({
     id: duplicateCheckoutClaimId,
-    site_id: createdSiteId,
+    site_id: acceptedSiteId,
     owner_email: `duplicate-${runId}@example.com`,
     status: "checkout_required",
     stripe_checkout_session_id: expectedCheckoutSessionId,
@@ -309,7 +327,7 @@ async function main() {
   }
   const mismatchedClaim = await supabaseRepository.completeClaimCheckout({
     claimId: claim.id,
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     checkoutSessionId: `cs_wrong_${runId}`,
     stripeCustomerId: `cus_wrong_${runId}`,
     stripeSubscriptionId: `sub_wrong_${runId}`,
@@ -327,7 +345,7 @@ async function main() {
   assert(wrongSiteClaim === null, "Claim checkout completion accepted mismatched site metadata.");
   const completedClaim = await supabaseRepository.completeClaimCheckout({
     claimId: claim.id,
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     checkoutSessionId: expectedCheckoutSessionId,
     stripeCustomerId: `cus_verify_${runId}`,
     stripeSubscriptionId: `sub_verify_${runId}`,
@@ -337,7 +355,7 @@ async function main() {
   checks.push({ name: "claim", ok: true, detail: `Created and completed claim ${claim.id}; checkout configured=${claim.checkout.configured}.` });
 
   const domain = await supabaseRepository.registerDomain({
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     hostname: `verify-${runId}.example.com`,
     provider: "cloudflare_for_saas"
   });
@@ -357,7 +375,7 @@ async function main() {
   createdCampaignId = campaign.id;
   const prospect = await supabaseRepository.upsertOutboundProspect({
     campaignId: campaign.id,
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     businessName: bundle.businessProfile.name,
     vertical: "home_services",
     previewToken: preview.token,
@@ -366,14 +384,14 @@ async function main() {
   await supabaseRepository.recordOutboundEvent({
     campaignId: campaign.id,
     prospectId: prospect.id,
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     type: "preview_viewed",
     value: 1
   });
   await supabaseRepository.recordOutboundEvent({
     campaignId: campaign.id,
     prospectId: prospect.id,
-    siteId: createdSiteId,
+    siteId: acceptedSiteId,
     type: "claim_completed",
     value: 1
   });
@@ -381,7 +399,7 @@ async function main() {
   assert(outbound.mailerToPreviewRate >= 1 && outbound.mailerToClaimRate >= 1, "Outbound summary did not include verification events.");
   checks.push({ name: "outbound", ok: true, detail: `Recorded outbound campaign ${campaign.id} with prospect ${prospect.id}.` });
 
-  const job = await supabaseRepository.enqueueJob("monthly_action_list", { siteId: createdSiteId });
+  const job = await supabaseRepository.enqueueJob("monthly_action_list", { siteId: acceptedSiteId });
   createdJobIds.add(job.id);
   assert(job.maxAttempts >= 1 && Boolean(job.runAfter), "Queued job did not include retry/backoff metadata.");
   const processed = await supabaseRepository.processNextJob();
@@ -399,7 +417,7 @@ async function main() {
       id: staleJobId,
       kind: "monthly_action_list",
       status: "running",
-      payload: { siteId: createdSiteId, verifier: "stale_exhausted_job" },
+      payload: { siteId: acceptedSiteId, verifier: "stale_exhausted_job" },
       attempts: 1,
       max_attempts: 1,
       run_after: staleLockedAt,
@@ -432,8 +450,8 @@ async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   if (createdCampaignId) {
     await requireSupabase(supabase.from("outbound_campaigns").delete().eq("id", createdCampaignId), "Cleanup outbound campaign");
   }
-  if (createdSiteId) {
-    await requireSupabase(supabase.from("sites").delete().eq("id", createdSiteId), "Cleanup site");
+  if (acceptedSiteId) {
+    await requireSupabase(supabase.from("sites").delete().eq("id", acceptedSiteId), "Cleanup site");
   }
   if (createdJobIds.size) {
     await requireSupabase(supabase.from("jobs").delete().in("id", Array.from(createdJobIds)), "Cleanup jobs");

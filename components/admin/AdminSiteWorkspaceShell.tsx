@@ -19,11 +19,11 @@ type AdminSiteWorkspaceShellProps = {
 
 const viewItems: Array<{ view: AdminSiteWorkspaceView; label: string; detail: string }> = [
   { view: "overview", label: "Overview", detail: "Status and next steps" },
-  { view: "report", label: "Current Website Report", detail: "Source crawl and presence" },
-  { view: "site", label: "Generated Site", detail: "Lodesta preview" },
-  { view: "qa", label: "Generated Site QA", detail: "Checks and fixes" },
+  { view: "report", label: "Source Report", detail: "Crawl and presence" },
+  { view: "site", label: "Preview", detail: "Rendered Lodesta site" },
+  { view: "qa", label: "QA", detail: "Checks and fixes" },
   { view: "versions", label: "Versions", detail: "Publish and restore" },
-  { view: "runs", label: "Run History", detail: "Generation telemetry" }
+  { view: "runs", label: "Activity", detail: "Runs and telemetry" }
 ];
 
 export function AdminSiteWorkspaceShell({
@@ -45,7 +45,7 @@ export function AdminSiteWorkspaceShell({
         className="admin-workspace-header"
         eyebrow="Site workspace"
         title={bundle.businessProfile.name}
-        description="Inspect source-site evidence, generated artifacts, QA, versions, and run telemetry from one internal control panel."
+        description="Inspect source evidence, previews, QA, versions, and activity from one internal control panel."
         actions={
           <AdminButtonLink variant="secondary" href="/admin/sites">
             All sites
@@ -63,7 +63,7 @@ export function AdminSiteWorkspaceShell({
 
           <section className="workspace-sidebar-section workspace-status-grid" aria-label="Site status">
             <StatusPill label="Source" value={scoreLabel(sourceEvaluation)} />
-            <StatusPill label="Generated" value={scoreLabel(generatedEvaluation)} />
+            <StatusPill label="Preview" value={scoreLabel(generatedEvaluation)} />
             <StatusPill label="Versions" value={String(bundle.siteModel.versions.length)} />
             <StatusPill label="Open findings" value={String(openFindings)} />
           </section>
@@ -93,7 +93,7 @@ export function AdminSiteWorkspaceShell({
             <h2>Actions</h2>
             <div className="workspace-action-list">
               <AdminButtonLink variant="secondary" href={workspaceHref(slug, "site", selectedVersion.id)}>
-                View generated site
+                View preview
               </AdminButtonLink>
               <AdminButtonLink variant="secondary" href={`/editor/${slug}`}>
                 Open editor
@@ -107,11 +107,11 @@ export function AdminSiteWorkspaceShell({
                 </AdminButtonLink>
               ) : null}
               <AdminButtonLink variant="secondary" href={workspaceHref(slug, "runs")}>
-                View run history
+                View activity
               </AdminButtonLink>
               {latestRun ? (
                 <AdminButtonLink variant="secondary" href={`/admin/runs/${latestRun.id}`}>
-                  Inspect latest run
+                  Inspect latest activity
                 </AdminButtonLink>
               ) : null}
             </div>

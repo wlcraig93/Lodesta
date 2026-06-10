@@ -7,17 +7,26 @@ export function AdminAccountMenu({
   label,
   email,
   tokenAccess,
-  authConfigured
+  authConfigured,
+  sessionLabel,
+  settingsHref = "/settings",
+  settingsLabel = "Settings",
+  signInHref
 }: {
   label: string;
   email?: string;
   tokenAccess: boolean;
   authConfigured: boolean;
+  sessionLabel?: string;
+  settingsHref?: string;
+  settingsLabel?: string;
+  signInHref?: string;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const canSignOut = Boolean(authConfigured && email && !tokenAccess);
-  const sessionLabel = tokenAccess ? "Token session" : authConfigured ? "Admin account" : "Local session";
+  const canSignIn = Boolean(authConfigured && !email && !tokenAccess && signInHref);
+  const resolvedSessionLabel = sessionLabel ?? (tokenAccess ? "Token session" : authConfigured ? "Admin account" : "Local session");
 
   useEffect(() => {
     if (!open) return;
@@ -48,18 +57,24 @@ export function AdminAccountMenu({
             </span>
             <div>
               <strong>{label}</strong>
-              <span>{sessionLabel}</span>
+              <span>{resolvedSessionLabel}</span>
             </div>
           </div>
-          <Link href="/settings" role="menuitem" onClick={() => setOpen(false)}>
-            Settings
-          </Link>
+          {settingsHref ? (
+            <Link href={settingsHref} role="menuitem" onClick={() => setOpen(false)}>
+              {settingsLabel}
+            </Link>
+          ) : null}
           {canSignOut ? (
             <form action="/auth/logout" method="post">
               <button type="submit" role="menuitem">
                 Sign out
               </button>
             </form>
+          ) : canSignIn && signInHref ? (
+            <Link href={signInHref} role="menuitem" onClick={() => setOpen(false)}>
+              Sign in
+            </Link>
           ) : (
             <span className="admin-account-note">{tokenAccess ? "Authenticated by admin token." : "Local development access."}</span>
           )}
@@ -77,7 +92,7 @@ export function AdminAccountMenu({
         </span>
         <span className="admin-account-copy">
           <strong>{label}</strong>
-          <small>{sessionLabel}</small>
+          <small>{resolvedSessionLabel}</small>
         </span>
       </button>
     </div>

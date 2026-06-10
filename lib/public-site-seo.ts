@@ -1,4 +1,5 @@
 import type { ClaimRecord, PageModel, SiteBundle } from "./models";
+import { configuredAppOrigin } from "./app-origin";
 import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
@@ -7,7 +8,7 @@ export function canonicalUrlForPage(bundle: SiteBundle, page: PageModel, headers
   const canonicalPath = normalizeCanonicalPath(page.seo.canonicalPath || page.slug);
   if (isCustomDomainRequest(headers)) return `${requestOrigin(headers)}${canonicalPath}`;
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? requestOrigin(headers).replace(/\/$/, "");
+  const baseUrl = configuredAppOrigin() ?? requestOrigin(headers).replace(/\/$/, "");
   return `${baseUrl}/sites/${bundle.siteModel.slug}${canonicalPath === "/" ? "" : canonicalPath}`;
 }
 
@@ -47,7 +48,7 @@ export function siteSitemapXml(bundle: SiteBundle, claims: ClaimRecord[], header
 
 function siteSitemapUrl(bundle: SiteBundle, headers: HeaderReader) {
   if (isCustomDomainRequest(headers)) return `${requestOrigin(headers)}/sitemap.xml`;
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? requestOrigin(headers).replace(/\/$/, "");
+  const baseUrl = configuredAppOrigin() ?? requestOrigin(headers).replace(/\/$/, "");
   return `${baseUrl}/sites/${bundle.siteModel.slug}/sitemap.xml`;
 }
 

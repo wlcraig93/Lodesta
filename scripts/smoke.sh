@@ -23,7 +23,7 @@ done
 
 BASE_URL="${LODESTA_SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 BASE_URL="${BASE_URL%/}"
-export NEXT_PUBLIC_APP_URL="${LODESTA_SMOKE_APP_URL:-$BASE_URL}"
+export LODESTA_APP_ORIGIN="${LODESTA_SMOKE_APP_ORIGIN:-$BASE_URL}"
 export LODESTA_REPOSITORY="${LODESTA_REPOSITORY:-local}"
 export LODESTA_ASSET_STORAGE="${LODESTA_ASSET_STORAGE:-local}"
 export STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_smoke}"
@@ -522,24 +522,27 @@ assert_success "experiment learning rollback list"
 assert_json "experiment learning rollback list" 'const data = JSON.parse(process.env.BODY); const learning = data.learnings?.find((item) => item.experimentId === "exp_sticky_cta_restaurant"); if (!learning || learning.status !== "rolled_back" || !learning.rolledBackAt) process.exit(1);'
 
 post_check "JSON form submission" "/api/forms/submit" '{"siteId":"site_joes_pizza","formId":"form_contact","pageId":"home","sessionId":"smoke_session","visitorId":"visitor_smoke","sourceUrl":"http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer&email=smoke@example.com&token=secret","payload":{"name":"Smoke Test","email":"smoke@example.com","message":"Testing the core lead path."},"metadata":{"landingPath":"/sites/joes-pizza","referrerHost":"local-smoke","ownerEmail":"smoke@example.com"}}'
-assert_json "JSON form submission" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || data.formId !== "form_contact" || !data.id || data.ipHash || data.visitorId || data.sourceUrl !== "http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer" || data.metadata?.ownerEmail) process.exit(1);'
-LEAD_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); process.stdout.write(data.id);')"
+assert_json "JSON form submission" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true || data.status !== "received" || data.id || data.siteId || data.ipHash || data.visitorId || data.sourceUrl || data.metadata) process.exit(1);'
 
-post_check "lead status API" "/api/leads/status" "{\"siteId\":\"site_joes_pizza\",\"submissionId\":\"${LEAD_ID}\",\"status\":\"reviewed\"}"
-LEAD_ID="$LEAD_ID" assert_json "lead status API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.lead?.status !== "reviewed" || data.lead?.id !== process.env.LEAD_ID) process.exit(1);'
+request GET "/api/inquiries?siteId=site_joes_pizza"
+assert_success "inquiries API"
+INQUIRY_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); const inquiry = data.inquiries?.find((item) => item.contactEmail === "smoke@example.com"); if (!inquiry || !Array.isArray(data.inquiryEvents) || !data.inquiryEvents.some((event) => event.inquiryId === inquiry.id && event.sourceUrl === "http://127.0.0.1:4330/sites/joes-pizza?utm_source=mailer")) process.exit(1); process.stdout.write(inquiry.id);')"
 
-request GET "/api/leads?siteId=site_joes_pizza"
-assert_success "leads API"
-LEAD_ID="$LEAD_ID" assert_json "leads API" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.leads) || !data.leads.some((lead) => lead.id === process.env.LEAD_ID && lead.status === "reviewed") || !Array.isArray(data.workflowDeliveries)) process.exit(1);'
+post_check "inquiry status API" "/api/inquiries/status" "{\"siteId\":\"site_joes_pizza\",\"inquiryId\":\"${INQUIRY_ID}\",\"status\":\"needs_reply\"}"
+INQUIRY_ID="$INQUIRY_ID" assert_json "inquiry status API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.inquiry?.status !== "needs_reply" || data.inquiry?.id !== process.env.INQUIRY_ID) process.exit(1);'
 
-request GET "/api/leads/export?siteId=site_joes_pizza"
-assert_success "leads CSV export"
-LEAD_ID="$LEAD_ID" BODY="$BODY" node -e 'const body = process.env.BODY || ""; if (!body.includes("\"id\",\"siteId\",\"formId\"") || !body.includes(process.env.LEAD_ID) || !body.includes("\"reviewed\"")) process.exit(1);' || {
-  echo "Smoke check failed: leads CSV export returned unexpected CSV" >&2
+request GET "/api/inquiries?siteId=site_joes_pizza"
+assert_success "inquiries API after status"
+INQUIRY_ID="$INQUIRY_ID" assert_json "inquiries API after status" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.inquiries) || !data.inquiries.some((inquiry) => inquiry.id === process.env.INQUIRY_ID && inquiry.status === "needs_reply") || !Array.isArray(data.inquiryDeliveries)) process.exit(1);'
+
+request GET "/api/inquiries/export?siteId=site_joes_pizza"
+assert_success "inquiries CSV export"
+INQUIRY_ID="$INQUIRY_ID" BODY="$BODY" node -e 'const body = process.env.BODY || ""; if (!body.includes("\"id\",\"siteId\",\"sourceChannel\"") || !body.includes(process.env.INQUIRY_ID) || !body.includes("\"needs_reply\"")) process.exit(1);' || {
+  echo "Smoke check failed: inquiries CSV export returned unexpected CSV" >&2
   echo "$BODY" >&2
   exit 1
 }
-echo "ok - leads CSV export content"
+echo "ok - inquiries CSV export content"
 
 request POST "/api/outbound/campaigns" '{"name":"High Volume Direct Mail","status":"running","channel":"direct_mail","metadata":{"plannedRecipients":250}}'
 if [[ "$STATUS" != "409" ]]; then

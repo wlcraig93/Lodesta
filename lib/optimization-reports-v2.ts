@@ -3,7 +3,7 @@ import type {
   AnalyticsSummary,
   Experiment,
   ExperimentLearning,
-  GenerationArtifactV2,
+  SiteArtifactRecord,
   SiteBundle,
   SiteVersion,
   SourceAwareFactV2
@@ -48,7 +48,7 @@ export type OptimizationReportsAuditV2Result = {
     pageGapAnalysis: OptimizationReportV2;
     experimentRecommendations: OptimizationReportV2;
   };
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -331,16 +331,16 @@ function reportForFindings(input: {
 function artifactForReport(input: {
   siteId: string;
   report: OptimizationReportV2;
-  artifactType: GenerationArtifactV2["artifactType"];
+  artifactType: SiteArtifactRecord["artifactType"];
   createdAt?: string;
   version?: SiteVersion;
-}): GenerationArtifactV2 {
+}): SiteArtifactRecord {
   const payload = { report: input.report };
   const contentHash = hashPayload(payload);
   return {
     id: `artifact_${input.siteId}_${input.report.id}_${contentHash.slice(0, 16)}`,
     siteId: input.siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: input.artifactType,
     artifactVersion: `${input.report.id}-report-v2`,
     producerId: input.report.skillId,

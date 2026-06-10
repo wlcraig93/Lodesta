@@ -1,4 +1,5 @@
 import { repository } from "./repository";
+import { appOriginEnvName } from "./app-origin";
 import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
 import { getRenderInspectionRuntimeStatus } from "./render-inspection";
 import { ASSET_BUCKET_NAME } from "./asset-storage";
@@ -33,6 +34,7 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkWorkflowEmailConfig(),
     checkHashSecretConfig(),
     checkGooglePlacesConfig(),
+    checkLocationMapConfig(),
     assetStorageCheck,
     openAiCheck
   ];
@@ -49,19 +51,19 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
 }
 
 function checkAppUrl(): HealthCheck {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const appUrl = process.env[appOriginEnvName];
   if (!appUrl) {
     if (requiresDeploymentConfig()) {
-      return error("app_url", "Application URL", "NEXT_PUBLIC_APP_URL is required for deployed environments.");
+      return error("app_url", "Application URL", `${appOriginEnvName} is required for deployed environments.`);
     }
-    return warning("app_url", "Application URL", "NEXT_PUBLIC_APP_URL is not set; generated links will fall back to the request origin.");
+    return warning("app_url", "Application URL", `${appOriginEnvName} is not set; generated links will fall back to the request origin.`);
   }
 
   try {
     new URL(appUrl);
-    return ok("app_url", "Application URL", "NEXT_PUBLIC_APP_URL is configured.");
+    return ok("app_url", "Application URL", `${appOriginEnvName} is configured.`);
   } catch {
-    return error("app_url", "Application URL", "NEXT_PUBLIC_APP_URL must be a valid absolute URL.");
+    return error("app_url", "Application URL", `${appOriginEnvName} must be a valid absolute URL.`);
   }
 }
 
@@ -161,6 +163,28 @@ function checkGooglePlacesConfig(): HealthCheck {
     "Google Places",
     "GOOGLE_PLACES_API_KEY is not set; presence enrichment will use website-derived public links and schema facts only."
   );
+}
+
+function checkLocationMapConfig(): HealthCheck {
+  const mode = process.env.LODESTA_LOCATION_MAP_MODE || "link_only";
+  if (mode === "embed") {
+    if (process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY) {
+      return ok(
+        "location_maps",
+        "Location maps",
+        "Embedded location maps are enabled. Confirm the public Google Maps Embed key is HTTP-referrer restricted."
+      );
+    }
+    return warning(
+      "location_maps",
+      "Location maps",
+      "LODESTA_LOCATION_MAP_MODE=embed but NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY is not set; generated sites will fall back to map links."
+    );
+  }
+  if (mode !== "link_only") {
+    return warning("location_maps", "Location maps", "Unknown LODESTA_LOCATION_MAP_MODE; generated sites will use link-only map actions.");
+  }
+  return ok("location_maps", "Location maps", "Location panels use link-only Google Maps actions by default.");
 }
 
 function checkAssetStorageConfig(): HealthCheck {

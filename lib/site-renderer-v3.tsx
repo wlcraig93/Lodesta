@@ -1,8 +1,24 @@
 import * as React from "react";
-import type { BusinessProfile, SiteArtDirectionFontPairingIdV3, SiteModel, SiteVersionV3 } from "./models";
-import type { BlockV3, MediaCropV3, VisualBlockContentV3, VisualSectionV3 } from "./generated-site-v3-visual-controls";
-import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
-import { makeLocalBusinessJsonLd, serializeJsonLd } from "./structured-data";
+import type { BusinessLocationRecord, BusinessProfile, SiteArtDirectionFontPairingIdV3, SiteArtDirectionV3, SiteLocationBinding, SiteModel, SiteVersionV3 } from "./models";
+import type {
+  ActionSlotV3,
+  BackgroundFocalPointV3,
+  CopySlotV3,
+  FaqItemV3,
+  FactsSlotV3,
+  MapEmbedIntentV3,
+  MediaSlotV3,
+  QuoteItemV3,
+  RenderableLocationV3,
+  SectionBackgroundOptionV3,
+  StandardItemV3,
+  VisualCtaV3,
+  VisualSectionConstraintViolationV3,
+  VisualSectionV3
+} from "./generated-site-v3-visual-controls";
+import { compileVisualSectionV3, foregroundForBackgroundV3, getVisualSectionV3, visualSectionRenderStateV3 } from "./generated-site-v3-visual-controls";
+import { makeLocalBusinessJsonLdForBundle, serializeJsonLd } from "./structured-data";
+import { businessIdForProfile, businessLocationsFromProfile, normalizeSiteLocationBindings } from "./business-model";
 import { AnalyticsTracker } from "@/components/AnalyticsTracker";
 import { ExperimentRuntime } from "@/components/ExperimentRuntime";
 import type { Experiment } from "./models";
@@ -11,6 +27,8 @@ type SiteRendererV3Props = {
   business: BusinessProfile;
   site: SiteModel;
   version: SiteVersionV3;
+  locations?: BusinessLocationRecord[];
+  locationBindings?: SiteLocationBinding[];
   pageSlug?: string;
   experiments?: Experiment[];
   tracking?: boolean;
@@ -19,19 +37,28 @@ type SiteRendererV3Props = {
 
 type Cta = { label: string; href: string };
 type SectionProps = Record<string, unknown>;
+type PublicMediaItem = { url: string; label: string; caption?: string; publicCaption?: string };
 
 export function SiteRendererV3({
   business,
   site,
   version,
+  locations,
+  locationBindings,
   pageSlug,
   experiments = [],
   tracking = true,
   formsEnabled = true
 }: SiteRendererV3Props) {
   const page = version.pageComposition.pages.find((candidate) => candidate.slug === (pageSlug ?? "")) ?? version.pageComposition.pages[0];
-  const localBusinessJson = makeLocalBusinessJsonLd(business);
+  const rendererLocations = normalizeRendererLocations(business, locations, locationBindings);
+  const localBusinessJson = makeLocalBusinessJsonLdForBundle({
+    business,
+    locations: rendererLocations.locations,
+    locationBindings: rendererLocations.locationBindings
+  });
   if (!page) return null;
+  const firstVisualSection = page.sections.map((section) => getVisualSectionV3(section.props)).find((section): section is VisualSectionV3 => Boolean(section));
 
   return (
     <main
@@ -46,7 +73,7 @@ export function SiteRendererV3({
       {tracking ? <AnalyticsTracker siteId={business.siteId} pageId={page.id} /> : null}
       {tracking ? <ExperimentRuntime siteId={business.siteId} experiments={experiments} /> : null}
       {localBusinessJson ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(localBusinessJson) }} /> : null}
-      <HeaderV3 business={business} site={site} version={version} />
+      <HeaderV3 business={business} site={site} version={version} firstVisualSection={firstVisualSection} />
       {page.sections.map((section) => (
         <SectionV3 key={section.id} family={section.family} variant={section.variant} props={section.props} business={business} formsEnabled={formsEnabled} />
       ))}
@@ -55,11 +82,17 @@ export function SiteRendererV3({
   );
 }
 
-function HeaderV3({ business, site, version }: { business: BusinessProfile; site: SiteModel; version: SiteVersionV3 }) {
+function HeaderV3({ business, site, version, firstVisualSection }: { business: BusinessProfile; site: SiteModel; version: SiteVersionV3; firstVisualSection?: VisualSectionV3 }) {
   const phoneHref = business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact";
   const logoUrl = safeLogoUrl(business.logo);
+  const visualMode = headerVisualMode(version.artDirection, firstVisualSection);
   return (
-    <header className="site-header-v3" data-site-chrome="header" data-header-mode={version.artDirection.headerMode}>
+    <header
+      className="site-header-v3"
+      data-site-chrome="header"
+      data-header-mode={visualMode}
+      data-header-visual-mode={visualMode}
+    >
       <a className="site-brand-v3" href={`/sites/${site.slug}`} aria-label={`${business.name} home`}>
         {logoUrl ? (
           <img className="site-brand-mark-v3" src={logoUrl} alt="" aria-hidden="true" />
@@ -94,7 +127,10 @@ function SectionV3({
   formsEnabled: boolean;
 }) {
   const visualSection = getVisualSectionV3(props);
-  if (visualSection) return <VisualSectionRendererV3 section={visualSection} />;
+  if (visualSection) {
+    const compiled = compileVisualSectionV3(visualSection);
+    return <VisualSectionRendererV3 section={compiled.section} violations={compiled.violations} business={business} formsEnabled={formsEnabled} />;
+  }
   if (family.startsWith("hero.")) return <HeroV3 variant={variant} props={props} />;
   if (family.startsWith("services.")) return <ServicesV3 variant={variant} props={props} />;
   if (family.startsWith("proof.")) return <ProofV3 variant={variant} props={props} />;
@@ -107,145 +143,302 @@ function SectionV3({
   return null;
 }
 
-function VisualSectionRendererV3({ section }: { section: VisualSectionV3 }) {
+export function VisualSectionRendererV3({
+  section,
+  violations = [],
+  business,
+  formsEnabled = true
+}: {
+  section: VisualSectionV3;
+  violations?: VisualSectionConstraintViolationV3[];
+  business?: BusinessProfile;
+  formsEnabled?: boolean;
+}) {
+  const errorCount = violations.filter((violation) => violation.severity === "error").length;
+  const renderState = visualSectionRenderStateV3(section);
+  const background = section.options.background;
+  const sectionForeground = foregroundForBackgroundV3(background);
   return (
     <section
       id={section.anchorId}
       className={`site-section-v3 site-visual-section-v3 ${sectionFrameClass(section)}`}
-      data-anatomy={section.anatomy}
-      data-width={section.frame.width}
-      data-padding={section.frame.padding}
-      data-color-mode={section.frame.colorMode}
-      data-min-height={section.frame.minHeight}
-      data-gap={section.frame.gap ?? "standard"}
+      data-constraint-status={errorCount > 0 ? "normalized" : "valid"}
+      data-constraint-errors={errorCount}
+      data-constraint-warnings={violations.length - errorCount}
+      data-section-template={section.templateId}
+      data-align={section.templateId === "hero_statement" ? section.options.align : undefined}
+      data-media-side={section.templateId === "split_media" ? section.options.mediaSide : undefined}
+      data-card-treatment={section.templateId === "intro_grid" ? section.options.cardTreatment ?? "standard" : undefined}
+      data-background-kind={background.kind}
+      data-rhythm-role={renderState.rhythmRole}
       style={
         {
-          "--site-visual-grid-columns": section.frame.gridColumns ?? 12
+          "--site-visual-grid-columns": renderState.gridColumns,
+          "--site-section-bg": sectionBackgroundCssV3(background),
+          "--site-section-fg": sectionForeground?.foreground ?? "#171512",
+          "--site-section-muted": sectionForeground?.muted ?? "rgba(23, 21, 18, 0.72)",
+          "--site-section-button-bg": sectionForeground?.primaryButtonBackground ?? "#171512",
+          "--site-section-button-fg": sectionForeground?.primaryButtonForeground ?? "#ffffff",
+          "--site-section-button-border": sectionForeground?.primaryButtonBorder ?? "#171512",
+          "--site-section-button-secondary-bg": sectionForeground?.secondaryButtonBackground ?? "transparent",
+          "--site-section-button-secondary-fg": sectionForeground?.secondaryButtonForeground ?? "#171512",
+          "--site-section-button-secondary-border": sectionForeground?.secondaryButtonBorder ?? "#171512",
+          "--site-section-background-position": sectionBackgroundPositionCssV3(background)
         } as React.CSSProperties
       }
     >
-      {section.blocks.map((block) => (
-        <VisualBlockRendererV3 key={block.id} block={block} section={section} />
-      ))}
+      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} />
     </section>
   );
 }
 
-function VisualBlockRendererV3({ block, section }: { block: BlockV3; section: VisualSectionV3 }) {
-  const content = block.content;
+function VisualTemplateSlotsRendererV3({
+  section,
+  business,
+  formsEnabled
+}: {
+  section: VisualSectionV3;
+  business?: BusinessProfile;
+  formsEnabled: boolean;
+}) {
+  switch (section.templateId) {
+    case "hero_split":
+      return (
+        <>
+          <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
+          <SlotBlockV3 role="hero_media" kind="media">{renderMediaSlotV3(section.slots.media, "single", "portrait", "soft")}</SlotBlockV3>
+          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
+        </>
+      );
+    case "hero_statement":
+      return (
+        <>
+          <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
+          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
+          {section.slots.action ? <SlotBlockV3 role="hero_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "split_media":
+      return (
+        <>
+          <SlotBlockV3 role="story_media" kind="media">{renderMediaSlotV3(section.slots.media, "single", "portrait", "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="story_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          {section.slots.facts ? <SlotBlockV3 role="story_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
+        </>
+      );
+    case "intro_grid":
+      return (
+        <>
+          <SlotBlockV3 role="intro_grid_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="intro_grid_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "action_tiles")}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="intro_grid_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "side_intro_rows":
+      return (
+        <>
+          <SlotBlockV3 role="rows_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="rows_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "program_rows")}</SlotBlockV3>
+        </>
+      );
+    case "feature_band":
+      return (
+        <>
+          <SlotBlockV3 role="feature_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="feature_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="feature_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "media_feature":
+      return (
+        <>
+          <SlotBlockV3 role="media_feature_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="media_feature_image" kind="media">{renderMediaSlotV3(section.slots.media, "single", "wide", "soft")}</SlotBlockV3>
+        </>
+      );
+    case "media_mosaic":
+      return (
+        <>
+          <SlotBlockV3 role="gallery_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="gallery_mosaic" kind="media">{renderMediaSlotV3(section.slots.media, "mosaic", "landscape", "soft")}</SlotBlockV3>
+        </>
+      );
+    case "quote_wall":
+      return (
+        <>
+          <SlotBlockV3 role="quote_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="quote_items" kind="list">{renderQuoteItemsSlotV3(section.slots.items.items)}</SlotBlockV3>
+        </>
+      );
+    case "faq_list":
+      return (
+        <>
+          <SlotBlockV3 role="faq_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="faq_items" kind="list">{renderFaqItemsSlotV3(section.slots.items.items)}</SlotBlockV3>
+        </>
+      );
+    case "facts_strip":
+      return <SlotBlockV3 role="facts_strip" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>;
+    case "facts_cta":
+      return (
+        <>
+          <SlotBlockV3 role="local_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>
+          <SlotBlockV3 role="local_action" kind="action_card" className="site-visual-block-v3-surface-card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3>
+        </>
+      );
+    case "editorial_statement":
+      return (
+        <>
+          <SlotBlockV3 role="statement_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="statement_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "location_panel":
+      return (
+        <>
+          <SlotBlockV3 role="location_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="location_list" kind="list">{renderLocationsSlotV3(section.slots.locations.locations)}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="location_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "contact_split":
+      return (
+        <>
+          <SlotBlockV3 role="contact_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="contact_facts" kind="facts">{renderFactsSlotV3({ items: section.slots.contact.facts }, "stacked")}</SlotBlockV3>
+          {business ? (
+            <SlotBlockV3 role="contact_form" kind="action_card" className="site-visual-block-v3-form-card">
+              <ContactFormV3 business={business} formsEnabled={formsEnabled} />
+            </SlotBlockV3>
+          ) : null}
+          {section.slots.action ? <SlotBlockV3 role="contact_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+  }
+}
+
+function SlotBlockV3({ role, kind, className, children }: { role: string; kind: "text" | "media" | "action_card" | "list" | "facts"; className?: string; children: React.ReactNode }) {
   return (
     <div
-      className={`site-visual-block-v3 ${visualBlockClass(block)}`}
-      data-role={block.role}
-      data-kind={content.kind}
-      data-tone={block.style?.tone ?? "plain"}
-      data-density={block.style?.density ?? "balanced"}
-      data-emphasis={block.style?.emphasis ?? "standard"}
-      data-align={block.layout.align ?? "stretch"}
-      data-z={block.layout.z ?? "base"}
-      data-overlap={block.layout.overlap ?? "none"}
-      style={visualBlockStyle(block)}
+      className={`site-visual-block-v3 site-visual-block-v3-${kind} site-visual-block-v3-${role.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase()}${className ? ` ${className}` : ""}`}
+      data-role={role}
+      data-kind={kind}
     >
-      <VisualBlockContentRendererV3 block={block} content={content} section={section} />
+      {children}
     </div>
   );
 }
 
-function VisualBlockContentRendererV3({ block, content, section }: { block: BlockV3; content: VisualBlockContentV3; section: VisualSectionV3 }) {
-  if (content.kind === "text") {
-    const Heading = content.headingLevel ?? "h2";
-    const markHeroCta = block.role === "hero_copy";
-    return (
-      <>
-        {content.eyebrow ? <p className="site-eyebrow-v3">{content.eyebrow}</p> : null}
-        <Heading>{content.heading}</Heading>
-        {content.body ? <p>{content.body}</p> : null}
-        {content.actions?.length ? (
-          <div className="site-actions-v3">
-            {content.actions.map((action) => (
-              <a
-                key={`${action.href}:${action.label}`}
-                className={`site-button-v3 ${visualCtaClass(action.style)}`}
-                href={action.href}
-                data-primary-hero-cta={markHeroCta && action.style !== "secondary" && action.style !== "text" ? "true" : undefined}
-              >
-                {action.label}
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </>
-    );
-  }
+function renderCopySlotV3(content: CopySlotV3, headingLevel: "h1" | "h2" = "h2", markHeroCta = false) {
+  const Heading = headingLevel;
+  return (
+    <>
+      {content.eyebrow ? <p className="site-eyebrow-v3">{content.eyebrow}</p> : null}
+      <Heading>{content.heading}</Heading>
+      {content.body ? <p>{content.body}</p> : null}
+      {content.actions?.length ? renderActionsV3(content.actions, markHeroCta) : null}
+    </>
+  );
+}
 
-  if (content.kind === "media") {
-    return (
-      <div className="site-visual-media-v3" data-presentation={content.presentation ?? "single"} data-crop={content.crop?.aspectRatio ?? "auto"} data-overlay={content.crop?.overlay ?? "none"} data-radius={content.crop?.radius ?? "none"}>
-        {content.items.map((item) => (
-          <figure key={`${item.url}:${item.label}`}>
-            <img src={item.url} alt="" style={mediaObjectPosition(content.crop)} />
-            {item.caption || item.label ? <figcaption>{item.caption ?? item.label}</figcaption> : null}
-          </figure>
-        ))}
-      </div>
-    );
-  }
+function renderActionsV3(actions: VisualCtaV3[], markHeroCta = false) {
+  return (
+    <div className="site-actions-v3">
+      {actions.map((action) => (
+        <a
+          key={`${action.href}:${action.label}`}
+          className={`site-button-v3 ${visualCtaClass(action.style)}`}
+          href={action.href}
+          data-primary-hero-cta={markHeroCta && action.style !== "secondary" && action.style !== "text" ? "true" : undefined}
+        >
+          {action.label}
+        </a>
+      ))}
+    </div>
+  );
+}
 
-  if (content.kind === "action_card") {
-    return (
-      <aside className="site-visual-action-card-v3" aria-label={content.title}>
-        <strong>{content.title}</strong>
-        {content.body ? <p>{content.body}</p> : null}
-        {content.facts?.length ? (
-          <div>
-            {content.facts.slice(0, 4).map((fact) => (
-              <span key={fact.label}>{fact.href ? <a href={fact.href}>{fact.value}</a> : fact.value}</span>
-            ))}
-          </div>
-        ) : null}
-        {content.cta ? (
-          <a
-            className="site-button-v3 site-button-v3-primary"
-            href={content.cta.href}
-            data-primary-hero-cta={block.role === "hero_action" ? "true" : undefined}
-          >
-            {content.cta.label}
-          </a>
-        ) : null}
-      </aside>
-    );
-  }
+function renderMediaSlotV3(slot: MediaSlotV3, presentation: "single" | "mosaic", crop: "portrait" | "landscape" | "wide", radius: "none" | "soft") {
+  const captionMode = mediaCaptionMode(slot);
+  return (
+    <div className="site-visual-media-v3" data-presentation={presentation} data-crop={crop} data-tablet-crop="wide" data-mobile-crop="wide" data-radius={radius} data-caption={captionMode}>
+      {slot.items.map((item) => (
+        <figure key={`${item.url}:${item.label}`}>
+          <img src={item.url} alt="" style={mediaObjectPosition(slot.focalPoint)} />
+          {captionMode !== "none" ? publicFigcaption(item.publicCaption) : null}
+        </figure>
+      ))}
+    </div>
+  );
+}
 
-  if (content.kind === "list") {
-    return (
-      <>
-        {content.heading || content.intro || content.eyebrow ? (
-          <div className="site-section-heading-v3">
-            {content.eyebrow ? <span className="site-section-kicker-v3">{content.eyebrow}</span> : null}
-            {content.heading ? <h2>{content.heading}</h2> : null}
-            {content.intro ? <p>{content.intro}</p> : null}
-          </div>
-        ) : null}
-        <div className="site-visual-list-v3" data-presentation={content.presentation ?? "action_tiles"}>
-          {content.items.map((item, index) => (
-            <article key={item.title}>
-              {item.mediaUrl ? (
-                <figure>
-                  <img src={item.mediaUrl} alt="" />
-                </figure>
-              ) : null}
-              <span>{item.meta ?? String(index + 1).padStart(2, "0")}</span>
-              <h3>{item.title}</h3>
-              <p>{item.body}</p>
-            </article>
+function renderActionSlotV3(content: ActionSlotV3) {
+  return (
+    <aside className="site-visual-action-card-v3" aria-label={content.title}>
+      <strong>{content.title}</strong>
+      {content.body ? <p>{content.body}</p> : null}
+      {content.facts?.length ? (
+        <div>
+          {content.facts.slice(0, 4).map((fact) => (
+            <span key={fact.label}>{fact.href ? <a href={fact.href}>{fact.value}</a> : fact.value}</span>
           ))}
         </div>
-      </>
-    );
-  }
+      ) : null}
+      {content.cta ? <a className="site-button-v3 site-button-v3-primary" href={content.cta.href}>{content.cta.label}</a> : null}
+    </aside>
+  );
+}
 
+function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: "action_tiles" | "program_rows") {
   return (
-    <div className="site-visual-facts-v3" data-presentation={content.presentation ?? "inline_strip"}>
+    <div className="site-visual-list-v3" data-presentation={presentation}>
+      {items.map((item, index) => (
+        <article key={item.title}>
+          {item.mediaUrl ? (
+            <figure>
+              <img src={item.mediaUrl} alt="" />
+            </figure>
+          ) : null}
+          <span>{item.meta ?? String(index + 1).padStart(2, "0")}</span>
+          <h3>{item.title}</h3>
+          <p>{item.body}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function renderQuoteItemsSlotV3(items: QuoteItemV3[]) {
+  return (
+    <div className="site-visual-list-v3" data-presentation="action_tiles">
+      {items.map((item, index) => (
+        <article key={`${item.quote}:${index}`}>
+          <span>{item.context ?? "Proof"}</span>
+          <h3>{item.quote}</h3>
+          {item.attribution ? <p>{item.attribution}</p> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function renderFaqItemsSlotV3(items: FaqItemV3[]) {
+  return (
+    <div className="site-visual-list-v3" data-presentation="service_problem_rows">
+      {items.map((item, index) => (
+        <article key={item.question}>
+          <span>{`Q${index + 1}`}</span>
+          <h3>{item.question}</h3>
+          <p>{item.answer}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function renderFactsSlotV3(content: FactsSlotV3, presentation: "inline_strip" | "trust_bar" | "stacked") {
+  return (
+    <div className="site-visual-facts-v3" data-presentation={presentation}>
       {content.items.map((item) => (
         <div key={item.label}>
           <span>{item.label}</span>
@@ -256,12 +449,75 @@ function VisualBlockContentRendererV3({ block, content, section }: { block: Bloc
   );
 }
 
+function renderLocationsSlotV3(locations: RenderableLocationV3[]) {
+  const primaryLocation = locations.find((location) => location.isPrimary) ?? locations[0];
+  const mapSrc = primaryLocation?.mapEmbedIntent ? mapEmbedUrlForIntent(primaryLocation.mapEmbedIntent) : undefined;
+  return (
+    <div className="site-visual-locations-v3">
+      <div className="site-visual-location-cards-v3">
+        {locations.map((location) => (
+          <article key={location.id} className="site-visual-location-card-v3" data-primary-location={location.isPrimary ? "true" : undefined}>
+            <div>
+              <span>{location.isPrimary ? "Primary location" : location.role === "covered" ? "Location" : "Service area"}</span>
+              <h3>{location.label}</h3>
+            </div>
+            {location.addressLine ? <p>{location.addressLine}</p> : null}
+            {!location.addressLine && location.serviceAreas.length ? <p>Serving {location.serviceAreas.join(", ")}</p> : null}
+            <dl>
+              {location.phone ? (
+                <div>
+                  <dt>Phone</dt>
+                  <dd><a href={`tel:${phoneHrefValue(location.phone)}`}>{formatPhone(location.phone)}</a></dd>
+                </div>
+              ) : null}
+              {location.hoursSummary ? (
+                <div>
+                  <dt>Hours</dt>
+                  <dd>{location.hoursSummary}</dd>
+                </div>
+              ) : null}
+              {location.serviceAreas.length && location.addressLine ? (
+                <div>
+                  <dt>Service areas</dt>
+                  <dd>{location.serviceAreas.slice(0, 4).join(", ")}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="site-actions-v3">
+              {location.directionsUrl ? (
+                <a className="site-button-v3 site-button-v3-secondary" href={location.directionsUrl} data-analytics-role="directions_click">
+                  Get directions
+                </a>
+              ) : null}
+              {location.phone ? (
+                <a className="site-button-v3 site-button-v3-text" href={`tel:${phoneHrefValue(location.phone)}`}>
+                  Call
+                </a>
+              ) : null}
+            </div>
+          </article>
+        ))}
+      </div>
+      {mapSrc && primaryLocation ? (
+        <div className="site-visual-location-map-v3">
+          <iframe
+            title={`${primaryLocation.label} map`}
+            src={mapSrc}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
   const primaryCta = props.primaryCta as Cta | undefined;
   const secondaryCta = props.secondaryCta as Cta | undefined;
   const mediaUrl = stringProp(props.mediaUrl);
   const panelItems = arrayProp<{ label: string; value: string }>(props.panelItems);
-  const mediaItems = arrayProp<{ url: string; label: string; caption?: string }>(props.mediaItems);
+  const mediaItems = arrayProp<PublicMediaItem>(props.mediaItems);
   const statItems = arrayProp<{ label: string; value: string }>(props.statItems);
   const appointmentFields = arrayProp<{ label: string; value?: string }>(props.appointmentFields);
 
@@ -271,7 +527,7 @@ function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
         {mediaUrl ? (
           <figure className="site-hero-media-v3 hero-media">
             <img src={mediaUrl} alt="" />
-            <figcaption>{stringProp(props.mediaCaption)}</figcaption>
+            {publicFigcaption(props.publicMediaCaption)}
           </figure>
         ) : null}
         <div className="site-hero-copy-v3">
@@ -336,7 +592,7 @@ function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
           {primaryMedia ? (
             <figure>
               <img src={primaryMedia} alt="" />
-              <figcaption>{mediaItems[0]?.caption ?? stringProp(props.mediaCaption)}</figcaption>
+              {publicFigcaption(mediaItems[0]?.publicCaption ?? props.publicMediaCaption)}
             </figure>
           ) : null}
           {statItems.length ? (
@@ -372,13 +628,13 @@ function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
           {primaryMedia ? (
             <figure>
               <img src={primaryMedia} alt="" />
-              <figcaption>{mediaItems[0]?.caption ?? stringProp(props.mediaCaption)}</figcaption>
+              {publicFigcaption(mediaItems[0]?.publicCaption ?? props.publicMediaCaption)}
             </figure>
           ) : null}
           {secondaryMedia ? (
             <figure>
               <img src={secondaryMedia} alt="" />
-              <figcaption>{mediaItems[1]?.caption ?? mediaItems[1]?.label}</figcaption>
+              {publicFigcaption(mediaItems[1]?.publicCaption)}
             </figure>
           ) : null}
           {statItems.length ? (
@@ -412,7 +668,7 @@ function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
           {mediaItems.slice(0, 4).map((item) => (
             <figure key={item.url}>
               <img src={item.url} alt="" />
-              <figcaption>{item.caption ?? item.label}</figcaption>
+              {publicFigcaption(item.publicCaption)}
             </figure>
           ))}
         </div>
@@ -460,7 +716,7 @@ function HeroV3({ variant, props }: { variant: string; props: SectionProps }) {
       {mediaUrl ? (
         <figure className="site-hero-media-v3 hero-media">
           <img src={mediaUrl} alt="" />
-          <figcaption>{stringProp(props.mediaCaption)}</figcaption>
+          {publicFigcaption(props.publicMediaCaption)}
         </figure>
       ) : (
         <aside className="site-hero-panel-v3" aria-label="Highlights">
@@ -679,7 +935,7 @@ function StoryV3({ variant, props }: { variant: string; props: SectionProps }) {
       {mediaUrl ? (
         <figure className="site-story-media-v3">
           <img src={mediaUrl} alt="" />
-          <figcaption>{stringProp(props.mediaCaption)}</figcaption>
+          {publicFigcaption(props.publicMediaCaption)}
         </figure>
       ) : null}
     </section>
@@ -687,7 +943,7 @@ function StoryV3({ variant, props }: { variant: string; props: SectionProps }) {
 }
 
 function MediaStoryV3({ variant, props }: { variant: string; props: SectionProps }) {
-  const items = arrayProp<{ url: string; label: string }>(props.items);
+  const items = arrayProp<PublicMediaItem>(props.items);
   if (variant === "immersive_media_band") {
     const primary = items[0];
     return (
@@ -699,7 +955,7 @@ function MediaStoryV3({ variant, props }: { variant: string; props: SectionProps
         {primary ? (
           <figure className="site-immersive-media-band-v3">
             <img src={primary.url} alt="" />
-            <figcaption>{primary.label}</figcaption>
+            {publicFigcaption(primary.publicCaption)}
           </figure>
         ) : null}
       </section>
@@ -716,7 +972,7 @@ function MediaStoryV3({ variant, props }: { variant: string; props: SectionProps
         {items.map((item) => (
           <figure key={item.label}>
             <img src={item.url} alt="" />
-            <figcaption>{item.label}</figcaption>
+            {publicFigcaption(item.publicCaption)}
           </figure>
         ))}
       </div>
@@ -766,13 +1022,7 @@ function ContactV3({ variant, props, business, formsEnabled }: { variant: string
         ) : null}
       </div>
       {formsEnabled ? (
-        <form className="site-contact-form-v3" data-form-kind="contact">
-          <label>Name<input name="name" autoComplete="name" /></label>
-          <label>Phone<input name="phone" type="tel" autoComplete="tel" /></label>
-          <label>Email<input name="email" type="email" autoComplete="email" /></label>
-          <label>Message<textarea name="message" /></label>
-          <button className="site-button-v3 site-button-v3-primary" type="submit">Send message</button>
-        </form>
+        <ContactFormV3 business={business} formsEnabled={formsEnabled} />
       ) : (
         <aside className="site-contact-action-v3" aria-label="Contact actions">
           {fallbackActionItems.map((item) => (
@@ -784,9 +1034,34 @@ function ContactV3({ variant, props, business, formsEnabled }: { variant: string
           <a className="site-button-v3 site-button-v3-primary" href={business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact"}>
             {business.phone ? "Call now" : "Send details"}
           </a>
+          <ContactFormV3 business={business} formsEnabled={formsEnabled} />
         </aside>
       )}
     </section>
+  );
+}
+
+function ContactFormV3({ business, formsEnabled }: { business: BusinessProfile; formsEnabled: boolean }) {
+  return (
+    <form
+      className="site-contact-form-v3"
+      data-form-kind="contact"
+      data-preview-disabled={formsEnabled ? undefined : "lead-form"}
+      action={formsEnabled ? "/api/forms/submit" : undefined}
+      method={formsEnabled ? "post" : undefined}
+      aria-disabled={formsEnabled ? undefined : true}
+    >
+      <input type="hidden" name="siteId" value={business.siteId} disabled={!formsEnabled} />
+      <input type="hidden" name="formId" value="form_contact" disabled={!formsEnabled} />
+      <input type="hidden" name="pageId" value="home" disabled={!formsEnabled} />
+      <label>Name<input name="name" autoComplete="name" disabled={!formsEnabled} /></label>
+      <label>Phone<input name="phone" type="tel" autoComplete="tel" disabled={!formsEnabled} /></label>
+      <label>Email<input name="email" type="email" autoComplete="email" disabled={!formsEnabled} /></label>
+      <label>Message<textarea name="message" disabled={!formsEnabled} /></label>
+      <button className="site-button-v3 site-button-v3-primary" type="submit" disabled={!formsEnabled}>
+        {formsEnabled ? "Send message" : "Claim this site to enable lead capture"}
+      </button>
+    </form>
   );
 }
 
@@ -834,40 +1109,73 @@ function FooterV3({ business, site }: { business: BusinessProfile; site: SiteMod
 
 function sectionFrameClass(section: VisualSectionV3) {
   return [
-    `site-visual-section-v3-${section.anatomy}`,
-    section.frame.bleedMedia ? "site-visual-section-v3-bleed-media" : ""
+    `site-visual-section-v3-template-${section.templateId}`,
+    section.options.background.kind === "image" ? "site-visual-section-v3-bleed-media" : ""
   ]
     .filter(Boolean)
     .join(" ");
 }
 
-function visualBlockClass(block: BlockV3) {
-  return [`site-visual-block-v3-${block.content.kind}`, `site-visual-block-v3-${block.role.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase()}`].join(" ");
+function sectionBackgroundCssV3(background: SectionBackgroundOptionV3): string {
+  if (background.kind === "solid") {
+    const values: Record<"page" | "surface" | "dark" | "brand", string> = {
+      page: "var(--site-v3-bg)",
+      surface: "var(--site-v3-surface)",
+      dark: "#12100d",
+      brand: "var(--site-v3-primary)"
+    };
+    return values[background.token];
+  }
+  if (background.kind === "gradient") {
+    if (background.token === "brand") {
+      return "linear-gradient(135deg, #14120f 0%, var(--site-v3-primary) 100%)";
+    }
+    return "linear-gradient(180deg, var(--site-v3-surface) 0%, color-mix(in srgb, var(--site-v3-bg) 84%, var(--site-v3-accent) 16%) 100%)";
+  }
+  const image = `url("${cssUrlValueV3(background.url)}")`;
+  return `linear-gradient(0deg, rgba(12, 12, 10, 0.8), rgba(12, 12, 10, 0.26)), ${image}`;
 }
 
-function visualBlockStyle(block: BlockV3): React.CSSProperties {
-  const column = block.layout.column;
-  const row = block.layout.row;
-  return {
-    "--site-visual-col-start": column?.start ?? "auto",
-    "--site-visual-col-span": column?.span ?? "auto",
-    "--site-visual-row-start": row?.start ?? "auto",
-    "--site-visual-row-span": row?.span ?? "auto",
-    "--site-visual-block-order": block.layout.order ?? 0,
-    "--site-visual-block-mobile-order": block.layout.mobileOrder ?? block.layout.order ?? 0
-  } as React.CSSProperties;
+function cssUrlValueV3(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function mediaObjectPosition(crop: MediaCropV3 | undefined): React.CSSProperties | undefined {
-  if (!crop?.focalPoint) return undefined;
-  const positions: Record<NonNullable<MediaCropV3["focalPoint"]>, string> = {
+function sectionBackgroundPositionCssV3(background: SectionBackgroundOptionV3): string {
+  if (background.kind !== "image") return "center";
+  const positions: Record<"center" | "top" | "bottom" | "left" | "right", string> = {
     center: "center",
     top: "center top",
     bottom: "center bottom",
     left: "left center",
     right: "right center"
   };
-  return { objectPosition: positions[crop.focalPoint] };
+  return positions[background.focalPoint ?? "center"];
+}
+
+function mediaCaptionMode(slot: MediaSlotV3): NonNullable<MediaSlotV3["caption"]> {
+  if (!slot.items.some((item) => Boolean(publicCaptionText(item.publicCaption)))) return "none";
+  return slot.caption ?? "below";
+}
+
+function publicFigcaption(value: unknown) {
+  const caption = publicCaptionText(value);
+  return caption ? <figcaption>{caption}</figcaption> : null;
+}
+
+function publicCaptionText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function mediaObjectPosition(focalPoint: BackgroundFocalPointV3 | undefined): React.CSSProperties | undefined {
+  if (!focalPoint) return undefined;
+  const positions: Record<BackgroundFocalPointV3, string> = {
+    center: "center",
+    top: "center top",
+    bottom: "center bottom",
+    left: "left center",
+    right: "right center"
+  };
+  return { objectPosition: positions[focalPoint] };
 }
 
 function visualCtaClass(style: "primary" | "secondary" | "text" | undefined) {
@@ -876,9 +1184,57 @@ function visualCtaClass(style: "primary" | "secondary" | "text" | undefined) {
   return "site-button-v3-primary";
 }
 
-function artDirectionStyle(version: SiteVersionV3): React.CSSProperties {
+function headerVisualMode(artDirection: SiteArtDirectionV3, firstVisualSection?: VisualSectionV3) {
+  if (firstVisualSection && isHeroVisualSection(firstVisualSection)) {
+    return firstVisualSection.options.background.kind === "image" ? "transparent_overlay" : "solid";
+  }
+  if (artDirection.headerMode === "transparent_overlay") return "transparent_overlay";
+  if (artDirection.recipeId.includes("canonical_editorial")) return "floating_pill";
+  if (artDirection.recipeId.includes("immersive_media")) return "transparent_overlay";
+  if (artDirection.recipeId.includes("premium_dark")) return "glass_overlay";
+  if (artDirection.recipeId.includes("minimal_studio")) return "floating_pill";
+  return "solid";
+}
+
+function isHeroVisualSection(section: VisualSectionV3) {
+  return section.templateId === "hero_split" || section.templateId === "hero_statement";
+}
+
+function normalizeRendererLocations(
+  business: BusinessProfile,
+  locations: BusinessLocationRecord[] | undefined,
+  locationBindings: SiteLocationBinding[] | undefined
+) {
+  const normalizedLocations = locations?.length
+    ? locations
+    : businessLocationsFromProfile(business, businessIdForProfile(business));
+  return {
+    locations: normalizedLocations,
+    locationBindings: normalizeSiteLocationBindings(normalizedLocations, locationBindings)
+  };
+}
+
+function mapEmbedUrlForIntent(intent: MapEmbedIntentV3) {
+  if (process.env.LODESTA_LOCATION_MAP_MODE !== "embed") return undefined;
+  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY?.trim();
+  if (!key) return undefined;
+  const query = mapEmbedQueryForIntent(intent);
+  if (!query) return undefined;
+  const params = new URLSearchParams({ key, q: query });
+  return `https://www.google.com/maps/embed/v1/place?${params.toString()}`;
+}
+
+function mapEmbedQueryForIntent(intent: MapEmbedIntentV3) {
+  if (intent.kind === "place") return intent.placeId ? `place_id:${intent.placeId}` : undefined;
+  if (intent.kind === "address") return intent.address.trim() || undefined;
+  if (intent.kind === "geo" && Number.isFinite(intent.latitude) && Number.isFinite(intent.longitude)) return `${intent.latitude},${intent.longitude}`;
+  return undefined;
+}
+
+export function artDirectionStyle(version: SiteVersionV3): React.CSSProperties {
   const fonts = fontStacks(version.artDirection.fontPairingId);
   const colors = version.theme?.colors;
+  const surfaceForeground = colors ? surfaceForegroundTokens(colors.surface) : undefined;
   return {
     "--site-v3-heading": fonts.heading,
     "--site-v3-body": fonts.body,
@@ -889,12 +1245,46 @@ function artDirectionStyle(version: SiteVersionV3): React.CSSProperties {
           "--site-v3-ink": colors.text,
           "--site-v3-muted": colors.muted,
           "--site-v3-primary": colors.primary,
+          "--site-v3-primaryText": colors.primaryText,
           "--site-v3-primary-dark": colors.primary,
           "--site-v3-accent": colors.accent,
-          "--site-v3-line": colors.border
+          "--site-v3-line": colors.border,
+          "--site-v3-surface-ink": surfaceForeground?.ink ?? colors.text,
+          "--site-v3-surface-muted": surfaceForeground?.muted ?? colors.muted
         }
       : {})
   } as React.CSSProperties;
+}
+
+function surfaceForegroundTokens(surface: string) {
+  const rgb = parseHexColor(surface);
+  if (!rgb) return undefined;
+  const luminance = relativeLuminance(rgb);
+  return luminance > 0.52
+    ? { ink: "#171512", muted: "#5f574d" }
+    : { ink: "#f8f3ea", muted: "rgba(248, 243, 234, 0.78)" };
+}
+
+function parseHexColor(value: string) {
+  const normalized = value.trim();
+  const match = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return undefined;
+  const hex = match[1].length === 3
+    ? match[1].split("").map((part) => `${part}${part}`).join("")
+    : match[1];
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16)
+  };
+}
+
+function relativeLuminance(rgb: { r: number; g: number; b: number }) {
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
 }
 
 function fontStacks(fontPairingId: SiteArtDirectionFontPairingIdV3) {

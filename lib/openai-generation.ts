@@ -193,6 +193,7 @@ function makePlanningContext({ bundle, sourceUrl, prompt, crawl, renderInspectio
       market: "US SMB launch",
       renderer: "structured multi-tenant Next.js renderer",
       customerEditing: "curated controls only",
+      sectionPaint: "V3 visual section paint uses only template background options: solid, gradient, or image; overlays and contrast are renderer-derived.",
       sourceMaterialPolicy: "internal previews may use public customer website material and assets with provenance"
     },
     sourceUrl,

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ConversionGoal, GenerationArtifactV2, SiteBundle, SiteVersion, Vertical } from "./models";
+import type { ConversionGoal, SiteArtifactRecord, SiteBundle, SiteVersion, Vertical } from "./models";
 
 export type VerticalClassificationReportV2 = {
   selectedVertical: Vertical;
@@ -32,7 +32,7 @@ export type StrategyPlanningV2Result = {
   verticalClassification: VerticalClassificationReportV2;
   conversionPath: ConversionPathReportV2;
   informationArchitecture: InformationArchitectureReportV2;
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -132,7 +132,7 @@ function strategyArtifacts(input: {
   conversionPath: ConversionPathReportV2;
   informationArchitecture: InformationArchitectureReportV2;
   createdAt?: string;
-}): GenerationArtifactV2[] {
+}): SiteArtifactRecord[] {
   const createdAt = input.createdAt ?? new Date().toISOString();
   return [
     strategyArtifact(input.siteId, "vertical_classification_report", "strategy.vertical-classifier", "vertical-classification-report-v2", { versionId: input.versionId, verticalClassification: input.verticalClassification }, createdAt),
@@ -143,17 +143,17 @@ function strategyArtifacts(input: {
 
 function strategyArtifact(
   siteId: string,
-  artifactType: GenerationArtifactV2["artifactType"],
+  artifactType: SiteArtifactRecord["artifactType"],
   producerId: string,
   artifactVersion: string,
   payload: Record<string, unknown>,
   createdAt: string
-): GenerationArtifactV2 {
+): SiteArtifactRecord {
   const contentHash = hashPayload(payload);
   return {
     id: `artifact_${siteId}_${artifactType}_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType,
     artifactVersion,
     producerId,

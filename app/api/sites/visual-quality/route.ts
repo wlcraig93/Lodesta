@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       version: result.updatedVersion
     });
   }
-  await repository.upsertGenerationArtifact(result.artifact);
+  await repository.upsertSiteArtifact(result.artifact);
 
   return NextResponse.json({
     skillId: result.skillId,

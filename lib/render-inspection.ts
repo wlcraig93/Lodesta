@@ -262,7 +262,7 @@ async function inspectHtmlWithPlaywright(
 
       try {
         await installPublicAssetRoute(page, input.sourceUrl);
-        await page.setContent(input.html, { waitUntil: "load", timeout: renderTimeoutMs() });
+        await page.setContent(input.html, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs() });
         await waitForImages(page);
         const metrics = await page.evaluate<BrowserMetrics>(collectBrowserMetricsScript());
         metrics.finalUrl = input.sourceUrl;
@@ -503,15 +503,22 @@ function collectBrowserMetricsScript() {
       return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
     };
     const backgroundForElement = (element) => {
+      const ownBackground = parseRgb(getComputedStyle(element).backgroundColor);
+      if (ownBackground && ownBackground.a > 0.5) return ownBackground;
       if (element.closest(".site-portfolio-index-v3 article")) return { r: 8, g: 8, b: 8, a: 1 };
       if (element.closest(".site-visual-list-v3[data-presentation='portfolio_index'] article")) return { r: 12, g: 12, b: 12, a: 1 };
-      if (element.closest(".site-visual-block-v3[data-tone='glass']")) return { r: 18, g: 18, b: 16, a: 1 };
+      if (element.closest(".site-header-v3[data-header-mode='utility_call_bar']")) return { r: 13, g: 92, b: 99, a: 1 };
+      if (element.closest(".site-header-v3[data-header-mode='split_brand_rail']")) return { r: 23, g: 21, b: 18, a: 1 };
+      const usesGlassSurface = element.closest(".site-visual-block-v3[data-tone='glass']");
       const usesV3OverlaySurface =
         element.closest(".site-hero-v3[data-variant='media_masthead']") ||
         element.closest(".site-hero-v3[data-variant='appointment_card_overlay']") ||
         element.closest(".site-visual-section-v3-bleed-media") ||
-        element.closest(".site-visual-section-v3[data-color-mode='contrast']") ||
-        element.closest(".site-header-v3[data-header-mode='transparent_overlay']");
+        element.closest(".site-visual-section-v3[data-background-kind='image']") ||
+        element.closest(".site-visual-section-v3[data-background-kind='gradient']") ||
+        element.closest(".site-header-v3[data-header-mode='transparent_overlay']") ||
+        element.closest(".site-header-v3[data-header-visual-mode='transparent_overlay']") ||
+        element.closest(".site-header-v3[data-header-visual-mode='glass_overlay']");
       let current = element;
       while (current) {
         const background = parseRgb(getComputedStyle(current).backgroundColor);
@@ -521,23 +528,154 @@ function collectBrowserMetricsScript() {
         }
         current = current.parentElement;
       }
+      const visualSection = element.closest(".site-visual-section-v3");
+      if (visualSection) {
+        const sectionForeground = parseRgb(getComputedStyle(visualSection).color);
+        if (sectionForeground) {
+          return relativeLuminance(sectionForeground) > 0.5
+            ? { r: 18, g: 16, b: 13, a: 1 }
+            : { r: 255, g: 253, b: 248, a: 1 };
+        }
+      }
       if (usesV3OverlaySurface) return { r: 12, g: 11, b: 10, a: 1 };
-      return parseRgb(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+      if (usesGlassSurface) return { r: 18, g: 18, b: 16, a: 1 };
+      const bodyBackground = parseRgb(getComputedStyle(document.body).backgroundColor);
+      return bodyBackground && bodyBackground.a > 0.5 ? bodyBackground : { r: 255, g: 255, b: 255, a: 1 };
     };
     const isVisible = (element) => {
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
     };
+    const textLineRects = (element) => {
+      if (!element) return [];
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const rects = Array.from(range.getClientRects())
+        .filter((rect) => rect.width > 1 && rect.height > 1)
+        .map((rect) => ({
+          top: rect.top,
+          left: rect.left,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height
+        }));
+      range.detach();
+      const lines = [];
+      for (const rect of rects) {
+        const existing = lines.find((line) => Math.abs(line.top - rect.top) < Math.max(4, rect.height * 0.35));
+        if (existing) {
+          existing.left = Math.min(existing.left, rect.left);
+          existing.right = Math.max(existing.right, rect.right);
+          existing.top = Math.min(existing.top, rect.top);
+          existing.bottom = Math.max(existing.bottom, rect.bottom);
+          existing.width = existing.right - existing.left;
+          existing.height = existing.bottom - existing.top;
+        } else {
+          lines.push({ ...rect });
+        }
+      }
+      return lines;
+    };
+    const isMeaningfullyInViewport = (rect) => rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+    const selectorName = (element) => {
+      if (!element) return "unknown";
+      const tag = element.tagName.toLowerCase();
+      const role = element.getAttribute("data-role");
+      const kind = element.getAttribute("data-kind");
+      const klass = String(element.className || "").split(/\\s+/).filter(Boolean).slice(0, 2).join(".");
+      return [tag, role ? "[role=" + role + "]" : "", kind ? "[kind=" + kind + "]" : "", klass ? "." + klass : ""].join("");
+    };
+    const intersectionArea = (left, right) => {
+      const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
+      const height = Math.max(0, Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top));
+      return width * height;
+    };
+    const foregroundOverlapSamples = () => {
+      const candidates = Array.from(
+        document.querySelectorAll(
+          [
+            "[data-site-chrome='header']",
+            ".site-visual-block-v3[data-kind='text'] h1",
+            ".site-visual-block-v3[data-kind='text'] h2",
+            ".site-visual-action-card-v3",
+            ".site-visual-facts-v3",
+            ".site-visual-list-v3 article",
+            ".site-actions-v3",
+            "[data-primary-hero-cta='true']"
+          ].join(",")
+        )
+      )
+        .filter(isVisible)
+        .map((element) => ({ element, rect: element.getBoundingClientRect(), name: selectorName(element) }))
+        .filter((entry) => entry.rect.width >= 24 && entry.rect.height >= 24 && isMeaningfullyInViewport(entry.rect));
+      const samples = [];
+      for (let index = 0; index < candidates.length; index += 1) {
+        for (let otherIndex = index + 1; otherIndex < candidates.length; otherIndex += 1) {
+          const left = candidates[index];
+          const right = candidates[otherIndex];
+          if (left.element.contains(right.element) || right.element.contains(left.element)) continue;
+          const area = intersectionArea(left.rect, right.rect);
+          if (area <= 0) continue;
+          const smallerArea = Math.max(1, Math.min(left.rect.width * left.rect.height, right.rect.width * right.rect.height));
+          if (area / smallerArea < 0.12 && area < 1400) continue;
+          samples.push(
+            left.name +
+              " overlaps " +
+              right.name +
+              " by " +
+              Math.round(area) +
+              "px^2"
+          );
+          if (samples.length >= 5) return samples;
+        }
+      }
+      return samples;
+    };
+    const crampedTextSamples = () => {
+      const minWidth = window.innerWidth < 480 ? 150 : window.innerWidth < 900 ? 180 : 220;
+      const minWidthForElement = (element) => {
+        if (element.closest(".site-visual-facts-v3")) return 96;
+        if (element.closest(".site-visual-action-card-v3")) return window.innerWidth < 480 ? 150 : 180;
+        return minWidth;
+      };
+      return Array.from(
+        siteRoot.querySelectorAll(
+          [
+            ".site-visual-block-v3[data-kind='text'] p:not(.site-eyebrow-v3)",
+            ".site-visual-list-v3 article h3",
+            ".site-visual-list-v3 article p",
+            ".site-visual-action-card-v3 p",
+            ".site-visual-facts-v3 a",
+            ".site-visual-facts-v3 strong"
+          ].join(",")
+        )
+      )
+        .filter((element) => isVisible(element) && (element.innerText || "").trim().length >= 18)
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter((entry) => isMeaningfullyInViewport(entry.rect) && entry.rect.width > 0 && entry.rect.width < minWidthForElement(entry.element))
+        .slice(0, 5)
+        .map((entry) => selectorName(entry.element) + " width=" + Math.round(entry.rect.width) + " text=" + (entry.element.innerText || "").trim().slice(0, 70));
+    };
     const bodyText = document.body?.innerText?.replace(/\\s+/g, " ").trim() ?? "";
     const siteRoot = document.querySelector(".public-site") || document.body;
     const hero =
-      document.querySelector(".site-visual-section-v3[data-anatomy='hero_overlay_action']") ??
+      document.querySelector(
+        [
+          ".site-visual-section-v3[data-section-template='hero']",
+          ".site-visual-section-v3[data-section-template='hero_split']",
+          ".site-visual-section-v3[data-section-template='hero_statement']",
+          ".site-visual-section-v3[data-section-template='full_bleed_media']"
+        ].join(",")
+      ) ??
       document.querySelector(".site-hero-v3") ??
       document.querySelector(".site-hero-v2") ??
       document.querySelector(".hero");
     const h1 = hero?.querySelector("h1") ?? document.querySelector("h1");
-    const primaryHeroCtas = Array.from(document.querySelectorAll("[data-primary-hero-cta='true']")).filter(isVisible);
+    const heroPrimaryCtas = hero ? Array.from(hero.querySelectorAll("[data-primary-hero-cta='true']")).filter(isVisible) : [];
+    const pagePrimaryCtas = Array.from(document.querySelectorAll("[data-primary-hero-cta='true']")).filter(isVisible);
+    const primaryHeroCtas = heroPrimaryCtas.length ? heroPrimaryCtas : pagePrimaryCtas;
     const primaryHeroCta =
       primaryHeroCtas.find((element) => {
         const rect = elementRect(element);
@@ -552,8 +690,21 @@ function collectBrowserMetricsScript() {
       hero?.querySelector(".site-hero-v2-media") ??
       hero?.querySelector(".hero-media");
     const primaryMediaImage = primaryMedia?.querySelector("img");
+    const heroMediaEdgeClipSamples = () => {
+      if (!primaryMedia) return [];
+      const edgeTolerance = window.innerWidth < 480 ? 0 : 8;
+      return Array.from(primaryMedia.querySelectorAll("figure, img"))
+        .filter((element) => isVisible(element))
+        .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+        .filter((entry) => entry.rect.width > 40 && entry.rect.height > 40)
+        .filter((entry) => entry.rect.left <= edgeTolerance || entry.rect.right >= window.innerWidth - edgeTolerance)
+        .slice(0, 5)
+        .map((entry) => selectorName(entry.element) + " left=" + Math.round(entry.rect.left) + " right=" + Math.round(entry.rect.right) + " viewport=" + window.innerWidth);
+    };
+    const siteHeader = document.querySelector("[data-site-chrome='header']");
     const siteStyle = getComputedStyle(siteRoot);
     const h1Style = h1 ? getComputedStyle(h1) : undefined;
+    const h1LineRects = textLineRects(h1);
     const readableElements = Array.from(siteRoot.querySelectorAll("p, li, dt, dd, a.site-button, .site-button-v3, .site-card-v2 h3, .site-card-v2 p, .site-card-link-v2 > span:last-child"))
       .filter((element) => isVisible(element) && (element.innerText || "").trim().length > 0);
     const readableMetrics = readableElements.map((element) => {
@@ -579,6 +730,26 @@ function collectBrowserMetricsScript() {
     const minContrastMetric = readableMetrics
       .filter((metric) => Number.isFinite(metric.contrast))
       .sort((left, right) => left.contrast - right.contrast)[0];
+    const headerReadableMetrics = siteHeader
+      ? Array.from(siteHeader.querySelectorAll("a, strong, .site-button-v3"))
+          .filter((element) => isVisible(element) && (element.innerText || element.getAttribute("aria-label") || "").trim().length > 0)
+          .map((element) => {
+            const style = getComputedStyle(element);
+            const foreground = parseRgb(style.color);
+            const background = backgroundForElement(element);
+            return {
+              contrast: foreground && background ? contrastRatio(foreground, background) : undefined,
+              sample: selectorName(element) + " fg=" + style.color + " text=" + (element.innerText || "").trim().slice(0, 60)
+            };
+          })
+      : [];
+    const headerContrastRatios = headerReadableMetrics.map((metric) => metric.contrast).filter((value) => Number.isFinite(value) && value > 0);
+    const minHeaderContrastMetric = headerReadableMetrics
+      .filter((metric) => Number.isFinite(metric.contrast))
+      .sort((left, right) => left.contrast - right.contrast)[0];
+    const overlapSamples = foregroundOverlapSamples();
+    const crampedSamples = crampedTextSamples();
+    const mediaEdgeSamples = heroMediaEdgeClipSamples();
     const images = Array.from(document.images);
     const loadedImages = images.filter((image) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
     const brokenImages = images.filter((image) => image.complete && (image.naturalWidth === 0 || image.naturalHeight === 0));
@@ -616,10 +787,10 @@ function collectBrowserMetricsScript() {
       loadedImageCount: loadedImages.length,
       brokenImageCount: brokenImages.length,
       aboveFoldCtaDetected: primaryHeroCtaRect
-        ? primaryHeroCtaRect.top >= 0 && primaryHeroCtaRect.top <= window.innerHeight
+        ? primaryHeroCtaRect.top <= window.innerHeight && primaryHeroCtaVisibleHeight >= Math.min(primaryHeroCtaRect.height, 44)
         : typeof firstCtaTop === "number" ? firstCtaTop >= 0 && firstCtaTop <= window.innerHeight : false,
       primaryHeroCtaDetected: Boolean(primaryHeroCta),
-      primaryHeroCtaAboveFold: primaryHeroCtaRect ? primaryHeroCtaRect.top >= 0 && primaryHeroCtaVisibleHeight >= Math.min(primaryHeroCtaRect.height, 44) : false,
+      primaryHeroCtaAboveFold: primaryHeroCtaRect ? primaryHeroCtaRect.top <= window.innerHeight && primaryHeroCtaVisibleHeight >= Math.min(primaryHeroCtaRect.height, 44) : false,
       primaryMediaImageLoaded: primaryMediaImage ? primaryMediaImage.complete && primaryMediaImage.naturalWidth > 0 && primaryMediaImage.naturalHeight > 0 : undefined,
       siteHeaderDetected: Boolean(document.querySelector("[data-site-chrome='header']")),
       siteFooterDetected: Boolean(document.querySelector("[data-site-chrome='footer']")),
@@ -628,6 +799,17 @@ function collectBrowserMetricsScript() {
       minReadableTextFontSizePx: readableFontSizes.length ? Math.min(...readableFontSizes) : undefined,
       minTextContrastRatio: contrastRatios.length ? Math.min(...contrastRatios) : undefined,
       minTextContrastSample: minContrastMetric?.sample,
+      headerContrastRatio: headerContrastRatios.length ? Math.min(...headerContrastRatios) : undefined,
+      headerContrastSample: minHeaderContrastMetric?.sample,
+      headerVisualMode: siteHeader?.getAttribute("data-header-visual-mode") ?? siteHeader?.getAttribute("data-header-mode") ?? undefined,
+      heroH1LineCount: h1LineRects.length || undefined,
+      heroH1MaxLineWidthPx: h1LineRects.length ? Math.max(...h1LineRects.map((rect) => rect.width)) : undefined,
+      visualOverlapCount: overlapSamples.length,
+      visualOverlapSamples: overlapSamples,
+      crampedTextCount: crampedSamples.length,
+      crampedTextSamples: crampedSamples,
+      heroMediaEdgeClipCount: mediaEdgeSamples.length,
+      heroMediaEdgeClipSamples: mediaEdgeSamples,
       headingFontFamily: h1Style?.fontFamily,
       bodyFontFamily: siteStyle.fontFamily,
       rects: {
@@ -696,6 +878,9 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
   const primaryCtaRect = metrics.rects?.primaryHeroCta;
   const stickyRect = metrics.rects?.stickyCta;
   const mediaRect = metrics.rects?.primaryMedia;
+  const h1LineCount = metrics.heroH1LineCount;
+  const viewportName = viewport ?? metrics.viewport?.name;
+  const maxH1Lines = viewportName === "mobile" ? 6 : viewportName === "tablet" ? 5 : 4;
 
   findings.push({
     id: `render.body_text${suffix}`,
@@ -738,6 +923,15 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       viewport
     });
   }
+  if (typeof h1LineCount === "number") {
+    findings.push({
+      id: `render.hero_h1_lines${suffix}`,
+      severity: h1LineCount <= maxH1Lines ? "pass" : "fail",
+      title: `Hero headline line count is controlled${titleSuffix}`,
+      evidence: `${h1LineCount} rendered H1 line boxes detected; maximum for this viewport is ${maxH1Lines}.`,
+      viewport
+    });
+  }
   if (typeof metrics.horizontalOverflowPx === "number") {
     findings.push({
       id: `render.horizontal_overflow${suffix}`,
@@ -771,6 +965,37 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       severity: metrics.minTextContrastRatio >= 4.5 ? "pass" : "fail",
       title: `Sampled text contrast meets AA minimum${titleSuffix}`,
       evidence: `Lowest sampled text contrast ratio is ${metrics.minTextContrastRatio.toFixed(2)}:1.`,
+      viewport
+    });
+  }
+  if (typeof metrics.headerContrastRatio === "number") {
+    findings.push({
+      id: `render.header_contrast${suffix}`,
+      severity: metrics.headerContrastRatio >= 4.5 ? "pass" : "fail",
+      title: `Header contrast is readable${titleSuffix}`,
+      evidence: `Lowest sampled header contrast ratio is ${metrics.headerContrastRatio.toFixed(2)}:1 (${metrics.headerVisualMode ?? "unknown mode"}).`,
+      viewport
+    });
+  }
+  if (typeof metrics.visualOverlapCount === "number") {
+    findings.push({
+      id: `render.visual_overlap${suffix}`,
+      severity: metrics.visualOverlapCount === 0 ? "pass" : "fail",
+      title: `Foreground elements do not incoherently overlap${titleSuffix}`,
+      evidence: metrics.visualOverlapCount
+        ? `${metrics.visualOverlapCount} foreground overlap samples: ${(metrics.visualOverlapSamples ?? []).join("; ")}`
+        : "No foreground overlap samples detected.",
+      viewport
+    });
+  }
+  if (typeof metrics.crampedTextCount === "number") {
+    findings.push({
+      id: `render.cramped_text_columns${suffix}`,
+      severity: metrics.crampedTextCount === 0 ? "pass" : "fail",
+      title: `Text columns are not cramped${titleSuffix}`,
+      evidence: metrics.crampedTextCount
+        ? `${metrics.crampedTextCount} cramped text samples: ${(metrics.crampedTextSamples ?? []).join("; ")}`
+        : "No cramped text samples detected.",
       viewport
     });
   }
@@ -924,6 +1149,20 @@ function mergeMetrics(left: BrowserMetrics, right: BrowserMetrics): BrowserMetri
       minDefined(left.minTextContrastRatio, right.minTextContrastRatio) === left.minTextContrastRatio
         ? left.minTextContrastSample
         : right.minTextContrastSample,
+    headerContrastRatio: minDefined(left.headerContrastRatio, right.headerContrastRatio),
+    headerContrastSample:
+      minDefined(left.headerContrastRatio, right.headerContrastRatio) === left.headerContrastRatio
+        ? left.headerContrastSample
+        : right.headerContrastSample,
+    headerVisualMode: left.headerVisualMode ?? right.headerVisualMode,
+    heroH1LineCount: maxDefined(left.heroH1LineCount, right.heroH1LineCount),
+    heroH1MaxLineWidthPx: maxDefined(left.heroH1MaxLineWidthPx, right.heroH1MaxLineWidthPx),
+    visualOverlapCount: maxDefined(left.visualOverlapCount, right.visualOverlapCount),
+    visualOverlapSamples: left.visualOverlapSamples?.length ? left.visualOverlapSamples : right.visualOverlapSamples,
+    crampedTextCount: maxDefined(left.crampedTextCount, right.crampedTextCount),
+    crampedTextSamples: left.crampedTextSamples?.length ? left.crampedTextSamples : right.crampedTextSamples,
+    heroMediaEdgeClipCount: maxDefined(left.heroMediaEdgeClipCount, right.heroMediaEdgeClipCount),
+    heroMediaEdgeClipSamples: left.heroMediaEdgeClipSamples?.length ? left.heroMediaEdgeClipSamples : right.heroMediaEdgeClipSamples,
     headingFontFamily: left.headingFontFamily ?? right.headingFontFamily,
     bodyFontFamily: left.bodyFontFamily ?? right.bodyFontFamily
   };

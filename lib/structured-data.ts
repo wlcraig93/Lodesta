@@ -1,4 +1,4 @@
-import type { BusinessProfile } from "./models";
+import type { BusinessLocationRecord, BusinessProfile, SiteLocationBinding } from "./models";
 
 export function makeLocalBusinessJsonLd(business: BusinessProfile) {
   if (!verified(business, "name")) return null;
@@ -43,6 +43,39 @@ export function makeLocalBusinessJsonLd(business: BusinessProfile) {
   });
 }
 
+export function makeLocalBusinessJsonLdForBundle(input: {
+  business: BusinessProfile;
+  locations?: BusinessLocationRecord[];
+  locationBindings?: SiteLocationBinding[];
+}) {
+  const base = makeLocalBusinessJsonLd(input.business);
+  if (!base) return null;
+  const locations = input.locations ?? [];
+  if (locations.length <= 1) return base;
+
+  const locationById = new Map(locations.map((location) => [location.id, location]));
+  const orderedLocations = (input.locationBindings?.length
+    ? input.locationBindings
+        .map((binding) => locationById.get(binding.locationId))
+        .filter((location): location is BusinessLocationRecord => Boolean(location))
+    : locations
+  ).filter((location) => verifiedLocation(location, "address") && location.address);
+
+  const locationNodes = orderedLocations
+    .map((location, index) => locationJsonLd(input.business, location, index))
+    .filter((location): location is Record<string, unknown> => Boolean(location));
+
+  if (!locationNodes.length) return base;
+  const baseNode: Record<string, unknown> | undefined = base && typeof base === "object" && !Array.isArray(base)
+    ? { ...(base as Record<string, unknown>), "@id": "#business" }
+    : undefined;
+  if (baseNode) delete baseNode["@context"];
+  return compactJsonLd({
+    "@context": "https://schema.org",
+    "@graph": [baseNode, ...locationNodes]
+  });
+}
+
 export function serializeJsonLd(value: unknown) {
   return JSON.stringify(value)
     .replace(/</g, "\\u003c")
@@ -54,6 +87,45 @@ export function serializeJsonLd(value: unknown) {
 
 function verified(business: BusinessProfile, field: string) {
   return business.provenance[field]?.verified === true;
+}
+
+function verifiedLocation(location: BusinessLocationRecord, field: string) {
+  const provenance = location.provenance[field];
+  if (!provenance?.verified) return false;
+  return provenance.source === "owner" || provenance.source === "manual" || provenance.source === "website";
+}
+
+function locationJsonLd(business: BusinessProfile, location: BusinessLocationRecord, index: number) {
+  if (!verifiedLocation(location, "address") || !location.address) return undefined;
+  return compactJsonLd({
+    "@type": schemaTypeForBusiness(business),
+    "@id": `#location-${index + 1}`,
+    name: [business.name, location.label].filter(Boolean).join(" - "),
+    parentOrganization: { "@id": "#business" },
+    telephone: verifiedLocation(location, "phone") ? location.phone : undefined,
+    email: verifiedLocation(location, "email") ? location.email : undefined,
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: location.address.street,
+      addressLocality: location.address.city,
+      addressRegion: location.address.region,
+      postalCode: location.address.postalCode,
+      addressCountry: location.address.country
+    },
+    geo: verifiedLocation(location, "geo") && location.geo
+      ? {
+          "@type": "GeoCoordinates",
+          latitude: location.geo.latitude,
+          longitude: location.geo.longitude
+        }
+      : undefined,
+    areaServed: verifiedLocation(location, "serviceAreas") && location.serviceAreas.length
+      ? location.serviceAreas.map((area) => ({ "@type": "Place", name: area }))
+      : undefined,
+    openingHours: verifiedLocation(location, "hours") && location.hours
+      ? Object.entries(location.hours).map(([day, hours]) => `${day} ${hours}`)
+      : undefined
+  });
 }
 
 function schemaSafeReviewSummary(

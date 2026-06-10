@@ -7,17 +7,22 @@ import type {
   AgentRunStatus,
   AgentRunTokenTotals,
   AnalyticsEvent,
+  BusinessLocationRecord,
   BusinessProfile,
+  BusinessRecord,
   ClaimRecord,
   DomainRecord,
   Experiment,
   ExperimentLearning,
   ExtensionModel,
   FormDefinition,
-  GenerationArtifactV2,
+  Inquiry,
+  InquiryAiEnrichment,
+  InquiryDelivery,
+  InquiryEvent,
+  SiteArtifactRecord,
   JobKind,
   JobRecord,
-  LeadSubmission,
   OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
@@ -26,23 +31,21 @@ import type {
   PreviewToken,
   SiteAsset,
   SiteBundle,
-  SiteGenerationRecord,
-  SiteGenerationStatus,
+  SiteCandidateRecord,
+  SiteCandidateStatus,
   SiteModel,
   SiteVersion,
-  WorkflowDelivery
 } from "../models";
 import type {
   CreateClaimInput,
   CompleteClaimCheckoutInput,
   CreateAgentRunInput,
   CreateAgentRunSpanInput,
-  CreateSiteGenerationInput,
+  CreateSiteCandidateInput,
   CreateSiteInput,
-  ListSiteGenerationsFilter,
+  ListSiteCandidatesFilter,
   ListAgentRunsFilter,
   ListAgentRunsResult,
-  RecordSubmissionInput,
   RecordAgentModelCallInput,
   RegisterDomainInput,
   LodestaRepository,
@@ -79,10 +82,14 @@ import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "../site-version-metadata";
 import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "../layout-registry";
-import { promoteGenerationArtifactV2 } from "../generated-site-v2-artifacts";
+import { copyCandidateArtifactToSite } from "../site-artifacts";
+import { businessIdForProfile, businessLocationsFromProfile, businessRecordFromProfile, normalizeSiteLocationRole, withBusinessBundleFields } from "../business-model";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
+import { aggregateNotificationState, executeInquiryNotificationWorkflows } from "../workflows";
+import { runInquiryAiEnrichmentJob } from "../groq-inquiry-ai";
+import { extractInquiryContact, inquiryDedupeKey, inquiryMessageText } from "../inquiries";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -93,11 +100,47 @@ import {
 
 type SiteRow = {
   id: string;
+  business_id: string;
   slug: string;
   status: string;
+  is_primary: boolean;
   site_model: unknown;
   extension_model: unknown;
   presence_assessment: unknown;
+  created_at: string;
+};
+
+type BusinessRow = {
+  id: string;
+  workspace_id: string | null;
+  name: string;
+  vertical: BusinessProfile["vertical"];
+  profile_json: unknown;
+  provenance: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+type BusinessLocationRow = {
+  id: string;
+  business_id: string;
+  label: string | null;
+  address: unknown;
+  service_areas: string[];
+  phone: string | null;
+  email: string | null;
+  hours: unknown;
+  geo: unknown;
+  google_place_id: string | null;
+  provenance: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+type SiteLocationRow = {
+  site_id: string;
+  location_id: string;
+  role: string | null;
   created_at: string;
 };
 
@@ -109,28 +152,31 @@ export function setSupabaseJobGenerateSite(generateSite: SupabaseJobGenerateSite
   supabaseJobGenerateSite = generateSite;
 }
 
-type SiteGenerationRow = {
+type SiteCandidateRow = {
   id: string;
+  business_id: string;
   agent_run_id: string | null;
   source_url: string | null;
   source_host: string | null;
   business_name: string;
-  vertical: SiteGenerationRecord["vertical"];
+  vertical: SiteCandidateRecord["vertical"];
   candidate_slug: string;
   bundle_json: unknown;
-  status: SiteGenerationStatus;
-  created_site_id: string | null;
-  promoted_at: string | null;
+  status: SiteCandidateStatus;
+  intended_site_id: string | null;
+  accepted_site_id: string | null;
+  accepted_version_id: string | null;
+  accepted_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-type GenerationArtifactRow = {
+type SiteArtifactRow = {
   id: string;
-  generation_id: string | null;
+  site_candidate_id: string | null;
   site_id: string | null;
-  scope: GenerationArtifactV2["scope"];
-  artifact_type: GenerationArtifactV2["artifactType"];
+  scope: SiteArtifactRecord["scope"];
+  artifact_type: SiteArtifactRecord["artifactType"];
   artifact_version: string;
   producer_id: string;
   producer_version: string;
@@ -239,32 +285,55 @@ type ExperimentLearningRow = {
   rolled_back_at: string | null;
 };
 
-type SubmissionRow = {
+type InquiryRow = {
   id: string;
   site_id: string;
-  form_id: string;
-  page_id: string | null;
-  visitor_id: string | null;
-  payload: unknown;
-  metadata: unknown;
-  submitted_at: string;
-  source_url: string | null;
-  user_agent: string | null;
-  ip_hash: string | null;
-  status: LeadSubmission["status"];
+  source_channel: Inquiry["sourceChannel"];
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_email_normalized: string | null;
+  contact_phone: string | null;
+  contact_phone_normalized: string | null;
+  status: Inquiry["status"];
+  notification_state: Inquiry["notificationState"];
+  ai_enrichment_state: Inquiry["aiEnrichmentState"];
+  ai_enrichment: unknown;
+  ai_enriched_at: string | null;
+  ai_enrichment_error: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
-type WorkflowDeliveryRow = {
+type InquiryEventRow = {
   id: string;
   site_id: string;
+  inquiry_id: string;
+  type: InquiryEvent["type"];
+  actor: InquiryEvent["actor"];
+  message_text: string | null;
+  payload: unknown;
+  source_url: string | null;
+  page_id: string | null;
+  form_id: string | null;
+  metadata: unknown;
+  dedupe_key: string | null;
+  created_at: string;
+};
+
+type InquiryDeliveryRow = {
+  id: string;
+  site_id: string;
+  inquiry_id: string;
+  event_id: string | null;
   workflow_id: string;
-  submission_id: string | null;
-  destination: WorkflowDelivery["destination"];
+  destination: InquiryDelivery["destination"];
   target: string | null;
-  status: WorkflowDelivery["status"];
+  status: InquiryDelivery["status"];
   message: string;
   response_status: number | null;
   error: string | null;
+  provider_message_id: string | null;
+  metadata: unknown;
   created_at: string;
 };
 
@@ -467,7 +536,7 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async createAndStoreSite(input, options) {
-    const bundle = createSiteFromInput({
+    let bundle = createSiteFromInput({
       ...(await prepareIntakeInput(input, { telemetry: options?.telemetry })),
       experimentLearnings: await this.listExperimentLearnings({ status: "active" })
     });
@@ -476,6 +545,7 @@ export const supabaseRepository: LodestaRepository = {
       "Load existing slugs"
     );
     applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
+    bundle = withBusinessBundleFields(bundle, { businessId: bundle.business?.id });
     const persistenceSpan = await options?.telemetry?.startSpan({
       spanType: "persistence",
       name: "Persist generated site",
@@ -503,108 +573,219 @@ export const supabaseRepository: LodestaRepository = {
     return bundle;
   },
 
-  async createSiteGeneration(input) {
+  async createSiteCandidate(input) {
     const now = new Date().toISOString();
     const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
-    const row = await requireData<SiteGenerationRow>(
+    const businessId = input.intendedSiteId
+      ? (await businessIdForSite(input.intendedSiteId)) ?? input.businessId ?? businessIdForProfile(input.bundle.businessProfile)
+      : input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
+    const bundle = withBusinessBundleFields(input.bundle, { businessId, now });
+    await persistBusinessFromProfile(bundle.businessProfile, businessId);
+    const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
-        .from("site_generations")
+        .from("site_candidates")
         .insert({
-          id: input.id ?? `sitegen_${crypto.randomUUID().replace(/-/g, "")}`,
+          id: input.id ?? `sitecand_${crypto.randomUUID().replace(/-/g, "")}`,
+          business_id: businessId,
           agent_run_id: input.agentRunId,
           source_url: sourceUrl,
           source_host: input.sourceHost ?? hostFromUrl(sourceUrl),
-          business_name: input.bundle.businessProfile.name,
-          vertical: input.bundle.businessProfile.vertical,
-          candidate_slug: input.bundle.siteModel.slug,
-          bundle_json: input.bundle,
+          business_name: bundle.businessProfile.name,
+          vertical: bundle.businessProfile.vertical,
+          candidate_slug: bundle.siteModel.slug,
+          bundle_json: bundle,
           status: input.status ?? "ready",
+          intended_site_id: input.intendedSiteId,
           created_at: now,
           updated_at: now
         })
         .select("*")
         .single(),
-      "Create site generation"
+      "Create site candidate"
     );
-    return rowToSiteGeneration(row);
+    return rowToSiteCandidate(row);
   },
 
-  async listSiteGenerations(filter = {}) {
+  async listSiteCandidates(filter = {}) {
     const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
     const offset = Math.max(0, filter.offset ?? 0);
     let query = getSupabaseAdminClient()
-      .from("site_generations")
+      .from("site_candidates")
       .select("*", { count: "exact" })
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
-    query = applySiteGenerationFilters(query, filter);
+    query = applySiteCandidateFilters(query, filter);
     const response = await query;
-    if (response.error) throw new Error(`List site generations: ${response.error.message}`);
-    const generations = ((response.data ?? []) as SiteGenerationRow[]).map(rowToSiteGeneration);
-    return { generations, total: response.count ?? generations.length };
+    if (response.error) throw new Error(`List site candidates: ${response.error.message}`);
+    const candidates = ((response.data ?? []) as SiteCandidateRow[]).map(rowToSiteCandidate);
+    return { candidates, total: response.count ?? candidates.length };
   },
 
-  async getSiteGeneration(generationId) {
-    const row = await requireMaybe<SiteGenerationRow>(
-      getSupabaseAdminClient().from("site_generations").select("*").eq("id", generationId).maybeSingle(),
-      "Get site generation"
+  async getSiteCandidate(candidateId) {
+    const row = await requireMaybe<SiteCandidateRow>(
+      getSupabaseAdminClient().from("site_candidates").select("*").eq("id", candidateId).maybeSingle(),
+      "Get site candidate"
     );
-    return row ? rowToSiteGeneration(row) : null;
+    return row ? rowToSiteCandidate(row) : null;
   },
 
-  async promoteSiteGeneration(generationId) {
-    const generation = await this.getSiteGeneration(generationId);
-    if (!generation) return null;
-    if (generation.status === "promoted" && generation.createdSiteId) {
-      const existingBundle = await this.getSiteBundle(generation.createdSiteId);
-      return existingBundle ? { generation, bundle: existingBundle } : null;
+  async acceptSiteCandidateAsSite(candidateId) {
+    const candidate = await this.getSiteCandidate(candidateId);
+    if (!candidate) return null;
+    if (candidate.status === "accepted" && candidate.acceptedSiteId) {
+      const existingBundle = await this.getSiteBundle(candidate.acceptedSiteId);
+      if (!existingBundle) return { ok: false as const, reason: "Accepted site no longer exists." };
+      if (candidate.intendedSiteId) {
+        return { ok: false as const, reason: "Site candidate was already accepted as a site version." };
+      }
+      return {
+        ok: true as const,
+        candidate,
+        bundle: existingBundle,
+        acceptedSiteId: candidate.acceptedSiteId
+      };
+    }
+    const ready = assertCandidateAcceptable(candidate);
+    if (!ready.ok) return ready;
+    if (candidate.intendedSiteId) {
+      return { ok: false as const, reason: "Site candidate is intended for an existing site version." };
     }
 
     const existingRows = await requireData<Array<{ slug: string }>>(
       getSupabaseAdminClient().from("sites").select("slug"),
       "Load existing slugs"
     );
-    const bundle = structuredClone(generation.bundle);
+    let bundle = structuredClone(candidate.bundle);
     applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
-    await persistBundle(bundle, { cleanupOnFailure: true });
-    const promotedAt = new Date().toISOString();
-    const selectedArtifacts = await this.listGenerationArtifacts({ generationId, scope: "generation_selected" });
-    for (const artifact of selectedArtifacts) {
-      await this.upsertGenerationArtifact(
-        promoteGenerationArtifactV2({
-          artifact,
-          managedSiteId: bundle.businessProfile.siteId,
-          promotedAt
-        })
-      );
-    }
-    const row = await requireData<SiteGenerationRow>(
+    bundle = withBusinessBundleFields(bundle, { businessId: candidate.businessId });
+    await persistBundle(bundle, { cleanupOnFailure: true, businessId: candidate.businessId });
+    const acceptedAt = new Date().toISOString();
+    await copySelectedArtifactsToSite(this, {
+      candidateId,
+      siteId: bundle.businessProfile.siteId,
+      acceptedAt
+    });
+    const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
-        .from("site_generations")
+        .from("site_candidates")
         .update({
-          status: "promoted",
-          created_site_id: bundle.businessProfile.siteId,
-          promoted_at: promotedAt,
-          updated_at: promotedAt
+          status: "accepted",
+          business_id: candidate.businessId,
+          accepted_site_id: bundle.businessProfile.siteId,
+          accepted_version_id: bundle.siteModel.versions[0]?.id,
+          accepted_at: acceptedAt,
+          updated_at: acceptedAt
         })
-        .eq("id", generationId)
+        .eq("id", candidateId)
         .select("*")
         .single(),
-      "Mark site generation promoted"
+      "Mark site candidate accepted"
     );
     return {
-      generation: rowToSiteGeneration(row),
-      bundle
+      ok: true as const,
+      candidate: rowToSiteCandidate(row),
+      bundle,
+      acceptedSiteId: bundle.businessProfile.siteId,
+      acceptedVersionId: bundle.siteModel.versions[0]?.id
     };
   },
 
-  async upsertGenerationArtifact(artifact) {
-    const row = await requireData<GenerationArtifactRow>(
+  async acceptSiteCandidateAsVersion(input) {
+    const candidate = await this.getSiteCandidate(input.candidateId);
+    if (!candidate) return null;
+    const targetBundle = await this.getSiteBundle(input.siteId);
+    if (!targetBundle) return { ok: false as const, reason: "Target site not found." };
+    if (candidate.status === "accepted" && candidate.acceptedSiteId) {
+      if (!candidate.intendedSiteId || candidate.acceptedSiteId !== input.siteId || !candidate.acceptedVersionId) {
+        return { ok: false as const, reason: "Site candidate was already accepted into a different target." };
+      }
+      return {
+        ok: true as const,
+        candidate,
+        bundle: targetBundle,
+        acceptedSiteId: candidate.acceptedSiteId,
+        acceptedVersionId: candidate.acceptedVersionId
+      };
+    }
+    const ready = assertCandidateAcceptable(candidate);
+    if (!ready.ok) return ready;
+    if (candidate.intendedSiteId && candidate.intendedSiteId !== input.siteId) {
+      return { ok: false as const, reason: "Site candidate is intended for a different site." };
+    }
+
+    const acceptedAt = new Date().toISOString();
+    const targetBusinessId = await businessIdForSite(input.siteId);
+    const version = siteVersionFromCandidate({
+      candidateBundle: candidate.bundle,
+      targetBundle,
+      acceptedAt
+    });
+    if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
+
+    targetBundle.siteModel.versions.unshift(version);
+    await persistVersions(targetBundle);
+    await copySelectedArtifactsToSite(this, {
+      candidateId: input.candidateId,
+      siteId: input.siteId,
+      acceptedAt
+    });
+
+    const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
-        .from("generation_artifacts")
+        .from("site_candidates")
+        .update({
+          status: "accepted",
+          business_id: targetBusinessId ?? candidate.businessId,
+          intended_site_id: input.siteId,
+          accepted_site_id: input.siteId,
+          accepted_version_id: version.id,
+          accepted_at: acceptedAt,
+          updated_at: acceptedAt
+        })
+        .eq("id", input.candidateId)
+        .select("*")
+        .single(),
+      "Mark site candidate accepted as version"
+    );
+    return {
+      ok: true as const,
+      candidate: rowToSiteCandidate(row),
+      bundle: targetBundle,
+      acceptedSiteId: input.siteId,
+      acceptedVersionId: version.id
+    };
+  },
+
+  async mergeBusinesses(input) {
+    const sourceBusinessId = input.sourceBusinessId.trim();
+    const targetBusinessId = input.targetBusinessId.trim();
+    if (!sourceBusinessId || !targetBusinessId) return { ok: false as const, reason: "Source and target business ids are required." };
+    if (sourceBusinessId === targetBusinessId) return { ok: false as const, reason: "Source and target business ids must differ." };
+    const result = await requireData<Record<string, unknown>>(
+      getSupabaseAdminClient().rpc("merge_businesses", {
+        source_business_id: sourceBusinessId,
+        target_business_id: targetBusinessId
+      }),
+      "Merge businesses"
+    );
+    if (result.ok === false) return { ok: false as const, reason: String(result.reason ?? "Business merge failed.") };
+    return {
+      ok: true as const,
+      sourceBusinessId: String(result.sourceBusinessId ?? sourceBusinessId),
+      targetBusinessId: String(result.targetBusinessId ?? targetBusinessId),
+      movedSites: Number(result.movedSites ?? 0),
+      movedSiteCandidates: Number(result.movedSiteCandidates ?? 0),
+      movedLocations: Number(result.movedLocations ?? 0)
+    };
+  },
+
+  async upsertSiteArtifact(artifact) {
+    const row = await requireData<SiteArtifactRow>(
+      getSupabaseAdminClient()
+        .from("site_artifacts")
         .upsert({
           id: artifact.id,
-          generation_id: artifact.generationId,
+          site_candidate_id: artifact.siteCandidateId,
           site_id: artifact.siteId,
           scope: artifact.scope,
           artifact_type: artifact.artifactType,
@@ -626,17 +807,17 @@ export const supabaseRepository: LodestaRepository = {
         .single(),
       "Upsert generation artifact"
     );
-    return rowToGenerationArtifact(row);
+    return rowToSiteArtifact(row);
   },
 
-  async listGenerationArtifacts(filter = {}) {
-    let query = getSupabaseAdminClient().from("generation_artifacts").select("*").order("created_at", { ascending: false });
-    if (filter.generationId) query = query.eq("generation_id", filter.generationId);
+  async listSiteArtifacts(filter = {}) {
+    let query = getSupabaseAdminClient().from("site_artifacts").select("*").order("created_at", { ascending: false });
+    if (filter.siteCandidateId) query = query.eq("site_candidate_id", filter.siteCandidateId);
     if (filter.siteId) query = query.eq("site_id", filter.siteId);
     if (filter.scope) query = query.eq("scope", filter.scope);
     if (filter.artifactType) query = query.eq("artifact_type", filter.artifactType);
-    const rows = await requireData<GenerationArtifactRow[]>(query, "List generation artifacts");
-    return rows.map(rowToGenerationArtifact);
+    const rows = await requireData<SiteArtifactRow[]>(query, "List generation artifacts");
+    return rows.map(rowToSiteArtifact);
   },
 
   async createPreviewToken(input) {
@@ -798,87 +979,209 @@ export const supabaseRepository: LodestaRepository = {
     return result;
   },
 
-  async recordFormSubmission(input) {
-    const submittedAt = new Date().toISOString();
-    const row = await requireData<SubmissionRow>(
-      getSupabaseAdminClient()
-        .from("form_submissions")
-        .insert({
-          id: crypto.randomUUID(),
-          site_id: input.siteId,
-          form_id: input.formId,
-          page_id: input.pageId,
-          visitor_id: input.visitorId,
-          payload: input.payload,
-          metadata: input.metadata ?? {},
-          submitted_at: submittedAt,
-          source_url: input.sourceUrl,
-          user_agent: input.userAgent,
-          ip_hash: input.ipHash,
-          status: "new"
-        })
-        .select("*")
-        .single(),
-      "Record form submission"
+  async createInquiryFromForm(input) {
+    const contact = extractInquiryContact(input.form, input.payload);
+    const dedupeKey = inquiryDedupeKey({
+      siteId: input.siteId,
+      formId: input.form.id,
+      contactEmailNormalized: contact.contactEmailNormalized,
+      contactPhoneNormalized: contact.contactPhoneNormalized,
+      payload: input.payload
+    });
+    const result = await requireData<{
+      inquiry: InquiryRow;
+      event: InquiryEventRow;
+      duplicate: boolean;
+    }>(
+      getSupabaseAdminClient().rpc("create_inquiry_from_form", {
+        p_site_id: input.siteId,
+        p_form_id: input.form.id,
+        p_page_id: input.pageId ?? null,
+        p_visitor_id: input.visitorId ?? null,
+        p_payload: input.payload,
+        p_metadata: {
+          ...(input.metadata ?? {}),
+          contactExtractionStatus: contact.status,
+          contactExtractionNotes: contact.notes,
+          visitorId: input.visitorId,
+          ipHash: input.ipHash,
+          userAgent: input.userAgent
+        },
+        p_source_url: input.sourceUrl ?? null,
+        p_user_agent: input.userAgent ?? null,
+        p_ip_hash: input.ipHash ?? null,
+        p_contact_name: contact.contactName ?? null,
+        p_contact_email: contact.contactEmail ?? null,
+        p_contact_email_normalized: contact.contactEmailNormalized ?? null,
+        p_contact_phone: contact.contactPhone ?? null,
+        p_contact_phone_normalized: contact.contactPhoneNormalized ?? null,
+        p_message_text: inquiryMessageText(input.form, input.payload) ?? null,
+        p_dedupe_key: dedupeKey
+      }),
+      "Create inquiry from form"
     );
-    return rowToSubmission(row);
+    return {
+      inquiry: rowToInquiry(result.inquiry),
+      event: rowToInquiryEvent(result.event),
+      duplicate: result.duplicate
+    };
   },
 
-  async listFormSubmissions(siteId) {
-    let query = getSupabaseAdminClient()
-      .from("form_submissions")
-      .select("*")
-      .order("submitted_at", { ascending: false });
+  async listInquiries(siteId) {
+    let query = getSupabaseAdminClient().from("inquiries").select("*").order("created_at", { ascending: false });
     if (siteId) query = query.eq("site_id", siteId);
-    const rows = await requireData<SubmissionRow[]>(query, "List form submissions");
-    return rows.map(rowToSubmission);
+    const rows = await requireData<InquiryRow[]>(query, "List inquiries");
+    return rows.map(rowToInquiry);
   },
 
-  async updateLeadStatus(input) {
-    const row = await requireMaybe<SubmissionRow>(
+  async getInquiry(siteId, inquiryId) {
+    const row = await requireMaybe<InquiryRow>(
+      getSupabaseAdminClient().from("inquiries").select("*").eq("site_id", siteId).eq("id", inquiryId).maybeSingle(),
+      "Get inquiry"
+    );
+    return row ? rowToInquiry(row) : null;
+  },
+
+  async updateInquiryStatus(input) {
+    const row = await requireMaybe<InquiryRow>(
       getSupabaseAdminClient()
-        .from("form_submissions")
+        .from("inquiries")
         .update({ status: input.status })
         .eq("site_id", input.siteId)
-        .eq("id", input.submissionId)
+        .eq("id", input.inquiryId)
         .select("*")
         .maybeSingle(),
-      "Update lead status"
+      "Update inquiry status"
     );
-    return row ? rowToSubmission(row) : null;
+    return row ? rowToInquiry(row) : null;
   },
 
-  async recordWorkflowDelivery(input) {
-    const row = await requireData<WorkflowDeliveryRow>(
+  async updateInquiryNotificationState(input) {
+    const row = await requireMaybe<InquiryRow>(
       getSupabaseAdminClient()
-        .from("workflow_deliveries")
+        .from("inquiries")
+        .update({ notification_state: input.state })
+        .eq("site_id", input.siteId)
+        .eq("id", input.inquiryId)
+        .select("*")
+        .maybeSingle(),
+      "Update inquiry notification state"
+    );
+    return row ? rowToInquiry(row) : null;
+  },
+
+  async updateInquiryAiEnrichment(input) {
+    const row = await requireMaybe<InquiryRow>(
+      getSupabaseAdminClient()
+        .from("inquiries")
+        .update({
+          ai_enrichment_state: input.state,
+          ai_enrichment: input.enrichment,
+          ai_enriched_at: input.enrichment ? new Date().toISOString() : undefined,
+          ai_enrichment_error: input.error
+        })
+        .eq("site_id", input.siteId)
+        .eq("id", input.inquiryId)
+        .select("*")
+        .maybeSingle(),
+      "Update inquiry AI enrichment"
+    );
+    return row ? rowToInquiry(row) : null;
+  },
+
+  async listInquiryEvents(inquiryId) {
+    const rows = await requireData<InquiryEventRow[]>(
+      getSupabaseAdminClient()
+        .from("inquiry_events")
+        .select("*")
+        .eq("inquiry_id", inquiryId)
+        .order("created_at", { ascending: false }),
+      "List inquiry events"
+    );
+    return rows.map(rowToInquiryEvent);
+  },
+
+  async countRecentInquiries(siteId, since) {
+    const response = await getSupabaseAdminClient()
+      .from("inquiries")
+      .select("*", { count: "exact", head: true })
+      .eq("site_id", siteId)
+      .gte("created_at", since);
+    if (response.error) throw new Error(`Count recent inquiries: ${response.error.message}`);
+    return response.count ?? 0;
+  },
+
+  async recordInquiryDelivery(input) {
+    let existingQuery = getSupabaseAdminClient()
+      .from("inquiry_deliveries")
+      .select("*")
+      .eq("inquiry_id", input.inquiryId)
+      .eq("workflow_id", input.workflowId)
+      .eq("destination", input.destination)
+      .eq("status", "sent");
+    existingQuery = input.target ? existingQuery.eq("target", input.target) : existingQuery.is("target", null);
+    const existing = await requireMaybe<InquiryDeliveryRow>(
+      existingQuery.maybeSingle(),
+      "Find existing inquiry delivery"
+    );
+    if (existing) return rowToInquiryDelivery(existing);
+    const row = await requireData<InquiryDeliveryRow>(
+      getSupabaseAdminClient()
+        .from("inquiry_deliveries")
         .insert({
           id: crypto.randomUUID(),
           site_id: input.siteId,
+          inquiry_id: input.inquiryId,
+          event_id: input.eventId,
           workflow_id: input.workflowId,
-          submission_id: input.submissionId,
           destination: input.destination,
           target: input.target,
           status: input.status,
           message: input.message,
           response_status: input.responseStatus,
-          error: input.error
+          error: input.error,
+          provider_message_id: input.providerMessageId,
+          metadata: input.metadata ?? {}
         })
         .select("*")
         .single(),
-      "Record workflow delivery"
+      "Record inquiry delivery"
     );
-    return rowToWorkflowDelivery(row);
+    return rowToInquiryDelivery(row);
   },
 
-  async listWorkflowDeliveries(siteId) {
+  async listInquiryDeliveries(siteId) {
     let query = getSupabaseAdminClient()
-      .from("workflow_deliveries")
+      .from("inquiry_deliveries")
       .select("*")
       .order("created_at", { ascending: false });
     if (siteId) query = query.eq("site_id", siteId);
-    const rows = await requireData<WorkflowDeliveryRow[]>(query, "List workflow deliveries");
-    return rows.map(rowToWorkflowDelivery);
+    const rows = await requireData<InquiryDeliveryRow[]>(query, "List inquiry deliveries");
+    return rows.map(rowToInquiryDelivery);
+  },
+
+  async processInquiryNotification(input) {
+    const [bundle, inquiry] = await Promise.all([
+      this.getSiteBundle(input.siteId),
+      this.getInquiry(input.siteId, input.inquiryId)
+    ]);
+    if (!bundle || !inquiry) return { skipped: true, reason: "Inquiry or site not found." };
+    if (inquiry.notificationState === "completed") return { skipped: true, reason: "Inquiry notifications already completed." };
+    await this.updateInquiryNotificationState({ siteId: input.siteId, inquiryId: input.inquiryId, state: "processing" });
+    const event = (await this.listInquiryEvents(input.inquiryId)).find((candidate) => candidate.type === "form_submission");
+    const deliveries = await executeInquiryNotificationWorkflows(bundle, inquiry, event, (delivery) => this.recordInquiryDelivery(delivery));
+    const state = aggregateNotificationState(deliveries);
+    await this.updateInquiryNotificationState({ siteId: input.siteId, inquiryId: input.inquiryId, state });
+    return {
+      deliveredAt: new Date().toISOString(),
+      inquiryId: input.inquiryId,
+      deliveries: deliveries.length,
+      notificationState: state
+    };
+  },
+
+  async processInquiryAiEnrichment(input) {
+    return runInquiryAiEnrichmentJob(this, input);
   },
 
   async recordAnalyticsEvent(event) {
@@ -1671,7 +1974,10 @@ export const supabaseRepository: LodestaRepository = {
         analyticsSummary: (siteId) => this.analyticsSummary(siteId),
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
         listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
-        listFormSubmissions: (siteId) => this.listFormSubmissions(siteId),
+        listInquiries: (siteId) => this.listInquiries(siteId),
+        listInquiryEvents: (inquiryId) => this.listInquiryEvents(inquiryId),
+        processInquiryNotification: (input) => this.processInquiryNotification(input),
+        processInquiryAiEnrichment: (input) => this.processInquiryAiEnrichment(input),
         cleanupAgentTelemetry: (input) => this.cleanupAgentTelemetry(input)
       };
       const result = await executeJob(rowToJob(row), jobContext);
@@ -1730,12 +2036,81 @@ export const supabaseRepository: LodestaRepository = {
   }
 };
 
+function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
+  if (candidate.status === "blocked") {
+    return { ok: false as const, reason: "Blocked site candidates cannot be accepted." };
+  }
+  if (candidate.status === "archived") {
+    return { ok: false as const, reason: "Archived site candidates cannot be accepted." };
+  }
+  if (candidate.status !== "ready") {
+    return { ok: false as const, reason: "Only ready site candidates can be accepted." };
+  }
+  return { ok: true as const };
+}
+
+function siteVersionFromCandidate(input: {
+  candidateBundle: SiteBundle;
+  targetBundle: SiteBundle;
+  acceptedAt: string;
+}): SiteVersion | null {
+  const candidateBundle = structuredClone(input.candidateBundle);
+  applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
+  const candidateVersion =
+    candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
+    candidateBundle.siteModel.versions[0];
+  if (!candidateVersion) return null;
+  const version = structuredClone(candidateVersion);
+  version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
+  version.status = "draft";
+  version.createdAt = input.acceptedAt;
+  version.theme ??= structuredClone(candidateBundle.siteModel.theme);
+  return version;
+}
+
+function nextAcceptedVersionId(bundle: SiteBundle, acceptedAt: string) {
+  const seed = Date.parse(acceptedAt);
+  const base = `version_${bundle.siteModel.slug}_candidate_${Number.isFinite(seed) ? seed : Date.now()}`;
+  const existing = new Set(bundle.siteModel.versions.map((version) => version.id));
+  let candidate = base;
+  let counter = 2;
+  while (existing.has(candidate)) {
+    candidate = `${base}_${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+async function copySelectedArtifactsToSite(
+  repository: Pick<LodestaRepository, "listSiteArtifacts" | "upsertSiteArtifact">,
+  input: { candidateId: string; siteId: string; acceptedAt: string }
+) {
+  const selectedArtifacts = await repository.listSiteArtifacts({
+    siteCandidateId: input.candidateId,
+    scope: "candidate_selected"
+  });
+  for (const artifact of selectedArtifacts) {
+    await repository.upsertSiteArtifact(
+      copyCandidateArtifactToSite({
+        artifact,
+        managedSiteId: input.siteId,
+        acceptedAt: input.acceptedAt
+      })
+    );
+  }
+}
+
 async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
   const supabase = getSupabaseAdminClient();
-  const [profileRow, assetRows, versionRows, formRows, findingRows, experimentRows, learningRows] = await Promise.all([
+  const [profileRow, businessRow, siteLocationRows, assetRows, versionRows, formRows, findingRows, experimentRows, learningRows] = await Promise.all([
     requireData<BusinessProfileRow>(
       supabase.from("business_profiles").select("*").eq("site_id", siteRow.id).single(),
       "Load business profile"
+    ),
+    requireData<BusinessRow>(supabase.from("businesses").select("*").eq("id", siteRow.business_id).single(), "Load business"),
+    requireData<SiteLocationRow[]>(
+      supabase.from("site_locations").select("*").eq("site_id", siteRow.id).order("created_at"),
+      "Load site locations"
     ),
     requireData<SiteAssetRow[]>(
       supabase.from("site_assets").select("*").eq("site_id", siteRow.id).order("created_at"),
@@ -1766,9 +2141,31 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
     customBlocks: []
   };
   const presenceAssessment = siteRow.presence_assessment as PresenceAssessment;
+  const profile = profileRow.profile as BusinessProfile;
+  const sortedSiteLocationRows = [...siteLocationRows].sort(compareSiteLocationRows);
+  const locationIds = sortedSiteLocationRows.map((row) => row.location_id);
+  const locationRows = locationIds.length
+    ? await requireData<BusinessLocationRow[]>(
+        supabase.from("business_locations").select("*").in("id", locationIds),
+        "Load business locations"
+      )
+    : [];
+  const locationById = new Map(locationRows.map((row) => [row.id, rowToBusinessLocation(row)]));
+  const locations = locationIds.map((id) => locationById.get(id)).filter((location): location is BusinessLocationRecord => Boolean(location));
+  const locationBindings = sortedSiteLocationRows
+    .filter((row) => locationById.has(row.location_id))
+    .map((row, index) => ({
+      locationId: row.location_id,
+      role: normalizeSiteLocationRole(row.role),
+      orderIndex: index
+    }));
 
-  return {
-    businessProfile: profileRow.profile as BusinessProfile,
+  const bundle: SiteBundle = {
+    businessProfile: profile,
+    business: rowToBusiness(businessRow),
+    locations,
+    locationBindings,
+    renderProfile: profile,
     siteModel: {
       ...siteShell,
       versions: versionRows.map((row) => row.version_model as SiteVersion)
@@ -1786,36 +2183,43 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
       assetInventory: assetRows.length ? assetRows.map(rowToSiteAsset) : presenceAssessment.assetInventory
     }
   };
+  return withBusinessBundleFields(bundle, { businessId: businessRow.id });
 }
 
-async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: boolean } = {}) {
-  const siteShell = siteModelShell(bundle.siteModel);
+async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: boolean; businessId?: string } = {}) {
   try {
+    const businessId = options.businessId ?? (await businessIdForSite(bundle.businessProfile.siteId)) ?? businessIdForProfile(bundle.businessProfile);
+    const hydratedBundle = withBusinessBundleFields(bundle, { businessId });
+    const siteShell = siteModelShell(hydratedBundle.siteModel);
+    await persistBusinessFromProfile(hydratedBundle.businessProfile, businessId);
     await requireData<SiteRow>(
       getSupabaseAdminClient()
         .from("sites")
         .upsert({
-          id: bundle.businessProfile.siteId,
-          slug: bundle.siteModel.slug,
+          id: hydratedBundle.businessProfile.siteId,
+          business_id: businessId,
+          slug: hydratedBundle.siteModel.slug,
           status: "draft",
+          is_primary: true,
           site_model: siteShell,
           extension_model: {
-            workflows: bundle.extensionModel.workflows,
-            customBlocks: bundle.extensionModel.customBlocks
+            workflows: hydratedBundle.extensionModel.workflows,
+            customBlocks: hydratedBundle.extensionModel.customBlocks
           },
-          presence_assessment: bundle.presenceAssessment
+          presence_assessment: hydratedBundle.presenceAssessment
         })
         .select("*")
         .single(),
       "Persist site"
     );
 
-    await persistBusinessProfile(bundle.businessProfile);
-    await persistAssets(bundle.businessProfile.siteId, bundle.presenceAssessment.assetInventory ?? []);
-    await persistVersions(bundle);
-    await persistForms(bundle.businessProfile.siteId, bundle.extensionModel.forms);
-    await persistFindings(bundle.businessProfile.siteId, bundle.optimizationFindings);
-    await persistExperiments(bundle.businessProfile.siteId, bundle.experiments);
+    await persistBusinessProfile(hydratedBundle.businessProfile);
+    await persistBusinessLocations(hydratedBundle, businessId);
+    await persistAssets(hydratedBundle.businessProfile.siteId, hydratedBundle.presenceAssessment.assetInventory ?? []);
+    await persistVersions(hydratedBundle);
+    await persistForms(hydratedBundle.businessProfile.siteId, hydratedBundle.extensionModel.forms);
+    await persistFindings(hydratedBundle.businessProfile.siteId, hydratedBundle.optimizationFindings);
+    await persistExperiments(hydratedBundle.businessProfile.siteId, hydratedBundle.experiments);
   } catch (error) {
     if (options.cleanupOnFailure) {
       await requireSuccess(
@@ -1843,6 +2247,80 @@ async function persistBusinessProfile(profile: BusinessProfile) {
       .single(),
     "Persist business profile"
   );
+}
+
+async function persistBusinessFromProfile(profile: BusinessProfile, businessId: string) {
+  const now = new Date().toISOString();
+  const business = businessRecordFromProfile(profile, businessId, now);
+  await requireData<BusinessRow>(
+    getSupabaseAdminClient()
+      .from("businesses")
+      .upsert({
+        id: business.id,
+        workspace_id: business.workspaceId,
+        name: business.name,
+        vertical: business.vertical,
+        profile_json: business.profile,
+        provenance: business.provenance,
+        updated_at: now
+      })
+      .select("*")
+      .single(),
+    "Persist business"
+  );
+}
+
+async function persistBusinessLocations(bundle: SiteBundle, businessId: string) {
+  const profile = bundle.businessProfile;
+  const normalizedBundle = withBusinessBundleFields(bundle, { businessId });
+  const locations = normalizedBundle.locations ?? businessLocationsFromProfile(profile, businessId);
+  const bindingByLocationId = new Map((normalizedBundle.locationBindings ?? []).map((binding) => [binding.locationId, binding]));
+  const supabase = getSupabaseAdminClient();
+  await requireSuccess(supabase.from("site_locations").delete().eq("site_id", profile.siteId), "Clear site locations");
+  if (locations.length === 0) return;
+  await requireData<BusinessLocationRow[]>(
+    supabase
+      .from("business_locations")
+      .upsert(
+        locations.map((location) => ({
+          id: location.id,
+          business_id: location.businessId,
+          label: location.label,
+          address: location.address,
+          service_areas: location.serviceAreas,
+          phone: location.phone,
+          email: location.email,
+          hours: location.hours,
+          geo: location.geo,
+          google_place_id: location.googlePlaceId,
+          provenance: location.provenance,
+          updated_at: location.updatedAt
+        }))
+      )
+      .select("*"),
+    "Persist business locations"
+  );
+  await requireData<Array<{ site_id: string; location_id: string }>>(
+    supabase
+      .from("site_locations")
+      .upsert(
+        locations.map((location, index) => ({
+          site_id: profile.siteId,
+          location_id: location.id,
+          role: bindingByLocationId.get(location.id)?.role ?? (index === 0 ? "primary" : "covered")
+        }))
+      )
+      .select("site_id, location_id"),
+    "Persist site locations"
+  );
+}
+
+async function businessIdForSite(siteId: string) {
+  const row = await requireMaybe<{ business_id: string | null }>(
+    getSupabaseAdminClient().from("sites").select("business_id").eq("id", siteId).maybeSingle(),
+    "Load site business"
+  );
+  return row?.business_id ?? undefined;
 }
 
 async function persistVersions(bundle: SiteBundle) {
@@ -2083,28 +2561,74 @@ function rowToSiteAsset(row: SiteAssetRow): SiteAsset {
   };
 }
 
-function rowToSiteGeneration(row: SiteGenerationRow): SiteGenerationRecord {
+function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
   return {
     id: row.id,
+    businessId: row.business_id,
     agentRunId: row.agent_run_id ?? undefined,
     sourceUrl: row.source_url ?? undefined,
     sourceHost: row.source_host ?? undefined,
     businessName: row.business_name,
     vertical: row.vertical,
     candidateSlug: row.candidate_slug,
-    bundle: row.bundle_json as SiteBundle,
+    bundle: withBusinessBundleFields(row.bundle_json as SiteBundle, { businessId: row.business_id }),
     status: row.status,
-    createdSiteId: row.created_site_id ?? undefined,
-    promotedAt: row.promoted_at ?? undefined,
+    intendedSiteId: row.intended_site_id ?? undefined,
+    acceptedSiteId: row.accepted_site_id ?? undefined,
+    acceptedVersionId: row.accepted_version_id ?? undefined,
+    acceptedAt: row.accepted_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
 }
 
-function rowToGenerationArtifact(row: GenerationArtifactRow): GenerationArtifactV2 {
+function rowToBusiness(row: BusinessRow): BusinessRecord {
   return {
     id: row.id,
-    generationId: row.generation_id ?? undefined,
+    workspaceId: row.workspace_id ?? undefined,
+    name: row.name,
+    vertical: row.vertical,
+    profile: row.profile_json as BusinessProfile,
+    provenance: row.provenance as BusinessRecord["provenance"],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToBusinessLocation(row: BusinessLocationRow): BusinessLocationRecord {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    label: row.label ?? undefined,
+    address: row.address as BusinessLocationRecord["address"] | undefined,
+    serviceAreas: row.service_areas,
+    phone: row.phone ?? undefined,
+    email: row.email ?? undefined,
+    hours: row.hours as BusinessLocationRecord["hours"] | undefined,
+    geo: row.geo as BusinessLocationRecord["geo"] | undefined,
+    googlePlaceId: row.google_place_id ?? undefined,
+    provenance: row.provenance as BusinessLocationRecord["provenance"],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function compareSiteLocationRows(left: SiteLocationRow, right: SiteLocationRow) {
+  const roleDelta = siteLocationRoleSortValue(left.role) - siteLocationRoleSortValue(right.role);
+  if (roleDelta !== 0) return roleDelta;
+  const createdAtDelta = left.created_at.localeCompare(right.created_at);
+  if (createdAtDelta !== 0) return createdAtDelta;
+  return left.location_id.localeCompare(right.location_id);
+}
+
+function siteLocationRoleSortValue(role: string | null) {
+  return normalizeSiteLocationRole(role) === "primary" ? 0 : 1;
+}
+
+function rowToSiteArtifact(row: SiteArtifactRow): SiteArtifactRecord {
+  return {
+    id: row.id,
+    siteCandidateId: row.site_candidate_id ?? undefined,
     siteId: row.site_id ?? undefined,
     scope: row.scope,
     artifactType: row.artifact_type,
@@ -2193,35 +2717,60 @@ function rowToExperimentLearning(row: ExperimentLearningRow): ExperimentLearning
   };
 }
 
-function rowToSubmission(row: SubmissionRow): LeadSubmission {
+function rowToInquiry(row: InquiryRow): Inquiry {
   return {
     id: row.id,
     siteId: row.site_id,
-    formId: row.form_id,
-    pageId: row.page_id ?? undefined,
-    visitorId: row.visitor_id ?? undefined,
-    payload: row.payload as Record<string, unknown>,
-    metadata: row.metadata as Record<string, string | number | boolean>,
-    submittedAt: row.submitted_at,
-    sourceUrl: row.source_url ?? undefined,
-    userAgent: row.user_agent ?? undefined,
-    ipHash: row.ip_hash ?? undefined,
-    status: row.status
+    sourceChannel: row.source_channel,
+    contactName: row.contact_name ?? undefined,
+    contactEmail: row.contact_email ?? undefined,
+    contactEmailNormalized: row.contact_email_normalized ?? undefined,
+    contactPhone: row.contact_phone ?? undefined,
+    contactPhoneNormalized: row.contact_phone_normalized ?? undefined,
+    status: row.status,
+    notificationState: row.notification_state,
+    aiEnrichmentState: row.ai_enrichment_state,
+    aiEnrichment: row.ai_enrichment as Inquiry["aiEnrichment"] | undefined,
+    aiEnrichedAt: row.ai_enriched_at ?? undefined,
+    aiEnrichmentError: row.ai_enrichment_error ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
-function rowToWorkflowDelivery(row: WorkflowDeliveryRow): WorkflowDelivery {
+function rowToInquiryEvent(row: InquiryEventRow): InquiryEvent {
   return {
     id: row.id,
     siteId: row.site_id,
+    inquiryId: row.inquiry_id,
+    type: row.type,
+    actor: row.actor,
+    messageText: row.message_text ?? undefined,
+    payload: row.payload as Record<string, unknown> | undefined,
+    sourceUrl: row.source_url ?? undefined,
+    pageId: row.page_id ?? undefined,
+    formId: row.form_id ?? undefined,
+    metadata: row.metadata as Record<string, unknown> | undefined,
+    dedupeKey: row.dedupe_key ?? undefined,
+    createdAt: row.created_at
+  };
+}
+
+function rowToInquiryDelivery(row: InquiryDeliveryRow): InquiryDelivery {
+  return {
+    id: row.id,
+    siteId: row.site_id,
+    inquiryId: row.inquiry_id,
+    eventId: row.event_id ?? undefined,
     workflowId: row.workflow_id,
-    submissionId: row.submission_id ?? undefined,
     destination: row.destination,
     target: row.target ?? undefined,
     status: row.status,
     message: row.message,
     responseStatus: row.response_status ?? undefined,
     error: row.error ?? undefined,
+    providerMessageId: row.provider_message_id ?? undefined,
+    metadata: row.metadata as Record<string, unknown> | undefined,
     createdAt: row.created_at
   };
 }
@@ -2513,7 +3062,7 @@ async function attachModelCallTotals(runs: AgentRunRecord[]) {
   });
 }
 
-function applySiteGenerationFilters(query: any, filter: ListSiteGenerationsFilter) {
+function applySiteCandidateFilters(query: any, filter: ListSiteCandidatesFilter) {
   let next = query;
   if (filter.status) next = next.eq("status", filter.status);
   if (filter.sourceHost) next = next.ilike("source_host", `%${filter.sourceHost.replace(/[%_]/g, "\\$&")}%`);

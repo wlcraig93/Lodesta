@@ -17,8 +17,8 @@ V3 is justified only where it fixes a V2 failure that blocks production-quality 
 | Copy artifacts and claim spans | Claim safety exists, but copy can still read like planning/template language. | Copy checks focus on factual safety more than slot purpose, conversion clarity, and rendered copy quality. | Add copy candidate/evaluator artifacts with slot goals, candidate scoring, rejection reasons, and rendered-text verification. | Copy verifier blocks template/meta language, weak "ask about" phrasing when facts are known, and unsupported claims. |
 | Visual QA/readiness | V2 can pass deterministic QA while still looking generic. | Current QA proves "not broken", not "designed". | Carry forward V2 deterministic QA and add V3 visual checks for repetition, weak hierarchy, disconnected header, CTA grouping, mobile composition, and admin UI leakage. | V3 review packet stores screenshots, deterministic findings, visual rubric scores, reviewer/date, and blocker notes. |
 | Public route/SEO/markdown compatibility | Public surfaces still require legacy projections in places. | Existing base version shape includes `pages` and `designPlan`; V2 uses `compiledPages` as canonical but transitional projections remain. | Add a V3 page adapter/index from day one while retaining transitional projections until cutover. | Tests assert render, SEO, markdown, preview, sitemap/robots, and admin review use the V3 page adapter. |
-| Artifact persistence | V2 already has `generation_artifacts`, but V3 review artifacts need explicit types. | Review packets and design decisions would otherwise live only in docs or screenshots. | Extend artifact types for `art_direction_decision`, `media_asset_decision`, `copy_evaluation_report`, `v3_review_packet`, and `generation_cost_report`. | Contract verifier checks TS union and Supabase constraints contain V3 artifact types. |
-| Rollout gating | V2 currently defaults to all canonical, which is too open for a new visual fork. | V2 is already canonical, but V3 needs fixture/operator exposure until proven. | Add fail-closed `GeneratedSiteV3Mode` defaulting to `fixture_only`. | Unit tests verify invalid/missing config falls back to fixture-only and all-new-generations needs explicit confirmation. |
+| Artifact persistence | V2 already has `site_artifacts`, but V3 review artifacts need explicit types. | Review packets and design decisions would otherwise live only in docs or screenshots. | Extend artifact types for `art_direction_decision`, `media_asset_decision`, `copy_evaluation_report`, `v3_review_packet`, and `generation_cost_report`. | Contract verifier checks TS union and Supabase constraints contain V3 artifact types. |
+| Rollout gating | Keeping V2 as the default path lets weak legacy output survive after V3 proves cleaner structure. | The V2 compiler/renderer stayed wired as fallback even after the V3 section-template renderer became the canonical architecture. | Default `GeneratedSiteV3Mode` to `all_new_generations`, remove V2 compiler/pipeline/renderer dispatch, and keep `off`/`fixture_only`/`operator_allowlist` only as explicit test or emergency modes. | V3 contracts verify invalid/missing config defaults to V3, fixture-only still fails closed for non-fixtures, and `generateSite` emits `layout-v3` without a V2 fallback. |
 
 ## Carry Forward
 
@@ -30,7 +30,7 @@ V3 is justified only where it fixes a V2 failure that blocks production-quality 
 - Readiness blockers.
 - Generation artifacts as the durable audit store.
 - Async intake/job status.
-- Public renderer version dispatch.
+- Public renderer wrapper dispatches only to V3. Pre-cutover V1/V2 artifacts are not rendered as customer-site output and must be regenerated before visual review.
 - Form, analytics, publish, preview, and indexing gates.
 - Existing generation-cost tracking, extended for V3 cost categories.
 
@@ -49,11 +49,13 @@ V3 is justified only where it fixes a V2 failure that blocks production-quality 
 - Narrow header/hero composition.
 - One-size section rhythm.
 
-## Retire After Cutover
+## Retired In Section-Template Cutover
 
 - V2 default generation path.
-- Obsolete V2 visual compiler/renderer paths.
-- V2 visual tests that only prove legacy output shape, unless retained as legacy-read tests.
+- V2 visual compiler and generated-site pipeline.
+- V2 public renderer dispatch.
+- V2 visual tests that only proved legacy output shape.
+- V1 public renderer fallback.
 
 ## Phase 0 Exit Criteria
 

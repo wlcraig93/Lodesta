@@ -12,7 +12,6 @@ const intakeSchema = z
   .object({
     url: z.string().trim().min(1).optional(),
     prompt: z.string().trim().min(3).optional(),
-    generatedSiteV2: z.boolean().optional(),
     telemetrySource: z.enum(["admin_console"]).optional()
   })
   .refine((value) => value.url || value.prompt, "Provide a URL or prompt.");
@@ -56,8 +55,7 @@ export async function POST(request: Request) {
       prompt: parsed.data.prompt,
       metadata: {
         entrypoint: "/api/intake",
-        generatedSiteV2: parsed.data.generatedSiteV2,
-        rendererVersion: parsed.data.generatedSiteV2 ? "layout-v2" : undefined,
+        rendererVersion: "layout-v3",
         telemetrySource: parsed.data.telemetrySource ?? "api"
       }
     });

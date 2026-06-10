@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion, VisualQaResult } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion, VisualQaResult } from "./models";
 import { buildGeneratedSiteQaMetadata } from "./generated-site-qa";
 import { inspectGeneratedSiteBundleRender } from "./generated-site-render-inspection";
 import { computeSiteModelHash } from "./site-version-metadata";
@@ -11,7 +11,7 @@ export type VisualQualityAuditV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   visualQa: VisualQaResult;
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
   updatedVersion?: SiteVersion;
 };
@@ -117,10 +117,10 @@ function visualQualityResult(input: {
     ...input.extraPayload
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_visual_quality_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "visual_benchmark",
     artifactVersion: "visual-quality-audit-v2",
     producerId: "design.visual-quality-audit",

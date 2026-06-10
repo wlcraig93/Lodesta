@@ -45,6 +45,7 @@ import { computeSiteModelHash, makePendingGenerationQa } from "./site-version-me
 import { createBusinessFactGraph } from "./business-fact-graph";
 import { createGenerationPlanV2 } from "./generation-plan-v2";
 import { applyClaimVerificationToPlan, verifyGenerationClaims } from "./claim-verification";
+import { withBusinessBundleFields } from "./business-model";
 import {
   defaultDesignPlanForVertical,
   designSchemaVersion,
@@ -54,7 +55,6 @@ import {
   validateLayoutDocument
 } from "./layout-registry";
 import { pruneUnsupportedCatalogSections } from "./section-catalog";
-import { maybeApplyGeneratedSiteV2 } from "./generated-site-v2-pipeline";
 import { planGenerationCost } from "./generation-cost";
 
 export type IntakeInput = {
@@ -323,7 +323,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     generationBrief: presenceAssessment.generationBrief
   });
 
-  const bundle: SiteBundle = {
+  const bundle: SiteBundle = withBusinessBundleFields({
     businessProfile,
     siteModel,
     extensionModel: {
@@ -339,7 +339,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     optimizationFindings: runAudit(businessProfile, siteModel),
     experiments: defaultExperimentsForBusiness(businessProfile, recipe, input.experimentLearnings),
     presenceAssessment
-  };
+  });
   const initialVersion = bundle.siteModel.versions[0];
   if (initialVersion) {
     presenceAssessment.businessFactGraph = createBusinessFactGraph({
@@ -368,15 +368,6 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
       v2Plan,
       verifyGenerationClaims({ version: initialVersion, factGraph: presenceAssessment.businessFactGraph })
     );
-    const sourceHost = input.url ? new URL(input.url).hostname.replace(/^www\./, "").toLowerCase() : undefined;
-    const v2Application = maybeApplyGeneratedSiteV2({
-      bundle,
-      sourceHost,
-      explicitOperatorRequest: true
-    });
-    if (v2Application.applied) {
-      presenceAssessment.technicalNotes.push(`Canonical V2 generation path applied during intake creation: ${v2Application.reason}`);
-    }
     const activeInitialVersion = bundle.siteModel.versions[0] ?? initialVersion;
     presenceAssessment.generationPlanV2 = applyClaimVerificationToPlan(
       createGenerationPlanV2({
@@ -1284,10 +1275,10 @@ function createNormalizedBusinessFacts(input: {
     .filter((text) => !input.services.includes(text) && !input.serviceAreas.includes(text))
     .map((text) => ({ text, reason: "Suppressed generic intake fallback from visible generated copy." }));
   const proofSignals: RenderableFact[] = [];
-  if (input.facts?.reviewsSummary?.rating) {
+  if (input.facts?.reviewsSummary?.rating && !isGoogleDerivedReviewSummary(input.facts.reviewsSummary)) {
     proofSignals.push(fact("reviews.rating", `${input.facts.reviewsSummary.rating}`, "crawl", "medium"));
   }
-  if (input.facts?.reviewsSummary?.count) {
+  if (input.facts?.reviewsSummary?.count && !isGoogleDerivedReviewSummary(input.facts.reviewsSummary)) {
     proofSignals.push(fact("reviews.count", `${input.facts.reviewsSummary.count}`, "crawl", "medium"));
   }
   if (input.facts?.address?.city) proofSignals.push(fact("address.city", input.facts.address.city, "crawl", "high"));
@@ -1766,11 +1757,12 @@ function galleryBody(vertical: Vertical) {
 
 function trustItems(context: SectionBuildContext) {
   const items: string[] = [];
-  if (context.business.reviewsSummary?.rating) {
-    items.push(`${context.business.reviewsSummary.rating} rating`);
+  const reviewSummary = isGoogleDerivedReviewSummary(context.business.reviewsSummary) ? undefined : context.business.reviewsSummary;
+  if (reviewSummary?.rating) {
+    items.push(`${reviewSummary.rating} rating`);
   }
-  if (context.business.reviewsSummary?.count) {
-    items.push(`${context.business.reviewsSummary.count} reviews`);
+  if (reviewSummary?.count) {
+    items.push(`${reviewSummary.count} reviews`);
   }
   if (context.business.serviceAreas[0]) {
     items.push(`Serves ${cleanDisplayPlace(context.business.serviceAreas[0])}`);
@@ -1914,16 +1906,17 @@ function sentenceCap(value: string) {
 
 function testimonialItems(business: BusinessProfile) {
   const items = [];
-  if (business.reviewsSummary?.rating || business.reviewsSummary?.count) {
+  const reviewSummary = isGoogleDerivedReviewSummary(business.reviewsSummary) ? undefined : business.reviewsSummary;
+  if (reviewSummary?.rating || reviewSummary?.count) {
     return [
       {
         quote: [
-          business.reviewsSummary.rating ? `${business.reviewsSummary.rating} average rating` : undefined,
-          business.reviewsSummary.count ? `${business.reviewsSummary.count} public reviews` : undefined
+          reviewSummary.rating ? `${reviewSummary.rating} average rating` : undefined,
+          reviewSummary.count ? `${reviewSummary.count} public reviews` : undefined
         ]
           .filter(Boolean)
           .join(" across "),
-        author: "Google review profile"
+        author: "Review profile"
       }
     ];
   }
@@ -2112,14 +2105,16 @@ function mergeExtractedFacts(
 
 function durablePublicPresenceFacts(publicPresence: PublicPresenceEnrichment | undefined): PublicPresenceEnrichment["facts"] | undefined {
   if (!publicPresence) return undefined;
-  if (publicPresence.provider === "google_places") return undefined;
   return publicPresence.facts;
 }
 
 function durablePublicPresenceProvenance(publicPresence: PublicPresenceEnrichment | undefined): Record<string, FieldProvenance> {
   if (!publicPresence) return {};
-  if (publicPresence.provider === "google_places") return {};
   return publicPresence.provenance;
+}
+
+function isGoogleDerivedReviewSummary(summary: BusinessProfile["reviewsSummary"] | ExtractedBusinessFacts["reviewsSummary"] | undefined) {
+  return summary?.sources.includes("google_places") ?? false;
 }
 
 function selectMergedBusinessName(websiteName?: string, publicName?: string) {

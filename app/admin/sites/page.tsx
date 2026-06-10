@@ -29,11 +29,11 @@ export default async function AdminSitesPage() {
     <main className="admin-page">
       <AdminPageHeader
         eyebrow="Managed inventory"
-        title="Sites"
-        description="Open durable managed sites for editing, claiming, preview tokens, publishing, billing, and domains."
+        title="Managed Sites"
+        description="Operate durable accepted sites with editing, claiming, preview tokens, publishing, billing, and domains."
         actions={
           <AdminButtonLink variant="primary" href="/admin/generate">
-            Generate
+            New candidate
           </AdminButtonLink>
         }
       />
@@ -57,7 +57,7 @@ export default async function AdminSitesPage() {
               const lastActivity = run
                 ? {
                     label: run.status,
-                    detail: `Updated ${formatDate(run.updatedAt)}`
+                    detail: `Run started ${formatDate(run.startedAt)}`
                   }
                 : {
                     label: "Latest version",
@@ -100,7 +100,7 @@ export default async function AdminSitesPage() {
                         Preview
                       </AdminButtonLink>
                       <AdminButtonLink variant="secondary" size="sm" href={`/admin/sites/${bundle.siteModel.slug}?view=runs`}>
-                        Runs
+                        Activity
                       </AdminButtonLink>
                     </AdminButtonRow>
                   </td>

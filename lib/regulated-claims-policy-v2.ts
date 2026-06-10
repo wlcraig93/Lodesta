@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 import { runClaimVerificationReportV2, type ClaimReportIssueV2 } from "./claim-report-v2";
 
 export type RegulatedClaimsPolicyV2Result = {
@@ -8,7 +8,7 @@ export type RegulatedClaimsPolicyV2Result = {
   versionId?: string;
   status: "passed" | "failed";
   issues: ClaimReportIssueV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -38,10 +38,10 @@ export function runRegulatedClaimsPolicyV2(input: {
     policy: "Regulated and sensitive claims must be backed by source-aware facts before public rendering."
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_regulated_claims_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "policy_report",
     artifactVersion: "regulated-claims-policy-v2",
     producerId: "policy.regulated-claims",

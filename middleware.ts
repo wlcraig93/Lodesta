@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { configuredAppOrigin } from "./lib/app-origin";
 import { cachePolicyForPathname, cachePolicyHeaders } from "./lib/cache-policy";
 import {
   customDomainRoutedHeader,
@@ -108,14 +109,8 @@ export const config = {
 };
 
 function domainResolveOrigin(request: NextRequest) {
-  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL;
-  if (configuredOrigin) {
-    try {
-      return new URL(configuredOrigin).origin;
-    } catch {
-      // Fall back to the request origin so malformed config does not break public rendering.
-    }
-  }
+  const configuredOrigin = configuredAppOrigin();
+  if (configuredOrigin) return configuredOrigin;
   return request.nextUrl.origin;
 }
 

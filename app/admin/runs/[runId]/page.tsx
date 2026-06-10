@@ -22,22 +22,22 @@ export default async function AdminRunDetailPage({ params }: { params: Promise<{
   if (!detail) notFound();
 
   const generationUrl = typeof detail.run.metadata?.generationUrl === "string" ? detail.run.metadata.generationUrl : undefined;
-  const generationId = detail.run.targetType === "site_generation" ? detail.run.targetId : undefined;
+  const siteCandidateId = detail.run.targetType === "site_candidate" ? detail.run.targetId : undefined;
 
   return (
     <main className="admin-page">
       <AdminPageHeader
         eyebrow={<span className={`badge status-${detail.run.status}`}>{detail.run.status}</span>}
-        title="Run inspector"
+        title="Activity inspector"
         description={detail.run.outputSummary ?? detail.run.inputSummary ?? detail.run.id}
         actions={
           <AdminButtonRow>
             <AdminButtonLink variant="secondary" href="/admin/runs">
-              Runs
+              Activity
             </AdminButtonLink>
             {generationUrl ? (
               <AdminButtonLink variant="secondary" href={generationUrl}>
-                Site generation
+                Candidate
               </AdminButtonLink>
             ) : null}
           </AdminButtonRow>
@@ -49,10 +49,10 @@ export default async function AdminRunDetailPage({ params }: { params: Promise<{
           <span>Run ID</span>
           <code>{detail.run.id}</code>
         </div>
-        {generationId ? (
+        {siteCandidateId ? (
           <div>
             <span>Generation ID</span>
-            <code>{generationId}</code>
+            <code>{siteCandidateId}</code>
           </div>
         ) : null}
       </section>
@@ -136,9 +136,9 @@ export default async function AdminRunDetailPage({ params }: { params: Promise<{
       </section>
 
       <section className="panel admin-section">
-        <h2>Run JSON</h2>
+        <h2>Activity JSON</h2>
         <details>
-          <summary>Raw run record</summary>
+          <summary>Raw activity record</summary>
           <pre className="json-block">{pretty(detail.run)}</pre>
         </details>
       </section>

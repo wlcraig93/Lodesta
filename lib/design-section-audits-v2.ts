@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CompiledPageV2, CompiledSectionV2, GenerationArtifactV2, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
+import type { CompiledPageV2, CompiledSectionV2, SiteArtifactRecord, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
 
 export type DesignSectionAuditSkillIdV2 =
   | "design.site-system"
@@ -36,7 +36,7 @@ export type DesignSectionAuditsV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   reports: DesignSectionAuditReportV2[];
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -81,7 +81,7 @@ function siteSystemFindings(version: SiteVersion | undefined): DesignSectionAudi
   if (version?.rendererVersion !== "layout-v2") return [blocking("site_system_layout_v2_required", "Site design system audits require a layout-v2 version.", "Generate or select a layout-v2 version before auditing site-specific tokens.")];
   const design = version.siteDesignSystem;
   return [
-    passOrWatch(design.buttons.variants.length >= 2, "site_system_button_variants", "Site has at least two bounded button variants.", "Add primary and secondary site-scoped variants before promotion."),
+    passOrWatch(design.buttons.variants.length >= 2, "site_system_button_variants", "Site has at least two bounded button variants.", "Add primary and secondary site-scoped variants before acceptance."),
     passOrWatch(design.typography.headingFamily !== design.typography.bodyFamily || design.typography.headingWeight !== design.typography.bodyWeight, "site_system_type_hierarchy", "Typography has visible heading/body separation.", "Choose a bounded type recipe with stronger heading/body hierarchy."),
     passOrWatch(design.color.primary !== design.color.background && design.color.primaryText !== design.color.primary, "site_system_color_separation", "Primary CTA colors are distinct from the page background.", "Select a token recipe with clearer CTA contrast."),
     passOrWatch(Boolean(design.media.treatment), "site_system_media_treatment", "Media treatment is explicitly tokenized.", "Set a bounded media treatment before rendering public sections.")
@@ -187,13 +187,13 @@ function artifactForReport(input: {
   report: DesignSectionAuditReportV2;
   version?: SiteVersion;
   createdAt?: string;
-}): GenerationArtifactV2 {
+}): SiteArtifactRecord {
   const payload = { report: input.report };
   const contentHash = hashPayload(payload);
   return {
     id: `artifact_${input.siteId}_${input.report.skillId.replace(/[^a-z0-9]+/g, "_")}_${contentHash.slice(0, 16)}`,
     siteId: input.siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "design_section_audit_report",
     artifactVersion: "design-section-audit-v2",
     producerId: input.report.skillId,

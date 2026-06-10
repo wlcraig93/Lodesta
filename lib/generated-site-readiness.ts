@@ -1,4 +1,4 @@
-import type { GenerationQaMetadata, SiteBundle, SiteGenerationStatus, SiteVersion } from "./models";
+import type { GenerationQaMetadata, SiteBundle, SiteCandidateStatus, SiteVersion } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import { applyDeterministicGeneratedSiteRepair } from "./generated-site-repair";
 import { buildGeneratedSiteQaMetadata } from "./generated-site-qa";
@@ -8,7 +8,7 @@ import { computeSiteModelHash } from "./site-version-metadata";
 import { createOpenAiVisualQa } from "./visual-qa";
 
 export type GeneratedSiteReadinessResult = {
-  status: Extract<SiteGenerationStatus, "ready" | "blocked">;
+  status: Extract<SiteCandidateStatus, "ready" | "blocked">;
   qa: GenerationQaMetadata;
   repaired: boolean;
 };

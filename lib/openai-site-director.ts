@@ -194,6 +194,7 @@ function makeSiteDirectorContext(input: OpenAiSiteDirectorInput) {
       output: "final generated website, not a website editor",
       renderer: "registered structured section catalog",
       decisionPolicy: "one decision per rendered section; do not create new sections",
+      sectionPaint: "V3 visual section paint uses only template background options: solid, gradient, or image; overlays and contrast are renderer-derived.",
       copyPolicy: "fact_ids_only; unsupported claims are blocked before ready"
     },
     business: {

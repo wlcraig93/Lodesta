@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { appOriginFromRequest } from "@/lib/app-origin";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { inspectUrlRender } from "@/lib/render-inspection";
@@ -120,7 +121,5 @@ async function findOrCreatePreviewToken(siteId: string, versionId: string) {
 }
 
 function appOrigin(request: Request) {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (configured) return configured;
-  return new URL(request.url).origin;
+  return appOriginFromRequest(request);
 }

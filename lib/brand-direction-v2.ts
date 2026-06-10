@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BrandAssessment, GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { BrandAssessment, SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 
 export type BrandCueReportV2 = {
   id: string;
@@ -38,7 +38,7 @@ export type BrandDirectionV2Result = {
   versionId?: string;
   cueReport: BrandCueReportV2;
   directionReport: BrandDirectionReportV2;
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -145,7 +145,7 @@ function brandDirectionArtifactsV2(input: {
   cueReport: BrandCueReportV2;
   directionReport: BrandDirectionReportV2;
   createdAt?: string;
-}): GenerationArtifactV2[] {
+}): SiteArtifactRecord[] {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const cuePayload = {
     versionId: input.versionId,
@@ -161,7 +161,7 @@ function brandDirectionArtifactsV2(input: {
     {
       id: `artifact_${input.siteId}_brand_cues_${cueHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "brand_cue_report",
       artifactVersion: "brand-cue-report-v2",
       producerId: "brand.cue-extraction",
@@ -174,7 +174,7 @@ function brandDirectionArtifactsV2(input: {
     {
       id: `artifact_${input.siteId}_brand_direction_${directionHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "brand_direction_report",
       artifactVersion: "brand-direction-report-v2",
       producerId: "brand.direction",

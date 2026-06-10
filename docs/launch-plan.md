@@ -66,21 +66,22 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
    - AI chat dock that applies constrained mutations through tools.
    - Field policies define what owners can edit, what experiments can vary, and what the system owns.
 
-6. Forms, Leads, and Workflows
+6. Forms, Inquiries, and Lead Workflows
    - Flexible form definitions.
-   - JSON lead submissions.
+   - Canonical inquiry records with event-scoped submitted payloads.
    - Spam guard with honeypot and submit-timing checks.
-   - Lead status operations: new, reviewed, spam.
-   - Workflow deliveries for email, webhook, and CRM placeholders.
+   - Inquiry status operations: new, needs reply, replied, booked, won/lost, spam, archived.
+   - Queued notification deliveries for email, webhook, and CRM placeholders.
+   - GPT-OSS triage through Groq for advisory intent, urgency, and recommended status.
    - CSV export.
 
 7. Analytics and Measurement
    - First-party event capture: pageviews, clicks, tel clicks, outbound booking/order clicks, section views, form starts/submits, scroll depth, engagement time, web vitals, experiment assignment.
-   - Lead metadata: source URL, session id, landing path, referrer host, UTM fields.
+   - Inquiry event metadata: source URL, session id, landing path, referrer host, UTM fields.
    - Summaries by page, CTA role, section, experiment variant, and baseline window.
 
 8. Review-Mode Optimization
-   - Monthly action-list job runs audit, QA, analytics summary, leads summary, and experiment analysis.
+   - Monthly action-list job runs audit, QA, analytics summary, inquiry summary, and experiment analysis.
    - Findings have apply modes: `auto_fix`, `one_click`, `manual_service`.
    - Individual apply and apply-all safe recommendations.
    - QA gate before publish.

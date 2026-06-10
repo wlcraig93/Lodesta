@@ -6,13 +6,20 @@ import { hasValidAdminToken } from "@/lib/auth-policy";
 import { AdminAccountMenu } from "@/components/admin/AdminAccountMenu";
 import { AdminNav, type AdminNavItem } from "@/components/admin/AdminNav";
 
-const navItems: AdminNavItem[] = [
-  { href: "/admin/sites", label: "Sites" },
-  { href: "/admin/site-generations", label: "Site generations" },
-  { href: "/admin/generate", label: "Generate" },
-  { href: "/admin/runs", label: "Runs" },
-  { href: "/settings", label: "Settings" },
-  { href: "/outbound", label: "Outbound" }
+const primaryNavItems: AdminNavItem[] = [
+  { href: "/admin/generate", label: "Generation Lab" },
+  { href: "/admin/site-candidates", label: "Candidates" },
+  { href: "/admin/sites", label: "Managed Sites" },
+  { href: "/admin/benchmark-sites", label: "Evaluations" }
+];
+
+const operationsNavItems: AdminNavItem[] = [
+  { href: "/outbound", label: "Outbound" },
+  { href: "/settings", label: "Settings" }
+];
+
+const debugNavItems: AdminNavItem[] = [
+  { href: "/admin/runs", label: "Activity" }
 ];
 
 export async function AdminShell({ children }: { children: ReactNode }) {
@@ -25,9 +32,19 @@ export async function AdminShell({ children }: { children: ReactNode }) {
       <aside className="admin-sidebar">
         <Link className="admin-brand" href="/admin/generate">
           <img src="/lodesta-logo.png" alt="Lodesta" />
-          <span>Admin</span>
+          <span>Control plane</span>
         </Link>
-        <AdminNav items={navItems} />
+        <div className="admin-nav-stack">
+          <NavGroup label="Build">
+            <AdminNav items={primaryNavItems} ariaLabel="Build" />
+          </NavGroup>
+          <NavGroup label="Operate">
+            <AdminNav items={operationsNavItems} ariaLabel="Operate" />
+          </NavGroup>
+          <NavGroup label="Debug">
+            <AdminNav items={debugNavItems} ariaLabel="Debug" />
+          </NavGroup>
+        </div>
         <AdminAccountMenu
           label={accountLabel}
           email={auth.user?.email ?? undefined}
@@ -37,5 +54,14 @@ export async function AdminShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="admin-shell-main">{children}</div>
     </div>
+  );
+}
+
+function NavGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="admin-nav-group" aria-label={`${label} navigation`}>
+      <p>{label}</p>
+      {children}
+    </section>
   );
 }

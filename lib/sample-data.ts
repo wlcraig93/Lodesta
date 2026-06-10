@@ -10,6 +10,8 @@ import {
   repairLayoutDocument,
   validateLayoutDocument
 } from "./layout-registry";
+import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
+import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 
 const observedAt = new Date("2026-05-28T00:00:00.000Z").toISOString();
 
@@ -357,11 +359,16 @@ export const sampleExtensionModel: ExtensionModel = {
   workflows: [
     {
       id: "workflow_contact_email",
-      trigger: "form_submission",
+      trigger: "inquiry_created",
       destination: "email",
       config: { to: "owner@example.com" }
     }
   ],
+  inboundSettings: {
+    captureMode: "form_only",
+    aiHandlingMode: "classify_only",
+    notificationMode: "all_inquiries"
+  },
   customBlocks: []
 };
 
@@ -370,7 +377,7 @@ function hydrateSampleSiteModel(siteModel: LegacySampleSiteModel): SiteModel {
     ...siteModel,
     versions: siteModel.versions.map((version) => {
       const activeTheme = version.theme ?? siteModel.theme;
-      const nextVersion: SiteVersion = {
+      const legacyVersion: SiteVersion = {
         ...version,
         rendererVersion,
         designSchemaVersion,
@@ -382,15 +389,42 @@ function hydrateSampleSiteModel(siteModel: LegacySampleSiteModel): SiteModel {
           })
         )
       };
-      repairLayoutDocument(nextVersion);
-      const blockingIssues = validateLayoutDocument(nextVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
+      repairLayoutDocument(legacyVersion);
+      const blockingIssues = validateLayoutDocument(legacyVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
       if (blockingIssues.length) {
         throw new Error(`Sample layout-v1 document failed validation: ${blockingIssues.map((issue) => issue.message).join("; ")}`);
       }
-      return nextVersion;
+      const compiledV3 = compileGeneratedSiteV3Site({
+        siteId: siteModel.id,
+        business: sampleBusinessProfile,
+        createdAt: version.createdAt
+      }).version;
+      applySampleHeroCopy(compiledV3);
+      return {
+        ...legacyVersion,
+        rendererVersion: "layout-v3",
+        designSchemaVersion: "design-v3",
+        theme: compiledV3.theme,
+        artifactRefs: compiledV3.artifactRefs,
+        mediaDecisions: compiledV3.mediaDecisions,
+        artDirection: compiledV3.artDirection,
+        artDirectionDecision: compiledV3.artDirectionDecision,
+        pageComposition: compiledV3.pageComposition,
+        visualQa: compiledV3.visualQa
+      };
     })
   };
   return model;
+}
+
+function applySampleHeroCopy(version: Extract<SiteVersion, { rendererVersion: "layout-v3" }>) {
+  const hero = version.pageComposition.pages[0]?.sections[0];
+  const visualSection = hero ? getVisualSectionV3(hero.props) : undefined;
+  if (!visualSection || (visualSection.templateId !== "hero_split" && visualSection.templateId !== "hero_statement")) return;
+  visualSection.slots.copy.eyebrow = "Austin pizza, pasta, and family dinners";
+  visualSection.slots.copy.heading = "Pizza night should be easy.";
+  visualSection.slots.copy.body =
+    "Fresh pies, generous pasta, and quick takeout from a neighborhood restaurant built around real food and fast service.";
 }
 
 export const sampleSiteBundle: SiteBundle = {

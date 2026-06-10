@@ -1,9 +1,11 @@
 import type { ClaimRecord, CompiledSectionV2, PageModel, SectionModel, SiteBundle } from "./models";
+import { configuredAppOrigin } from "./app-origin";
 import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { canonicalUrlForPage } from "./public-site-seo";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
 import { sectionFromLayoutSection } from "./layout-registry";
+import { withBusinessBundleFields } from "./business-model";
 
 export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
   if (!isIndexableSite(bundle, claims)) return null;
@@ -49,7 +51,7 @@ export function markdownUrlForPage(bundle: SiteBundle, page: PageModel, headers:
   const suffix = normalizePathSuffix(page.slug);
   if (isCustomDomainRequest(headers)) return `${requestOrigin(headers)}/md${suffix}`;
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? requestOrigin(headers).replace(/\/$/, "");
+  const baseUrl = configuredAppOrigin() ?? requestOrigin(headers).replace(/\/$/, "");
   return `${baseUrl}/sites/${bundle.siteModel.slug}/md${suffix}`;
 }
 
@@ -58,13 +60,16 @@ export function markdownCanonicalLinkHeader(bundle: SiteBundle, page: PageModel,
 }
 
 function businessFactLines(bundle: SiteBundle) {
-  const business = bundle.businessProfile;
+  const normalizedBundle = withBusinessBundleFields(bundle);
+  const business = normalizedBundle.businessProfile;
+  const locationLines = locationFactLines(normalizedBundle);
+  const serviceAreas = serviceAreasForBundle(normalizedBundle);
   return [
     `- Category: ${markdownText(business.categories[0] ?? business.vertical)}`,
     business.phone ? `- Phone: ${markdownText(business.phone)}` : undefined,
     business.email ? `- Email: ${markdownText(business.email)}` : undefined,
-    addressLine(bundle) ? `- Address: ${addressLine(bundle)}` : undefined,
-    business.serviceAreas.length ? `- Service areas: ${business.serviceAreas.map(markdownText).join(", ")}` : undefined,
+    ...locationLines,
+    serviceAreas.length ? `- Service areas: ${serviceAreas.map(markdownText).join(", ")}` : undefined,
     business.services.length ? `- Services: ${business.services.map(markdownText).join(", ")}` : undefined
   ].filter((line): line is string => Boolean(line));
 }
@@ -122,8 +127,30 @@ function sectionItems(section: SectionModel) {
   });
 }
 
-function addressLine(bundle: SiteBundle) {
-  const address = bundle.businessProfile.address;
+function locationFactLines(bundle: SiteBundle) {
+  const locations = bundle.locations ?? [];
+  if (locations.length > 1) {
+    return [
+      `- Locations: ${locations
+        .map((location) => [location.label ? markdownText(location.label) : undefined, addressLine(location.address)].filter(Boolean).join(" - "))
+        .filter(Boolean)
+        .join("; ")}`
+    ];
+  }
+  const address = locations[0]?.address ?? bundle.businessProfile.address;
+  const line = addressLine(address);
+  return line ? [`- Address: ${line}`] : [];
+}
+
+function serviceAreasForBundle(bundle: SiteBundle) {
+  const areas = new Set<string>(bundle.businessProfile.serviceAreas);
+  for (const location of bundle.locations ?? []) {
+    for (const area of location.serviceAreas) areas.add(area);
+  }
+  return [...areas];
+}
+
+function addressLine(address: SiteBundle["businessProfile"]["address"] | undefined) {
   if (!address) return undefined;
   return [address.street, address.city, address.region, address.postalCode, address.country]
     .filter(Boolean)

@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
-import { executeFormSubmissionWorkflows } from "@/lib/workflows";
 import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "@/lib/privacy";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { validateFormSubmission } from "@/lib/form-validation";
-import { publicLeadSubmission } from "@/lib/lead-privacy";
 
 export async function POST(request: Request) {
   const limit = rateLimit(request, {
@@ -67,9 +65,9 @@ export async function POST(request: Request) {
   }
 
   const submittedAt = new Date();
-  const submission = await repository.recordFormSubmission({
+  const inquiryResult = await repository.createInquiryFromForm({
     siteId,
-    formId,
+    form,
     pageId: parsedSubmission.pageId || "unknown",
     visitorId: parsedSubmission.visitorId,
     payload: validation.payload,
@@ -79,22 +77,27 @@ export async function POST(request: Request) {
     ipHash: ipHashForRequest(request, { siteId, at: submittedAt })
   });
 
-  await repository.recordAnalyticsEvent({
-    siteId,
-    sessionId: parsedSubmission.sessionId || `form_${submission.id}`,
-    visitorId: parsedSubmission.visitorId,
-    pageId: submission.pageId,
-    eventType: "form_submit",
-    timestamp: submission.submittedAt,
-    sectionId: parsedSubmission.sectionId || undefined,
-    metadata: { formId, ...submission.metadata }
-  });
+  repository
+    .recordAnalyticsEvent({
+      siteId,
+      sessionId: parsedSubmission.sessionId || `form_${inquiryResult.inquiry.id}`,
+      visitorId: parsedSubmission.visitorId,
+      pageId: parsedSubmission.pageId || "unknown",
+      eventType: "form_submit",
+      timestamp: submittedAt.toISOString(),
+      sectionId: parsedSubmission.sectionId || undefined,
+      metadata: {
+        formId,
+        inquiryId: inquiryResult.inquiry.id,
+        duplicate: inquiryResult.duplicate,
+        ...parsedSubmission.metadata
+      }
+    })
+    .catch((error) => {
+      console.warn(`Form submit analytics failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
 
-  const workflowDeliveries = bundle
-    ? await executeFormSubmissionWorkflows(bundle, submission, (delivery) => repository.recordWorkflowDelivery(delivery))
-    : [];
-
-  return applyRateLimitHeaders(NextResponse.json({ ...publicLeadSubmission(submission), workflowDeliveries }), limit);
+  return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "received" }), limit);
 }
 
 type ParsedSubmission =

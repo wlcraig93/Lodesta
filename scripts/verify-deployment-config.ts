@@ -24,7 +24,7 @@ const modelsSource = readFileSync("lib/models.ts", "utf8");
 const repositorySource = readFileSync("lib/repository.ts", "utf8");
 const supabaseRepositorySource = readFileSync("lib/supabase/repository.ts", "utf8");
 const agentTelemetrySource = readFileSync("lib/agent-telemetry.ts", "utf8");
-const siteGenerationServiceSource = readFileSync("lib/site-generation-service.ts", "utf8");
+const siteCandidateServiceSource = readFileSync("lib/site-candidate-service.ts", "utf8");
 const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
 const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8");
 const workerSource = readFileSync("workers/runner.ts", "utf8");
@@ -131,26 +131,27 @@ assertIncludes(schemaSql, "create table agent_run_spans", "Supabase schema must 
 assertIncludes(schemaSql, "create table agent_model_calls", "Supabase schema must include agent model calls.");
 assertIncludes(schemaSql, "create index agent_runs_target_idx on agent_runs(target_type, target_id);", "Agent telemetry target lookup must be indexed.");
 assertIncludes(schemaSql, "alter table agent_runs enable row level security;", "Agent run telemetry must have RLS enabled.");
-assertIncludes(schemaSql, "create table site_generations", "Site generations must be stored separately from managed sites.");
-assertIncludes(schemaSql, "created_site_id text references sites(id) on delete set null", "Site generations must point to promoted managed sites without owning public site lifecycle.");
-assertIncludes(schemaSql, "alter table site_generations enable row level security;", "Site generations must have RLS enabled.");
+assertIncludes(schemaSql, "create table site_candidates", "Site candidates must be stored separately from managed sites.");
+assertIncludes(schemaSql, "accepted_site_id text references sites(id) on delete set null", "Site candidates must point to accepted managed sites without owning public site lifecycle.");
+assertIncludes(schemaSql, "accepted_version_id text", "Site candidates must record accepted site-version identity when accepted as a version.");
+assertIncludes(schemaSql, "alter table site_candidates enable row level security;", "Site candidates must have RLS enabled.");
 assertIncludes(schemaSql, "version_id text", "Preview tokens must store the generated site version id.");
 assertIncludes(
-  siteGenerationServiceSource,
-  "startRequiredSiteGenerationTelemetry",
-  "Persisted site generation must fail closed when the initial telemetry run cannot be created."
+  siteCandidateServiceSource,
+  "startRequiredSiteCandidateTelemetry",
+  "Persisted site candidate creation must fail closed when the initial telemetry run cannot be created."
 );
-assertIncludes(siteGenerationServiceSource, "previewStatus", "Canonical generation must record preview-token outcomes on the run metadata.");
-assertIncludes(siteGenerationServiceSource, "createSiteGeneration", "Canonical generation must persist site-generation candidates instead of managed sites.");
+assertIncludes(siteCandidateServiceSource, "previewStatus", "Canonical generation must record preview-token outcomes on the run metadata.");
+assertIncludes(siteCandidateServiceSource, "createSiteCandidate", "Canonical generation must persist site-candidate candidates instead of managed sites.");
 assertIncludes(intakeRoute, "repository.enqueueJob(\"generate_site\"", "Intake API must enqueue generation through the canonical job pipeline.");
 assertIncludes(intakeRoute, "/api/intake/jobs/", "Intake API must return a pollable generation job status URL.");
 assertIncludes(intakeJobStatusRoute, "intakeJobStatusResponse", "Intake job status API must use the safe status response shape.");
-assert(!intakeRoute.includes("startSiteGenerationTelemetry"), "Intake API must not start generation telemetry directly.");
+assert(!intakeRoute.includes("startSiteCandidateTelemetry"), "Intake API must not start generation telemetry directly.");
 assert(!intakeRoute.includes("repository.createAndStoreSite"), "Intake API must not persist generated sites directly.");
 assertIncludes(jobsSource, "context.generateSite", "Generation jobs must route persisted generation through the canonical generation service.");
 assertIncludes(jobsSource, "assertPublicFetchUrl(rawUrl)", "Generation jobs must repeat public URL safety validation in the worker.");
 assertIncludes(jobsSource, "assertLaunchMarket({ url, prompt })", "Generation jobs must repeat launch-market validation in the worker.");
-assert(!jobsSource.includes("startSiteGenerationTelemetry"), "Jobs must not start generation telemetry directly.");
+assert(!jobsSource.includes("startSiteCandidateTelemetry"), "Jobs must not start generation telemetry directly.");
 assert(!jobsSource.includes("createAndStoreSite"), "Jobs must not persist generated sites directly.");
 assert(!jobsSource.includes("createPreviewToken"), "Jobs must not create generated-site preview tokens directly.");
 assertIncludes(
@@ -159,8 +160,8 @@ assertIncludes(
   "Supabase worker context must receive the canonical generation service through an entrypoint hook."
 );
 assert(
-  !supabaseRepositorySource.includes("../site-generation-service"),
-  "Supabase repository must not import the site-generation service into admin page graphs."
+  !supabaseRepositorySource.includes("../site-candidate-service"),
+  "Supabase repository must not import the site-candidate service into admin page graphs."
 );
 assertIncludes(
   jobsProcessRoute,
@@ -173,8 +174,8 @@ assertIncludes(
   "Worker runner must attach the canonical generation service outside admin page graphs."
 );
 assert(
-  !agentTelemetrySource.includes("export async function startSiteGenerationTelemetry"),
-  "Best-effort site-generation telemetry starter must not be exported for product generation paths."
+  !agentTelemetrySource.includes("export async function startSiteCandidateTelemetry"),
+  "Best-effort site-candidate telemetry starter must not be exported for product generation paths."
 );
 assertIncludes(jobSchedulerSource, '"agent_telemetry_cleanup"', "Launch maintenance must queue bounded agent telemetry cleanup.");
 assertIncludes(

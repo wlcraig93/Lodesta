@@ -66,6 +66,8 @@ export default async function PublicSitePage({
       business={bundle.businessProfile}
       site={bundle.siteModel}
       extensions={bundle.extensionModel}
+      locations={bundle.locations}
+      locationBindings={bundle.locationBindings}
       page={page}
       theme={version.theme ?? bundle.siteModel.theme}
       experiments={bundle.experiments}

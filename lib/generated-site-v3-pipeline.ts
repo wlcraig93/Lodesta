@@ -1,4 +1,5 @@
 import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
+import { withBusinessBundleFields } from "./business-model";
 import {
   generatedSiteV3AllowlistHosts,
   getGeneratedSiteV3Mode,
@@ -28,9 +29,9 @@ export function maybeApplyGeneratedSiteV3(input: {
   });
   if (!allowed) return { applied: false, reason: `layout-v3 disabled for mode ${mode}.` };
 
+  const hydratedBundle = withBusinessBundleFields(input.bundle);
   const result = compileGeneratedSiteV3Site({
-    siteId: input.bundle.businessProfile.siteId,
-    business: input.bundle.businessProfile,
+    bundle: hydratedBundle,
     createdAt: input.now
   });
   const previousDraftIndex = input.bundle.siteModel.versions.findIndex((version) => version.status === "draft");

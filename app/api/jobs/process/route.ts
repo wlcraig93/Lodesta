@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
-import { generateSite } from "@/lib/site-generation-service";
+import { generateSite } from "@/lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "@/lib/supabase/repository";
 import { requireAdmin } from "@/lib/security";
 

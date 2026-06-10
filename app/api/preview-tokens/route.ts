@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { appOriginFromRequest } from "@/lib/app-origin";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 
@@ -57,7 +58,5 @@ export async function GET(request: Request) {
 }
 
 function appOrigin(request: Request) {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (configured) return configured;
-  return new URL(request.url).origin;
+  return appOriginFromRequest(request);
 }

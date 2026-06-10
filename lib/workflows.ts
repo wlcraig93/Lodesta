@@ -1,35 +1,65 @@
-import type { LeadSubmission, SiteBundle, WorkflowDelivery, WorkflowDefinition } from "./models";
-import { publicLeadSubmission } from "./lead-privacy";
+import type { Inquiry, InquiryDelivery, InquiryEvent, SiteBundle, WorkflowDefinition } from "./models";
+import { publicInquiry, publicInquiryEvent, workflowTarget } from "./inquiries";
 import { validatePublicFetchUrl } from "./url-safety";
 
-type WorkflowRecorder = (delivery: Omit<WorkflowDelivery, "id" | "createdAt">) => Promise<WorkflowDelivery>;
+type DeliveryInput = Omit<InquiryDelivery, "id" | "createdAt">;
+type WorkflowRecorder = (delivery: DeliveryInput) => Promise<InquiryDelivery>;
 
-export async function executeFormSubmissionWorkflows(
+export async function executeInquiryNotificationWorkflows(
   bundle: SiteBundle,
-  submission: LeadSubmission,
+  inquiry: Inquiry,
+  event: InquiryEvent | undefined,
   recordDelivery: WorkflowRecorder
 ) {
-  const workflows = bundle.extensionModel.workflows.filter((workflow) => workflow.trigger === "form_submission");
-  const deliveries: WorkflowDelivery[] = [];
+  const workflows = bundle.extensionModel.workflows.filter((workflow) => workflow.trigger === "inquiry_created");
+  const deliveries: InquiryDelivery[] = [];
+
+  if (!workflows.length) {
+    deliveries.push(
+      await recordDelivery({
+        siteId: inquiry.siteId,
+        inquiryId: inquiry.id,
+        eventId: event?.id,
+        workflowId: "inquiry_notification_default",
+        destination: "crm_placeholder",
+        target: "none",
+        status: "skipped",
+        message: "No inquiry notification workflows are configured."
+      })
+    );
+    return deliveries;
+  }
 
   for (const workflow of workflows) {
-    const delivery = await executeWorkflow(bundle, submission, workflow, recordDelivery);
+    const delivery = await executeWorkflow(bundle, inquiry, event, workflow, recordDelivery);
     deliveries.push(delivery);
   }
 
   return deliveries;
 }
 
+export function aggregateNotificationState(deliveries: InquiryDelivery[]): Inquiry["notificationState"] {
+  if (!deliveries.length) return "skipped";
+  const sent = deliveries.filter((delivery) => delivery.status === "sent").length;
+  const failed = deliveries.filter((delivery) => delivery.status === "failed").length;
+  const skipped = deliveries.filter((delivery) => delivery.status === "skipped").length;
+  if (failed === 0) return sent > 0 || skipped > 0 ? "completed" : "skipped";
+  if (sent > 0 || skipped > 0) return "partial";
+  return "failed";
+}
+
 async function executeWorkflow(
   bundle: SiteBundle,
-  submission: LeadSubmission,
+  inquiry: Inquiry,
+  event: InquiryEvent | undefined,
   workflow: WorkflowDefinition,
   recordDelivery: WorkflowRecorder
 ) {
   const base = {
-    siteId: bundle.businessProfile.siteId,
+    siteId: inquiry.siteId,
+    inquiryId: inquiry.id,
+    eventId: event?.id,
     workflowId: workflow.id,
-    submissionId: submission.id,
     destination: workflow.destination
   };
 
@@ -37,14 +67,14 @@ async function executeWorkflow(
     if (workflow.destination === "email") {
       return recordDelivery({
         ...base,
-        ...(await deliverEmail(bundle, submission, workflow))
+        ...(await deliverEmail(bundle, inquiry, event, workflow))
       });
     }
 
     if (workflow.destination === "webhook") {
       return recordDelivery({
         ...base,
-        ...(await deliverWebhook(bundle, submission, workflow))
+        ...(await deliverWebhook(bundle, inquiry, event, workflow))
       });
     }
 
@@ -57,16 +87,16 @@ async function executeWorkflow(
   } catch (error) {
     return recordDelivery({
       ...base,
-      target: workflowTarget(workflow, bundle),
+      target: workflowTarget(workflow, { fallbackEmail: bundle.businessProfile.email }),
       status: "failed",
-      message: "Workflow delivery failed.",
+      message: "Inquiry notification workflow failed.",
       error: error instanceof Error ? error.message : "Unknown workflow error"
     });
   }
 }
 
-async function deliverEmail(bundle: SiteBundle, submission: LeadSubmission, workflow: WorkflowDefinition) {
-  const target = workflowTarget(workflow, bundle);
+async function deliverEmail(bundle: SiteBundle, inquiry: Inquiry, event: InquiryEvent | undefined, workflow: WorkflowDefinition) {
+  const target = workflowTarget(workflow, { fallbackEmail: bundle.businessProfile.email });
   if (!target) {
     return {
       target,
@@ -81,7 +111,7 @@ async function deliverEmail(bundle: SiteBundle, submission: LeadSubmission, work
     return {
       target,
       status: "skipped" as const,
-      message: "Email workflow logged only. Set RESEND_API_KEY to send notification emails."
+      message: "Email workflow logged only. Set RESEND_API_KEY to send inquiry notifications."
     };
   }
 
@@ -95,22 +125,24 @@ async function deliverEmail(bundle: SiteBundle, submission: LeadSubmission, work
     body: JSON.stringify({
       from,
       to: target,
-      subject: `New lead for ${bundle.businessProfile.name}`,
-      text: leadSummaryText(bundle, submission)
+      subject: `New inquiry for ${bundle.businessProfile.name}`,
+      text: inquirySummaryText(bundle, inquiry, event)
     })
   });
 
+  const payload = (await response.json().catch(() => null)) as { id?: string } | null;
   return {
     target,
     status: response.ok ? ("sent" as const) : ("failed" as const),
     responseStatus: response.status,
-    message: response.ok ? "Lead notification email sent." : "Lead notification email request failed.",
-    error: response.ok ? undefined : await response.text().catch(() => undefined)
+    providerMessageId: payload?.id,
+    message: response.ok ? "Inquiry notification email sent." : "Inquiry notification email request failed.",
+    error: response.ok ? undefined : JSON.stringify(payload) || (await response.text().catch(() => undefined))
   };
 }
 
-async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, workflow: WorkflowDefinition) {
-  const target = workflowTarget(workflow, bundle);
+async function deliverWebhook(bundle: SiteBundle, inquiry: Inquiry, event: InquiryEvent | undefined, workflow: WorkflowDefinition) {
+  const target = workflowTarget(workflow, { fallbackEmail: bundle.businessProfile.email });
   if (!target) {
     return {
       target,
@@ -133,10 +165,11 @@ async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, wo
     signal: workflowTimeoutSignal(),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      type: "form_submission",
-      siteId: bundle.businessProfile.siteId,
+      type: "inquiry_created",
+      siteId: inquiry.siteId,
       siteName: bundle.businessProfile.name,
-      submission: publicLeadSubmission(submission)
+      inquiry: publicInquiry(inquiry),
+      event: event ? publicInquiryEvent(event) : undefined
     })
   });
 
@@ -144,26 +177,25 @@ async function deliverWebhook(bundle: SiteBundle, submission: LeadSubmission, wo
     target,
     status: response.ok ? ("sent" as const) : ("failed" as const),
     responseStatus: response.status,
-    message: response.ok ? "Lead webhook delivered." : "Lead webhook request failed.",
+    message: response.ok ? "Inquiry webhook delivered." : "Inquiry webhook request failed.",
     error: response.ok ? undefined : await response.text().catch(() => undefined)
   };
 }
 
-function workflowTarget(workflow: WorkflowDefinition, bundle: SiteBundle) {
-  const configured = workflow.config.to ?? workflow.config.url ?? workflow.config.target;
-  if (typeof configured === "string" && configured.trim()) return configured.trim();
-  if (workflow.destination === "email") return bundle.businessProfile.email;
-  return undefined;
-}
-
-function leadSummaryText(bundle: SiteBundle, submission: LeadSubmission) {
+function inquirySummaryText(bundle: SiteBundle, inquiry: Inquiry, event: InquiryEvent | undefined) {
   return [
-    `New lead for ${bundle.businessProfile.name}`,
-    `Form: ${submission.formId}`,
-    `Submitted: ${submission.submittedAt}`,
-    submission.sourceUrl ? `Source: ${submission.sourceUrl}` : undefined,
+    `New inquiry for ${bundle.businessProfile.name}`,
+    `Inquiry: ${inquiry.id}`,
+    `Status: ${inquiry.status}`,
+    inquiry.contactName ? `Name: ${inquiry.contactName}` : undefined,
+    inquiry.contactEmail ? `Email: ${inquiry.contactEmail}` : undefined,
+    inquiry.contactPhone ? `Phone: ${inquiry.contactPhone}` : undefined,
+    event?.formId ? `Form: ${event.formId}` : undefined,
+    event?.createdAt ? `Submitted: ${event.createdAt}` : undefined,
+    event?.sourceUrl ? `Source: ${event.sourceUrl}` : undefined,
     "",
-    JSON.stringify(submission.payload, null, 2)
+    event?.messageText ? event.messageText : undefined,
+    event?.payload ? JSON.stringify(event.payload, null, 2) : undefined
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");

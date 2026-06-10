@@ -255,14 +255,6 @@ export type RendererVersion = "layout-v1" | "layout-v2" | "layout-v3";
 
 export type DesignSchemaVersion = "design-v1" | "design-v2" | "design-v3";
 
-export type GeneratedSiteV2Mode =
-  | "off"
-  | "fixture_only"
-  | "operator_allowlist"
-  | "auto_body_canonical"
-  | "supported_verticals_canonical"
-  | "all_canonical";
-
 export type GeneratedSiteV3Mode = "off" | "fixture_only" | "operator_allowlist" | "all_new_generations";
 
 export type SiteStylePack = "local_modern" | "premium_editorial" | "urgent_service" | "warm_neighborhood" | "clinical_trust";
@@ -486,18 +478,6 @@ export type SectionFamilyV2 =
   | "cta.final_band"
   | "footer.standard";
 
-export type SectionFamilyContractV2 = {
-  id: SectionFamilyV2;
-  verticals: Vertical[];
-  requiredFactKinds: BusinessFactKind[];
-  optionalFactKinds: BusinessFactKind[];
-  copySlots: string[];
-  assetSlots: string[];
-  layoutVariants: string[];
-  responsiveBehavior: "stack" | "reorder" | "compress";
-  qaRisks: string[];
-};
-
 export type ClaimCategoryV2 =
   | "business_identity"
   | "service"
@@ -584,21 +564,9 @@ export type BlueprintV2 = {
   assetNeeds: string[];
 };
 
-export type VerticalPlaybookV2 = {
-  id: Vertical;
-  version: string;
-  serviceTaxonomy: string[];
-  contentPriorities: string[];
-  trustSignals: string[];
-  forbiddenClaims: ClaimCategoryV2[];
-  proofRules: string[];
-  ctaStrategy: string;
-  visualDirection: string[];
-};
-
 export type SiteVersionArtifactRefV2 = {
   artifactId: string;
-  artifactType: GenerationArtifactTypeV2;
+  artifactType: SiteArtifactType;
   artifactVersion: string;
   contentHash: string;
   affectedPageId?: string;
@@ -878,7 +846,14 @@ export type GenerationQaMetadata = {
 export type ExtensionModel = {
   forms: FormDefinition[];
   workflows: WorkflowDefinition[];
+  inboundSettings?: InboundSettings;
   customBlocks: CustomBlockDefinition[];
+};
+
+export type InboundSettings = {
+  captureMode: "form_only" | "form_and_chat";
+  aiHandlingMode: "off" | "classify_only";
+  notificationMode: "all_inquiries" | "real_leads_only" | "urgent_only" | "digest";
 };
 
 export type FormDefinition = {
@@ -897,22 +872,93 @@ export type FormDefinition = {
 
 export type WorkflowDefinition = {
   id: string;
-  trigger: "form_submission" | "lead_created";
+  trigger: "inquiry_created";
   destination: "email" | "crm_placeholder" | "webhook";
   config: Record<string, unknown>;
 };
 
-export type WorkflowDelivery = {
+export type InquirySourceChannel = "form" | "chat" | "email" | "phone" | "sms" | "booking";
+export type InquiryStatus = "new" | "needs_reply" | "replied" | "booked" | "won" | "lost" | "spam" | "archived";
+export type InquiryNotificationState = "queued" | "processing" | "completed" | "partial" | "failed" | "skipped";
+export type InquiryAiEnrichmentState = "queued" | "processing" | "succeeded" | "retrying" | "rate_limited" | "failed" | "skipped";
+export type InquiryEventType =
+  | "form_submission"
+  | "chat_message"
+  | "email_received"
+  | "email_sent"
+  | "owner_note"
+  | "ai_note"
+  | "booking_created";
+export type InquiryActor = "visitor" | "owner" | "ai" | "system";
+
+export type InquiryAiEnrichment = {
+  schemaVersion: string;
+  promptVersion: string;
+  provider: "groq";
+  model: string;
+  intent: string;
+  urgency: string;
+  spamLikelihood: "low" | "medium" | "high" | "unknown";
+  serviceInterest?: string | null;
+  contactPreference?: "email" | "phone" | "unknown" | null;
+  summary: string;
+  missingInfo: string[];
+  suggestedNextAction: string;
+  recommendedStatus: Extract<InquiryStatus, "needs_reply" | "spam" | "archived">;
+  confidence: number;
+  safetyFlags: string[];
+  createdAt: string;
+};
+
+export type Inquiry = {
   id: string;
   siteId: string;
+  sourceChannel: InquirySourceChannel;
+  contactName?: string;
+  contactEmail?: string;
+  contactEmailNormalized?: string;
+  contactPhone?: string;
+  contactPhoneNormalized?: string;
+  status: InquiryStatus;
+  notificationState: InquiryNotificationState;
+  aiEnrichmentState: InquiryAiEnrichmentState;
+  aiEnrichment?: InquiryAiEnrichment;
+  aiEnrichedAt?: string;
+  aiEnrichmentError?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InquiryEvent = {
+  id: string;
+  siteId: string;
+  inquiryId: string;
+  type: InquiryEventType;
+  actor: InquiryActor;
+  messageText?: string;
+  payload?: Record<string, unknown>;
+  sourceUrl?: string;
+  pageId?: string;
+  formId?: string;
+  metadata?: Record<string, unknown>;
+  dedupeKey?: string;
+  createdAt: string;
+};
+
+export type InquiryDelivery = {
+  id: string;
+  siteId: string;
+  inquiryId: string;
+  eventId?: string;
   workflowId: string;
-  submissionId?: string;
   destination: WorkflowDefinition["destination"];
   target?: string;
   status: "sent" | "skipped" | "failed";
   message: string;
   responseStatus?: number;
   error?: string;
+  providerMessageId?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -1202,21 +1248,6 @@ export type AnalyticsOutcomeTotals = {
   avgScrollDepth: number;
 };
 
-export type LeadSubmission = {
-  id: string;
-  siteId: string;
-  formId: string;
-  pageId?: string;
-  visitorId?: string;
-  payload: Record<string, unknown>;
-  metadata?: Record<string, string | number | boolean>;
-  submittedAt: string;
-  sourceUrl?: string;
-  userAgent?: string;
-  ipHash?: string;
-  status: "new" | "reviewed" | "spam";
-};
-
 export type PreviewToken = {
   token: string;
   siteId: string;
@@ -1430,6 +1461,17 @@ export type RenderViewportMetrics = {
   minReadableTextFontSizePx?: number;
   minTextContrastRatio?: number;
   minTextContrastSample?: string;
+  headerContrastRatio?: number;
+  headerContrastSample?: string;
+  headerVisualMode?: string;
+  heroH1LineCount?: number;
+  heroH1MaxLineWidthPx?: number;
+  visualOverlapCount?: number;
+  visualOverlapSamples?: string[];
+  crampedTextCount?: number;
+  crampedTextSamples?: string[];
+  heroMediaEdgeClipCount?: number;
+  heroMediaEdgeClipSamples?: string[];
   headingFontFamily?: string;
   bodyFontFamily?: string;
   rects?: {
@@ -1496,6 +1538,17 @@ export type RenderInspectionResult = {
     minReadableTextFontSizePx?: number;
     minTextContrastRatio?: number;
     minTextContrastSample?: string;
+    headerContrastRatio?: number;
+    headerContrastSample?: string;
+    headerVisualMode?: string;
+    heroH1LineCount?: number;
+    heroH1MaxLineWidthPx?: number;
+    visualOverlapCount?: number;
+    visualOverlapSamples?: string[];
+    crampedTextCount?: number;
+    crampedTextSamples?: string[];
+    heroMediaEdgeClipCount?: number;
+    heroMediaEdgeClipSamples?: string[];
     headingFontFamily?: string;
     bodyFontFamily?: string;
   };
@@ -1719,15 +1772,15 @@ export type PresenceAssessment = {
   generationBrief?: GenerationBrief;
 };
 
-export type GenerationArtifactScopeV2 =
-  | "generation_selected"
-  | "generation_candidate"
-  | "managed_site_selected"
-  | "managed_site_candidate"
-  | "eval_candidate"
+export type SiteArtifactScope =
+  | "candidate_selected"
+  | "candidate_alternative"
+  | "site_selected"
+  | "site_alternative"
+  | "evaluation_candidate"
   | "qa_evidence";
 
-export type GenerationArtifactTypeV2 =
+export type SiteArtifactType =
   | "copy_artifact"
   | "copy_diff"
   | "business_context_report"
@@ -1763,12 +1816,12 @@ export type GenerationArtifactTypeV2 =
   | "v3_review_packet"
   | "generation_cost_report";
 
-export type GenerationArtifactV2 = {
+export type SiteArtifactRecord = {
   id: string;
-  generationId?: string;
+  siteCandidateId?: string;
   siteId?: string;
-  scope: GenerationArtifactScopeV2;
-  artifactType: GenerationArtifactTypeV2;
+  scope: SiteArtifactScope;
+  artifactType: SiteArtifactType;
   artifactVersion: string;
   producerId: string;
   producerVersion: string;
@@ -1902,6 +1955,10 @@ export type PresenceQualityScore = {
 
 export type SiteBundle = {
   businessProfile: BusinessProfile;
+  business?: BusinessRecord;
+  locations?: BusinessLocationRecord[];
+  locationBindings?: SiteLocationBinding[];
+  renderProfile?: BusinessProfile;
   siteModel: SiteModel;
   extensionModel: ExtensionModel;
   optimizationFindings: OptimizationFinding[];
@@ -1910,10 +1967,44 @@ export type SiteBundle = {
   presenceAssessment: PresenceAssessment;
 };
 
-export type SiteGenerationStatus = "ready" | "blocked" | "promoted" | "archived";
+export type SiteLocationBinding = {
+  locationId: string;
+  role: "primary" | "covered";
+  orderIndex: number;
+};
 
-export type SiteGenerationRecord = {
+export type BusinessRecord = {
   id: string;
+  workspaceId?: string;
+  name: string;
+  vertical: Vertical;
+  profile: BusinessProfile;
+  provenance: Record<string, FieldProvenance>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BusinessLocationRecord = {
+  id: string;
+  businessId: string;
+  label?: string;
+  address?: BusinessProfile["address"];
+  serviceAreas: string[];
+  phone?: string;
+  email?: string;
+  hours?: BusinessProfile["hours"];
+  geo?: BusinessProfile["geo"];
+  googlePlaceId?: string;
+  provenance: Record<string, FieldProvenance>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SiteCandidateStatus = "ready" | "blocked" | "accepted" | "archived";
+
+export type SiteCandidateRecord = {
+  id: string;
+  businessId: string;
   agentRunId?: string;
   sourceUrl?: string;
   sourceHost?: string;
@@ -1921,9 +2012,11 @@ export type SiteGenerationRecord = {
   vertical: Vertical;
   candidateSlug: string;
   bundle: SiteBundle;
-  status: SiteGenerationStatus;
-  createdSiteId?: string;
-  promotedAt?: string;
+  status: SiteCandidateStatus;
+  intendedSiteId?: string;
+  acceptedSiteId?: string;
+  acceptedVersionId?: string;
+  acceptedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -2024,7 +2117,9 @@ export type JobKind =
   | "generate_site"
   | "agent_telemetry_cleanup"
   | "monthly_action_list"
-  | "import_batch";
+  | "import_batch"
+  | "inquiry_notification"
+  | "inquiry_ai_enrichment";
 
 export type JobRecord = {
   id: string;

@@ -36,10 +36,10 @@ export function GeneratedSiteQaPanel({ bundle, version, qa }: GeneratedSiteQaPan
         <section className="panel">
           <div className="section-heading-row">
             <div>
-              <span className="badge">Generated Site QA</span>
+              <span className="badge">QA</span>
               <h2>QA checks</h2>
               <p className="muted">
-                Local deterministic checks against the generated site model. No agent or model work runs here.
+                Local deterministic checks against the preview model. No agent or model work runs here.
               </p>
             </div>
             <RunGeneratedQaForm siteId={bundle.businessProfile.siteId} versionId={version.id} />
@@ -55,8 +55,8 @@ export function GeneratedSiteQaPanel({ bundle, version, qa }: GeneratedSiteQaPan
             {readiness === "unavailable" ? (
               <article className="finding-card compact-card">
                 <span className="badge severity-warning">unavailable</span>
-                <h3>Generated preview QA has not run</h3>
-                <p>Run generated QA for this version before publishing.</p>
+                <h3>Preview QA has not run</h3>
+                <p>Run QA for this version before publishing.</p>
               </article>
             ) : null}
           </div>

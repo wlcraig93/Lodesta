@@ -158,7 +158,7 @@ export function FormSettingsForm({ siteId, form, workflows }: FormSettingsFormPr
 }
 
 function workflowTarget(workflows: WorkflowDefinition[], destination: WorkflowDefinition["destination"]) {
-  const workflow = workflows.find((candidate) => candidate.trigger === "form_submission" && candidate.destination === destination);
+  const workflow = workflows.find((candidate) => candidate.trigger === "inquiry_created" && candidate.destination === destination);
   const target = workflow?.config.to ?? workflow?.config.url ?? workflow?.config.target;
   return typeof target === "string" ? target : "";
 }

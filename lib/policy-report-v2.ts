@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 import { makeLocalBusinessJsonLd } from "./structured-data";
 
 export type PolicyReportIssueV2 = {
@@ -16,7 +16,7 @@ export type PolicyReportV2Result = {
   versionId?: string;
   status: "passed" | "failed";
   issues: PolicyReportIssueV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -36,10 +36,10 @@ export function runPolicyReportV2(input: {
     issues
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_policy_report_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "policy_report",
     artifactVersion: "policy-report-v2",
     producerId: "policy.google-places",

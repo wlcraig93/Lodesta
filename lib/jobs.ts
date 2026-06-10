@@ -4,11 +4,13 @@ import type {
   AnalyticsSummary,
   ExperimentAnalysis,
   ExperimentLearning,
+  Inquiry,
+  InquiryEvent,
   JobKind,
   JobRecord,
-  LeadSubmission,
   OptimizationFinding,
-  SiteBundle
+  SiteBundle,
+  SiteVersion
 } from "./models";
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput } from "./intake";
@@ -20,7 +22,7 @@ import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
-import type { GenerateSiteOptions, GenerateSiteResult } from "./site-generation-service";
+import type { GenerateSiteOptions, GenerateSiteResult } from "./site-candidate-service";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
 export const defaultJobMaxAttempts = 3;
@@ -38,7 +40,10 @@ export type JobExecutionContext = {
   analyticsSummary?: (siteId: string) => Promise<AnalyticsSummary>;
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
   listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
-  listFormSubmissions?: (siteId?: string) => Promise<LeadSubmission[]>;
+  listInquiries?: (siteId?: string) => Promise<Inquiry[]>;
+  listInquiryEvents?: (inquiryId: string) => Promise<InquiryEvent[]>;
+  processInquiryNotification?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
+  processInquiryAiEnrichment?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
   cleanupAgentTelemetry?: (input?: { olderThanDays?: number; limit?: number }) => Promise<{ deleted: number; cutoff: string }>;
 };
 
@@ -130,7 +135,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
     }
     case "generate_site": {
       if (!context?.generateSite) {
-        throw new Error("generate_site requires the canonical site-generation service.");
+        throw new Error("generate_site requires the canonical site-candidate service.");
       }
       const rawUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
       const prompt = typeof job.payload.prompt === "string" ? job.payload.prompt : undefined;
@@ -149,14 +154,14 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       const version = bundle.siteModel.versions[0];
       return {
         runId: generation.runId,
-        generationId: generation.generationId,
+        siteCandidateId: generation.siteCandidateId,
         candidateSiteId: bundle.businessProfile.siteId,
         candidateSlug: bundle.siteModel.slug,
         businessName: bundle.businessProfile.name,
         vertical: bundle.businessProfile.vertical,
         rendererVersion: version?.rendererVersion,
         readiness: version?.generationQa?.readiness,
-        pages: version?.rendererVersion === "layout-v2" ? version.compiledPages.length : version?.pages.length ?? 0,
+        pages: versionPageCount(version),
         findings: bundle.optimizationFindings.length
       };
     }
@@ -173,7 +178,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
     }
     case "import_batch": {
       if (!context?.generateSite) {
-        throw new Error("import_batch requires the canonical site-generation service.");
+        throw new Error("import_batch requires the canonical site-candidate service.");
       }
       const urls = parseBatchUrls(job.payload.urls ?? job.payload.text);
       if (urls.length === 0) throw new Error("import_batch requires at least one URL");
@@ -199,7 +204,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             ok: true,
             url,
             runId: generation.runId,
-            generationId: generation.generationId,
+            siteCandidateId: generation.siteCandidateId,
             candidateSiteId: bundle.businessProfile.siteId,
             candidateSlug: bundle.siteModel.slug,
             vertical: bundle.businessProfile.vertical,
@@ -254,12 +259,12 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       }
       const bundle = await context.getSiteBundle(siteId);
       if (!bundle) throw new Error(`Unknown site: ${siteId}`);
-      const [findings, analytics, experiments, learnings, leads] = await Promise.all([
+      const [findings, analytics, experiments, learnings, inquiries] = await Promise.all([
         context.runAndStoreAudit(siteId),
         context.analyticsSummary(siteId),
         context.analyzeExperiments(siteId),
         context.listExperimentLearnings?.(siteId) ?? Promise.resolve([]),
-        context.listFormSubmissions?.(siteId) ?? Promise.resolve([])
+        context.listInquiries?.(siteId) ?? Promise.resolve([])
       ]);
       const qa = runSiteQa(bundle, { versionStatus: "draft" });
       const openFindings = (findings ?? []).filter((finding) => finding.status === "open");
@@ -275,8 +280,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
           avgScrollDepth: analytics.avgScrollDepth,
           medianTimeToActionMs: analytics.medianTimeToActionMs
         },
-        leads: leads.length,
-        leadSummary: summarizeLeads(leads),
+        leads: inquiries.length,
+        leadSummary: summarizeInquiries(inquiries),
         qa: qaSummary(qa),
         findings: {
           total: findings?.length ?? 0,
@@ -303,10 +308,33 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         }
       };
     }
+    case "inquiry_notification": {
+      const siteId = assertString(job.payload.siteId, "siteId");
+      const inquiryId = assertString(job.payload.inquiryId, "inquiryId");
+      if (!context?.processInquiryNotification) {
+        throw new Error("inquiry_notification requires repository-backed job context");
+      }
+      return context.processInquiryNotification({ siteId, inquiryId });
+    }
+    case "inquiry_ai_enrichment": {
+      const siteId = assertString(job.payload.siteId, "siteId");
+      const inquiryId = assertString(job.payload.inquiryId, "inquiryId");
+      if (!context?.processInquiryAiEnrichment) {
+        throw new Error("inquiry_ai_enrichment requires repository-backed job context");
+      }
+      return context.processInquiryAiEnrichment({ siteId, inquiryId });
+    }
     default:
       job.kind satisfies never;
       throw new Error(`Unsupported job kind: ${job.kind}`);
   }
+}
+
+function versionPageCount(version: SiteVersion | undefined) {
+  if (!version) return 0;
+  if (version.rendererVersion === "layout-v3") return version.pageComposition.pages.length;
+  if (version.rendererVersion === "layout-v2") return version.compiledPages.length;
+  return version.pages.length;
 }
 
 function jobGenerationMetadata(job: JobRecord, context: JobExecutionContext) {
@@ -444,54 +472,40 @@ function parseBatchUrls(input: unknown) {
   );
 }
 
-function summarizeLeads(leads: LeadSubmission[]) {
-  const byStatus = {
+function summarizeInquiries(inquiries: Inquiry[]) {
+  const byStatus: Record<Inquiry["status"], number> = {
     new: 0,
-    reviewed: 0,
-    spam: 0
+    needs_reply: 0,
+    replied: 0,
+    booked: 0,
+    won: 0,
+    lost: 0,
+    spam: 0,
+    archived: 0
   };
-  const forms = new Map<string, number>();
-  for (const lead of leads) {
-    byStatus[lead.status] += 1;
-    forms.set(lead.formId, (forms.get(lead.formId) ?? 0) + 1);
+  const channels = new Map<string, number>();
+  for (const inquiry of inquiries) {
+    byStatus[inquiry.status] += 1;
+    channels.set(inquiry.sourceChannel, (channels.get(inquiry.sourceChannel) ?? 0) + 1);
   }
 
   return {
-    total: leads.length,
+    total: inquiries.length,
     ...byStatus,
-    byForm: Array.from(forms.entries())
-      .map(([formId, total]) => ({ formId, total }))
-      .sort((left, right) => right.total - left.total || left.formId.localeCompare(right.formId)),
-    recent: [...leads]
-      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
+    byChannel: Array.from(channels.entries())
+      .map(([channel, total]) => ({ channel, total }))
+      .sort((left, right) => right.total - left.total || left.channel.localeCompare(right.channel)),
+    recent: [...inquiries]
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, 5)
-      .map((lead) => ({
-        id: lead.id,
-        formId: lead.formId,
-        pageId: lead.pageId,
-        status: lead.status,
-        submittedAt: lead.submittedAt,
-        sourceHost: leadSourceHost(lead),
-        utmSource: stringMetadata(lead.metadata, "utmSource"),
-        utmCampaign: stringMetadata(lead.metadata, "utmCampaign")
+      .map((inquiry) => ({
+        id: inquiry.id,
+        sourceChannel: inquiry.sourceChannel,
+        status: inquiry.status,
+        createdAt: inquiry.createdAt,
+        contactEmail: inquiry.contactEmailNormalized
       }))
   };
-}
-
-function leadSourceHost(lead: LeadSubmission) {
-  const referrerHost = stringMetadata(lead.metadata, "referrerHost");
-  if (referrerHost) return referrerHost;
-  if (!lead.sourceUrl) return undefined;
-  try {
-    return new URL(lead.sourceUrl).hostname;
-  } catch {
-    return undefined;
-  }
-}
-
-function stringMetadata(metadata: LeadSubmission["metadata"], key: string) {
-  const value = metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function qaSummary(qa: ReturnType<typeof runSiteQa>) {

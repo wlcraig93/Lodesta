@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AssetReference, GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { AssetReference, SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 
 export type AssetSelectionSlotV2 = {
   slotId: "heroMedia" | "brandMark" | "proofMedia";
@@ -17,7 +17,7 @@ export type AssetSelectionV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   selections: AssetSelectionSlotV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -35,10 +35,10 @@ export function runAssetSelectionV2(input: {
     selections
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_asset_selection_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "asset_selection_report",
     artifactVersion: "asset-selection-report-v2",
     producerId: "asset.selection",

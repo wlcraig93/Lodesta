@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BusinessFactKind, GenerationArtifactV2, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
+import type { BusinessFactKind, SiteArtifactRecord, SiteBundle, SiteVersion, SourceAwareFactV2 } from "./models";
 
 export type IdentityFieldV2 = {
   field: Extract<BusinessFactKind, "name" | "phone" | "address" | "hours">;
@@ -25,7 +25,7 @@ export type BusinessIdentityServiceV2Result = {
   versionId?: string;
   identity: IdentityFieldV2[];
   services: ServiceCatalogItemV2[];
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -107,7 +107,7 @@ function businessIdentityServiceArtifacts(input: {
   identity: IdentityFieldV2[];
   services: ServiceCatalogItemV2[];
   createdAt?: string;
-}): GenerationArtifactV2[] {
+}): SiteArtifactRecord[] {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const identityPayload = { versionId: input.versionId, identity: input.identity };
   const servicesPayload = { versionId: input.versionId, services: input.services };
@@ -117,7 +117,7 @@ function businessIdentityServiceArtifacts(input: {
     {
       id: `artifact_${input.siteId}_identity_reconcile_${identityHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "identity_reconcile_report",
       artifactVersion: "identity-reconcile-report-v2",
       producerId: "business.identity-reconcile",
@@ -130,7 +130,7 @@ function businessIdentityServiceArtifacts(input: {
     {
       id: `artifact_${input.siteId}_service_catalog_${serviceHash.slice(0, 16)}`,
       siteId: input.siteId,
-      scope: "managed_site_candidate",
+      scope: "site_alternative",
       artifactType: "service_catalog_report",
       artifactVersion: "service-catalog-report-v2",
       producerId: "business.service-catalog",

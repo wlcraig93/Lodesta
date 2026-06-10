@@ -25,8 +25,6 @@ async function MarketingHeader() {
         <img src="/lodesta-logo.png" alt="Lodesta" />
       </Link>
       <nav className="app-nav" aria-label="Primary navigation">
-        <Link href="/#product">How it works</Link>
-        <Link href="/#proof">Proof</Link>
         <Link className="app-nav-primary" href={appHref}>
           {appLabel}
         </Link>
@@ -42,10 +40,6 @@ function MarketingFooter() {
         <img src="/lodesta-logo.png" alt="Lodesta" />
       </Link>
       <p>Managed website optimization for local businesses.</p>
-      <nav aria-label="Legal">
-        <Link href="/privacy">Privacy</Link>
-        <Link href="/terms">Terms</Link>
-      </nav>
     </footer>
   );
 }

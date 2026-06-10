@@ -2,7 +2,7 @@
 
 ## Purpose
 
-V3 review and generation decisions must be durable. Screenshots, art direction choices, media decisions, copy evaluations, cost reports, and review packets should be stored through `generation_artifacts`, not only in docs or temporary files.
+V3 review and generation decisions must be durable. Screenshots, art direction choices, media decisions, copy evaluations, cost reports, and review packets should be stored through `site_artifacts`, not only in docs or temporary files.
 
 ## Reused Artifact Types
 
@@ -23,9 +23,9 @@ V3 review and generation decisions must be durable. Screenshots, art direction c
 
 ## Storage Rules
 
-- Use `generation_selected` for artifacts that define the selected generated site.
-- Use `generation_candidate` for rejected but useful generation candidates.
-- Use `eval_candidate` for retained examples used to calibrate evaluators.
+- Use `candidate_selected` for artifacts that define the selected generated site.
+- Use `candidate_alternative` for rejected but useful generation candidates.
+- Use `evaluation_candidate` for retained examples used to calibrate evaluators.
 - Use `qa_evidence` for screenshots, review packets, visual benchmark artifacts, and cost reports.
 - Every artifact must include a content hash and producer version.
 

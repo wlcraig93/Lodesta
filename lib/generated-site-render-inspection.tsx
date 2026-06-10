@@ -35,6 +35,8 @@ async function renderGeneratedSiteHtml(bundle: SiteBundle, version: SiteVersion,
       business={bundle.businessProfile}
       site={bundle.siteModel}
       extensions={bundle.extensionModel}
+      locations={bundle.locations}
+      locationBindings={bundle.locationBindings}
       version={version}
       pageSlug={pageSlug}
       experiments={bundle.experiments}

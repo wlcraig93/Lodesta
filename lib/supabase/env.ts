@@ -1,9 +1,14 @@
 export function getSupabasePublicEnv() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  const url = envValue("NEXT_PUBLIC_SUPABASE_URL") || envValue("SUPABASE_URL");
+  const anonKey = envValue("NEXT_PUBLIC_SUPABASE_ANON_KEY") || envValue("SUPABASE_ANON_KEY");
   return {
     url,
     anonKey,
     configured: Boolean(url && anonKey)
   };
+}
+
+function envValue(name: string) {
+  const value = process.env[name]?.trim();
+  return value || undefined;
 }

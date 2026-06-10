@@ -49,9 +49,9 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
   return (
     <main className="admin-page">
       <AdminPageHeader
-        eyebrow="Telemetry"
-        title="Runs"
-        description="Inspect site generation attempts, spans, model calls, token totals, failures, and target links."
+        eyebrow="Debug"
+        title="Activity"
+        description="Inspect generation attempts, spans, model calls, token totals, failures, and target links when something needs debugging."
       />
 
       <section className="panel">
@@ -85,7 +85,7 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
 
       <section className="panel admin-section">
         <div className="section-heading-row">
-          <h2>Recent Runs</h2>
+          <h2>Recent activity</h2>
           <span className="muted">{result.total} total</span>
         </div>
         <table className="data-table">
@@ -98,7 +98,8 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
               <th>Duration</th>
               <th>Model Calls</th>
               <th>Tokens</th>
-              <th>Updated</th>
+              <th>Started</th>
+              <th>Ended</th>
             </tr>
           </thead>
           <tbody>
@@ -117,8 +118,8 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
                 <td>
                   {run.targetId ? (
                     <>
-                      {run.targetType === "site_generation" ? (
-                        <Link href={`/admin/site-generations/${run.targetId}`}>{run.targetName ?? run.targetId}</Link>
+                      {run.targetType === "site_candidate" ? (
+                        <Link href={`/admin/site-candidates/${run.targetId}`}>{run.targetName ?? run.targetId}</Link>
                       ) : (
                         run.targetName ?? run.targetId
                       )}
@@ -131,7 +132,8 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
                 <td>{formatDuration(run.startedAt, run.endedAt)}</td>
                 <td>{run.modelCallCount ?? 0}</td>
                 <td>{run.tokenTotals?.totalTokens ?? 0}</td>
-                <td>{formatDate(run.updatedAt)}</td>
+                <td>{formatDate(run.startedAt)}</td>
+                <td>{run.endedAt ? formatDate(run.endedAt) : <span className="muted">In progress</span>}</td>
               </tr>
             ))}
           </tbody>

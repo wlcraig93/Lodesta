@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-The default local app URL is `http://localhost:4330`. `npm run dev` binds Next to `127.0.0.1:4330`; override with `PORT=4331 npm run dev` only when you intentionally need another port. Keep `NEXT_PUBLIC_APP_URL` aligned with the local URL because generated links and OAuth callback URLs use it.
+The default local app URL is `http://localhost:4330`. `npm run dev` binds Next to `127.0.0.1:4330`; override with `PORT=4331 npm run dev` only when you intentionally need another port. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
 
 To run the launch-flow smoke checks against a local dev server:
 
@@ -101,8 +101,8 @@ Useful API smoke routes:
 - `POST /api/jobs/process`
 - `GET /api/jobs`
 - `GET /api/sites`
-- `GET /api/leads?siteId=site_joes_pizza`
-- `GET /api/leads/export?siteId=site_joes_pizza`
+- `GET /api/inquiries?siteId=site_joes_pizza`
+- `GET /api/inquiries/export?siteId=site_joes_pizza`
 
 Admin CLI:
 
@@ -140,7 +140,7 @@ Use `/api/health?deep=1` or `npm run cli -- health deep` as the admin readiness 
 
 Minimum Railway web service environment:
 
-- `NEXT_PUBLIC_APP_URL`
+- `LODESTA_APP_ORIGIN`
 - `LODESTA_ADMIN_TOKEN`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -234,16 +234,18 @@ Publishing through `/api/sites/publish` or `/api/sites/versions` is blocked unti
 
 Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution uses positive customer-domain lookup and serves only completed `claimed` sites, so pending checkout records do not expose customer domains. Unknown non-platform hostnames receive a bare `404`.
 
-## Lead Workflows
+## Inquiries And Lead Workflows
 
-Form submissions are stored as JSON leads and then run through the site's configured workflows. V1 supports:
+Form submissions create canonical `Inquiry` records with a first `form_submission` event, then queued notification and AI triage jobs. V1 supports form-originated inquiries only; chat, bookings, inbound email, SMS, and phone transcripts are future source channels.
 
 - `email`: logs a skipped delivery locally unless `RESEND_API_KEY` is set, then sends through Resend from `Lodesta <notifications@mail.lodesta.com>`.
-- `webhook`: posts the lead payload to the configured workflow URL.
-- `crm_placeholder`: records a skipped delivery so CRM destinations can be added without changing the lead model.
+- `webhook`: posts a sanitized `type: "inquiry_created"` payload to the configured workflow URL.
+- `crm_placeholder`: records a skipped delivery so CRM destinations can be added without changing the inquiry model.
 
-Workflow delivery attempts are visible on the leads page and returned from `GET /api/leads?siteId=...`.
-Lead submissions also capture source URL, session id, visitor id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a stable pseudonymous `v2` `ip_hash` derived with `LODESTA_HASH_SECRET`. Analytics events are retained for longitudinal site performance history while the site/account is active.
+Notification delivery attempts are visible on the leads page and returned from `GET /api/inquiries?siteId=...`. Public form submit returns only `{ "accepted": true, "status": "received" }`.
+Inquiry events also capture source URL, session id, visitor id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a stable pseudonymous `v2` `ip_hash` derived with `LODESTA_HASH_SECRET`. Analytics events are retained for longitudinal site performance history while the site/account is active.
+
+AI triage uses Groq-hosted `openai/gpt-oss-120b` directly in V1. Customer inquiry content may include PII and may be sent to Groq; operational internals such as IP hash, visitor id, user agent, webhook URLs, workflow targets, and delivery metadata are excluded from prompts. Set `GROQ_API_KEY` to enable triage. In production, also set `LODESTA_GROQ_ZDR_CONFIRMED=true` only after Groq data controls/ZDR and privacy/terms disclosures have been verified.
 
 Public write routes have in-process abuse limits with hashed client fingerprints derived separately from `LODESTA_HASH_SECRET`. Defaults cover form submissions, analytics ingestion, experiment assignment, claim creation, site intake, presence assessment, and owner asset uploads. Route-specific thresholds are code defaults, not deployment environment variables.
-URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are always blocked to reduce SSRF risk. End-to-end crawler smoke tests use the protected public fixture on the dev deployment, and lead workflow webhooks also keep private/internal targets blocked.
+URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are always blocked to reduce SSRF risk. End-to-end crawler smoke tests use the protected public fixture on the dev deployment, and inquiry notification webhooks also keep private/internal targets blocked.

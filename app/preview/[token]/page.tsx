@@ -42,6 +42,8 @@ export default async function PreviewPage({
         business={bundle.businessProfile}
         site={bundle.siteModel}
         extensions={bundle.extensionModel}
+        locations={bundle.locations}
+        locationBindings={bundle.locationBindings}
         version={selectedVersion}
         experiments={bundle.experiments}
         tracking={false}
@@ -85,6 +87,8 @@ export default async function PreviewPage({
             business={bundle.businessProfile}
             site={bundle.siteModel}
             extensions={bundle.extensionModel}
+            locations={bundle.locations}
+            locationBindings={bundle.locationBindings}
             version={selectedVersion}
             experiments={bundle.experiments}
             tracking={false}

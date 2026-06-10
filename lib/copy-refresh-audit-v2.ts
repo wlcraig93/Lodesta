@@ -3,7 +3,7 @@ import type {
   ClaimCategoryV2,
   CompiledSectionV2,
   CopyArtifactV2,
-  GenerationArtifactV2,
+  SiteArtifactRecord,
   SiteBundle,
   SiteVersion,
   SiteVersionV2
@@ -17,7 +17,7 @@ export type CopyRefreshAuditV2Result = {
   versionId?: string;
   candidates: CopyArtifactV2[];
   diffs: GeneratedSiteV2Diff[];
-  artifacts: GenerationArtifactV2[];
+  artifacts: SiteArtifactRecord[];
   summary: string;
 };
 
@@ -169,12 +169,12 @@ function copyRefreshArtifactsForV2(input: {
   candidates: CopyArtifactV2[];
   diffs: GeneratedSiteV2Diff[];
   createdAt?: string;
-}): GenerationArtifactV2[] {
+}): SiteArtifactRecord[] {
   const createdAt = input.createdAt ?? new Date().toISOString();
-  const candidateArtifacts = input.candidates.map((candidate): GenerationArtifactV2 => ({
+  const candidateArtifacts = input.candidates.map((candidate): SiteArtifactRecord => ({
     id: `artifact_${input.siteId}_${candidate.id}`,
     siteId: input.siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "copy_artifact",
     artifactVersion: candidate.artifactVersion,
     producerId: candidate.producerId,
@@ -191,10 +191,10 @@ function copyRefreshArtifactsForV2(input: {
     },
     createdAt
   }));
-  const diffArtifacts = input.diffs.map((diff): GenerationArtifactV2 => ({
+  const diffArtifacts = input.diffs.map((diff): SiteArtifactRecord => ({
     id: `artifact_${input.siteId}_${diff.id}`,
     siteId: input.siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "copy_diff",
     artifactVersion: "copy-diff-v2",
     producerId: diff.producerId,

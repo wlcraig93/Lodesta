@@ -82,12 +82,12 @@ function cleanFields(fields: FormFieldSettingsInput[]) {
 }
 
 function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: UpdateFormSettingsInput, webhookUrl?: string) {
-  const next = workflows.filter((workflow) => workflow.trigger !== "form_submission" || workflow.destination === "crm_placeholder");
+  const next = workflows.filter((workflow) => workflow.trigger !== "inquiry_created" || workflow.destination === "crm_placeholder");
   const email = cleanString(input.notificationEmail);
   if (email) {
     next.push({
       id: `workflow_${input.formId}_email`,
-      trigger: "form_submission",
+      trigger: "inquiry_created",
       destination: "email",
       config: { to: email }
     });
@@ -96,7 +96,7 @@ function updateNotificationWorkflows(workflows: WorkflowDefinition[], input: Upd
   if (webhookUrl) {
     next.push({
       id: `workflow_${input.formId}_webhook`,
-      trigger: "form_submission",
+      trigger: "inquiry_created",
       destination: "webhook",
       config: { url: webhookUrl }
     });

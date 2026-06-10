@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     version,
     siteId: bundle.businessProfile.siteId
   });
-  await Promise.all(result.artifacts.map((artifact) => repository.upsertGenerationArtifact(artifact)));
+  await Promise.all(result.artifacts.map((artifact) => repository.upsertSiteArtifact(artifact)));
 
   return NextResponse.json({
     skillIds: result.skillIds,

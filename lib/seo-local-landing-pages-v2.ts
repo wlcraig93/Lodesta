@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 import type { PageOpportunityV2 } from "./page-opportunities-v2";
 import { runPageOpportunitiesAuditV2 } from "./page-opportunities-v2";
 
@@ -8,7 +8,7 @@ export type LocalLandingPagesAuditV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   opportunities: PageOpportunityV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -25,13 +25,13 @@ export function runLocalLandingPagesAuditV2(input: {
     versionId: source.versionId,
     vertical: input.bundle.businessProfile.vertical,
     opportunities,
-    policy: "Recommendations only; landing pages are generated later through V2 compiler, claim verification, render QA, and admin promotion."
+    policy: "Recommendations only; landing pages are generated later through V2 compiler, claim verification, render QA, and admin acceptance."
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_local_landing_pages_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "page_opportunity_report",
     artifactVersion: "local-landing-pages-report-v2",
     producerId: "seo.local-landing-pages",

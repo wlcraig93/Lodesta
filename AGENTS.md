@@ -6,19 +6,27 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 ## Pre-Launch Operating Mode
 
-- Prefer clean go-forward implementations over backwards compatibility.
-- Remove obsolete paths when replacing behavior.
-- Avoid compatibility shims unless the user explicitly requests them.
+- Prefer clean go-forward implementations over backwards compatibility for all pre-launch internal product work.
+- For internal/admin/dev schemas, APIs, routes, types, jobs, fixtures, and workflows, replace obsolete shapes and paths instead of maintaining dual legacy/new behavior.
+- When replacing behavior, update all known callers, tests, fixtures, docs, scripts, and migrations to the new canonical implementation in the same change, then remove the obsolete path.
+- Do not add aliases, compatibility redirects, dual read/write paths, fallback dispatch, deprecation layers, or feature flags solely to preserve old internal behavior.
 - Keep one canonical implementation for product behavior, models, UI patterns, and configuration.
+- Preserve compatibility only when explicitly requested or when required for security, privacy, data safety, external platform contracts, or boundary-sensitive public/customer behavior.
 - Update or remove this pre-launch section when the first production customer is onboarded.
 - This operating mode does not override security, privacy, data safety, or explicit user instructions.
 
 ## Compatibility Boundary
 
 - Clean-breakable by default: admin/operator UI, settings, dashboards, intake/admin workflows, local dev tooling, docs, and internal component patterns.
-- Boundary-sensitive by default: generated customer-site renderer, theme presets, public `/sites/*` output, preview-token routes, SEO/robots/sitemap behavior, analytics/form submission surfaces, repository/schema contracts, auth, billing, webhooks, privacy, and URL-safety logic.
+- Boundary-sensitive by default: generated customer-site renderer, theme presets, public `/sites/*` output, preview-token routes, SEO/robots/sitemap behavior, analytics/form submission surfaces, repository/schema contracts that back public/customer flows, auth, billing, webhooks, privacy, and URL-safety logic.
 - If uncertain whether a utility, type, API handler, or component affects generated customer websites or public/customer flows, treat it as boundary-sensitive and confirm before changing it.
 - When intentionally changing a boundary-sensitive area, make the customer/public behavior explicit and update callers, docs, and tests in the same change.
+
+## Secrets And Data
+
+- Never log, commit, or invent real secrets.
+- Use `.env.example` for documented placeholder configuration only.
+- Do not use production customer data in tests, fixtures, screenshots, or docs.
 
 ## Stack Context
 
@@ -32,6 +40,14 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - Run `npm run smoke` when a dev server is already running, or `npm run smoke:dev` when one is not, for launch-flow behavior changes.
 - Run `npm run verify:render-browser` when touching browser rendering, preview rendering, generated-site rendering, or Playwright-backed inspection behavior.
 - If tests fail in clean-breakable areas, fix them directly. If a failure involves boundary-sensitive customer/public behavior and the fix is not clearly within the requested task, stop and confirm before changing that behavior.
+
+## Git Hygiene
+
+- Check `git status --short` before editing so existing user or agent changes are visible.
+- Do not commit automatically unless the user explicitly asks for a commit, PR, or publish-style handoff.
+- Stage only files changed for the current task. Do not stage unrelated dirty files.
+- Before committing, inspect the staged diff, run the relevant verification, and use a focused commit message.
+- Never revert user changes unless the user explicitly requests it.
 
 ## Design Boundary
 

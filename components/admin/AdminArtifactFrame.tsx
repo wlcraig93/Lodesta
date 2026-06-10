@@ -8,14 +8,14 @@ type AdminArtifactFrameProps = {
 
 export function AdminArtifactFrame({ bundle, version }: AdminArtifactFrameProps) {
   const src = `/editor/${bundle.siteModel.slug}/preview?versionId=${encodeURIComponent(version.id)}`;
-  const homeTitle = version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Generated site";
+  const homeTitle = version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Preview";
 
   return (
     <section className="panel workspace-artifact-panel">
       <div className="section-heading-row">
         <div>
           <span className="badge">{version.status}</span>
-          <h2>Generated Site</h2>
+          <h2>Preview</h2>
           <p className="muted">{homeTitle}</p>
         </div>
         <AdminButtonAnchor variant="secondary" size="sm" href={src}>
@@ -23,7 +23,7 @@ export function AdminArtifactFrame({ bundle, version }: AdminArtifactFrameProps)
         </AdminButtonAnchor>
       </div>
       <div className="admin-artifact-frame">
-        <iframe title={`${bundle.businessProfile.name} generated site preview`} src={src} />
+        <iframe title={`${bundle.businessProfile.name} preview`} src={src} />
       </div>
     </section>
   );

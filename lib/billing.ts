@@ -1,3 +1,5 @@
+import { configuredAppOriginOrDefault } from "./app-origin";
+
 export type CheckoutSessionResult = {
   required: true;
   provider: "stripe";
@@ -30,7 +32,7 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     };
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:4330";
+  const appUrl = configuredAppOriginOrDefault();
   const body = new URLSearchParams({
     mode: "subscription",
     client_reference_id: input.claimId,

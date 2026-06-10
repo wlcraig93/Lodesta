@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GenerationArtifactV2, RenderInspectionSummary, SiteBundle, SiteVersion } from "./models";
+import type { SiteArtifactRecord, RenderInspectionSummary, SiteBundle, SiteVersion } from "./models";
 import { webVitalThresholds } from "./web-vitals-standard";
 
 export type PerformanceAuditFindingV2 = {
@@ -14,7 +14,7 @@ export type PerformanceAuditV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   findings: PerformanceAuditFindingV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -34,10 +34,10 @@ export function runPerformanceAuditV2(input: {
     findings
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_performance_audit_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "performance_audit_report",
     artifactVersion: "performance-audit-report-v2",
     producerId: "optimization.performance-audit",
@@ -66,7 +66,7 @@ function performanceFindings(inspection: RenderInspectionSummary | SiteBundle["p
         id: "performance_render_inspection_missing",
         severity: "warning",
         metric: "render_inspection",
-        detail: "No generated-site render inspection is available; run generated-site QA before promotion."
+        detail: "No generated-site render inspection is available; run generated-site QA before acceptance."
       },
       {
         id: "performance_field_vitals_pending",

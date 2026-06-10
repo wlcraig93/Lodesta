@@ -1,29 +1,51 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { isAdminUserId } from "@/lib/auth-policy";
+import { configuredAppOrigin } from "@/lib/app-origin";
 import { requestOrigin } from "@/lib/host-routing";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export async function GET(request: Request) {
+const authNextCookieName = "lodesta_auth_next";
+
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const nextParam = url.searchParams.get("next");
-  const next = nextParam?.startsWith("/") && !nextParam.startsWith("//") ? nextParam : "/account";
+  let next =
+    safeNextPath(url.searchParams.get("next")) ??
+    safeNextPath(decodeCookieValue(request.cookies.get(authNextCookieName)?.value)) ??
+    "/account";
+  let authenticatedUserId: string | undefined;
 
   if (code) {
     const supabase = await createSupabaseServerClient();
-    await supabase.auth.exchangeCodeForSession(code);
+    const { data } = await supabase.auth.exchangeCodeForSession(code);
+    authenticatedUserId = data.user?.id;
   }
 
-  return NextResponse.redirect(new URL(next, callbackRedirectOrigin(request)));
+  if (next === "/account" && isAdminUserId(authenticatedUserId)) {
+    next = "/admin/sites";
+  }
+
+  const response = NextResponse.redirect(new URL(next, callbackRedirectOrigin(request)));
+  response.cookies.set(authNextCookieName, "", { path: "/auth", maxAge: 0 });
+  return response;
 }
 
-function callbackRedirectOrigin(request: Request) {
-  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL;
-  if (configuredOrigin) {
-    try {
-      return new URL(configuredOrigin).origin;
-    } catch {
-      // Fall back to forwarded request headers when the configured URL is malformed.
-    }
+function safeNextPath(value: string | undefined | null) {
+  if (!value?.startsWith("/") || value.startsWith("//")) return undefined;
+  return value;
+}
+
+function decodeCookieValue(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
   }
+}
+
+function callbackRedirectOrigin(request: NextRequest) {
+  const configuredOrigin = configuredAppOrigin();
+  if (configuredOrigin) return configuredOrigin;
   return requestOrigin(request.headers);
 }

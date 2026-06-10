@@ -25,7 +25,7 @@ const privacySections = [
   },
   {
     title: "4. Sharing and subprocessors",
-    body: "We may share information with service providers that help operate hosting, authentication, billing, storage, email, analytics, security, and support systems. Final subprocessor details should be listed before launch."
+    body: "We may share information with service providers that help operate hosting, authentication, billing, storage, email, analytics, AI inference, security, and support systems. Customer inquiry content may be sent to Groq for GPT-OSS triage after Groq data controls and production disclosures are verified. Final subprocessor details should be listed before launch."
   },
   {
     title: "5. Customer and visitor data",

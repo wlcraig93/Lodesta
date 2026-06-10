@@ -13,10 +13,13 @@ import type {
   ExperimentAnalysis,
   ExperimentLearning,
   FormDefinition,
-  GenerationArtifactV2,
+  Inquiry,
+  InquiryAiEnrichment,
+  InquiryDelivery,
+  InquiryEvent,
+  SiteArtifactRecord,
   JobKind,
   JobRecord,
-  LeadSubmission,
   OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
@@ -24,10 +27,9 @@ import type {
   OutboundSummary,
   PreviewToken,
   SiteBundle,
-  SiteGenerationRecord,
-  SiteGenerationStatus,
+  SiteCandidateRecord,
+  SiteCandidateStatus,
   SiteVersion,
-  WorkflowDelivery
 } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import type { AiEditResult } from "./ai-editor";
@@ -49,37 +51,40 @@ import {
   completeClaimCheckout,
   dismissFinding,
   createPreviewToken,
-  createSiteGeneration as createSiteGenerationStore,
-  listGenerationArtifacts as listGenerationArtifactsStore,
+  createSiteCandidate as createSiteCandidateStore,
+  listSiteArtifacts as listSiteArtifactsStore,
   createOutboundCampaign,
   getForms,
   getDomainById,
   getDomainByHostname,
   getSiteBundle,
   getSiteBundleBySlug,
-  getSiteGeneration as getSiteGenerationStore,
+  getSiteCandidate as getSiteCandidateStore,
   listAnalyticsEvents,
   listClaims,
   listDomains,
   listExperiments,
   listExperimentLearnings,
-  listFormSubmissions,
+  listInquiries,
+  listInquiryDeliveries,
+  listInquiryEvents,
   listOutboundCampaigns,
   listOutboundEvents,
   listOutboundProspects,
-  listWorkflowDeliveries,
   listPreviewTokens,
-  listSiteGenerations as listSiteGenerationsStore,
+  listSiteCandidates as listSiteCandidatesStore,
   listSiteBundles,
+  mergeBusinesses as mergeBusinessesStore,
   outboundSummary,
   publishDraft,
   publishVersion,
-  promoteSiteGeneration as promoteSiteGenerationStore,
+  acceptSiteCandidateAsSite as acceptSiteCandidateAsSiteStore,
+  acceptSiteCandidateAsVersion as acceptSiteCandidateAsVersionStore,
   recordAnalyticsEvent,
   recordClaimCheckoutSession,
-  recordFormSubmission,
+  createInquiryFromForm as createInquiryFromFormStore,
   recordOutboundEvent,
-  recordWorkflowDelivery,
+  recordInquiryDelivery,
   registerDomain,
   restoreVersionToDraft,
   resolvePreviewToken,
@@ -87,12 +92,16 @@ import {
   saveSiteVersion,
   updateExperiment,
   updateFormSettings,
-  updateLeadStatus,
+  updateInquiryAiEnrichment,
+  updateInquiryNotificationState,
+  updateInquiryStatus,
+  countRecentInquiries,
+  getInquiry,
   updateDomain,
   updateOwnerAssets,
   updateSiteDesign as updateSiteDesignStore,
   updateSectionProps,
-  upsertGenerationArtifact as upsertGenerationArtifactStore,
+  upsertSiteArtifact as upsertSiteArtifactStore,
   upsertOutboundProspect
 } from "./store";
 import {
@@ -113,6 +122,9 @@ import type {
   RecordOutboundEventInput,
   UpsertOutboundProspectInput
 } from "./outbound";
+import type { CreateInquiryFromFormInput, CreateInquiryFromFormResult } from "./inquiries";
+import { aggregateNotificationState, executeInquiryNotificationWorkflows } from "./workflows";
+import { runInquiryAiEnrichmentJob } from "./groq-inquiry-ai";
 
 export type CreateSiteInput = {
   url?: string;
@@ -123,37 +135,52 @@ export type CreateSiteOptions = {
   telemetry?: AgentTelemetryRecorder;
 };
 
-export type CreateSiteGenerationInput = {
+export type CreateSiteCandidateInput = {
   id?: string;
+  businessId?: string;
   agentRunId?: string;
   bundle: SiteBundle;
   sourceUrl?: string;
   sourceHost?: string;
-  status?: SiteGenerationStatus;
+  intendedSiteId?: string;
+  status?: SiteCandidateStatus;
 };
 
-export type ListSiteGenerationsFilter = {
-  status?: SiteGenerationStatus;
+export type ListSiteCandidatesFilter = {
+  status?: SiteCandidateStatus;
   sourceHost?: string;
   limit?: number;
   offset?: number;
 };
 
-export type ListSiteGenerationsResult = {
-  generations: SiteGenerationRecord[];
+export type ListSiteCandidatesResult = {
+  candidates: SiteCandidateRecord[];
   total: number;
 };
 
-export type ListGenerationArtifactsFilter = {
-  generationId?: string;
+export type ListSiteArtifactsFilter = {
+  siteCandidateId?: string;
   siteId?: string;
-  scope?: GenerationArtifactV2["scope"];
-  artifactType?: GenerationArtifactV2["artifactType"];
+  scope?: SiteArtifactRecord["scope"];
+  artifactType?: SiteArtifactRecord["artifactType"];
 };
 
-export type PromoteSiteGenerationResult = {
-  generation: SiteGenerationRecord;
-  bundle: SiteBundle;
+export type AcceptSiteCandidateResult =
+  | {
+      ok: true;
+      candidate: SiteCandidateRecord;
+      bundle: SiteBundle;
+      acceptedSiteId: string;
+      acceptedVersionId?: string;
+    }
+  | {
+      ok: false;
+      reason: string;
+    };
+
+export type AcceptSiteCandidateAsVersionInput = {
+  candidateId: string;
+  siteId: string;
 };
 
 export type CreateAgentRunInput = {
@@ -274,18 +301,6 @@ const localAgentRuns = new Map<string, AgentRunRecord>();
 const localAgentRunSpans = new Map<string, AgentRunSpanRecord>();
 const localAgentModelCalls = new Map<string, AgentModelCallRecord>();
 
-export type RecordSubmissionInput = {
-  siteId: string;
-  formId: string;
-  pageId?: string;
-  visitorId?: string;
-  payload: Record<string, unknown>;
-  metadata?: Record<string, string | number | boolean>;
-  sourceUrl?: string;
-  userAgent?: string;
-  ipHash?: string;
-};
-
 export type CreateClaimInput = {
   siteId: string;
   ownerUserId?: string;
@@ -311,10 +326,10 @@ export type CompleteClaimCheckoutInput = {
   completedAt?: string;
 };
 
-export type UpdateLeadStatusInput = {
+export type UpdateInquiryStatusInput = {
   siteId: string;
-  submissionId: string;
-  status: LeadSubmission["status"];
+  inquiryId: string;
+  status: Inquiry["status"];
 };
 
 type SectionUpdateResult =
@@ -368,18 +383,30 @@ type ClaimResult = (ClaimRecord & {
 type DomainResult = (DomainRecord & {
   verification: DomainVerification;
 }) | null;
+export type BusinessMergeResult =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      sourceBusinessId: string;
+      targetBusinessId: string;
+      movedSites: number;
+      movedSiteCandidates: number;
+      movedLocations: number;
+    };
 
 export type LodestaRepository = {
   listSiteBundles(): Promise<SiteBundle[]>;
   getSiteBundle(siteId: string): Promise<SiteBundle | null>;
   getSiteBundleBySlug(slug: string): Promise<SiteBundle | null>;
   createAndStoreSite(input: CreateSiteInput, options?: CreateSiteOptions): Promise<SiteBundle>;
-  createSiteGeneration(input: CreateSiteGenerationInput): Promise<SiteGenerationRecord>;
-  listSiteGenerations(filter?: ListSiteGenerationsFilter): Promise<ListSiteGenerationsResult>;
-  getSiteGeneration(generationId: string): Promise<SiteGenerationRecord | null>;
-  promoteSiteGeneration(generationId: string): Promise<PromoteSiteGenerationResult | null>;
-  upsertGenerationArtifact(artifact: GenerationArtifactV2): Promise<GenerationArtifactV2>;
-  listGenerationArtifacts(filter?: ListGenerationArtifactsFilter): Promise<GenerationArtifactV2[]>;
+  createSiteCandidate(input: CreateSiteCandidateInput): Promise<SiteCandidateRecord>;
+  listSiteCandidates(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidatesResult>;
+  getSiteCandidate(candidateId: string): Promise<SiteCandidateRecord | null>;
+  acceptSiteCandidateAsSite(candidateId: string): Promise<AcceptSiteCandidateResult | null>;
+  acceptSiteCandidateAsVersion(input: AcceptSiteCandidateAsVersionInput): Promise<AcceptSiteCandidateResult | null>;
+  mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }): Promise<BusinessMergeResult>;
+  upsertSiteArtifact(artifact: SiteArtifactRecord): Promise<SiteArtifactRecord>;
+  listSiteArtifacts(filter?: ListSiteArtifactsFilter): Promise<SiteArtifactRecord[]>;
   createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }): Promise<PreviewToken | null>;
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
   listPreviewTokens(siteId?: string): Promise<PreviewToken[]>;
@@ -392,11 +419,24 @@ export type LodestaRepository = {
   restoreVersionToDraft(input: { siteId: string; versionId: string }): Promise<RestoreVersionResult>;
   updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<BusinessProfileUpdateResult>;
   updateOwnerAssets(input: UpdateOwnerAssetsInput): Promise<UpdateOwnerAssetsResult | null>;
-  recordFormSubmission(input: RecordSubmissionInput): Promise<LeadSubmission>;
-  listFormSubmissions(siteId?: string): Promise<LeadSubmission[]>;
-  updateLeadStatus(input: UpdateLeadStatusInput): Promise<LeadSubmission | null>;
-  recordWorkflowDelivery(input: Omit<WorkflowDelivery, "id" | "createdAt">): Promise<WorkflowDelivery>;
-  listWorkflowDeliveries(siteId?: string): Promise<WorkflowDelivery[]>;
+  createInquiryFromForm(input: CreateInquiryFromFormInput): Promise<CreateInquiryFromFormResult>;
+  listInquiries(siteId?: string): Promise<Inquiry[]>;
+  getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
+  updateInquiryStatus(input: UpdateInquiryStatusInput): Promise<Inquiry | null>;
+  updateInquiryNotificationState(input: { siteId: string; inquiryId: string; state: Inquiry["notificationState"] }): Promise<Inquiry | null>;
+  updateInquiryAiEnrichment(input: {
+    siteId: string;
+    inquiryId: string;
+    state: Inquiry["aiEnrichmentState"];
+    enrichment?: InquiryAiEnrichment;
+    error?: string;
+  }): Promise<Inquiry | null>;
+  listInquiryEvents(inquiryId: string): Promise<InquiryEvent[]>;
+  countRecentInquiries(siteId: string, since: string): Promise<number>;
+  recordInquiryDelivery(input: Omit<InquiryDelivery, "id" | "createdAt">): Promise<InquiryDelivery>;
+  listInquiryDeliveries(siteId?: string): Promise<InquiryDelivery[]>;
+  processInquiryNotification(input: { siteId: string; inquiryId: string }): Promise<Record<string, unknown>>;
+  processInquiryAiEnrichment(input: { siteId: string; inquiryId: string }): Promise<Record<string, unknown>>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<AnalyticsEvent>;
   listAnalyticsEvents(siteId?: string): Promise<AnalyticsEvent[]>;
   analyticsSummary(siteId: string): Promise<AnalyticsSummary>;
@@ -479,23 +519,29 @@ export const localRepository: LodestaRepository = {
     });
     return bundle;
   },
-  async createSiteGeneration(input) {
-    return createSiteGenerationStore(input);
+  async createSiteCandidate(input) {
+    return createSiteCandidateStore(input);
   },
-  async listSiteGenerations(filter) {
-    return listSiteGenerationsStore(filter);
+  async listSiteCandidates(filter) {
+    return listSiteCandidatesStore(filter);
   },
-  async getSiteGeneration(generationId) {
-    return getSiteGenerationStore(generationId);
+  async getSiteCandidate(candidateId) {
+    return getSiteCandidateStore(candidateId);
   },
-  async promoteSiteGeneration(generationId) {
-    return promoteSiteGenerationStore(generationId);
+  async acceptSiteCandidateAsSite(candidateId) {
+    return acceptSiteCandidateAsSiteStore(candidateId);
   },
-  async upsertGenerationArtifact(artifact) {
-    return upsertGenerationArtifactStore(artifact);
+  async acceptSiteCandidateAsVersion(input) {
+    return acceptSiteCandidateAsVersionStore(input);
   },
-  async listGenerationArtifacts(filter) {
-    return listGenerationArtifactsStore(filter);
+  async mergeBusinesses(input) {
+    return mergeBusinessesStore(input);
+  },
+  async upsertSiteArtifact(artifact) {
+    return upsertSiteArtifactStore(artifact);
+  },
+  async listSiteArtifacts(filter) {
+    return listSiteArtifactsStore(filter);
   },
   async createPreviewToken(input) {
     return createPreviewToken(input);
@@ -533,20 +579,46 @@ export const localRepository: LodestaRepository = {
   async updateOwnerAssets(input) {
     return updateOwnerAssets(input);
   },
-  async recordFormSubmission(input) {
-    return recordFormSubmission(input);
+  async createInquiryFromForm(input) {
+    const result = createInquiryFromFormStore(input);
+    if (!result.duplicate) {
+      await enqueueJob("inquiry_notification", { siteId: result.inquiry.siteId, inquiryId: result.inquiry.id, maxAttempts: 3 });
+      await enqueueJob("inquiry_ai_enrichment", { siteId: result.inquiry.siteId, inquiryId: result.inquiry.id, maxAttempts: 3 });
+    }
+    return result;
   },
-  async listFormSubmissions(siteId) {
-    return listFormSubmissions(siteId);
+  async listInquiries(siteId) {
+    return listInquiries(siteId);
   },
-  async updateLeadStatus(input) {
-    return updateLeadStatus(input);
+  async getInquiry(siteId, inquiryId) {
+    return getInquiry(siteId, inquiryId);
   },
-  async recordWorkflowDelivery(input) {
-    return recordWorkflowDelivery(input);
+  async updateInquiryStatus(input) {
+    return updateInquiryStatus(input);
   },
-  async listWorkflowDeliveries(siteId) {
-    return listWorkflowDeliveries(siteId);
+  async updateInquiryNotificationState(input) {
+    return updateInquiryNotificationState(input);
+  },
+  async updateInquiryAiEnrichment(input) {
+    return updateInquiryAiEnrichment(input);
+  },
+  async listInquiryEvents(inquiryId) {
+    return listInquiryEvents(inquiryId);
+  },
+  async countRecentInquiries(siteId, since) {
+    return countRecentInquiries(siteId, since);
+  },
+  async recordInquiryDelivery(input) {
+    return recordInquiryDelivery(input);
+  },
+  async listInquiryDeliveries(siteId) {
+    return listInquiryDeliveries(siteId);
+  },
+  async processInquiryNotification(input) {
+    return processInquiryNotification(localRepository, input);
+  },
+  async processInquiryAiEnrichment(input) {
+    return runInquiryAiEnrichmentJob(localRepository, input);
   },
   async recordAnalyticsEvent(event) {
     return recordAnalyticsEvent(event);
@@ -861,7 +933,7 @@ function createLocalJobContext(): JobExecutionContext {
   return {
     workerId: getProcessWorkerId(),
     generateSite: async (options) => {
-      const { generateSite } = await import("./site-generation-service");
+      const { generateSite } = await import("./site-candidate-service");
       return generateSite({ ...options, repository: localRepository });
     },
     getSiteBundle: localRepository.getSiteBundle,
@@ -869,8 +941,44 @@ function createLocalJobContext(): JobExecutionContext {
     analyticsSummary: localRepository.analyticsSummary,
     analyzeExperiments: localRepository.analyzeExperiments,
     listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
-    listFormSubmissions: localRepository.listFormSubmissions,
+    listInquiries: localRepository.listInquiries,
+    listInquiryEvents: localRepository.listInquiryEvents,
+    processInquiryNotification: (input) => localRepository.processInquiryNotification(input),
+    processInquiryAiEnrichment: (input) => localRepository.processInquiryAiEnrichment(input),
     cleanupAgentTelemetry: (input) => localRepository.cleanupAgentTelemetry(input)
+  };
+}
+
+async function processInquiryNotification(
+  repository: Pick<
+    LodestaRepository,
+    | "getSiteBundle"
+    | "getInquiry"
+    | "listInquiryEvents"
+    | "recordInquiryDelivery"
+    | "updateInquiryNotificationState"
+    | "listInquiryDeliveries"
+  >,
+  input: { siteId: string; inquiryId: string }
+) {
+  const [bundle, inquiry] = await Promise.all([
+    repository.getSiteBundle(input.siteId),
+    repository.getInquiry(input.siteId, input.inquiryId)
+  ]);
+  if (!bundle || !inquiry) return { skipped: true, reason: "Inquiry or site not found." };
+  if (inquiry.notificationState === "completed") return { skipped: true, reason: "Inquiry notifications already completed." };
+  await repository.updateInquiryNotificationState({ siteId: input.siteId, inquiryId: input.inquiryId, state: "processing" });
+  const event = (await repository.listInquiryEvents(input.inquiryId)).find((candidate) => candidate.type === "form_submission");
+  const deliveries = await executeInquiryNotificationWorkflows(bundle, inquiry, event, (delivery) =>
+    repository.recordInquiryDelivery(delivery)
+  );
+  const state = aggregateNotificationState(deliveries);
+  await repository.updateInquiryNotificationState({ siteId: input.siteId, inquiryId: input.inquiryId, state });
+  return {
+    deliveredAt: new Date().toISOString(),
+    inquiryId: input.inquiryId,
+    deliveries: deliveries.length,
+    notificationState: state
   };
 }
 

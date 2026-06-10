@@ -4,7 +4,7 @@ import { FormSettingsForm } from "@/components/FormSettingsForm";
 import { LeadStatusControls } from "@/components/LeadStatusControls";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
-import type { LeadSubmission } from "@/lib/models";
+import type { Inquiry, InquiryEvent } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +14,16 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/leads/${slug}`);
 
-  const [leads, workflowDeliveries] = await Promise.all([
-    repository.listFormSubmissions(bundle.businessProfile.siteId),
-    repository.listWorkflowDeliveries(bundle.businessProfile.siteId)
+  const [inquiries, inquiryDeliveries] = await Promise.all([
+    repository.listInquiries(bundle.businessProfile.siteId),
+    repository.listInquiryDeliveries(bundle.businessProfile.siteId)
   ]);
+  const eventsByInquiry = new Map<string, InquiryEvent[]>();
+  await Promise.all(
+    inquiries.map(async (inquiry) => {
+      eventsByInquiry.set(inquiry.id, await repository.listInquiryEvents(inquiry.id));
+    })
+  );
 
   return (
     <main className="admin-page">
@@ -25,7 +31,7 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
         <div>
           <span className="badge">Leads</span>
           <h1>{bundle.businessProfile.name}</h1>
-          <p>Captured form submissions with payloads preserved as flexible JSON for each site-specific form.</p>
+          <p>Inbound inquiries from site forms, with normalized contact details and event history.</p>
         </div>
         <div className="button-row">
           <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
@@ -34,18 +40,18 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
           <Link className="button secondary" href={`/analytics/${bundle.siteModel.slug}`}>
             Analytics
           </Link>
-          <a className="button primary" href={`/api/leads/export?siteId=${bundle.businessProfile.siteId}`}>
+          <a className="button primary" href={`/api/inquiries/export?siteId=${bundle.businessProfile.siteId}`}>
             Export CSV
           </a>
         </div>
       </header>
 
       <section className="metric-row">
-        <Metric label="Total leads" value={leads.length} />
-        <Metric label="New" value={leads.filter((lead) => lead.status === "new").length} />
-        <Metric label="Reviewed" value={leads.filter((lead) => lead.status === "reviewed").length} />
-        <Metric label="Spam" value={leads.filter((lead) => lead.status === "spam").length} />
-        <Metric label="Workflow deliveries" value={workflowDeliveries.length} />
+        <Metric label="Total leads" value={inquiries.length} />
+        <Metric label="New" value={inquiries.filter((inquiry) => inquiry.status === "new").length} />
+        <Metric label="Need reply" value={inquiries.filter((inquiry) => inquiry.status === "needs_reply").length} />
+        <Metric label="Spam" value={inquiries.filter((inquiry) => inquiry.status === "spam").length} />
+        <Metric label="Notification deliveries" value={inquiryDeliveries.length} />
       </section>
 
       <section className="panel">
@@ -62,47 +68,76 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
       </section>
 
       <section className="panel">
-        <h2>Submissions</h2>
+        <h2>Inquiries</h2>
         <table className="data-table">
           <thead>
             <tr>
-              <th>Submitted</th>
+              <th>Received</th>
               <th>Status</th>
-              <th>Form</th>
-              <th>Payload</th>
+              <th>Contact</th>
               <th>Source</th>
+              <th>AI triage</th>
+              <th>Events</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {leads.map((lead) => (
-              <tr key={lead.id}>
-                <td>{formatDate(lead.submittedAt)}</td>
-                <td>{lead.status}</td>
-                <td>{lead.formId}</td>
-                <td>
-                  <code>{JSON.stringify(lead.payload)}</code>
-                </td>
-                <td>
-                  <span>{lead.sourceUrl ?? "unknown"}</span>
-                  <small className="muted">{sourceSummary(lead)}</small>
-                </td>
-                <td>
-                  <LeadStatusControls
-                    siteId={bundle.businessProfile.siteId}
-                    submissionId={lead.id}
-                    initialStatus={lead.status}
-                  />
-                </td>
-              </tr>
-            ))}
+            {inquiries.map((inquiry) => {
+              const events = eventsByInquiry.get(inquiry.id) ?? [];
+              const primaryEvent = events.find((event) => event.metadata?.dedupe !== true) ?? events[0];
+              const duplicateCount = events.filter((event) => event.metadata?.dedupe === true).length;
+              return (
+                <tr key={inquiry.id}>
+                  <td>{formatDate(inquiry.createdAt)}</td>
+                  <td>{humanStatus(inquiry.status)}</td>
+                  <td>
+                    <strong>{inquiry.contactName ?? "Unknown"}</strong>
+                    <small className="muted">{inquiry.contactEmail ?? inquiry.contactPhone ?? "No contact extracted"}</small>
+                  </td>
+                  <td>
+                    <span>{primaryEvent?.formId ?? inquiry.sourceChannel}</span>
+                    <small className="muted">{sourceSummary(primaryEvent)}</small>
+                  </td>
+                  <td>
+                    {inquiry.aiEnrichment ? (
+                      <>
+                        <strong>{inquiry.aiEnrichment.intent}</strong>
+                        <small className="muted">
+                          Suggested: {humanStatus(inquiry.aiEnrichment.recommendedStatus)} · {inquiry.aiEnrichment.urgency}
+                        </small>
+                      </>
+                    ) : (
+                      <>
+                        <span>{humanStatus(inquiry.aiEnrichmentState)}</span>
+                        {inquiry.aiEnrichmentError ? <small className="muted">{inquiry.aiEnrichmentError}</small> : null}
+                      </>
+                    )}
+                  </td>
+                  <td>
+                    <span>{events.length}</span>
+                    {duplicateCount ? <small className="muted">{duplicateCount} duplicate retry</small> : null}
+                    <details>
+                      <summary>Payload</summary>
+                      <code>{JSON.stringify(primaryEvent?.payload ?? {})}</code>
+                    </details>
+                  </td>
+                  <td>
+                    <LeadStatusControls
+                      siteId={bundle.businessProfile.siteId}
+                      inquiryId={inquiry.id}
+                      initialStatus={inquiry.status}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-        {leads.length === 0 ? <p className="muted">No submissions yet.</p> : null}
+        {inquiries.length === 0 ? <p className="muted">No inquiries yet.</p> : null}
       </section>
 
       <section className="panel">
-        <h2>Workflow Deliveries</h2>
+        <h2>Notification Deliveries</h2>
         <table className="data-table">
           <thead>
             <tr>
@@ -114,7 +149,7 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
             </tr>
           </thead>
           <tbody>
-            {workflowDeliveries.map((delivery) => (
+            {inquiryDeliveries.map((delivery) => (
               <tr key={delivery.id}>
                 <td>{formatDate(delivery.createdAt)}</td>
                 <td>{delivery.status}</td>
@@ -125,7 +160,7 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
             ))}
           </tbody>
         </table>
-        {workflowDeliveries.length === 0 ? <p className="muted">No workflow deliveries yet.</p> : null}
+        {inquiryDeliveries.length === 0 ? <p className="muted">No notification deliveries yet.</p> : null}
       </section>
     </main>
   );
@@ -149,12 +184,17 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function sourceSummary(lead: LeadSubmission) {
+function sourceSummary(event: InquiryEvent | undefined) {
+  const metadata = event?.metadata;
   const parts = [
-    lead.metadata?.utmSource ? `utm_source=${lead.metadata.utmSource}` : "",
-    lead.metadata?.utmMedium ? `utm_medium=${lead.metadata.utmMedium}` : "",
-    lead.metadata?.utmCampaign ? `utm_campaign=${lead.metadata.utmCampaign}` : "",
-    lead.metadata?.referrerHost ? `referrer=${lead.metadata.referrerHost}` : ""
+    metadata?.utmSource ? `utm_source=${metadata.utmSource}` : "",
+    metadata?.utmMedium ? `utm_medium=${metadata.utmMedium}` : "",
+    metadata?.utmCampaign ? `utm_campaign=${metadata.utmCampaign}` : "",
+    metadata?.referrerHost ? `referrer=${metadata.referrerHost}` : ""
   ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "direct / untagged";
+  return parts.length ? parts.join(" · ") : event?.sourceUrl ?? "direct / untagged";
+}
+
+function humanStatus(status: Inquiry["status"] | Inquiry["aiEnrichmentState"]) {
+  return status.replaceAll("_", " ");
 }

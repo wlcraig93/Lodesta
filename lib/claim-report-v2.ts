@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   BusinessFactGraph,
-  GenerationArtifactV2,
+  SiteArtifactRecord,
   SiteBundle,
   SiteVersion
 } from "./models";
@@ -31,7 +31,7 @@ export type ClaimReportV2Result = {
   versionId?: string;
   status: "passed" | "failed";
   issues: ClaimReportIssueV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -77,10 +77,10 @@ export function runClaimVerificationReportV2(input: {
     issues
   };
   const contentHash = hashPayload(payload);
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_claim_report_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "claim_report",
     artifactVersion: "claim-report-v2",
     producerId: "claims.verification",

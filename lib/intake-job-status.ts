@@ -1,4 +1,4 @@
-import type { JobRecord, SiteGenerationRecord, SiteVersion } from "./models";
+import type { JobRecord, SiteCandidateRecord, SiteVersion } from "./models";
 
 export type IntakeJobFailureCode =
   | "invalid_url"
@@ -17,14 +17,20 @@ export type IntakeJobStatusResponse = {
     errorCode: IntakeJobFailureCode | null;
     failureReason: string | null;
     runId: string | null;
+    createdAt: string;
+    updatedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
   };
-  generation: {
+  candidate: {
     id: string;
     businessName: string;
     vertical: string;
     rendererVersion: SiteVersion["rendererVersion"] | "not_compiled" | null;
     readiness: "ready" | "blocked" | "unavailable" | "pending" | null;
     adminReviewUrl: string;
+    createdAt: string;
+    updatedAt: string;
   } | null;
   worker: {
     state: "active" | "not_processing";
@@ -36,7 +42,7 @@ export const intakeJobStaleAfterSeconds = 900;
 
 export function intakeJobStatusResponse(input: {
   job: JobRecord;
-  generation?: SiteGenerationRecord | null;
+  candidate?: SiteCandidateRecord | null;
   origin: string;
   now?: number;
 }): IntakeJobStatusResponse {
@@ -50,9 +56,13 @@ export function intakeJobStatusResponse(input: {
       attempts: input.job.attempts,
       errorCode: error.errorCode,
       failureReason: error.failureReason,
-      runId
+      runId,
+      createdAt: input.job.createdAt,
+      updatedAt: input.job.updatedAt,
+      startedAt: input.job.startedAt ?? null,
+      completedAt: input.job.completedAt ?? null
     },
-    generation: input.generation ? generationSummary(input.generation, input.origin) : null,
+    candidate: input.candidate ? candidateSummary(input.candidate, input.origin) : null,
     worker: {
       state: workerState(input.job, input.now ?? Date.now()),
       staleAfterSeconds: intakeJobStaleAfterSeconds
@@ -60,19 +70,21 @@ export function intakeJobStatusResponse(input: {
   };
 }
 
-export function generationIdForJob(job: JobRecord) {
-  return stringResult(job.result, "generationId");
+export function siteCandidateIdForJob(job: JobRecord) {
+  return stringResult(job.result, "siteCandidateId");
 }
 
-function generationSummary(generation: SiteGenerationRecord, origin: string): NonNullable<IntakeJobStatusResponse["generation"]> {
-  const version = generation.bundle.siteModel.versions[0];
+function candidateSummary(candidate: SiteCandidateRecord, origin: string): NonNullable<IntakeJobStatusResponse["candidate"]> {
+  const version = candidate.bundle.siteModel.versions[0];
   return {
-    id: generation.id,
-    businessName: generation.businessName,
-    vertical: generation.vertical,
+    id: candidate.id,
+    businessName: candidate.businessName,
+    vertical: candidate.vertical,
     rendererVersion: version?.rendererVersion ?? "not_compiled",
-    readiness: version?.generationQa?.readiness ?? (generation.status === "blocked" ? "blocked" : generation.status === "ready" ? "ready" : null),
-    adminReviewUrl: `${origin}/admin/site-generations/${generation.id}`
+    readiness: version?.generationQa?.readiness ?? (candidate.status === "blocked" ? "blocked" : candidate.status === "ready" ? "ready" : null),
+    adminReviewUrl: `${origin}/admin/site-candidates/${candidate.id}`,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt
   };
 }
 
@@ -85,7 +97,7 @@ function workerState(job: JobRecord, now: number): IntakeJobStatusResponse["work
 
 function failureForJob(job: JobRecord): { errorCode: IntakeJobFailureCode | null; failureReason: string | null } {
   if (job.status !== "failed") return { errorCode: null, failureReason: null };
-  const message = job.error ?? "Generation failed.";
+  const message = job.error ?? "Candidate failed.";
   return {
     errorCode: classifyFailure(message),
     failureReason: message

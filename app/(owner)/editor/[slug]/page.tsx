@@ -27,9 +27,9 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
     .map((section) => ({ section, fields: editableFields(section, bundle.businessProfile) }))
     .filter((item) => item.fields.length > 0);
   const siteId = bundle.businessProfile.siteId;
-  const [summary, leads, claims, domains] = await Promise.all([
+  const [summary, inquiries, claims, domains] = await Promise.all([
     repository.analyticsSummary(siteId),
-    repository.listFormSubmissions(siteId),
+    repository.listInquiries(siteId),
     repository.listClaims(siteId),
     repository.listDomains(siteId)
   ]);
@@ -95,7 +95,7 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
           <span>Tracked clicks</span>
         </div>
         <div className="metric-card">
-          <strong>{leads.length}</strong>
+          <strong>{inquiries.length}</strong>
           <span>Leads</span>
         </div>
         <div className="metric-card">

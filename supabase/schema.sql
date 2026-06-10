@@ -1,18 +1,57 @@
+create extension if not exists pgcrypto;
+
 create table workspaces (
   id text primary key,
   name text not null,
   created_at timestamptz not null default now()
 );
 
+create table businesses (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  name text not null,
+  vertical text not null,
+  profile_json jsonb not null,
+  provenance jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table business_locations (
+  id text primary key,
+  business_id text not null references businesses(id) on delete cascade,
+  label text,
+  address jsonb,
+  service_areas text[] not null default '{}',
+  phone text,
+  email text,
+  hours jsonb,
+  geo jsonb,
+  google_place_id text,
+  provenance jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table sites (
   id text primary key,
   workspace_id text references workspaces(id) on delete cascade,
+  business_id text not null references businesses(id) on delete restrict,
   slug text not null unique,
   status text not null default 'draft',
+  is_primary boolean not null default true,
   site_model jsonb not null,
-  extension_model jsonb not null default '{"workflows":[],"customBlocks":[]}',
+  extension_model jsonb not null default '{"forms":[],"workflows":[],"inboundSettings":{"captureMode":"form_only","aiHandlingMode":"classify_only","notificationMode":"all_inquiries"},"customBlocks":[]}',
   presence_assessment jsonb not null default '{}',
   created_at timestamptz not null default now()
+);
+
+create table site_locations (
+  site_id text not null references sites(id) on delete cascade,
+  location_id text not null references business_locations(id) on delete cascade,
+  role text not null default 'covered' check (role in ('primary', 'covered')),
+  created_at timestamptz not null default now(),
+  primary key (site_id, location_id)
 );
 
 create table business_profiles (
@@ -58,32 +97,55 @@ create table forms (
   primary key (site_id, id)
 );
 
-create table form_submissions (
+create table inquiries (
   id text primary key,
   site_id text references sites(id) on delete cascade,
-  form_id text,
-  page_id text,
-  visitor_id text,
-  payload jsonb not null,
-  metadata jsonb not null default '{}',
-  submitted_at timestamptz not null default now(),
-  source_url text,
-  user_agent text,
-  ip_hash text,
-  status text not null default 'new'
+  source_channel text not null default 'form' check (source_channel in ('form', 'chat', 'email', 'phone', 'sms', 'booking')),
+  contact_name text,
+  contact_email text,
+  contact_email_normalized text,
+  contact_phone text,
+  contact_phone_normalized text,
+  status text not null default 'new' check (status in ('new', 'needs_reply', 'replied', 'booked', 'won', 'lost', 'spam', 'archived')),
+  notification_state text not null default 'queued' check (notification_state in ('queued', 'processing', 'completed', 'partial', 'failed', 'skipped')),
+  ai_enrichment_state text not null default 'queued' check (ai_enrichment_state in ('queued', 'processing', 'succeeded', 'retrying', 'rate_limited', 'failed', 'skipped')),
+  ai_enrichment jsonb,
+  ai_enriched_at timestamptz,
+  ai_enrichment_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
-create table workflow_deliveries (
+create table inquiry_events (
   id text primary key,
   site_id text references sites(id) on delete cascade,
+  inquiry_id text references inquiries(id) on delete cascade,
+  type text not null check (type in ('form_submission', 'chat_message', 'email_received', 'email_sent', 'owner_note', 'ai_note', 'booking_created')),
+  actor text not null check (actor in ('visitor', 'owner', 'ai', 'system')),
+  message_text text,
+  payload jsonb,
+  source_url text,
+  page_id text,
+  form_id text,
+  metadata jsonb not null default '{}',
+  dedupe_key text,
+  created_at timestamptz not null default now()
+);
+
+create table inquiry_deliveries (
+  id text primary key,
+  site_id text references sites(id) on delete cascade,
+  inquiry_id text references inquiries(id) on delete cascade,
+  event_id text references inquiry_events(id) on delete set null,
   workflow_id text not null,
-  submission_id text references form_submissions(id) on delete set null,
   destination text not null check (destination in ('email', 'crm_placeholder', 'webhook')),
   target text,
   status text not null check (status in ('sent', 'skipped', 'failed')),
   message text not null,
   response_status int,
   error text,
+  provider_message_id text,
+  metadata jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
 
@@ -276,8 +338,9 @@ create table agent_runs (
   updated_at timestamptz not null default now()
 );
 
-create table site_generations (
+create table site_candidates (
   id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
   agent_run_id text references agent_runs(id) on delete set null,
   source_url text,
   source_host text,
@@ -285,18 +348,20 @@ create table site_generations (
   vertical text not null,
   candidate_slug text not null,
   bundle_json jsonb not null,
-  status text not null default 'ready' check (status in ('ready', 'blocked', 'promoted', 'archived')),
-  created_site_id text references sites(id) on delete set null,
-  promoted_at timestamptz,
+  status text not null default 'ready' check (status in ('ready', 'blocked', 'accepted', 'archived')),
+  intended_site_id text references sites(id) on delete set null,
+  accepted_site_id text references sites(id) on delete set null,
+  accepted_version_id text,
+  accepted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create table generation_artifacts (
+create table site_artifacts (
   id text primary key,
-  generation_id text references site_generations(id) on delete cascade,
+  site_candidate_id text references site_candidates(id) on delete cascade,
   site_id text references sites(id) on delete cascade,
-  scope text not null check (scope in ('generation_selected', 'generation_candidate', 'managed_site_selected', 'managed_site_candidate', 'eval_candidate', 'qa_evidence')),
+  scope text not null check (scope in ('candidate_selected', 'candidate_alternative', 'site_selected', 'site_alternative', 'evaluation_candidate', 'qa_evidence')),
   artifact_type text not null check (artifact_type in ('copy_artifact', 'copy_diff', 'business_context_report', 'change_impact_report', 'identity_reconcile_report', 'service_catalog_report', 'vertical_classification_report', 'conversion_path_report', 'information_architecture_report', 'brand_cue_report', 'brand_direction_report', 'brand_mark_generation_report', 'asset_selection_report', 'seo_metadata_report', 'performance_audit_report', 'social_proof_report', 'conversion_insights_report', 'local_seo_refresh_report', 'page_gap_analysis_report', 'experiment_recommendation_report', 'design_section_audit_report', 'design_system', 'blueprint', 'compiled_section', 'compiled_page', 'claim_report', 'policy_report', 'page_opportunity_report', 'visual_benchmark', 'art_direction_decision', 'media_asset_decision', 'copy_evaluation_report', 'v3_review_packet', 'generation_cost_report')),
   artifact_version text not null,
   producer_id text not null,
@@ -311,7 +376,7 @@ create table generation_artifacts (
   content_hash text not null,
   payload_json jsonb not null,
   created_at timestamptz not null default now(),
-  check (generation_id is not null or site_id is not null)
+  check (site_candidate_id is not null or site_id is not null)
 );
 
 create table agent_run_spans (
@@ -376,16 +441,29 @@ create index analytics_events_site_time_idx on analytics_events(site_id, occurre
 create index analytics_events_site_event_time_idx on analytics_events(site_id, event_type, occurred_at desc);
 create index analytics_events_site_visitor_time_idx on analytics_events(site_id, visitor_id, occurred_at desc) where visitor_id is not null;
 create index sites_workspace_idx on sites(workspace_id);
+create index businesses_workspace_idx on businesses(workspace_id);
+create index businesses_name_idx on businesses(name);
+create index business_locations_business_idx on business_locations(business_id);
+create index business_locations_google_place_idx on business_locations(google_place_id) where google_place_id is not null;
+create index sites_business_idx on sites(business_id);
+create unique index sites_one_primary_per_business_idx on sites(business_id) where is_primary;
+create index site_locations_location_idx on site_locations(location_id);
 create unique index business_profiles_site_idx on business_profiles(site_id);
 create index site_assets_site_kind_idx on site_assets(site_id, kind);
 create index site_assets_site_rights_idx on site_assets(site_id, rights_status);
-create index form_submissions_site_time_idx on form_submissions(site_id, submitted_at desc);
-create index form_submissions_site_status_time_idx on form_submissions(site_id, status, submitted_at desc);
-create index form_submissions_site_visitor_time_idx on form_submissions(site_id, visitor_id, submitted_at desc) where visitor_id is not null;
+create index inquiries_site_time_idx on inquiries(site_id, created_at desc);
+create index inquiries_site_status_time_idx on inquiries(site_id, status, created_at desc);
+create index inquiries_notification_queue_idx on inquiries(notification_state, created_at);
+create index inquiries_ai_queue_idx on inquiries(ai_enrichment_state, created_at);
+create index inquiries_email_normalized_idx on inquiries(site_id, contact_email_normalized) where contact_email_normalized is not null;
+create index inquiries_phone_normalized_idx on inquiries(site_id, contact_phone_normalized) where contact_phone_normalized is not null;
+create index inquiry_events_inquiry_time_idx on inquiry_events(inquiry_id, created_at desc);
+create index inquiry_events_site_time_idx on inquiry_events(site_id, created_at desc);
+create index inquiry_events_dedupe_idx on inquiry_events(site_id, type, dedupe_key, created_at desc) where dedupe_key is not null;
 create index forms_site_idx on forms(site_id);
 create index site_versions_site_status_idx on site_versions(site_id, status);
-create index workflow_deliveries_site_time_idx on workflow_deliveries(site_id, created_at desc);
-create index workflow_deliveries_submission_idx on workflow_deliveries(submission_id);
+create index inquiry_deliveries_site_time_idx on inquiry_deliveries(site_id, created_at desc);
+create index inquiry_deliveries_inquiry_time_idx on inquiry_deliveries(inquiry_id, created_at desc);
 create index optimization_findings_site_status_idx on optimization_findings(site_id, status);
 create index experiments_site_status_idx on experiments(site_id, status);
 create index experiment_learnings_status_cohort_idx on experiment_learnings(status, cohort, surface, primary_metric);
@@ -407,21 +485,223 @@ create index outbound_events_site_time_idx on outbound_events(site_id, occurred_
 create index jobs_status_created_idx on jobs(status, created_at);
 create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
 create index jobs_running_lock_idx on jobs(status, locked_at);
+create unique index jobs_one_inquiry_notification_idx
+  on jobs ((payload ->> 'inquiryId'))
+  where kind = 'inquiry_notification' and payload ? 'inquiryId';
+create unique index jobs_one_inquiry_ai_enrichment_idx
+  on jobs ((payload ->> 'inquiryId'))
+  where kind = 'inquiry_ai_enrichment' and payload ? 'inquiryId';
 create index agent_runs_created_at_idx on agent_runs(created_at);
 create index agent_runs_source_host_idx on agent_runs(source_host);
 create index agent_runs_target_idx on agent_runs(target_type, target_id);
 create index agent_runs_type_status_created_idx on agent_runs(run_type, status, created_at);
-create index site_generations_status_created_idx on site_generations(status, created_at desc);
-create index site_generations_source_host_idx on site_generations(source_host);
-create index site_generations_agent_run_idx on site_generations(agent_run_id);
-create index site_generations_created_site_idx on site_generations(created_site_id);
-create index generation_artifacts_generation_idx on generation_artifacts(generation_id, scope, artifact_type);
-create index generation_artifacts_site_idx on generation_artifacts(site_id, scope, artifact_type);
-create index generation_artifacts_content_hash_idx on generation_artifacts(content_hash);
+create index site_candidates_status_created_idx on site_candidates(status, created_at desc);
+create index site_candidates_business_idx on site_candidates(business_id);
+create index site_candidates_source_host_idx on site_candidates(source_host);
+create index site_candidates_agent_run_idx on site_candidates(agent_run_id);
+create index site_candidates_accepted_site_idx on site_candidates(accepted_site_id);
+create index site_artifacts_candidate_idx on site_artifacts(site_candidate_id, scope, artifact_type);
+create index site_artifacts_site_idx on site_artifacts(site_id, scope, artifact_type);
+create index site_artifacts_content_hash_idx on site_artifacts(content_hash);
 create index agent_run_spans_run_started_idx on agent_run_spans(run_id, started_at);
 create index agent_model_calls_run_idx on agent_model_calls(run_id);
 create index agent_model_calls_span_idx on agent_model_calls(span_id);
 create index operator_setting_audits_key_time_idx on operator_setting_audits(setting_key, changed_at desc);
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger inquiries_set_updated_at
+before update on inquiries
+for each row
+execute function public.set_updated_at();
+
+create or replace function public.create_inquiry_from_form(
+  p_site_id text,
+  p_form_id text,
+  p_page_id text,
+  p_visitor_id text,
+  p_payload jsonb,
+  p_metadata jsonb,
+  p_source_url text,
+  p_user_agent text,
+  p_ip_hash text,
+  p_contact_name text,
+  p_contact_email text,
+  p_contact_email_normalized text,
+  p_contact_phone text,
+  p_contact_phone_normalized text,
+  p_message_text text,
+  p_dedupe_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  lock_key bigint;
+  existing_event inquiry_events%rowtype;
+  target_inquiry inquiries%rowtype;
+  created_event inquiry_events%rowtype;
+  duplicate boolean := false;
+begin
+  lock_key := hashtextextended(p_site_id || ':' || coalesce(p_form_id, '') || ':' || coalesce(p_dedupe_key, ''), 0);
+  perform pg_advisory_xact_lock(lock_key);
+
+  select *
+  into existing_event
+  from inquiry_events
+  where site_id = p_site_id
+    and type = 'form_submission'
+    and dedupe_key = p_dedupe_key
+    and created_at >= now() - interval '2 minutes'
+    and coalesce((metadata ->> 'dedupe')::boolean, false) = false
+  order by created_at desc
+  limit 1;
+
+  if found then
+    select *
+    into target_inquiry
+    from inquiries
+    where id = existing_event.inquiry_id
+      and site_id = p_site_id;
+
+    insert into inquiry_events (
+      id,
+      site_id,
+      inquiry_id,
+      type,
+      actor,
+      message_text,
+      payload,
+      source_url,
+      page_id,
+      form_id,
+      metadata,
+      dedupe_key
+    )
+    values (
+      gen_random_uuid()::text,
+      p_site_id,
+      target_inquiry.id,
+      'form_submission',
+      'visitor',
+      p_message_text,
+      p_payload,
+      p_source_url,
+      p_page_id,
+      p_form_id,
+      coalesce(p_metadata, '{}'::jsonb) || jsonb_build_object(
+        'dedupe', true,
+        'duplicateOfEventId', existing_event.id,
+        'dedupeWindowSeconds', 120
+      ),
+      p_dedupe_key
+    )
+    returning * into created_event;
+
+    update inquiries
+    set updated_at = now()
+    where id = target_inquiry.id
+    returning * into target_inquiry;
+
+    duplicate := true;
+  else
+    insert into inquiries (
+      id,
+      site_id,
+      source_channel,
+      contact_name,
+      contact_email,
+      contact_email_normalized,
+      contact_phone,
+      contact_phone_normalized,
+      status,
+      notification_state,
+      ai_enrichment_state
+    )
+    values (
+      gen_random_uuid()::text,
+      p_site_id,
+      'form',
+      nullif(p_contact_name, ''),
+      nullif(p_contact_email, ''),
+      nullif(p_contact_email_normalized, ''),
+      nullif(p_contact_phone, ''),
+      nullif(p_contact_phone_normalized, ''),
+      'new',
+      'queued',
+      'queued'
+    )
+    returning * into target_inquiry;
+
+    insert into inquiry_events (
+      id,
+      site_id,
+      inquiry_id,
+      type,
+      actor,
+      message_text,
+      payload,
+      source_url,
+      page_id,
+      form_id,
+      metadata,
+      dedupe_key
+    )
+    values (
+      gen_random_uuid()::text,
+      p_site_id,
+      target_inquiry.id,
+      'form_submission',
+      'visitor',
+      p_message_text,
+      p_payload,
+      p_source_url,
+      p_page_id,
+      p_form_id,
+      coalesce(p_metadata, '{}'::jsonb),
+      p_dedupe_key
+    )
+    returning * into created_event;
+
+    insert into jobs (id, kind, status, payload, max_attempts)
+    values (
+      gen_random_uuid()::text,
+      'inquiry_notification',
+      'queued',
+      jsonb_build_object('siteId', p_site_id, 'inquiryId', target_inquiry.id),
+      3
+    )
+    on conflict do nothing;
+
+    insert into jobs (id, kind, status, payload, max_attempts)
+    values (
+      gen_random_uuid()::text,
+      'inquiry_ai_enrichment',
+      'queued',
+      jsonb_build_object('siteId', p_site_id, 'inquiryId', target_inquiry.id),
+      3
+    )
+    on conflict do nothing;
+  end if;
+
+  return jsonb_build_object(
+    'inquiry', to_jsonb(target_inquiry),
+    'event', to_jsonb(created_event),
+    'duplicate', duplicate
+  );
+end;
+$$;
 
 create or replace function public.claim_next_job(worker_id text, stale_after_seconds int default 900)
 returns setof jobs
@@ -471,6 +751,69 @@ begin
 end;
 $$;
 
+create or replace function public.merge_businesses(source_business_id text, target_business_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  moved_sites integer := 0;
+  moved_site_candidates integer := 0;
+  moved_locations integer := 0;
+  target_has_primary boolean := false;
+begin
+  if source_business_id is null or target_business_id is null or source_business_id = '' or target_business_id = '' then
+    return jsonb_build_object('ok', false, 'reason', 'Source and target business ids are required.');
+  end if;
+  if source_business_id = target_business_id then
+    return jsonb_build_object('ok', false, 'reason', 'Source and target business ids must differ.');
+  end if;
+  if not exists (select 1 from businesses where id = source_business_id) then
+    return jsonb_build_object('ok', false, 'reason', 'Source business not found.');
+  end if;
+  if not exists (select 1 from businesses where id = target_business_id) then
+    return jsonb_build_object('ok', false, 'reason', 'Target business not found.');
+  end if;
+
+  select exists(select 1 from sites where business_id = target_business_id and is_primary) into target_has_primary;
+  if target_has_primary then
+    update sites
+    set is_primary = false
+    where business_id = source_business_id
+      and is_primary;
+  end if;
+
+  update sites
+  set business_id = target_business_id
+  where business_id = source_business_id;
+  get diagnostics moved_sites = row_count;
+
+  update site_candidates
+  set business_id = target_business_id,
+      updated_at = now()
+  where business_id = source_business_id;
+  get diagnostics moved_site_candidates = row_count;
+
+  update business_locations
+  set business_id = target_business_id,
+      updated_at = now()
+  where business_id = source_business_id;
+  get diagnostics moved_locations = row_count;
+
+  delete from businesses where id = source_business_id;
+
+  return jsonb_build_object(
+    'ok', true,
+    'sourceBusinessId', source_business_id,
+    'targetBusinessId', target_business_id,
+    'movedSites', moved_sites,
+    'movedSiteCandidates', moved_site_candidates,
+    'movedLocations', moved_locations
+  );
+end;
+$$;
+
 create or replace function public.is_claimed_site_owner(target_site_id text)
 returns boolean
 language sql
@@ -496,8 +839,9 @@ alter table business_profiles enable row level security;
 alter table site_assets enable row level security;
 alter table site_versions enable row level security;
 alter table forms enable row level security;
-alter table form_submissions enable row level security;
-alter table workflow_deliveries enable row level security;
+alter table inquiries enable row level security;
+alter table inquiry_events enable row level security;
+alter table inquiry_deliveries enable row level security;
 alter table analytics_events enable row level security;
 alter table optimization_findings enable row level security;
 alter table experiments enable row level security;
@@ -510,8 +854,11 @@ alter table outbound_events enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
 alter table agent_runs enable row level security;
-alter table site_generations enable row level security;
-alter table generation_artifacts enable row level security;
+alter table businesses enable row level security;
+alter table business_locations enable row level security;
+alter table site_locations enable row level security;
+alter table site_candidates enable row level security;
+alter table site_artifacts enable row level security;
 alter table agent_run_spans enable row level security;
 alter table agent_model_calls enable row level security;
 alter table operator_settings enable row level security;
@@ -537,12 +884,21 @@ create policy "site owners can read claimed forms"
 on forms for select
 using (public.is_claimed_site_owner(site_id));
 
-create policy "site owners can read claimed form submissions"
-on form_submissions for select
+create policy "site owners can read claimed inquiries"
+on inquiries for select
 using (public.is_claimed_site_owner(site_id));
 
-create policy "site owners can read claimed workflow deliveries"
-on workflow_deliveries for select
+create policy "site owners can update claimed inquiry status"
+on inquiries for update
+using (public.is_claimed_site_owner(site_id))
+with check (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed inquiry events"
+on inquiry_events for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed inquiry deliveries"
+on inquiry_deliveries for select
 using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed analytics events"

@@ -41,6 +41,8 @@ export default async function DraftPreviewPage({
       business={bundle.businessProfile}
       site={bundle.siteModel}
       extensions={bundle.extensionModel}
+      locations={bundle.locations}
+      locationBindings={bundle.locationBindings}
       version={version}
       page={page}
       theme={version.theme ?? bundle.siteModel.theme}

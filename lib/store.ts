@@ -5,17 +5,20 @@ import type {
   Experiment,
   ExperimentLearning,
   FormDefinition,
-  GenerationArtifactV2,
-  LeadSubmission,
+  Inquiry,
+  InquiryAiEnrichment,
+  InquiryDelivery,
+  InquiryEvent,
+  SiteArtifactRecord,
   OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
   OutboundProspect,
   PreviewToken,
   SiteBundle,
-  SiteGenerationRecord,
-  SiteGenerationStatus,
-  WorkflowDelivery
+  SiteCandidateRecord,
+  SiteCandidateStatus,
+  SiteVersion,
 } from "./models";
 import { runAudit } from "./audit";
 import { createSiteFromInput } from "./intake";
@@ -37,7 +40,8 @@ import { restoreVersionToDraftBundle } from "./site-versions";
 import { sanitizeAnalyticsMetadata } from "./privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "./site-version-metadata";
 import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "./layout-registry";
-import { promoteGenerationArtifactV2 } from "./generated-site-v2-artifacts";
+import { copyCandidateArtifactToSite } from "./site-artifacts";
+import { businessIdForProfile, withBusinessBundleFields } from "./business-model";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -48,22 +52,30 @@ import {
   type RecordOutboundEventInput,
   type UpsertOutboundProspectInput
 } from "./outbound";
+import {
+  type CreateInquiryFromFormInput,
+  type CreateInquiryFromFormResult,
+  extractInquiryContact,
+  inquiryDedupeKey,
+  inquiryMessageText
+} from "./inquiries";
 
 type StoreState = {
   bundles: Map<string, SiteBundle>;
   slugToSiteId: Map<string, string>;
-  siteGenerations: Map<string, SiteGenerationRecord>;
-  submissions: LeadSubmission[];
+  siteCandidates: Map<string, SiteCandidateRecord>;
+  inquiries: Inquiry[];
+  inquiryEvents: InquiryEvent[];
+  inquiryDeliveries: InquiryDelivery[];
   analyticsEvents: AnalyticsEvent[];
   claims: ClaimRecord[];
   domains: DomainRecord[];
   previewTokens: PreviewToken[];
-  workflowDeliveries: WorkflowDelivery[];
   outboundCampaigns: OutboundCampaign[];
   outboundProspects: OutboundProspect[];
   outboundEvents: OutboundEvent[];
   experimentLearnings: ExperimentLearning[];
-  generationArtifacts: GenerationArtifactV2[];
+  siteArtifacts: SiteArtifactRecord[];
 };
 
 const globalStore = globalThis as typeof globalThis & {
@@ -73,20 +85,22 @@ const globalStore = globalThis as typeof globalThis & {
 function createInitialState(): StoreState {
   const bundles = new Map<string, SiteBundle>();
   const slugToSiteId = new Map<string, string>();
-  bundles.set(sampleSiteBundle.businessProfile.siteId, structuredClone(sampleSiteBundle));
-  slugToSiteId.set(sampleSiteBundle.siteModel.slug, sampleSiteBundle.businessProfile.siteId);
+  const sampleBundle = withBusinessBundleFields(structuredClone(sampleSiteBundle));
+  bundles.set(sampleBundle.businessProfile.siteId, sampleBundle);
+  slugToSiteId.set(sampleBundle.siteModel.slug, sampleBundle.businessProfile.siteId);
   return {
     bundles,
     slugToSiteId,
-    siteGenerations: new Map(),
-    submissions: [],
+    siteCandidates: new Map(),
+    inquiries: [],
+    inquiryEvents: [],
+    inquiryDeliveries: [],
     analyticsEvents: [],
-    workflowDeliveries: [],
     outboundCampaigns: [],
     outboundProspects: [],
     outboundEvents: [],
     experimentLearnings: [],
-    generationArtifacts: [],
+    siteArtifacts: [],
     claims: [],
     previewTokens: [
       {
@@ -113,16 +127,18 @@ function createInitialState(): StoreState {
 
 function state() {
   globalStore.__lodestaStore ??= createInitialState();
-  globalStore.__lodestaStore.siteGenerations ??= new Map();
+  globalStore.__lodestaStore.siteCandidates ??= new Map();
   globalStore.__lodestaStore.claims ??= [];
   globalStore.__lodestaStore.domains ??= [];
   globalStore.__lodestaStore.previewTokens ??= [];
-  globalStore.__lodestaStore.workflowDeliveries ??= [];
+  globalStore.__lodestaStore.inquiries ??= [];
+  globalStore.__lodestaStore.inquiryEvents ??= [];
+  globalStore.__lodestaStore.inquiryDeliveries ??= [];
   globalStore.__lodestaStore.outboundCampaigns ??= [];
   globalStore.__lodestaStore.outboundProspects ??= [];
   globalStore.__lodestaStore.outboundEvents ??= [];
   globalStore.__lodestaStore.experimentLearnings ??= [];
-  globalStore.__lodestaStore.generationArtifacts ??= [];
+  globalStore.__lodestaStore.siteArtifacts ??= [];
   return globalStore.__lodestaStore;
 }
 
@@ -140,43 +156,50 @@ export function getSiteBundleBySlug(slug: string) {
 }
 
 export function createAndStoreSite(input: Parameters<typeof createSiteFromInput>[0]) {
-  const bundle = createSiteFromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) });
+  let bundle = withBusinessBundleFields(createSiteFromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) }));
   const store = state();
   applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
+  bundle = withBusinessBundleFields(bundle, { businessId: bundle.business?.id });
   store.bundles.set(bundle.businessProfile.siteId, bundle);
   store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
   return bundle;
 }
 
-export function createSiteGeneration(input: {
+export function createSiteCandidate(input: {
   id?: string;
+  businessId?: string;
   agentRunId?: string;
   bundle: SiteBundle;
   sourceUrl?: string;
   sourceHost?: string;
-  status?: SiteGenerationStatus;
+  intendedSiteId?: string;
+  status?: SiteCandidateStatus;
 }) {
   const now = new Date().toISOString();
-  const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
-  const generation: SiteGenerationRecord = {
-    id: input.id ?? `sitegen_${crypto.randomUUID().replace(/-/g, "")}`,
+  const businessId = input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
+  const bundle = withBusinessBundleFields(input.bundle, { businessId, now });
+  const sourceUrl = input.sourceUrl ?? bundle.presenceAssessment.sourceUrl;
+  const candidate: SiteCandidateRecord = {
+    id: input.id ?? `sitecand_${crypto.randomUUID().replace(/-/g, "")}`,
+    businessId,
     agentRunId: input.agentRunId,
     sourceUrl,
     sourceHost: input.sourceHost ?? hostFromUrl(sourceUrl),
-    businessName: input.bundle.businessProfile.name,
-    vertical: input.bundle.businessProfile.vertical,
-    candidateSlug: input.bundle.siteModel.slug,
-    bundle: structuredClone(input.bundle),
+    businessName: bundle.businessProfile.name,
+    vertical: bundle.businessProfile.vertical,
+    candidateSlug: bundle.siteModel.slug,
+    bundle: structuredClone(bundle),
     status: input.status ?? "ready",
+    intendedSiteId: input.intendedSiteId,
     createdAt: now,
     updatedAt: now
   };
-  state().siteGenerations.set(generation.id, generation);
-  return structuredClone(generation);
+  state().siteCandidates.set(candidate.id, candidate);
+  return structuredClone(candidate);
 }
 
-export function upsertGenerationArtifact(artifact: GenerationArtifactV2) {
-  const artifacts = state().generationArtifacts;
+export function upsertSiteArtifact(artifact: SiteArtifactRecord) {
+  const artifacts = state().siteArtifacts;
   const index = artifacts.findIndex((candidate) => candidate.id === artifact.id);
   const next = structuredClone(artifact);
   if (index >= 0) artifacts[index] = next;
@@ -184,15 +207,15 @@ export function upsertGenerationArtifact(artifact: GenerationArtifactV2) {
   return structuredClone(next);
 }
 
-export function listGenerationArtifacts(filter: {
-  generationId?: string;
+export function listSiteArtifacts(filter: {
+  siteCandidateId?: string;
   siteId?: string;
-  scope?: GenerationArtifactV2["scope"];
-  artifactType?: GenerationArtifactV2["artifactType"];
+  scope?: SiteArtifactRecord["scope"];
+  artifactType?: SiteArtifactRecord["artifactType"];
 } = {}) {
   return state()
-    .generationArtifacts.filter((artifact) => {
-      if (filter.generationId && artifact.generationId !== filter.generationId) return false;
+    .siteArtifacts.filter((artifact) => {
+      if (filter.siteCandidateId && artifact.siteCandidateId !== filter.siteCandidateId) return false;
       if (filter.siteId && artifact.siteId !== filter.siteId) return false;
       if (filter.scope && artifact.scope !== filter.scope) return false;
       if (filter.artifactType && artifact.artifactType !== filter.artifactType) return false;
@@ -201,64 +224,240 @@ export function listGenerationArtifacts(filter: {
     .map((artifact) => structuredClone(artifact));
 }
 
-export function listSiteGenerations(filter: {
-  status?: SiteGenerationStatus;
+export function listSiteCandidates(filter: {
+  status?: SiteCandidateStatus;
   sourceHost?: string;
   limit?: number;
   offset?: number;
 } = {}) {
   const offset = Math.max(0, filter.offset ?? 0);
   const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
-  const generations = Array.from(state().siteGenerations.values())
-    .filter((generation) => !filter.status || generation.status === filter.status)
-    .filter((generation) => !filter.sourceHost || generation.sourceHost === filter.sourceHost)
+  const candidates = Array.from(state().siteCandidates.values())
+    .filter((candidate) => !filter.status || candidate.status === filter.status)
+    .filter((candidate) => !filter.sourceHost || candidate.sourceHost === filter.sourceHost)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   return {
-    generations: generations.slice(offset, offset + limit).map((generation) => structuredClone(generation)),
-    total: generations.length
+    candidates: candidates.slice(offset, offset + limit).map((candidate) => structuredClone(candidate)),
+    total: candidates.length
   };
 }
 
-export function getSiteGeneration(generationId: string) {
-  const generation = state().siteGenerations.get(generationId);
-  return generation ? structuredClone(generation) : null;
+export function getSiteCandidate(candidateId: string) {
+  const candidate = state().siteCandidates.get(candidateId);
+  return candidate ? structuredClone(candidate) : null;
 }
 
-export function promoteSiteGeneration(generationId: string) {
+export function mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }) {
+  const sourceBusinessId = input.sourceBusinessId.trim();
+  const targetBusinessId = input.targetBusinessId.trim();
+  if (!sourceBusinessId || !targetBusinessId) return { ok: false as const, reason: "Source and target business ids are required." };
+  if (sourceBusinessId === targetBusinessId) return { ok: false as const, reason: "Source and target business ids must differ." };
+
   const store = state();
-  const generation = store.siteGenerations.get(generationId);
-  if (!generation) return null;
-  if (generation.status === "promoted" && generation.createdSiteId) {
-    const existingBundle = getSiteBundle(generation.createdSiteId);
-    return existingBundle ? { generation: structuredClone(generation), bundle: existingBundle } : null;
+  const knownBusinessIds = new Set<string>();
+  for (const bundle of store.bundles.values()) {
+    if (bundle.business?.id) knownBusinessIds.add(bundle.business.id);
+  }
+  for (const candidate of store.siteCandidates.values()) {
+    knownBusinessIds.add(candidate.businessId);
+    if (candidate.bundle.business?.id) knownBusinessIds.add(candidate.bundle.business.id);
+  }
+  if (!knownBusinessIds.has(sourceBusinessId)) return { ok: false as const, reason: "Source business not found." };
+  if (!knownBusinessIds.has(targetBusinessId)) return { ok: false as const, reason: "Target business not found." };
+
+  const now = new Date().toISOString();
+  let movedSites = 0;
+  let movedSiteCandidates = 0;
+  let movedLocations = 0;
+  for (const bundle of store.bundles.values()) {
+    if (bundle.business?.id !== sourceBusinessId) continue;
+    const locationCount = bundle.locations?.length ?? 0;
+    const nextBundle = withBusinessBundleFields(bundle, { businessId: targetBusinessId, now });
+    nextBundle.locations = nextBundle.locations?.map((location) => ({ ...location, businessId: targetBusinessId, updatedAt: now }));
+    store.bundles.set(nextBundle.businessProfile.siteId, nextBundle);
+    movedSites += 1;
+    movedLocations += locationCount;
+  }
+  for (const candidate of store.siteCandidates.values()) {
+    if (candidate.businessId !== sourceBusinessId && candidate.bundle.business?.id !== sourceBusinessId) continue;
+    candidate.businessId = targetBusinessId;
+    candidate.bundle = withBusinessBundleFields(candidate.bundle, { businessId: targetBusinessId, now });
+    candidate.bundle.locations = candidate.bundle.locations?.map((location) => ({ ...location, businessId: targetBusinessId, updatedAt: now }));
+    candidate.updatedAt = now;
+    movedSiteCandidates += 1;
+  }
+  return {
+    ok: true as const,
+    sourceBusinessId,
+    targetBusinessId,
+    movedSites,
+    movedSiteCandidates,
+    movedLocations
+  };
+}
+
+export function acceptSiteCandidateAsSite(candidateId: string) {
+  const store = state();
+  const candidate = store.siteCandidates.get(candidateId);
+  if (!candidate) return null;
+  if (candidate.status === "accepted" && candidate.acceptedSiteId) {
+    const existingBundle = getSiteBundle(candidate.acceptedSiteId);
+    if (!existingBundle) return { ok: false as const, reason: "Accepted site no longer exists." };
+    if (candidate.intendedSiteId) {
+      return { ok: false as const, reason: "Site candidate was already accepted as a site version." };
+    }
+    return {
+      ok: true as const,
+      candidate: structuredClone(candidate),
+      bundle: existingBundle,
+      acceptedSiteId: candidate.acceptedSiteId
+    };
+  }
+  const ready = assertCandidateAcceptable(candidate);
+  if (!ready.ok) return ready;
+  if (candidate.intendedSiteId) {
+    return { ok: false as const, reason: "Site candidate is intended for an existing site version." };
   }
 
-  const bundle = structuredClone(generation.bundle);
+  const acceptedAt = new Date().toISOString();
+  let bundle = structuredClone(candidate.bundle);
   applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
+  bundle = withBusinessBundleFields(bundle, { businessId: candidate.businessId, now: acceptedAt });
   store.bundles.set(bundle.businessProfile.siteId, bundle);
   store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
-  const promotedAt = new Date().toISOString();
-  const selectedArtifacts = store.generationArtifacts.filter(
-    (artifact) => artifact.generationId === generationId && artifact.scope === "generation_selected"
+  copySelectedArtifactsToSite({
+    candidateId,
+    siteId: bundle.businessProfile.siteId,
+    acceptedAt
+  });
+  candidate.status = "accepted";
+  candidate.acceptedSiteId = bundle.businessProfile.siteId;
+  candidate.acceptedVersionId = bundle.siteModel.versions[0]?.id;
+  candidate.acceptedAt = acceptedAt;
+  candidate.updatedAt = candidate.acceptedAt;
+  return {
+    ok: true as const,
+    candidate: structuredClone(candidate),
+    bundle,
+    acceptedSiteId: bundle.businessProfile.siteId,
+    acceptedVersionId: candidate.acceptedVersionId
+  };
+}
+
+export function acceptSiteCandidateAsVersion(input: { candidateId: string; siteId: string }) {
+  const store = state();
+  const candidate = store.siteCandidates.get(input.candidateId);
+  if (!candidate) return null;
+  const targetBundle = getSiteBundle(input.siteId);
+  if (!targetBundle) return { ok: false as const, reason: "Target site not found." };
+  if (candidate.status === "accepted" && candidate.acceptedSiteId) {
+    if (!candidate.intendedSiteId || candidate.acceptedSiteId !== input.siteId || !candidate.acceptedVersionId) {
+      return { ok: false as const, reason: "Site candidate was already accepted into a different target." };
+    }
+    return {
+      ok: true as const,
+      candidate: structuredClone(candidate),
+      bundle: targetBundle,
+      acceptedSiteId: candidate.acceptedSiteId,
+      acceptedVersionId: candidate.acceptedVersionId
+    };
+  }
+  const ready = assertCandidateAcceptable(candidate);
+  if (!ready.ok) return ready;
+  if (candidate.intendedSiteId && candidate.intendedSiteId !== input.siteId) {
+    return { ok: false as const, reason: "Site candidate is intended for a different site." };
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const version = siteVersionFromCandidate({
+    candidateBundle: candidate.bundle,
+    targetBundle,
+    acceptedAt
+  });
+  if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
+
+  targetBundle.siteModel.versions.unshift(version);
+  copySelectedArtifactsToSite({
+    candidateId: input.candidateId,
+    siteId: input.siteId,
+    acceptedAt
+  });
+  candidate.status = "accepted";
+  candidate.intendedSiteId = input.siteId;
+  candidate.acceptedSiteId = input.siteId;
+  candidate.acceptedVersionId = version.id;
+  candidate.acceptedAt = acceptedAt;
+  candidate.updatedAt = acceptedAt;
+
+  return {
+    ok: true as const,
+    candidate: structuredClone(candidate),
+    bundle: targetBundle,
+    acceptedSiteId: input.siteId,
+    acceptedVersionId: version.id
+  };
+}
+
+function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
+  if (candidate.status === "blocked") {
+    return { ok: false as const, reason: "Blocked site candidates cannot be accepted." };
+  }
+  if (candidate.status === "archived") {
+    return { ok: false as const, reason: "Archived site candidates cannot be accepted." };
+  }
+  if (candidate.status !== "ready") {
+    return { ok: false as const, reason: "Only ready site candidates can be accepted." };
+  }
+  return { ok: true as const };
+}
+
+function siteVersionFromCandidate(input: {
+  candidateBundle: SiteBundle;
+  targetBundle: SiteBundle;
+  acceptedAt: string;
+}): SiteVersion | null {
+  const candidateBundle = structuredClone(input.candidateBundle);
+  applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
+  const candidateVersion =
+    candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
+    candidateBundle.siteModel.versions[0];
+  if (!candidateVersion) return null;
+  const version = structuredClone(candidateVersion);
+  version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
+  version.status = "draft";
+  version.createdAt = input.acceptedAt;
+  version.theme ??= structuredClone(candidateBundle.siteModel.theme);
+  return version;
+}
+
+function nextAcceptedVersionId(bundle: SiteBundle, acceptedAt: string) {
+  const seed = Date.parse(acceptedAt);
+  const base = `version_${bundle.siteModel.slug}_candidate_${Number.isFinite(seed) ? seed : Date.now()}`;
+  const existing = new Set(bundle.siteModel.versions.map((version) => version.id));
+  let candidate = base;
+  let counter = 2;
+  while (existing.has(candidate)) {
+    candidate = `${base}_${counter}`;
+    counter += 1;
+  }
+  return candidate;
+}
+
+function copySelectedArtifactsToSite(input: { candidateId: string; siteId: string; acceptedAt: string }) {
+  const store = state();
+  const selectedArtifacts = store.siteArtifacts.filter(
+    (artifact) => artifact.siteCandidateId === input.candidateId && artifact.scope === "candidate_selected"
   );
   for (const artifact of selectedArtifacts) {
-    const promotedArtifact = promoteGenerationArtifactV2({
+    const acceptedArtifact = copyCandidateArtifactToSite({
       artifact,
-      managedSiteId: bundle.businessProfile.siteId,
-      promotedAt
+      managedSiteId: input.siteId,
+      acceptedAt: input.acceptedAt
     });
-    const existingIndex = store.generationArtifacts.findIndex((candidate) => candidate.id === promotedArtifact.id);
-    if (existingIndex >= 0) store.generationArtifacts[existingIndex] = promotedArtifact;
-    else store.generationArtifacts.push(promotedArtifact);
+    const existingIndex = store.siteArtifacts.findIndex((candidate) => candidate.id === acceptedArtifact.id);
+    if (existingIndex >= 0) store.siteArtifacts[existingIndex] = acceptedArtifact;
+    else store.siteArtifacts.push(acceptedArtifact);
   }
-  generation.status = "promoted";
-  generation.createdSiteId = bundle.businessProfile.siteId;
-  generation.promotedAt = promotedAt;
-  generation.updatedAt = generation.promotedAt;
-  return {
-    generation: structuredClone(generation),
-    bundle
-  };
 }
 
 export function createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }) {
@@ -439,62 +638,179 @@ export function updateOwnerAssets(input: UpdateOwnerAssetsInput) {
   return result;
 }
 
-export function recordFormSubmission(input: {
-  siteId: string;
-  formId: string;
-  pageId?: string;
-  visitorId?: string;
-  payload: Record<string, unknown>;
-  metadata?: Record<string, string | number | boolean>;
-  sourceUrl?: string;
-  userAgent?: string;
-  ipHash?: string;
-}) {
-  const submission: LeadSubmission = {
+export function createInquiryFromForm(input: CreateInquiryFromFormInput): CreateInquiryFromFormResult {
+  const store = state();
+  const now = new Date().toISOString();
+  const contact = extractInquiryContact(input.form, input.payload);
+  const dedupeKey = inquiryDedupeKey({
+    siteId: input.siteId,
+    formId: input.form.id,
+    contactEmailNormalized: contact.contactEmailNormalized,
+    contactPhoneNormalized: contact.contactPhoneNormalized,
+    payload: input.payload
+  });
+  const duplicateEvent = store.inquiryEvents
+    .filter((event) => event.siteId === input.siteId && event.type === "form_submission" && event.dedupeKey === dedupeKey)
+    .filter((event) => Date.now() - new Date(event.createdAt).getTime() <= 2 * 60_000)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+  if (duplicateEvent) {
+    const event: InquiryEvent = {
+      id: crypto.randomUUID(),
+      siteId: input.siteId,
+      inquiryId: duplicateEvent.inquiryId,
+      type: "form_submission",
+      actor: "visitor",
+      messageText: inquiryMessageText(input.form, input.payload),
+      payload: structuredClone(input.payload),
+      sourceUrl: input.sourceUrl,
+      pageId: input.pageId,
+      formId: input.form.id,
+      dedupeKey,
+      metadata: {
+        ...input.metadata,
+        contactExtractionStatus: contact.status,
+        contactExtractionNotes: contact.notes,
+        dedupe: true,
+        duplicateOfEventId: duplicateEvent.id,
+        dedupeWindowSeconds: 120,
+        visitorId: input.visitorId,
+        ipHash: input.ipHash,
+        userAgent: input.userAgent
+      },
+      createdAt: now
+    };
+    store.inquiryEvents.push(event);
+    const inquiry = store.inquiries.find((candidate) => candidate.id === duplicateEvent.inquiryId);
+    if (!inquiry) throw new Error("Duplicate inquiry was not found.");
+    return { inquiry: structuredClone(inquiry), event: structuredClone(event), duplicate: true };
+  }
+
+  const inquiry: Inquiry = {
     id: crypto.randomUUID(),
     siteId: input.siteId,
-    formId: input.formId,
-    pageId: input.pageId,
-    visitorId: input.visitorId,
-    payload: input.payload,
-    metadata: input.metadata,
-    submittedAt: new Date().toISOString(),
-    sourceUrl: input.sourceUrl,
-    userAgent: input.userAgent,
-    ipHash: input.ipHash,
-    status: "new"
+    sourceChannel: "form",
+    contactName: contact.contactName,
+    contactEmail: contact.contactEmail,
+    contactEmailNormalized: contact.contactEmailNormalized,
+    contactPhone: contact.contactPhone,
+    contactPhoneNormalized: contact.contactPhoneNormalized,
+    status: "new",
+    notificationState: "queued",
+    aiEnrichmentState: "queued",
+    createdAt: now,
+    updatedAt: now
   };
-  state().submissions.push(submission);
-  return submission;
+  const event: InquiryEvent = {
+    id: crypto.randomUUID(),
+    siteId: input.siteId,
+    inquiryId: inquiry.id,
+    type: "form_submission",
+    actor: "visitor",
+    messageText: inquiryMessageText(input.form, input.payload),
+    payload: structuredClone(input.payload),
+    sourceUrl: input.sourceUrl,
+    pageId: input.pageId,
+    formId: input.form.id,
+    dedupeKey,
+    metadata: {
+      ...input.metadata,
+      contactExtractionStatus: contact.status,
+      contactExtractionNotes: contact.notes,
+      visitorId: input.visitorId,
+      ipHash: input.ipHash,
+      userAgent: input.userAgent
+    },
+    createdAt: now
+  };
+  store.inquiries.push(inquiry);
+  store.inquiryEvents.push(event);
+  return { inquiry: structuredClone(inquiry), event: structuredClone(event), duplicate: false };
 }
 
-export function listFormSubmissions(siteId?: string) {
-  return state().submissions.filter((submission) => !siteId || submission.siteId === siteId);
+export function listInquiries(siteId?: string) {
+  return state()
+    .inquiries.filter((inquiry) => !siteId || inquiry.siteId === siteId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((inquiry) => structuredClone(inquiry));
 }
 
-export function updateLeadStatus(input: { siteId: string; submissionId: string; status: LeadSubmission["status"] }) {
-  const submission = state().submissions.find(
-    (candidate) => candidate.siteId === input.siteId && candidate.id === input.submissionId
+export function getInquiry(siteId: string, inquiryId: string) {
+  const inquiry = state().inquiries.find((candidate) => candidate.siteId === siteId && candidate.id === inquiryId);
+  return inquiry ? structuredClone(inquiry) : null;
+}
+
+export function updateInquiryStatus(input: { siteId: string; inquiryId: string; status: Inquiry["status"] }) {
+  const inquiry = state().inquiries.find((candidate) => candidate.siteId === input.siteId && candidate.id === input.inquiryId);
+  if (!inquiry) return null;
+  inquiry.status = input.status;
+  inquiry.updatedAt = new Date().toISOString();
+  return structuredClone(inquiry);
+}
+
+export function updateInquiryNotificationState(input: { siteId: string; inquiryId: string; state: Inquiry["notificationState"] }) {
+  const inquiry = state().inquiries.find((candidate) => candidate.siteId === input.siteId && candidate.id === input.inquiryId);
+  if (!inquiry) return null;
+  inquiry.notificationState = input.state;
+  inquiry.updatedAt = new Date().toISOString();
+  return structuredClone(inquiry);
+}
+
+export function updateInquiryAiEnrichment(input: {
+  siteId: string;
+  inquiryId: string;
+  state: Inquiry["aiEnrichmentState"];
+  enrichment?: InquiryAiEnrichment;
+  error?: string;
+}) {
+  const inquiry = state().inquiries.find((candidate) => candidate.siteId === input.siteId && candidate.id === input.inquiryId);
+  if (!inquiry) return null;
+  inquiry.aiEnrichmentState = input.state;
+  if (input.enrichment) {
+    inquiry.aiEnrichment = input.enrichment;
+    inquiry.aiEnrichedAt = new Date().toISOString();
+    inquiry.aiEnrichmentError = undefined;
+  }
+  if (input.error !== undefined) inquiry.aiEnrichmentError = input.error;
+  inquiry.updatedAt = new Date().toISOString();
+  return structuredClone(inquiry);
+}
+
+export function listInquiryEvents(inquiryId: string) {
+  return state()
+    .inquiryEvents.filter((event) => event.inquiryId === inquiryId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((event) => structuredClone(event));
+}
+
+export function countRecentInquiries(siteId: string, since: string) {
+  return state().inquiries.filter((inquiry) => inquiry.siteId === siteId && inquiry.createdAt >= since).length;
+}
+
+export function recordInquiryDelivery(input: Omit<InquiryDelivery, "id" | "createdAt">) {
+  const existing = state().inquiryDeliveries.find(
+    (delivery) =>
+      delivery.inquiryId === input.inquiryId &&
+      delivery.workflowId === input.workflowId &&
+      delivery.destination === input.destination &&
+      delivery.target === input.target &&
+      delivery.status === "sent"
   );
-  if (!submission) return null;
-  submission.status = input.status;
-  return submission;
-}
-
-export function recordWorkflowDelivery(input: Omit<WorkflowDelivery, "id" | "createdAt">) {
-  const delivery: WorkflowDelivery = {
+  if (existing) return structuredClone(existing);
+  const delivery: InquiryDelivery = {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     ...input
   };
-  state().workflowDeliveries.push(delivery);
-  return delivery;
+  state().inquiryDeliveries.push(delivery);
+  return structuredClone(delivery);
 }
 
-export function listWorkflowDeliveries(siteId?: string) {
+export function listInquiryDeliveries(siteId?: string) {
   return state()
-    .workflowDeliveries.filter((delivery) => !siteId || delivery.siteId === siteId)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    .inquiryDeliveries.filter((delivery) => !siteId || delivery.siteId === siteId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .map((delivery) => structuredClone(delivery));
 }
 
 export function recordAnalyticsEvent(event: AnalyticsEvent) {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BusinessFactKind, GenerationArtifactV2, SiteBundle, SiteVersion } from "./models";
+import type { BusinessFactKind, SiteArtifactRecord, SiteBundle, SiteVersion } from "./models";
 
 export type PageOpportunityKindV2 = "service_page" | "location_page" | "faq_page";
 
@@ -19,7 +19,7 @@ export type PageOpportunityAuditV2Result = {
   skillVersion: "direct-module-v1";
   versionId?: string;
   opportunities: PageOpportunityV2[];
-  artifact: GenerationArtifactV2;
+  artifact: SiteArtifactRecord;
   summary: string;
 };
 
@@ -38,10 +38,10 @@ export function runPageOpportunitiesAuditV2(input: {
   ];
   const siteId = input.siteId ?? input.bundle.businessProfile.siteId;
   const contentHash = hashOpportunityPayload({ siteId, versionId: version?.id, opportunities });
-  const artifact: GenerationArtifactV2 = {
+  const artifact: SiteArtifactRecord = {
     id: `artifact_${siteId}_page_opportunities_${contentHash.slice(0, 16)}`,
     siteId,
-    scope: "managed_site_candidate",
+    scope: "site_alternative",
     artifactType: "page_opportunity_report",
     artifactVersion: "page-opportunity-report-v2",
     producerId: "strategy.page-opportunities",

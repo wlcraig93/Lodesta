@@ -1,7 +1,7 @@
 import "./load-env.mjs";
 import { fileURLToPath } from "node:url";
 
-const baseUrl = (process.env.LODESTA_API_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://127.0.0.1:4330").replace(
+const baseUrl = (process.env.LODESTA_API_URL ?? process.env.LODESTA_APP_ORIGIN ?? "http://127.0.0.1:4330").replace(
   /\/$/,
   ""
 );
@@ -71,8 +71,8 @@ async function main() {
       requireArgs(command, args, 2);
       await printJson(post("/api/business-profile", { siteId: args[0], ...JSON.parse(args.slice(1).join(" ")) }));
       return;
-    case "inspect-leads":
-      await printJson(get(`/api/leads${args[0] ? `?siteId=${encodeURIComponent(args[0])}` : ""}`));
+    case "inspect-inquiries":
+      await printJson(get(`/api/inquiries${args[0] ? `?siteId=${encodeURIComponent(args[0])}` : ""}`));
       return;
     case "update-experiment":
       requireArgs(command, args, 3);
@@ -255,7 +255,7 @@ Commands:
   connect-domain <siteId> <hostname>        Register a custom hostname and print verification
   refresh-domain <domainId>                 Refresh custom-domain provider status
   update-business <siteId> <json>           Update owner-truth business facts
-  inspect-leads [siteId]                   List captured leads
+  inspect-inquiries [siteId]               List captured inquiries
   update-experiment <siteId> <expId> <status> Start, pause, conclude, or rollback an experiment
   adopt-experiment-learning <siteId> <expId> Adopt a detected experiment winner into generation defaults
   enqueue-job <kind> [key=value|json]       Queue a worker job

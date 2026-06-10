@@ -45,9 +45,9 @@ export async function POST(request: Request) {
     version,
     siteId: bundle.businessProfile.siteId
   });
-  await repository.upsertGenerationArtifact(claimReport.artifact);
-  await repository.upsertGenerationArtifact(policyReport.artifact);
-  await repository.upsertGenerationArtifact(regulatedClaimsPolicy.artifact);
+  await repository.upsertSiteArtifact(claimReport.artifact);
+  await repository.upsertSiteArtifact(policyReport.artifact);
+  await repository.upsertSiteArtifact(regulatedClaimsPolicy.artifact);
 
   return NextResponse.json({
     versionId: version.id,

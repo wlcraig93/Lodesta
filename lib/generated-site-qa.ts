@@ -10,7 +10,6 @@ import type {
   SiteVersion,
   SiteVersionV2,
   SiteVersionV3,
-  VisualQaFinding,
   VisualQaResult
 } from "./models";
 import { registryAssetByUrl } from "./image-registry";
@@ -60,8 +59,7 @@ export function buildGeneratedSiteQaMetadata(input: {
   const { inspectionSummary, artifactRefs } = summarizeRenderInspection(input.inspection);
   const blockers = [
     ...blockersFromInspection(input.inspection),
-    ...blockersFromSiteModel(input.bundle, input.version),
-    ...blockersFromVisualQa(input.visualQa)
+    ...blockersFromSiteModel(input.bundle, input.version)
   ];
   const warnings = [...warningsFromInspection(input.inspection), ...warningsFromVisualQa(input.visualQa)];
   const readiness = aggregateReadinessV2({
@@ -542,34 +540,17 @@ function collectImageUrls(value: unknown): string[] {
   });
 }
 
-function blockersFromVisualQa(visualQa: VisualQaResult | undefined): GenerationQaBlocker[] {
-  return (
-    visualQa?.findings
-      .filter((finding) => finding.severity === "fail")
-      .map((finding) => ({
-        id: visualQaBlockerId(finding),
-        title: finding.title,
-        detail: finding.evidence,
-        viewport: finding.viewport
-      })) ?? []
-  );
-}
-
 function warningsFromVisualQa(visualQa: VisualQaResult | undefined): GenerationQaWarning[] {
   return (
     visualQa?.findings
-      .filter((finding) => finding.severity === "warning")
+      .filter((finding) => finding.severity === "warning" || finding.severity === "fail")
       .map((finding) => ({
         id: `visual_${finding.id}`,
         title: finding.title,
-        detail: finding.evidence,
+        detail: finding.severity === "fail" ? `Model QA flagged this as a launch concern: ${finding.evidence}` : finding.evidence,
         viewport: finding.viewport
       })) ?? []
   );
-}
-
-function visualQaBlockerId(finding: VisualQaFinding) {
-  return `visual_${finding.id.replace(/[^a-z0-9_.-]+/gi, "_")}`;
 }
 
 function blockerForRenderFinding(finding: RenderInspectionFinding): GenerationQaBlocker | undefined {

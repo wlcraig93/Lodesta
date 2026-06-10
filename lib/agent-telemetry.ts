@@ -47,7 +47,7 @@ export type AgentTelemetryRecorder = {
   failRun(error: unknown, input?: Omit<UpdateAgentRunInput, "runId" | "status" | "endedAt" | "errorMessage">): Promise<void>;
 };
 
-export type SiteGenerationTelemetryInput = {
+export type SiteCandidateTelemetryInput = {
   source: AgentRunSource;
   url?: string;
   prompt?: string;
@@ -65,18 +65,18 @@ export type RequiredAgentTelemetryRecorder = AgentTelemetryRecorder & {
   runId: string;
 };
 
-export async function startRequiredSiteGenerationTelemetry(
+export async function startRequiredSiteCandidateTelemetry(
   repository: AgentTelemetryRepository,
-  input: SiteGenerationTelemetryInput
+  input: SiteCandidateTelemetryInput
 ): Promise<RequiredAgentTelemetryRecorder> {
-  const run = await repository.createAgentRun(siteGenerationRunInput(input));
+  const run = await repository.createAgentRun(siteCandidateRunInput(input));
   if (!run?.id) {
-    throw new Error("Required site-generation telemetry run was not created.");
+    throw new Error("Required site-candidate telemetry run was not created.");
   }
   return new RepositoryAgentTelemetry(repository, run.id, input.source);
 }
 
-function siteGenerationRunInput(input: SiteGenerationTelemetryInput): CreateAgentRunInput {
+function siteCandidateRunInput(input: SiteCandidateTelemetryInput): CreateAgentRunInput {
   const sourceUrl = input.url;
   return {
     runType: "site_generation",
@@ -87,7 +87,7 @@ function siteGenerationRunInput(input: SiteGenerationTelemetryInput): CreateAgen
     sourceHost: sourceUrl ? hostnameFromUrl(sourceUrl) : undefined,
     actorType: input.actorType,
     actorId: input.actorId,
-    inputSummary: input.url ?? input.prompt?.slice(0, 240) ?? "Prompt-only site generation",
+    inputSummary: input.url ?? input.prompt?.slice(0, 240) ?? "Prompt-only site candidate",
     inputJson: sanitizeTelemetryPayload({
       url: input.url,
       prompt: input.prompt

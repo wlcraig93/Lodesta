@@ -3,7 +3,7 @@ import "../scripts/load-env";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createSiteFromInput } from "../lib/intake";
 import { repository } from "../lib/repository";
-import { generateSite } from "../lib/site-generation-service";
+import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
 import { runAudit } from "../lib/audit";
 

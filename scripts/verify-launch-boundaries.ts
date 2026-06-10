@@ -10,11 +10,12 @@ import type {
   AgentRunSpanRecord,
   AnalyticsEvent,
   ClaimRecord,
+  Inquiry,
+  InquiryEvent,
   JobRecord,
-  LeadSubmission,
   OptimizationFinding,
   PreviewToken,
-  SiteGenerationRecord
+  SiteCandidateRecord
 } from "../lib/models";
 import { summarizeAnalytics } from "../lib/analytics";
 import { readLocalAsset, storeAssetBytes, storeGeneratedAssetBytes } from "../lib/asset-storage";
@@ -27,7 +28,7 @@ import { validateBusinessProfileUpdate, validateSectionUpdate } from "../lib/edi
 import { applyBusinessProfileUpdate } from "../lib/business-profile-update";
 import { applyFormSettingsUpdate } from "../lib/form-settings";
 import { validateFormSubmission } from "../lib/form-validation";
-import { executeFormSubmissionWorkflows } from "../lib/workflows";
+import { executeInquiryNotificationWorkflows } from "../lib/workflows";
 import { createSiteFromInput } from "../lib/intake";
 import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
@@ -75,23 +76,23 @@ import { getPublishedVersion } from "../lib/sample-data";
 import { coldUrlCheckableChecks, evaluateSiteAgainstStandard } from "../lib/standard-evaluation";
 import { applyVerifiedFacts, requiredClaimFactIds } from "../lib/fact-verification";
 import { claimGateForBundle, isIndexableSite } from "../lib/site-publication";
-import { makeLocalBusinessJsonLd, serializeJsonLd } from "../lib/structured-data";
+import { makeLocalBusinessJsonLd, makeLocalBusinessJsonLdForBundle, serializeJsonLd } from "../lib/structured-data";
 import { restoreVersionToDraftBundle } from "../lib/site-versions";
 import {
   completeClaimCheckout as completeLocalClaimCheckout,
-  createSiteGeneration as createLocalSiteGeneration,
+  createSiteCandidate as createLocalSiteCandidate,
   createAndStoreSite as createLocalStoreSite,
   createPreviewToken as createLocalPreviewToken,
   createClaim as createLocalClaim,
   getSiteBundle as getLocalSiteBundle,
   listSiteBundles as listLocalSiteBundles,
-  promoteSiteGeneration as promoteLocalSiteGeneration,
+  acceptSiteCandidateAsSite as acceptLocalSiteCandidateAsSite,
   recordClaimCheckoutSession,
   resolvePreviewToken as resolveLocalPreviewToken
 } from "../lib/store";
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
 import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
-import { generateSite, type SiteGenerationRepository } from "../lib/site-generation-service";
+import { generateSite, type SiteCandidateRepository } from "../lib/site-candidate-service";
 import { applyPropsToLayoutSection, propsForLayoutSection, syncLegacySectionsFromLayout } from "../lib/layout-registry";
 
 const bundle = createSiteFromInput({
@@ -373,7 +374,7 @@ for (const [command, markers] of [
   ["create-preview", ['post("/api/preview-tokens"']],
   ["publish", ['post("/api/sites/publish"', "confirmed: true"]],
   ["apply-safe-findings", ['post("/api/action-list/apply-all"']],
-  ["inspect-leads", ["get(`/api/leads"]],
+  ["inspect-inquiries", ["get(`/api/inquiries"]],
   ["connect-domain", ['post("/api/domains"', 'provider: "cloudflare_for_saas"']],
   ["monthly-action-list", ['post("/api/jobs"', 'kind: "monthly_action_list"', 'post("/api/jobs/process"']],
   ["process-jobs", ['post("/api/jobs/process"']]
@@ -385,7 +386,7 @@ assertCliTransportUsesHttpApis();
 const authEnvSnapshot = {
   nodeEnv: process.env.NODE_ENV,
   requireAuth: process.env.LODESTA_REQUIRE_AUTH,
-  appUrl: process.env.NEXT_PUBLIC_APP_URL,
+  appOrigin: process.env.LODESTA_APP_ORIGIN,
   adminToken: process.env.LODESTA_ADMIN_TOKEN,
   adminUserId: process.env.LODESTA_ADMIN_USER_ID,
   hashSecret: process.env.LODESTA_HASH_SECRET,
@@ -393,7 +394,9 @@ const authEnvSnapshot = {
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
   nextSupabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  nextSupabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  nextSupabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  locationMapMode: process.env.LODESTA_LOCATION_MAP_MODE,
+  googleMapsEmbedApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
 };
 try {
   setEnv("NODE_ENV", "development");
@@ -454,13 +457,15 @@ try {
   assert(isAdminUserId("admin-user-id"), "Admin page policy should match the configured Supabase admin user id.");
   assert(!isAdminUserId("owner-user-id"), "Admin page policy should reject Supabase user ids outside the admin setting.");
 
-  delete process.env.NEXT_PUBLIC_APP_URL;
+  delete process.env.LODESTA_APP_ORIGIN;
   delete process.env.LODESTA_HASH_SECRET;
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_ANON_KEY;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   delete process.env.NEXT_PUBLIC_SUPABASE_URL;
   delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  delete process.env.LODESTA_LOCATION_MAP_MODE;
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
   const productionHealth = await getHealthReport();
   assert(
     healthCheckState(productionHealth, "repository") === "error",
@@ -468,7 +473,7 @@ try {
   );
   assert(
     healthCheckState(productionHealth, "app_url") === "error",
-    "Production health must require NEXT_PUBLIC_APP_URL."
+    "Production health must require LODESTA_APP_ORIGIN."
   );
   assert(
     healthCheckState(productionHealth, "supabase_auth") === "error",
@@ -478,8 +483,12 @@ try {
     healthCheckState(productionHealth, "hash_secret") === "error",
     "Production health must require LODESTA_HASH_SECRET."
   );
+  assert(
+    healthCheckState(productionHealth, "location_maps") === "ok",
+    "Location maps should default to link-only without requiring a Google Maps key."
+  );
 
-  process.env.NEXT_PUBLIC_APP_URL = "https://app.example";
+  process.env.LODESTA_APP_ORIGIN = "https://app.example";
   process.env.LODESTA_HASH_SECRET = "boundary-health-hash-secret";
   process.env.SUPABASE_URL = "https://supabase.example";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
@@ -490,10 +499,25 @@ try {
   assert(healthCheckState(configuredHealth, "app_url") === "ok", "Configured application URL health should pass.");
   assert(healthCheckState(configuredHealth, "supabase_auth") === "ok", "Configured Supabase Auth health should pass.");
   assert(healthCheckState(configuredHealth, "hash_secret") === "ok", "Configured hash secret health should pass.");
+  assert(healthCheckState(configuredHealth, "location_maps") === "ok", "Link-only location map health should pass without an embed key.");
+
+  process.env.LODESTA_LOCATION_MAP_MODE = "embed";
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  const embedWithoutKeyHealth = await getHealthReport();
+  assert(
+    healthCheckState(embedWithoutKeyHealth, "location_maps") === "warning",
+    "Embed location map mode should warn until NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY is configured."
+  );
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY = "browser-restricted-public-key";
+  const embedWithKeyHealth = await getHealthReport();
+  assert(
+    healthCheckState(embedWithKeyHealth, "location_maps") === "ok",
+    "Embed location map mode should pass when a public browser-restricted key is configured."
+  );
 } finally {
   restoreEnv("NODE_ENV", authEnvSnapshot.nodeEnv);
   restoreEnv("LODESTA_REQUIRE_AUTH", authEnvSnapshot.requireAuth);
-  restoreEnv("NEXT_PUBLIC_APP_URL", authEnvSnapshot.appUrl);
+  restoreEnv("LODESTA_APP_ORIGIN", authEnvSnapshot.appOrigin);
   restoreEnv("LODESTA_ADMIN_TOKEN", authEnvSnapshot.adminToken);
   restoreEnv("LODESTA_ADMIN_USER_ID", authEnvSnapshot.adminUserId);
   restoreEnv("LODESTA_HASH_SECRET", authEnvSnapshot.hashSecret);
@@ -502,6 +526,8 @@ try {
   restoreEnv("SUPABASE_SERVICE_ROLE_KEY", authEnvSnapshot.supabaseServiceRoleKey);
   restoreEnv("NEXT_PUBLIC_SUPABASE_URL", authEnvSnapshot.nextSupabaseUrl);
   restoreEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", authEnvSnapshot.nextSupabaseAnonKey);
+  restoreEnv("LODESTA_LOCATION_MAP_MODE", authEnvSnapshot.locationMapMode);
+  restoreEnv("NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY", authEnvSnapshot.googleMapsEmbedApiKey);
 }
 
 const generatedEvaluation = evaluateSiteAgainstStandard(bundle);
@@ -921,36 +947,43 @@ assert(
   ),
   "Monthly recommendations should turn poor Web Vitals into a Standard-backed performance Action List item."
 );
-const monthlyLeadSubmissions: LeadSubmission[] = [
+const monthlyInquiries: Inquiry[] = [
   {
-    id: "lead_monthly_new",
+    id: "inquiry_monthly_new",
     siteId: bundle.businessProfile.siteId,
-    formId: "form_contact",
-    pageId: "page_home",
-    payload: { name: "New Lead", email: "new@example.com" },
-    metadata: { utmSource: "mailer", utmCampaign: "postcard" },
-    sourceUrl: "https://boundary-verify.example/?utm_source=mailer&utm_campaign=postcard",
-    submittedAt: "2026-05-29T12:03:00.000Z",
-    status: "new"
+    sourceChannel: "form",
+    contactName: "New Lead",
+    contactEmail: "new@example.com",
+    contactEmailNormalized: "new@example.com",
+    status: "new",
+    notificationState: "queued",
+    aiEnrichmentState: "queued",
+    createdAt: "2026-05-29T12:03:00.000Z",
+    updatedAt: "2026-05-29T12:03:00.000Z"
   },
   {
-    id: "lead_monthly_reviewed",
+    id: "inquiry_monthly_needs_reply",
     siteId: bundle.businessProfile.siteId,
-    formId: "form_contact",
-    pageId: "page_home",
-    payload: { name: "Reviewed Lead", email: "reviewed@example.com" },
-    metadata: { referrerHost: "search.example" },
-    submittedAt: "2026-05-29T12:04:00.000Z",
-    status: "reviewed"
+    sourceChannel: "form",
+    contactName: "Needs Reply Lead",
+    contactEmail: "needs-reply@example.com",
+    contactEmailNormalized: "needs-reply@example.com",
+    status: "needs_reply",
+    notificationState: "completed",
+    aiEnrichmentState: "queued",
+    createdAt: "2026-05-29T12:04:00.000Z",
+    updatedAt: "2026-05-29T12:04:00.000Z"
   },
   {
-    id: "lead_monthly_spam",
+    id: "inquiry_monthly_spam",
     siteId: bundle.businessProfile.siteId,
-    formId: "form_quote",
-    pageId: "page_contact",
-    payload: { name: "Spam Lead" },
-    submittedAt: "2026-05-29T12:05:00.000Z",
-    status: "spam"
+    sourceChannel: "form",
+    contactName: "Spam Lead",
+    status: "spam",
+    notificationState: "skipped",
+    aiEnrichmentState: "skipped",
+    createdAt: "2026-05-29T12:05:00.000Z",
+    updatedAt: "2026-05-29T12:05:00.000Z"
   }
 ];
 const monthlyActionListResult = (await executeJob(
@@ -971,30 +1004,33 @@ const monthlyActionListResult = (await executeJob(
     analyticsSummary: async () => analyticsProbe,
     analyzeExperiments: async () => [],
     listExperimentLearnings: async () => [],
-    listFormSubmissions: async () => monthlyLeadSubmissions
+    listInquiries: async () => monthlyInquiries
   }
 )) as {
   leads?: number;
   leadSummary?: {
     total?: number;
     new?: number;
-    reviewed?: number;
+    needs_reply?: number;
     spam?: number;
-    byForm?: Array<{ formId: string; total: number }>;
-    recent?: Array<{ id: string; sourceHost?: string; utmSource?: string; utmCampaign?: string }>;
+    byChannel?: Array<{ channel: string; total: number }>;
+    recent?: Array<{ id: string; sourceChannel?: string; status?: string; contactEmail?: string }>;
   };
 };
 assert(
   monthlyActionListResult.leads === 3 &&
     monthlyActionListResult.leadSummary?.total === 3 &&
     monthlyActionListResult.leadSummary.new === 1 &&
-    monthlyActionListResult.leadSummary.reviewed === 1 &&
+    monthlyActionListResult.leadSummary.needs_reply === 1 &&
     monthlyActionListResult.leadSummary.spam === 1 &&
-    monthlyActionListResult.leadSummary.byForm?.some((row) => row.formId === "form_contact" && row.total === 2) &&
+    monthlyActionListResult.leadSummary.byChannel?.some((row) => row.channel === "form" && row.total === 3) &&
     monthlyActionListResult.leadSummary.recent?.some(
-      (lead) => lead.id === "lead_monthly_new" && lead.sourceHost === "boundary-verify.example" && lead.utmSource === "mailer"
+      (inquiry) =>
+        inquiry.id === "inquiry_monthly_new" &&
+        inquiry.sourceChannel === "form" &&
+        inquiry.contactEmail === "new@example.com"
     ),
-  "Monthly action-list jobs should include a lead summary with status counts, form counts, and safe attribution."
+  "Monthly action-list jobs should include an inquiry summary with status counts and source-channel counts."
 );
 const telemetryCleanupResult = (await executeJob(
   {
@@ -1315,6 +1351,10 @@ assert(
       '<https://www.boundary-verify.example/>; rel="canonical"; type="text/html"',
   "Markdown alternates should summarize public page content and point back to the canonical HTML URL."
 );
+for (const forbiddenAgentReadableLeak of ["GOOGLE_MAPS_EMBED_API_KEY", "googleMapsUri", "ratingValue", "reviewCount"]) {
+  assert(!claimedLlmsTxt?.includes(forbiddenAgentReadableLeak), `llms.txt must not leak ${forbiddenAgentReadableLeak}.`);
+  assert(!claimedMarkdown.includes(forbiddenAgentReadableLeak), `Markdown alternates must not leak ${forbiddenAgentReadableLeak}.`);
+}
 for (const privatePath of [
   "/",
   "/api/forms/submit",
@@ -1692,6 +1732,58 @@ assert(
   Boolean(firstPartyReviewSchema?.aggregateRating),
   "LocalBusiness JSON-LD may emit aggregate ratings only when the review summary is verified and not Google-derived."
 );
+const multiLocationJsonLdBundle = structuredClone(structuredDataBundle);
+multiLocationJsonLdBundle.locations = [
+  {
+    id: "loc_owner_verified",
+    businessId: "biz_boundary",
+    label: "Owner verified",
+    address: structuredDataBundle.businessProfile.address,
+    serviceAreas: ["Austin"],
+    phone: structuredDataBundle.businessProfile.phone,
+    hours: structuredDataBundle.businessProfile.hours,
+    provenance: {
+      address: { source: "owner", confidence: 1, verified: true, observedAt: new Date().toISOString() },
+      phone: { source: "owner", confidence: 1, verified: true, observedAt: new Date().toISOString() },
+      hours: { source: "owner", confidence: 1, verified: true, observedAt: new Date().toISOString() },
+      serviceAreas: { source: "owner", confidence: 1, verified: true, observedAt: new Date().toISOString() }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "loc_google_enriched",
+    businessId: "biz_boundary",
+    label: "Google enriched",
+    address: {
+      street: "200 Google Way",
+      city: "Austin",
+      region: "TX",
+      postalCode: "78702",
+      country: "US"
+    },
+    serviceAreas: ["Austin"],
+    phone: "+1555010200",
+    provenance: {
+      address: { source: "places_api", confidence: 0.9, verified: true, observedAt: new Date().toISOString() }
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+multiLocationJsonLdBundle.locationBindings = [
+  { locationId: "loc_owner_verified", role: "primary", orderIndex: 0 },
+  { locationId: "loc_google_enriched", role: "covered", orderIndex: 1 }
+];
+const multiLocationJsonLd = JSON.stringify(makeLocalBusinessJsonLdForBundle({
+  business: multiLocationJsonLdBundle.businessProfile,
+  locations: multiLocationJsonLdBundle.locations,
+  locationBindings: multiLocationJsonLdBundle.locationBindings
+}));
+assert(
+  multiLocationJsonLd.includes("Owner verified") && !multiLocationJsonLd.includes("Google enriched") && !multiLocationJsonLd.includes("200 Google Way"),
+  "Bundle-aware location JSON-LD should emit owner/manual/website-verified locations and exclude Google-derived location facts."
+);
 const serializedJsonLd = serializeJsonLd({ name: "</script><script>alert(1)</script>", sameAs: ["https://example.com?a=1&b=2"] });
 assert(
   !serializedJsonLd.includes("</script>") &&
@@ -1806,21 +1898,36 @@ const unsafeWebhookBundle = structuredClone(qaBundle);
 unsafeWebhookBundle.extensionModel.workflows = [
   {
     id: "workflow_unsafe_webhook",
-    trigger: "form_submission",
+    trigger: "inquiry_created",
     destination: "webhook",
     config: { url: "http://127.0.0.1:3000/private-leads" }
   }
 ];
-const unsafeWebhookLead: LeadSubmission = {
-  id: "lead_unsafe_webhook",
+const unsafeWebhookInquiry: Inquiry = {
+  id: "inquiry_unsafe_webhook",
   siteId: unsafeWebhookBundle.businessProfile.siteId,
+  sourceChannel: "form",
+  contactName: "Boundary Owner",
+  contactEmail: "owner@example.com",
+  contactEmailNormalized: "owner@example.com",
+  status: "new",
+  notificationState: "queued",
+  aiEnrichmentState: "queued",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+};
+const unsafeWebhookEvent: InquiryEvent = {
+  id: "event_unsafe_webhook",
+  siteId: unsafeWebhookBundle.businessProfile.siteId,
+  inquiryId: unsafeWebhookInquiry.id,
+  type: "form_submission",
+  actor: "visitor",
   formId: unsafeWebhookBundle.extensionModel.forms[0]?.id ?? "form_contact",
   pageId: "page_home",
   payload: { name: "Boundary Owner", email: "owner@example.com" },
-  submittedAt: new Date().toISOString(),
-  status: "new"
+  createdAt: new Date().toISOString()
 };
-const unsafeWebhookDeliveries = await executeFormSubmissionWorkflows(unsafeWebhookBundle, unsafeWebhookLead, async (delivery) => ({
+const unsafeWebhookDeliveries = await executeInquiryNotificationWorkflows(unsafeWebhookBundle, unsafeWebhookInquiry, unsafeWebhookEvent, async (delivery) => ({
   id: "delivery_unsafe_webhook",
   createdAt: new Date().toISOString(),
   ...delivery
@@ -2294,15 +2401,15 @@ async function verifyCanonicalGenerationService() {
   assert(
     generated.runId === "run_generation_probe" &&
       success.state.persisted === 1 &&
-      generated.generationId === "sitegen_rungenerationprobe" &&
-      generated.bundle.businessProfile.siteId === generated.generationId &&
+      generated.siteCandidateId === "sitecand_rungenerationprobe" &&
+      generated.bundle.businessProfile.siteId === generated.siteCandidateId &&
       success.state.runUpdates.some(
         (update) =>
           update.status === "completed" &&
-          update.targetType === "site_generation" &&
-          update.targetId === generated.generationId
+          update.targetType === "site_candidate" &&
+          update.targetId === generated.siteCandidateId
       ),
-    "Canonical generation should create telemetry, persist one site generation, attach the generation target, and complete the run."
+    "Canonical generation should create telemetry, persist one site candidate, attach the candidate target, and complete the run."
   );
 
   const repeatedFirst = await generateSite({
@@ -2318,15 +2425,15 @@ async function verifyCanonicalGenerationService() {
   const firstAssetIds = new Set(repeatedFirst.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
   const secondAssetIds = new Set(repeatedSecond.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
   assert(
-    repeatedFirst.generationId !== repeatedSecond.generationId &&
+    repeatedFirst.siteCandidateId !== repeatedSecond.siteCandidateId &&
       [...firstAssetIds].every((assetId) => !secondAssetIds.has(assetId)),
-    "Repeated generation of the same source should create independent site-generation identities and asset ids."
+    "Repeated generation of the same source should create independent site-candidate identities and asset ids."
   );
 
   const previewRequested = createGenerationServiceProbe();
   const previewSkipped = await generateSite({
     repository: previewRequested.repository,
-    input: { prompt: "Build a site for a post-promotion preview probe." },
+    input: { prompt: "Build a site for a post-acceptance preview probe." },
     source: "api",
     preview: { create: true, origin: "https://app.example" }
   });
@@ -2335,35 +2442,38 @@ async function verifyCanonicalGenerationService() {
       previewRequested.state.runUpdates.some(
         (update) =>
           update.status === "completed" &&
-          update.metadata?.previewStatus === "admin_only_until_promotion"
+          update.targetType === "site_candidate" &&
+          update.targetId === previewSkipped.siteCandidateId
       ),
-    "Canonical generation should not create tokenized previews before promotion to a managed site."
+    "Canonical generation should not create tokenized previews before acceptance into a managed site."
   );
 
   const localSiteCount = listLocalSiteBundles().length;
   const candidateBundle = createSiteFromInput({
-    prompt: "Build a site generation promotion candidate.",
-    identity: { siteId: "sitegen_boundary_promotion_candidate" }
+    prompt: "Build a site candidate acceptance candidate.",
+    identity: { siteId: "sitecand_boundary_acceptance_candidate" }
   });
-  const candidate = createLocalSiteGeneration({
-    id: "sitegen_boundary_promotion_candidate",
-    agentRunId: "run_boundary_promotion_candidate",
+  const candidate = createLocalSiteCandidate({
+    id: "sitecand_boundary_acceptance_candidate",
+    agentRunId: "run_boundary_acceptance_candidate",
     bundle: candidateBundle
   });
   assert(
     listLocalSiteBundles().length === localSiteCount &&
       !getLocalSiteBundle(candidate.bundle.businessProfile.siteId) &&
       !resolveLocalPreviewToken(candidate.id),
-    "A site generation should not create a managed site or tokenized preview before promotion."
+    "A site candidate should not create a managed site or tokenized preview before acceptance."
   );
-  const promoted = promoteLocalSiteGeneration(candidate.id);
-  const promotedAgain = promoteLocalSiteGeneration(candidate.id);
+  const accepted = acceptLocalSiteCandidateAsSite(candidate.id);
+  const acceptedAgain = acceptLocalSiteCandidateAsSite(candidate.id);
   assert(
-    promoted?.bundle.businessProfile.siteId.startsWith("site_") &&
-      promoted.generation.status === "promoted" &&
-      promoted.generation.createdSiteId === promoted.bundle.businessProfile.siteId &&
-      promotedAgain?.bundle.businessProfile.siteId === promoted.bundle.businessProfile.siteId,
-    "Promoting a site generation should create one managed site and remain idempotent."
+    accepted?.ok &&
+      accepted.bundle.businessProfile.siteId.startsWith("site_") &&
+      accepted.candidate.status === "accepted" &&
+      accepted.candidate.acceptedSiteId === accepted.bundle.businessProfile.siteId &&
+      acceptedAgain?.ok &&
+      acceptedAgain.bundle.businessProfile.siteId === accepted.bundle.businessProfile.siteId,
+    "Accepting a site candidate should create one managed site and remain idempotent."
   );
 }
 
@@ -2371,8 +2481,8 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
   const now = new Date("2026-05-29T12:00:00.000Z").toISOString();
   const state = {
     persisted: 0,
-    runUpdates: [] as Array<Parameters<SiteGenerationRepository["updateAgentRun"]>[0]>,
-    spanUpdates: [] as Array<Parameters<SiteGenerationRepository["updateAgentRunSpan"]>[0]>
+    runUpdates: [] as Array<Parameters<SiteCandidateRepository["updateAgentRun"]>[0]>,
+    spanUpdates: [] as Array<Parameters<SiteCandidateRepository["updateAgentRunSpan"]>[0]>
   };
   const run: AgentRunRecord = {
     id: options.runId ?? "run_generation_probe",
@@ -2393,7 +2503,7 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
     status: "running",
     startedAt: now
   };
-  const repository: SiteGenerationRepository = {
+  const repository: SiteCandidateRepository = {
     async createAgentRun() {
       return options.telemetryUnavailable ? null : run;
     },
@@ -2430,10 +2540,11 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
     async recordAgentModelCall() {
       return null as AgentModelCallRecord | null;
     },
-    async createSiteGeneration(input) {
+    async createSiteCandidate(input) {
       state.persisted += 1;
-      const generation: SiteGenerationRecord = {
-        id: input.id ?? "sitegen_generation_probe",
+      const generation: SiteCandidateRecord = {
+        id: input.id ?? "sitecand_generation_probe",
+        businessId: input.businessId ?? `biz_${input.bundle.businessProfile.id}`,
         agentRunId: input.agentRunId,
         sourceUrl: input.sourceUrl,
         sourceHost: input.sourceHost,
@@ -2447,7 +2558,7 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
       };
       return generation;
     },
-    async upsertGenerationArtifact(artifact) {
+    async upsertSiteArtifact(artifact) {
       return artifact;
     },
     async listExperimentLearnings() {

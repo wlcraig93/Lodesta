@@ -1707,6 +1707,24 @@ async function main() {
     console.log("craft loop tier 2/3 checks passed");
   }
 
+  // --- fingerprintV1 ---
+  {
+    const { computeFingerprintV1, fingerprintDistanceV1, minPairwiseDistanceV1 } = await import("../lib/fingerprint-v1");
+    const fpBundleA = createSiteFromInput({
+      prompt: "Build a website for Fp Tire One, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0301"
+    });
+    const fpBundleB = createSiteFromInput({
+      prompt: "Build a website for Fp Salon Two, a beauty salon in Austin offering haircuts, color, and styling. phone: 512-555-0302"
+    });
+    const fpA = computeFingerprintV1(compileGeneratedSiteV3Site({ bundle: fpBundleA }).version);
+    const fpA2 = computeFingerprintV1(compileGeneratedSiteV3Site({ bundle: structuredClone(fpBundleA) }).version);
+    const fpB = computeFingerprintV1(compileGeneratedSiteV3Site({ bundle: fpBundleB }).version);
+    assert.equal(fingerprintDistanceV1(fpA, fpA2), 0, "same input → identical fingerprint, distance 0");
+    assert.ok(fingerprintDistanceV1(fpA, fpB) > 25, "cross-vertical compiles are distinct");
+    assert.equal(minPairwiseDistanceV1([fpA]), undefined, "single fingerprint has no pairwise distance");
+    console.log("fingerprint v1 checks passed");
+  }
+
   console.log("verify-generation-quality-v2: all checks passed");
 }
 

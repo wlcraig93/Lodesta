@@ -33,6 +33,7 @@ import {
 import { withBusinessBundleFields } from "./business-model";
 import { isDynamicHoursStatus } from "./business-understanding-v2";
 import { deriveBrandThemeV2, siteVariationSeedV2, type BrandCueReportV2 } from "./brand-derivation-v2";
+import { resolveBrief } from "./design-brief-v1";
 import {
   registerForVertical,
   resolveDesignControlsV3,
@@ -137,8 +138,9 @@ export function compileGeneratedSiteV3Site(input: ({
     brandAssessment: bundle.presenceAssessment?.brandAssessment
   });
   const theme = brandDerivation.theme ?? presetTheme;
-  const designProfile = designProfileForBusiness(business, brandDerivation.report.applied);
-  const designControls = resolveDesignControlsV3(designProfile);
+  const brief = bundle.presenceAssessment?.designBrief;
+  const designProfile = brief?.profile ?? designProfileForBusiness(business, brandDerivation.report.applied);
+  const designControls = resolveBrief(designProfile, brief?.overrides, "solid_editorial");
   const composition = v3PageSectionsForBusiness(business, media, locationContext, copyDeck);
   {
     // Validate controls against the COMPOSED header mode, not a static one:

@@ -1594,6 +1594,50 @@ async function main() {
     console.log("craft loop slice 4 checks passed");
   }
 
+  // --- Model design brief (Part 2.4) ---
+  {
+    const { createDesignBrief, resolveBrief } = await import("../lib/design-brief-v1");
+    const { resolveDesignControlsV3 } = await import("../lib/generated-site-v3-art-direction-catalog");
+
+    // No API key → no brief; the compiler's deterministic tier carries.
+    const briefBundle = createSiteFromInput({
+      prompt: "Build a website for Brief Tire, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0188"
+    });
+    assert.equal(
+      await createDesignBrief({ business: briefBundle.businessProfile, brandApplied: true }),
+      undefined,
+      "brief is absent without a model key"
+    );
+
+    // Valid overrides merge; incompatible override sets fall back to pure profile.
+    const profile = { register: "punchy_retail" as const, brandPosture: "reserved" as const };
+    const base = resolveDesignControlsV3(profile);
+    const merged = resolveBrief(profile, { cardChrome: "elevated" }, "solid_editorial");
+    assert.equal(merged.cardChrome, "elevated", "valid override applies");
+    assert.equal(merged.eyebrowTreatment, base.eyebrowTreatment, "non-overridden controls keep profile values");
+    const incompatible = resolveBrief(
+      { register: "steady_professional", brandPosture: "reserved" },
+      { headingCase: "display_upper" },
+      "solid_editorial"
+    );
+    assert.deepEqual(
+      incompatible,
+      resolveDesignControlsV3({ register: "steady_professional", brandPosture: "reserved" }),
+      "override tripping the incompatibility table (display_upper + plain_caps) falls back to profile resolution"
+    );
+
+    // Compiled version consumes a bundle-level brief.
+    briefBundle.presenceAssessment.designBrief = {
+      profile: { register: "warm_boutique", brandPosture: "reserved", rationale: "test brief" },
+      overrides: { badgeStyle: "rounded" },
+      source: "model"
+    };
+    const briefCompiled = compileGeneratedSiteV3Site({ bundle: briefBundle });
+    assert.equal(briefCompiled.version.artDirection.designProfile?.register, "warm_boutique", "brief profile wins over deterministic");
+    assert.equal(briefCompiled.version.artDirection.controls?.badgeStyle, "rounded", "brief override survives compile");
+    console.log("design brief checks passed");
+  }
+
   console.log("verify-generation-quality-v2: all checks passed");
 }
 

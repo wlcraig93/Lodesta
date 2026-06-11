@@ -14,6 +14,7 @@ import { extractImagePalette } from "./image-palette";
 import { createOpenAiGeneratedCopyDeck, lintGeneratedCopyDeck } from "./generated-copy-v2";
 import { runInitialGeneratedSiteReadiness } from "./generated-site-readiness";
 import { runShadowCraftLoop } from "./craft-loop";
+import { createDesignBrief } from "./design-brief-v1";
 import { maybeApplyGeneratedSiteV3, maybeApplyGeneratedSiteV3WithAssetLibrary } from "./generated-site-v3-pipeline";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { evaluatePreCompileResolutionGateV2 } from "./precompile-resolution-gate";
@@ -161,6 +162,19 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     } catch (error) {
       await copySpan.fail(error);
       throw error;
+    }
+    // Model design brief (Part 2.4): profile-level art direction reasoning.
+    // Non-fatal — the compiler's deterministic selector is the fallback tier.
+    try {
+      const brief = await createDesignBrief({
+        business: bundle.businessProfile,
+        understanding: bundle.presenceAssessment.businessUnderstanding,
+        brandApplied: Boolean(bundle.presenceAssessment.brandAssessment?.colorSignals?.length),
+        telemetry
+      });
+      if (brief) bundle.presenceAssessment.designBrief = brief;
+    } catch (briefError) {
+      console.warn("Design brief unavailable; deterministic selection will be used.", briefError instanceof Error ? briefError.message : briefError);
     }
     // Real photos for protected previews: download crawl media into private
     // storage (reference_only; publish requires per-photo attestation).

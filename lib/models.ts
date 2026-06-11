@@ -1015,7 +1015,12 @@ export type GenerationQualityRubricScores = {
 export type GenerationQualityReport = {
   version: "generation-quality-v2";
   overallScore: number;
-  /** Model-judged craft grade (1-10), anchored and reported separately from the floor score. */
+  /**
+   * INTERNAL measurement instrument only: the critic judges on an anchored
+   * 1-10 scale (coarse anchored scales keep LLM judges consistent). The
+   * reported metric is the scorecard's visual_design dimension (craft x 10,
+   * 0-100). Never surface this raw value to operators — read the scorecard.
+   */
   craft?: number;
   rubric: GenerationQualityRubricScores;
   findings: GenerationQualityFinding[];
@@ -1979,6 +1984,12 @@ export type PresenceAssessment = {
   generationPlanningSource?: "openai" | "deterministic_fallback";
   businessUnderstanding?: BusinessUnderstandingV2;
   generatedCopyDeck?: GeneratedCopyDeckV2;
+  /** Model design brief (profile + validated control overrides); compiler falls back to deterministic selection when absent. */
+  designBrief?: {
+    profile: import("./generated-site-v3-art-direction-catalog").DesignProfileV3;
+    overrides: Partial<import("./generated-site-v3-art-direction-catalog").DesignControlsV3>;
+    source: "model";
+  };
   /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
   textFirstFallbackApproval?: {
     approvedBy: string;

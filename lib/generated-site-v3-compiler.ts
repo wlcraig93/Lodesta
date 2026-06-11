@@ -1930,12 +1930,32 @@ function hasPricingLanguage(value: string) {
  * Real business facts only. Filler facts ("Services: 3", "Start: Call directly")
  * are never synthesized; sections with fact minimums are skipped instead.
  */
+function isOpenSevenDays(business: BusinessProfile): boolean {
+  const hours = business.hours;
+  if (!hours) return false;
+  const entries = hoursEntriesForHours(hours);
+  const openValues = entries.filter(({ value }) => value && !/closed/i.test(value));
+  // Collapsed entries (Mon–Fri) count their day spans; seven open weekdays.
+  const dayCount = openValues.reduce((sum, entry) => {
+    const span = entry.label.match(/^(\w+)\s*[–-]\s*(\w+)$/);
+    if (!span) return sum + 1;
+    const order = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const from = order.findIndex((day) => span[1].toLowerCase().startsWith(day));
+    const to = order.findIndex((day) => span[2].toLowerCase().startsWith(day));
+    return sum + (from >= 0 && to >= from ? to - from + 1 : 1);
+  }, 0);
+  return dayCount >= 7;
+}
+
 function proofFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
   const hoursSummary = hoursSummaryForBusiness(business);
+  // Open-7-days is a selling point (demo-parity): promoted as an explicit
+  // fact, grounded in the structured weekly schedule, never inferred.
+  const openSeven = isOpenSevenDays(business);
   return [
     ...(business.phone ? [{ label: "Phone", value: formatPhone(business.phone), href: `tel:${phoneHref(business.phone)}` }] : []),
     ...(business.address ? [{ label: "Location", value: locationLineForBusiness(business) }] : []),
-    ...(hoursSummary ? [{ label: "Hours", value: hoursSummary }] : []),
+    ...(openSeven ? [{ label: "Hours", value: "Open 7 days a week" }] : hoursSummary ? [{ label: "Hours", value: hoursSummary }] : []),
     ...(business.serviceAreas.length && !business.address ? [{ label: "Serves", value: business.serviceAreas.slice(0, 2).join(", ") }] : [])
   ].slice(0, 4);
 }

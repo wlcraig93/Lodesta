@@ -13638,3 +13638,29 @@ html[data-form-length-variant="phone_first"] .lead-form .lead-submit {
 .public-site-v3[data-eyebrow-treatment="filled_kicker"] .site-visual-section-v3[data-section-template="hero_statement"][data-background-kind="image"] .site-visual-block-v3-hero_copy .site-eyebrow-v3 {
   color: var(--site-v3-primaryText, #ffffff);
 }
+
+/* Location-card hours table (demo-parity): hairline rows, right-aligned times */
+.site-location-hours-v3 dd {
+  margin: 0;
+}
+
+.site-location-hours-v3 table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.site-location-hours-v3 td {
+  border-bottom: 1px solid var(--site-v3-line, #e3e2da);
+  font-size: 0.95rem;
+  padding: 8px 0;
+}
+
+.site-location-hours-v3 tr:last-child td {
+  border-bottom: none;
+}
+
+.site-location-hours-v3 td:last-child {
+  font-weight: 620;
+  text-align: right;
+  white-space: nowrap;
+}

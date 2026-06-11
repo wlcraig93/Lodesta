@@ -641,7 +641,23 @@ function renderLocationsSlotV3(locations: RenderableLocationV3[]) {
                   <dd><a href={`tel:${phoneHrefValue(location.phone)}`}>{formatPhone(location.phone)}</a></dd>
                 </div>
               ) : null}
-              {location.hoursSummary ? (
+              {location.hours && location.hours.length >= 2 ? (
+                <div className="site-location-hours-v3">
+                  <dt>Hours</dt>
+                  <dd>
+                    <table>
+                      <tbody>
+                        {location.hours.map((entry) => (
+                          <tr key={entry.label}>
+                            <td>{entry.label}</td>
+                            <td>{unbreakableTimes(entry.value)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </dd>
+                </div>
+              ) : location.hoursSummary ? (
                 <div>
                   <dt>Hours</dt>
                   <dd>{location.hoursSummary}</dd>

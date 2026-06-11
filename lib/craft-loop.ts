@@ -10,6 +10,9 @@ import {
   type DesignControlsV3
 } from "./generated-site-v3-art-direction-catalog";
 import { inspectGeneratedSiteBundleRender } from "./generated-site-render-inspection";
+import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
+import { evaluateGenerationQualityV2 } from "./generation-quality-v2";
+import { lintGeneratedCopyDeck } from "./generated-copy-v2";
 import { buildGenerationScorecard } from "./generation-scorecard";
 import { createOpenAiVisualQa } from "./visual-qa";
 import { extractOpenAiResponseText, openAiErrorMessage } from "./openai-generation";
@@ -24,11 +27,15 @@ import { openAiRequestSignal } from "./openai-timeout";
  * every hard gate, and never alters the served candidate. Promotion to live
  * follows the scorecard promotion contract.
  *
- * Tier-1 vocabulary: swap_presentation, adjust_profile_control. The
- * change_hero_variant action is declared but its precondition (target hero
- * satisfiable with the same approved slots and media) currently always fails
- * post-compile, so it records precondition_failed rather than mutating —
- * hero variation requires a recompile path that lands with Tier 2.
+ * Tiered vocabulary (LODESTA_CRAFT_LOOP_TIERS, default 1):
+ * - Tier 1 (artDirection-only): swap_presentation, adjust_profile_control.
+ * - Tier 2 (recompile path): change_hero_variant, recast_media — recompiled
+ *   via compiler overrides so every compile-time validation re-runs;
+ *   media overrides only reference this compile's safe gallery assets.
+ * - Tier 3 (content): rewrite_section_copy (deck mutation; copy lint +
+ *   meta-instructional detection re-run, full quality eval gates acceptance)
+ *   and reorder_sections (same-id-set permutation; hero stays first,
+ *   contact stays last; quality eval re-validates required facts).
  *
  * Hygiene (from the plan): mutation ids, allowed-target paths, before/after
  * diffs, max mutations per iteration, oscillation detection, replay
@@ -39,8 +46,30 @@ import { openAiRequestSignal } from "./openai-timeout";
 const maxMutationsPerIteration = 3;
 const maxIterations = 2;
 
+const tierForAction: Record<string, 1 | 2 | 3> = {
+  swap_presentation: 1,
+  adjust_profile_control: 1,
+  change_hero_variant: 2,
+  recast_media: 2,
+  rewrite_section_copy: 3,
+  reorder_sections: 3
+};
+
+/** Highest mutation tier the loop may apply (env-configured; default Tier 1). */
+function enabledTier(): 1 | 2 | 3 {
+  const raw = Number(process.env.LODESTA_CRAFT_LOOP_TIERS ?? "1");
+  return raw >= 3 ? 3 : raw >= 2 ? 2 : 1;
+}
+
 const mutationSchema = z.object({
-  action: z.enum(["swap_presentation", "adjust_profile_control", "change_hero_variant"]),
+  action: z.enum([
+    "swap_presentation",
+    "adjust_profile_control",
+    "change_hero_variant",
+    "recast_media",
+    "rewrite_section_copy",
+    "reorder_sections"
+  ]),
   /** swap_presentation: section role. adjust_profile_control: control key. */
   target: z.string().min(1).max(60),
   value: z.string().min(1).max(60),
@@ -231,6 +260,11 @@ export function applyMutation(
     return record;
   }
 
+  if (tierForAction[mutation.action] > enabledTier()) {
+    record.note = `tier_gated: ${mutation.action} requires LODESTA_CRAFT_LOOP_TIERS>=${tierForAction[mutation.action]}`;
+    return record;
+  }
+
   if (mutation.action === "adjust_profile_control") {
     const key = mutation.target as keyof DesignControlsV3;
     if (!controlKeys.includes(key) || !controlValueUniverse[key]?.includes(mutation.value)) {
@@ -269,11 +303,35 @@ export function applyMutation(
     return record;
   }
 
-  // change_hero_variant: precondition — the target hero must be satisfiable
-  // with the same approved slots and media. Post-compile mutation cannot
-  // guarantee that today (hero assembly is a compile-time decision), so the
-  // precondition fails closed until the Tier-2 recompile path exists.
-  record.note = "precondition_failed: hero variant changes require the recompile path (Tier 2)";
+  // Tier-2 actions are RECOMPILE REQUESTS: they don't mutate artDirection;
+  // the loop recompiles the clone with typed compiler overrides so every
+  // compile-time validation re-runs. Preconditions enforce themselves in the
+  // compiler (image variants need gallery; media URLs must be this compile's
+  // safe assets) — an unsatisfiable override leaves the compile unchanged.
+  if (mutation.action === "change_hero_variant") {
+    if (mutation.value !== "image_statement" && mutation.value !== "hero_split") {
+      record.note = "invalid hero variant";
+      return record;
+    }
+    record.applied = true;
+    record.note = "recompile_request";
+    return record;
+  }
+  if (mutation.action === "recast_media") {
+    record.applied = true;
+    record.note = "recompile_request";
+    return record;
+  }
+
+  // Tier 3: content mutations are validated here, applied to the CLONED deck
+  // by the loop, and gated by the full quality eval before acceptance.
+  if (mutation.action === "rewrite_section_copy" || mutation.action === "reorder_sections") {
+    record.applied = true;
+    record.note = "content_request";
+    return record;
+  }
+
+  record.note = "unknown action";
   return record;
 }
 
@@ -312,10 +370,80 @@ export async function runShadowCraftLoop(input: {
     base.replay.criticModel = critic.model;
     if (!critic.mutations.length) break;
 
-    const clone = structuredClone(working);
+    // Partition mutations by execution class.
+    const recompileRequests = critic.mutations.filter(
+      (mutation) => mutation.action === "change_hero_variant" || mutation.action === "recast_media"
+    );
+    const contentRequests = critic.mutations.filter(
+      (mutation) => mutation.action === "rewrite_section_copy" || mutation.action === "reorder_sections"
+    );
+
+    // Tier-3 deck rewrites mutate a CLONED bundle deck; copy lint +
+    // meta-instructional detection gate them before any recompile.
+    const workingBundle = structuredClone(input.bundle);
+    let deckChanged = false;
+    const deckTargets = new Set(["hero.heading", "hero.body", "about.body"]);
+    for (const request of contentRequests) {
+      if (request.action !== "rewrite_section_copy") continue;
+      const deck = workingBundle.presenceAssessment.generatedCopyDeck;
+      if (!deck || !deckTargets.has(request.target) || tierForAction.rewrite_section_copy > enabledTier()) continue;
+      const mutated = structuredClone(deck);
+      if (request.target === "hero.heading") mutated.hero.heading = request.value;
+      if (request.target === "hero.body") mutated.hero.body = request.value;
+      if (request.target === "about.body" && mutated.about) mutated.about.body = request.value;
+      if (lintGeneratedCopyDeck(mutated, { businessName: input.bundle.businessProfile.name }).length) continue;
+      workingBundle.presenceAssessment.generatedCopyDeck = mutated;
+      deckChanged = true;
+    }
+
+    // Tier-2 recompile path: typed compiler overrides re-run every
+    // compile-time validation; unsatisfiable overrides leave output unchanged.
+    const heroVariantReq = recompileRequests.find((request) => request.action === "change_hero_variant");
+    const recastReq = recompileRequests.find((request) => request.action === "recast_media");
+    const needsRecompile =
+      (deckChanged || recompileRequests.length > 0) && enabledTier() >= 2 && version.rendererVersion === "layout-v3";
+    let clone: SiteVersion;
+    if (needsRecompile) {
+      const recompiled = compileGeneratedSiteV3Site({
+        bundle: workingBundle,
+        overrides: {
+          ...(heroVariantReq && (heroVariantReq.value === "image_statement" || heroVariantReq.value === "hero_split")
+            ? { heroVariant: heroVariantReq.value }
+            : {}),
+          ...(recastReq ? { heroMediaUrl: recastReq.value } : {})
+        }
+      });
+      clone = recompiled.version;
+      // Carry forward art direction the loop already settled in prior iterations.
+      (clone as { artDirection: Record<string, unknown> }).artDirection = structuredClone(
+        (working as { artDirection?: Record<string, unknown> }).artDirection ?? {}
+      ) as never;
+    } else {
+      clone = structuredClone(working);
+    }
+
     const artDirection = (clone as { artDirection: Record<string, unknown> }).artDirection;
     const records = critic.mutations.map((mutation) => applyMutation(artDirection, mutation, appliedHistory));
-    const anyApplied = records.some((record) => record.applied);
+
+    // Tier-3 reorder: same-id-set permutation, hero stays first, contact stays last.
+    const reorderReq = contentRequests.find((request) => request.action === "reorder_sections");
+    if (reorderReq && enabledTier() >= 3) {
+      const pages = (clone as { pageComposition?: { pages: Array<{ sections: Array<{ id: string }> }> } }).pageComposition?.pages;
+      const sections = pages?.[0]?.sections;
+      if (sections) {
+        const proposed = reorderReq.value.split(",").map((id) => id.trim());
+        const currentIds = sections.map((section) => section.id);
+        const sameSet = proposed.length === currentIds.length && proposed.every((id) => currentIds.includes(id));
+        const heroFirst = proposed[0] === currentIds[0];
+        const contactLast = proposed[proposed.length - 1] === currentIds[currentIds.length - 1];
+        if (sameSet && heroFirst && contactLast) {
+          const byId = new Map(sections.map((section) => [section.id, section]));
+          pages![0].sections = proposed.map((id) => byId.get(id)!);
+        }
+      }
+    }
+
+    const anyApplied = records.some((record) => record.applied) || deckChanged;
     const oscillated = records.some((record) => record.note.startsWith("oscillation"));
     appliedHistory.push(...records);
 
@@ -350,8 +478,19 @@ export async function runShadowCraftLoop(input: {
       warnings: [],
       brandCueApplied: input.bundle.presenceAssessment.brandCueReport?.applied
     });
+    // Full gate stack: render fails, quality blocking findings (claim
+    // grounding, internal-state, duplicates), and non-decreasing craft.
+    const qualityAfter = evaluateGenerationQualityV2({
+      bundle: workingBundle,
+      version: clone,
+      mobileIssueCount: 0,
+      visualQa: undefined
+    });
+    const qualityBlocking = qualityAfter.findings.filter((finding) => finding.severity === "blocking").length;
     const wouldAccept =
-      blockersAfter === 0 && (craftAfter === undefined || craftBefore === undefined || craftAfter >= craftBefore);
+      blockersAfter === 0 &&
+      qualityBlocking === 0 &&
+      (craftAfter === undefined || craftBefore === undefined || craftAfter >= craftBefore);
 
     base.iterations.push({
       index,

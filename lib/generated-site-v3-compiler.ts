@@ -122,6 +122,16 @@ export function compileGeneratedSiteV3Site(input: ({
   createdAt?: string;
 }) & {
   assetLibraryAssets?: ApprovedAssetLibraryAsset[];
+  /**
+   * Craft-loop recompile overrides (Tier 2). Preconditions enforced here:
+   * image hero variants require safe gallery media; hero media overrides
+   * must reference an already-selected safe asset. Invalid overrides are
+   * ignored, never guessed at.
+   */
+  overrides?: {
+    heroVariant?: "image_statement" | "hero_split";
+    heroMediaUrl?: string;
+  };
 }): GeneratedSiteV3CompileResult {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const bundle = withBusinessBundleFields("bundle" in input ? input.bundle : temporaryBundleForProfile(input.business, input.siteId));
@@ -141,7 +151,7 @@ export function compileGeneratedSiteV3Site(input: ({
   const brief = bundle.presenceAssessment?.designBrief;
   const designProfile = brief?.profile ?? designProfileForBusiness(business, brandDerivation.report.applied);
   const designControls = resolveBrief(designProfile, brief?.overrides, "solid_editorial");
-  const composition = v3PageSectionsForBusiness(business, media, locationContext, copyDeck);
+  const composition = v3PageSectionsForBusiness(business, media, locationContext, copyDeck, input.overrides);
   {
     // Validate controls against the COMPOSED header mode, not a static one:
     // an image-background hero makes the header transparent_overlay, which
@@ -483,7 +493,8 @@ function v3PageSectionsForBusiness(
   business: BusinessProfile,
   media: SelectedV3Media,
   locationContext: LocationCompileContextV3,
-  deck?: GeneratedCopyDeckV2
+  deck?: GeneratedCopyDeckV2,
+  overrides?: { heroVariant?: "image_statement" | "hero_split"; heroMediaUrl?: string }
 ): V3Composition {
   const recipeId = v3RecipeIdForVertical(business.vertical);
   const services = serviceItemsForBusiness(business, deck);
@@ -518,9 +529,21 @@ function v3PageSectionsForBusiness(
 
   if (evidence.hasSafeHeroMedia) {
     // Hero family rotation: full-bleed image hero vs split hero, by seed.
-    const useImageHero = siteVariationSeedV2(`${business.siteId}:hero`) % 2 === 0 && gallery.length > 0;
+    // Craft-loop hero overrides (preconditions enforced): an explicit variant
+    // beats the seed, and a media override must be one of THIS compile's safe
+    // gallery assets — never an arbitrary URL.
+    const overrideHeroUrl =
+      overrides?.heroMediaUrl && gallery.some((item) => item.url === overrides.heroMediaUrl)
+        ? overrides.heroMediaUrl
+        : undefined;
+    const useImageHero =
+      overrides?.heroVariant === "image_statement"
+        ? gallery.length > 0
+        : overrides?.heroVariant === "hero_split"
+          ? false
+          : siteVariationSeedV2(`${business.siteId}:hero`) % 2 === 0 && gallery.length > 0;
     if (useImageHero) {
-      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, gallery[0].url, deck));
+      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, overrideHeroUrl ?? gallery[0].url, deck));
     } else {
       include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available, so the recipe uses hero_split.", heroSplitSection(business, gallery, deck));
     }

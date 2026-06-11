@@ -1561,8 +1561,8 @@ async function main() {
         rationale: "test",
         expectedDimension: "visual_design"
       }, []);
-      assert.equal(heroChange.applied, false, "hero variant precondition fails closed pre-Tier-2");
-      assert.ok(heroChange.note.includes("precondition_failed"));
+      assert.equal(heroChange.applied, false, "hero variant is tier-gated at the default tier");
+      assert.ok(heroChange.note.includes("tier_gated"));
       const oscillating = applyMutation(artDirection, {
         action: "adjust_profile_control",
         target: "cardChrome",
@@ -1636,6 +1636,75 @@ async function main() {
     assert.equal(briefCompiled.version.artDirection.designProfile?.register, "warm_boutique", "brief profile wins over deterministic");
     assert.equal(briefCompiled.version.artDirection.controls?.badgeStyle, "rounded", "brief override survives compile");
     console.log("design brief checks passed");
+  }
+
+  // --- Craft loop Tier-2/3 (recompile path + content mutations) ---
+  {
+    const { applyMutation } = await import("../lib/craft-loop");
+    const { compileGeneratedSiteV3Site: compileForOverrides } = await import("../lib/generated-site-v3-compiler");
+
+    const tierBundle = createSiteFromInput({
+      prompt: "Build a website for Tier Tire, a tire shop in Austin offering flat repair, new tires, and wheel alignment. phone: 512-555-0199"
+    });
+    tierBundle.businessProfile.photos = Array.from({ length: 4 }, (_, index) => ({
+      id: `tier_photo_${index + 1}`,
+      url: `/generated-site-assets/auto-body/${["bodywork-hero-v1.jpg", "finished-shop-context-v1.png", "glass-service-v1.jpg", "paint-refinish-closeup-v1.png"][index]}`,
+      alt: `photo ${index + 1}`,
+      source: "licensed" as const,
+      rightsStatus: "preclaim_safe" as const
+    }));
+
+    // Tier gating: Tier-2+ actions refuse to apply at the default tier.
+    const previousTiers = process.env.LODESTA_CRAFT_LOOP_TIERS;
+    delete process.env.LODESTA_CRAFT_LOOP_TIERS;
+    const gated = applyMutation({}, {
+      action: "change_hero_variant",
+      target: "hero",
+      value: "image_statement",
+      rationale: "test",
+      expectedDimension: "visual_design"
+    }, []);
+    assert.equal(gated.applied, false, "tier-2 action gated at default tier");
+    assert.ok(gated.note.includes("tier_gated"));
+
+    process.env.LODESTA_CRAFT_LOOP_TIERS = "3";
+    try {
+      const heroReq = applyMutation({}, {
+        action: "change_hero_variant",
+        target: "hero",
+        value: "image_statement",
+        rationale: "test",
+        expectedDimension: "visual_design"
+      }, []);
+      assert.equal(heroReq.applied, true, "tier-2 hero request accepted at tier 3");
+      assert.equal(heroReq.note, "recompile_request");
+
+      // Compiler overrides: explicit variant beats seed; preconditions enforced.
+      const forcedImage = compileForOverrides({ bundle: structuredClone(tierBundle), overrides: { heroVariant: "image_statement" } });
+      const heroImage = forcedImage.version.pageComposition.pages[0].sections[0];
+      const imageVisual = (heroImage.props as { visualSectionV3?: { templateId: string; options?: { background?: { kind?: string } } } }).visualSectionV3;
+      assert.equal(imageVisual?.templateId, "hero_statement", "override forces image hero");
+      assert.equal(imageVisual?.options?.background?.kind, "image", "image hero carries image background");
+
+      const forcedSplit = compileForOverrides({ bundle: structuredClone(tierBundle), overrides: { heroVariant: "hero_split" } });
+      const splitVisual = (forcedSplit.version.pageComposition.pages[0].sections[0].props as { visualSectionV3?: { templateId: string } }).visualSectionV3;
+      assert.equal(splitVisual?.templateId, "hero_split", "override forces split hero");
+
+      // Media override precondition: arbitrary URLs are ignored.
+      const arbitrary = compileForOverrides({
+        bundle: structuredClone(tierBundle),
+        overrides: { heroVariant: "image_statement", heroMediaUrl: "https://evil.example/injected.jpg" }
+      });
+      const arbitraryVisual = (arbitrary.version.pageComposition.pages[0].sections[0].props as { visualSectionV3?: { options?: { background?: { url?: string } } } }).visualSectionV3;
+      assert.ok(
+        arbitraryVisual?.options?.background?.url?.startsWith("/generated-site-assets/"),
+        "non-gallery media override ignored; safe asset retained"
+      );
+    } finally {
+      if (previousTiers === undefined) delete process.env.LODESTA_CRAFT_LOOP_TIERS;
+      else process.env.LODESTA_CRAFT_LOOP_TIERS = previousTiers;
+    }
+    console.log("craft loop tier 2/3 checks passed");
   }
 
   console.log("verify-generation-quality-v2: all checks passed");

@@ -14,5 +14,5 @@ export const metadata: Metadata = {
 export default async function DashboardPage() {
   await requireAdminPageAccess("/dashboard");
   const bundles = await repository.listSiteBundles();
-  redirect(bundles.length ? "/admin/sites" : "/admin/generate");
+  redirect(bundles.length ? "/admin/sites" : "/admin/site-candidates");
 }

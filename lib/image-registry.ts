@@ -26,6 +26,10 @@ const registry: Record<Vertical, RegistryImageAsset[]> = {
     asset("auto_body", "auto_body_paint_spray_booth", "https://images.pexels.com/photos/6870314/pexels-photo-6870314.jpeg?auto=compress&cs=tinysrgb&w=1200", "Technician spray painting a vehicle body panel in a paint booth", "Paint and refinish"),
     asset("auto_body", "auto_body_finished_vehicle_exterior", "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80", "Clean repaired vehicle exterior", "Finished vehicle")
   ],
+  // No curated tire/auto-service assets exist yet. Media-completeness gating in
+  // generation-quality-v2 blocks text-only candidates for this visual trade until
+  // the asset-library project adds coverage.
+  auto_services: [],
   beauty_salon: [
     asset("beauty_salon", "beauty_salon_hero", "https://images.unsplash.com/photo-1522337660859-02fbefca4702?auto=format&fit=crop&w=1600&q=80", "Nail polish service in a salon", "Nail service"),
     asset("beauty_salon", "beauty_salon_station", "https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=1200&q=80", "Salon station prepared for hair service", "Salon station"),

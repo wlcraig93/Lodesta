@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-The default local app URL is `http://localhost:4330`. `npm run dev` binds Next to `127.0.0.1:4330`; override with `PORT=4331 npm run dev` only when you intentionally need another port. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
+The default local app URL is `http://localhost:4330`. `npm run dev` starts both the Next.js app on `127.0.0.1:4330` and the Lodesta job worker, so queued site generations and maintenance jobs are processed in local development. Override with `PORT=4331 npm run dev` only when you intentionally need another port. Use `npm run dev:web` when you intentionally want the web server without a worker. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
 
 To run the launch-flow smoke checks against a local dev server:
 
@@ -157,6 +157,7 @@ Optional launch integrations:
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
 - `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
+- `LODESTA_ASSET_LIBRARY_IMAGE_ESTIMATE_USD` for the internal generated-asset CLI dry-run estimate; default is `0.08` per image if unset
 
 Recommended Railway services:
 
@@ -168,6 +169,7 @@ Recommended Railway services:
 OpenAI runtime settings:
 
 - Use `/settings` to manage generation model, visual QA model, image model, image size, image quality, and mockup limit.
+- Use `npm run asset-library -- estimate --manifest asset-library/manifests/tire-auto-v2.json --candidates 4 --limit 10` before generated-asset batches. Generation requires an explicit `--limit` and `--confirm-cost`.
 - Run `npm run seed:openai-settings` before deploying a fresh Supabase environment. Override defaults with `--generation-model`, `--visual-qa-model`, `--image-model`, `--image-size`, `--image-quality`, and `--mockup-limit` when needed.
 
 Browser render inspection:

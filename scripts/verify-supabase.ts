@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
 import { requiredClaimFactIds } from "../lib/fact-verification";
 import { ASSET_BUCKET_NAME, imageMimeTypeMatchesBytes, storeAssetBytes } from "../lib/asset-storage";
+import { ASSET_LIBRARY_BUCKET_NAME } from "../lib/asset-library";
 
 type CheckResult = {
   name: string;
@@ -50,6 +51,7 @@ async function main() {
   checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
   await verifyAgentTelemetry(supabase);
   await verifyAssetStorage(supabase);
+  await verifyAssetLibrary(supabase);
   if (storageOnly) {
     process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
     return;
@@ -79,15 +81,17 @@ async function main() {
 
   const ownerAssets = await supabaseRepository.updateOwnerAssets({
     siteId: acceptedSiteId,
-    rightsAccepted: true,
+    attestedBy: "verify-supabase@example.com",
     logo: {
       url: `https://assets.example/verify-${runId}-logo.png`,
-      alt: "Lodesta verification logo"
+      alt: "Lodesta verification logo",
+      rightsConfirmed: true
     },
     photos: [
       {
         url: `https://assets.example/verify-${runId}-truck.webp`,
-        alt: "Lodesta verification service truck"
+        alt: "Lodesta verification service truck",
+        rightsConfirmed: true
       }
     ]
   });
@@ -214,6 +218,13 @@ async function main() {
     sourceUrl: `https://example.test/${bundle.siteModel.slug}`,
     userAgent: "lodesta-supabase-verifier"
   });
+  const inquiryQueueJobs = await requireSupabase<Array<{ id: string }>>(
+    supabase.from("jobs").select("id").contains("payload", { inquiryId: inquiryResult.inquiry.id }),
+    "Track inquiry queue jobs"
+  );
+  for (const queuedJob of inquiryQueueJobs) {
+    createdJobIds.add(queuedJob.id);
+  }
   const inquiries = await supabaseRepository.listInquiries(acceptedSiteId);
   assert(inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id), "Inquiry was not persisted.");
   assert(
@@ -248,6 +259,15 @@ async function main() {
     ok: true,
     detail: `Recorded inquiry ${inquiryResult.inquiry.id}, marked it needs_reply, and stored delivery ${delivery.id}.`
   });
+  if (inquiryQueueJobs.length) {
+    await requireSupabase(
+      supabase.from("jobs").delete().in(
+        "id",
+        inquiryQueueJobs.map((queuedJob) => queuedJob.id)
+      ),
+      "Cleanup inquiry queue jobs before monthly job verifier"
+    );
+  }
 
   const draftAssignment = await supabaseRepository.assignExperiment({
     siteId: acceptedSiteId,
@@ -445,6 +465,20 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
 }
 
+async function verifyAssetLibrary(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  await requireSupabase(supabase.from("asset_library_batches").select("id", { count: "exact", head: true }), "Query asset library batches");
+  await requireSupabase(supabase.from("asset_library_assets").select("id", { count: "exact", head: true }), "Query asset library assets");
+  await requireSupabase(supabase.from("asset_library_reviews").select("id", { count: "exact", head: true }), "Query asset library reviews");
+  const { data, error } = await supabase.storage.getBucket(ASSET_LIBRARY_BUCKET_NAME);
+  if (error || !data) throw new Error(`Asset library bucket is missing or inaccessible: ${error?.message ?? "bucket not found"}`);
+  assert(data.public === false, "Asset library bucket must remain private; approved assets are served through the app route.");
+  checks.push({
+    name: "asset_library",
+    ok: true,
+    detail: `Asset library tables are queryable and ${ASSET_LIBRARY_BUCKET_NAME} is private.`
+  });
+}
+
 async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   await cleanupStorageProbe(supabase);
   if (createdCampaignId) {
@@ -590,10 +624,10 @@ function requireEnv(name: string) {
   }
 }
 
-async function requireSupabase<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>, label: string) {
+async function requireSupabase<T>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, label: string) {
   const { data, error } = await query;
   if (error) throw new Error(`${label}: ${error.message}`);
-  return data;
+  return data as T;
 }
 
 function assert(condition: unknown, message: string): asserts condition {

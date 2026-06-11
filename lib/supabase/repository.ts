@@ -779,6 +779,105 @@ export const supabaseRepository: LodestaRepository = {
     };
   },
 
+  async replaceFactCandidates(businessId, candidates) {
+    const client = getSupabaseAdminClient();
+    await client.from("fact_candidates").delete().eq("business_id", businessId).in("status", ["discovered", "system_selected_for_preview", "superseded"]);
+    if (!candidates.length) return [];
+    await requireOk(
+      client.from("fact_candidates").upsert(
+        candidates.map((candidate) => ({
+          id: candidate.id,
+          business_id: candidate.businessId,
+          source_type: candidate.sourceType,
+          field_key: candidate.fieldKey,
+          proposed_value: candidate.proposedValue ?? null,
+          confidence: candidate.confidence,
+          status: candidate.status,
+          evidence_label: candidate.evidenceLabel,
+          evidence_url: candidate.evidenceUrl ?? null,
+          place_id: candidate.placeId ?? null,
+          comparison_result: candidate.comparisonResult ?? null,
+          observed_at: candidate.observedAt,
+          created_at: candidate.createdAt
+        }))
+      )
+    );
+    return candidates;
+  },
+  async listFactCandidates(businessId) {
+    const { data } = await getSupabaseAdminClient().from("fact_candidates").select("*").eq("business_id", businessId);
+    return (data ?? []).map(factCandidateFromRow);
+  },
+  async replaceProposedBusinessServices(businessId, records) {
+    const client = getSupabaseAdminClient();
+    // Idempotent catalog sync: business_services rows reference
+    // service_definitions; the canonical catalog is code-defined, so upsert
+    // any referenced definitions before inserting.
+    const referencedDefinitionIds = new Set(records.map((record) => record.serviceDefinitionId).filter(Boolean));
+    if (referencedDefinitionIds.size) {
+      const { serviceCatalog } = await import("../service-catalog");
+      const referenced = serviceCatalog.filter((definition) => referencedDefinitionIds.has(definition.id));
+      if (referenced.length) {
+        await requireOk(
+          client.from("service_definitions").upsert(
+            referenced.map((definition) => ({
+              id: definition.id,
+              vertical: definition.vertical,
+              slug: definition.slug,
+              name: definition.name,
+              category: definition.category ?? null,
+              aliases: definition.aliases,
+              default_questions: definition.defaultQuestions,
+              page_strategy: definition.pageStrategy
+            }))
+          )
+        );
+      }
+    }
+    const { data: existing } = await client.from("business_services").select("*").eq("business_id", businessId);
+    const ownerDecided = (existing ?? []).filter((row) => row.status !== "proposed");
+    const decidedKeys = new Set(ownerDecided.map((row) => row.service_definition_id ?? `custom:${(row.custom_name ?? "").toLowerCase()}`));
+    await client.from("business_services").delete().eq("business_id", businessId).eq("status", "proposed");
+    const fresh = records.filter((record) => !decidedKeys.has(record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
+    if (fresh.length) {
+      await requireOk(
+        client.from("business_services").upsert(
+          fresh.map((record) => ({
+            id: record.id,
+            business_id: record.businessId,
+            service_definition_id: record.serviceDefinitionId ?? null,
+            custom_name: record.customName ?? null,
+            status: record.status,
+            confirmation_source: record.confirmationSource ?? null,
+            featured: record.featured,
+            publish_landing_page: record.publishLandingPage ?? null,
+            created_at: record.createdAt,
+            updated_at: record.updatedAt
+          }))
+        )
+      );
+    }
+    return this.listBusinessServices(businessId);
+  },
+  async listBusinessServices(businessId) {
+    const { data } = await getSupabaseAdminClient().from("business_services").select("*").eq("business_id", businessId);
+    return (data ?? []).map(businessServiceFromRow);
+  },
+  async updateBusinessService(input) {
+    const { data } = await getSupabaseAdminClient()
+      .from("business_services")
+      .update({
+        status: input.status,
+        confirmation_source: "owner",
+        confirmed_by: input.confirmedBy,
+        confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", input.id)
+      .select("*")
+      .maybeSingle();
+    return data ? businessServiceFromRow(data) : null;
+  },
   async upsertSiteArtifact(artifact) {
     const row = await requireData<SiteArtifactRow>(
       getSupabaseAdminClient()
@@ -3151,4 +3250,76 @@ async function requireMaybe<T>(
   const response = await responsePromise;
   if (response.error) throw new Error(`${action}: ${response.error.message}`);
   return response.data;
+}
+
+
+type FactCandidateRow = {
+  id: string;
+  business_id: string;
+  source_type: string;
+  field_key: string;
+  proposed_value: unknown;
+  confidence: number;
+  status: string;
+  evidence_label: string | null;
+  evidence_url: string | null;
+  place_id: string | null;
+  comparison_result: Record<string, unknown> | null;
+  observed_at: string;
+  created_at: string;
+};
+
+function factCandidateFromRow(row: FactCandidateRow): import("../business-evidence").FactCandidate {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    sourceType: row.source_type as import("../business-evidence").FactCandidateSourceType,
+    fieldKey: row.field_key,
+    proposedValue: row.proposed_value ?? undefined,
+    confidence: Number(row.confidence),
+    status: row.status as import("../business-evidence").FactCandidateStatus,
+    evidenceLabel: row.evidence_label ?? "",
+    evidenceUrl: row.evidence_url ?? undefined,
+    placeId: row.place_id ?? undefined,
+    comparisonResult: row.comparison_result ?? undefined,
+    observedAt: row.observed_at,
+    createdAt: row.created_at
+  };
+}
+
+type BusinessServiceRow = {
+  id: string;
+  business_id: string;
+  service_definition_id: string | null;
+  custom_name: string | null;
+  status: string;
+  confirmation_source: string | null;
+  featured: boolean;
+  publish_landing_page: boolean | null;
+  confirmed_by: string | null;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function businessServiceFromRow(row: BusinessServiceRow): import("../business-evidence").BusinessServiceRecord {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    serviceDefinitionId: row.service_definition_id ?? undefined,
+    customName: row.custom_name ?? undefined,
+    status: row.status as import("../business-evidence").BusinessServiceRecord["status"],
+    confirmationSource: (row.confirmation_source ?? undefined) as import("../business-evidence").BusinessServiceRecord["confirmationSource"],
+    featured: row.featured,
+    publishLandingPage: row.publish_landing_page ?? undefined,
+    confirmedBy: row.confirmed_by ?? undefined,
+    confirmedAt: row.confirmed_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+async function requireOk(query: PromiseLike<{ error: { message: string } | null }>) {
+  const { error } = await query;
+  if (error) throw new Error(error.message);
 }

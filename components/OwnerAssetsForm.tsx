@@ -10,11 +10,13 @@ type OwnerAssetsFormProps = {
 type AssetRow = {
   url: string;
   alt: string;
+  rightsConfirmed: boolean;
 };
 
 type UploadRow = {
   file?: File;
   alt: string;
+  rightsConfirmed: boolean;
 };
 
 type OwnerAssetResponse = {
@@ -30,16 +32,20 @@ const acceptedImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
   const [logo, setLogo] = useState<AssetRow>({
     url: profile.logo?.url ?? "",
-    alt: profile.logo?.alt ?? `${profile.name} logo`
+    alt: profile.logo?.alt ?? `${profile.name} logo`,
+    rightsConfirmed: false
   });
-  const [logoUpload, setLogoUpload] = useState<UploadRow>({ alt: `${profile.name} logo` });
+  const [logoUpload, setLogoUpload] = useState<UploadRow>({ alt: `${profile.name} logo`, rightsConfirmed: false });
   const [photos, setPhotos] = useState<AssetRow[]>(
-    profile.photos.length
-      ? profile.photos.map((photo) => ({ url: photo.url, alt: photo.alt }))
-      : [{ url: "", alt: `${profile.name} photo` }]
+    profile.photos.filter((photo) => photo.rightsStatus !== "reference_only").length
+      ? profile.photos
+          .filter((photo) => photo.rightsStatus !== "reference_only")
+          .map((photo) => ({ url: photo.url, alt: photo.alt, rightsConfirmed: false }))
+      : [{ url: "", alt: `${profile.name} photo`, rightsConfirmed: false }]
   );
-  const [photoUploads, setPhotoUploads] = useState<UploadRow[]>([{ alt: `${profile.name} uploaded photo` }]);
-  const [rightsAccepted, setRightsAccepted] = useState(false);
+  const [photoUploads, setPhotoUploads] = useState<UploadRow[]>([{ alt: `${profile.name} uploaded photo`, rightsConfirmed: false }]);
+  const scrapedPhotos = profile.photos.filter((photo) => photo.rightsStatus === "reference_only");
+  const [scrapedAttested, setScrapedAttested] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState("");
 
   function updatePhoto(index: number, patch: Partial<AssetRow>) {
@@ -47,7 +53,7 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
   }
 
   function addPhoto() {
-    setPhotos((current) => [...current, { url: "", alt: `${profile.name} photo ${current.length + 1}` }]);
+    setPhotos((current) => [...current, { url: "", alt: `${profile.name} photo ${current.length + 1}`, rightsConfirmed: false }]);
   }
 
   function removePhoto(index: number) {
@@ -59,7 +65,7 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
   }
 
   function addPhotoUpload() {
-    setPhotoUploads((current) => [...current, { alt: `${profile.name} uploaded photo ${current.length + 1}` }]);
+    setPhotoUploads((current) => [...current, { alt: `${profile.name} uploaded photo ${current.length + 1}`, rightsConfirmed: false }]);
   }
 
   function removePhotoUpload(index: number) {
@@ -79,22 +85,30 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
     setStatus("Saving owner-approved assets...");
     const formData = new FormData();
     formData.set("siteId", profile.siteId);
-    formData.set("rightsAccepted", rightsAccepted ? "true" : "false");
-    if (logo.url.trim()) formData.set("logoUrl", logo.url.trim());
+    if (logo.url.trim()) {
+      formData.set("logoUrl", logo.url.trim());
+      formData.set("logoRights", logo.rightsConfirmed ? "true" : "false");
+    }
     if (logo.alt.trim()) formData.set("logoAlt", logo.alt.trim());
     if (logoUpload.file) {
       formData.set("logoFile", logoUpload.file);
       formData.set("logoAlt", logoUpload.alt.trim() || `${profile.name} logo`);
+      formData.set("logoRights", logoUpload.rightsConfirmed ? "true" : "false");
     }
     for (const photo of photos) {
       if (!photo.url.trim() || !photo.alt.trim()) continue;
       formData.append("photoUrl", photo.url.trim());
       formData.append("photoUrlAlt", photo.alt.trim());
+      formData.append("photoUrlRights", photo.rightsConfirmed ? "true" : "false");
     }
     for (const upload of photoUploads) {
       if (!upload.file) continue;
       formData.append("photoFiles", upload.file);
       formData.append("photoAlt", upload.alt.trim() || `${profile.name} uploaded photo`);
+      formData.append("photoRights", upload.rightsConfirmed ? "true" : "false");
+    }
+    for (const [assetId, confirmed] of Object.entries(scrapedAttested)) {
+      if (confirmed) formData.append("scrapedAssetId", assetId);
     }
 
     const response = await fetch("/api/assets/owner", {
@@ -106,11 +120,11 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
       setStatus(result.error ?? "Unable to save owner-approved assets.");
       return;
     }
-    if (result.logo) setLogo({ url: result.logo.url, alt: result.logo.alt });
-    if (result.photos?.length) setPhotos(result.photos.map((photo) => ({ url: photo.url, alt: photo.alt })));
-    setLogoUpload({ alt: `${profile.name} logo` });
-    setPhotoUploads([{ alt: `${profile.name} uploaded photo` }]);
-    setRightsAccepted(false);
+    if (result.logo) setLogo({ url: result.logo.url, alt: result.logo.alt, rightsConfirmed: false });
+    if (result.photos?.length) setPhotos(result.photos.map((photo) => ({ url: photo.url, alt: photo.alt, rightsConfirmed: false })));
+    setLogoUpload({ alt: `${profile.name} logo`, rightsConfirmed: false });
+    setPhotoUploads([{ alt: `${profile.name} uploaded photo`, rightsConfirmed: false }]);
+    setScrapedAttested({});
     setStatus("Owner-approved assets saved.");
   }
 
@@ -153,6 +167,14 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
               <span>Alt text</span>
               <input value={photo.alt} onChange={(event) => updatePhoto(index, { alt: event.target.value })} />
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={photo.rightsConfirmed}
+                onChange={(event) => updatePhoto(index, { rightsConfirmed: event.target.checked })}
+              />
+              <span>I own this image or hold the rights to use it</span>
+            </label>
             <button className="button secondary" type="button" onClick={() => removePhoto(index)} disabled={photos.length <= 1}>
               Remove
             </button>
@@ -175,6 +197,14 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
               <span>Uploaded photo alt text</span>
               <input value={upload.alt} onChange={(event) => updatePhotoUpload(index, { alt: event.target.value })} />
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={upload.rightsConfirmed}
+                onChange={(event) => updatePhotoUpload(index, { rightsConfirmed: event.target.checked })}
+              />
+              <span>I own this image or hold the rights to use it</span>
+            </label>
             <button
               className="button secondary"
               type="button"
@@ -187,11 +217,41 @@ export function OwnerAssetsForm({ profile }: OwnerAssetsFormProps) {
         ))}
       </div>
 
+      {scrapedPhotos.length ? (
+        <div className="owner-scraped-list">
+          <h3>Images from your current website</h3>
+          <p>
+            These were found on your existing site. Confirm the ones you own (or hold rights to) and they become usable on
+            your managed site; unconfirmed images are never published.
+          </p>
+          {scrapedPhotos.map((photo) => (
+            <label className="checkbox-row" key={photo.id}>
+              <input
+                type="checkbox"
+                checked={Boolean(scrapedAttested[photo.id])}
+                onChange={(event) => setScrapedAttested((current) => ({ ...current, [photo.id]: event.target.checked }))}
+              />
+              <span>
+                <strong>{photo.alt || photo.url}</strong>
+                <small>I own this image or hold the rights to use it on this website.</small>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+
       <label className="checkbox-row">
-        <input type="checkbox" checked={rightsAccepted} onChange={(event) => setRightsAccepted(event.target.checked)} />
+        <input
+          type="checkbox"
+          checked={logo.rightsConfirmed && logoUpload.rightsConfirmed}
+          onChange={(event) => {
+            setLogo((current) => ({ ...current, rightsConfirmed: event.target.checked }));
+            setLogoUpload((current) => ({ ...current, rightsConfirmed: event.target.checked }));
+          }}
+        />
         <span>
-          <strong>I have rights to use these assets</strong>
-          <small>Approved photos and logos may be hosted or displayed on the published managed site.</small>
+          <strong>I own the logo or hold the rights to use it</strong>
+          <small>Each photo above also needs its own confirmation; rights are recorded per image.</small>
         </span>
       </label>
 

@@ -3,10 +3,18 @@ import {
   startRequiredSiteCandidateTelemetry,
   type AgentTelemetryRepository
 } from "./agent-telemetry";
-import { createSiteFromInput, slugify } from "./intake";
+import { createSiteFromInput } from "./intake";
+import { slugify } from "./slug";
 import { prepareIntakeInput } from "./intake-pipeline";
+import { understandingVerticalConfidenceFloor } from "./business-understanding-v2";
+import { generateWordmarkCandidateV2, wordmarkCandidateArtifactV2 } from "./brand-wordmark-v2";
+import { factCandidatesFromBundle, proposedBusinessServices, selectCandidatesForPreview } from "./business-evidence";
+import { castScrapedPhotos, scrapeAndStoreBusinessMedia } from "./scraped-media";
+import { extractImagePalette } from "./image-palette";
+import { createOpenAiGeneratedCopyDeck, lintGeneratedCopyDeck } from "./generated-copy-v2";
 import { runInitialGeneratedSiteReadiness } from "./generated-site-readiness";
-import { maybeApplyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { runShadowCraftLoop } from "./craft-loop";
+import { maybeApplyGeneratedSiteV3, maybeApplyGeneratedSiteV3WithAssetLibrary } from "./generated-site-v3-pipeline";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { evaluatePreCompileResolutionGateV2 } from "./precompile-resolution-gate";
 import type {
@@ -21,7 +29,10 @@ import type { CreateSiteInput, LodestaRepository } from "./repository";
 import { normalizePublicFetchUrlInput } from "./url-safety";
 
 export type SiteCandidateRepository = AgentTelemetryRepository &
-  Pick<LodestaRepository, "createSiteCandidate" | "listExperimentLearnings" | "upsertSiteArtifact">;
+  Pick<
+    LodestaRepository,
+    "createSiteCandidate" | "listExperimentLearnings" | "upsertSiteArtifact" | "replaceFactCandidates" | "replaceProposedBusinessServices"
+  >;
 
 export type GenerateSitePreviewOptions = {
   create?: boolean;
@@ -123,7 +134,75 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
         artifactPayload: resolutionGate.artifactPayload
       });
     }
-    const v3Application = maybeApplyGeneratedSiteV3({
+    assertVerticalResolutionForServiceBusiness(bundle, input.url);
+    applyTextFirstFallbackApproval(bundle, options);
+    const copySpan = await telemetry.startSpan({
+      spanType: "generated_copy_deck",
+      name: "Fact-grounded copy deck",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        vertical: bundle.businessProfile.vertical,
+        services: bundle.businessProfile.services.length
+      }
+    });
+    try {
+      bundle.presenceAssessment.generatedCopyDeck = await createOpenAiGeneratedCopyDeck({
+        bundle,
+        telemetry,
+        spanId: copySpan.id
+      });
+      await copySpan.end({
+        outputJson: {
+          source: bundle.presenceAssessment.generatedCopyDeck ? "openai" : "deterministic_fallback",
+          serviceItems: bundle.presenceAssessment.generatedCopyDeck?.serviceItems.length ?? 0,
+          faqs: bundle.presenceAssessment.generatedCopyDeck?.faqs.length ?? 0
+        }
+      });
+    } catch (error) {
+      await copySpan.fail(error);
+      throw error;
+    }
+    // Real photos for protected previews: download crawl media into private
+    // storage (reference_only; publish requires per-photo attestation).
+    try {
+      const scrapedManifest = await scrapeAndStoreBusinessMedia(bundle);
+      if (scrapedManifest.length) {
+        // Brand palette from the pixels we just stored: logo first (it IS the
+        // brand), then photos. Cues feed the existing WCAG-clamped derivation.
+        const storagePaths = [...scrapedManifest]
+          .sort((left, right) => (left.kind === "logo" ? -1 : 0) - (right.kind === "logo" ? -1 : 0))
+          .map((entry) => entry.storedUrl.replace(/^\/api\/assets\//, ""));
+        const palette = await extractImagePalette(storagePaths);
+        if (palette.hexes.length) {
+          const assessment = bundle.presenceAssessment.brandAssessment ?? {
+            id: `brand_${bundle.businessProfile.siteId}`,
+            siteId: bundle.businessProfile.siteId,
+            confidence: 0.6,
+            cues: [],
+            colorSignals: [],
+            typographySignals: [],
+            imageStyleSignals: [],
+            toneSignals: [],
+            preservationRules: [],
+            sourceNotes: []
+          };
+          assessment.colorSignals = [...palette.hexes, ...assessment.colorSignals].slice(0, 8);
+          assessment.sourceNotes.push(`Palette sampled from ${storagePaths.length} scraped media files.`);
+          bundle.presenceAssessment.brandAssessment = assessment;
+        }
+        // Media casting: dimensions recorded for hero/section placement rules.
+        for (const entry of scrapedManifest) {
+          const dimensions = palette.dimensions[entry.storedUrl.replace(/^\/api\/assets\//, "")];
+          if (dimensions) Object.assign(entry, { width: dimensions.width, height: dimensions.height });
+        }
+        castScrapedPhotos(bundle);
+      }
+    } catch (error) {
+      bundle.presenceAssessment.technicalNotes.push(
+        `Scraped media storage skipped: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const v3Application = await maybeApplyGeneratedSiteV3WithAssetLibrary({
       bundle,
       sourceHost,
       explicitOperatorRequest: isExplicitV3Request(options.metadata)
@@ -150,6 +229,11 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
           blockers: readiness.qa.blockers.length,
           warnings: readiness.qa.warnings.length,
           repaired: readiness.repaired,
+          repairAttempted: readiness.qa.repair?.attempted ?? false,
+          repairSummaries: readiness.qa.repair?.mutationSummaries ?? [],
+          qualityScore: readiness.qa.qualityReport?.overallScore,
+          qualityBlockingFindings: readiness.qa.qualityReport?.findings.filter((finding) => finding.severity === "blocking").length ?? 0,
+          qualityRubric: readiness.qa.qualityReport?.rubric,
           visualQaSource: readiness.qa.visualQa?.source,
           visualQaFindings: readiness.qa.visualQa?.findings.length ?? 0,
           costStatus: readiness.qa.generationCostEstimate?.status,
@@ -164,6 +248,17 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       await qaSpan.fail(error);
       throw error;
     }
+    // Shadow craft loop (opt-in via LODESTA_CRAFT_LOOP=shadow): observes what
+    // typed Tier-1 mutations would do; never alters the served candidate.
+    try {
+      const version = bundle.siteModel.versions[0];
+      if (version) {
+        const craftLoop = await runShadowCraftLoop({ bundle, version, qa: readiness.qa, telemetry, spanId: qaSpan.id });
+        if (craftLoop && version.generationQa) version.generationQa.craftLoop = craftLoop;
+      }
+    } catch (craftLoopError) {
+      console.warn("Shadow craft loop failed (non-fatal):", craftLoopError instanceof Error ? craftLoopError.message : craftLoopError);
+    }
     const generation = await options.repository.createSiteCandidate({
       id: siteCandidateId,
       agentRunId: telemetry.runId,
@@ -172,6 +267,8 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       bundle,
       status: readiness.status
     });
+    await persistCopyDeckArtifacts({ repository: options.repository, generation });
+    await persistEvidenceLayer({ repository: options.repository, generation });
     const runOutput = baseRunOutput(generation);
     const runMetadata = baseRunMetadata(generation, options.metadata);
     const finalOutput = {
@@ -234,6 +331,158 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     await telemetry.failRun(error);
     throw error;
   }
+}
+
+/**
+ * A known-service business that still resolves to general_local with low
+ * classification confidence must block instead of shipping a generic local
+ * site that cannot represent its trade.
+ */
+function assertVerticalResolutionForServiceBusiness(bundle: SiteBundle, sourceUrl: string | undefined) {
+  if (bundle.businessProfile.vertical !== "general_local") return;
+  if (!sourceUrl && !bundle.presenceAssessment.sourceUrl) return;
+  const understanding = bundle.presenceAssessment.businessUnderstanding;
+  const hasServiceSignals = bundle.businessProfile.services.length > 0 || (understanding?.cleanedServices.length ?? 0) > 0;
+  if (!hasServiceSignals) return;
+  const confidentGeneralLocal = Boolean(
+    understanding &&
+      understanding.vertical === "general_local" &&
+      understanding.verticalConfidence >= understandingVerticalConfidenceFloor
+  );
+  if (confidentGeneralLocal) return;
+  throw createPreCompileSiteCandidateBlock({
+    message: "A service business could not be classified into a supported vertical with enough confidence to generate a credible site.",
+    businessName: bundle.businessProfile.name,
+    vertical: bundle.businessProfile.vertical,
+    sourceUrl: bundle.presenceAssessment.sourceUrl ?? sourceUrl,
+    candidateSlug: bundle.siteModel.slug,
+    blockers: [
+      {
+        id: "vertical_unresolved_service_business",
+        title: "Vertical classification is unresolved",
+        detail: `Extracted services exist but the business fell back to general_local${
+          understanding ? ` with confidence ${understanding.verticalConfidence.toFixed(2)}` : " without an understanding pass"
+        }. Generating a generic local site would misrepresent the trade.`,
+        category: "needs_operator_review",
+        severity: "blocking"
+      }
+    ],
+    artifactType: "vertical_classification_report",
+    artifactPayload: {
+      understanding: understanding ?? null,
+      extractedServices: bundle.businessProfile.services
+    }
+  });
+}
+
+/**
+ * Operators can explicitly approve a text-first candidate for a visual-trade
+ * vertical via metadata.approvedTextFirstFallback (true or a reason string).
+ * The approval is recorded on the bundle and downgrades the media-completeness
+ * blocking finding to advisory.
+ */
+function applyTextFirstFallbackApproval(bundle: SiteBundle, options: GenerateSiteOptions) {
+  const approval = options.metadata?.approvedTextFirstFallback;
+  if (approval !== true && typeof approval !== "string") return;
+  bundle.presenceAssessment.textFirstFallbackApproval = {
+    approvedBy: options.actorId ?? options.actorType ?? "operator",
+    reason: typeof approval === "string" && approval.trim()
+      ? approval.trim()
+      : "Operator approved a text-first fallback for this candidate.",
+    approvedAt: new Date().toISOString()
+  };
+}
+
+/**
+ * Phase 1 evidence layer: derive fact candidates (statuses per the evidence
+ * model; preview compiles from system_selected_for_preview) and proposed
+ * business_services mapped onto the canonical catalog. Failure here never
+ * blocks generation — evidence is additive to the candidate record.
+ */
+async function persistEvidenceLayer(input: {
+  repository: SiteCandidateRepository;
+  generation: SiteCandidateRecord;
+}) {
+  try {
+    const bundle = input.generation.bundle;
+    const businessId = bundle.business?.id ?? input.generation.businessId;
+    if (!businessId) return;
+    const candidates = selectCandidatesForPreview(factCandidatesFromBundle(bundle, businessId));
+    await input.repository.replaceFactCandidates(businessId, candidates);
+    const services = proposedBusinessServices(businessId, bundle.businessProfile.vertical, bundle.businessProfile);
+    await input.repository.replaceProposedBusinessServices(businessId, services);
+  } catch (error) {
+    console.warn(`Evidence layer persistence skipped: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function persistCopyDeckArtifacts(input: {
+  repository: SiteCandidateRepository;
+  generation: SiteCandidateRecord;
+}) {
+  const wordmarkVersion = input.generation.bundle.siteModel.versions[0];
+  if (wordmarkVersion?.rendererVersion === "layout-v3" && wordmarkVersion.theme) {
+    await input.repository.upsertSiteArtifact(
+      wordmarkCandidateArtifactV2({
+        siteCandidateId: input.generation.id,
+        candidate: generateWordmarkCandidateV2({
+          business: input.generation.bundle.businessProfile,
+          theme: wordmarkVersion.theme,
+          fontPairingId: wordmarkVersion.artDirection.fontPairingId
+        })
+      })
+    );
+  }
+  const brandCueReport = input.generation.bundle.presenceAssessment.brandCueReport;
+  if (brandCueReport) {
+    await input.repository.upsertSiteArtifact({
+      id: `${input.generation.id}_brand_cues`,
+      siteCandidateId: input.generation.id,
+      scope: "candidate_selected",
+      artifactType: "brand_cue_report",
+      artifactVersion: "brand-cue-report-v2",
+      producerId: "brand-derivation-v2",
+      producerVersion: "brand-cue-report-v2",
+      sourceFactIds: [],
+      contentHash: contentHash(brandCueReport),
+      payload: { report: brandCueReport },
+      createdAt: new Date().toISOString()
+    });
+  }
+  const deck = input.generation.bundle.presenceAssessment.generatedCopyDeck;
+  if (!deck) return;
+  const createdAt = new Date().toISOString();
+  const lintViolations = lintGeneratedCopyDeck(deck);
+  await input.repository.upsertSiteArtifact({
+    id: `${input.generation.id}_copy_deck`,
+    siteCandidateId: input.generation.id,
+    scope: "candidate_selected",
+    artifactType: "copy_artifact",
+    artifactVersion: "generated-copy-deck-v2",
+    producerId: "generated-copy-v2",
+    producerVersion: "generated-copy-deck-v2",
+    sourceFactIds: [],
+    contentHash: contentHash(deck),
+    payload: { deck },
+    createdAt
+  });
+  await input.repository.upsertSiteArtifact({
+    id: `${input.generation.id}_copy_evaluation`,
+    siteCandidateId: input.generation.id,
+    scope: "qa_evidence",
+    artifactType: "copy_evaluation_report",
+    artifactVersion: "generated-copy-deck-v2",
+    producerId: "generated-copy-v2",
+    producerVersion: "generated-copy-deck-v2",
+    sourceFactIds: [],
+    contentHash: contentHash({ lintViolations, groundingNotes: deck.groundingNotes }),
+    payload: {
+      lintViolations,
+      groundingNotes: deck.groundingNotes,
+      status: lintViolations.length ? "violations_found" : "passed"
+    },
+    createdAt
+  });
 }
 
 async function persistPreCompileBlockedGeneration(input: {
@@ -353,7 +602,7 @@ function createPreCompileBlockArtifact(input: {
 async function recordGeneratedSiteV3Application(input: {
   telemetry: Awaited<ReturnType<typeof startRequiredSiteCandidateTelemetry>>;
   bundle: SiteBundle;
-  application: ReturnType<typeof maybeApplyGeneratedSiteV3>;
+  application: Awaited<ReturnType<typeof maybeApplyGeneratedSiteV3>>;
 }) {
   const span = await input.telemetry.startSpan({
     spanType: "generated_site_v3",

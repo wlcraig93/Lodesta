@@ -38,6 +38,16 @@ Source:
   - "See us on Google Maps"
 - Do not call Places API for every anonymous preview by default.
 
+### Carve-Out: Tokenized Previews
+
+Tokenized preview routes (`/preview/[token]`) MAY render the Places UI Kit
+trust module: they are operator-shared, finite, and are the surface where
+proof sells the claim. They sit behind a hard daily COGS cap
+(`LODESTA_PREVIEW_PROOF_DAILY_CAP`, enforced server-side via
+`consumePreviewProofSlot` in `lib/live-proof.ts`); past the cap, previews fall
+back to the link-only CTA. Anonymous unclaimed public sites remain link-only.
+Implemented through the `proofMode` prop on the site renderer.
+
 ### Claimed Sites With Google Place ID
 
 - Render a compact Google-powered trust module using Places UI Kit.

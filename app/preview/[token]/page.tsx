@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { PreviewWedge } from "@/components/PreviewWedge";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
 import { SiteRenderer } from "@/lib/site-renderer";
+import { consumePreviewProofSlot } from "@/lib/live-proof";
 import { repository } from "@/lib/repository";
 
 export const metadata: Metadata = {
@@ -37,6 +38,9 @@ export default async function PreviewPage({
   if (!selectedVersion) notFound();
 
   if (artifact === "site" && chromeParam === "none") {
+    // Tokenized previews are the claim-conversion surface: render the Places
+    // UI Kit proof module behind the daily COGS cap, link-only past it.
+    const proofMode = consumePreviewProofSlot() ? ("ui_kit" as const) : ("link_only" as const);
     return (
       <SiteRenderer
         business={bundle.businessProfile}
@@ -48,6 +52,7 @@ export default async function PreviewPage({
         experiments={bundle.experiments}
         tracking={false}
         formsEnabled={false}
+        proofMode={proofMode}
       />
     );
   }

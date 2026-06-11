@@ -285,6 +285,29 @@ begin
 end;
 $$;
 
+grant usage on schema public to service_role;
+grant select, insert, update, delete on inquiries to service_role;
+grant select, insert, update, delete on inquiry_events to service_role;
+grant select, insert, update, delete on inquiry_deliveries to service_role;
+grant execute on function public.create_inquiry_from_form(
+  text,
+  text,
+  text,
+  text,
+  jsonb,
+  jsonb,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text
+) to service_role;
+
 alter table inquiries enable row level security;
 alter table inquiry_events enable row level security;
 alter table inquiry_deliveries enable row level security;

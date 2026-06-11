@@ -28,7 +28,7 @@ export async function inspectGeneratedSiteBundleRender(input: {
   });
 }
 
-async function renderGeneratedSiteHtml(bundle: SiteBundle, version: SiteVersion, pageSlug?: string) {
+export async function renderGeneratedSiteHtml(bundle: SiteBundle, version: SiteVersion, pageSlug?: string) {
   const css = await readFile(join(process.cwd(), "app", "globals.css"), "utf8");
   const stream = await renderToReadableStream(
     <SiteRenderer

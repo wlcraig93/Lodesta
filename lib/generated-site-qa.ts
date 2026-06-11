@@ -38,7 +38,10 @@ const blockedPlaceholderPatterns = [
   { pattern: /\bEasy next step\b/i, reason: "Generic trust-bar filler is visible instead of a specific business signal." },
   { pattern: /\b(Customer decision path|Conversion standard|Review summary detected)\b/i, reason: "Internal quality-calibration copy is visible." },
   { pattern: /\b(general visuals?|visual context|source-backed next steps?|site source|extracted service list|profile details)\b/i, reason: "Internal source/template language is visible." },
-  { pattern: /\b(repair conversation|estimate conversation|repair paths?|estimate path|call-first path|agreed next step|starting point)\b/i, reason: "Generic process-planning copy is visible instead of customer-facing copy." },
+  // "starting point" removed: it appears in legitimate price copy ("starts at
+  // $25, so you know the starting point"). The remaining phrases are distinctly
+  // internal process-planning language.
+  { pattern: /\b(repair conversation|estimate conversation|repair paths?|estimate path|call-first path|agreed next step)\b/i, reason: "Generic process-planning copy is visible instead of customer-facing copy." },
   { pattern: /\b(customers should describe|specific without assuming|not a photo of this specific shop)\b/i, reason: "Meta commentary about generated-site safety is visible." },
   { pattern: /\b(Call-first|listed repair service available|listed service customers can ask)\b/i, reason: "Filler proof or service copy is visible." }
 ];
@@ -289,7 +292,11 @@ function blockersFromSiteModelV3(bundle: SiteBundle, version: SiteVersionV3): Ge
       severity: "blocking"
     });
   }
-  const text = home.sections.map((section) => JSON.stringify(section.props)).join(" ");
+  // Placeholder scanning covers every composed page, not just the homepage.
+  const text = version.pageComposition.pages
+    .flatMap((page) => page.sections)
+    .map((section) => JSON.stringify(section.props))
+    .join(" ");
   for (const blocked of blockedPlaceholderPatterns) {
     if (!blocked.pattern.test(text)) continue;
     blockers.push({
@@ -301,7 +308,12 @@ function blockersFromSiteModelV3(bundle: SiteBundle, version: SiteVersionV3): Ge
     });
   }
   for (const decision of version.mediaDecisions) {
-    if (decision.rightsStatus !== "approved") {
+    // owner_attestation_required is the protected-preview state: real scraped
+    // photos render on owner/admin surfaces only. It does not block candidate
+    // readiness — the public route refuses these versions, and publishing
+    // requires per-photo attestation which recompiles with customer_granted.
+    if (decision.rightsStatus === "owner_attestation_required") continue;
+    if (decision.rightsStatus !== "approved" && decision.rightsStatus !== "preclaim_safe") {
       blockers.push({
         id: "v3_media_rights_unapproved",
         title: "V3 media rights are not approved",

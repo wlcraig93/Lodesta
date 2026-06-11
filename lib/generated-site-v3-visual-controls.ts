@@ -89,6 +89,8 @@ export type StandardItemV3 = {
   body: string;
   meta?: string;
   mediaUrl?: string;
+  /** Optional landing-page link rendered as a "Learn more" affordance. */
+  href?: string;
 };
 
 export type QuoteItemV3 = {

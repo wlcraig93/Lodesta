@@ -181,9 +181,11 @@ export async function createOpenAiGenerationPlanning(
   }
 }
 
-function elapsedMs(startedAt: string, endedAt: string) {
+export function elapsedOpenAiCallMs(startedAt: string, endedAt: string) {
   return Math.max(0, new Date(endedAt).getTime() - new Date(startedAt).getTime());
 }
+
+const elapsedMs = elapsedOpenAiCallMs;
 
 function makePlanningContext({ bundle, sourceUrl, prompt, crawl, renderInspection }: OpenAiGenerationInput) {
   const business = bundle.businessProfile;
@@ -256,7 +258,7 @@ function makePlanningContext({ bundle, sourceUrl, prompt, crawl, renderInspectio
   };
 }
 
-function extractResponseText(payload: unknown) {
+export function extractOpenAiResponseText(payload: unknown) {
   if (isRecord(payload) && typeof payload.output_text === "string") return payload.output_text;
   if (!isRecord(payload) || !Array.isArray(payload.output)) return undefined;
   const parts: string[] = [];
@@ -265,7 +267,7 @@ function extractResponseText(payload: unknown) {
     for (const item of output.content) {
       if (!isRecord(item)) continue;
       if (item.type === "refusal" && typeof item.refusal === "string") {
-        throw new Error(`OpenAI generation planning refused: ${item.refusal}`);
+        throw new Error(`OpenAI structured response refused: ${item.refusal}`);
       }
       if (typeof item.parsed === "object" && item.parsed) return JSON.stringify(item.parsed);
       if (typeof item.text === "string") parts.push(item.text);
@@ -274,7 +276,9 @@ function extractResponseText(payload: unknown) {
   return parts.join("").trim() || undefined;
 }
 
-function openAiErrorMessage(payload: unknown) {
+const extractResponseText = extractOpenAiResponseText;
+
+export function openAiErrorMessage(payload: unknown) {
   if (!isRecord(payload) || !isRecord(payload.error)) return undefined;
   return typeof payload.error.message === "string" ? payload.error.message : undefined;
 }

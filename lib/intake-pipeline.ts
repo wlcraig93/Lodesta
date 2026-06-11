@@ -1,5 +1,6 @@
 import { crawlUrl } from "./crawler";
 import { createSiteFromInput, type IntakeInput } from "./intake";
+import { createOpenAiBusinessUnderstanding } from "./business-understanding-v2";
 import { createOpenAiMockupArtifacts, createPromptOnlyMockupArtifacts } from "./image-generation";
 import { createOpenAiGenerationPlanning } from "./openai-generation";
 import { gatherPublicPresenceSignals } from "./public-presence";
@@ -110,6 +111,33 @@ export async function prepareIntakeInput(
     (result) => ({ outputJson: result })
   );
 
+  const understanding = await runSpan(
+    telemetry,
+    {
+      spanType: "business_understanding",
+      name: "Business understanding",
+      inputJson: { url: safeUrl, prompt: input.prompt, hasCrawl: Boolean(crawl) }
+    },
+    (span) =>
+      createOpenAiBusinessUnderstanding({
+        sourceUrl: safeUrl,
+        prompt: input.prompt,
+        crawl,
+        publicPresence,
+        telemetry,
+        spanId: span.id
+      }),
+    (result) => ({
+      outputJson: {
+        source: result?.source ?? "deterministic_fallback",
+        vertical: result?.vertical,
+        verticalConfidence: result?.verticalConfidence,
+        cleanedServices: result?.cleanedServices.length ?? 0,
+        hoursEntries: result?.hours?.length ?? 0,
+        primaryConversionGoal: result?.primaryConversionGoal
+      }
+    })
+  );
   const deterministicBundle = await runSpan(
     telemetry,
     {
@@ -117,7 +145,7 @@ export async function prepareIntakeInput(
       name: "Build deterministic baseline",
       inputJson: { url: safeUrl, prompt: input.prompt }
     },
-    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, publicPresence }),
+    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, publicPresence, understanding }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
   const aiPlanning = await runSpan(
@@ -153,7 +181,7 @@ export async function prepareIntakeInput(
       name: "Build planned site model",
       inputJson: { planningSource: aiPlanning?.source ?? "deterministic_fallback" }
     },
-    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence }),
+    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence, understanding }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
   const generationCostEstimate = planGenerationCost({
@@ -232,6 +260,7 @@ export async function prepareIntakeInput(
     renderInspection,
     publicPresence,
     aiPlanning,
+    understanding,
     mockupArtifacts,
     visualQa,
     generationCostEstimate

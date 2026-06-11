@@ -1,0 +1,5746 @@
+{
+  "version": "asset-library-manifest-v1",
+  "name": "tire-auto-v2",
+  "vertical": "auto_services",
+  "defaultModel": "gpt-image-2",
+  "defaultSize": "1536x1024",
+  "defaultQuality": "low",
+  "prompts": [
+    {
+      "id": "tire_auto_v2_001",
+      "title": "Torque wrench tightening wheel lug nuts",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "torque",
+        "lug-nuts",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands using a torque wrench on one visible lug nut after tire installation; the socket is seated on an off-center lug nut, clearly away from the wheel hub or center cap. Wheel fills most of the frame. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "torque",
+        "wrench",
+        "tightening",
+        "wheel",
+        "lug",
+        "lug-nuts"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "torque",
+        "wrench",
+        "tightening",
+        "lug"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_002",
+      "title": "Impact wrench removing lug nuts",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "impact-wrench",
+        "lug-nuts",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands using an impact wrench to remove one visible lug nut from a wheel; the socket is seated on an off-center lug nut, clearly away from the wheel hub or center cap. Crop close with only hands, tool, lug nuts, and wheel visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "impact",
+        "wrench",
+        "removing",
+        "lug",
+        "nuts",
+        "impact-wrench",
+        "lug-nuts",
+        "wheel"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "impact",
+        "wrench",
+        "removing",
+        "lug",
+        "nuts"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_003",
+      "title": "Fresh tire tread macro",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "tread",
+        "macro",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show macro close-up of fresh tire tread blocks and siping, crisp rubber texture and shallow depth of field. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "fresh",
+        "tire",
+        "tread",
+        "macro"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "fresh",
+        "macro"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_004",
+      "title": "Tread depth gauge measurement",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "tread-depth",
+        "gauge",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show a gloved hand placing a plain unmarked tread depth gauge into tire grooves; the gauge scale is turned away from camera with no numbers, markings, labels, or pseudo-text visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tread",
+        "depth",
+        "gauge",
+        "measurement",
+        "tread-depth",
+        "inspection"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "depth",
+        "gauge",
+        "measurement"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_005",
+      "title": "Valve stem replacement detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "valve-stem",
+        "tpms",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of a generic valve stem and wheel rim during tire service, with a small valve-stem tool accurately seated on the valve stem hardware, not touching the tire sidewall. No labels or brand marks. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "valve",
+        "stem",
+        "replacement",
+        "detail",
+        "valve-stem",
+        "tpms",
+        "tire"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "valve",
+        "stem",
+        "replacement",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "tpms-service"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_006",
+      "title": "TPMS sensor on work mat",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "tpms",
+        "sensor",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic TPMS sensor and valve hardware on a dark shop mat with tire edge softly blurred behind. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tpms",
+        "sensor",
+        "work",
+        "mat",
+        "wheel"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "tpms",
+        "sensor",
+        "work",
+        "mat"
+      ],
+      "catalogServiceSlugs": [
+        "tpms-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_007",
+      "title": "Wheel balancing weights close-up",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "balancing",
+        "wheel-weights",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of small generic adhesive wheel balancing weights placed flat on the inner barrel of the rim, not floating and not crossing a spoke opening; no numbers or labels visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "balancing",
+        "weights",
+        "close",
+        "wheel-weights"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "balancing",
+        "weights",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-balancing"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_008",
+      "title": "Wheel on balancing spindle",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "balancing",
+        "wheel",
+        "equipment",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show wheel mounted on a balancing spindle with equipment cropped tightly so no screen or brand label is visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "balancing",
+        "spindle",
+        "equipment"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "balancing",
+        "spindle"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-balancing"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_009",
+      "title": "Tire bead seating detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "mounting",
+        "bead",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of tire bead being seated on a wheel rim while the wheel is clamped on a tire changer machine; both hands are gloved, no bare hands, no wheel resting on a tire stack, and the bead tool contacts the tire safely with realistic rubber deformation. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "bead",
+        "seating",
+        "detail",
+        "mounting"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "bead",
+        "seating",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_010",
+      "title": "Tire changer duckhead close-up",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "mounting",
+        "tire-changer",
+        "tool",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of a tire changer duckhead accurately guiding the tire bead over a rim, with the bead interface crisp and physically plausible; equipment cropped tight with no labels and no screen visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "changer",
+        "duckhead",
+        "close",
+        "mounting",
+        "tire-changer",
+        "tool"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "changer",
+        "duckhead",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_011",
+      "title": "Air hose at valve stem",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "air-pressure",
+        "valve-stem",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand connecting an air hose chuck to a valve stem, tire sidewall cropped so no text is readable. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "air",
+        "hose",
+        "valve",
+        "stem",
+        "air-pressure",
+        "valve-stem",
+        "tire"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "air",
+        "hose",
+        "valve",
+        "stem"
+      ],
+      "catalogServiceSlugs": [
+        "tpms-service"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_012",
+      "title": "Stack of new tread patterns",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "tread",
+        "inventory",
+        "tires",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show tight crop across several new tire tread patterns on a rack, no aisle or storefront context visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "stack",
+        "new",
+        "tread",
+        "patterns",
+        "inventory",
+        "tires"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "stack",
+        "new",
+        "patterns"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_013",
+      "title": "Wheel rim cleaning before mount",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "wheel",
+        "prep",
+        "mounting",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands wiping the bead seat of a plain wheel rim before mounting a tire, towel and tool details realistic. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "rim",
+        "cleaning",
+        "before",
+        "mount",
+        "prep",
+        "mounting"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "rim",
+        "cleaning",
+        "before",
+        "mount"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_014",
+      "title": "Lug nuts in magnetic tray",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "lug-nuts",
+        "wheel",
+        "parts",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of lug nuts in a magnetic tray beside a wheel, natural shop dust and no labels. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "lug",
+        "nuts",
+        "magnetic",
+        "tray",
+        "lug-nuts",
+        "wheel",
+        "parts"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "lug",
+        "nuts",
+        "magnetic",
+        "tray"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_015",
+      "title": "Tire repair plug tools",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "flat-repair",
+        "plug-tools",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show tire plug repair tools arranged beside a tire puncture area, no packaging or readable labels. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "repair",
+        "plug",
+        "tools",
+        "flat-repair",
+        "plug-tools"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "repair",
+        "plug",
+        "tools"
+      ],
+      "catalogServiceSlugs": [
+        "flat-repair"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_016",
+      "title": "Patch repair inside tire",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "flat-repair",
+        "patch",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show inside of a tire with a generic patch repair area being prepared, hands cropped and workflow plausible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "patch",
+        "repair",
+        "inside",
+        "tire",
+        "flat-repair"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "patch",
+        "repair",
+        "inside"
+      ],
+      "catalogServiceSlugs": [
+        "flat-repair"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_017",
+      "title": "Wheel hub with tire removed",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "wheel-hub",
+        "rotation",
+        "tire-service",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of wheel hub and studs after wheel removal, neutral vehicle crop without badges or full car context. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "hub",
+        "with",
+        "tire",
+        "removed",
+        "wheel-hub",
+        "rotation",
+        "tire-service"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "hub",
+        "with",
+        "removed"
+      ],
+      "catalogServiceSlugs": [
+        "tire-rotation"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_018",
+      "title": "Rotation pattern tire set detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "rotation",
+        "tires",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show two tires positioned near a wheel well with focus on tread and wheel edges, no full shop context. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "rotation",
+        "pattern",
+        "tire",
+        "set",
+        "detail",
+        "tires",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "rotation",
+        "pattern",
+        "set",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "tire-rotation"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_019",
+      "title": "All-season tread side angle",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "all-season",
+        "tread",
+        "tires",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show angled close-up of all-season tire tread with realistic road dust and shallow depth of field. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "all",
+        "season",
+        "tread",
+        "side",
+        "angle",
+        "all-season",
+        "tires"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "all",
+        "season",
+        "side",
+        "angle"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_020",
+      "title": "Winter tire siping macro",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "winter-tires",
+        "siping",
+        "tread",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show macro detail of winter-style tire siping and tread blocks with no sidewall lettering visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "winter",
+        "tire",
+        "siping",
+        "macro",
+        "winter-tires",
+        "tread"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "winter",
+        "siping",
+        "macro"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_021",
+      "title": "Performance wheel detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "performance",
+        "wheel",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close crop of a clean generic alloy wheel and tire shoulder in a service bay, no badges or brand marks. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "performance",
+        "wheel",
+        "detail",
+        "tire"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "performance",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_022",
+      "title": "Used tire inspection light",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "inspection",
+        "shop-light",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show handheld shop light illuminating a tire shoulder during inspection, hands and tire dominate frame. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "used",
+        "tire",
+        "inspection",
+        "light",
+        "shop-light"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "used",
+        "inspection",
+        "light"
+      ],
+      "catalogServiceSlugs": [
+        "used-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_023",
+      "title": "Sidewall check with gloved hand",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "sidewall",
+        "inspection",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved fingers pressing lightly along tire sidewall in a close service-inspection crop, no sidewall text readable. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "sidewall",
+        "check",
+        "with",
+        "gloved",
+        "hand",
+        "inspection",
+        "tire"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "sidewall",
+        "check",
+        "with",
+        "gloved",
+        "hand"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_024",
+      "title": "Tire pressure gauge close-up",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "pressure-gauge",
+        "air-pressure",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show analog tire pressure gauge near a valve stem with numbers out of focus and no readable labels. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "pressure",
+        "gauge",
+        "close",
+        "pressure-gauge",
+        "air-pressure"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "pressure",
+        "gauge",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "tpms-service"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_025",
+      "title": "Wheel lock key and lug set",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "wheel-lock",
+        "lug-nuts",
+        "parts",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic wheel lock key and lug nuts on a shop mat beside a blurred rim edge. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "lock",
+        "key",
+        "and",
+        "lug",
+        "wheel-lock",
+        "lug-nuts",
+        "parts"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "lock",
+        "key",
+        "and",
+        "lug"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_026",
+      "title": "Tire mounting lubricant brush",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "mounting",
+        "lubricant",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand brushing mounting lubricant along a tire bead, plain container cropped with no label. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "mounting",
+        "lubricant",
+        "brush"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "mounting",
+        "lubricant",
+        "brush"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_027",
+      "title": "Rim flange inspection detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "rim",
+        "inspection",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of rim flange inspection with a gloved hand and small light, wheel detail dominates image. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "rim",
+        "flange",
+        "inspection",
+        "detail",
+        "wheel"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "rim",
+        "flange",
+        "inspection",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_028",
+      "title": "Wheel center cap removed",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "wheel",
+        "center-cap",
+        "lug-area",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show wheel lug area with center cap removed and tools nearby, tight crop with no vehicle badge visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "center",
+        "cap",
+        "removed",
+        "center-cap",
+        "lug-area"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "center",
+        "cap",
+        "removed"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_029",
+      "title": "Shop tire cart close-up",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "tire-cart",
+        "tools",
+        "tires",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show cropped tire cart with two tires and a torque wrench, background too shallow to identify the facility. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "shop",
+        "tire",
+        "cart",
+        "close",
+        "tire-cart",
+        "tools",
+        "tires"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "shop",
+        "cart",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_030",
+      "title": "Tire rack texture detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "tire-rack",
+        "inventory",
+        "texture",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show tight texture image of tire shoulders on a rack, no showroom, counter, signage, or storefront visible. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "rack",
+        "texture",
+        "detail",
+        "tire-rack",
+        "inventory"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "rack",
+        "texture",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_031",
+      "title": "Wheel balancing cone set",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "balancing",
+        "cones",
+        "tools",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic wheel balancing cones and adapters on a workbench with a blurred wheel behind. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "balancing",
+        "cone",
+        "set",
+        "cones",
+        "tools"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "balancing",
+        "cone",
+        "set"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-balancing"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_032",
+      "title": "Hand marking tire position",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "inspection",
+        "chalk-mark",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand making a small non-readable chalk mark on a tire for service tracking, close crop. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "hand",
+        "marking",
+        "tire",
+        "position",
+        "inspection",
+        "chalk-mark"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "hand",
+        "marking",
+        "position"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_033",
+      "title": "Tire shoulder wear inspection",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "wear",
+        "inspection",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of tire shoulder wear being inspected under shop light, no claims or readable markings. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "shoulder",
+        "wear",
+        "inspection"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "shoulder",
+        "wear",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_034",
+      "title": "Wheel studs cleaned detail",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "wheel-studs",
+        "prep",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands cleaning wheel studs with a small brush, realistic metal texture and tight crop. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "wheel",
+        "studs",
+        "cleaned",
+        "detail",
+        "wheel-studs",
+        "prep",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "studs",
+        "cleaned",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_035",
+      "title": "Mounted tire final wipe",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "wheel",
+        "final-check",
+        "tire",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands giving a mounted wheel and tire a final wipe after installation, no full vehicle context. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "mounted",
+        "tire",
+        "final",
+        "wipe",
+        "wheel",
+        "final-check"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "mounted",
+        "final",
+        "wipe"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_036",
+      "title": "Tire service tool layout",
+      "category": "tires",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "tools",
+        "tire-service",
+        "workbench",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show torque wrench, valve cores, gloves, and tire tools arranged naturally on a workbench with no labels. The image must feel like generic tire service category imagery, not a photo of a specific shop.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Tire and wheel category imagery that avoids business-specific location proof.",
+      "imageFamily": "tires_wheels",
+      "imageSubjects": [
+        "tire",
+        "service",
+        "tool",
+        "layout",
+        "tools",
+        "tire-service",
+        "workbench"
+      ],
+      "serviceHints": [
+        "tire",
+        "wheel",
+        "lug_nuts",
+        "tread",
+        "service",
+        "tool",
+        "layout"
+      ],
+      "catalogServiceSlugs": [
+        "new-tires"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_037",
+      "title": "Brake rotor inspection light",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "brakes",
+        "rotor",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand holding a small inspection light near a brake rotor and caliper with wheel removed. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "rotor",
+        "inspection",
+        "light",
+        "brakes"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "inspection",
+        "light"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_038",
+      "title": "Brake pad thickness close-up",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "pads",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of generic brake pad thickness beside a rotor, no packaging or readable labels. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "pad",
+        "thickness",
+        "close",
+        "brakes",
+        "pads",
+        "inspection"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "thickness",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_039",
+      "title": "Caliper bracket detail",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "caliper",
+        "repair",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show brake caliper bracket and rotor detail with realistic metal texture and soft shop background. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "caliper",
+        "bracket",
+        "detail",
+        "brakes",
+        "repair"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "bracket",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_040",
+      "title": "Brake hardware kit on mat",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "hardware",
+        "parts",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic brake hardware pieces on a shop mat with no labels, boxes, or documents. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "hardware",
+        "kit",
+        "mat",
+        "brakes",
+        "parts"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "hardware",
+        "kit",
+        "mat"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_041",
+      "title": "Rotor measurement tool",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "brakes",
+        "measurement",
+        "rotor",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands measuring a brake rotor with a generic caliper-style tool, no readable numbers. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "rotor",
+        "measurement",
+        "tool",
+        "brakes"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "measurement",
+        "tool"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_042",
+      "title": "Brake service tool cart close-up",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "brakes",
+        "tools",
+        "cart",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show brake service hand tools on a rolling cart, tight crop without facility context. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "service",
+        "tool",
+        "cart",
+        "close",
+        "brakes",
+        "tools"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "service",
+        "tool",
+        "cart",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_043",
+      "title": "Caliper compression tool detail",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "brakes",
+        "caliper-tool",
+        "repair",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show caliper compression tool and gloved hands in a close brake service crop. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "caliper",
+        "compression",
+        "tool",
+        "detail",
+        "brakes",
+        "caliper-tool",
+        "repair"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "compression",
+        "tool",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_044",
+      "title": "Brake fluid reservoir check crop",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "brakes",
+        "fluid",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands checking a generic brake fluid reservoir area under hood with all labels cropped or blurred. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "fluid",
+        "reservoir",
+        "check",
+        "crop",
+        "brakes",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "fluid",
+        "reservoir",
+        "check",
+        "crop"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_045",
+      "title": "Rotor surface texture macro",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "rotor",
+        "macro",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show macro of brake rotor surface texture with a shop light reflection and no vehicle identity. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "rotor",
+        "surface",
+        "texture",
+        "macro",
+        "brakes"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "surface",
+        "texture",
+        "macro"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_046",
+      "title": "Brake dust cleaning detail",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "brakes",
+        "cleaning",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands cleaning brake dust from a wheel hub area with a small brush, safe tight crop. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "dust",
+        "cleaning",
+        "detail",
+        "brakes",
+        "inspection"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "dust",
+        "cleaning",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_047",
+      "title": "Wheel-off brake assembly",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "brakes",
+        "wheel-off",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show wheel-off brake assembly cropped tightly around rotor, caliper, and control arm with no full car context. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "wheel",
+        "off",
+        "brake",
+        "assembly",
+        "brakes",
+        "wheel-off",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "wheel",
+        "off",
+        "assembly"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_048",
+      "title": "Brake parts bench detail",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "parts",
+        "workbench",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic brake pads and small parts on a workbench, no packaging, forms, or receipts. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "parts",
+        "bench",
+        "detail",
+        "brakes",
+        "workbench"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "parts",
+        "bench",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_049",
+      "title": "Shop light on caliper",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "brakes",
+        "caliper",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show caliper and rotor illuminated by a handheld shop light, dramatic but realistic close-up. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "shop",
+        "light",
+        "caliper",
+        "brakes",
+        "inspection"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "shop",
+        "light"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_050",
+      "title": "Brake job final lug torque",
+      "category": "brakes",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "brakes",
+        "torque",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands using a torque wrench on lug nuts after brake and tire reassembly, category crop. Keep the view close enough that it cannot be mistaken for the actual customer's shop or vehicle.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Brake service category detail without specific repair claims.",
+      "imageFamily": "brakes",
+      "imageSubjects": [
+        "brake",
+        "job",
+        "final",
+        "lug",
+        "torque",
+        "brakes",
+        "wheel"
+      ],
+      "serviceHints": [
+        "brake",
+        "rotor",
+        "pad",
+        "caliper",
+        "job",
+        "final",
+        "lug",
+        "torque"
+      ],
+      "catalogServiceSlugs": [
+        "brake-service"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_051",
+      "title": "Oil filter close-up on bench",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "oil-change",
+        "filter",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic oil filter, gloves, and drain plug washer on a clean shop mat with no packaging. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "oil",
+        "filter",
+        "close",
+        "bench",
+        "oil-change",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "close",
+        "bench"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_052",
+      "title": "Drain plug removal detail",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "oil-change",
+        "drain-plug",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands loosening a drain plug with a drain pan cropped below, safe under-vehicle detail. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "drain",
+        "plug",
+        "removal",
+        "detail",
+        "oil-change",
+        "drain-plug",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "drain",
+        "plug",
+        "removal",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_053",
+      "title": "Oil funnel under hood crop",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "oil-change",
+        "funnel",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands holding a generic funnel near an oil fill area with all labels cropped out. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "oil",
+        "funnel",
+        "under",
+        "hood",
+        "crop",
+        "oil-change",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "funnel",
+        "under",
+        "hood",
+        "crop"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_054",
+      "title": "Drain pan texture detail",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "oil-change",
+        "drain-pan",
+        "tools",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show drain pan, gloves, and shop towel arranged naturally on scuffed concrete, no fluid spill hazard. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "drain",
+        "pan",
+        "texture",
+        "detail",
+        "oil-change",
+        "drain-pan",
+        "tools"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "drain",
+        "pan",
+        "texture",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_055",
+      "title": "Cabin filter replacement detail",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "maintenance",
+        "filter",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic cabin air filter being removed or compared with no packaging or text. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "cabin",
+        "filter",
+        "replacement",
+        "detail",
+        "maintenance",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "cabin",
+        "replacement",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_056",
+      "title": "Engine bay maintenance light",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "maintenance",
+        "engine-bay",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands using a small inspection light in a generic engine bay crop with no brand badges. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "engine",
+        "bay",
+        "maintenance",
+        "light",
+        "engine-bay",
+        "inspection"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "engine",
+        "bay",
+        "light"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_057",
+      "title": "Oil cap area cropped",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "oil-change",
+        "engine-bay",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show oil fill area cropped so cap text is not readable, with glove and funnel nearby. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "oil",
+        "cap",
+        "area",
+        "cropped",
+        "oil-change",
+        "engine-bay",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "cap",
+        "area",
+        "cropped"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_058",
+      "title": "Routine maintenance tool layout",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "maintenance",
+        "tools",
+        "workbench",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show wrench, gloves, funnel, and generic filter on a workbench with no documents or labels. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "routine",
+        "maintenance",
+        "tool",
+        "layout",
+        "tools",
+        "workbench"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "routine",
+        "tool",
+        "layout"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_059",
+      "title": "Underbody service close-up",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "maintenance",
+        "underbody",
+        "oil-change",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show tight underbody maintenance view with drain pan positioned correctly and no full vehicle identity. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "underbody",
+        "service",
+        "close",
+        "maintenance",
+        "oil-change"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "underbody",
+        "service",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_060",
+      "title": "Fluid check rag detail",
+      "category": "oil_change",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "maintenance",
+        "fluid-check",
+        "hands",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand holding a shop rag near a generic dipstick area with no readable marks. Avoid containers with labels and avoid any paperwork or screen in frame.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Routine maintenance imagery that stays generic and close.",
+      "imageFamily": "oil_maintenance",
+      "imageSubjects": [
+        "fluid",
+        "check",
+        "rag",
+        "detail",
+        "maintenance",
+        "fluid-check",
+        "hands"
+      ],
+      "serviceHints": [
+        "oil",
+        "maintenance",
+        "filter",
+        "fluid",
+        "check",
+        "rag",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "oil-change"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_061",
+      "title": "Battery terminal service close-up",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "battery",
+        "terminals",
+        "maintenance",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands cleaning a battery terminal with a small brush, battery labels cropped out. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "battery",
+        "terminal",
+        "service",
+        "close",
+        "terminals",
+        "maintenance"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "terminal",
+        "service",
+        "close"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_062",
+      "title": "Battery clamp detail",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "battery",
+        "clamp",
+        "parts",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic battery clamp and terminal hardware in close-up with no readable battery brand. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "battery",
+        "clamp",
+        "detail",
+        "parts"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "clamp",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_063",
+      "title": "Multimeter probes on battery",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "battery",
+        "testing",
+        "diagnostics",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show multimeter probes touching battery terminals, meter face angled away so no screen or numbers are visible. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "multimeter",
+        "probes",
+        "battery",
+        "testing",
+        "diagnostics"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "multimeter",
+        "probes"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_064",
+      "title": "Diagnostic connector close-up",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "diagnostics",
+        "connector",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic vehicle diagnostic connector and technician hand, no scanner screen visible. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "diagnostic",
+        "connector",
+        "close",
+        "diagnostics",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "diagnostic",
+        "connector",
+        "close"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_065",
+      "title": "Engine bay inspection light",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "diagnostics",
+        "inspection",
+        "engine-bay",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands using a small inspection light on a generic engine bay component, no badges or labels. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "engine",
+        "bay",
+        "inspection",
+        "light",
+        "diagnostics",
+        "engine-bay"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "engine",
+        "bay",
+        "light"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_066",
+      "title": "Fuse box detail without labels",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "diagnostics",
+        "fuse-box",
+        "electrical",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of a fuse box area with labels cropped or blurred, hands and puller tool visible. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "fuse",
+        "box",
+        "detail",
+        "without",
+        "labels",
+        "diagnostics",
+        "fuse-box",
+        "electrical"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "fuse",
+        "box",
+        "detail",
+        "without",
+        "labels"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_067",
+      "title": "Battery tester leads only",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tool_closeup",
+        "battery",
+        "tester-leads",
+        "diagnostics",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show battery tester leads coiled beside a battery terminal crop, no tester screen in frame. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "battery",
+        "tester",
+        "leads",
+        "only",
+        "tester-leads",
+        "diagnostics"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "tester",
+        "leads",
+        "only"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_068",
+      "title": "Serpentine belt inspection",
+      "category": "diagnostics",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "diagnostics",
+        "belt",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand inspecting a generic serpentine belt area with tight crop and no vehicle identity. Exclude diagnostic screens, printed labels, and anything that reads like a specific vehicle record.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Battery and diagnostic category imagery without screens or claims.",
+      "imageFamily": "battery_diagnostics",
+      "imageSubjects": [
+        "serpentine",
+        "belt",
+        "inspection",
+        "diagnostics"
+      ],
+      "serviceHints": [
+        "battery",
+        "diagnostics",
+        "electrical",
+        "inspection",
+        "serpentine",
+        "belt"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_069",
+      "title": "Alignment sensor clamp close-up",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "alignment",
+        "sensor-clamp",
+        "wheel",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic alignment sensor clamp on a wheel, tightly cropped with no calibration target board or screen. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "alignment",
+        "sensor",
+        "clamp",
+        "close",
+        "sensor-clamp",
+        "wheel"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "sensor",
+        "clamp",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_070",
+      "title": "Tie rod adjustment hands",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "alignment",
+        "tie-rod",
+        "suspension",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hands using a wrench near a tie rod adjustment point, safe close mechanical detail. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "tie",
+        "rod",
+        "adjustment",
+        "hands",
+        "alignment",
+        "tie-rod",
+        "suspension"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "tie",
+        "rod",
+        "adjustment",
+        "hands"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_071",
+      "title": "Suspension component inspection",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "alignment",
+        "suspension",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show control arm and suspension component detail with shop light and no full vehicle context. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "suspension",
+        "component",
+        "inspection",
+        "alignment"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "component",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_072",
+      "title": "Wheel angle service detail",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "service_detail",
+        "alignment",
+        "wheel-angle",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show wheel and alignment clamp detail from a low angle, no screens or printed targets. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "wheel",
+        "angle",
+        "service",
+        "detail",
+        "alignment",
+        "wheel-angle",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "wheel",
+        "angle",
+        "service",
+        "detail"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_073",
+      "title": "Tire wear alignment clue",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "tire_closeup",
+        "alignment",
+        "tire-wear",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of uneven tire shoulder wear under shop light, no claims or readable tire text. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "tire",
+        "wear",
+        "alignment",
+        "clue",
+        "tire-wear",
+        "inspection"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "tire",
+        "wear",
+        "clue"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_074",
+      "title": "Suspension fastener tool close-up",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "alignment",
+        "suspension",
+        "tools",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands placing a wrench on a suspension fastener, tight realistic service crop. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "suspension",
+        "fastener",
+        "tool",
+        "close",
+        "alignment",
+        "tools"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "fastener",
+        "tool",
+        "close"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_075",
+      "title": "Alignment lift rail texture",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "alignment",
+        "lift-rail",
+        "shop-texture",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show cropped alignment rack rail, wheel stop, and tools, no vehicle identity or wide shop view. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "alignment",
+        "lift",
+        "rail",
+        "texture",
+        "lift-rail",
+        "shop-texture"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "lift",
+        "rail",
+        "texture"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_076",
+      "title": "Steering component inspection",
+      "category": "alignment",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "part_closeup",
+        "alignment",
+        "steering",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of steering linkage inspection with gloved hand and small light. Do not include alignment screens, calibration targets, printed boards, or wide facility context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Alignment and suspension detail imagery without target boards or shop identity.",
+      "imageFamily": "alignment_suspension",
+      "imageSubjects": [
+        "steering",
+        "component",
+        "inspection",
+        "alignment"
+      ],
+      "serviceHints": [
+        "alignment",
+        "suspension",
+        "steering",
+        "tire_wear",
+        "component",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [
+        "wheel-alignment"
+      ],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_077",
+      "title": "Windshield chip resin injector macro",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "chip-repair",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show macro of a resin injector over a small windshield chip, glass reflections realistic and no vehicle identity. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield",
+        "chip",
+        "resin",
+        "injector",
+        "macro",
+        "auto-glass",
+        "chip-repair"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "resin",
+        "injector",
+        "macro"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_078",
+      "title": "Windshield chip close-up before repair",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "chip",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of a small windshield chip with gloved fingers nearby for scale, no before-after claim. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield",
+        "chip",
+        "close",
+        "before",
+        "repair",
+        "auto-glass"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "close",
+        "before",
+        "repair"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_079",
+      "title": "Glass suction cup hands",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "hands_tools",
+        "auto-glass",
+        "suction-cup",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands placing a generic suction cup handle on windshield glass, tightly cropped with no shop exterior. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass",
+        "suction",
+        "cup",
+        "hands",
+        "auto-glass",
+        "suction-cup",
+        "windshield"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "suction",
+        "cup",
+        "hands"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_080",
+      "title": "Urethane bead prep detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "hands_tools",
+        "auto-glass",
+        "urethane",
+        "prep",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands preparing a clean urethane bead along a windshield edge, no labels or vehicle badge. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "urethane",
+        "bead",
+        "prep",
+        "detail",
+        "auto-glass"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "urethane",
+        "bead",
+        "prep",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_081",
+      "title": "Windshield edge trim close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "trim",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of windshield edge trim and gasket detail with realistic reflections. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield",
+        "edge",
+        "trim",
+        "close",
+        "auto-glass"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "edge",
+        "trim",
+        "close"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_082",
+      "title": "Wiper and glass inspection",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "wiper",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close-up of wiper blade and windshield glass being inspected by gloved hand. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "wiper",
+        "and",
+        "glass",
+        "inspection",
+        "auto-glass"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "wiper",
+        "and",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_083",
+      "title": "Rock chip repair tool kit detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "tool_closeup",
+        "auto-glass",
+        "repair-tools",
+        "chip-repair",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic glass repair tools arranged on a shop mat with no packaging or text. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rock",
+        "chip",
+        "repair",
+        "tool",
+        "kit",
+        "auto-glass",
+        "repair-tools",
+        "chip-repair"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "rock",
+        "repair",
+        "tool",
+        "kit"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_084",
+      "title": "Windshield removal wire close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "hands_tools",
+        "auto-glass",
+        "removal-wire",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands using windshield removal wire at a glass edge, safe tight crop without faces. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield",
+        "removal",
+        "wire",
+        "close",
+        "auto-glass",
+        "removal-wire"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "removal",
+        "wire",
+        "close"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_085",
+      "title": "Side window regulator detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "part_closeup",
+        "auto-glass",
+        "side-window",
+        "parts",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic side window regulator hardware and glass edge detail, no interior identity. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "side",
+        "window",
+        "regulator",
+        "detail",
+        "auto-glass",
+        "side-window",
+        "parts"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "side",
+        "window",
+        "regulator",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_086",
+      "title": "Replacement glass edge on stand",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "replacement-glass",
+        "detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show replacement windshield edge on a padded stand, cropped to glass and tools only. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "replacement",
+        "glass",
+        "edge",
+        "stand",
+        "auto-glass",
+        "replacement-glass",
+        "detail"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "replacement",
+        "edge",
+        "stand"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_087",
+      "title": "Primer applicator at pinch weld",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "hands_tools",
+        "auto-glass",
+        "primer",
+        "pinch-weld",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands applying generic primer at a windshield pinch weld with no labels or text. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "primer",
+        "applicator",
+        "pinch",
+        "weld",
+        "auto-glass",
+        "pinch-weld"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "primer",
+        "applicator",
+        "pinch",
+        "weld"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_088",
+      "title": "Glass-safe tool close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "tool_closeup",
+        "auto-glass",
+        "tools",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show plastic trim tools and glass-safe hand tools on a mat beside windshield edge detail. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass",
+        "safe",
+        "tool",
+        "close",
+        "auto-glass",
+        "tools",
+        "windshield"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "safe",
+        "tool",
+        "close"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_089",
+      "title": "Rain bead windshield texture",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "glass-texture",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show macro texture of rain beads on clean windshield glass with a blurred wiper edge. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rain",
+        "bead",
+        "windshield",
+        "texture",
+        "auto-glass",
+        "glass-texture"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "rain",
+        "bead",
+        "texture"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_090",
+      "title": "Mobile glass tool tray detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "tool_closeup",
+        "auto-glass",
+        "mobile-tools",
+        "tool-tray",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic mobile glass tool tray cropped tight, no van markings, no exterior context. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "mobile",
+        "glass",
+        "tool",
+        "tray",
+        "detail",
+        "auto-glass",
+        "mobile-tools",
+        "tool-tray"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "mobile",
+        "tool",
+        "tray",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_091",
+      "title": "Windshield tape retention detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "glass_closeup",
+        "auto-glass",
+        "retention-tape",
+        "windshield",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show close detail of fresh windshield edge with neutral tape strips, no car badge or shop context. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield",
+        "tape",
+        "retention",
+        "detail",
+        "auto-glass",
+        "retention-tape"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "tape",
+        "retention",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_092",
+      "title": "Gloved hand checking chip fill",
+      "category": "auto_glass",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "hands_tools",
+        "auto-glass",
+        "chip-repair",
+        "inspection",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show gloved hand inspecting a repaired chip area with a small light, no claims or before-after layout. Exclude calibration targets, diagnostic screens, printed patterns, paperwork, and identifiable business context.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Auto-glass service imagery designed to avoid screens, target boards, and pseudo-text.",
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "gloved",
+        "hand",
+        "checking",
+        "chip",
+        "fill",
+        "auto-glass",
+        "chip-repair",
+        "inspection"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield",
+        "chip",
+        "glass",
+        "gloved",
+        "hand",
+        "checking",
+        "fill"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_093",
+      "title": "Hand placing keys on plain counter mat",
+      "category": "customer_service",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "keys",
+        "service-detail",
+        "checkout",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands placing generic car keys on a plain counter mat, cropped so no room, staff, paperwork, or business identity is visible. Keep it hands-only and avoid any customer, staff, paperwork, receipt, form, front counter, or waiting-room implication.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Hands-only service detail, not a fake customer-service scene.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "hand",
+        "placing",
+        "keys",
+        "plain",
+        "counter",
+        "service-detail",
+        "checkout"
+      ],
+      "serviceHints": [
+        "keys",
+        "checkout",
+        "service_detail",
+        "hand",
+        "placing",
+        "plain",
+        "counter"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail"
+    },
+    {
+      "id": "tire_auto_v2_094",
+      "title": "Key fob and tire gauge detail",
+      "category": "customer_service",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "keys",
+        "tire-gauge",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show generic key fob beside a tire pressure gauge and gloves on a workbench, no documents or counter scene. Keep it hands-only and avoid any customer, staff, paperwork, receipt, form, front counter, or waiting-room implication.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Hands-only service detail, not a fake customer-service scene.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "key",
+        "fob",
+        "and",
+        "tire",
+        "gauge",
+        "keys",
+        "tire-gauge",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "keys",
+        "checkout",
+        "service_detail",
+        "key",
+        "fob",
+        "and",
+        "tire",
+        "gauge"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_095",
+      "title": "Hands passing key tag without text",
+      "category": "customer_service",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "keys",
+        "handoff",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands passing a blank generic key tag and keys in a tight crop with no faces and no front desk context. Keep it hands-only and avoid any customer, staff, paperwork, receipt, form, front counter, or waiting-room implication.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Hands-only service detail, not a fake customer-service scene.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "hands",
+        "passing",
+        "key",
+        "tag",
+        "without",
+        "keys",
+        "handoff",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "keys",
+        "checkout",
+        "service_detail",
+        "hands",
+        "passing",
+        "key",
+        "tag",
+        "without"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_096",
+      "title": "Service reminder card absent detail",
+      "category": "customer_service",
+      "intendedUses": [
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "keys",
+        "maintenance",
+        "service-detail",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show hands holding keys near a torque wrench and gloves, no paper card, no form, no receipt, no counter signage. Keep it hands-only and avoid any customer, staff, paperwork, receipt, form, front counter, or waiting-room implication.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Hands-only service detail, not a fake customer-service scene.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "service",
+        "reminder",
+        "card",
+        "absent",
+        "detail",
+        "keys",
+        "maintenance",
+        "service-detail"
+      ],
+      "serviceHints": [
+        "keys",
+        "checkout",
+        "service_detail",
+        "service",
+        "reminder",
+        "card",
+        "absent",
+        "detail"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup"
+    },
+    {
+      "id": "tire_auto_v2_097",
+      "title": "Torque wrench on scuffed bench",
+      "category": "detail_texture",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "shop_texture",
+        "tools",
+        "workbench",
+        "texture",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show torque wrench and gloves on a scuffed workbench, no labels, no paperwork, no facility identity. The crop must be generic texture or tool detail, never a recognizable shop interior.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Neutral texture/support imagery for layouts without implying a real facility.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "torque",
+        "wrench",
+        "scuffed",
+        "bench",
+        "tools",
+        "workbench",
+        "texture"
+      ],
+      "serviceHints": [
+        "shop_texture",
+        "tools",
+        "workbench",
+        "torque",
+        "wrench",
+        "scuffed",
+        "bench"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture"
+    },
+    {
+      "id": "tire_auto_v2_098",
+      "title": "Used tools on rolling cart",
+      "category": "detail_texture",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "shop_texture",
+        "tools",
+        "rolling-cart",
+        "texture",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show cropped rolling cart with used but organized automotive tools, no bay layout or signage visible. The crop must be generic texture or tool detail, never a recognizable shop interior.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Neutral texture/support imagery for layouts without implying a real facility.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "used",
+        "tools",
+        "rolling",
+        "cart",
+        "rolling-cart",
+        "texture"
+      ],
+      "serviceHints": [
+        "shop_texture",
+        "tools",
+        "workbench",
+        "used",
+        "rolling",
+        "cart"
+      ],
+      "catalogServiceSlugs": [
+        "used-tires"
+      ],
+      "compositionTemplate": "surface_texture"
+    },
+    {
+      "id": "tire_auto_v2_099",
+      "title": "Shop floor tire marks texture",
+      "category": "detail_texture",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "shop_texture",
+        "floor",
+        "texture",
+        "tools",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show scuffed concrete floor with tire marks, gloves, and a small tool, abstract service texture. The crop must be generic texture or tool detail, never a recognizable shop interior.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Neutral texture/support imagery for layouts without implying a real facility.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "shop",
+        "floor",
+        "tire",
+        "marks",
+        "texture",
+        "tools"
+      ],
+      "serviceHints": [
+        "shop_texture",
+        "tools",
+        "workbench",
+        "shop",
+        "floor",
+        "tire",
+        "marks",
+        "texture"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture"
+    },
+    {
+      "id": "tire_auto_v2_100",
+      "title": "Generic parts tray texture",
+      "category": "detail_texture",
+      "intendedUses": [
+        "section",
+        "card",
+        "gallery"
+      ],
+      "tags": [
+        "shop_texture",
+        "parts-tray",
+        "tools",
+        "texture",
+        "no_location_context"
+      ],
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for an auto service website, ordinary working-shop background, realistic fluorescent lighting, scuffed concrete or used but organized tools, no faces, no exterior, no signage visible, no documents, no screens. Show small generic parts tray with lug nuts, valve cores, and gloves, no packaging or text. The crop must be generic texture or tool detail, never a recognizable shop interior.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Neutral texture/support imagery for layouts without implying a real facility.",
+      "imageFamily": "detail_texture",
+      "imageSubjects": [
+        "generic",
+        "parts",
+        "tray",
+        "texture",
+        "parts-tray",
+        "tools"
+      ],
+      "serviceHints": [
+        "shop_texture",
+        "tools",
+        "workbench",
+        "generic",
+        "parts",
+        "tray",
+        "texture"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture"
+    }
+  ]
+}

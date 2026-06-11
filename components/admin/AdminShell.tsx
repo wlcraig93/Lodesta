@@ -7,9 +7,9 @@ import { AdminAccountMenu } from "@/components/admin/AdminAccountMenu";
 import { AdminNav, type AdminNavItem } from "@/components/admin/AdminNav";
 
 const primaryNavItems: AdminNavItem[] = [
-  { href: "/admin/generate", label: "Generation Lab" },
-  { href: "/admin/site-candidates", label: "Candidates" },
+  { href: "/admin/site-candidates", label: "Site Candidates" },
   { href: "/admin/sites", label: "Managed Sites" },
+  { href: "/admin/assets", label: "Assets" },
   { href: "/admin/benchmark-sites", label: "Evaluations" }
 ];
 
@@ -30,7 +30,7 @@ export async function AdminShell({ children }: { children: ReactNode }) {
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <Link className="admin-brand" href="/admin/generate">
+        <Link className="admin-brand" href="/admin/site-candidates">
           <img src="/lodesta-logo.png" alt="Lodesta" />
           <span>Control plane</span>
         </Link>

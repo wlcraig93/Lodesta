@@ -1,5 +1,30 @@
 import type { ConversionGoal, SectionType, Theme, Vertical } from "./models";
 
+/**
+ * Synthesized fallback services used when a source provides none. These are
+ * unverified claims: the quality gate blocks non-generic verticals that render
+ * them, and they never earn service landing pages.
+ */
+export function defaultServicesForVertical(vertical: Vertical) {
+  const defaults: Record<Vertical, string[]> = {
+    restaurant: ["Menu", "Online ordering", "Catering"],
+    auto_body: ["Collision repair", "Paint repair", "Dent repair"],
+    auto_services: ["Flat repair", "New and used tires", "Brake service"],
+    beauty_salon: ["Services and pricing", "Online booking", "Gallery"],
+    med_spa: ["Consultations", "Treatments", "Before and after results"],
+    law_firm: ["Practice areas", "Consultations", "Client intake"],
+    dental: ["Preventive care", "New patient visits", "Cosmetic dentistry"],
+    home_services: ["Emergency service", "Repairs", "Maintenance"],
+    fitness: ["Classes", "Memberships", "Personal training"],
+    real_estate: ["Listings", "Home valuation", "Buyer and seller consultations"],
+    landscaping: ["Lawn care", "Landscape design", "Seasonal cleanup"],
+    veterinary: ["Wellness exams", "Vaccinations", "New patient visits"],
+    creative_studio: ["Portfolio", "Session booking", "Project inquiries"],
+    general_local: []
+  };
+  return defaults[vertical];
+}
+
 export type VerticalRecipe = {
   vertical: Vertical;
   label: string;
@@ -28,6 +53,15 @@ export const verticalRecipes: Record<Vertical, VerticalRecipe> = {
     defaultSections: ["hero", "services", "before_after", "trust_bar", "testimonials", "contact", "cta"],
     trustSignals: ["insurance accepted", "certifications", "before and after proof"],
     integrations: ["estimate form", "call tracking"]
+  },
+  auto_services: {
+    vertical: "auto_services",
+    label: "Tire & Auto Service",
+    primaryGoal: "calls",
+    mood: "utilitarian",
+    defaultSections: ["hero", "services", "trust_bar", "testimonials", "contact", "cta"],
+    trustSignals: ["fast turnaround", "fair pricing", "reviews"],
+    integrations: ["call tracking", "appointment form"]
   },
   beauty_salon: {
     vertical: "beauty_salon",

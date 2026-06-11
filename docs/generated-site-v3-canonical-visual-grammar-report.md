@@ -1,6 +1,6 @@
 # Generated Site V3 Canonical Section Template Report
 
-Generated at: 2026-06-09T21:08:21.438Z
+Generated at: 2026-06-11T00:32:22.327Z
 
 This report is produced by `npm run verify:generated-site-v3-section-template-library`. It verifies one reusable high-polish generic homepage section-template stack across 16 local-business shells.
 
@@ -28,9 +28,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039237087-f794c3d3/desktop.png (4694652 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039237087-f794c3d3/tablet.png (2720376 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039237087-f794c3d3/mobile.png (1900902 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137879640-6a11ae4d/desktop.png (4453980 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137879640-6a11ae4d/tablet.png (2563220 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137879640-6a11ae4d/mobile.png (1918705 bytes)
 
 ### canonical_editorial_home_service
 
@@ -40,9 +40,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039241002-a2772fda/desktop.png (4886856 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039241002-a2772fda/tablet.png (2787080 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039241002-a2772fda/mobile.png (2000074 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137883426-1bb0e85a/desktop.png (4621810 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137883426-1bb0e85a/tablet.png (2644172 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137883426-1bb0e85a/mobile.png (1996989 bytes)
 
 ### canonical_editorial_restaurant
 
@@ -52,9 +52,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039245098-b750bad0/desktop.png (5445337 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039245098-b750bad0/tablet.png (3217352 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039245098-b750bad0/mobile.png (2048642 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137887440-650ddd30/desktop.png (5238648 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137887440-650ddd30/tablet.png (3069946 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137887440-650ddd30/mobile.png (2071826 bytes)
 
 ### canonical_editorial_beauty_salon
 
@@ -64,9 +64,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039249433-ddca7957/desktop.png (4836389 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039249433-ddca7957/tablet.png (2797413 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039249433-ddca7957/mobile.png (1964340 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137891929-a61708e3/desktop.png (4644403 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137891929-a61708e3/tablet.png (2666257 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137891929-a61708e3/mobile.png (1974760 bytes)
 
 ### canonical_editorial_med_spa
 
@@ -76,9 +76,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039253560-1f7440d8/desktop.png (5176273 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039253560-1f7440d8/tablet.png (2847136 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039253560-1f7440d8/mobile.png (2001998 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137895930-5c265574/desktop.png (4948771 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137895930-5c265574/tablet.png (2702264 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137895930-5c265574/mobile.png (2014741 bytes)
 
 ### canonical_editorial_law_firm
 
@@ -88,9 +88,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039257358-8818ddc6/desktop.png (4698158 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039257358-8818ddc6/tablet.png (2608384 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039257358-8818ddc6/mobile.png (1826376 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137899870-679bcf09/desktop.png (4480457 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137899870-679bcf09/tablet.png (2497385 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137899870-679bcf09/mobile.png (1846021 bytes)
 
 ### canonical_editorial_dental
 
@@ -100,9 +100,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039261434-1909d44e/desktop.png (5140783 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039261434-1909d44e/tablet.png (2830841 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039261434-1909d44e/mobile.png (1965073 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137903505-2e7a19e0/desktop.png (4914627 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137903505-2e7a19e0/tablet.png (2682858 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137903505-2e7a19e0/mobile.png (1960424 bytes)
 
 ### canonical_editorial_fitness
 
@@ -112,9 +112,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039265157-d3194aa4/desktop.png (4697090 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039265157-d3194aa4/tablet.png (2703122 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039265157-d3194aa4/mobile.png (1894900 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137907568-ac2dc2d9/desktop.png (4414879 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137907568-ac2dc2d9/tablet.png (2558101 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137907568-ac2dc2d9/mobile.png (1913757 bytes)
 
 ### canonical_editorial_real_estate
 
@@ -124,9 +124,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039269051-a7abfdac/desktop.png (4839749 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039269051-a7abfdac/tablet.png (2809791 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039269051-a7abfdac/mobile.png (1988363 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137911237-857d6f04/desktop.png (4610458 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137911237-857d6f04/tablet.png (2657267 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137911237-857d6f04/mobile.png (1994041 bytes)
 
 ### canonical_editorial_landscaping
 
@@ -136,9 +136,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039273050-17d434de/desktop.png (5467909 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039273050-17d434de/tablet.png (3203845 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039273050-17d434de/mobile.png (2074429 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137915164-62a55145/desktop.png (5283634 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137915164-62a55145/tablet.png (3073770 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137915164-62a55145/mobile.png (2075794 bytes)
 
 ### canonical_editorial_veterinary
 
@@ -148,9 +148,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039277506-ffdbc891/desktop.png (4883442 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039277506-ffdbc891/tablet.png (2825077 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039277506-ffdbc891/mobile.png (1979653 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137919503-1ca6b610/desktop.png (4699908 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137919503-1ca6b610/tablet.png (2701318 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137919503-1ca6b610/mobile.png (2000094 bytes)
 
 ### canonical_editorial_creative_studio
 
@@ -160,9 +160,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039281592-e398fb01/desktop.png (4872413 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039281592-e398fb01/tablet.png (2643299 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039281592-e398fb01/mobile.png (1898477 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137923356-35026116/desktop.png (4623660 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137923356-35026116/tablet.png (2525222 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137923356-35026116/mobile.png (1905423 bytes)
 
 ### canonical_editorial_cleaning
 
@@ -172,9 +172,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039285665-e35c7e33/desktop.png (4730427 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039285665-e35c7e33/tablet.png (2649443 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039285665-e35c7e33/mobile.png (1853679 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137927124-43ec9f1c/desktop.png (4532888 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137927124-43ec9f1c/tablet.png (2525232 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137927124-43ec9f1c/mobile.png (1858868 bytes)
 
 ### canonical_editorial_bakery
 
@@ -184,9 +184,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039289365-ee5dd41c/desktop.png (5686825 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039289365-ee5dd41c/tablet.png (3230288 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039289365-ee5dd41c/mobile.png (2064486 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137930773-4bed9022/desktop.png (5401052 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137930773-4bed9022/tablet.png (3097684 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137930773-4bed9022/mobile.png (2068638 bytes)
 
 ### canonical_editorial_tutoring
 
@@ -196,9 +196,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039293468-97848db3/desktop.png (4722236 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039293468-97848db3/tablet.png (2741324 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039293468-97848db3/mobile.png (1889845 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137934906-e6d91aa5/desktop.png (4459343 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137934906-e6d91aa5/tablet.png (2577374 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137934906-e6d91aa5/mobile.png (1914487 bytes)
 
 ### canonical_editorial_pet_grooming
 
@@ -208,9 +208,9 @@ This report is produced by `npm run verify:generated-site-v3-section-template-li
 - Failing findings: none
 - Polish notes: none
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039297681-a52b2472/desktop.png (4868800 bytes)
-  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039297681-a52b2472/tablet.png (2780894 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781039297681-a52b2472/mobile.png (1977729 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137938747-3579629c/desktop.png (4610722 bytes)
+  - tablet: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137938747-3579629c/tablet.png (2639599 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/render-inspections/generated.lodesta.local-1781137938747-3579629c/mobile.png (1979010 bytes)
 
 ## Acceptance
 

@@ -16,6 +16,17 @@ type VisualQaInput = {
   };
 };
 
+const defectCategoryValues = [
+  "contrast",
+  "overflow",
+  "blank_layout",
+  "unreadable_text",
+  "broken_media",
+  "cramped_layout",
+  "repetition",
+  "none"
+] as const;
+
 const findingSchema = z.object({
   id: z.string().min(1).max(80),
   category: z.enum(["hierarchy", "responsive", "conversion", "brand", "trust", "accessibility", "content"]),
@@ -23,12 +34,15 @@ const findingSchema = z.object({
   title: z.string().min(1).max(120),
   evidence: z.string().min(1).max(360),
   recommendation: z.string().max(360),
-  viewport: z.enum(["desktop", "tablet", "mobile", "none"])
+  viewport: z.enum(["desktop", "tablet", "mobile", "none"]),
+  defectCategory: z.enum(defectCategoryValues),
+  confidence: z.number().min(0).max(1)
 });
 
 const visualQaSchema = z.object({
   summary: z.string().min(1).max(420),
   score: z.object({
+    craft: z.number().min(1).max(10),
     overall: z.number().min(1).max(10),
     brand: z.number().min(1).max(10),
     layout: z.number().min(1).max(10),
@@ -82,7 +96,11 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
               "If the overall score is below 9.5, include at least one fail finding that explains the highest-leverage reason it is not production-grade yet.",
               "Score harshly: 8 means plausible but agency polish is missing; 9 means strong but still has visible refinements; 9.5+ means a business owner would reasonably prefer this over a typical polished template.",
               "Do not invent business facts, legal claims, offers, prices, credentials, or reviews.",
-              "Treat screenshots as QA evidence only; they are not source-of-truth UI."
+              "Treat screenshots as QA evidence only; they are not source-of-truth UI.",
+              "For every finding, set defectCategory to the single best-matching concrete defect (contrast, overflow, blank_layout, unreadable_text, broken_media, cramped_layout, repetition) or none when the finding is an editorial observation without a concrete rendering defect.",
+              "unreadable_text means text that literally cannot be read: clipped, obscured, or rendered below legible size. Small-but-legible branding, weak hierarchy, or elements that fail to 'anchor' the design are editorial observations — category none.",
+              "score.craft answers one question with brutal honesty: would a small-business owner be proud to pay for this site? Calibration anchors: 2 = broken or embarrassing; 4 = clean and correct but template-anonymous, generic imagery, no brand personality (most automated output); 6 = solid local-agency work with real brand color, relevant imagery, and a distinct voice; 8 = excellent custom work with strong identity, story, and conversion energy; 9-10 = flagship bespoke design. Do NOT inflate: a defect-free page with stock-feeling images and interchangeable copy is a 4, not a 7.",
+              "Set confidence (0-1) to how certain you are the defect is real and visible in the screenshots; use below 0.5 when unsure."
             ].join(" ")
           }
         ]
@@ -408,8 +426,9 @@ const responseJsonSchema = {
     score: {
       type: "object",
       additionalProperties: false,
-      required: ["overall", "brand", "layout", "copy", "conversion", "media", "mobile"],
+      required: ["craft", "overall", "brand", "layout", "copy", "conversion", "media", "mobile"],
       properties: {
+        craft: { type: "number", minimum: 1, maximum: 10 },
         overall: { type: "number", minimum: 1, maximum: 10 },
         brand: { type: "number", minimum: 1, maximum: 10 },
         layout: { type: "number", minimum: 1, maximum: 10 },
@@ -426,7 +445,7 @@ const responseJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "category", "severity", "title", "evidence", "recommendation", "viewport"],
+        required: ["id", "category", "severity", "title", "evidence", "recommendation", "viewport", "defectCategory", "confidence"],
         properties: {
           id: { type: "string", minLength: 1, maxLength: 80 },
           category: {
@@ -437,7 +456,12 @@ const responseJsonSchema = {
           title: { type: "string", minLength: 1, maxLength: 120 },
           evidence: { type: "string", minLength: 1, maxLength: 360 },
           recommendation: { type: "string", maxLength: 360 },
-          viewport: { type: "string", enum: ["desktop", "tablet", "mobile", "none"] }
+          viewport: { type: "string", enum: ["desktop", "tablet", "mobile", "none"] },
+          defectCategory: {
+            type: "string",
+            enum: ["contrast", "overflow", "blank_layout", "unreadable_text", "broken_media", "cramped_layout", "repetition", "none"]
+          },
+          confidence: { type: "number", minimum: 0, maximum: 1 }
         }
       }
     },

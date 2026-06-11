@@ -1,3 +1,4 @@
+import type { BusinessServiceRecord, FactCandidate } from "./business-evidence";
 import type {
   AnalyticsEvent,
   ClaimRecord,
@@ -196,6 +197,47 @@ export function createSiteCandidate(input: {
   };
   state().siteCandidates.set(candidate.id, candidate);
   return structuredClone(candidate);
+}
+
+const factCandidatesByBusiness = new Map<string, FactCandidate[]>();
+const businessServicesByBusiness = new Map<string, BusinessServiceRecord[]>();
+
+export function replaceFactCandidates(businessId: string, candidates: FactCandidate[]) {
+  factCandidatesByBusiness.set(businessId, candidates.map((candidate) => ({ ...candidate })));
+  return structuredClone(factCandidatesByBusiness.get(businessId) ?? []);
+}
+
+export function listFactCandidates(businessId: string) {
+  return structuredClone(factCandidatesByBusiness.get(businessId) ?? []);
+}
+
+export function replaceProposedBusinessServices(businessId: string, records: BusinessServiceRecord[]) {
+  // Replace machine-proposed rows; owner-decided rows (active/hidden/rejected) persist.
+  const existing = businessServicesByBusiness.get(businessId) ?? [];
+  const ownerDecided = existing.filter((record) => record.status !== "proposed");
+  const decidedKeys = new Set(ownerDecided.map((record) => record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
+  const fresh = records.filter((record) => !decidedKeys.has(record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
+  businessServicesByBusiness.set(businessId, [...ownerDecided, ...fresh.map((record) => ({ ...record }))]);
+  return structuredClone(businessServicesByBusiness.get(businessId) ?? []);
+}
+
+export function listBusinessServices(businessId: string) {
+  return structuredClone(businessServicesByBusiness.get(businessId) ?? []);
+}
+
+export function updateBusinessService(input: { id: string; status: "active" | "hidden" | "rejected"; confirmedBy: string }) {
+  for (const records of businessServicesByBusiness.values()) {
+    const record = records.find((entry) => entry.id === input.id);
+    if (record) {
+      record.status = input.status;
+      record.confirmationSource = "owner";
+      record.confirmedBy = input.confirmedBy;
+      record.confirmedAt = new Date().toISOString();
+      record.updatedAt = record.confirmedAt;
+      return structuredClone(record);
+    }
+  }
+  return null;
 }
 
 export function upsertSiteArtifact(artifact: SiteArtifactRecord) {

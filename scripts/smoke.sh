@@ -359,10 +359,10 @@ if [[ "$BODY" != *"# Home"* || "$BODY" != *"Canonical:"* || "$BODY" != *"## Busi
   exit 1
 fi
 
-post_check "owner assets API" "/api/assets/owner" '{"siteId":"site_joes_pizza","rightsAccepted":true,"logo":{"url":"https://assets.example/joes-logo.png","alt":"Joe'\''s Pizza logo"},"photos":[{"url":"https://assets.example/pizza-oven.jpg","alt":"Pizza oven"},{"url":"https://assets.example/catering-table.webp","alt":"Catering table"}]}'
+post_check "owner assets API" "/api/assets/owner" '{"siteId":"site_joes_pizza","logo":{"url":"https://assets.example/joes-logo.png","alt":"Joe'\''s Pizza logo","rightsConfirmed":true},"photos":[{"url":"https://assets.example/pizza-oven.jpg","alt":"Pizza oven","rightsConfirmed":true},{"url":"https://assets.example/catering-table.webp","alt":"Catering table","rightsConfirmed":true}]}'
 assert_json "owner assets API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.logo?.rightsStatus !== "customer_granted" || data.photos?.length !== 2 || !data.assets?.every((asset) => asset.ownerApproved === true && asset.usageScope === "published_site")) process.exit(1);'
 
-post_check "owner asset upload API" "/api/assets/owner" '{"siteId":"site_joes_pizza","rightsAccepted":true,"logoUpload":{"base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=","mimeType":"image/png","alt":"Uploaded Joe'\''s Pizza logo"},"photoUploads":[{"base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=","mimeType":"image/png","alt":"Uploaded pizza oven"}]}'
+post_check "owner asset upload API" "/api/assets/owner" '{"siteId":"site_joes_pizza","logoUpload":{"base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=","mimeType":"image/png","alt":"Uploaded Joe'\''s Pizza logo","rightsConfirmed":true},"photoUploads":[{"base64":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=","mimeType":"image/png","alt":"Uploaded pizza oven","rightsConfirmed":true}]}'
 assert_json "owner asset upload API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.logo?.url?.startsWith("/api/assets/") || data.logo?.rightsStatus !== "customer_granted" || data.photos?.length !== 1 || !data.photos[0]?.url?.startsWith("/api/assets/") || !data.assets?.every((asset) => asset.ownerApproved === true && asset.rightsStatus === "customer_granted")) process.exit(1);'
 UPLOADED_LOGO_URL="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); process.stdout.write(data.logo.url);')"
 UPLOADED_LOGO_STATUS="$(curl -sS -o /dev/null -w "%{http_code}" -H "x-forwarded-for: 203.0.113.10" "${BASE_URL}${UPLOADED_LOGO_URL}")"
@@ -371,7 +371,7 @@ if [[ "$UPLOADED_LOGO_STATUS" != "200" ]]; then
   exit 1
 fi
 echo "ok - owner-approved local asset serving"
-PLATFORM_ASSET_PAYLOAD="$(UPLOADED_LOGO_URL="$UPLOADED_LOGO_URL" node -e 'process.stdout.write(JSON.stringify({siteId:"site_joes_pizza",rightsAccepted:true,logo:{url:process.env.UPLOADED_LOGO_URL,alt:"Uploaded Joe'\''s Pizza logo"}}));')"
+PLATFORM_ASSET_PAYLOAD="$(UPLOADED_LOGO_URL="$UPLOADED_LOGO_URL" node -e 'process.stdout.write(JSON.stringify({siteId:"site_joes_pizza",logo:{url:process.env.UPLOADED_LOGO_URL,alt:"Uploaded Joe'\''s Pizza logo",rightsConfirmed:true}}));')"
 post_check "owner platform asset URL API" "/api/assets/owner" "$PLATFORM_ASSET_PAYLOAD"
 assert_json "owner platform asset URL API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.logo?.url?.startsWith("/api/assets/") || data.logo?.rightsStatus !== "customer_granted") process.exit(1);'
 

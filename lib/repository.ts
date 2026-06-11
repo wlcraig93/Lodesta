@@ -1,3 +1,4 @@
+import type { BusinessServiceRecord, FactCandidate } from "./business-evidence";
 import type {
   AgentModelCallRecord,
   AgentRunDetail,
@@ -102,6 +103,11 @@ import {
   updateSiteDesign as updateSiteDesignStore,
   updateSectionProps,
   upsertSiteArtifact as upsertSiteArtifactStore,
+  replaceFactCandidates as replaceFactCandidatesStore,
+  listFactCandidates as listFactCandidatesStore,
+  replaceProposedBusinessServices as replaceProposedBusinessServicesStore,
+  listBusinessServices as listBusinessServicesStore,
+  updateBusinessService as updateBusinessServiceStore,
   upsertOutboundProspect
 } from "./store";
 import {
@@ -406,6 +412,11 @@ export type LodestaRepository = {
   acceptSiteCandidateAsVersion(input: AcceptSiteCandidateAsVersionInput): Promise<AcceptSiteCandidateResult | null>;
   mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }): Promise<BusinessMergeResult>;
   upsertSiteArtifact(artifact: SiteArtifactRecord): Promise<SiteArtifactRecord>;
+  replaceFactCandidates(businessId: string, candidates: FactCandidate[]): Promise<FactCandidate[]>;
+  listFactCandidates(businessId: string): Promise<FactCandidate[]>;
+  replaceProposedBusinessServices(businessId: string, records: BusinessServiceRecord[]): Promise<BusinessServiceRecord[]>;
+  listBusinessServices(businessId: string): Promise<BusinessServiceRecord[]>;
+  updateBusinessService(input: { id: string; status: "active" | "hidden" | "rejected"; confirmedBy: string }): Promise<BusinessServiceRecord | null>;
   listSiteArtifacts(filter?: ListSiteArtifactsFilter): Promise<SiteArtifactRecord[]>;
   createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }): Promise<PreviewToken | null>;
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
@@ -539,6 +550,21 @@ export const localRepository: LodestaRepository = {
   },
   async upsertSiteArtifact(artifact) {
     return upsertSiteArtifactStore(artifact);
+  },
+  async replaceFactCandidates(businessId, candidates) {
+    return replaceFactCandidatesStore(businessId, candidates);
+  },
+  async listFactCandidates(businessId) {
+    return listFactCandidatesStore(businessId);
+  },
+  async replaceProposedBusinessServices(businessId, records) {
+    return replaceProposedBusinessServicesStore(businessId, records);
+  },
+  async listBusinessServices(businessId) {
+    return listBusinessServicesStore(businessId);
+  },
+  async updateBusinessService(input) {
+    return updateBusinessServiceStore(input);
   },
   async listSiteArtifacts(filter) {
     return listSiteArtifactsStore(filter);

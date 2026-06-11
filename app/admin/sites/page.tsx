@@ -32,7 +32,7 @@ export default async function AdminSitesPage() {
         title="Managed Sites"
         description="Operate durable accepted sites with editing, claiming, preview tokens, publishing, billing, and domains."
         actions={
-          <AdminButtonLink variant="primary" href="/admin/generate">
+          <AdminButtonLink variant="primary" href="/admin/site-candidates">
             New candidate
           </AdminButtonLink>
         }

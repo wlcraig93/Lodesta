@@ -43,6 +43,16 @@ export function computeSiteModelHash(bundle: SiteBundle, version: SiteVersion) {
           designOverrides: section.designOverrides
         }))
       })),
+      // layout-v3 renders from pageComposition, not legacy layoutSections; the
+      // hash must cover what actually renders or repairs/edits go undetected
+      // and stale `ready` statuses survive post-QA mutations.
+      ...(version.rendererVersion === "layout-v3"
+        ? {
+            pageComposition: version.pageComposition,
+            mediaDecisions: version.mediaDecisions,
+            artDirection: version.artDirection
+          }
+        : {}),
       theme: version.theme ?? bundle.siteModel.theme,
       presentation: version.presentation
     }

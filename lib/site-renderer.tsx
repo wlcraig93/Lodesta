@@ -16,6 +16,14 @@ type SiteRendererProps = {
   experiments?: Experiment[];
   tracking?: boolean;
   formsEnabled?: boolean;
+  /**
+   * Path prefix for internal navigation links. Defaults to the platform path
+   * (/sites/{slug}); custom-domain requests must pass "" so visitors never get
+   * linked back to platform URLs.
+   */
+  basePath?: string;
+  /** Google proof mode (see SiteRendererV3); defaults to "none" for QA/internal renders. */
+  proofMode?: "ui_kit" | "link_only" | "none";
 };
 
 export function SiteRenderer({
@@ -29,7 +37,9 @@ export function SiteRenderer({
   pageSlug,
   experiments = [],
   tracking = true,
-  formsEnabled = true
+  formsEnabled = true,
+  basePath,
+  proofMode
 }: SiteRendererProps) {
   const version = selectedVersion ?? getPublishedVersion(site);
   if (version.rendererVersion !== "layout-v3") {
@@ -46,6 +56,8 @@ export function SiteRenderer({
       experiments={experiments}
       tracking={tracking}
       formsEnabled={formsEnabled}
+      basePath={basePath}
+      proofMode={proofMode}
     />
   );
 }

@@ -33,7 +33,7 @@ import { createSiteFromInput } from "../lib/intake";
 import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
 import { isAdminUserId } from "../lib/auth-policy";
-import { applyOwnerAssetsUpdate } from "../lib/owner-assets";
+import { applyOwnerAssetsUpdate, parseAssetAttestation } from "../lib/owner-assets";
 import { updateSiteDesignBundle } from "../lib/design";
 import { applySuggestedEdit, preserveFindingLifecycle } from "../lib/optimization";
 import { recommendFromAnalytics } from "../lib/analytics-insights";
@@ -94,6 +94,20 @@ import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safet
 import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
 import { generateSite, type SiteCandidateRepository } from "../lib/site-candidate-service";
 import { applyPropsToLayoutSection, propsForLayoutSection, syncLegacySectionsFromLayout } from "../lib/layout-registry";
+import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
+import {
+  ASSET_LIBRARY_ACTIVE_MANIFEST_NAME,
+  ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES,
+  ASSET_LIBRARY_APPROVED_VARIANTS,
+  ASSET_LIBRARY_MANIFEST_VERSION,
+  assessAssetLibraryPolicy,
+  estimateAssetLibraryGeneration,
+  isAssetLibraryAssetAllowedForBusiness,
+  publicAssetLibraryUrl,
+  selectApprovedAssetLibraryMedia,
+  validateAssetLibraryManifest,
+  type ApprovedAssetLibraryAsset
+} from "../lib/asset-library";
 
 const bundle = createSiteFromInput({
   prompt: "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin."
@@ -601,6 +615,387 @@ assert(
   OPENAI_IMAGE_OUTPUT_FORMAT === "jpeg" && imageGenerationSource.includes("outputFormat: settings.imageFormat"),
   "Generated mockup output format should be hard-coded through operator settings defaults."
 );
+const frozenAssetLibraryManifestJson = JSON.parse(readFileSync("asset-library/manifests/tire-auto-v1.json", "utf8")) as unknown;
+assert(!validateAssetLibraryManifest(frozenAssetLibraryManifestJson).ok, "Frozen tire-auto-v1 manifest should not validate for new active generation.");
+const assetLibraryManifestJson = JSON.parse(readFileSync("asset-library/manifests/tire-auto-v2.json", "utf8")) as unknown;
+const assetLibraryManifest = validateAssetLibraryManifest(assetLibraryManifestJson);
+assert(assetLibraryManifest.ok, "Tire/auto v2 asset library manifest should validate.");
+const autoServicesWaveManifestJson = JSON.parse(readFileSync("asset-library/manifests/auto-services-wave-1-v1.json", "utf8")) as unknown;
+const autoServicesWaveManifest = validateAssetLibraryManifest(autoServicesWaveManifestJson);
+assert(autoServicesWaveManifest.ok, "Auto services wave 1 asset library manifest should validate.");
+const autoServicesEnvironmentWaveManifestJson = JSON.parse(readFileSync("asset-library/manifests/auto-services-environment-wave-1-v1.json", "utf8")) as unknown;
+const autoServicesEnvironmentWaveManifest = validateAssetLibraryManifest(autoServicesEnvironmentWaveManifestJson);
+assert(autoServicesEnvironmentWaveManifest.ok, "Auto services environment wave 1 asset library manifest should validate.");
+const autoGlassWaveManifestJson = JSON.parse(readFileSync("asset-library/manifests/auto-glass-wave-1-v1.json", "utf8")) as unknown;
+const autoGlassWaveManifest = validateAssetLibraryManifest(autoGlassWaveManifestJson);
+assert(autoGlassWaveManifest.ok, "Auto glass wave 1 asset library manifest should validate.");
+const autoBodyWaveManifestJson = JSON.parse(readFileSync("asset-library/manifests/auto-body-wave-1-v1.json", "utf8")) as unknown;
+const autoBodyWaveManifest = validateAssetLibraryManifest(autoBodyWaveManifestJson);
+assert(autoBodyWaveManifest.ok, "Auto body wave 1 asset library manifest should validate.");
+assert(
+  assetLibraryManifest.ok &&
+    assetLibraryManifest.manifest.version === ASSET_LIBRARY_MANIFEST_VERSION &&
+    ASSET_LIBRARY_ACTIVE_MANIFEST_NAME === "tire-auto-v2" &&
+    (ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES as readonly string[]).includes(assetLibraryManifest.manifest.name) &&
+    ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES.includes("auto-services-wave-1-v1") &&
+    ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES.includes("auto-services-environment-wave-1-v1") &&
+    ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES.includes("auto-glass-wave-1-v1") &&
+    ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES.includes("auto-body-wave-1-v1") &&
+    assetLibraryManifest.manifest.prompts.length === 100,
+  "Asset library should keep tire-auto-v2 valid while allowing the first automotive wave manifests."
+);
+if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnvironmentWaveManifest.ok && autoGlassWaveManifest.ok && autoBodyWaveManifest.ok) {
+  assert(
+    autoServicesWaveManifest.manifest.prompts.length === 96 &&
+      autoServicesEnvironmentWaveManifest.manifest.prompts.length === 24 &&
+      autoGlassWaveManifest.manifest.prompts.length === 48 &&
+      autoBodyWaveManifest.manifest.prompts.length === 72,
+    "Automotive wave manifests should contain the planned demand-ordered prompt counts."
+  );
+  const invalidManifest = structuredClone(autoServicesWaveManifest.manifest);
+  invalidManifest.prompts[0] = {
+    ...invalidManifest.prompts[0],
+    negativeConstraints: invalidManifest.prompts[0].negativeConstraints.slice(0, 2)
+  };
+  assert(
+    !validateAssetLibraryManifest(invalidManifest).ok,
+    "Asset library manifest validation should reject prompts missing required negative constraints."
+  );
+  const noClassificationManifest = structuredClone(autoServicesWaveManifest.manifest);
+  noClassificationManifest.prompts[0] = {
+    ...noClassificationManifest.prompts[0],
+    tags: noClassificationManifest.prompts[0].tags.filter((tag) => tag !== "tire_closeup" && tag !== "hands_tools" && tag !== "part_closeup" && tag !== "tool_closeup" && tag !== "service_detail" && tag !== "glass_closeup" && tag !== "shop_texture" && tag !== "shop_environment")
+  };
+  assert(
+    !validateAssetLibraryManifest(noClassificationManifest).ok,
+    "Asset library manifest validation should reject prompts without one safe subject classification."
+  );
+  const doubleClassificationManifest = structuredClone(autoServicesWaveManifest.manifest);
+  doubleClassificationManifest.prompts[0] = {
+    ...doubleClassificationManifest.prompts[0],
+    tags: [...doubleClassificationManifest.prompts[0].tags, "tool_closeup"]
+  };
+  assert(
+    !validateAssetLibraryManifest(doubleClassificationManifest).ok,
+    "Asset library manifest validation should reject prompts with multiple safe subject classifications."
+  );
+  const invalidCatalogManifest = structuredClone(autoServicesWaveManifest.manifest);
+  invalidCatalogManifest.prompts[0] = {
+    ...invalidCatalogManifest.prompts[0],
+    catalogServiceSlugs: ["collision-repair"]
+  };
+  assert(
+    !validateAssetLibraryManifest(invalidCatalogManifest).ok,
+    "Asset library manifest validation should reject catalog slugs outside the manifest vertical."
+  );
+  const derivedTagManifest = structuredClone(autoServicesWaveManifest.manifest);
+  derivedTagManifest.prompts[0] = {
+    ...derivedTagManifest.prompts[0],
+    tags: [...derivedTagManifest.prompts[0].tags, "family_tires_wheels"]
+  };
+  assert(
+    !validateAssetLibraryManifest(derivedTagManifest).ok,
+    "Asset library manifest validation should reject hand-authored derived taxonomy mirror tags."
+  );
+  const undersizedEnvironmentManifest = structuredClone(autoServicesEnvironmentWaveManifest.manifest);
+  undersizedEnvironmentManifest.defaultSize = "1536x1024";
+  assert(
+    !validateAssetLibraryManifest(undersizedEnvironmentManifest).ok,
+    "Environment manifest validation should reject undersized or non-2:1 default sizes."
+  );
+  const missingEnvironmentConstraintManifest = structuredClone(autoServicesEnvironmentWaveManifest.manifest);
+  missingEnvironmentConstraintManifest.prompts[0] = {
+    ...missingEnvironmentConstraintManifest.prompts[0],
+    negativeConstraints: missingEnvironmentConstraintManifest.prompts[0].negativeConstraints.filter((constraint) => constraint !== "no people")
+  };
+  assert(
+    !validateAssetLibraryManifest(missingEnvironmentConstraintManifest).ok,
+    "Environment manifest validation should reject prompts missing people-less constraints."
+  );
+  const brokenScenePairManifest = structuredClone(autoServicesEnvironmentWaveManifest.manifest);
+  brokenScenePairManifest.prompts[1] = {
+    ...brokenScenePairManifest.prompts[1],
+    sceneFamily: "mismatched_scene_family"
+  };
+  assert(
+    !validateAssetLibraryManifest(brokenScenePairManifest).ok,
+    "Environment manifest validation should reject left/right prompt pairs that do not share sceneFamily."
+  );
+  const estimate = estimateAssetLibraryGeneration({ manifest: autoServicesWaveManifest.manifest, candidates: 4, limit: 12 });
+  assert(
+    estimate.promptCount === 12 && estimate.estimatedImages === 48 && estimate.estimatedCostUsd > 0,
+    "Asset library estimate should calculate dry-run image count and cost without uploads or generation."
+  );
+  const offsetEstimate = estimateAssetLibraryGeneration({ manifest: autoServicesWaveManifest.manifest, candidates: 4, offset: 12, limit: 20 });
+  assert(
+    offsetEstimate.promptCount === 20 && offsetEstimate.selection.selectionMode === "offset",
+    "Asset library estimate should support offset wave selection."
+  );
+  const promptIdsEstimate = estimateAssetLibraryGeneration({
+    manifest: autoServicesWaveManifest.manifest,
+    candidates: 4,
+    promptIds: [autoServicesWaveManifest.manifest.prompts[3].id, autoServicesWaveManifest.manifest.prompts[4].id],
+    limit: 1
+  });
+  assert(
+    promptIdsEstimate.promptCount === 1 && promptIdsEstimate.selection.selectionMode === "prompt_ids",
+    "Asset library estimate should support explicit prompt-id wave selection with limit applied after filtering."
+  );
+  let combinedSelectionRejected = false;
+  try {
+    estimateAssetLibraryGeneration({
+      manifest: autoServicesWaveManifest.manifest,
+      candidates: 4,
+      offset: 1,
+      promptIds: [autoServicesWaveManifest.manifest.prompts[0].id],
+      limit: 1
+    });
+  } catch {
+    combinedSelectionRejected = true;
+  }
+  assert(combinedSelectionRejected, "Asset library estimate should reject combining offset and prompt-id selection.");
+  const assetLibraryCliSource = readFileSync("scripts/asset-library.ts", "utf8");
+  const assetLibrarySource = readFileSync("lib/asset-library.ts", "utf8");
+  const assetLibraryPublicRouteSource = readFileSync("app/api/asset-library/public/[assetId]/[variant]/route.ts", "utf8");
+  const assetLibraryTagsRouteSource = readFileSync("app/api/admin/asset-library/[assetId]/tags/route.ts", "utf8");
+  assert(
+    assetLibraryCliSource.includes("Generation requires explicit --limit") &&
+      assetLibraryCliSource.includes("--confirm-cost") &&
+      assetLibraryCliSource.includes("--offset") &&
+      assetLibraryCliSource.includes("--prompt-ids") &&
+      assetLibraryCliSource.includes("retag-closeup-heroes"),
+    "Asset library generation CLI should refuse runs without explicit limit and cost confirmation."
+  );
+  assert(
+    assetLibrarySource.includes("raw/${safeSegment(vertical)}") && !assetLibrarySource.includes("getPublicUrl"),
+    "Asset library raw candidates should use raw storage paths without public Supabase URLs."
+  );
+  assert(
+    ASSET_LIBRARY_APPROVED_VARIANTS.every((variant) => assetLibrarySource.includes(variant)),
+    "Asset library approved derivative generation should create hero, card, and thumbnail WebP variants."
+  );
+  assert(
+    assetLibrarySource.includes("ASSET_LIBRARY_HERO_DERIVATIVE_MIN_WIDTH") &&
+      assetLibrarySource.includes("Hero derivative blocked"),
+    "Asset library approved derivative generation should block hero derivatives that would require upscaling."
+  );
+  assert(
+    assetLibrarySource.includes("Only approved asset-library assets can receive public derivatives") &&
+      assetLibrarySource.includes("Invalid asset review transition"),
+    "Asset library approval and review transitions should fail closed before public derivatives are created."
+  );
+  assert(
+    assetLibrarySource.includes("Asset library policy and derived taxonomy tags can only be changed through review or taxonomy backfill actions") &&
+      assetLibraryTagsRouteSource.includes("updateAssetLibraryAssetTags"),
+    "Asset library metadata edits should not bypass generated-image policy flags, classifications, or derived taxonomy tags."
+  );
+  assert(
+    assetLibraryPublicRouteSource.includes("asset.status !== \"approved\"") &&
+      assetLibraryPublicRouteSource.includes("assessAssetLibraryPolicy(asset).siteSelectable") &&
+      assetLibraryPublicRouteSource.includes("path.startsWith(\"raw/\")"),
+    "Asset library public route should serve only approved policy-safe non-raw derivative paths."
+  );
+  const autoServicesBundle = createSiteFromInput({
+    prompt: "Build a website for Boundary Tire and Auto, a tire and alignment shop in Austin. Services: tire rotation, wheel alignment, brake service. Phone: 512-555-0188."
+  });
+  autoServicesBundle.businessProfile.vertical = "auto_services";
+  autoServicesBundle.businessProfile.services = ["Tire rotation", "Wheel alignment", "Brake service"];
+  const approvedLibraryAsset: ApprovedAssetLibraryAsset = {
+    id: "asset_boundary_approved_auto_services",
+    vertical: "auto_services",
+    category: "alignment",
+    intendedUses: ["hero", "section", "card"],
+    tags: ["service_detail", "alignment", "tires", "no_location_context", "family_alignment_suspension", "catalog_wheel-alignment"],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_approved_auto_services", "hero-1600.webp"),
+    approvedStoragePaths: {
+      "hero-1600.webp": "approved/auto_services/asset_boundary_approved_auto_services/hero-1600.webp",
+      "card-900.webp": "approved/auto_services/asset_boundary_approved_auto_services/card-900.webp",
+      "thumb-320.webp": "approved/auto_services/asset_boundary_approved_auto_services/thumb-320.webp"
+    },
+    promptMetadata: assetLibraryManifest.manifest.prompts.find((prompt) => prompt.category === "alignment") ?? assetLibraryManifest.manifest.prompts[0]
+  };
+  const unclassifiedLibraryAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_unclassified_auto_services",
+    tags: ["alignment", "no_location_context"],
+    promptMetadata: { ...approvedLibraryAsset.promptMetadata, tags: ["no_location_context", "alignment"] },
+    publicUrl: publicAssetLibraryUrl("asset_boundary_unclassified_auto_services", "hero-1600.webp")
+  };
+  const policyFailedLibraryAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_policy_failed_auto_services",
+    tags: ["service_detail", "alignment", "policy_fail_signage_pseudo_text"],
+    promptMetadata: { ...approvedLibraryAsset.promptMetadata, tags: ["service_detail", "alignment"] },
+    publicUrl: publicAssetLibraryUrl("asset_boundary_policy_failed_auto_services", "hero-1600.webp")
+  };
+  const environmentHeroAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_environment_left",
+    category: "general_repair",
+    intendedUses: ["hero", "section", "gallery"],
+    tags: ["shop_environment", "service_bay", "no_location_context", "family_shop_environment", "scene_two_post_lift_car", "clear_left"],
+    promptMetadata: autoServicesEnvironmentWaveManifest.manifest.prompts[0],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_environment_left", "hero-1600.webp")
+  };
+  const environmentHeroRightAsset: ApprovedAssetLibraryAsset = {
+    ...environmentHeroAsset,
+    id: "asset_boundary_environment_right",
+    tags: ["shop_environment", "service_bay", "no_location_context", "family_shop_environment", "scene_two_post_lift_car", "clear_right"],
+    promptMetadata: autoServicesEnvironmentWaveManifest.manifest.prompts[1],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_environment_right", "hero-1600.webp")
+  };
+  const conversionBackgroundAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_environment_background",
+    category: "general_repair",
+    intendedUses: ["background", "section"],
+    tags: ["shop_environment", "soft_blur", "no_location_context", "family_shop_environment", "scene_blur_lift_bay", "clear_none"],
+    promptMetadata: autoServicesEnvironmentWaveManifest.manifest.prompts[22],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_environment_background", "hero-1600.webp")
+  };
+  assert(assessAssetLibraryPolicy(approvedLibraryAsset).siteSelectable, "Safe classified asset-library image should be policy selectable.");
+  assert(assessAssetLibraryPolicy(environmentHeroAsset).siteSelectable, "Safe shop_environment asset-library image should be policy selectable.");
+  assert(!assessAssetLibraryPolicy(unclassifiedLibraryAsset).siteSelectable, "Unclassified asset-library image should fail default-deny policy.");
+  assert(!assessAssetLibraryPolicy(policyFailedLibraryAsset).siteSelectable, "Reviewer-applied policy fail tags should make an asset non-selectable.");
+  const modifierOnlyLibraryAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_modifier_only_auto_services",
+    tags: ["no_location_context"],
+    promptMetadata: { ...approvedLibraryAsset.promptMetadata, tags: ["no_location_context"] },
+    publicUrl: publicAssetLibraryUrl("asset_boundary_modifier_only_auto_services", "hero-1600.webp")
+  };
+  assert(!assessAssetLibraryPolicy(modifierOnlyLibraryAsset).siteSelectable, "no_location_context alone should not make generated assets selectable.");
+  assert(
+    !selectApprovedAssetLibraryMedia({
+      business: autoServicesBundle.businessProfile,
+      assets: [policyFailedLibraryAsset],
+      intendedUse: "hero"
+    }).asset,
+    "Approved legacy asset-library images that fail policy should not be selected."
+  );
+  assert(
+    selectApprovedAssetLibraryMedia({
+      business: autoServicesBundle.businessProfile,
+      assets: [environmentHeroAsset],
+      intendedUse: "hero"
+    }).asset?.id === environmentHeroAsset.id,
+    "Approved shop_environment assets should be selectable for photo-less auto-service heroes."
+  );
+  const glassOnlyBundle = createSiteFromInput({
+    prompt: "Build a website for Austin Auto Glass, a windshield repair shop. Services: windshield chip repair, auto glass replacement. Phone: 512-555-0200."
+  });
+  glassOnlyBundle.businessProfile.vertical = "auto_services";
+  glassOnlyBundle.businessProfile.services = ["Windshield chip repair", "Auto glass replacement"];
+  const glassAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_auto_glass",
+    category: "auto_glass",
+    tags: ["hands_tools", "auto_glass", "no_location_context", "family_auto_glass", "hint_windshield"],
+    promptMetadata: autoGlassWaveManifest.manifest.prompts[0],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_auto_glass", "hero-1600.webp")
+  };
+  const brakeAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_brake",
+    category: "brakes",
+    tags: ["service_detail", "brake", "no_location_context", "family_brakes", "catalog_brake-service"],
+    promptMetadata: autoServicesWaveManifest.manifest.prompts.find((prompt) => prompt.category === "brakes") ?? autoServicesWaveManifest.manifest.prompts[0],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_brake", "hero-1600.webp")
+  };
+  assert(
+    selectApprovedAssetLibraryMedia({
+      business: glassOnlyBundle.businessProfile,
+      assets: [brakeAsset, glassAsset],
+      intendedUse: "hero"
+    }).asset?.id === glassAsset.id,
+    "Glass-only auto-service businesses should select glass imagery instead of brake or tire fallback."
+  );
+  assert(
+    !isAssetLibraryAssetAllowedForBusiness(brakeAsset, glassOnlyBundle.businessProfile),
+    "Glass-only auto-service businesses should reject mechanical fallback families."
+  );
+  const bodyAsset: ApprovedAssetLibraryAsset = {
+    ...approvedLibraryAsset,
+    id: "asset_boundary_auto_body",
+    vertical: "auto_body",
+    category: "collision_repair",
+    tags: ["service_detail", "collision", "no_location_context", "family_collision_body", "catalog_collision-repair"],
+    promptMetadata: autoBodyWaveManifest.manifest.prompts[0],
+    publicUrl: publicAssetLibraryUrl("asset_boundary_auto_body", "hero-1600.webp")
+  };
+  assert(
+    !selectApprovedAssetLibraryMedia({
+      business: autoServicesBundle.businessProfile,
+      assets: [bodyAsset],
+      intendedUse: "hero"
+    }).asset,
+    "General auto-service businesses should not receive collision or paint imagery by fallback."
+  );
+  const realPhotoBundle = createSiteFromInput({
+    prompt: "Build a website for Real Photo Tire, a tire shop in Austin. Services: tire rotation, brake service. Phone: 512-555-0201."
+  });
+  realPhotoBundle.businessProfile.vertical = "auto_services";
+  realPhotoBundle.businessProfile.services = ["Tire rotation", "Brake service"];
+  realPhotoBundle.businessProfile.photos = [
+    {
+      id: "real_photo_customer_granted",
+      url: "https://example.com/customer-granted-shop-photo.jpg",
+      alt: "Customer-granted real shop photo",
+      source: "uploaded",
+      rightsStatus: "customer_granted"
+    }
+  ];
+  const realPhotoCompile = compileGeneratedSiteV3Site({
+    bundle: realPhotoBundle,
+    assetLibraryAssets: [environmentHeroAsset],
+    createdAt: "2026-06-10T00:00:00.000Z"
+  });
+  assert(
+    realPhotoCompile.version.mediaDecisions.some(
+      (decision) => decision.source !== "generated_ai" && decision.sourceUrl === realPhotoBundle.businessProfile.photos[0].url
+    ),
+    "Real customer-granted photos should outrank generated category imagery for hero media."
+  );
+  const assetLibraryCompile = compileGeneratedSiteV3Site({
+    bundle: autoServicesBundle,
+    assetLibraryAssets: [policyFailedLibraryAsset, environmentHeroAsset, environmentHeroRightAsset, conversionBackgroundAsset, { ...approvedLibraryAsset, intendedUses: ["section", "card", "gallery"] }],
+    createdAt: "2026-06-10T00:00:00.000Z"
+  });
+  const assetLibraryVersionJson = JSON.stringify(assetLibraryCompile.version);
+  assert(
+    assetLibraryCompile.version.mediaDecisions.some(
+      (decision) =>
+        decision.source === "generated_ai" &&
+        decision.rightsStatus === "preclaim_safe" &&
+        (decision.artifactRef === environmentHeroAsset.id || decision.artifactRef === environmentHeroRightAsset.id) &&
+        (decision.sourceUrl === environmentHeroAsset.publicUrl || decision.sourceUrl === environmentHeroRightAsset.publicUrl) &&
+        decision.mayImplyRealBusinessWork === false
+    ),
+    "Approved asset-library images should compile into V3 media decisions as non-deceptive generated category imagery."
+  );
+  assert(
+    assetLibraryCompile.version.mediaDecisions.some(
+      (decision) =>
+        decision.slotId === "home.conversion.background" &&
+        decision.source === "generated_ai" &&
+        decision.usageScope === "background" &&
+        decision.artifactRef === conversionBackgroundAsset.id &&
+        decision.sourceUrl === conversionBackgroundAsset.publicUrl
+    ) &&
+      assetLibraryVersionJson.includes(conversionBackgroundAsset.publicUrl ?? ""),
+    "Approved soft-blur background assets should populate the auto-services conversion band."
+  );
+  assert(
+    !(assetLibraryVersionJson.includes(environmentHeroAsset.publicUrl ?? "") && assetLibraryVersionJson.includes(environmentHeroRightAsset.publicUrl ?? "")),
+    "Scene-family dedupe should prevent left/right crops of the same environment scene from appearing together."
+  );
+  assert(
+    !assetLibraryVersionJson.includes("raw/") &&
+      !assetLibraryVersionJson.includes("data:image") &&
+      !assetLibraryVersionJson.includes("candidate"),
+    "Generated sites must not contain asset-library raw paths, base64 images, or candidate statuses."
+  );
+}
 const previousRepositoryMode = process.env.LODESTA_REPOSITORY;
 const operatorSettingsProbeFile = join(mkdtempSync(join(tmpdir(), "lodesta-operator-settings-")), "settings.json");
 setEnv("LODESTA_REPOSITORY", "local");
@@ -1949,11 +2344,11 @@ const ownerAssetBundle = createSiteFromInput({
 });
 const ownerAssets = applyOwnerAssetsUpdate(ownerAssetBundle, {
   siteId: ownerAssetBundle.businessProfile.siteId,
-  rightsAccepted: true,
-  logo: { url: "https://assets.example/boundary-logo.png", alt: "Boundary Verify Salon logo" },
+  attestedBy: "boundary-verify@example.com",
+  logo: { url: "https://assets.example/boundary-logo.png", alt: "Boundary Verify Salon logo", rightsConfirmed: true },
   photos: [
-    { url: "https://assets.example/boundary-style.jpg", alt: "Salon styling" },
-    { url: "https://assets.example/boundary-color.webp", alt: "Hair color service" }
+    { url: "https://assets.example/boundary-style.jpg", alt: "Salon styling", rightsConfirmed: true },
+    { url: "https://assets.example/boundary-color.webp", alt: "Hair color service", rightsConfirmed: true }
   ]
 });
 assert(
@@ -1983,8 +2378,8 @@ const ownerUploadedAsset = await storeAssetBytes({
 assert(ownerUploadedAsset.url, "Owner upload storage should return a public URL.");
 const ownerUploadedAssets = applyOwnerAssetsUpdate(ownerAssetBundle, {
   siteId: ownerAssetBundle.businessProfile.siteId,
-  rightsAccepted: true,
-  logo: { url: ownerUploadedAsset.url, alt: "Uploaded Boundary Verify Salon logo" }
+  attestedBy: "boundary-verify@example.com",
+  logo: { url: ownerUploadedAsset.url, alt: "Uploaded Boundary Verify Salon logo", rightsConfirmed: true }
 });
 assert(
   ownerUploadedAssets.ok &&
@@ -1999,17 +2394,26 @@ assert(
 );
 const blockedOwnerAssets = applyOwnerAssetsUpdate(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
-  rightsAccepted: false,
-  photos: [{ url: "https://assets.example/no-rights.jpg", alt: "No rights" }]
+  attestedBy: "boundary-verify@example.com",
+  photos: [{ url: "https://assets.example/no-rights.jpg", alt: "No rights", rightsConfirmed: false }]
 });
 assert(
   !blockedOwnerAssets.ok,
-  "Owner assets must require explicit rights confirmation before becoming published-site content."
+  "Owner assets must require per-image rights confirmation before becoming published-site content."
+);
+const ownerAssetsModuleSource = readFileSync("lib/owner-assets.ts", "utf8");
+assert(
+  !ownerAssetsModuleSource.includes("rightsAccepted"),
+  "Blanket rights acceptance must not exist anywhere in the owner assets model."
+);
+assert(
+  ownerAssets.ok && ownerAssets.assets.every((asset) => parseAssetAttestation(asset.metadata)?.attestedBy === "boundary-verify@example.com"),
+  "Every owner-approved asset must carry a typed per-image attestation record."
 );
 const blockedPrivateOwnerAssets = applyOwnerAssetsUpdate(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
-  rightsAccepted: true,
-  logo: { url: "http://127.0.0.1/private-logo.png", alt: "Private network logo" }
+  attestedBy: "boundary-verify@example.com",
+  logo: { url: "http://127.0.0.1/private-logo.png", alt: "Private network logo", rightsConfirmed: true }
 });
 assert(
   !blockedPrivateOwnerAssets.ok,
@@ -2212,12 +2616,19 @@ const renderInspection = await inspectUrlRender({
   url: `data:text/html,${renderFixture}`,
   captureScreenshots: false
 });
+// Browser inspections emit per-viewport findings (render.primary_cta.desktop);
+// the fetch fallback emits unsuffixed ids. Accept both so this boundary check
+// passes regardless of whether Chromium can launch in the environment.
 assert(
-  renderInspection.findings.some((finding) => finding.id === "render.primary_cta" && finding.severity === "pass"),
+  renderInspection.findings.some(
+    (finding) => (finding.id === "render.primary_cta" || finding.id.startsWith("render.primary_cta.")) && finding.severity === "pass"
+  ),
   "Render inspection should detect CTA-like actions."
 );
 assert(
-  renderInspection.findings.some((finding) => finding.id === "render.form" && finding.severity === "pass"),
+  renderInspection.findings.some(
+    (finding) => (finding.id === "render.form" || finding.id.startsWith("render.form.")) && finding.severity === "pass"
+  ),
   "Render inspection should detect rendered forms."
 );
 const renderQaBundle = createSiteFromInput({
@@ -2504,6 +2915,12 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
     startedAt: now
   };
   const repository: SiteCandidateRepository = {
+    async replaceFactCandidates(_businessId, candidates) {
+      return candidates;
+    },
+    async replaceProposedBusinessServices(_businessId, records) {
+      return records;
+    },
     async createAgentRun() {
       return options.telemetryUnavailable ? null : run;
     },

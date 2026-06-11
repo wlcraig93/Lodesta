@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Texas Tires #30 — Tires, Wheels, Lift Kits | N Lamar, Austin</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,500;0,700;0,800;0,900;1,900&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1c2a42; --navy-deep:#121d31; --yellow:#fec702; --yellow-hot:#ffd92e;
+  --ink:#151d2b; --muted:#5d6678; --paper:#fff; --bone:#f5f4ee; --line:#e4e3da;
+  --tread: repeating-linear-gradient(135deg, rgba(255,255,255,.045) 0 2px, transparent 2px 13px);
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{font-family:Figtree,system-ui,sans-serif;color:var(--ink);background:var(--paper);line-height:1.55}
+h1,h2,h3,h4{font-family:Archivo,system-ui,sans-serif}
+img{display:block;max-width:100%}
+a{color:inherit}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+html.js .reveal{opacity:0;transform:translateY(22px);transition:opacity .6s ease,transform .6s ease}
+html.js .reveal.in{opacity:1;transform:none}
+
+/* ===== Header ===== */
+header{position:sticky;top:0;z-index:60;background:var(--navy);color:#fff;box-shadow:0 2px 0 var(--yellow)}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 0}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand .mark{background:var(--yellow);color:var(--navy);font-family:Archivo;font-weight:900;font-size:.95rem;padding:5px 8px;border-radius:5px;letter-spacing:-.02em}
+.brand .word{font-family:Archivo;font-weight:900;font-size:1.3rem;letter-spacing:-.02em}
+.brand .word em{color:var(--yellow);font-style:normal}
+nav{display:flex;gap:24px;font-weight:600;font-size:.94rem}
+nav a{text-decoration:none;opacity:.85}
+nav a:hover{opacity:1;color:var(--yellow)}
+.lang{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;border-radius:5px;padding:6px 10px;font:inherit;font-size:.85rem;cursor:pointer}
+.lang:hover{border-color:var(--yellow);color:var(--yellow)}
+.call-btn{background:var(--yellow);color:var(--navy);font-family:Archivo;font-weight:800;padding:11px 18px;border-radius:6px;text-decoration:none;white-space:nowrap;font-size:.93rem;transition:transform .12s ease}
+.call-btn:hover{background:var(--yellow-hot);transform:translateY(-1px)}
+
+/* ===== Hero ===== */
+.hero{position:relative;color:#fff;min-height:88vh;display:flex;align-items:center;background:var(--navy-deep);overflow:hidden}
+.hero .photo{position:absolute;inset:0;background:url('/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_010_4_b5fec13e72/hero-1600.webp') center/cover;opacity:.5}
+.hero .scrim{position:absolute;inset:0;background:linear-gradient(98deg,rgba(18,29,49,.97) 0%,rgba(18,29,49,.84) 46%,rgba(18,29,49,.2) 100%)}
+.hero .slab{position:absolute;top:-5%;right:-7%;width:30%;height:115%;background:var(--yellow);transform:skewX(-7deg);box-shadow:-18px 0 60px rgba(0,0,0,.35)}
+.hero .slab::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg, rgba(28,42,66,.12) 0 3px, transparent 3px 16px)}
+.hero .tread{position:absolute;inset:0;background:var(--tread)}
+.hero .wrap{position:relative;z-index:3;padding:80px 24px}
+.rating-pill{display:inline-flex;align-items:center;gap:10px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(4px);border-radius:99px;padding:8px 16px;font-size:.92rem;margin-bottom:22px}
+.rating-pill .stars{color:var(--yellow);font-size:1rem;letter-spacing:2px}
+.rating-pill strong{font-family:Archivo}
+.hero h1{font-size:clamp(3rem,7vw,5.8rem);font-weight:900;line-height:.9;letter-spacing:-.03em;text-transform:uppercase;max-width:11ch}
+.hero h1 .y{color:var(--yellow)}
+.hero .sub{margin:24px 0 32px;font-size:1.15rem;max-width:44ch;color:rgba(255,255,255,.86)}
+.hero-ctas{display:flex;gap:14px;flex-wrap:wrap}
+.btn-y{background:var(--yellow);color:var(--navy);font-family:Archivo;font-weight:900;font-size:1.06rem;padding:17px 30px;border-radius:7px;text-decoration:none;transition:transform .12s ease,box-shadow .12s ease}
+.btn-y:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(254,199,2,.35)}
+.btn-o{border:2px solid rgba(255,255,255,.45);color:#fff;font-family:Archivo;font-weight:700;font-size:1.06rem;padding:15px 28px;border-radius:7px;text-decoration:none}
+.btn-o:hover{border-color:var(--yellow);color:var(--yellow)}
+.hero-chips{display:flex;gap:30px;flex-wrap:wrap;margin-top:48px;padding-top:26px;border-top:1px solid rgba(255,255,255,.2)}
+.chip strong{display:block;font-family:Archivo;font-weight:900;font-size:1.15rem;color:var(--yellow)}
+.chip span{color:rgba(255,255,255,.72);font-size:.92rem}
+
+/* ===== Marquee ===== */
+.marquee{background:var(--yellow);border-top:4px solid var(--navy);border-bottom:4px solid var(--navy);overflow:hidden;padding:13px 0}
+.marquee-track{display:flex;gap:0;white-space:nowrap;animation:scroll 28s linear infinite;width:max-content}
+.marquee span{font-family:Archivo;font-weight:900;font-size:.95rem;letter-spacing:.13em;text-transform:uppercase;color:var(--navy);padding:0 28px;position:relative}
+.marquee span::after{content:"●";position:absolute;right:-7px;font-size:.5rem;top:50%;transform:translateY(-50%)}
+@keyframes scroll{to{transform:translateX(-50%)}}
+
+/* ===== Sections ===== */
+.section{padding:96px 0}
+.eyebrow{font-family:Archivo;font-weight:800;font-size:.8rem;letter-spacing:.13em;text-transform:uppercase;color:var(--navy);background:var(--bone);border-left:4px solid var(--yellow);padding:6px 13px;display:inline-block;margin-bottom:16px}
+.section-head{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:48px}
+.section-head h2{font-size:clamp(2rem,4vw,3.1rem);font-weight:900;letter-spacing:-.025em;line-height:1;max-width:17ch;text-transform:uppercase}
+.section-head p{max-width:36ch;color:var(--muted)}
+
+/* Services */
+.svc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.svc{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:transform .16s ease,box-shadow .16s ease}
+.svc:hover{transform:translateY(-4px);box-shadow:0 22px 50px rgba(21,29,43,.14)}
+.svc figure{aspect-ratio:16/9;overflow:hidden;position:relative;background:var(--navy-deep)}
+.svc figure img{width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
+.svc:hover figure img{transform:scale(1.05)}
+.svc figure::after{content:"";position:absolute;inset:auto 0 0 0;height:5px;background:var(--yellow)}
+.svc-body{padding:24px 26px 28px;display:flex;flex-direction:column;gap:10px;flex:1}
+.svc .tag{font-family:Archivo;font-weight:900;font-size:.8rem;letter-spacing:.04em;color:var(--navy);background:var(--yellow);align-self:start;padding:4px 11px;border-radius:4px;text-transform:uppercase}
+.svc h3{font-size:1.5rem;font-weight:900;text-transform:uppercase;letter-spacing:-.01em}
+.svc p{color:var(--muted);font-size:.97rem;flex:1}
+.svc a{font-family:Archivo;font-weight:800;color:var(--navy);text-decoration:none;font-size:.95rem}
+.svc a::after{content:" →";color:#caa102;font-weight:900}
+.svc a:hover{text-decoration:underline;text-underline-offset:.25em}
+
+/* Size finder */
+.finder{background:var(--navy);color:#fff;border-radius:18px;padding:38px 40px;margin-top:26px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;position:relative;overflow:hidden}
+.finder::after{content:"";position:absolute;inset:0;background:var(--tread);pointer-events:none}
+.finder h3{font-size:1.5rem;font-weight:900;text-transform:uppercase}
+.finder p{color:rgba(255,255,255,.75);font-size:.95rem}
+.finder .selects{display:flex;gap:12px;flex-wrap:wrap;position:relative;z-index:2}
+.finder select{background:#fff;color:var(--ink);border:0;border-radius:7px;padding:13px 16px;font:inherit;font-weight:600;min-width:110px}
+.finder .btn-y{padding:13px 24px;font-size:1rem;position:relative;z-index:2}
+
+/* Reviews */
+.reviews{background:var(--bone);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.review-summary{display:flex;align-items:center;gap:30px;flex-wrap:wrap;margin-bottom:40px}
+.big-rating{font-family:Archivo;font-weight:900;font-size:4.6rem;line-height:1;color:var(--navy)}
+.review-summary .stars{color:#e2a800;font-size:1.5rem;letter-spacing:3px}
+.review-summary .meta{color:var(--muted)}
+.review-summary .meta strong{color:var(--ink)}
+.g-badge{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 16px;font-weight:600;font-size:.92rem;text-decoration:none}
+.theme-row{display:flex;gap:12px;flex-wrap:wrap}
+.theme{background:#fff;border:1px solid var(--line);border-radius:99px;padding:10px 20px;font-weight:600;font-size:.93rem}
+.theme b{color:var(--navy);font-family:Archivo}
+
+/* Why / split */
+.split{display:grid;grid-template-columns:1.04fr .96fr;gap:60px;align-items:center}
+.split figure{border-radius:16px;overflow:hidden;box-shadow:0 28px 70px rgba(21,29,43,.2);position:relative}
+.split figure::after{content:"";position:absolute;top:18px;left:18px;right:auto;bottom:auto;width:64px;height:64px;background:var(--yellow);border-radius:10px;opacity:.95;mask:radial-gradient(circle at center, transparent 40%, black 41%)}
+.split img{width:100%;object-fit:cover;aspect-ratio:4/3.3}
+.points{display:grid;gap:24px;margin-top:32px}
+.point{display:flex;gap:18px}
+.point .n{font-family:Archivo;font-weight:900;font-size:1.15rem;color:var(--navy);background:var(--yellow);min-width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;transform:rotate(-3deg)}
+.point h4{font-size:1.12rem;font-weight:800;margin-bottom:3px}
+.point p{color:var(--muted);font-size:.96rem}
+
+/* Financing */
+.financing{background:var(--yellow);position:relative;overflow:hidden}
+.financing::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(135deg, rgba(28,42,66,.05) 0 3px, transparent 3px 18px)}
+.financing .wrap{position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:30px;padding-top:54px;padding-bottom:54px;flex-wrap:wrap}
+.financing h2{font-size:clamp(1.7rem,3.4vw,2.5rem);font-weight:900;color:var(--navy);text-transform:uppercase;letter-spacing:-.02em;max-width:22ch}
+.financing p{color:rgba(28,42,66,.75);font-weight:600;max-width:40ch}
+.btn-navy{background:var(--navy);color:#fff;font-family:Archivo;font-weight:800;padding:16px 28px;border-radius:7px;text-decoration:none;white-space:nowrap;font-size:1.02rem}
+.btn-navy:hover{background:var(--navy-deep)}
+
+/* Visit */
+.visit{background:var(--navy);color:#fff;position:relative}
+.visit::after{content:"";position:absolute;inset:0;background:var(--tread);pointer-events:none}
+.visit .wrap{position:relative;z-index:2;display:grid;grid-template-columns:1.05fr .95fr;gap:60px;padding-top:96px;padding-bottom:96px}
+.visit h2{font-size:clamp(2rem,3.8vw,3rem);font-weight:900;letter-spacing:-.02em;line-height:1;text-transform:uppercase}
+.visit .eyebrow{background:rgba(255,255,255,.08);color:var(--yellow)}
+.visit address{font-style:normal;margin:18px 0 8px;color:rgba(255,255,255,.88);font-size:1.08rem}
+.visit .franchise{color:rgba(255,255,255,.55);font-size:.9rem;margin-bottom:24px}
+.visit-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:32px 34px}
+.open-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(254,199,2,.16);color:var(--yellow);font-weight:700;font-size:.9rem;padding:7px 15px;border-radius:99px;margin-bottom:18px}
+.open-badge::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--yellow);animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.4}}
+.hours-table{width:100%;border-collapse:collapse}
+.hours-table td{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.13);font-size:1rem}
+.hours-table td:last-child{text-align:right;font-weight:600;white-space:nowrap}
+.hours-table tr.hot td{color:var(--yellow);font-weight:800}
+
+/* CTA */
+.cta-band{position:relative;background:var(--navy-deep);color:#fff;text-align:center;overflow:hidden}
+.cta-band .bg{position:absolute;inset:0;background:url('/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_005_4_33e2c3557e/hero-1600.webp') center/cover;opacity:.16;filter:blur(2px)}
+.cta-band .wrap{position:relative;padding-top:92px;padding-bottom:92px}
+.cta-band h2{font-size:clamp(2.4rem,6.4vw,5rem);font-weight:900;letter-spacing:-.03em;text-transform:uppercase;line-height:.92}
+.cta-band h2 .y{color:var(--yellow)}
+.cta-band p{margin:18px auto 34px;max-width:44ch;color:rgba(255,255,255,.78);font-size:1.08rem}
+
+/* Footer */
+footer{background:#0e1626;color:rgba(255,255,255,.75);padding:64px 0 36px;font-size:.95rem}
+.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr 1.25fr;gap:42px;margin-bottom:44px}
+.foot-grid h5{font-family:Archivo;color:#fff;font-weight:800;font-size:.83rem;letter-spacing:.11em;text-transform:uppercase;margin-bottom:15px}
+.foot-grid ul{list-style:none;padding:0;display:grid;gap:9px}
+.foot-grid a{text-decoration:none;opacity:.85}
+.foot-grid a:hover{color:var(--yellow);opacity:1}
+.foot-hours td{padding:4px 0}
+.foot-hours td:last-child{text-align:right;white-space:nowrap}
+.legal{border-top:1px solid rgba(255,255,255,.12);padding-top:24px;display:flex;justify-content:space-between;gap:16px;font-size:.85rem;opacity:.55;flex-wrap:wrap}
+
+/* Mobile call bar */
+.mobile-call{display:none;position:fixed;bottom:0;left:0;right:0;z-index:70;background:var(--yellow);padding:13px 18px;text-align:center}
+.mobile-call a{font-family:Archivo;font-weight:900;color:var(--navy);text-decoration:none;font-size:1.08rem}
+
+@media (max-width:880px){
+  nav,.hero .slab{display:none}
+  .split,.visit .wrap{grid-template-columns:1fr}
+  .foot-grid{grid-template-columns:1fr 1fr}
+  .section{padding:64px 0}
+  .hero{min-height:auto}
+  .section-head{flex-direction:column;align-items:start}
+  .mobile-call{display:block}
+  body{padding-bottom:54px}
+  .finder{padding:28px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap topbar">
+    <a class="brand" href="#"><span class="mark">TX•30</span><span class="word">TEXAS<em>TIRES</em></span></a>
+    <nav>
+      <a href="#services" data-i18n="nav_services">Services</a>
+      <a href="#reviews" data-i18n="nav_reviews">Reviews</a>
+      <a href="#financing" data-i18n="nav_financing">Financing</a>
+      <a href="#visit" data-i18n="nav_visit">Hours &amp; Location</a>
+    </nav>
+    <div style="display:flex;gap:12px;align-items:center">
+      <button class="lang" id="langToggle">ES</button>
+      <a class="call-btn" href="tel:+15124336864">(512) 433-6864</a>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="photo"></div><div class="scrim"></div><div class="tread"></div><div class="slab"></div>
+  <div class="wrap">
+    <div class="rating-pill"><span class="stars">★★★★½</span><span><strong>4.4</strong> · <span data-i18n="hero_reviews">761 Google reviews</span></span></div>
+    <h1 data-i18n-html="hero_h1">Tires, wheels &amp; <span class="y">lift kits.</span></h1>
+    <p class="sub" data-i18n="hero_sub">Low prices, real inventory, and straight answers — new and used tires mounted same-day at the shop on N Lamar. Open seven days a week.</p>
+    <div class="hero-ctas">
+      <a class="btn-y" href="tel:+15124336864" data-i18n="cta_call">Call for a price</a>
+      <a class="btn-o" href="#finder" data-i18n="cta_find">Find your tire size</a>
+    </div>
+    <div class="hero-chips">
+      <div class="chip"><strong data-i18n="chip1_t">Open 7 days</strong><span data-i18n="chip1_s">Mon–Sat 8–7 · Sun 10–4</span></div>
+      <div class="chip"><strong>7535 N Lamar</strong><span>Austin, TX 78752</span></div>
+      <div class="chip"><strong data-i18n="chip3_t">Financing</strong><span data-i18n="chip3_s">Tires, wheels &amp; mechanic work</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track">
+    <span>New &amp; Used Tires</span><span>Custom Wheels</span><span>Lift Kits</span><span>Drop Kits</span><span>Auto Repair</span><span>Financing Available</span><span>Open 7 Days</span>
+    <span>New &amp; Used Tires</span><span>Custom Wheels</span><span>Lift Kits</span><span>Drop Kits</span><span>Auto Repair</span><span>Financing Available</span><span>Open 7 Days</span>
+  </div>
+</div>
+
+<section class="section" id="services">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <span class="eyebrow" data-i18n="svc_eyebrow">What we do</span>
+        <h2 data-i18n="svc_h2">Five ways we get you rolling.</h2>
+      </div>
+      <p data-i18n="svc_p">Pick the job, call for the price. Most tire and wheel work is finished while you wait.</p>
+    </div>
+    <div class="svc-grid">
+      <article class="svc reveal">
+        <figure><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_009_4_3ca573df00/hero-1600.webp" alt="Tires" loading="lazy"></figure>
+        <div class="svc-body"><span class="tag">New &amp; used</span><h3>Tires</h3><p data-i18n="svc1">Low prices on new and used tires — mounted, balanced, and out the door same-day for most sizes.</p><a href="#finder">Tires in Austin</a></div>
+      </article>
+      <article class="svc reveal">
+        <figure><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_007_4_a899767d36/hero-1600.webp" alt="Wheels" loading="lazy"></figure>
+        <div class="svc-body"><span class="tag">Fitment checked</span><h3>Wheels</h3><p data-i18n="svc2">Replacement wheels or a whole new look — offset and fitment verified before anything goes on.</p><a href="tel:+15124336864">Wheels in Austin</a></div>
+      </article>
+      <article class="svc reveal">
+        <figure><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_005_4_33e2c3557e/hero-1600.webp" alt="Lift kits" loading="lazy"></figure>
+        <div class="svc-body"><span class="tag">Kits + install</span><h3>Lift Kits</h3><p data-i18n="svc3">Raise your truck's stance with a kit matched to how you actually drive it.</p><a href="tel:+15124336864">Lift kits in Austin</a></div>
+      </article>
+      <article class="svc reveal">
+        <figure><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_010_4_b5fec13e72/hero-1600.webp" alt="Drop kits" loading="lazy"></figure>
+        <div class="svc-body"><span class="tag">Kits + install</span><h3>Drop Kits</h3><p data-i18n="svc4">Lower it right — drop kits installed with alignment-safe geometry.</p><a href="tel:+15124336864">Drop kits in Austin</a></div>
+      </article>
+      <article class="svc reveal">
+        <figure><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_009_4_3ca573df00/hero-1600.webp" alt="Auto repair" loading="lazy"></figure>
+        <div class="svc-body"><span class="tag">Mechanic work</span><h3>Auto Repair</h3><p data-i18n="svc5">General mechanic work with financing available — ask when you call.</p><a href="tel:+15124336864">Auto repair in Austin</a></div>
+      </article>
+    </div>
+
+    <div class="finder reveal" id="finder">
+      <div>
+        <h3 data-i18n="finder_h">Know your size?</h3>
+        <p data-i18n="finder_p">It's on the tire sidewall — like 265/70R17.</p>
+      </div>
+      <div class="selects">
+        <select aria-label="Width"><option>265</option><option>185</option><option>195</option><option>205</option><option>215</option><option>225</option><option>235</option><option>245</option><option>255</option><option>275</option><option>285</option></select>
+        <select aria-label="Ratio"><option>70</option><option>40</option><option>45</option><option>50</option><option>55</option><option>60</option><option>65</option><option>75</option></select>
+        <select aria-label="Diameter"><option>R17</option><option>R14</option><option>R15</option><option>R16</option><option>R18</option><option>R20</option><option>R22</option></select>
+      </div>
+      <a class="btn-y" href="tel:+15124336864" data-i18n="finder_cta">Call with my size</a>
+    </div>
+  </div>
+</section>
+
+<section class="section reviews" id="reviews">
+  <div class="wrap">
+    <span class="eyebrow reveal" data-i18n="rev_eyebrow">What Austin says</span>
+    <div class="review-summary reveal">
+      <span class="big-rating">4.4</span>
+      <div>
+        <div class="stars">★★★★½</div>
+        <p class="meta"><strong data-i18n="rev_count">761 reviews</strong> <span data-i18n="rev_on">on Google</span></p>
+      </div>
+      <a class="g-badge" href="https://www.google.com/maps/search/Texas+Tires+Austin+7535+N+Lamar" target="_blank" rel="noopener">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15A11 11 0 0 0 12 1 11 11 0 0 0 2.18 7.06l3.66 2.84C6.71 7.3 9.14 5.38 12 5.38z"/></svg>
+        <span data-i18n="rev_read">Read our reviews</span>
+      </a>
+    </div>
+    <div class="uikit-demo reveal" style="margin-bottom:40px">
+      <p style="font-family:Archivo;font-weight:800;font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:14px">Google integration options — side-by-side comparison</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:20px;align-items:start">
+        <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--line)"><strong style="font-family:Archivo">1a. UI Kit — compact card</strong><br><small style="color:var(--muted)">~$1 / 1,000 loads · browser key · Experimental</small></div>
+          <div style="padding:10px">
+            <gmp-place-details-compact style="display:block;min-height:80px">
+              <gmp-place-details-place-request place="ChIJAQA0fDTKRIYRUWMe1bV5m5A"></gmp-place-details-place-request>
+              <gmp-place-all-content></gmp-place-all-content>
+            </gmp-place-details-compact>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--line)"><strong style="font-family:Archivo">1b. UI Kit — full card</strong><br><small style="color:var(--muted)">~$1 / 1,000 loads · browser key · Experimental</small></div>
+          <div style="padding:10px;max-height:430px;overflow:auto">
+            <gmp-place-details style="display:block">
+              <gmp-place-details-place-request place="ChIJAQA0fDTKRIYRUWMe1bV5m5A"></gmp-place-details-place-request>
+              <gmp-place-all-content></gmp-place-all-content>
+            </gmp-place-details>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--line)"><strong style="font-family:Archivo">2. Maps Embed API — place mode</strong><br><small style="color:var(--muted)">Free, unlimited · browser key · official</small></div>
+          <iframe title="Maps Embed API place mode" style="width:100%;height:300px;border:0;display:block"
+            src="https://www.google.com/maps/embed/v1/place?key=__MAPS_KEY__&q=place_id:ChIJAQA0fDTKRIYRUWMe1bV5m5A&zoom=15"
+            loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+        </div>
+        <div style="background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--line)"><strong style="font-family:Archivo">3. Classic embed (keyless)</strong><br><small style="color:var(--muted)">Free · no key · unofficial legacy</small></div>
+          <iframe title="Classic keyless embed" style="width:100%;height:300px;border:0;display:block"
+            src="https://maps.google.com/maps?q=Texas%20Tires%207535%20N%20Lamar%20Blvd%20Austin%20TX&z=15&output=embed"
+            loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+        </div>
+      </div>
+      <p id="uikit-status" style="margin-top:10px;font-size:.85rem;color:var(--muted)"></p>
+    </div>
+    <div class="theme-row reveal">
+      <span class="theme" data-i18n="th1"><b>Fast</b> — in and out while you wait</span>
+      <span class="theme" data-i18n="th2"><b>Fair prices</b> — quoted before the work</span>
+      <span class="theme" data-i18n="th3"><b>Used tire selection</b> — hard sizes in stock</span>
+      <span class="theme" data-i18n="th4"><b>Open Sundays</b> — when others aren't</span>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap split">
+    <figure class="reveal"><img src="/api/asset-library/public/asset_tire-auto-v2_tire_auto_v2_007_4_a899767d36/hero-1600.webp" alt="Wheel and tire work" loading="lazy"></figure>
+    <div class="reveal">
+      <span class="eyebrow" data-i18n="how_eyebrow">How it works</span>
+      <h2 style="font-size:clamp(2rem,3.8vw,2.9rem);font-weight:900;letter-spacing:-.02em;line-height:1;text-transform:uppercase" data-i18n="how_h2">Straight answers, same-day work.</h2>
+      <div class="points">
+        <div class="point"><span class="n">1</span><div><h4 data-i18n="p1_t">Tell us the job</h4><p data-i18n="p1_p">Tire size, the wheels you want, or the kit you're thinking about — call or pull in.</p></div></div>
+        <div class="point"><span class="n">2</span><div><h4 data-i18n="p2_t">Price before work</h4><p data-i18n="p2_p">You hear the number first. Financing available on tires, wheels, and mechanic work.</p></div></div>
+        <div class="point"><span class="n">3</span><div><h4 data-i18n="p3_t">Out the same day</h4><p data-i18n="p3_p">Most tire and wheel jobs are done while you wait — seven days a week.</p></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="financing" id="financing">
+  <div class="wrap reveal">
+    <div>
+      <h2 data-i18n="fin_h2">Need it now? Finance it.</h2>
+      <p data-i18n="fin_p">Financing applications available on wheels, tires, lift kits, and mechanic work.</p>
+    </div>
+    <a class="btn-navy" href="tel:+15124336864" data-i18n="fin_cta">Ask about financing</a>
+  </div>
+</section>
+
+<section class="visit" id="visit">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="eyebrow" data-i18n="visit_eyebrow">Hours &amp; location</span>
+      <h2 data-i18n="visit_h2">On N Lamar. Open every day.</h2>
+      <address>7535 N Lamar Blvd<br>Austin, TX 78752</address>
+      <p class="franchise" data-i18n="visit_franchise">Texas Tires location #30 — part of the Texas Tires network.</p>
+      <a class="btn-y" href="https://maps.google.com/?q=Texas+Tires+7535+N+Lamar+Blvd+Austin" data-i18n="visit_cta">Get directions</a>
+    </div>
+    <div class="visit-card reveal" style="padding:0;overflow:hidden">
+      <iframe
+        title="Texas Tires on Google Maps"
+        src="https://maps.google.com/maps?q=Texas%20Tires%207535%20N%20Lamar%20Blvd%20Austin%20TX&z=15&output=embed"
+        style="width:100%;height:280px;border:0;display:block"
+        loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+      <div style="padding:28px 34px 32px">
+      <span class="open-badge" data-i18n="open_badge">Open today</span>
+      <table class="hours-table">
+        <tr><td data-i18n="d_mf">Monday – Friday</td><td>8:00 AM – 7:00 PM</td></tr>
+        <tr><td data-i18n="d_sa">Saturday</td><td>8:00 AM – 7:00 PM</td></tr>
+        <tr class="hot"><td data-i18n="d_su">Sunday</td><td>10:00 AM – 4:00 PM</td></tr>
+      </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-band">
+  <div class="bg"></div>
+  <div class="wrap reveal">
+    <h2 data-i18n-html="band_h2">Ready for tires? <span class="y">Call now.</span></h2>
+    <p data-i18n="band_p">Tell us your size and we'll quote you on the spot — new or used, mounted and balanced today.</p>
+    <a class="btn-y" href="tel:+15124336864">(512) 433-6864</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <a class="brand" href="#" style="margin-bottom:12px"><span class="mark">TX•30</span><span class="word" style="color:#fff">TEXAS<em>TIRES</em></span></a>
+        <p style="margin-top:10px" data-i18n="foot_about">Tires, wheels, lift kits, and auto repair on N Lamar Blvd — low prices, financing available, open seven days a week.</p>
+      </div>
+      <div>
+        <h5 data-i18n="foot_svc">Services</h5>
+        <ul><li><a href="#services">Tires</a></li><li><a href="#services">Wheels</a></li><li><a href="#services">Lift Kits</a></li><li><a href="#services">Drop Kits</a></li><li><a href="#services" data-i18n="foot_repair">Auto Repair</a></li></ul>
+      </div>
+      <div>
+        <h5 data-i18n="foot_contact">Contact</h5>
+        <ul><li><a href="tel:+15124336864">(512) 433-6864</a></li><li><a href="tel:+15124336863">(512) 433-6863</a></li><li>7535 N Lamar Blvd</li><li>Austin, TX 78752</li><li><a href="https://facebook.com/TEXASTIRES30">Facebook</a></li></ul>
+      </div>
+      <div>
+        <h5 data-i18n="foot_hours">Hours</h5>
+        <table class="foot-hours">
+          <tr><td data-i18n="d_ms">Mon – Sat</td><td>8:00 AM – 7:00 PM</td></tr>
+          <tr><td data-i18n="d_su">Sunday</td><td>10:00 AM – 4:00 PM</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="legal"><span>© 2026 Texas Tires Austin · #30</span><span>Tires • Wheels • Lift Kits • Drop Kits • Auto Repair</span></div>
+  </div>
+</footer>
+
+<div class="mobile-call"><a href="tel:+15124336864" data-i18n="mob_call">Call Texas Tires — (512) 433-6864</a></div>
+
+<script>
+document.documentElement.classList.add("js");
+// Scroll reveal
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+}, { threshold: 0.12 });
+document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+
+// EN/ES toggle — N Lamar serves a bilingual customer base.
+const es = {
+  nav_services:"Servicios", nav_reviews:"Reseñas", nav_financing:"Financiamiento", nav_visit:"Horario y Ubicación",
+  hero_reviews:"761 reseñas en Google",
+  hero_h1:'Llantas, rines y <span class="y">lift kits.</span>',
+  hero_sub:"Precios bajos, inventario real y respuestas claras — llantas nuevas y usadas montadas el mismo día en N Lamar. Abierto los siete días.",
+  cta_call:"Llame para precio", cta_find:"Encuentre su medida",
+  chip1_t:"Abierto 7 días", chip1_s:"Lun–Sáb 8–7 · Dom 10–4", chip3_t:"Financiamiento", chip3_s:"Llantas, rines y mecánica",
+  svc_eyebrow:"Lo que hacemos", svc_h2:"Cinco maneras de ponerlo en marcha.", svc_p:"Elija el trabajo y llame para el precio. La mayoría se termina mientras espera.",
+  svc1:"Precios bajos en llantas nuevas y usadas — montadas y balanceadas el mismo día.",
+  svc2:"Rines de reemplazo o un look nuevo — verificamos la medida antes de instalar.",
+  svc3:"Levante su troca con un kit adecuado a su manejo.",
+  svc4:"Bájela bien — drop kits instalados con geometría segura.",
+  svc5:"Mecánica general con financiamiento disponible — pregunte al llamar.",
+  finder_h:"¿Sabe su medida?", finder_p:"Está en el costado de la llanta — como 265/70R17.", finder_cta:"Llamar con mi medida",
+  rev_eyebrow:"Lo que dice Austin", rev_count:"761 reseñas", rev_on:"en Google", rev_read:"Lea nuestras reseñas",
+  th1:"<b>Rápido</b> — entra y sale mientras espera", th2:"<b>Precios justos</b> — cotizados antes del trabajo", th3:"<b>Llantas usadas</b> — medidas difíciles en stock", th4:"<b>Abierto domingos</b> — cuando otros no",
+  how_eyebrow:"Cómo funciona", how_h2:"Respuestas claras, trabajo el mismo día.",
+  p1_t:"Díganos el trabajo", p1_p:"Medida de llanta, los rines que quiere, o el kit — llame o pase.",
+  p2_t:"Precio antes del trabajo", p2_p:"Usted escucha el número primero. Financiamiento disponible.",
+  p3_t:"Listo el mismo día", p3_p:"La mayoría de los trabajos se terminan mientras espera — los siete días.",
+  fin_h2:"¿Lo necesita ya? Financíelo.", fin_p:"Solicitudes de financiamiento en rines, llantas, kits y mecánica.", fin_cta:"Pregunte por financiamiento",
+  visit_eyebrow:"Horario y ubicación", visit_h2:"En N Lamar. Abierto todos los días.", visit_franchise:"Texas Tires ubicación #30 — parte de la red Texas Tires.", visit_cta:"Cómo llegar",
+  open_badge:"Abierto hoy", d_mf:"Lunes – Viernes", d_sa:"Sábado", d_su:"Domingo", d_ms:"Lun – Sáb",
+  band_h2:'¿Listo para llantas? <span class="y">Llame ya.</span>',
+  band_p:"Díganos su medida y le cotizamos al momento — nuevas o usadas, montadas hoy.",
+  foot_about:"Llantas, rines, lift kits y mecánica en N Lamar Blvd — precios bajos, financiamiento, abierto los siete días.",
+  foot_svc:"Servicios", foot_repair:"Mecánica", foot_contact:"Contacto", foot_hours:"Horario",
+  mob_call:"Llame a Texas Tires — (512) 433-6864"
+};
+const en = {};
+let lang = "en";
+document.getElementById("langToggle").addEventListener("click", () => {
+  if (lang === "en") {
+    document.querySelectorAll("[data-i18n]").forEach((el) => { en[el.dataset.i18n] ??= el.innerHTML; if (es[el.dataset.i18n]) el.innerHTML = es[el.dataset.i18n]; });
+    document.querySelectorAll("[data-i18n-html]").forEach((el) => { en[el.dataset.i18nHtml] ??= el.innerHTML; if (es[el.dataset.i18nHtml]) el.innerHTML = es[el.dataset.i18nHtml]; });
+    document.getElementById("langToggle").textContent = "EN"; document.documentElement.lang = "es"; lang = "es";
+  } else {
+    document.querySelectorAll("[data-i18n]").forEach((el) => { if (en[el.dataset.i18n]) el.innerHTML = en[el.dataset.i18n]; });
+    document.querySelectorAll("[data-i18n-html]").forEach((el) => { if (en[el.dataset.i18nHtml]) el.innerHTML = en[el.dataset.i18nHtml]; });
+    document.getElementById("langToggle").textContent = "ES"; document.documentElement.lang = "en"; lang = "en";
+  }
+});
+</script>
+
+<script>
+(g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+  key: "__MAPS_KEY__",
+  v: "alpha"
+});
+(async () => {
+  const status = () => document.getElementById("uikit-status");
+  try {
+    await google.maps.importLibrary("places");
+    status().textContent = "UI Kit loaded (v=alpha).";
+  } catch (error) {
+    status().textContent = "UI Kit failed to load: " + error.message + " — check that Maps JavaScript API is enabled on the project.";
+  }
+})();
+</script>
+</body>
+</html>

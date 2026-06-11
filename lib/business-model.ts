@@ -45,7 +45,15 @@ export function withBusinessBundleFields(bundle: SiteBundle, input: { businessId
   const businessId = input.businessId ?? businessIdForProfile(bundle.businessProfile);
   const now = input.now ?? new Date().toISOString();
   const business = businessRecordFromProfile(bundle.businessProfile, businessId, now);
-  const locations = bundle.locations ?? businessLocationsFromProfile(bundle.businessProfile, businessId, now);
+  const derivedLocations = bundle.locations ?? businessLocationsFromProfile(bundle.businessProfile, businessId, now);
+  // Presence intake captures the Google place_id on signals; thread it onto the
+  // primary location so proof surfaces (link CTA, UI Kit module, maps embed)
+  // can resolve it. Only place_id is stored — never ratings or review content.
+  const presencePlaceId = bundle.presenceAssessment?.publicPresenceSignals?.find((signal) => signal.placeId)?.placeId;
+  const locations =
+    presencePlaceId && derivedLocations.length && !derivedLocations.some((location) => location.googlePlaceId)
+      ? derivedLocations.map((location, index) => (index === 0 ? { ...location, googlePlaceId: presencePlaceId } : location))
+      : derivedLocations;
   const locationBindings = normalizeSiteLocationBindings(locations, bundle.locationBindings);
   return {
     ...bundle,

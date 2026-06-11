@@ -118,7 +118,14 @@ const testBusiness: BusinessProfile = {
 const testCompile = compileGeneratedSiteV3Site({ siteId: testBusiness.siteId, business: testBusiness, createdAt: "2026-06-02T00:00:00.000Z" });
 const testVersion = testCompile.version;
 assert.equal(testVersion.rendererVersion, "layout-v3", "V3 compiler should emit layout-v3.");
-assert.equal(testVersion.pageComposition.pages[0]?.sections[0]?.variant, "hero_split", "Auto-body V3 compiler should start with the split hero template.");
+// Hero family rotation: with safe media the seed selects hero_split or the
+// full-bleed image hero_statement; both are valid leads.
+const heroSection = testVersion.pageComposition.pages[0]?.sections[0];
+assert.ok(
+  heroSection?.variant === "hero_split" ||
+    (heroSection?.variant === "hero_statement" && (heroSection.props?.visualSectionV3 as { options?: { background?: { kind?: string } } })?.options?.background?.kind === "image"),
+  `Auto-body V3 compiler should lead with a media hero (split or full-bleed image); got ${heroSection?.variant}.`
+);
 assert.equal(testCompile.compositionReport.selectedRecipe, "auto_body_v1", "V3 compiler should expose the selected auto-body recipe in the internal composition report.");
 assert.equal(testCompile.compositionReport.evidence.hasRealPricingEvidence, false, "Baseline auto-body fixture should not infer pricing evidence.");
 assert.equal(testCompile.compositionReport.evidence.hasQuoteProof, false, "Baseline auto-body fixture should not infer testimonial evidence.");
@@ -136,7 +143,11 @@ assert.ok(
   "Curated three-image auto-body media should not select media_mosaic."
 );
 const firstVisualSection = getVisualSectionV3(testVersion.pageComposition.pages[0]?.sections[0]?.props ?? {});
-assert.equal(firstVisualSection?.templateId, "hero_split", "Auto-body V3 compiler should emit the split hero template when curated safe media is available.");
+assert.ok(
+  firstVisualSection?.templateId === "hero_split" ||
+    (firstVisualSection?.templateId === "hero_statement" && (firstVisualSection.options?.background as { kind?: string } | undefined)?.kind === "image"),
+  `Auto-body V3 compiler should emit a media-led hero (split or full-bleed image) when curated safe media is available; got ${firstVisualSection?.templateId}.`
+);
 assert.equal("sectionPurposeId" in (firstVisualSection ?? {}), false, "Rendered visual sections should not carry purpose metadata.");
 assert.equal("evidence" in (firstVisualSection ?? {}), false, "Rendered visual sections should not carry evidence metadata.");
 assert.equal(

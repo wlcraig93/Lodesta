@@ -16,8 +16,18 @@ import type {
   VisualSectionConstraintViolationV3,
   VisualSectionV3
 } from "./generated-site-v3-visual-controls";
-import { compileVisualSectionV3, foregroundForBackgroundV3, getVisualSectionV3, visualSectionRenderStateV3 } from "./generated-site-v3-visual-controls";
+import { compileVisualSectionV3, foregroundForBackgroundV3, getVisualSectionV3, visualSectionRenderStateV3, contrastRatioV3 } from "./generated-site-v3-visual-controls";
+import { PlacesTrustModule } from "@/components/PlacesTrustModule";
+import { hoursEntriesForHours } from "./generated-site-v3-compiler";
+import type {
+  FactsPresentationIdV3,
+  ListPresentationIdV3,
+  MediaPresentationIdV3,
+  SectionPresentationMapV3
+} from "./generated-site-v3-art-direction-catalog";
 import { makeLocalBusinessJsonLdForBundle, serializeJsonLd } from "./structured-data";
+
+import { faqPageJsonLd } from "./public-site-schema";
 import { businessIdForProfile, businessLocationsFromProfile, normalizeSiteLocationBindings } from "./business-model";
 import { AnalyticsTracker } from "@/components/AnalyticsTracker";
 import { ExperimentRuntime } from "@/components/ExperimentRuntime";
@@ -33,6 +43,14 @@ type SiteRendererV3Props = {
   experiments?: Experiment[];
   tracking?: boolean;
   formsEnabled?: boolean;
+  /** Link prefix: "/sites/{slug}" on the platform host, "" on custom domains. */
+  basePath?: string;
+  /**
+   * Google proof per docs/social-proof-agent-brief.md: "ui_kit" for claimed
+   * sites and capped tokenized previews, "link_only" for anonymous unclaimed
+   * sites, "none" (default) for QA/internal renders.
+   */
+  proofMode?: "ui_kit" | "link_only" | "none";
 };
 
 type Cta = { label: string; href: string };
@@ -48,8 +66,12 @@ export function SiteRendererV3({
   pageSlug,
   experiments = [],
   tracking = true,
-  formsEnabled = true
+  formsEnabled = true,
+  basePath,
+  proofMode = "none"
 }: SiteRendererV3Props) {
+  // Custom-domain requests pass "" so nav never links back to platform URLs.
+  const linkBase = basePath ?? `/sites/${site.slug}`;
   const page = version.pageComposition.pages.find((candidate) => candidate.slug === (pageSlug ?? "")) ?? version.pageComposition.pages[0];
   const rendererLocations = normalizeRendererLocations(business, locations, locationBindings);
   const localBusinessJson = makeLocalBusinessJsonLdForBundle({
@@ -58,6 +80,9 @@ export function SiteRendererV3({
     locationBindings: rendererLocations.locationBindings
   });
   if (!page) return null;
+  // FAQ structured data only on claimed (tracked) renders: generated copy is
+  // not pre-claim-verifiable, and unclaimed pages must emit no JSON-LD.
+  const faqJson = tracking ? faqPageJsonLd(version, page.id) : undefined;
   const firstVisualSection = page.sections.map((section) => getVisualSectionV3(section.props)).find((section): section is VisualSectionV3 => Boolean(section));
 
   return (
@@ -68,24 +93,64 @@ export function SiteRendererV3({
       data-design-schema-version={version.designSchemaVersion}
       data-art-recipe={version.artDirection.recipeId}
       data-density={version.artDirection.density}
+      data-font-pairing={version.artDirection.fontPairingId}
+      data-card-treatment={version.artDirection.cardTreatment}
+      data-button-system={version.artDirection.buttonSystem}
+      data-spacing-rhythm={version.artDirection.spacingRhythm}
+      data-eyebrow-treatment={version.artDirection.controls?.eyebrowTreatment}
+      data-card-chrome={version.artDirection.controls?.cardChrome}
+      data-figure-treatment={version.artDirection.controls?.figureTreatment}
+      data-heading-case={version.artDirection.controls?.headingCase}
+      data-badge-style={version.artDirection.controls?.badgeStyle}
+      data-fact-highlight={version.artDirection.controls?.factHighlight}
+      data-header-surface={version.artDirection.controls?.headerSurface}
       style={artDirectionStyle(version)}
     >
       {tracking ? <AnalyticsTracker siteId={business.siteId} pageId={page.id} /> : null}
       {tracking ? <ExperimentRuntime siteId={business.siteId} experiments={experiments} /> : null}
       {localBusinessJson ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(localBusinessJson) }} /> : null}
-      <HeaderV3 business={business} site={site} version={version} firstVisualSection={firstVisualSection} />
+      {faqJson ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(faqJson) }} /> : null}
+      <HeaderV3
+        business={business}
+        site={site}
+        version={version}
+        firstVisualSection={firstVisualSection}
+        linkBase={linkBase}
+      />
+      <GoogleProofV3
+        mode={proofMode}
+        placeId={rendererLocations.locations.find((location) => location.googlePlaceId)?.googlePlaceId}
+      />
       {page.sections.map((section) => (
-        <SectionV3 key={section.id} family={section.family} variant={section.variant} props={section.props} business={business} formsEnabled={formsEnabled} />
+        <SectionV3
+          key={section.id}
+          family={section.family}
+          variant={section.variant}
+          props={section.props}
+          business={business}
+          formsEnabled={formsEnabled}
+          pageId={page.id}
+          sectionPresentation={version.artDirection.sectionPresentation}
+          linkBase={linkBase}
+        />
       ))}
-      <FooterV3 business={business} site={site} />
+      <FooterV3 business={business} linkBase={linkBase} />
+      {business.phone && version.presentation?.mobileActionBehavior === "always" ? (
+        <div className="site-mobile-call-bar-v3" data-reserved-space={version.presentation.reservedMobileActionSpace ? "true" : undefined}>
+          <a className="site-button-v3 site-button-v3-primary" href={`tel:${phoneHrefValue(business.phone)}`}>
+            Call {formatPhone(business.phone)}
+          </a>
+        </div>
+      ) : null}
     </main>
   );
 }
 
-function HeaderV3({ business, site, version, firstVisualSection }: { business: BusinessProfile; site: SiteModel; version: SiteVersionV3; firstVisualSection?: VisualSectionV3 }) {
+function HeaderV3({ business, version, firstVisualSection, linkBase }: { business: BusinessProfile; site?: SiteModel; version: SiteVersionV3; firstVisualSection?: VisualSectionV3; linkBase: string }) {
   const phoneHref = business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact";
   const logoUrl = safeLogoUrl(business.logo);
   const visualMode = headerVisualMode(version.artDirection, firstVisualSection);
+  const navLinks = servicePageNavLinks(linkBase, version);
   return (
     <header
       className="site-header-v3"
@@ -93,21 +158,46 @@ function HeaderV3({ business, site, version, firstVisualSection }: { business: B
       data-header-mode={visualMode}
       data-header-visual-mode={visualMode}
     >
-      <a className="site-brand-v3" href={`/sites/${site.slug}`} aria-label={`${business.name} home`}>
+      <a className="site-brand-v3" href={linkBase || "/"} aria-label={`${business.name} home`}>
         {logoUrl ? (
-          <img className="site-brand-mark-v3" src={logoUrl} alt="" aria-hidden="true" />
+          <>
+            <img className="site-brand-mark-v3" src={logoUrl} alt="" aria-hidden="true" />
+            <strong>{business.name}</strong>
+          </>
         ) : (
-          <span className="site-brand-mark-v3" aria-hidden="true">{brandMarkLetter(business.name)}</span>
+          <strong className="site-brand-lockup-v3">
+            {business.name}
+            <span aria-hidden="true">.</span>
+          </strong>
         )}
-        <strong>{business.name}</strong>
       </a>
       <nav className="site-nav-v3" aria-label={`${business.name} navigation`}>
-        <a href="#services">Services</a>
-        <a href="#proof">Details</a>
-        <a href="#contact">Contact</a>
+        {navLinks.length ? (
+          <>
+            {navLinks.map((link) => (
+              <a key={link.href} href={link.href}>{link.label}</a>
+            ))}
+            <a href="#contact">Contact</a>
+          </>
+        ) : (
+          <>
+            <a href="#services">Services</a>
+            <a href="#proof">Details</a>
+            <a href="#contact">Contact</a>
+          </>
+        )}
       </nav>
-      <a className="site-button-v3 site-button-v3-primary" href={phoneHref}>
-        {business.phone ? "Call now" : "Contact"}
+      <a className="site-button-v3 site-button-v3-primary site-header-call-v3" href={phoneHref}>
+        {business.phone ? (
+          <>
+            {/* Full number for desktop readers; short label on narrow screens
+                where the sticky call bar already carries the number. */}
+            <span className="site-header-call-full-v3">{`Call ${formatPhone(business.phone)}`}</span>
+            <span className="site-header-call-short-v3">Call</span>
+          </>
+        ) : (
+          "Contact"
+        )}
       </a>
     </header>
   );
@@ -118,18 +208,34 @@ function SectionV3({
   variant,
   props,
   business,
-  formsEnabled
+  formsEnabled,
+  pageId,
+  sectionPresentation,
+  linkBase
 }: {
   family: string;
   variant: string;
   props: SectionProps;
   business: BusinessProfile;
   formsEnabled: boolean;
+  pageId?: string;
+  sectionPresentation?: SectionPresentationMapV3;
+  linkBase?: string;
 }) {
   const visualSection = getVisualSectionV3(props);
   if (visualSection) {
     const compiled = compileVisualSectionV3(visualSection);
-    return <VisualSectionRendererV3 section={compiled.section} violations={compiled.violations} business={business} formsEnabled={formsEnabled} />;
+    return (
+      <VisualSectionRendererV3
+        section={compiled.section}
+        violations={compiled.violations}
+        business={business}
+        formsEnabled={formsEnabled}
+        pageId={pageId}
+        sectionPresentation={sectionPresentation}
+        linkBase={linkBase}
+      />
+    );
   }
   if (family.startsWith("hero.")) return <HeroV3 variant={variant} props={props} />;
   if (family.startsWith("services.")) return <ServicesV3 variant={variant} props={props} />;
@@ -138,7 +244,7 @@ function SectionV3({
   if (family.startsWith("media.")) return <MediaStoryV3 variant={variant} props={props} />;
   if (family.startsWith("local.")) return <LocalActionV3 variant={variant} props={props} business={business} />;
   if (family.startsWith("process.") || family.startsWith("faq.")) return <FaqProcessV3 variant={variant} props={props} />;
-  if (family.startsWith("contact.")) return <ContactV3 variant={variant} props={props} business={business} formsEnabled={formsEnabled} />;
+  if (family.startsWith("contact.")) return <ContactV3 variant={variant} props={props} business={business} formsEnabled={formsEnabled} pageId={pageId} />;
   if (family.startsWith("cta.")) return <FinalCtaV3 variant={variant} props={props} />;
   return null;
 }
@@ -147,17 +253,26 @@ export function VisualSectionRendererV3({
   section,
   violations = [],
   business,
-  formsEnabled = true
+  formsEnabled = true,
+  pageId,
+  sectionPresentation,
+  linkBase
 }: {
   section: VisualSectionV3;
   violations?: VisualSectionConstraintViolationV3[];
   business?: BusinessProfile;
   formsEnabled?: boolean;
+  pageId?: string;
+  sectionPresentation?: SectionPresentationMapV3;
+  linkBase?: string;
 }) {
   const errorCount = violations.filter((violation) => violation.severity === "error").length;
   const renderState = visualSectionRenderStateV3(section);
   const background = section.options.background;
   const sectionForeground = foregroundForBackgroundV3(background);
+  // Dark sections must remap every foreground token (labels, dividers, buttons),
+  // not just heading/body color, or theme-colored details vanish on dark panels.
+  const lightForegroundSection = sectionForeground?.foreground === "#ffffff";
   return (
     <section
       id={section.anchorId}
@@ -177,9 +292,11 @@ export function VisualSectionRendererV3({
           "--site-section-bg": sectionBackgroundCssV3(background),
           "--site-section-fg": sectionForeground?.foreground ?? "#171512",
           "--site-section-muted": sectionForeground?.muted ?? "rgba(23, 21, 18, 0.72)",
-          "--site-section-button-bg": sectionForeground?.primaryButtonBackground ?? "#171512",
-          "--site-section-button-fg": sectionForeground?.primaryButtonForeground ?? "#ffffff",
-          "--site-section-button-border": sectionForeground?.primaryButtonBorder ?? "#171512",
+          "--site-section-label": lightForegroundSection ? "rgba(255, 255, 255, 0.76)" : "var(--site-v3-primary)",
+          "--site-section-line": lightForegroundSection ? "rgba(255, 255, 255, 0.22)" : "var(--site-v3-line)",
+          "--site-section-button-bg": lightForegroundSection ? sectionForeground?.primaryButtonBackground ?? "#ffffff" : "var(--site-v3-primary)",
+          "--site-section-button-fg": lightForegroundSection ? sectionForeground?.primaryButtonForeground ?? "#171512" : "var(--site-v3-primaryText, #ffffff)",
+          "--site-section-button-border": lightForegroundSection ? sectionForeground?.primaryButtonBorder ?? "#ffffff" : "var(--site-v3-primary)",
           "--site-section-button-secondary-bg": sectionForeground?.secondaryButtonBackground ?? "transparent",
           "--site-section-button-secondary-fg": sectionForeground?.secondaryButtonForeground ?? "#171512",
           "--site-section-button-secondary-border": sectionForeground?.secondaryButtonBorder ?? "#171512",
@@ -187,7 +304,7 @@ export function VisualSectionRendererV3({
         } as React.CSSProperties
       }
     >
-      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} />
+      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} sectionPresentation={sectionPresentation} linkBase={linkBase} />
     </section>
   );
 }
@@ -195,11 +312,17 @@ export function VisualSectionRendererV3({
 function VisualTemplateSlotsRendererV3({
   section,
   business,
-  formsEnabled
+  formsEnabled,
+  pageId,
+  sectionPresentation,
+  linkBase
 }: {
   section: VisualSectionV3;
   business?: BusinessProfile;
   formsEnabled: boolean;
+  pageId?: string;
+  sectionPresentation?: SectionPresentationMapV3;
+  linkBase?: string;
 }) {
   switch (section.templateId) {
     case "hero_split":
@@ -207,14 +330,14 @@ function VisualTemplateSlotsRendererV3({
         <>
           <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
           <SlotBlockV3 role="hero_media" kind="media">{renderMediaSlotV3(section.slots.media, "single", "portrait", "soft")}</SlotBlockV3>
-          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
+          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, sectionPresentation?.heroFacts ?? "inline_strip")}</SlotBlockV3> : null}
         </>
       );
     case "hero_statement":
       return (
         <>
           <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
-          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
+          {section.slots.facts ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, sectionPresentation?.heroFacts ?? "inline_strip")}</SlotBlockV3> : null}
           {section.slots.action ? <SlotBlockV3 role="hero_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
@@ -230,7 +353,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="intro_grid_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          <SlotBlockV3 role="intro_grid_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "action_tiles")}</SlotBlockV3>
+          <SlotBlockV3 role="intro_grid_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, sectionPresentation?.services ?? "action_tiles", linkBase)}</SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="intro_grid_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
@@ -260,7 +383,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="gallery_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="gallery_mosaic" kind="media">{renderMediaSlotV3(section.slots.media, "mosaic", "landscape", "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="gallery_mosaic" kind="media">{renderMediaSlotV3(section.slots.media, sectionPresentation?.gallery ?? "mosaic", "landscape", "soft")}</SlotBlockV3>
         </>
       );
     case "quote_wall":
@@ -278,7 +401,7 @@ function VisualTemplateSlotsRendererV3({
         </>
       );
     case "facts_strip":
-      return <SlotBlockV3 role="facts_strip" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>;
+      return <SlotBlockV3 role="facts_strip" kind="facts">{renderFactsSlotV3(section.slots.facts, sectionPresentation?.factsStrip ?? "trust_bar")}</SlotBlockV3>;
     case "facts_cta":
       return (
         <>
@@ -305,16 +428,57 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="contact_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="contact_facts" kind="facts">{renderFactsSlotV3({ items: section.slots.contact.facts }, "stacked")}</SlotBlockV3>
+          <SlotBlockV3 role="contact_facts" kind="facts">{renderFactsSlotV3({ items: section.slots.contact.facts }, sectionPresentation?.contactFacts ?? "stacked")}</SlotBlockV3>
           {business ? (
             <SlotBlockV3 role="contact_form" kind="action_card" className="site-visual-block-v3-form-card">
-              <ContactFormV3 business={business} formsEnabled={formsEnabled} />
+              <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
             </SlotBlockV3>
           ) : null}
           {section.slots.action ? <SlotBlockV3 role="contact_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
   }
+}
+
+function servicePageNavLinks(linkBase: string, version: SiteVersionV3): Array<{ href: string; label: string }> {
+  return version.pageComposition.pages
+    .filter((page) => page.purpose === "service_landing")
+    .slice(0, 3)
+    .map((page) => ({
+      href: `${linkBase}/${page.slug}`,
+      label: page.title.split("|")[0]?.trim() || page.slug
+    }));
+}
+
+/**
+ * Google proof per the social-proof brief: claimed sites and capped tokenized
+ * previews get the Places UI Kit compact module; anonymous unclaimed sites get
+ * a link-only CTA; QA/internal renders get nothing.
+ */
+function GoogleProofV3({ mode, placeId }: { mode: "ui_kit" | "link_only" | "none"; placeId?: string }) {
+  if (mode === "none" || !placeId) return null;
+  if (mode === "ui_kit") {
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY?.trim() || process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY?.trim();
+    if (apiKey) {
+      return (
+        <div className="site-google-proof-v3" data-proof-mode="ui_kit">
+          <PlacesTrustModule placeId={placeId} apiKey={apiKey} />
+        </div>
+      );
+    }
+    // No browser key configured: degrade to the link-only CTA.
+  }
+  return (
+    <div className="site-google-proof-v3" data-proof-mode="link_only">
+      <a
+        href={`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(placeId)}`}
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        Read our reviews on Google Maps
+      </a>
+    </div>
+  );
 }
 
 function SlotBlockV3({ role, kind, className, children }: { role: string; kind: "text" | "media" | "action_card" | "list" | "facts"; className?: string; children: React.ReactNode }) {
@@ -358,7 +522,7 @@ function renderActionsV3(actions: VisualCtaV3[], markHeroCta = false) {
   );
 }
 
-function renderMediaSlotV3(slot: MediaSlotV3, presentation: "single" | "mosaic", crop: "portrait" | "landscape" | "wide", radius: "none" | "soft") {
+function renderMediaSlotV3(slot: MediaSlotV3, presentation: "single" | MediaPresentationIdV3, crop: "portrait" | "landscape" | "wide", radius: "none" | "soft") {
   const captionMode = mediaCaptionMode(slot);
   return (
     <div className="site-visual-media-v3" data-presentation={presentation} data-crop={crop} data-tablet-crop="wide" data-mobile-crop="wide" data-radius={radius} data-caption={captionMode}>
@@ -389,7 +553,7 @@ function renderActionSlotV3(content: ActionSlotV3) {
   );
 }
 
-function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: "action_tiles" | "program_rows") {
+function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: ListPresentationIdV3, linkBase?: string) {
   return (
     <div className="site-visual-list-v3" data-presentation={presentation}>
       {items.map((item, index) => (
@@ -402,6 +566,12 @@ function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: "actio
           <span>{item.meta ?? String(index + 1).padStart(2, "0")}</span>
           <h3>{item.title}</h3>
           <p>{item.body}</p>
+          {item.href ? (
+            <a className="site-item-link-v3" href={`${linkBase ?? ""}${item.href}`}>
+              Learn more
+              <span aria-hidden="true"> {"\u2192"}</span>
+            </a>
+          ) : null}
         </article>
       ))}
     </div>
@@ -423,20 +593,21 @@ function renderQuoteItemsSlotV3(items: QuoteItemV3[]) {
 }
 
 function renderFaqItemsSlotV3(items: FaqItemV3[]) {
+  // Native disclosure semantics, no JS; first item open so the pattern is
+  // self-evident.
   return (
-    <div className="site-visual-list-v3" data-presentation="service_problem_rows">
+    <div className="site-visual-list-v3" data-presentation="faq_accordion">
       {items.map((item, index) => (
-        <article key={item.question}>
-          <span>{`Q${index + 1}`}</span>
-          <h3>{item.question}</h3>
+        <details key={item.question} open={index === 0 ? true : undefined}>
+          <summary>{item.question}</summary>
           <p>{item.answer}</p>
-        </article>
+        </details>
       ))}
     </div>
   );
 }
 
-function renderFactsSlotV3(content: FactsSlotV3, presentation: "inline_strip" | "trust_bar" | "stacked") {
+function renderFactsSlotV3(content: FactsSlotV3, presentation: FactsPresentationIdV3) {
   return (
     <div className="site-visual-facts-v3" data-presentation={presentation}>
       {content.items.map((item) => (
@@ -1000,7 +1171,7 @@ function FaqProcessV3({ variant, props }: { variant: string; props: SectionProps
   );
 }
 
-function ContactV3({ variant, props, business, formsEnabled }: { variant: string; props: SectionProps; business: BusinessProfile; formsEnabled: boolean }) {
+function ContactV3({ variant, props, business, formsEnabled, pageId }: { variant: string; props: SectionProps; business: BusinessProfile; formsEnabled: boolean; pageId?: string }) {
   const actionItems = arrayProp<{ label: string; value: string; href?: string }>(props.actionItems);
   const fallbackActionItems = actionItems.length
     ? actionItems
@@ -1022,7 +1193,7 @@ function ContactV3({ variant, props, business, formsEnabled }: { variant: string
         ) : null}
       </div>
       {formsEnabled ? (
-        <ContactFormV3 business={business} formsEnabled={formsEnabled} />
+        <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
       ) : (
         <aside className="site-contact-action-v3" aria-label="Contact actions">
           {fallbackActionItems.map((item) => (
@@ -1034,14 +1205,19 @@ function ContactV3({ variant, props, business, formsEnabled }: { variant: string
           <a className="site-button-v3 site-button-v3-primary" href={business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact"}>
             {business.phone ? "Call now" : "Send details"}
           </a>
-          <ContactFormV3 business={business} formsEnabled={formsEnabled} />
+          <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
         </aside>
       )}
     </section>
   );
 }
 
-function ContactFormV3({ business, formsEnabled }: { business: BusinessProfile; formsEnabled: boolean }) {
+function ContactFormV3({ business, formsEnabled, pageId }: { business: BusinessProfile; formsEnabled: boolean; pageId?: string }) {
+  // Preview/unclaimed: visible fields stay interactive so the form feels real,
+  // but the form has no action, hidden inputs are disabled, and the submit
+  // button is disabled with the claim message — typed data cannot leave the
+  // page. The server-side reject (smoke: "unclaimed form inactive gate")
+  // remains the backstop for direct POSTs.
   return (
     <form
       className="site-contact-form-v3"
@@ -1049,18 +1225,18 @@ function ContactFormV3({ business, formsEnabled }: { business: BusinessProfile; 
       data-preview-disabled={formsEnabled ? undefined : "lead-form"}
       action={formsEnabled ? "/api/forms/submit" : undefined}
       method={formsEnabled ? "post" : undefined}
-      aria-disabled={formsEnabled ? undefined : true}
     >
       <input type="hidden" name="siteId" value={business.siteId} disabled={!formsEnabled} />
       <input type="hidden" name="formId" value="form_contact" disabled={!formsEnabled} />
-      <input type="hidden" name="pageId" value="home" disabled={!formsEnabled} />
-      <label>Name<input name="name" autoComplete="name" disabled={!formsEnabled} /></label>
-      <label>Phone<input name="phone" type="tel" autoComplete="tel" disabled={!formsEnabled} /></label>
-      <label>Email<input name="email" type="email" autoComplete="email" disabled={!formsEnabled} /></label>
-      <label>Message<textarea name="message" disabled={!formsEnabled} /></label>
+      <input type="hidden" name="pageId" value={pageId ?? "home"} disabled={!formsEnabled} />
+      <label>Name<input name="name" autoComplete="name" /></label>
+      <label>Phone<input name="phone" type="tel" autoComplete="tel" /></label>
+      <label>Email<input name="email" type="email" autoComplete="email" /></label>
+      <label>Message<textarea name="message" /></label>
       <button className="site-button-v3 site-button-v3-primary" type="submit" disabled={!formsEnabled}>
         {formsEnabled ? "Send message" : "Claim this site to enable lead capture"}
       </button>
+      {!formsEnabled ? <p className="site-contact-form-preview-note-v3">This is a preview — claim the site to activate lead capture. Nothing typed here is sent or stored.</p> : null}
     </form>
   );
 }
@@ -1076,13 +1252,16 @@ function FinalCtaV3({ variant, props }: { variant: string; props: SectionProps }
   );
 }
 
-function FooterV3({ business, site }: { business: BusinessProfile; site: SiteModel }) {
+function FooterV3({ business, linkBase }: { business: BusinessProfile; linkBase: string }) {
   const services = business.services.slice(0, 5);
   const hours = hoursEntries(business.hours).slice(0, 4);
   return (
     <footer className="site-footer-v3" data-site-chrome="footer">
       <div className="site-footer-brand-v3">
-        <a href={`/sites/${site.slug}`}>{business.name}</a>
+        <a className="site-brand-lockup-v3" href={linkBase || "/"}>
+          {business.name}
+          <span aria-hidden="true">.</span>
+        </a>
         <span>{[business.categories[0], business.address?.city].filter(Boolean).join(" in ") || "Local business"}</span>
       </div>
       <div className="site-footer-column-v3">
@@ -1231,6 +1410,13 @@ function mapEmbedQueryForIntent(intent: MapEmbedIntentV3) {
   return undefined;
 }
 
+/** Text color for content sitting ON the accent: white or ink by measured contrast. */
+function accentInkFor(accentHex: string): string {
+  const white = contrastRatioV3("#ffffff", accentHex) ?? 0;
+  const ink = contrastRatioV3("#171512", accentHex) ?? 0;
+  return ink >= white ? "#171512" : "#ffffff";
+}
+
 export function artDirectionStyle(version: SiteVersionV3): React.CSSProperties {
   const fonts = fontStacks(version.artDirection.fontPairingId);
   const colors = version.theme?.colors;
@@ -1248,6 +1434,7 @@ export function artDirectionStyle(version: SiteVersionV3): React.CSSProperties {
           "--site-v3-primaryText": colors.primaryText,
           "--site-v3-primary-dark": colors.primary,
           "--site-v3-accent": colors.accent,
+          "--site-v3-accent-ink": accentInkFor(colors.accent),
           "--site-v3-line": colors.border,
           "--site-v3-surface-ink": surfaceForeground?.ink ?? colors.text,
           "--site-v3-surface-muted": surfaceForeground?.muted ?? colors.muted
@@ -1287,24 +1474,31 @@ function relativeLuminance(rgb: { r: number; g: number; b: number }) {
   return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
 }
 
+/**
+ * Every family referenced here must be loaded by the app/globals.css font
+ * import, or the pairing silently falls back to system fonts and every site
+ * renders the same. The verify suite asserts rendered shells use loaded fonts.
+ */
 function fontStacks(fontPairingId: SiteArtDirectionFontPairingIdV3) {
   switch (fontPairingId) {
     case "editorial_serif_clean_sans":
-      return { heading: "Fraunces, Georgia, serif", body: 'DM Sans, "Segoe UI", system-ui, sans-serif' };
+      return { heading: "Fraunces, Georgia, serif", body: '"DM Sans", "Segoe UI", system-ui, sans-serif' };
     case "condensed_service_sans":
-      return { heading: '"Avenir Next Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
+      return { heading: "Archivo, 'Helvetica Neue', system-ui, sans-serif", body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
     case "warm_editorial_sans":
-      return { heading: '"Source Serif 4", Georgia, serif', body: '"Source Sans 3", "Segoe UI", system-ui, sans-serif' };
+      return { heading: "Fraunces, Georgia, serif", body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
     case "precision_grotesk":
-      return { heading: '"IBM Plex Sans", "Helvetica Neue", Arial, sans-serif', body: '"IBM Plex Sans", "Segoe UI", system-ui, sans-serif' };
+      return { heading: '"Libre Franklin", "Helvetica Neue", Arial, sans-serif', body: '"Libre Franklin", "Segoe UI", system-ui, sans-serif' };
     case "friendly_rounded":
-      return { heading: '"Nunito Sans", "Segoe UI", system-ui, sans-serif', body: '"Nunito Sans", "Segoe UI", system-ui, sans-serif' };
+      return { heading: 'Figtree, "Segoe UI", system-ui, sans-serif', body: '"DM Sans", "Segoe UI", system-ui, sans-serif' };
     case "magazine_grotesk":
-      return { heading: '"Space Grotesk", "Avenir Next", system-ui, sans-serif', body: '"Public Sans", "Segoe UI", system-ui, sans-serif' };
+      return { heading: '"Space Grotesk", "Avenir Next", system-ui, sans-serif', body: 'Manrope, "Segoe UI", system-ui, sans-serif' };
     case "quiet_serif":
-      return { heading: '"Cormorant Garamond", Georgia, serif', body: '"Work Sans", "Segoe UI", system-ui, sans-serif' };
+      return { heading: '"Cormorant Garamond", Georgia, serif', body: 'Manrope, "Segoe UI", system-ui, sans-serif' };
+    case "display_sans_humanist":
+      return { heading: 'Sora, "Avenir Next", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
     default:
-      return { heading: '"Aptos Display", "Avenir Next", "Segoe UI", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
+      return { heading: 'Sora, "Avenir Next", "Segoe UI", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
   }
 }
 
@@ -1316,14 +1510,6 @@ function arrayProp<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
 
-function brandMarkLetter(name: string) {
-  const ignore = new Set(["the", "and", "&", "of", "a", "an"]);
-  const word = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .find((part) => !ignore.has(part.toLowerCase()));
-  return word?.[0]?.toUpperCase() ?? name.trim()[0]?.toUpperCase() ?? "L";
-}
 
 function safeLogoUrl(logo: BusinessProfile["logo"] | undefined) {
   if (!logo) return undefined;
@@ -1347,13 +1533,13 @@ function formatPhone(phone: string) {
   return `(${normalized.slice(0, 3)}) ${normalized.slice(3, 6)}-${normalized.slice(6)}`;
 }
 
+// Shared with the compiler so footer hours render in week order with
+// consecutive equal days collapsed, same as the location panel. Time tokens
+// get non-breaking spaces so "5:30 PM" never wraps mid-token.
 function hoursEntries(hours: BusinessProfile["hours"] | undefined) {
-  if (!hours) return [];
-  return Object.entries(hours)
-    .filter(([, value]) => Boolean(value))
-    .map(([label, value]) => ({ label: titleCaseDay(label), value }));
+  return hoursEntriesForHours(hours).map((entry) => ({ ...entry, value: unbreakableTimes(entry.value) }));
 }
 
-function titleCaseDay(value: string) {
-  return value ? `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}` : value;
+function unbreakableTimes(value: string) {
+  return value.replace(/(\d)\s+(AM|PM)\b/gi, "$1\u00A0$2");
 }

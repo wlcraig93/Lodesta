@@ -1,26 +1,80 @@
-import type { AssetReference, SiteAsset, SiteBundle } from "./models";
+import { createHash } from "node:crypto";
+import type { AssetAttestationV2, AssetReference, SiteAsset, SiteBundle } from "./models";
 import { validatePublicHostname } from "./url-safety";
 import { applyPropsToLayoutSection, syncVersionLegacySections } from "./layout-registry";
 
 export type OwnerAssetInput = {
   url: string;
   alt: string;
+  /** Per-image rights confirmation; assets without it are rejected, never silently dropped. */
+  rightsConfirmed: boolean;
+};
+
+export type ScrapedAssetAttestationInput = {
+  assetId: string;
+  rightsConfirmed: boolean;
 };
 
 export type UpdateOwnerAssetsInput = {
   siteId: string;
+  /** Authenticated principal recorded on every attestation. */
+  attestedBy: string;
   logo?: OwnerAssetInput;
   photos?: OwnerAssetInput[];
-  rightsAccepted: boolean;
+  /** Attestations for crawled reference_only images; confirmed ones become customer_granted. */
+  scrapedAttestations?: ScrapedAssetAttestationInput[];
 };
 
 export type UpdateOwnerAssetsResult =
   | { ok: true; bundle: SiteBundle; logo?: AssetReference; photos: AssetReference[]; assets: SiteAsset[] }
   | { ok: false; reason: string };
 
+export const assetAttestationStatement = "I own this image or hold the rights to use it on this website.";
+
+export function buildAssetAttestation(attestedBy: string, url: string): AssetAttestationV2 {
+  return {
+    attestedBy,
+    attestedAt: new Date().toISOString(),
+    imageHash: createHash("sha256").update(url).digest("hex"),
+    statement: assetAttestationStatement
+  };
+}
+
+/** Typed round-trip for the metadata.attestation contract. */
+export function parseAssetAttestation(metadata: Record<string, unknown> | undefined): AssetAttestationV2 | undefined {
+  const candidate = metadata?.attestation;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  const record = candidate as Record<string, unknown>;
+  if (
+    typeof record.attestedBy !== "string" ||
+    typeof record.attestedAt !== "string" ||
+    typeof record.imageHash !== "string" ||
+    typeof record.statement !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    attestedBy: record.attestedBy,
+    attestedAt: record.attestedAt,
+    imageHash: record.imageHash,
+    statement: record.statement
+  };
+}
+
 export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAssetsInput): UpdateOwnerAssetsResult {
-  if (!input.rightsAccepted) {
-    return { ok: false, reason: "Confirm rights before using owner-provided assets on the published site." };
+  if (!input.attestedBy.trim()) {
+    return { ok: false, reason: "Owner asset updates require an authenticated principal to record attestations." };
+  }
+
+  const unconfirmed = [
+    ...(input.logo?.url.trim() && !input.logo.rightsConfirmed ? ["logo"] : []),
+    ...(input.photos ?? []).filter((photo) => photo.url.trim() && !photo.rightsConfirmed).map((photo) => photo.alt || photo.url)
+  ];
+  if (unconfirmed.length) {
+    return {
+      ok: false,
+      reason: `Each image requires its own rights confirmation before it can be used. Unconfirmed: ${unconfirmed.join(", ")}.`
+    };
   }
 
   const logo: AssetReference | undefined = input.logo?.url.trim() ? ownerAssetReference(bundle, "logo", input.logo, 0) : undefined;
@@ -36,14 +90,27 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
     return { ok: false, reason: "Photo URLs must be valid image URLs." };
   }
 
-  bundle.businessProfile.logo = logo;
-  bundle.businessProfile.photos = photos;
-  bundle.businessProfile.provenance.logo = ownerAssetProvenance();
-  bundle.businessProfile.provenance.photos = ownerAssetProvenance();
+  const scrapedResult = applyScrapedAttestations(bundle, input);
+  if (!scrapedResult.ok) return scrapedResult;
+
+  if (logo || input.logo?.url.trim()) {
+    bundle.businessProfile.logo = logo;
+    bundle.businessProfile.provenance.logo = ownerAssetProvenance();
+  }
+  if (photos.length || (input.photos ?? []).length) {
+    bundle.businessProfile.photos = [...photos, ...scrapedResult.attestedPhotos];
+    bundle.businessProfile.provenance.photos = ownerAssetProvenance();
+  } else if (scrapedResult.attestedPhotos.length) {
+    bundle.businessProfile.photos = [
+      ...bundle.businessProfile.photos.filter((photo) => !scrapedResult.attestedIds.has(photo.id)),
+      ...scrapedResult.attestedPhotos
+    ];
+  }
 
   const ownerAssets = [
-    ...(logo ? [siteAssetFromReference(bundle.businessProfile.siteId, "logo", logo)] : []),
-    ...photos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo))
+    ...(logo ? [siteAssetFromReference(bundle.businessProfile.siteId, "logo", logo, input.attestedBy)] : []),
+    ...photos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo, input.attestedBy)),
+    ...scrapedResult.attestedPhotos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo, input.attestedBy))
   ];
   const ownerAssetIds = new Set(ownerAssets.map((asset) => asset.id));
   bundle.presenceAssessment.assetInventory = [
@@ -53,15 +120,40 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
     ...ownerAssets
   ];
 
-  updateGallerySections(bundle, photos);
+  updateGallerySections(bundle, [...photos, ...scrapedResult.attestedPhotos]);
 
   return {
     ok: true,
     bundle,
     logo,
-    photos,
+    photos: [...photos, ...scrapedResult.attestedPhotos],
     assets: ownerAssets
   };
+}
+
+function applyScrapedAttestations(
+  bundle: SiteBundle,
+  input: UpdateOwnerAssetsInput
+):
+  | { ok: true; attestedPhotos: AssetReference[]; attestedIds: Set<string> }
+  | { ok: false; reason: string } {
+  const attestedPhotos: AssetReference[] = [];
+  const attestedIds = new Set<string>();
+  for (const attestation of input.scrapedAttestations ?? []) {
+    if (!attestation.rightsConfirmed) continue;
+    const scraped = bundle.businessProfile.photos.find(
+      (photo) => photo.id === attestation.assetId && photo.rightsStatus === "reference_only"
+    );
+    if (!scraped) {
+      return { ok: false, reason: `Scraped asset ${attestation.assetId} was not found among attestable reference images.` };
+    }
+    attestedIds.add(scraped.id);
+    attestedPhotos.push({
+      ...scraped,
+      rightsStatus: "customer_granted"
+    });
+  }
+  return { ok: true, attestedPhotos, attestedIds };
 }
 
 function ownerAssetReference(
@@ -82,7 +174,7 @@ function ownerAssetReference(
   };
 }
 
-function siteAssetFromReference(siteId: string, kind: "logo" | "photo", reference: AssetReference): SiteAsset {
+function siteAssetFromReference(siteId: string, kind: "logo" | "photo", reference: AssetReference, attestedBy: string): SiteAsset {
   return {
     id: `site_asset_${reference.id}`,
     siteId,
@@ -94,7 +186,10 @@ function siteAssetFromReference(siteId: string, kind: "logo" | "photo", referenc
     usageScope: "published_site",
     ownerApproved: true,
     provenance: ownerAssetProvenance(),
-    metadata: { sourceAssetId: reference.id, ownerGranted: true },
+    metadata: {
+      sourceAssetId: reference.id,
+      attestation: buildAssetAttestation(attestedBy, reference.url)
+    },
     createdAt: new Date().toISOString()
   };
 }

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p ${PORT:-4330} -H ${HOST:-127.0.0.1}",
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "next dev -p ${PORT:-4330} -H ${HOST:-127.0.0.1}",
     "dev:raw": "next dev",
     "build": "next build",
     "start": "next start",
@@ -13,6 +14,7 @@
     "smoke:dev": "bash scripts/smoke.sh --start-server",
     "cli": "node scripts/lodesta.mjs",
     "benchmark:austin-auto": "node --import tsx scripts/run-market-benchmark.ts",
+    "asset-library": "node --import tsx scripts/asset-library.ts",
     "seed:openai-settings": "node --import tsx scripts/seed-openai-settings.ts",
     "worker": "node --import tsx workers/runner.ts",
     "install:browsers": "node --import tsx scripts/install-browsers.ts",
@@ -21,6 +23,7 @@
     "verify:dev-crawl": "node --import tsx scripts/verify-dev-crawl.mjs",
     "verify:market-benchmark-fixtures": "node --import tsx scripts/verify-market-benchmark-fixtures.ts",
     "verify:generated-site-v3-contracts": "node --import tsx scripts/verify-generated-site-v3-contracts.ts",
+    "verify:generation-quality-v2": "node --import tsx scripts/verify-generation-quality-v2.ts",
     "verify:generated-site-v3-benchmark-corpus": "node --import tsx scripts/verify-generated-site-v3-benchmark-corpus.ts",
     "verify:generated-site-v3-canonical-visual-grammar": "node --import tsx scripts/verify-generated-site-v3-canonical-visual-grammar.ts",
     "verify:generated-site-v3-section-template-library": "node --import tsx scripts/verify-generated-site-v3-canonical-visual-grammar.ts",
@@ -28,7 +31,8 @@
     "verify:generated-site-v3-renderer-constraints": "node --import tsx scripts/verify-generated-site-v3-renderer-constraints.ts",
     "verify:render-browser": "node --import tsx scripts/verify-render-browser.ts",
     "verify:stripe-webhook": "node --import tsx scripts/verify-stripe-webhook.ts",
-    "verify:supabase": "node --import tsx scripts/verify-supabase.ts"
+    "verify:supabase": "node --import tsx scripts/verify-supabase.ts",
+    "verify:template-matrix": "node --import tsx scripts/verify-template-matrix.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

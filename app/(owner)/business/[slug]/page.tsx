@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BusinessProfileForm } from "@/components/BusinessProfileForm";
 import { OwnerAssetsForm } from "@/components/OwnerAssetsForm";
+import { OwnerFactsReview } from "@/components/OwnerFactsReview";
+import { OwnerServicesPanel } from "@/components/OwnerServicesPanel";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
 
 export const dynamic = "force-dynamic";
 
@@ -13,52 +15,55 @@ export default async function BusinessProfilePage({ params }: { params: Promise<
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/business/${slug}`);
 
+  const profile = bundle.businessProfile;
+  const factCount = countConfirmedOwnerFacts(profile);
+
   return (
-    <main className="admin-page">
-      <header className="admin-header">
+    <main className="admin-page owner-page">
+      <header className="owner-page-header">
         <div>
-          <span className="badge">Business facts</span>
-          <h1>{bundle.businessProfile.name}</h1>
-          <p>Owner-confirmed facts power schema, contact paths, generated copy, forms, and future presence sync.</p>
+          <p className="owner-page-eyebrow">Your business</p>
+          <h1>{profile.name}</h1>
+          <p className="owner-page-lede">
+            We pulled these facts together while building your site. Confirm what&apos;s right and fix what isn&apos;t — confirmed
+            facts power your site&apos;s contact info, hours, and local search presence.
+            {factCount.total > 0 ? ` ${factCount.confirmed} of ${factCount.total} confirmed so far.` : ""}
+          </p>
         </div>
         <div className="button-row">
           <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
-            Editor
+            Edit site
           </Link>
-          <Link className="button secondary" href={`/claim/${bundle.siteModel.slug}`}>
-            Claim
-          </Link>
-          <Link className="button primary" href={`/sites/${bundle.siteModel.slug}`}>
-            View site
+          <Link className="button primary" href={`/business/${slug}/site-review`}>
+            Review your site
           </Link>
         </div>
       </header>
 
-      <div className="admin-grid">
+      <OwnerFactsReview
+        profile={{
+          siteId: profile.siteId,
+          phone: profile.phone,
+          email: profile.email,
+          address: profile.address,
+          hours: profile.hours,
+          serviceAreas: profile.serviceAreas,
+          bookingLinks: profile.bookingLinks,
+          orderingLinks: profile.orderingLinks,
+          socialLinks: profile.socialLinks,
+          pressLinks: profile.pressLinks,
+          provenance: profile.provenance
+        }}
+      />
+
+      <div className="owner-page-panels">
         <section className="panel">
-          <h2>Edit owner-truth fields</h2>
-          <BusinessProfileForm profile={bundle.businessProfile} />
+          <OwnerServicesPanel siteId={profile.siteId} />
         </section>
-
-        <aside className="panel">
-          <h2>Owner-approved assets</h2>
-          <OwnerAssetsForm profile={bundle.businessProfile} />
-
-          <h2>Verification state</h2>
-          <div className="finding-list">
-            {Object.entries(bundle.businessProfile.provenance).map(([key, provenance]) => (
-              <article key={key} className="finding-card">
-                <span className={`badge ${provenance.verified ? "severity-pass" : "severity-warning"}`}>
-                  {provenance.verified ? "verified" : "pending"}
-                </span>
-                <h3>{key}</h3>
-                <p>
-                  Source: {provenance.source}. Confidence: {Math.round(provenance.confidence * 100)}%.
-                </p>
-              </article>
-            ))}
-          </div>
-        </aside>
+        <section className="panel">
+          <h2>Your photos and logo</h2>
+          <OwnerAssetsForm profile={profile} />
+        </section>
       </div>
     </main>
   );

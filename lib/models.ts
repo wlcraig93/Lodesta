@@ -1,6 +1,7 @@
 export type Vertical =
   | "restaurant"
   | "auto_body"
+  | "auto_services"
   | "beauty_salon"
   | "med_spa"
   | "law_firm"
@@ -616,6 +617,17 @@ export type SiteArtDirectionV3 = {
   buttonSystem: SiteArtDirectionRecipeV3["buttonSystem"];
   cardTreatment: SiteArtDirectionRecipeV3["cardTreatment"];
   density: SiteArtDirectionRecipeV3["density"];
+  /** Named heading-weight scale; unset keeps the per-pairing CSS defaults. */
+  weightScale?: import("./generated-site-v3-art-direction-catalog").ArtDirectionWeightScaleV3;
+  /** Per-section-role presentation choices; unset roles keep compiler defaults. */
+  sectionPresentation?: import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
+  /**
+   * Design profile (learning signal) + resolved dressing controls (rendering
+   * authority). Renders ALWAYS read `controls`; the profile feeds analysis
+   * only — the reproducibility rule from the next-level plan.
+   */
+  designProfile?: import("./generated-site-v3-art-direction-catalog").DesignProfileV3;
+  controls?: import("./generated-site-v3-art-direction-catalog").DesignControlsV3;
 };
 
 export type ArtDirectionDecisionV3 = {
@@ -710,7 +722,7 @@ export type MediaAssetDecisionV3 = {
   version: "media-asset-decision-v3";
   slotId: string;
   source: "first_party" | "curated_stock" | "generated_ai" | "text_layout_fallback";
-  rightsStatus: "approved" | "restricted" | "unknown";
+  rightsStatus: "approved" | "preclaim_safe" | "restricted" | "unknown" | "owner_attestation_required";
   usageScope: "hero" | "section" | "background" | "thumbnail" | "not_public";
   sourceUrl?: string;
   artifactRef?: string;
@@ -803,7 +815,8 @@ export type GenerationQaBlockerCategory =
   | "policy_review_required"
   | "render_failed"
   | "claim_unsupported"
-  | "performance_failed";
+  | "performance_failed"
+  | "needs_operator_review";
 
 export type GenerationQaBlocker = {
   id: string;
@@ -841,6 +854,172 @@ export type GenerationQaMetadata = {
   visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
   repair?: GenerationQaRepairLog;
+  qualityReport?: GenerationQualityReport;
+  scorecard?: GenerationScorecard;
+  factCoverage?: import("./fact-coverage").FactCoverageReport;
+  craftLoop?: import("./craft-loop").CraftLoopReport;
+};
+
+/**
+ * Unified scorecard (next-level plan, Part 1). Dimensions are the measurement
+ * layer ABOVE the hard blockers — blocking findings stay authoritative and a
+ * site with any blocker never publishes regardless of scores. Each dimension
+ * carries an explicit gate state; `unscored` dimensions never pass, block, or
+ * enter any average.
+ */
+export type ScorecardDimensionId =
+  | "correctness_grounding"
+  | "visual_design"
+  | "mobile_experience"
+  | "conversion_readiness"
+  | "seo_structure"
+  | "content_quality"
+  | "brand_identity"
+  | "accessibility";
+
+export type ScorecardGateState = "unscored" | "shadow" | "enforcing" | "disabled";
+
+export type ScorecardDimension = {
+  id: ScorecardDimensionId;
+  /** 0-100; absent exactly when state is "unscored". */
+  score?: number;
+  state: ScorecardGateState;
+  /** Publish threshold this dimension is held to when enforcing. */
+  gate: number;
+  /** Which existing signals fed the projection (for operator debugging). */
+  signals: string[];
+  /** Defined only when the dimension is scored and its state can gate. */
+  passes?: boolean;
+};
+
+export type GenerationScorecard = {
+  version: "scorecard-v1";
+  dimensions: ScorecardDimension[];
+  /** Informational weighted blend over scored dimensions only. */
+  overall?: number;
+  evaluatedAt: string;
+};
+
+/**
+ * Per-image rights attestation. One record per asset, stored on the asset's
+ * metadata under `attestation` — blanket rights acceptance does not exist.
+ */
+export type AssetAttestationV2 = {
+  attestedBy: string;
+  attestedAt: string;
+  imageHash: string;
+  statement: string;
+};
+
+export type CleanedServiceV2 = {
+  name: string;
+  price?: string;
+  sourceText: string;
+  confidence: number;
+};
+
+export type BusinessUnderstandingConversionGoal = "call_first" | "form_first" | "booking_first" | "visit_first";
+
+export type BusinessUnderstandingFactConfidenceV2 = {
+  field: "name" | "phone" | "address" | "hours" | "services" | "service_areas" | "reviews";
+  confidence: number;
+  sourceBacked: boolean;
+};
+
+export type BusinessUnderstandingV2 = {
+  version: "business-understanding-v2";
+  source: "openai" | "deterministic_fallback";
+  vertical: Vertical;
+  verticalConfidence: number;
+  detectedSubverticals: string[];
+  cleanedServices: CleanedServiceV2[];
+  hours?: Array<{ label: string; value: string }>;
+  primaryConversionGoal: BusinessUnderstandingConversionGoal;
+  urgentServiceSignals: string[];
+  /** What makes this business memorable: founders, family, history, mascots. */
+  businessStory?: { summary: string; distinctives: string[] };
+  factConfidence: BusinessUnderstandingFactConfidenceV2[];
+  notes: string[];
+};
+
+export type GeneratedServicePageCopyV2 = {
+  serviceName: string;
+  hero: { heading: string; body: string };
+  detail: { heading: string; body: string };
+  faqs: Array<{ question: string; answer: string }>;
+  seo: { title: string; description: string };
+};
+
+export type GeneratedCopyDeckV2 = {
+  version: "generated-copy-deck-v2";
+  source: "openai";
+  hero: { eyebrow?: string; heading: string; body: string };
+  servicesIntro: { heading: string; body: string };
+  serviceItems: Array<{ title: string; body: string }>;
+  processIntro: { heading: string; body: string };
+  processSteps: Array<{ title: string; body: string }>;
+  faqs: Array<{ question: string; answer: string }>;
+  locationIntro?: { heading: string; body: string };
+  contactIntro: { heading: string; body: string };
+  /** Approach/working-with-us section shown beside a workshop photo. */
+  splitMedia: { heading: string; body: string };
+  /** Story section: founders, family, history — present only when the source has a story. */
+  about?: { heading: string; body: string };
+  /** Short intro for the photo gallery section. */
+  gallery: { heading: string; body: string };
+  seo: { title: string; description: string };
+  groundingNotes: string[];
+  /** Voice the copy was written in; defaulted per vertical, owner-changeable later. */
+  voiceProfile: GeneratedCopyVoiceProfileV2;
+  /** Per-service landing page copy; pages only generate for source-backed services. */
+  servicePages?: GeneratedServicePageCopyV2[];
+};
+
+export type GeneratedCopyVoicePovV2 = "first_plural" | "first_singular" | "brand_direct";
+
+export type GeneratedCopyVoiceProfileV2 = {
+  pov: GeneratedCopyVoicePovV2;
+  /** Energy register (next-level plan, C): aligned with the design profile's register. */
+  register?: import("./generated-site-v3-art-direction-catalog").DesignRegisterV3;
+};
+
+export type GenerationQualityFindingCategory =
+  | "vertical_fit"
+  | "source_grounding"
+  | "service_clarity"
+  | "hero_specificity"
+  | "section_quality"
+  | "cta_fit"
+  | "media_completeness"
+  | "mobile_credibility";
+
+export type GenerationQualityFinding = {
+  id: string;
+  severity: "blocking" | "advisory";
+  category: GenerationQualityFindingCategory;
+  sectionId?: string;
+  detail: string;
+};
+
+export type GenerationQualityRubricScores = {
+  verticalFit: number;
+  sourceGrounding: number;
+  serviceClarity: number;
+  heroSpecificity: number;
+  sectionQuality: number;
+  ctaFit: number;
+  mediaCompleteness: number;
+  mobileCredibility: number;
+};
+
+export type GenerationQualityReport = {
+  version: "generation-quality-v2";
+  overallScore: number;
+  /** Model-judged craft grade (1-10), anchored and reported separately from the floor score. */
+  craft?: number;
+  rubric: GenerationQualityRubricScores;
+  findings: GenerationQualityFinding[];
+  evaluatedAt: string;
 };
 
 export type ExtensionModel = {
@@ -1468,12 +1647,20 @@ export type RenderViewportMetrics = {
   heroH1MaxLineWidthPx?: number;
   visualOverlapCount?: number;
   visualOverlapSamples?: string[];
+  figureOverlapCount?: number;
+  figureOverlapSamples?: string[];
+  upscaledImageCount?: number;
+  upscaledImageSamples?: string[];
+  sectionLowFillCount?: number;
+  sectionLowFillSamples?: string[];
   crampedTextCount?: number;
   crampedTextSamples?: string[];
   heroMediaEdgeClipCount?: number;
   heroMediaEdgeClipSamples?: string[];
   headingFontFamily?: string;
   bodyFontFamily?: string;
+  /** Computed colors sampled from the page (header/buttons/links) for brand derivation. */
+  brandColorSamples?: string[];
   rects?: {
     hero?: RenderElementRect;
     h1?: RenderElementRect;
@@ -1545,16 +1732,38 @@ export type RenderInspectionResult = {
     heroH1MaxLineWidthPx?: number;
     visualOverlapCount?: number;
     visualOverlapSamples?: string[];
+    figureOverlapCount?: number;
+    figureOverlapSamples?: string[];
+    upscaledImageCount?: number;
+    upscaledImageSamples?: string[];
+    sectionLowFillCount?: number;
+    sectionLowFillSamples?: string[];
     crampedTextCount?: number;
     crampedTextSamples?: string[];
     heroMediaEdgeClipCount?: number;
     heroMediaEdgeClipSamples?: string[];
     headingFontFamily?: string;
     bodyFontFamily?: string;
+    brandColorSamples?: string[];
   };
   metricsByViewport?: Partial<Record<RenderViewportName, RenderViewportMetrics>>;
   unavailableReason?: string;
 };
+
+/**
+ * Normalized visual defect taxonomy for model-based QA. Only taxonomy-typed
+ * findings (never free prose) may influence quality scoring; "none" marks
+ * observations that map to no concrete defect.
+ */
+export type VisualQaDefectCategory =
+  | "contrast"
+  | "overflow"
+  | "blank_layout"
+  | "unreadable_text"
+  | "broken_media"
+  | "cramped_layout"
+  | "repetition"
+  | "none";
 
 export type VisualQaFinding = {
   id: string;
@@ -1564,6 +1773,8 @@ export type VisualQaFinding = {
   evidence: string;
   recommendation?: string;
   viewport?: RenderViewportName;
+  defectCategory?: VisualQaDefectCategory;
+  confidence?: number;
 };
 
 export type VisualQaResult = {
@@ -1579,6 +1790,8 @@ export type VisualQaResult = {
   selectedDesignDirectionId?: string;
   summary: string;
   score?: {
+    /** Anchored "would an owner pay for this" craft grade; never inflated by floor metrics. */
+    craft?: number;
     overall: number;
     brand: number;
     layout: number;
@@ -1764,6 +1977,35 @@ export type PresenceAssessment = {
   selectedDesignDirectionId?: string;
   mockupArtifacts?: CreativeMockupArtifact[];
   generationPlanningSource?: "openai" | "deterministic_fallback";
+  businessUnderstanding?: BusinessUnderstandingV2;
+  generatedCopyDeck?: GeneratedCopyDeckV2;
+  /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
+  textFirstFallbackApproval?: {
+    approvedBy: string;
+    reason: string;
+    approvedAt: string;
+  };
+  /** Deterministic brand-derivation outcome for the compiled V3 theme. */
+  brandCueReport?: {
+    version: "brand-cue-report-v2";
+    cues: Array<{ hex: string; source: "render_sample" | "ai_signal"; saturation: number; lightness: number }>;
+    selectedPrimary?: string;
+    selectedAccent?: string;
+    applied: boolean;
+    reason: string;
+  };
+  /** Privately stored scraped media (reference_only until owner attestation). */
+  scrapedMediaManifest?: Array<{
+    assetId: string;
+    kind: "photo" | "logo";
+    originalUrl: string;
+    storedUrl: string;
+    contentHash: string;
+    bytes: number;
+    scrapedAt: string;
+    width?: number;
+    height?: number;
+  }>;
   technicalNotes: string[];
   visualNotes: string[];
   brandNotes: string[];

@@ -37,7 +37,7 @@ type IntakeJobStatus = {
   error?: string;
 };
 
-export function AdminGenerateForm() {
+export function AdminGenerateForm({ onJobCreated }: { onJobCreated?: (response: IntakeResponse) => void } = {}) {
   const [url, setUrl] = useState("");
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -90,7 +90,12 @@ export function AdminGenerateForm() {
         })
       });
       const payload = (await response.json().catch(() => ({}))) as IntakeResponse;
-      setResult(response.ok ? payload : { error: payload.error ?? "Candidate failed." });
+      if (response.ok) {
+        setResult(payload);
+        onJobCreated?.(payload);
+      } else {
+        setResult({ error: payload.error ?? "Candidate failed." });
+      }
     } catch (error) {
       setResult({ error: error instanceof Error ? error.message : "Candidate failed." });
     } finally {

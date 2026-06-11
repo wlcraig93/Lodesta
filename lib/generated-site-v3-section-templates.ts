@@ -262,7 +262,7 @@ export const sectionTemplateCatalogV3: readonly SectionTemplateDefinitionV3[] = 
     requiredSlots: ["copy"],
     optionalSlots: ["action"],
     defaultBackground: surfaceBackgroundV3,
-    allowedBackgrounds: nonImageBackgroundsV3,
+    allowedBackgrounds: [...nonImageBackgroundsV3, { kind: "image", url: "/generated-site-assets/auto-services/conversion-background-v1.jpg", focalPoint: "center" }],
     visualDensity: "spacious",
     visualWeight: "feature",
     desktopRule: "Copy is centered in a constrained measure.",

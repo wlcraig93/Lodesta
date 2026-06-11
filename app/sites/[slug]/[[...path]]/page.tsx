@@ -7,6 +7,7 @@ import { repository } from "@/lib/repository";
 import { isIndexableSite } from "@/lib/site-publication";
 import { canonicalUrlForPage } from "@/lib/public-site-seo";
 import { markdownUrlForPage } from "@/lib/public-site-markdown";
+import { isCustomDomainRequest } from "@/lib/host-routing";
 
 export const dynamic = "force-dynamic";
 
@@ -60,19 +61,33 @@ export default async function PublicSitePage({
   if (!page) notFound();
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
   const claimedForPublicRuntime = isIndexableSite(bundle, claims);
+  // Versions composed with scraped reference media are protected-preview only:
+  // the public route never renders them. Owner attestation converts the media
+  // and recompiles before anything publishes.
+  const v3Version = version as typeof version & { mediaDecisions?: Array<{ rightsStatus: string }> };
+  if (v3Version.mediaDecisions?.some((decision) => decision.rightsStatus === "owner_attestation_required")) {
+    notFound();
+  }
+  // Custom-domain requests are internally rewritten to /sites/{slug}; rendered
+  // navigation must stay on the customer's domain, never the platform path.
+  const customDomain = isCustomDomainRequest(await headers());
 
   return (
-    <SiteRenderer
-      business={bundle.businessProfile}
-      site={bundle.siteModel}
-      extensions={bundle.extensionModel}
-      locations={bundle.locations}
-      locationBindings={bundle.locationBindings}
-      page={page}
-      theme={version.theme ?? bundle.siteModel.theme}
-      experiments={bundle.experiments}
-      tracking={claimedForPublicRuntime}
-      formsEnabled={claimedForPublicRuntime}
-    />
+    <>
+      <SiteRenderer
+        business={bundle.businessProfile}
+        site={bundle.siteModel}
+        extensions={bundle.extensionModel}
+        locations={bundle.locations}
+        locationBindings={bundle.locationBindings}
+        page={page}
+        theme={version.theme ?? bundle.siteModel.theme}
+        experiments={bundle.experiments}
+        tracking={claimedForPublicRuntime}
+        formsEnabled={claimedForPublicRuntime}
+        basePath={customDomain ? "" : `/sites/${bundle.siteModel.slug}`}
+        proofMode={claimedForPublicRuntime ? "ui_kit" : "link_only"}
+      />
+    </>
   );
 }

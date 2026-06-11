@@ -345,6 +345,24 @@ async function publicAssetForRequest(requestUrl: string, expectedOrigin: string 
   }
   if (expectedOrigin && parsed.origin !== expectedOrigin) return undefined;
   const pathname = decodeURIComponent(parsed.pathname);
+  // Asset-library media is app-served; resolve it through the same storage
+  // path the public route uses so QA renders can load approved imagery.
+  if (pathname.startsWith("/api/asset-library/public/")) {
+    return assetLibraryBytesForRequest(pathname);
+  }
+  // Locally stored site assets (incl. private scraped media): QA renders are a
+  // trusted local context, so serve bytes directly from storage.
+  const siteAssetMatch = pathname.match(/^\/api\/assets\/([^/]+)\/([^/]+)$/);
+  if (siteAssetMatch) {
+    try {
+      const { readLocalAsset } = await import("./asset-storage");
+      const asset = await readLocalAsset(`${decodeURIComponent(siteAssetMatch[1])}/${decodeURIComponent(siteAssetMatch[2])}`);
+      if (asset) return { body: asset.bytes, contentType: asset.mimeType };
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
   if (!pathname.startsWith("/generated-site-assets/")) return undefined;
   const normalizedPath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
   const publicRoot = join(process.cwd(), "public");
@@ -353,6 +371,26 @@ async function publicAssetForRequest(requestUrl: string, expectedOrigin: string 
   try {
     const body = await readFile(filePath);
     return { body, contentType: contentTypeForAsset(filePath) };
+  } catch {
+    return undefined;
+  }
+}
+
+async function assetLibraryBytesForRequest(pathname: string): Promise<{ body: Buffer; contentType: string } | undefined> {
+  const segments = pathname.split("/").filter(Boolean);
+  const assetId = decodeURIComponent(segments[3] ?? "");
+  const variant = segments[4] ?? "";
+  if (!assetId || !variant) return undefined;
+  try {
+    const { ASSET_LIBRARY_BUCKET_NAME, assessAssetLibraryPolicy, getAssetLibraryAsset } = await import("./asset-library");
+    const { getSupabaseAdminClient } = await import("./supabase/client");
+    const asset = await getAssetLibraryAsset(assetId);
+    if (!asset || asset.status !== "approved" || !assessAssetLibraryPolicy(asset).siteSelectable) return undefined;
+    const storagePath = (asset.approvedStoragePaths as Record<string, string | undefined>)[variant];
+    if (!storagePath || storagePath.startsWith("raw/")) return undefined;
+    const { data } = await getSupabaseAdminClient().storage.from(ASSET_LIBRARY_BUCKET_NAME).download(storagePath);
+    if (!data) return undefined;
+    return { body: Buffer.from(await data.arrayBuffer()), contentType: "image/webp" };
   } catch {
     return undefined;
   }
@@ -705,8 +743,15 @@ function collectBrowserMetricsScript() {
     const siteStyle = getComputedStyle(siteRoot);
     const h1Style = h1 ? getComputedStyle(h1) : undefined;
     const h1LineRects = textLineRects(h1);
-    const readableElements = Array.from(siteRoot.querySelectorAll("p, li, dt, dd, a.site-button, .site-button-v3, .site-card-v2 h3, .site-card-v2 p, .site-card-link-v2 > span:last-child"))
-      .filter((element) => isVisible(element) && (element.innerText || "").trim().length > 0);
+    // Fact labels/values, list numerals, eyebrows, and form labels must be
+    // sampled explicitly: they carry their own colors and are exactly the
+    // elements that historically went unreadable on dark sections.
+    const readableElements = Array.from(
+      siteRoot.querySelectorAll(
+        "p, li, dt, dd, a.site-button, .site-button-v3, .site-card-v2 h3, .site-card-v2 p, .site-card-link-v2 > span:last-child, " +
+          ".site-visual-facts-v3 span, .site-visual-facts-v3 strong, .site-visual-facts-v3 a, .site-visual-list-v3 span, .site-eyebrow-v3, .site-contact-form-v3 label"
+      )
+    ).filter((element) => isVisible(element) && (element.innerText || "").trim().length > 0);
     const readableMetrics = readableElements.map((element) => {
       const style = getComputedStyle(element);
       const foreground = parseRgb(style.color);
@@ -750,6 +795,57 @@ function collectBrowserMetricsScript() {
     const overlapSamples = foregroundOverlapSamples();
     const crampedSamples = crampedTextSamples();
     const mediaEdgeSamples = heroMediaEdgeClipSamples();
+    // Composition QA: figure-vs-figure overlap and per-section blank-space fill.
+    const figureOverlapSamples = (() => {
+      const samples = [];
+      for (const section of Array.from(document.querySelectorAll(".site-visual-section-v3"))) {
+        const figures = Array.from(section.querySelectorAll("figure")).map((figure) => figure.getBoundingClientRect()).filter((rect) => rect.width > 24 && rect.height > 24);
+        for (let i = 0; i < figures.length; i += 1) {
+          for (let j = i + 1; j < figures.length; j += 1) {
+            const a = figures[i];
+            const b = figures[j];
+            const x = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+            const y = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+            const intersection = x * y;
+            const smaller = Math.min(a.width * a.height, b.width * b.height);
+            if (smaller > 0 && intersection / smaller > 0.2) {
+              samples.push((section.getAttribute("data-section-template") || "section") + ": figures overlap " + Math.round((intersection / smaller) * 100) + "%");
+            }
+          }
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const upscaledImageSamples = (() => {
+      const samples = [];
+      for (const image of Array.from(document.images)) {
+        if (!image.complete || image.naturalWidth === 0) continue;
+        const rect = image.getBoundingClientRect();
+        if (rect.width < 320) continue;
+        const factor = rect.width / image.naturalWidth;
+        if (factor > 2.2) {
+          samples.push((image.getAttribute("src") || "image").split("/").pop().slice(0, 40) + " rendered at " + Math.round(factor * 10) / 10 + "x natural size");
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const sectionFillSamples = (() => {
+      const samples = [];
+      for (const section of Array.from(document.querySelectorAll(".site-visual-section-v3"))) {
+        const rect = section.getBoundingClientRect();
+        if (rect.width < 200 || rect.height < 160) continue;
+        let contentArea = 0;
+        for (const block of Array.from(section.querySelectorAll(".site-visual-block-v3"))) {
+          const blockRect = block.getBoundingClientRect();
+          contentArea += Math.max(0, blockRect.width) * Math.max(0, blockRect.height);
+        }
+        const fill = Math.min(1, contentArea / (rect.width * rect.height));
+        if (fill < 0.22) {
+          samples.push((section.getAttribute("data-section-template") || "section") + ": " + Math.round(fill * 100) + "% filled");
+        }
+      }
+      return samples.slice(0, 6);
+    })();
     const images = Array.from(document.images);
     const loadedImages = images.filter((image) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
     const brokenImages = images.filter((image) => image.complete && (image.naturalWidth === 0 || image.naturalHeight === 0));
@@ -806,12 +902,41 @@ function collectBrowserMetricsScript() {
       heroH1MaxLineWidthPx: h1LineRects.length ? Math.max(...h1LineRects.map((rect) => rect.width)) : undefined,
       visualOverlapCount: overlapSamples.length,
       visualOverlapSamples: overlapSamples,
+      figureOverlapCount: figureOverlapSamples.length,
+      figureOverlapSamples,
+      upscaledImageCount: upscaledImageSamples.length,
+      upscaledImageSamples,
+      sectionLowFillCount: sectionFillSamples.length,
+      sectionLowFillSamples: sectionFillSamples,
       crampedTextCount: crampedSamples.length,
       crampedTextSamples: crampedSamples,
       heroMediaEdgeClipCount: mediaEdgeSamples.length,
       heroMediaEdgeClipSamples: mediaEdgeSamples,
       headingFontFamily: h1Style?.fontFamily,
       bodyFontFamily: siteStyle.fontFamily,
+      brandColorSamples: (() => {
+        const samples = [];
+        const pushColor = (value) => {
+          if (value && value !== "rgba(0, 0, 0, 0)" && value !== "transparent") samples.push(value);
+        };
+        const header = document.querySelector("header") || document.querySelector("[data-site-chrome='header']") || document.querySelector("nav");
+        if (header) {
+          pushColor(getComputedStyle(header).backgroundColor);
+          const headerLink = header.querySelector("a");
+          if (headerLink) pushColor(getComputedStyle(headerLink).color);
+        }
+        const buttons = Array.from(
+          document.querySelectorAll("a.button, button, .button, .btn, [class*='button'], input[type='submit']")
+        ).filter(isVisible).slice(0, 6);
+        for (const button of buttons) {
+          pushColor(getComputedStyle(button).backgroundColor);
+        }
+        const firstLink = Array.from(document.querySelectorAll("main a, body a")).filter(isVisible)[0];
+        if (firstLink) pushColor(getComputedStyle(firstLink).color);
+        if (h1) pushColor(getComputedStyle(h1).color);
+        pushColor(getComputedStyle(document.body).backgroundColor);
+        return samples.slice(0, 16);
+      })(),
       rects: {
         hero: elementRect(hero),
         h1: elementRect(h1),
@@ -964,7 +1089,7 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       id: `render.text_contrast${suffix}`,
       severity: metrics.minTextContrastRatio >= 4.5 ? "pass" : "fail",
       title: `Sampled text contrast meets AA minimum${titleSuffix}`,
-      evidence: `Lowest sampled text contrast ratio is ${metrics.minTextContrastRatio.toFixed(2)}:1.`,
+      evidence: `Lowest sampled text contrast ratio is ${metrics.minTextContrastRatio.toFixed(2)}:1.${metrics.minTextContrastSample ? ` Sample: ${metrics.minTextContrastSample}` : ""}`,
       viewport
     });
   }
@@ -996,6 +1121,41 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       evidence: metrics.crampedTextCount
         ? `${metrics.crampedTextCount} cramped text samples: ${(metrics.crampedTextSamples ?? []).join("; ")}`
         : "No cramped text samples detected.",
+      viewport
+    });
+  }
+  if (typeof metrics.upscaledImageCount === "number") {
+    findings.push({
+      id: `render.image_upscaled${suffix}`,
+      severity: metrics.upscaledImageCount === 0 ? "pass" : "fail",
+      title: `Images render near natural resolution${titleSuffix}`,
+      evidence: metrics.upscaledImageCount
+        ? `${metrics.upscaledImageCount} blurry upscaled images: ${(metrics.upscaledImageSamples ?? []).join("; ")}`
+        : "No images stretched beyond 2.2x natural size.",
+      viewport
+    });
+  }
+  if (typeof metrics.figureOverlapCount === "number") {
+    findings.push({
+      id: `render.figure_overlap${suffix}`,
+      severity: metrics.figureOverlapCount === 0 ? "pass" : "fail",
+      title: `Section figures do not overlap${titleSuffix}`,
+      evidence: metrics.figureOverlapCount
+        ? `${metrics.figureOverlapCount} overlapping figure pairs: ${(metrics.figureOverlapSamples ?? []).join("; ")}`
+        : "No overlapping figures detected.",
+      viewport
+    });
+  }
+  if (typeof metrics.sectionLowFillCount === "number") {
+    findings.push({
+      id: `render.section_blank_space${suffix}`,
+      // Advisory while thresholds calibrate: low fill is a design smell, not
+      // automatically a defect (hero whitespace can be intentional).
+      severity: metrics.sectionLowFillCount === 0 ? "pass" : "warning",
+      title: `Sections are reasonably filled${titleSuffix}`,
+      evidence: metrics.sectionLowFillCount
+        ? `${metrics.sectionLowFillCount} low-fill sections: ${(metrics.sectionLowFillSamples ?? []).join("; ")}`
+        : "No abnormally blank sections detected.",
       viewport
     });
   }
@@ -1158,13 +1318,20 @@ function mergeMetrics(left: BrowserMetrics, right: BrowserMetrics): BrowserMetri
     heroH1LineCount: maxDefined(left.heroH1LineCount, right.heroH1LineCount),
     heroH1MaxLineWidthPx: maxDefined(left.heroH1MaxLineWidthPx, right.heroH1MaxLineWidthPx),
     visualOverlapCount: maxDefined(left.visualOverlapCount, right.visualOverlapCount),
+    figureOverlapCount: maxDefined(left.figureOverlapCount, right.figureOverlapCount),
+    upscaledImageCount: maxDefined(left.upscaledImageCount, right.upscaledImageCount),
+    upscaledImageSamples: left.upscaledImageSamples?.length ? left.upscaledImageSamples : right.upscaledImageSamples,
+    figureOverlapSamples: left.figureOverlapSamples?.length ? left.figureOverlapSamples : right.figureOverlapSamples,
+    sectionLowFillCount: maxDefined(left.sectionLowFillCount, right.sectionLowFillCount),
+    sectionLowFillSamples: left.sectionLowFillSamples?.length ? left.sectionLowFillSamples : right.sectionLowFillSamples,
     visualOverlapSamples: left.visualOverlapSamples?.length ? left.visualOverlapSamples : right.visualOverlapSamples,
     crampedTextCount: maxDefined(left.crampedTextCount, right.crampedTextCount),
     crampedTextSamples: left.crampedTextSamples?.length ? left.crampedTextSamples : right.crampedTextSamples,
     heroMediaEdgeClipCount: maxDefined(left.heroMediaEdgeClipCount, right.heroMediaEdgeClipCount),
     heroMediaEdgeClipSamples: left.heroMediaEdgeClipSamples?.length ? left.heroMediaEdgeClipSamples : right.heroMediaEdgeClipSamples,
     headingFontFamily: left.headingFontFamily ?? right.headingFontFamily,
-    bodyFontFamily: left.bodyFontFamily ?? right.bodyFontFamily
+    bodyFontFamily: left.bodyFontFamily ?? right.bodyFontFamily,
+    brandColorSamples: left.brandColorSamples?.length ? left.brandColorSamples : right.brandColorSamples
   };
 }
 

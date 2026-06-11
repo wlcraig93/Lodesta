@@ -1,0 +1,2326 @@
+{
+  "version": "asset-library-manifest-v1",
+  "defaultModel": "gpt-image-2",
+  "defaultSize": "1536x1024",
+  "defaultQuality": "low",
+  "name": "auto-glass-wave-1-v1",
+  "vertical": "auto_services",
+  "prompts": [
+    {
+      "id": "auto_glass_w1_001_chip_resin",
+      "title": "Windshield chip resin injector macro",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "windshield_chip",
+        "resin_injector",
+        "glass",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "resin_injector",
+        "glass"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass_repair"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield chip resin injector macro; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. tool centered on chip, no calibration target, no screen; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass_repair sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_002_chip_macro",
+      "title": "Windshield rock chip close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_chip",
+        "laminated_glass",
+        "crack",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "laminated_glass",
+        "crack"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield rock chip close-up, crisp real material texture, shallow depth of field, no measuring digits or text visible. small chip only, no before-after proof; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_003_urethane_bead",
+      "title": "Urethane bead application close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "urethane_bead",
+        "windshield_edge",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "urethane_bead",
+        "windshield_edge",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on urethane bead application close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. smooth bead on pinch weld, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_004_glass_edge",
+      "title": "Replacement windshield glass edge on stand",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_edge",
+        "windshield",
+        "stand",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_edge",
+        "windshield",
+        "stand"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of replacement windshield glass edge on stand, crisp real material texture, shallow depth of field, no measuring digits or text visible. edge detail only, no shop or car identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_005_suction_cup",
+      "title": "Glass suction cup hands close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "suction_cup",
+        "glass",
+        "gloved_hands",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "suction_cup",
+        "glass",
+        "gloved_hands"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on glass suction cup hands close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. both hands gloved, no faces; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_006_wiper_cowl",
+      "title": "Wiper and cowl glass inspection detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "wiper",
+        "cowl",
+        "windshield",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "wiper",
+        "cowl",
+        "windshield"
+      ],
+      "serviceHints": [
+        "windshield",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of wiper and cowl glass inspection detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. no VIN or plate visible; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, inspection sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_007_primer_pinch_weld",
+      "title": "Primer applicator at windshield pinch weld",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "primer",
+        "pinch_weld",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "primer",
+        "pinch_weld",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on primer applicator at windshield pinch weld; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. unlabeled applicator, no calibration board; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_008_rain_texture",
+      "title": "Rain beads on windshield texture",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "rain_beads",
+        "windshield",
+        "texture",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rain_beads",
+        "windshield",
+        "texture"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show rain beads on windshield texture as an abstract useful shop-safe texture, close cropped with no identifiable facility context. abstract glass texture only; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_009_wire_removal",
+      "title": "Windshield removal wire close-up",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "removal_wire",
+        "windshield_edge",
+        "tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "removal_wire",
+        "windshield_edge",
+        "tool"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield removal wire close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. wire tool engaged at edge, safe hand placement; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_010_tool_tray",
+      "title": "Auto glass tool tray flat lay",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "tools"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "parts_flat_lay",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show auto glass tool tray flat lay arranged on a plain worn work mat or scuffed bench, no labels or printed packaging visible. no labels, forms, receipts, or packaging; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, tools sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_011_side_window_regulator",
+      "title": "Side window regulator detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "window_regulator",
+        "glass_track",
+        "door",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "window_regulator",
+        "glass_track",
+        "door"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "side_window"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of side window regulator detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. cropped mechanical detail, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, side_window sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_012_tape_retention",
+      "title": "Windshield tape retention detail",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_tape",
+        "glass_edge",
+        "retention",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_tape",
+        "glass_edge",
+        "retention"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield tape retention detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. plain tape without branding or text; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_013_chip_resin",
+      "title": "Windshield chip resin injector macro alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "windshield_chip",
+        "resin_injector",
+        "glass",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "resin_injector",
+        "glass"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass_repair"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield chip resin injector macro; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. tool centered on chip, no calibration target, no screen; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass_repair sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_014_chip_macro",
+      "title": "Windshield rock chip close-up alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_chip",
+        "laminated_glass",
+        "crack",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "laminated_glass",
+        "crack"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield rock chip close-up, crisp real material texture, shallow depth of field, no measuring digits or text visible. small chip only, no before-after proof; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_015_urethane_bead",
+      "title": "Urethane bead application close-up alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "urethane_bead",
+        "windshield_edge",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "urethane_bead",
+        "windshield_edge",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on urethane bead application close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. smooth bead on pinch weld, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_016_glass_edge",
+      "title": "Replacement windshield glass edge on stand alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_edge",
+        "windshield",
+        "stand",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_edge",
+        "windshield",
+        "stand"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of replacement windshield glass edge on stand, crisp real material texture, shallow depth of field, no measuring digits or text visible. edge detail only, no shop or car identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_017_suction_cup",
+      "title": "Glass suction cup hands close-up alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "suction_cup",
+        "glass",
+        "gloved_hands",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "suction_cup",
+        "glass",
+        "gloved_hands"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on glass suction cup hands close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. both hands gloved, no faces; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_018_wiper_cowl",
+      "title": "Wiper and cowl glass inspection detail alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "wiper",
+        "cowl",
+        "windshield",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "wiper",
+        "cowl",
+        "windshield"
+      ],
+      "serviceHints": [
+        "windshield",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of wiper and cowl glass inspection detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. no VIN or plate visible; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, inspection sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_019_primer_pinch_weld",
+      "title": "Primer applicator at windshield pinch weld alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "primer",
+        "pinch_weld",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "primer",
+        "pinch_weld",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on primer applicator at windshield pinch weld; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. unlabeled applicator, no calibration board; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_020_rain_texture",
+      "title": "Rain beads on windshield texture alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "rain_beads",
+        "windshield",
+        "texture",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rain_beads",
+        "windshield",
+        "texture"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show rain beads on windshield texture as an abstract useful shop-safe texture, close cropped with no identifiable facility context. abstract glass texture only; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_021_wire_removal",
+      "title": "Windshield removal wire close-up alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "removal_wire",
+        "windshield_edge",
+        "tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "removal_wire",
+        "windshield_edge",
+        "tool"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield removal wire close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. wire tool engaged at edge, safe hand placement; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_022_tool_tray",
+      "title": "Auto glass tool tray flat lay alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "tools"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "parts_flat_lay",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show auto glass tool tray flat lay arranged on a plain worn work mat or scuffed bench, no labels or printed packaging visible. no labels, forms, receipts, or packaging; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, tools sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_023_side_window_regulator",
+      "title": "Side window regulator detail alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "window_regulator",
+        "glass_track",
+        "door",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "window_regulator",
+        "glass_track",
+        "door"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "side_window"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of side window regulator detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. cropped mechanical detail, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, side_window sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_024_tape_retention",
+      "title": "Windshield tape retention detail alternate crop 2",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_tape",
+        "glass_edge",
+        "retention",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_tape",
+        "glass_edge",
+        "retention"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield tape retention detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. plain tape without branding or text; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_025_chip_resin",
+      "title": "Windshield chip resin injector macro alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "windshield_chip",
+        "resin_injector",
+        "glass",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "resin_injector",
+        "glass"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass_repair"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield chip resin injector macro; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. tool centered on chip, no calibration target, no screen; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass_repair sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_026_chip_macro",
+      "title": "Windshield rock chip close-up alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_chip",
+        "laminated_glass",
+        "crack",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "laminated_glass",
+        "crack"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield rock chip close-up, crisp real material texture, shallow depth of field, no measuring digits or text visible. small chip only, no before-after proof; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_027_urethane_bead",
+      "title": "Urethane bead application close-up alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "urethane_bead",
+        "windshield_edge",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "urethane_bead",
+        "windshield_edge",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on urethane bead application close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. smooth bead on pinch weld, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_028_glass_edge",
+      "title": "Replacement windshield glass edge on stand alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_edge",
+        "windshield",
+        "stand",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_edge",
+        "windshield",
+        "stand"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of replacement windshield glass edge on stand, crisp real material texture, shallow depth of field, no measuring digits or text visible. edge detail only, no shop or car identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_029_suction_cup",
+      "title": "Glass suction cup hands close-up alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "suction_cup",
+        "glass",
+        "gloved_hands",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "suction_cup",
+        "glass",
+        "gloved_hands"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on glass suction cup hands close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. both hands gloved, no faces; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_030_wiper_cowl",
+      "title": "Wiper and cowl glass inspection detail alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "wiper",
+        "cowl",
+        "windshield",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "wiper",
+        "cowl",
+        "windshield"
+      ],
+      "serviceHints": [
+        "windshield",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of wiper and cowl glass inspection detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. no VIN or plate visible; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, inspection sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_031_primer_pinch_weld",
+      "title": "Primer applicator at windshield pinch weld alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "primer",
+        "pinch_weld",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "primer",
+        "pinch_weld",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on primer applicator at windshield pinch weld; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. unlabeled applicator, no calibration board; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_032_rain_texture",
+      "title": "Rain beads on windshield texture alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "rain_beads",
+        "windshield",
+        "texture",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rain_beads",
+        "windshield",
+        "texture"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show rain beads on windshield texture as an abstract useful shop-safe texture, close cropped with no identifiable facility context. abstract glass texture only; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_033_wire_removal",
+      "title": "Windshield removal wire close-up alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "removal_wire",
+        "windshield_edge",
+        "tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "removal_wire",
+        "windshield_edge",
+        "tool"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield removal wire close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. wire tool engaged at edge, safe hand placement; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_034_tool_tray",
+      "title": "Auto glass tool tray flat lay alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "tools"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "parts_flat_lay",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show auto glass tool tray flat lay arranged on a plain worn work mat or scuffed bench, no labels or printed packaging visible. no labels, forms, receipts, or packaging; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, tools sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_035_side_window_regulator",
+      "title": "Side window regulator detail alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "window_regulator",
+        "glass_track",
+        "door",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "window_regulator",
+        "glass_track",
+        "door"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "side_window"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of side window regulator detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. cropped mechanical detail, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, side_window sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_036_tape_retention",
+      "title": "Windshield tape retention detail alternate crop 3",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_tape",
+        "glass_edge",
+        "retention",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_tape",
+        "glass_edge",
+        "retention"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield tape retention detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. plain tape without branding or text; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_037_chip_resin",
+      "title": "Windshield chip resin injector macro alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "windshield_chip",
+        "resin_injector",
+        "glass",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "resin_injector",
+        "glass"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass_repair"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield chip resin injector macro; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. tool centered on chip, no calibration target, no screen; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass_repair sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_038_chip_macro",
+      "title": "Windshield rock chip close-up alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_chip",
+        "laminated_glass",
+        "crack",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_chip",
+        "laminated_glass",
+        "crack"
+      ],
+      "serviceHints": [
+        "windshield",
+        "chip",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield rock chip close-up, crisp real material texture, shallow depth of field, no measuring digits or text visible. small chip only, no before-after proof; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, chip, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_039_urethane_bead",
+      "title": "Urethane bead application close-up alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "urethane_bead",
+        "windshield_edge",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "urethane_bead",
+        "windshield_edge",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement",
+        "glass"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on urethane bead application close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. smooth bead on pinch weld, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement, glass sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_040_glass_edge",
+      "title": "Replacement windshield glass edge on stand alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_edge",
+        "windshield",
+        "stand",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_edge",
+        "windshield",
+        "stand"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of replacement windshield glass edge on stand, crisp real material texture, shallow depth of field, no measuring digits or text visible. edge detail only, no shop or car identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_041_suction_cup",
+      "title": "Glass suction cup hands close-up alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "suction_cup",
+        "glass",
+        "gloved_hands",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "suction_cup",
+        "glass",
+        "gloved_hands"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on glass suction cup hands close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. both hands gloved, no faces; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_042_wiper_cowl",
+      "title": "Wiper and cowl glass inspection detail alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "wiper",
+        "cowl",
+        "windshield",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "wiper",
+        "cowl",
+        "windshield"
+      ],
+      "serviceHints": [
+        "windshield",
+        "inspection"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of wiper and cowl glass inspection detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. no VIN or plate visible; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, inspection sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_043_primer_pinch_weld",
+      "title": "Primer applicator at windshield pinch weld alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "primer",
+        "pinch_weld",
+        "applicator",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "primer",
+        "pinch_weld",
+        "applicator"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on primer applicator at windshield pinch weld; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. unlabeled applicator, no calibration board; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_044_rain_texture",
+      "title": "Rain beads on windshield texture alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "shop_texture",
+        "rain_beads",
+        "windshield",
+        "texture",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "rain_beads",
+        "windshield",
+        "texture"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "windshield"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "surface_texture",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show rain beads on windshield texture as an abstract useful shop-safe texture, close cropped with no identifiable facility context. abstract glass texture only; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, windshield sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_045_wire_removal",
+      "title": "Windshield removal wire close-up alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "hands_tools",
+        "removal_wire",
+        "windshield_edge",
+        "tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "removal_wire",
+        "windshield_edge",
+        "tool"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "hands_tools_closeup",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show gloved hands working on windshield removal wire close-up; any tool is physically seated on the actual fastener or contact surface, with both hands safely staged. wire tool engaged at edge, safe hand placement; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_046_tool_tray",
+      "title": "Auto glass tool tray flat lay alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "glass_tools",
+        "tool_tray",
+        "urethane_tool"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "tools"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "parts_flat_lay",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show auto glass tool tray flat lay arranged on a plain worn work mat or scuffed bench, no labels or printed packaging visible. no labels, forms, receipts, or packaging; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, tools sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_047_side_window_regulator",
+      "title": "Side window regulator detail alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "window_regulator",
+        "glass_track",
+        "door",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "window_regulator",
+        "glass_track",
+        "door"
+      ],
+      "serviceHints": [
+        "auto_glass",
+        "side_window"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of side window regulator detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. cropped mechanical detail, no vehicle identity; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for auto_glass, side_window sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    },
+    {
+      "id": "auto_glass_w1_048_tape_retention",
+      "title": "Windshield tape retention detail alternate crop 4",
+      "category": "auto_glass",
+      "intendedUses": [
+        "hero",
+        "section",
+        "card"
+      ],
+      "tags": [
+        "glass_closeup",
+        "windshield_tape",
+        "glass_edge",
+        "retention",
+        "no_location_context"
+      ],
+      "imageFamily": "auto_glass",
+      "imageSubjects": [
+        "windshield_tape",
+        "glass_edge",
+        "retention"
+      ],
+      "serviceHints": [
+        "windshield",
+        "replacement"
+      ],
+      "catalogServiceSlugs": [],
+      "compositionTemplate": "macro_detail",
+      "aspectRatio": "3:2",
+      "prompt": "Photorealistic tight documentary commercial image for a US automotive website, generic category imagery only, practical shop lighting, scuffed concrete or used organized tools, no faces, no storefront, no signage, no identifiable facility, no readable labels, no documents, no screens. Show a close macro detail of windshield tape retention detail, crisp real material texture, shallow depth of field, no measuring digits or text visible. plain tape without branding or text; exclude screens, printed boards, ADAS calibration targets, stickers, forms, labels, and pseudo-text. The image must not imply work performed by a specific business, customer, staff member, vehicle, or location. Suitable for windshield, replacement sections, cards, galleries, or non-proof hero category imagery.",
+      "negativeConstraints": [
+        "no logos",
+        "no readable text",
+        "no license plates",
+        "no real business names",
+        "no fake certifications",
+        "no unsafe shop behavior",
+        "no customer-specific claims",
+        "no distorted hands or tools",
+        "no obvious AI artifacts",
+        "no screens",
+        "no documents",
+        "no forms",
+        "no receipts",
+        "no calibration targets"
+      ],
+      "notes": "Generic auto glass category imagery; no calibration targets, screens, paperwork, signage, or proof of a specific job."
+    }
+  ]
+}

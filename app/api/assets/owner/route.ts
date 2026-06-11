@@ -10,6 +10,7 @@ import {
   type SupportedAssetMimeType
 } from "@/lib/asset-storage";
 import { validatePublicHostname } from "@/lib/url-safety";
+import { getCurrentUser } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -18,23 +19,31 @@ const maxBase64Length = Math.ceil((maxOwnerAssetBytes * 4) / 3) + 128;
 
 const assetInputSchema = z.object({
   url: z.string().refine(isAllowedOwnerAssetUrl, "Asset URL must be an HTTP(S) image URL or a platform-hosted asset URL."),
-  alt: z.string().min(1).max(180)
+  alt: z.string().min(1).max(180),
+  rightsConfirmed: z.boolean()
 });
 
 const uploadInputSchema = z.object({
   base64: z.string().min(1).max(maxBase64Length),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
   alt: z.string().min(1).max(180),
-  fileName: z.string().max(180).optional()
+  fileName: z.string().max(180).optional(),
+  rightsConfirmed: z.boolean()
 });
 
+const scrapedAttestationSchema = z.object({
+  assetId: z.string().min(1).max(120),
+  rightsConfirmed: z.boolean()
+});
+
+// Rights are confirmed per image — there is deliberately no blanket field.
 const ownerAssetsSchema = z.object({
   siteId: z.string().min(1),
   logo: assetInputSchema.optional(),
   photos: z.array(assetInputSchema).max(12).optional(),
   logoUpload: uploadInputSchema.optional(),
   photoUploads: z.array(uploadInputSchema).max(12).optional(),
-  rightsAccepted: z.boolean()
+  scrapedAttestations: z.array(scrapedAttestationSchema).max(12).optional()
 });
 
 export async function POST(request: Request) {
@@ -58,11 +67,15 @@ export async function POST(request: Request) {
     return applyRateLimitHeaders(NextResponse.json({ error: materialized.error }, { status: 400 }), limit);
   }
 
+  const auth = await getCurrentUser();
+  const attestedBy = auth.user?.email ?? auth.user?.id ?? "site_owner";
+
   const result = await repository.updateOwnerAssets({
     siteId: parsed.data.siteId,
-    rightsAccepted: parsed.data.rightsAccepted,
+    attestedBy,
     logo: materialized.logo ?? parsed.data.logo,
-    photos: [...(parsed.data.photos ?? []), ...materialized.photos]
+    photos: [...(parsed.data.photos ?? []), ...materialized.photos],
+    scrapedAttestations: parsed.data.scrapedAttestations
   });
   if (!result) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
   if (!result.ok) return applyRateLimitHeaders(NextResponse.json({ error: result.reason }, { status: 400 }), limit);
@@ -103,31 +116,43 @@ async function parseMultipartOwnerAssetsRequest(request: Request): Promise<Parse
   const logoFile = fileValue(formData.get("logoFile") ?? formData.get("logo"));
   const photoFiles = formData.getAll("photoFiles").map(fileValue).filter((file): file is File => Boolean(file));
   const photoAlts = formData.getAll("photoAlt").map(stringValue);
+  const photoRights = formData.getAll("photoRights").map((value) => booleanValue(value));
   const photoUrls = formData
     .getAll("photoUrl")
     .map(stringValue)
     .filter(Boolean);
   const photoUrlAlts = formData.getAll("photoUrlAlt").map(stringValue);
+  const photoUrlRights = formData.getAll("photoUrlRights").map((value) => booleanValue(value));
+  const scrapedAssetIds = formData.getAll("scrapedAssetId").map(stringValue).filter(Boolean);
 
   const data = {
     siteId: stringValue(formData.get("siteId")),
-    rightsAccepted: booleanValue(formData.get("rightsAccepted")),
     logo: stringValue(formData.get("logoUrl"))
       ? {
           url: stringValue(formData.get("logoUrl")),
-          alt: stringValue(formData.get("logoAlt")) || "Owner-provided logo"
+          alt: stringValue(formData.get("logoAlt")) || "Owner-provided logo",
+          rightsConfirmed: booleanValue(formData.get("logoRights"))
         }
       : undefined,
     photos: photoUrls.map((url, index) => ({
       url,
-      alt: photoUrlAlts[index] || `Owner-provided photo ${index + 1}`
+      alt: photoUrlAlts[index] || `Owner-provided photo ${index + 1}`,
+      rightsConfirmed: photoUrlRights[index] ?? false
     })),
     logoUpload: logoFile
-      ? await uploadFromFile(logoFile, stringValue(formData.get("logoAlt")) || "Owner-provided logo")
+      ? {
+          ...(await uploadFromFile(logoFile, stringValue(formData.get("logoAlt")) || "Owner-provided logo")),
+          rightsConfirmed: booleanValue(formData.get("logoRights"))
+        }
       : undefined,
     photoUploads: await Promise.all(
-      photoFiles.slice(0, 12).map((file, index) => uploadFromFile(file, photoAlts[index] || `Owner-provided photo ${index + 1}`))
-    )
+      photoFiles.slice(0, 12).map(async (file, index) => ({
+        ...(await uploadFromFile(file, photoAlts[index] || `Owner-provided photo ${index + 1}`)),
+        rightsConfirmed: photoRights[index] ?? false
+      }))
+    ),
+    // Multipart attestation checkboxes only submit checked ids — presence means confirmed.
+    scrapedAttestations: scrapedAssetIds.map((assetId) => ({ assetId, rightsConfirmed: true }))
   };
   const parsed = ownerAssetsSchema.safeParse(data);
   if (!parsed.success) {
@@ -199,7 +224,8 @@ async function storeOwnerAssetUpload(input: {
   }
   return {
     url: stored.url,
-    alt: input.upload.alt
+    alt: input.upload.alt,
+    rightsConfirmed: input.upload.rightsConfirmed
   };
 }
 

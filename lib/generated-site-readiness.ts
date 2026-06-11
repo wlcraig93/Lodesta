@@ -1,7 +1,12 @@
 import type { GenerationQaMetadata, SiteBundle, SiteCandidateStatus, SiteVersion } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import { applyDeterministicGeneratedSiteRepair } from "./generated-site-repair";
+import { applyGeneratedSiteV3QualityRepair } from "./generated-site-v3-quality-repair";
 import { buildGeneratedSiteQaMetadata } from "./generated-site-qa";
+import { applyQualityGateV2, evaluateGenerationQualityV2 } from "./generation-quality-v2";
+import { buildGenerationScorecard, scorecardEnforcementBlockers } from "./generation-scorecard";
+import { evaluateSeoStructure } from "./seo-structure";
+import { buildFactCoverageReport } from "./fact-coverage";
 import { inspectGeneratedSiteBundleRender } from "./generated-site-render-inspection";
 import { finalizeGenerationCostEstimate, isModelVisualQaAllowed } from "./generation-cost";
 import { computeSiteModelHash } from "./site-version-metadata";
@@ -43,13 +48,17 @@ export async function runInitialGeneratedSiteReadiness(input: {
     generatedRenderInspection: firstInspection,
     generatedVisualQa: firstVisualQa
   });
-  version.generationQa = buildGeneratedSiteQaMetadata({
-    bundle: input.bundle,
+  version.generationQa = withQualityGate(
+    input.bundle,
     version,
-    inspection: firstInspection,
-    qaRunId: firstQaRunId,
-    visualQa: firstVisualQa
-  });
+    buildGeneratedSiteQaMetadata({
+      bundle: input.bundle,
+      version,
+      inspection: firstInspection,
+      qaRunId: firstQaRunId,
+      visualQa: firstVisualQa
+    })
+  );
 
   if (version.generationQa.blockers.length && version.status === "draft" && !version.ownerTouched && !version.ownerApprovedAt) {
     const repair = applyDeterministicGeneratedSiteRepair({
@@ -57,7 +66,15 @@ export async function runInitialGeneratedSiteReadiness(input: {
       version,
       blockers: version.generationQa.blockers
     });
-    if (repair.applied && computeSiteModelHash(input.bundle, version) !== version.generationQa.siteModelHash) {
+    const qualityRepair = version.generationQa.qualityReport
+      ? applyGeneratedSiteV3QualityRepair({
+          bundle: input.bundle,
+          version,
+          report: version.generationQa.qualityReport
+        })
+      : undefined;
+    const combinedRepair = mergeRepairLogs(repair, qualityRepair);
+    if (combinedRepair.applied && computeSiteModelHash(input.bundle, version) !== version.generationQa.siteModelHash) {
       const secondQaRunId = `generated_qa_${crypto.randomUUID().replace(/-/g, "")}`;
       const secondInspection = await inspectGeneratedSiteBundleRender({
         bundle: input.bundle,
@@ -76,14 +93,18 @@ export async function runInitialGeneratedSiteReadiness(input: {
         generatedRenderInspection: secondInspection,
         generatedVisualQa: secondVisualQa
       });
-      version.generationQa = buildGeneratedSiteQaMetadata({
-        bundle: input.bundle,
+      version.generationQa = withQualityGate(
+        input.bundle,
         version,
-        inspection: secondInspection,
-        qaRunId: secondQaRunId,
-        visualQa: secondVisualQa,
-        repair
-      });
+        buildGeneratedSiteQaMetadata({
+          bundle: input.bundle,
+          version,
+          inspection: secondInspection,
+          qaRunId: secondQaRunId,
+          visualQa: secondVisualQa,
+          repair: combinedRepair
+        })
+      );
       return {
         status: version.generationQa.readiness === "ready" ? "ready" : "blocked",
         qa: version.generationQa,
@@ -105,19 +126,65 @@ export async function runInitialGeneratedSiteReadiness(input: {
       generatedRenderInspection: firstInspection,
       generatedVisualQa: finalVisualQa
     });
-    version.generationQa = buildGeneratedSiteQaMetadata({
-      bundle: input.bundle,
+    version.generationQa = withQualityGate(
+      input.bundle,
       version,
-      inspection: firstInspection,
-      qaRunId: firstQaRunId,
-      visualQa: finalVisualQa
-    });
+      buildGeneratedSiteQaMetadata({
+        bundle: input.bundle,
+        version,
+        inspection: firstInspection,
+        qaRunId: firstQaRunId,
+        visualQa: finalVisualQa
+      })
+    );
   }
 
   return {
     status: version.generationQa.readiness === "ready" ? "ready" : "blocked",
     qa: version.generationQa,
     repaired: false
+  };
+}
+
+function withQualityGate(bundle: SiteBundle, version: SiteVersion, qa: GenerationQaMetadata): GenerationQaMetadata {
+  if (version.rendererVersion !== "layout-v3") return qa;
+  const mobileIssueCount =
+    qa.blockers.filter((blocker) => blocker.viewport === "mobile").length +
+    qa.warnings.filter((warning) => warning.viewport === "mobile").length;
+  const report = evaluateGenerationQualityV2({ bundle, version, mobileIssueCount, visualQa: qa.visualQa });
+  const gated = applyQualityGateV2(qa, report);
+  const factCoverage = buildFactCoverageReport({ bundle, version });
+  const scorecard = buildGenerationScorecard({
+    qualityReport: gated.qualityReport,
+    visualQa: gated.visualQa,
+    blockers: gated.blockers,
+    warnings: gated.warnings,
+    brandCueApplied: bundle.presenceAssessment.brandCueReport?.applied,
+    seoScore: evaluateSeoStructure({ bundle, version }).score,
+    factCoverageRatio: factCoverage.coverageRatio
+  });
+  const enforcementBlockers = scorecardEnforcementBlockers(scorecard);
+  return {
+    ...gated,
+    scorecard,
+    factCoverage,
+    ...(enforcementBlockers.length
+      ? { blockers: [...gated.blockers, ...enforcementBlockers], readiness: "blocked" as const }
+      : {})
+  };
+}
+
+function mergeRepairLogs(
+  base: ReturnType<typeof applyDeterministicGeneratedSiteRepair>,
+  quality: ReturnType<typeof applyGeneratedSiteV3QualityRepair> | undefined
+) {
+  if (!quality) return base;
+  return {
+    attempted: base.attempted || quality.attempted,
+    applied: base.applied || quality.applied,
+    attemptedAt: base.attemptedAt ?? quality.attemptedAt,
+    mutationSummaries: [...base.mutationSummaries, ...quality.mutationSummaries],
+    unresolvedBlockerIds: [...new Set([...base.unresolvedBlockerIds, ...quality.unresolvedBlockerIds])]
   };
 }
 

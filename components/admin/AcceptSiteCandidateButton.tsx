@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AdminButton } from "@/components/admin/AdminButton";
 
 type AcceptResponse = {
@@ -21,9 +21,10 @@ export function AcceptSiteCandidateButton({
   disabledReason?: string;
 }) {
   const router = useRouter();
+  const reasonId = useId();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const disabledReasonId = disabledReason ? `accept-${candidateId}-reason` : undefined;
+  const disabledReasonId = disabledReason ? reasonId : undefined;
 
   async function accept() {
     if (submitting) return;
@@ -59,7 +60,7 @@ export function AcceptSiteCandidateButton({
         aria-describedby={disabledReasonId}
         title={disabledReason}
       >
-        {accepted ? "Open site" : submitting ? "Accepting..." : "Accept as site"}
+        {accepted ? "Open managed site" : submitting ? "Promoting..." : "Promote to managed site"}
       </AdminButton>
       {disabledReason ? (
         <span id={disabledReasonId} className="visually-hidden">

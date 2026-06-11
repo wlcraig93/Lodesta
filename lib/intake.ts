@@ -1,5 +1,7 @@
 import type {
   BusinessProfile,
+  BusinessUnderstandingV2,
+  CleanedServiceV2,
   ConversionGoal,
   Experiment,
   ExperimentLearning,
@@ -25,7 +27,7 @@ import type {
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
 import { sampleExtensionModel } from "./sample-data";
 import { runAudit } from "./audit";
-import { verticalRecipes, type VerticalRecipe } from "./recipes";
+import { defaultServicesForVertical, verticalRecipes, type VerticalRecipe } from "./recipes";
 import { evaluateCrawlAgainstStandard, evaluateSiteAgainstStandard } from "./standard-evaluation";
 import { createCreativeBrief } from "./creative-brief";
 import {
@@ -56,6 +58,13 @@ import {
 } from "./layout-registry";
 import { pruneUnsupportedCatalogSections } from "./section-catalog";
 import { planGenerationCost } from "./generation-cost";
+import {
+  hoursRecordFromEntries,
+  normalizeBusinessHours,
+  normalizeServiceList,
+  understandingVerticalConfidenceFloor
+} from "./business-understanding-v2";
+import { slugify } from "./slug";
 
 export type IntakeInput = {
   url?: string;
@@ -68,6 +77,7 @@ export type IntakeInput = {
   crawl?: CrawlAssessment;
   renderInspection?: RenderInspectionResult;
   aiPlanning?: GenerationPlanningOverride;
+  understanding?: BusinessUnderstandingV2;
   mockupArtifacts?: CreativeMockupArtifact[];
   publicPresence?: PublicPresenceEnrichment;
   visualQa?: VisualQaResult;
@@ -96,6 +106,7 @@ export function inferVertical(input: IntakeInput): Vertical {
   if (source.includes("veterinary") || source.includes("veterinarian") || source.includes("vet clinic")) return "veterinary";
   if (source.includes("dentist") || source.includes("dental")) return "dental";
   if (source.includes("plumb") || source.includes("hvac") || source.includes("electric")) return "home_services";
+  if (/tire|wheel alignment|oil change|muffler|mechanic|transmission|brake (repair|service|shop)|smog check/.test(source)) return "auto_services";
   if (/\b(auto|automotive|collision|body shop|paint\s*(and|&)?\s*body|paint repair|dent repair|bumper|fender)\b/.test(source)) return "auto_body";
   if (source.includes("salon") || source.includes("nail") || source.includes("beauty")) return "beauty_salon";
   if (/\blaw\b|\blawyer\b|\battorney\b/.test(source)) return "law_firm";
@@ -106,7 +117,11 @@ export function inferVertical(input: IntakeInput): Vertical {
 }
 
 export function createSiteFromInput(input: IntakeInput): SiteBundle {
-  const vertical = inferVertical(input);
+  const understanding = input.understanding;
+  const vertical =
+    understanding && understanding.verticalConfidence >= understandingVerticalConfidenceFloor
+      ? understanding.vertical
+      : inferVertical(input);
   const facts = mergeExtractedFacts(input.crawl?.extractedFacts, durablePublicPresenceFacts(input.publicPresence));
   const sourceHostname = input.url ? new URL(input.url).hostname.replace(/^www\./, "") : undefined;
   const name = inferBusinessName(input, facts, sourceHostname);
@@ -116,11 +131,21 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
   const identityKey = slugify(siteId) || siteSlug;
   const now = new Date().toISOString();
   const promptFacts = extractPromptFacts(input.prompt);
+  const cleanedServices = understanding?.cleanedServices.length
+    ? understanding.cleanedServices
+    : normalizeServiceList(coalesceList(facts?.services, promptFacts.services));
   const serviceCandidates = removeBusinessNameServiceCandidates(
-    dedupeServiceNames(removeBlockedPlaceholders(coalesceList(facts?.services, promptFacts.services, defaultServicesForVertical(vertical)))),
+    dedupeServiceNames(
+      removeBlockedPlaceholders(
+        cleanedServices.length ? cleanedServices.map((service) => service.name) : defaultServicesForVertical(vertical)
+      )
+    ),
     name
   );
   const services = serviceCandidates.length ? serviceCandidates : defaultServicesForVertical(vertical);
+  const servicePricingHighlights = cleanedServices
+    .filter((service) => service.price && services.includes(service.name))
+    .map((service) => `${service.name}: ${service.price}`);
   const serviceAreas = coalesceList(
     facts?.serviceAreas,
     promptFacts.serviceAreas,
@@ -129,14 +154,17 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
   const phone = facts?.phone ?? promptFacts.phone;
   const email = facts?.email ?? promptFacts.email;
   const address = facts?.address ?? promptFacts.address;
-  const hours = facts?.hours ?? promptFacts.hours;
+  const hoursEntries = understanding?.hours?.length
+    ? understanding.hours
+    : normalizeBusinessHours(facts?.hours ?? promptFacts.hours);
+  const hours = hoursRecordFromEntries(hoursEntries);
 
   const businessProfile: BusinessProfile = {
     id: input.identity?.businessProfileId?.trim() || `bp_${identityKey}`,
     siteId,
     name,
     vertical,
-    categories: coalesceList(rankCategoriesBySpecificity(facts?.categories), [vertical.replace("_", " ")]),
+    categories: coalesceList(rankCategoriesBySpecificity(facts?.categories, vertical), [verticalRecipes[vertical].label]),
     description: profileDescriptionForBusiness({ name, vertical, services, serviceAreas, sourceHostname }),
     phone,
     email,
@@ -144,7 +172,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     geo: facts?.geo,
     hours,
     services,
-    serviceHighlights: facts?.serviceHighlights?.slice(0, 8),
+    serviceHighlights: unique([...(facts?.serviceHighlights ?? []), ...servicePricingHighlights]).slice(0, 8),
     serviceAreas,
     socialLinks: facts?.socialLinks ?? [],
     bookingLinks: facts?.bookingLinks ?? [],
@@ -184,7 +212,8 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     serviceAreas,
     facts,
     promptFacts,
-    sourceHostname
+    sourceHostname,
+    cleanedServices
   });
   const currentEvaluation = input.crawl ? evaluateCrawlAgainstStandard(input.crawl) : undefined;
   const brandAssessment = createBrandAssessment({
@@ -310,6 +339,7 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     designDirections,
     selectedDesignDirectionId: selectedDirection.id,
     generationPlanningSource: input.aiPlanning?.source ?? "deterministic_fallback",
+    businessUnderstanding: input.understanding,
     technicalNotes: buildTechnicalNotes(input.crawl),
     visualNotes: buildVisualNotes(input.renderInspection),
     brandNotes: buildBrandNotes(input.crawl),
@@ -1094,13 +1124,6 @@ function makeBeforeAfterSection(context: SectionBuildContext, id: string): Secti
   };
 }
 
-export function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
 
 function inferBusinessName(input: IntakeInput, facts?: ExtractedBusinessFacts, hostname?: string) {
   return normalizeBusinessNameForIntake(extractPromptName(input.prompt) ?? facts?.name) ?? titleCaseHost(hostname) ?? "Sample Local Business";
@@ -1268,7 +1291,25 @@ function createNormalizedBusinessFacts(input: {
   facts?: ExtractedBusinessFacts;
   promptFacts: ReturnType<typeof extractPromptFacts>;
   sourceHostname?: string;
+  cleanedServices?: CleanedServiceV2[];
 }): NormalizedBusinessFacts {
+  // Cleaned service names ("10 Minute Flat Repair") must keep the source
+  // backing of the raw strings they were derived from ("10 Minute Flat Repair
+  // Starting At $25"), or the cleanup pass silently strips provenance.
+  const cleanedByName = new Map((input.cleanedServices ?? []).map((service) => [service.name.toLowerCase(), service]));
+  const rawCrawlServices = input.facts?.services ?? [];
+  const rawPromptServices = input.promptFacts.services ?? [];
+  const serviceProvenance = (service: string): { source: "crawl" | "prompt" | "system_default"; confidence: "high" | "medium" | "low" } => {
+    if (rawCrawlServices.includes(service)) return { source: "crawl", confidence: "high" };
+    if (rawPromptServices.includes(service)) return { source: "prompt", confidence: "high" };
+    const cleaned = cleanedByName.get(service.toLowerCase());
+    if (cleaned) {
+      if (rawCrawlServices.includes(cleaned.sourceText)) return { source: "crawl", confidence: "high" };
+      if (rawPromptServices.includes(cleaned.sourceText)) return { source: "prompt", confidence: "high" };
+      return { source: "crawl", confidence: "medium" };
+    }
+    return { source: "system_default", confidence: "low" };
+  };
   const observedCategories = input.facts?.categories ?? [];
   const categories = observedCategories.length ? observedCategories : [input.vertical.replace("_", " ")];
   const blockedPlaceholders = ["Local area", "Core service", "Local support"]
@@ -1293,7 +1334,10 @@ function createNormalizedBusinessFacts(input: {
     email: input.facts?.email || input.promptFacts.email ? fact("email", input.facts?.email ?? input.promptFacts.email ?? "", input.facts?.email ? "crawl" : "prompt", "high") : undefined,
     address: input.facts?.address ? fact("address", formatAddress(input.facts.address), "crawl", "medium") : undefined,
     hours: input.facts?.hours ? fact("hours", Object.entries(input.facts.hours).map(([day, value]) => `${day}: ${value}`), "crawl", "medium") : undefined,
-    services: input.services.map((service) => fact("services", service, (input.facts?.services ?? []).includes(service) ? "crawl" : (input.promptFacts.services ?? []).includes(service) ? "prompt" : "system_default", (input.facts?.services ?? []).includes(service) || (input.promptFacts.services ?? []).includes(service) ? "high" : "low")),
+    services: input.services.map((service) => {
+      const provenance = serviceProvenance(service);
+      return fact("services", service, provenance.source, provenance.confidence);
+    }),
     serviceAreas: input.serviceAreas.map((area) => fact("serviceAreas", area, (input.facts?.serviceAreas ?? []).includes(area) || input.facts?.address?.city === area ? "crawl" : "prompt", "medium")),
     proofSignals,
     uncertainFacts: [],
@@ -1354,24 +1398,6 @@ function formatAddress(address: NonNullable<ExtractedBusinessFacts["address"]>) 
   return [address.street, address.city, address.region, address.postalCode, address.country].filter(Boolean).join(", ");
 }
 
-function defaultServicesForVertical(vertical: Vertical) {
-  const defaults: Record<Vertical, string[]> = {
-    restaurant: ["Menu", "Online ordering", "Catering"],
-    auto_body: ["Collision repair", "Paint repair", "Dent repair"],
-    beauty_salon: ["Services and pricing", "Online booking", "Gallery"],
-    med_spa: ["Consultations", "Treatments", "Before and after results"],
-    law_firm: ["Practice areas", "Consultations", "Client intake"],
-    dental: ["Preventive care", "New patient visits", "Cosmetic dentistry"],
-    home_services: ["Emergency service", "Repairs", "Maintenance"],
-    fitness: ["Classes", "Memberships", "Personal training"],
-    real_estate: ["Listings", "Home valuation", "Buyer and seller consultations"],
-    landscaping: ["Lawn care", "Landscape design", "Seasonal cleanup"],
-    veterinary: ["Wellness exams", "Vaccinations", "New patient visits"],
-    creative_studio: ["Portfolio", "Session booking", "Project inquiries"],
-    general_local: []
-  };
-  return defaults[vertical];
-}
 
 function formNameForVertical(vertical: Vertical) {
   return "Contact request";
@@ -1447,6 +1473,16 @@ function themeForVertical(vertical: Vertical, mood: Theme["mood"]): Theme {
       primaryText: "#ffffff",
       accent: "#d8b252",
       border: "#d7e0e8"
+    },
+    auto_services: {
+      background: "#f7f6f2",
+      surface: "#ffffff",
+      text: "#1a1c1e",
+      muted: "#5d6166",
+      primary: "#1f3a5f",
+      primaryText: "#ffffff",
+      accent: "#e0a325",
+      border: "#dcdcd4"
     },
     beauty_salon: {
       background: "#fbf7fa",
@@ -2323,12 +2359,35 @@ function unique(items: string[]) {
   return Array.from(new Set(items));
 }
 
-function rankCategoriesBySpecificity(values: string[] | undefined) {
+function rankCategoriesBySpecificity(values: string[] | undefined, vertical?: Vertical) {
   return unique(values ?? [])
     .filter((value) => !/^(local business|business|point of interest|establishment|food|web page|webpage|website)$/i.test(value.trim()))
-    .map((value, index) => ({ value, index, score: categorySpecificityScore(value) }))
+    .map((value, index) => ({ value, index, score: categorySpecificityScore(value) + verticalCategoryAffinity(value, vertical) }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map((item) => item.value);
+}
+
+/**
+ * Scraped category lists mix what the business IS with what directories filed
+ * it under ("auto parts store" for a tire shop). The surfaced category must
+ * describe the service business, so vertical-consistent labels outrank
+ * retail/generic ones.
+ */
+const verticalCategoryKeywords: Partial<Record<Vertical, RegExp>> = {
+  auto_services: /tire|wheel|auto (repair|service|care)|car repair|mechanic|brake|alignment|oil change/i,
+  auto_body: /auto body|collision|body shop|paint|dent/i,
+  home_services: /plumb|hvac|electric|handyman|home (repair|service)|drain|water heater/i,
+  restaurant: /restaurant|diner|cafe|kitchen|grill|pizzeria|taqueria|bakery|bar(?!ber)/i,
+  beauty_salon: /salon|hair|barber|beauty|stylist/i,
+  med_spa: /med ?spa|aesthetic|skin|laser|wellness/i
+};
+
+function verticalCategoryAffinity(value: string, vertical?: Vertical) {
+  if (!vertical) return 0;
+  const keywords = verticalCategoryKeywords[vertical];
+  if (keywords?.test(value)) return 120;
+  if (/parts store|supply|^store$|^service$|wholesale|retail/i.test(value.trim())) return -80;
+  return 0;
 }
 
 function categorySpecificityScore(value: string) {

@@ -816,6 +816,26 @@ function collectBrowserMetricsScript() {
       }
       return samples.slice(0, 6);
     })();
+    const a11yStructureIssues = (() => {
+      const issues = [];
+      if (!document.querySelector("main, [role='main']")) issues.push("no main landmark");
+      const h1Count = document.querySelectorAll("h1").length;
+      if (h1Count !== 1) issues.push(h1Count + " h1 elements (want exactly 1)");
+      const headings = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6"));
+      let lastLevel = 0;
+      for (const heading of headings) {
+        const level = Number(heading.tagName.slice(1));
+        if (lastLevel && level > lastLevel + 1) {
+          issues.push("heading level skip: h" + lastLevel + " -> h" + level);
+          break;
+        }
+        lastLevel = level;
+      }
+      const images = Array.from(document.images);
+      const missingAlt = images.filter((image) => !image.hasAttribute("alt")).length;
+      if (missingAlt) issues.push(missingAlt + " images missing alt attributes");
+      return issues.slice(0, 6);
+    })();
     const upscaledImageSamples = (() => {
       const samples = [];
       for (const image of Array.from(document.images)) {
@@ -906,6 +926,7 @@ function collectBrowserMetricsScript() {
       figureOverlapSamples,
       upscaledImageCount: upscaledImageSamples.length,
       upscaledImageSamples,
+      a11yStructureIssues,
       sectionLowFillCount: sectionFillSamples.length,
       sectionLowFillSamples: sectionFillSamples,
       crampedTextCount: crampedSamples.length,
@@ -1124,6 +1145,17 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       viewport
     });
   }
+  if (Array.isArray(metrics.a11yStructureIssues)) {
+    findings.push({
+      id: `render.a11y_structure${suffix}`,
+      severity: metrics.a11yStructureIssues.length === 0 ? "pass" : "fail",
+      title: `Accessibility structure${titleSuffix}`,
+      evidence: metrics.a11yStructureIssues.length
+        ? `Structure issues: ${metrics.a11yStructureIssues.join("; ")}`
+        : "Main landmark present, single h1, ordered headings, alt attributes complete.",
+      viewport
+    });
+  }
   if (typeof metrics.upscaledImageCount === "number") {
     findings.push({
       id: `render.image_upscaled${suffix}`,
@@ -1320,6 +1352,7 @@ function mergeMetrics(left: BrowserMetrics, right: BrowserMetrics): BrowserMetri
     visualOverlapCount: maxDefined(left.visualOverlapCount, right.visualOverlapCount),
     figureOverlapCount: maxDefined(left.figureOverlapCount, right.figureOverlapCount),
     upscaledImageCount: maxDefined(left.upscaledImageCount, right.upscaledImageCount),
+    a11yStructureIssues: left.a11yStructureIssues?.length ? left.a11yStructureIssues : right.a11yStructureIssues,
     upscaledImageSamples: left.upscaledImageSamples?.length ? left.upscaledImageSamples : right.upscaledImageSamples,
     figureOverlapSamples: left.figureOverlapSamples?.length ? left.figureOverlapSamples : right.figureOverlapSamples,
     sectionLowFillCount: maxDefined(left.sectionLowFillCount, right.sectionLowFillCount),

@@ -160,6 +160,8 @@ function withQualityGate(bundle: SiteBundle, version: SiteVersion, qa: Generatio
     blockers: gated.blockers,
     warnings: gated.warnings,
     brandCueApplied: bundle.presenceAssessment.brandCueReport?.applied,
+    aboveFoldCta: gated.inspectionSummary?.metricsByViewport?.desktop?.aboveFoldCtaDetected,
+    telLinkCount: gated.inspectionSummary?.metricsByViewport?.desktop?.telLinkCount,
     seoScore: evaluateSeoStructure({ bundle, version }).score,
     factCoverageRatio: factCoverage.coverageRatio
   });

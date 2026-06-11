@@ -34,6 +34,9 @@ export type ScorecardInput = {
   blockers: GenerationQaBlocker[];
   warnings: GenerationQaWarning[];
   brandCueApplied?: boolean;
+  /** Conversion presence signals from render inspection. */
+  aboveFoldCta?: boolean;
+  telLinkCount?: number;
   /** Slice 1b signals (SEO & structure); unscored until provided. */
   seoScore?: number;
   /** Slice 3 sub-metric (surfaced/eligible fact coverage, 0-1). */
@@ -122,9 +125,16 @@ export function buildGenerationScorecard(input: ScorecardInput): GenerationScore
     push("mobile_experience", "unscored", undefined, []);
   }
 
-  // Conversion readiness — CTA fit is the deterministic core today.
+  // Conversion readiness — CTA fit blended with rendered presence signals
+  // (above-fold CTA, tel links) when inspection metrics are available.
   if (rubric) {
-    push("conversion_readiness", "enforcing", rubric.ctaFit, ["rubric.ctaFit"]);
+    const hasPresenceSignals = input.aboveFoldCta !== undefined || input.telLinkCount !== undefined;
+    const presence = (input.aboveFoldCta ? 20 : 0) + ((input.telLinkCount ?? 0) > 0 ? 10 : 0);
+    const score = hasPresenceSignals ? rubric.ctaFit * 0.7 + presence : rubric.ctaFit;
+    push("conversion_readiness", "enforcing", score, [
+      "rubric.ctaFit",
+      ...(hasPresenceSignals ? ["render.aboveFoldCta", "render.telLinks"] : [])
+    ]);
   } else {
     push("conversion_readiness", "unscored", undefined, []);
   }

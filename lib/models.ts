@@ -1656,6 +1656,7 @@ export type RenderViewportMetrics = {
   figureOverlapSamples?: string[];
   upscaledImageCount?: number;
   upscaledImageSamples?: string[];
+  a11yStructureIssues?: string[];
   sectionLowFillCount?: number;
   sectionLowFillSamples?: string[];
   crampedTextCount?: number;

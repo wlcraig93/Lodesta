@@ -1,14 +1,14 @@
 import { runAudit } from "./audit";
-import type { DesignPlan, LayoutSectionPreset, SiteBundle, SiteVersion } from "./models";
-import { applyPresetToLayoutSection, syncVersionLegacySections, validateDesignPlan } from "./layout-registry";
-import { themeForPreset } from "./theme-presets";
+import { markVersionOwnerTouched } from "./site-version-metadata";
+import { assertSiteVersionV3 } from "./site-version-v3";
+import type { DesignPlan, SiteBundle, SiteVersionV3 } from "./models";
 
 export type UpdateSiteDesignInput = {
   siteId: string;
   pageId?: string;
   designPlan?: Partial<DesignPlan>;
-  layoutSectionOrder?: string[];
-  sectionPresets?: Record<string, LayoutSectionPreset>;
+  sectionOrder?: string[];
+  sectionTemplates?: Record<string, string>;
 };
 
 export type UpdateSiteDesignResult =
@@ -18,8 +18,8 @@ export type UpdateSiteDesignResult =
       draftVersionId: string;
       applied: {
         designPlan?: Partial<DesignPlan>;
-        layoutSectionOrder?: string[];
-        sectionPresets?: Record<string, LayoutSectionPreset>;
+        sectionOrder?: string[];
+        sectionTemplates?: Record<string, string>;
       };
     }
   | {
@@ -28,62 +28,39 @@ export type UpdateSiteDesignResult =
     };
 
 export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesignInput): UpdateSiteDesignResult {
-  const draft = clonePublishedAsDraft(bundle);
-  const applied: {
-    designPlan?: Partial<DesignPlan>;
-    layoutSectionOrder?: string[];
-    sectionPresets?: Record<string, LayoutSectionPreset>;
-  } = {};
+  const draft = clonePublishedAsDraftV3(bundle);
+  const applied: Extract<UpdateSiteDesignResult, { ok: true }>["applied"] = {};
 
   if (input.designPlan) {
-    const nextDesignPlan = {
+    draft.designPlan = {
+      ...fallbackDesignPlan(),
       ...draft.designPlan,
       ...input.designPlan
     };
-    const designIssues = validateDesignPlan(nextDesignPlan);
-    if (designIssues.length) return { ok: false, reason: designIssues.join(" ") };
-    draft.designPlan = nextDesignPlan;
     applied.designPlan = input.designPlan;
   }
 
-  if (input.designPlan?.colorSystem) {
-    draft.theme = themeForPreset(
-      bundle.businessProfile.vertical,
-      input.designPlan.colorSystem,
-      draft.theme ?? bundle.siteModel.theme
-    );
-  }
+  const page = draft.pageComposition.pages.find((candidate) => candidate.id === (input.pageId ?? "home")) ?? draft.pageComposition.pages[0];
+  if ((input.sectionOrder || input.sectionTemplates) && !page) return { ok: false, reason: "No editable page found." };
 
-  const page = draft.pages.find((candidate) => candidate.id === (input.pageId ?? "page_home")) ?? draft.pages[0];
-  if ((input.layoutSectionOrder || input.sectionPresets) && !page) return { ok: false, reason: "No editable page found." };
-
-  if (input.layoutSectionOrder && page) {
-    const existingIds = page.layoutSections.map((section) => section.id);
-    const requestedIds = input.layoutSectionOrder;
+  if (input.sectionOrder && page) {
+    const existingIds = page.sections.map((section) => section.id);
+    const requestedIds = input.sectionOrder;
     const existingSet = new Set(existingIds);
     const requestedSet = new Set(requestedIds);
     if (existingIds.length !== requestedIds.length || existingIds.some((id) => !requestedSet.has(id)) || requestedIds.some((id) => !existingSet.has(id))) {
-      return { ok: false, reason: "Layout section order must include every current layout section exactly once." };
+      return { ok: false, reason: "Section order must include every current section exactly once." };
     }
-    const sectionsById = new Map(page.layoutSections.map((section) => [section.id, section]));
-    page.layoutSections = requestedIds.map((id) => sectionsById.get(id)).filter((section): section is NonNullable<typeof section> => Boolean(section));
-    applied.layoutSectionOrder = requestedIds;
+    const sectionsById = new Map(page.sections.map((section) => [section.id, section]));
+    page.sections = requestedIds.map((id) => sectionsById.get(id)).filter((section): section is NonNullable<typeof section> => Boolean(section));
+    applied.sectionOrder = requestedIds;
   }
 
-  if (input.sectionPresets && page) {
-    const appliedPresets: Record<string, LayoutSectionPreset> = {};
-    for (const [sectionId, preset] of Object.entries(input.sectionPresets)) {
-      const section = page.layoutSections.find((candidate) => candidate.id === sectionId);
-      if (!section) return { ok: false, reason: `Layout section ${sectionId} was not found on the editable page.` };
-      if (!applyPresetToLayoutSection(section, preset)) {
-        return { ok: false, reason: `Preset ${preset} is not approved for ${section.kind} sections.` };
-      }
-      appliedPresets[sectionId] = preset;
-    }
-    applied.sectionPresets = appliedPresets;
+  if (input.sectionTemplates && Object.keys(input.sectionTemplates).length) {
+    return { ok: false, reason: "V3 template changes must go through compiler overrides; direct template mutation is not supported." };
   }
 
-  syncVersionLegacySections(draft);
+  markVersionOwnerTouched(draft);
   bundle.optimizationFindings = runAudit(bundle.businessProfile, bundle.siteModel);
   return {
     ok: true,
@@ -93,18 +70,27 @@ export function updateSiteDesignBundle(bundle: SiteBundle, input: UpdateSiteDesi
   };
 }
 
-function clonePublishedAsDraft(bundle: SiteBundle): SiteVersion {
+function clonePublishedAsDraftV3(bundle: SiteBundle): SiteVersionV3 {
   const existingDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
-  if (existingDraft) {
-    existingDraft.theme ??= structuredClone(bundle.siteModel.theme);
-    return existingDraft;
-  }
+  if (existingDraft) return assertSiteVersionV3(existingDraft, "design draft");
   const published = bundle.siteModel.versions.find((version) => version.status === "published") ?? bundle.siteModel.versions[0];
-  const draft = structuredClone(published);
+  const draft = structuredClone(assertSiteVersionV3(published, "published version for design draft"));
   draft.id = `version_${bundle.siteModel.slug}_draft_${Date.now()}`;
   draft.status = "draft";
   draft.createdAt = new Date().toISOString();
-  draft.theme ??= structuredClone(bundle.siteModel.theme);
   bundle.siteModel.versions.unshift(draft);
   return draft;
+}
+
+function fallbackDesignPlan(): DesignPlan {
+  return {
+    stylePack: "local_modern",
+    typographyPack: "clean_sans",
+    colorSystem: "warm",
+    spacingDensity: "standard",
+    buttonStyle: "solid",
+    radiusStyle: "soft",
+    imageTreatment: "natural",
+    motionPolicy: "subtle"
+  };
 }

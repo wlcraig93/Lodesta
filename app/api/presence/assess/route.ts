@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { crawlUrl } from "@/lib/crawler";
 import { createPresenceIntakePlan } from "@/lib/presence-intake";
-import { gatherPublicPresenceSignals } from "@/lib/public-presence";
-import { inspectUrlRender } from "@/lib/render-inspection";
+import { runUrlPresenceAssessment } from "@/lib/presence-assessment-runner";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-safety";
@@ -51,13 +49,12 @@ export async function POST(request: Request) {
   if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
   const safeUrl = urlSafety.url;
 
-  const [crawl, renderInspection] = await Promise.all([
-    crawlUrl(safeUrl),
-    parsed.data.render
-      ? inspectUrlRender({ url: safeUrl, captureScreenshots: parsed.data.screenshots })
-      : Promise.resolve(undefined)
-  ]);
-  const publicPresence = await gatherPublicPresenceSignals({ url: safeUrl, crawl });
+  const { crawl, renderInspection, publicPresence } = await runUrlPresenceAssessment({
+    url: safeUrl,
+    render: parsed.data.render,
+    captureScreenshots: parsed.data.screenshots,
+    publicPresence: "google_places"
+  });
   try {
     assertLaunchMarket({ url: safeUrl, crawl, publicPresence });
   } catch (error) {

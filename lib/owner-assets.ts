@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AssetAttestationV2, AssetReference, SiteAsset, SiteBundle } from "./models";
 import { validatePublicHostname } from "./url-safety";
-import { applyPropsToLayoutSection, syncVersionLegacySections } from "./layout-registry";
+import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
 
 export type OwnerAssetInput = {
   url: string;
@@ -113,14 +113,21 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
     ...scrapedResult.attestedPhotos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo, input.attestedBy))
   ];
   const ownerAssetIds = new Set(ownerAssets.map((asset) => asset.id));
+  const updatingLogo = Boolean(logo || input.logo?.url.trim());
+  const updatingPhotos = Boolean(photos.length || (input.photos ?? []).length || scrapedResult.attestedPhotos.length);
   bundle.presenceAssessment.assetInventory = [
     ...(bundle.presenceAssessment.assetInventory ?? []).filter(
-      (asset) => !(asset.ownerApproved && (asset.kind === "photo" || asset.kind === "logo")) && !ownerAssetIds.has(asset.id)
+      (asset) =>
+        !ownerAssetIds.has(asset.id) &&
+        !(asset.ownerApproved && ((updatingLogo && asset.kind === "logo") || (updatingPhotos && asset.kind === "photo")))
     ),
     ...ownerAssets
   ];
 
-  updateGallerySections(bundle, [...photos, ...scrapedResult.attestedPhotos]);
+  if (ownerAssets.length) {
+    const recompile = applyGeneratedSiteV3({ bundle });
+    bundle.presenceAssessment.technicalNotes.push(`Owner assets were recorded and ${recompile.reason}`);
+  }
 
   return {
     ok: true,
@@ -192,23 +199,6 @@ function siteAssetFromReference(siteId: string, kind: "logo" | "photo", referenc
     },
     createdAt: new Date().toISOString()
   };
-}
-
-function updateGallerySections(bundle: SiteBundle, photos: AssetReference[]) {
-  const galleryImages = photos.map((photo) => ({
-    url: photo.url,
-    alt: photo.alt,
-    label: "Business photo"
-  }));
-  for (const version of bundle.siteModel.versions) {
-    for (const page of version.pages) {
-      for (const section of page.layoutSections) {
-        if (section.kind !== "gallery") continue;
-        applyPropsToLayoutSection(section, { images: galleryImages });
-      }
-    }
-    syncVersionLegacySections(version);
-  }
 }
 
 function ownerAssetProvenance() {

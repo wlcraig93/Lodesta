@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
 import {
-  defaultGeneratedSiteV3Mode,
   generatedSiteV3ArtifactTypes,
   generatedSiteV3FontPairings,
-  getGeneratedSiteV3Mode,
-  initialSiteArtDirectionRecipesV3,
-  isGeneratedSiteV3Allowed
+  initialSiteArtDirectionRecipesV3
 } from "../lib/generated-site-v3";
-import { maybeApplyGeneratedSiteV3 } from "../lib/generated-site-v3-pipeline";
+import { applyGeneratedSiteV3 } from "../lib/generated-site-v3-pipeline";
 import { compileVisualSectionV3, getVisualSectionV3, type VisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
+import { applyCompositionPlanV3, validateCompositionPlanV3 } from "../lib/generated-site-v3-composition-plan";
 import { withBusinessBundleFields } from "../lib/business-model";
+import { buildFactCoverageReport } from "../lib/fact-coverage";
 import { localRepository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
-import type { BusinessProfile, ExtensionModel, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
+import { SiteRendererV3 } from "../lib/site-renderer-v3";
+import type { BusinessProfile, ExtensionModel, GeneratedCopyDeckV2, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
 
 const forbiddenPublicV3Copy = [
   "template",
@@ -35,43 +37,7 @@ const forbiddenPublicV3Copy = [
   "customer action path",
   "context"
 ];
-
-assert.equal(defaultGeneratedSiteV3Mode, "all_new_generations");
-assert.equal(getGeneratedSiteV3Mode({ GENERATED_SITE_V3_MODE: "bad" } as unknown as NodeJS.ProcessEnv), "all_new_generations");
-assert.equal(getGeneratedSiteV3Mode({} as NodeJS.ProcessEnv), "all_new_generations");
-assert.equal(getGeneratedSiteV3Mode({ GENERATED_SITE_V3_MODE: "off" } as unknown as NodeJS.ProcessEnv), "off");
-assert.equal(getGeneratedSiteV3Mode({ GENERATED_SITE_V3_MODE: "operator_allowlist" } as unknown as NodeJS.ProcessEnv), "operator_allowlist");
-
-assert.equal(isGeneratedSiteV3Allowed({ mode: "off", fixture: true }), false);
-assert.equal(isGeneratedSiteV3Allowed({ mode: "fixture_only", fixture: true }), true);
-assert.equal(isGeneratedSiteV3Allowed({ mode: "fixture_only" }), false);
-assert.equal(
-  isGeneratedSiteV3Allowed({
-    mode: "operator_allowlist",
-    explicitOperatorRequest: true,
-    sourceHost: "superb.example",
-    allowlistHosts: ["superb.example"]
-  }),
-  true
-);
-assert.equal(
-  isGeneratedSiteV3Allowed({
-    mode: "operator_allowlist",
-    explicitOperatorRequest: true,
-    sourceHost: "missing.example",
-    allowlistHosts: ["superb.example"]
-  }),
-  false
-);
-assert.equal(
-  isGeneratedSiteV3Allowed({
-    mode: "operator_allowlist",
-    sourceHost: "superb.example",
-    allowlistHosts: ["superb.example"]
-  }),
-  false
-);
-assert.equal(isGeneratedSiteV3Allowed({ mode: "all_new_generations", env: {} as NodeJS.ProcessEnv }), true);
+const removedLocationPanelTemplateId = ["location", "panel"].join("_");
 
 assert.deepEqual(generatedSiteV3ArtifactTypes, [
   "art_direction_decision",
@@ -160,18 +126,20 @@ assert.equal(
 );
 assert.ok(testVersion.mediaDecisions.every((decision) => decision.rightsStatus === "approved" && decision.mayImplyRealBusinessWork === false), "Curated V3 media decisions should be approved and non-deceptive.");
 const compiledTemplateIds = new Set<string>(visualTemplatesFor(testVersion));
-assert.equal(visualTemplatesFor(testVersion).includes("location_panel"), true, "Physical-location businesses should render location_panel.");
+assert.equal(visualTemplatesFor(testVersion).includes("location_showcase"), true, "Single physical-location businesses should render location_showcase.");
 assert.ok(
-  visualTemplatesFor(testVersion).indexOf("location_panel") < visualTemplatesFor(testVersion).indexOf("contact_split"),
-  "location_panel should compile immediately before the contact close."
+  visualTemplatesFor(testVersion).indexOf("location_showcase") < visualTemplatesFor(testVersion).indexOf("contact_split"),
+  "location_showcase should compile immediately before the contact close."
 );
-const locationPanel = visualSectionsFor(testVersion).find((section) => section.templateId === "location_panel");
-assert.ok(locationPanel, "Compiled V3 page should include a location_panel.");
-assert.equal(locationPanel.slots.locations.locations[0]?.directionsUrl?.startsWith("https://www.google.com/maps/dir/?"), true, "Physical locations should get a Google Maps directions URL.");
-assert.equal(locationPanel.slots.locations.locations[0]?.mapEmbedIntent?.kind, "address", "Physical address locations should persist a keyless map embed intent.");
+const locationShowcase = visualSectionsFor(testVersion).find((section) => section.templateId === "location_showcase");
+assert.ok(locationShowcase, "Compiled V3 page should include a location_showcase.");
+assert.ok(locationShowcase.slots.locations.locations.every((location) => location.addressLine), "location_showcase should only render address-bearing locations.");
+assert.equal(locationShowcase.slots.locations.locations[0]?.directionsUrl?.startsWith("https://www.google.com/maps/dir/?"), true, "Physical locations should get a Google Maps directions URL.");
+assert.equal(locationShowcase.slots.locations.locations[0]?.mapEmbedIntent?.kind, "address", "Physical address locations should persist a keyless map embed intent.");
+assert.equal(JSON.stringify(testVersion).includes(removedLocationPanelTemplateId), false, "Compiled V3 output must not contain the removed location panel template.");
 const contactPanel = visualSectionsFor(testVersion).find((section) => section.templateId === "contact_split");
 assert.ok(contactPanel?.templateId === "contact_split", "Compiled V3 page should include a contact_split.");
-assert.equal(contactPanel.slots.contact.facts.some((fact) => fact.label === "Address" || fact.label === "Hours"), false, "contact_split should slim address/hours facts when location_panel is present.");
+assert.equal(contactPanel.slots.contact.facts.some((fact) => fact.label === "Address" || fact.label === "Hours"), false, "contact_split should slim address/hours facts when a location section is present.");
 assert.equal(JSON.stringify(testVersion).includes("googleMapsUri"), false, "SiteVersion must not persist Google Maps URI fields.");
 assert.equal(JSON.stringify(testVersion).includes("NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY"), false, "SiteVersion must not persist public map key names.");
 assert.equal(JSON.stringify(testVersion).includes("ratingValue"), false, "SiteVersion must not persist Google rating data.");
@@ -291,7 +259,11 @@ const sparseContact = compileGeneratedSiteV3Site({
   },
   createdAt: "2026-06-02T00:00:00.000Z"
 });
-assert.equal(visualTemplatesFor(sparseContact.version).includes("location_panel"), false, "No-location businesses should omit location_panel.");
+assert.equal(
+  visualTemplatesFor(sparseContact.version).some((template) => template === "location_directory" || template === "location_showcase" || template === "service_area_showcase"),
+  false,
+  "No-location businesses should omit location sections."
+);
 assert.equal(
   visualSectionsFor(sparseContact.version).every((section) => compileVisualSectionV3(section).violations.every((violation) => violation.severity !== "error")),
   true,
@@ -309,10 +281,10 @@ const serviceAreaOnly = compileGeneratedSiteV3Site({
   },
   createdAt: "2026-06-02T00:00:00.000Z"
 });
-const serviceAreaLocation = visualSectionsFor(serviceAreaOnly.version).find((section) => section.templateId === "location_panel");
-assert.ok(serviceAreaLocation?.templateId === "location_panel", "Service-area-only businesses should render a coverage-oriented location_panel.");
-assert.equal(serviceAreaLocation.slots.locations.locations[0]?.directionsUrl, undefined, "Service-area-only locations should not get directions URLs.");
-assert.equal(serviceAreaLocation.slots.locations.locations[0]?.mapEmbedIntent, undefined, "Service-area-only locations should not get map embed intents.");
+const serviceAreaLocation = visualSectionsFor(serviceAreaOnly.version).find((section) => section.templateId === "service_area_showcase");
+assert.ok(serviceAreaLocation?.templateId === "service_area_showcase", "Service-area-only businesses should render service_area_showcase.");
+assert.equal(visualTemplatesFor(serviceAreaOnly.version).includes("location_directory"), false, "Service-area-only businesses should not render fake location directories.");
+assert.equal(serviceAreaOnly.version.pageComposition.pages.some((page) => page.purpose === "location_landing"), false, "Service-area-only businesses should not generate location landing pages.");
 
 const testTheme: Theme = {
   paletteName: "test",
@@ -374,10 +346,188 @@ const placeIdOnlyBundle = withBusinessBundleFields({
   }
 });
 const placeIdOnly = compileGeneratedSiteV3Site({ bundle: placeIdOnlyBundle, createdAt: "2026-06-02T00:00:00.000Z" });
-const placeOnlyLocation = visualSectionsFor(placeIdOnly.version).find((section) => section.templateId === "location_panel");
-assert.equal(placeOnlyLocation?.templateId, "location_panel", "Place-ID-only canonical locations may render as location records.");
-assert.equal(placeOnlyLocation.slots.locations.locations[0]?.directionsUrl, undefined, "Place ID alone should not imply a physical directions target.");
-assert.equal(placeOnlyLocation.slots.locations.locations[0]?.addressLine, undefined, "Place ID alone should not imply first-party address display.");
+assert.equal(
+  visualTemplatesFor(placeIdOnly.version).some((template) => template === "location_showcase" || template === "location_directory" || template === "service_area_showcase"),
+  false,
+  "Place-ID-only canonical locations should not count as physical locations or service-area facts."
+);
+assert.equal(placeIdOnly.version.pageComposition.pages.some((page) => page.purpose === "location_landing"), false, "Place ID alone should not create a location landing page.");
+
+const generatedCopyDeckFixture: GeneratedCopyDeckV2 = {
+  version: "generated-copy-deck-v2",
+  source: "openai",
+  hero: { eyebrow: "Auto body", heading: "Frame and finish work with clear next steps.", body: "Bring the visible damage, timing, and contact details so the right shop path is clear." },
+  servicesIntro: { heading: "Repairs that start with the damage in front of you.", body: "The service list stays focused on source-backed repair requests." },
+  serviceItems: [
+    { title: "Frame alignment", body: "Frame alignment checks visible structure and ride concerns before repair planning." },
+    { title: "Scratch repainting", body: "Scratch repainting handles scraped panels and finish work after review." },
+    { title: "Bumper welding", body: "Bumper welding routes damaged covers and support pieces toward the right repair." },
+    { title: "Fleet body repair", body: "Fleet body repair keeps repeat vehicles moving through a direct intake path." }
+  ],
+  processIntro: { heading: "A clear intake path.", body: "Start with the vehicle, damage, timing, and preferred callback." },
+  processSteps: [
+    { title: "Share damage details", body: "Tell the shop what happened and which area is affected." },
+    { title: "Confirm the repair fit", body: "The team routes the request to the right review path." },
+    { title: "Plan the visit", body: "Call ahead with timing and vehicle details." },
+    { title: "Bring the basics", body: "Photos and insurance questions help the first review." }
+  ],
+  faqs: [
+    { question: "What should I bring?", answer: "Bring the vehicle details, photos, and timing constraints." },
+    { question: "Can I ask about paint?", answer: "Yes, include which panels are scraped or refinished." },
+    { question: "Can I call ahead?", answer: "Yes, calling first confirms timing and fit." },
+    { question: "How is the right service chosen?", answer: "The shop starts with the visible damage and repair goal." }
+  ],
+  locationIntro: { heading: "Pick the location that fits the visit.", body: "Each documented address has its own details page before you call or get directions." },
+  contactIntro: { heading: "Call or send a short message.", body: "Include the vehicle, damage, timing, and best callback." },
+  splitMedia: { heading: "Repair details before assumptions.", body: "A short intake keeps the repair path grounded in the actual damage." },
+  gallery: { heading: "Shop context.", body: "Use approved media only when it is safe to show publicly." },
+  seo: { title: "Contract Collision", description: "Auto body repair details and contact path." },
+  groundingNotes: ["Fixture copy for V3 contracts."],
+  voiceProfile: { pov: "brand_direct" },
+  servicePages: [
+    {
+      serviceName: "Frame alignment",
+      hero: { heading: "Frame alignment starts with a focused review.", body: "Frame alignment requests need the vehicle details, visible damage, and the handling concern." },
+      detail: { heading: "Frame alignment details before repair planning.", body: "Frame alignment work starts with the structure and symptoms so the repair path stays clear." },
+      faqs: [
+        { question: "When should I ask about frame alignment?", answer: "Ask after a collision or when the vehicle does not track correctly." },
+        { question: "What helps the first call?", answer: "Share the impact area, photos, and whether the car can be driven." },
+        { question: "Will I get the next step?", answer: "Yes, the shop confirms whether a visit or more details are needed." },
+        { question: "Can location matter?", answer: "Yes, choose the location that best fits your visit." }
+      ],
+      seo: { title: "Frame Alignment | Contract Collision", description: "Frame alignment details, questions, and contact path." }
+    },
+    {
+      serviceName: "Scratch repainting",
+      hero: { heading: "Scratch repainting with the panel details up front.", body: "Scratch repainting requests work best when the panel, color area, and timing are clear." },
+      detail: { heading: "Scratch repainting details before scheduling.", body: "Scratch repainting starts with the visible finish damage and whether one or several panels are affected." },
+      faqs: [
+        { question: "What should I describe?", answer: "Describe the panel, scrape size, and whether bare material is visible." },
+        { question: "Do photos help?", answer: "Yes, photos help the shop understand the visible finish damage." },
+        { question: "Can I call first?", answer: "Yes, call to confirm the right next step." },
+        { question: "Does location matter?", answer: "Pick the location page that fits the visit." }
+      ],
+      seo: { title: "Scratch Repainting | Contract Collision", description: "Scratch repainting details, questions, and contact path." }
+    }
+  ]
+};
+
+const multiLocationBundle = withBusinessBundleFields({
+  businessProfile: {
+    ...testBusiness,
+    id: "business_v3_multi_location",
+    siteId: "site_v3_multi_location",
+    address: undefined,
+    services: ["Frame alignment", "Scratch repainting", "Bumper welding", "Fleet body repair"],
+    serviceAreas: ["Austin Metro"]
+  },
+  locations: [
+    {
+      id: "loc_north",
+      businessId: "business_v3_multi_location",
+      label: "North Austin",
+      address: { street: "101 North Loop", city: "Austin", region: "TX", postalCode: "78751", country: "US" },
+      phone: "(512) 555-0101",
+      hours: { Monday: "8 AM-5 PM", Tuesday: "8 AM-5 PM" },
+      serviceAreas: ["North Austin"],
+      provenance: {},
+      createdAt: "2026-06-02T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:00.000Z"
+    },
+    {
+      id: "loc_south",
+      businessId: "business_v3_multi_location",
+      label: "South Austin",
+      address: { street: "202 South First", city: "Austin", region: "TX", postalCode: "78704", country: "US" },
+      phone: "(512) 555-0102",
+      serviceAreas: ["South Austin"],
+      provenance: {},
+      createdAt: "2026-06-02T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:00.000Z"
+    },
+    {
+      id: "loc_service_only",
+      businessId: "business_v3_multi_location",
+      label: "Mobile coverage",
+      serviceAreas: ["Cedar Park"],
+      provenance: {},
+      createdAt: "2026-06-02T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:00.000Z"
+    }
+  ],
+  locationBindings: [
+    { locationId: "loc_north", role: "primary", orderIndex: 0 },
+    { locationId: "loc_south", role: "covered", orderIndex: 1 },
+    { locationId: "loc_service_only", role: "covered", orderIndex: 2 }
+  ],
+  siteModel: { ...testSite, id: "site_v3_multi_location", slug: "multi-location", versions: [] },
+  extensionModel: testExtensions,
+  optimizationFindings: [],
+  experiments: [],
+  presenceAssessment: {
+    siteId: "site_v3_multi_location",
+    sourceUrl: "https://multi-location.example",
+    technicalNotes: [],
+    visualNotes: [],
+    brandNotes: [],
+    publicPresenceNotes: [],
+    generatedCopyDeck: generatedCopyDeckFixture
+  }
+});
+const multiLocation = compileGeneratedSiteV3Site({ bundle: multiLocationBundle, createdAt: "2026-06-02T00:00:00.000Z" });
+const multiHomeTemplates = visualTemplatesForPage(multiLocation.version, "");
+assert.equal(multiHomeTemplates.includes("location_directory"), true, "Multi-location homepage should render location_directory.");
+assert.equal(multiHomeTemplates.includes("location_showcase"), false, "Multi-location homepage should not render location_showcase.");
+const directorySection = visualSectionsForPage(multiLocation.version, "").find((section) => section.templateId === "location_directory");
+assert.ok(directorySection?.templateId === "location_directory", "Multi-location homepage should include a typed location_directory section.");
+assert.equal(directorySection.slots.locations.locations.length, 2, "Service-area-only records should not become directory cards.");
+assert.ok(directorySection.slots.locations.locations.every((location) => location.addressLine && location.href?.startsWith("/locations/")), "Directory cards should be address-bearing and link to location pages.");
+assert.ok(directorySection.slots.locations.locations.some((location) => location.hoursSummary), "Directory cards should use per-location hours summaries when present.");
+const generatedLocationPages = multiLocation.version.pageComposition.pages.filter((page) => page.purpose === "location_landing");
+assert.equal(generatedLocationPages.length, 2, "Multi-location businesses should get one landing page per physical location.");
+assert.ok(generatedLocationPages.every((page) => page.slug.startsWith("locations/") && page.seo.canonicalPath === `/${page.slug}`), "Location pages should use typed locations/* slugs and canonical paths.");
+const generatedServicePages = multiLocation.version.pageComposition.pages.filter((page) => page.purpose === "service_landing");
+assert.ok(generatedServicePages.length >= 1, "Source-backed service copy should generate service landing pages.");
+assert.ok(generatedServicePages.every((page) => page.slug.startsWith("services/") && page.seo.canonicalPath === `/${page.slug}`), "Service pages should use typed services/* slugs and canonical paths.");
+const generatedSlugs = multiLocation.version.pageComposition.pages.map((page) => page.slug);
+assert.equal(new Set(generatedSlugs).size, generatedSlugs.length, "Generated page slugs should be unique site-wide.");
+assert.equal(generatedSlugs.filter((slug) => !slug.includes("/")).length, 1, "Homepage should be the only unprefixed generated page.");
+const directoryHtml = renderToStaticMarkup(
+  React.createElement(SiteRendererV3, {
+    business: multiLocationBundle.businessProfile,
+    site: multiLocationBundle.siteModel,
+    version: multiLocation.version,
+    locations: multiLocationBundle.locations,
+    locationBindings: multiLocationBundle.locationBindings,
+    tracking: false,
+    formsEnabled: false,
+    basePath: ""
+  })
+);
+assert.ok(directoryHtml.includes("site-visual-location-card-mark-v3"), "Directory cards should have a defined no-photo/no-map brand-safe visual state.");
+assert.ok(directoryHtml.includes('href="/locations/'), "Directory cards should link to generated location pages.");
+assert.ok(directoryHtml.includes("site-footer-column-v3") && directoryHtml.includes("/locations/"), "Footer should link generated location pages.");
+
+const mixedLocationLandingCount = generatedLocationPages.length;
+assert.equal(mixedLocationLandingCount, 2, "Mixed physical plus service-area records should not create fake service-area location pages.");
+
+const showcaseFallbackHtml = renderToStaticMarkup(
+  React.createElement(SiteRendererV3, {
+    business: testBusiness,
+    site: testSite,
+    version: testVersion,
+    tracking: false,
+    formsEnabled: false,
+    basePath: ""
+  })
+);
+assert.ok(showcaseFallbackHtml.includes("site-location-showcase-areas-v3"), "location_showcase should render the coverage/directions fallback when map embeds are unavailable.");
+assert.equal(showcaseFallbackHtml.includes("Service area</span>"), false, "location_showcase should not render the old no-address Service area heading branch.");
+
+const coverageReport = buildFactCoverageReport({ bundle: multiLocationBundle, version: multiLocation.version });
+assert.ok(coverageReport.facts.some((fact) => fact.category === "address" && fact.note.includes("location_showcase")), "Fact coverage should resolve address to the new location templates.");
+assert.ok(coverageReport.facts.some((fact) => fact.category === "service_areas" && fact.note.includes("service_area_showcase")), "Fact coverage should resolve service areas to the new service-area template.");
+assert.equal(JSON.stringify(multiLocation.version).includes(removedLocationPanelTemplateId), false, "Multi-location compiled output must not contain the removed location panel template.");
 
 function createTestBundle(): SiteBundle {
   return {
@@ -397,53 +547,25 @@ function createTestBundle(): SiteBundle {
   };
 }
 
-const previousMode = process.env.GENERATED_SITE_V3_MODE;
-const previousAllowlist = process.env.GENERATED_SITE_V3_ALLOWLIST_HOSTS;
-try {
-  process.env.GENERATED_SITE_V3_MODE = "fixture_only";
-  assert.equal(maybeApplyGeneratedSiteV3({ bundle: createTestBundle(), sourceHost: "contract.example" }).applied, false, "Fixture-only mode should still fail closed for non-fixture generations.");
-
-  process.env.GENERATED_SITE_V3_MODE = "operator_allowlist";
-  process.env.GENERATED_SITE_V3_ALLOWLIST_HOSTS = "contract.example";
-  const allowlistBundle = createTestBundle();
-  const allowlisted = maybeApplyGeneratedSiteV3({
-    bundle: allowlistBundle,
-    sourceHost: "contract.example",
-    explicitOperatorRequest: true,
-    now: "2026-06-02T00:00:00.000Z"
-  });
-  assert.equal(allowlisted.applied, true, "Explicit allowlisted operator request should apply V3.");
-  assert.equal(allowlistBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", "V3 application should replace the selected draft with layout-v3.");
-} finally {
-  if (previousMode === undefined) delete process.env.GENERATED_SITE_V3_MODE;
-  else process.env.GENERATED_SITE_V3_MODE = previousMode;
-  if (previousAllowlist === undefined) delete process.env.GENERATED_SITE_V3_ALLOWLIST_HOSTS;
-  else process.env.GENERATED_SITE_V3_ALLOWLIST_HOSTS = previousAllowlist;
-}
-
 const defaultBundle = createTestBundle();
-const applied = maybeApplyGeneratedSiteV3({
+const applied = applyGeneratedSiteV3({
   bundle: defaultBundle,
-  sourceHost: "contract.example",
   now: "2026-06-02T00:00:00.000Z"
 });
-assert.equal(applied.applied, true, "V3 application should be the default generated-site path.");
-assert.equal(defaultBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", "Default V3 application should replace the selected draft with layout-v3.");
+assert.equal(applied.applied, true, "V3 application is the only generated-site path and must always apply.");
+assert.equal(defaultBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", "V3 application should replace the selected draft with layout-v3.");
 
-const previousModeForFullGeneration = process.env.GENERATED_SITE_V3_MODE;
-try {
-  delete process.env.GENERATED_SITE_V3_MODE;
+{
   const generated = await generateSite({
     repository: localRepository,
     input: {
       prompt:
         "Create a website for Contract Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair, hail repair, auto glass. Phone: (512) 555-0100. Address: 100 Test Road, Austin, TX 78702."
     },
-    source: "admin_console",
-    metadata: { generatedSiteV3: true }
+    source: "admin_console"
   });
   const generatedVersion = generated.bundle.siteModel.versions[0];
-  assert.equal(generatedVersion?.rendererVersion, "layout-v3", "Canonical generateSite path should emit layout-v3 when V3 is explicitly enabled.");
+  assert.equal(generatedVersion?.rendererVersion, "layout-v3", "Canonical generateSite path should emit layout-v3.");
   assert.equal(
     generatedVersion?.generationQa?.blockers.filter((blocker) => blocker.id !== "render_browser_unavailable").length,
     0,
@@ -456,16 +578,81 @@ try {
   for (const copy of forbiddenPublicV3Copy) {
     assert.equal(generatedCopyCorpus.includes(copy), false, `Full V3 generateSite path should not emit internal/template public copy: ${copy}`);
   }
-} finally {
-  if (previousModeForFullGeneration === undefined) delete process.env.GENERATED_SITE_V3_MODE;
-  else process.env.GENERATED_SITE_V3_MODE = previousModeForFullGeneration;
+}
+
+// Composition plan grammar (bespoke quality plan, workstream A).
+{
+  const built = [
+    { id: "facts", variant: "facts_strip", backgroundKey: "gradient:subtle" },
+    { id: "story", variant: "split_media", backgroundKey: "gradient:subtle" },
+    { id: "services", variant: "side_intro_rows", backgroundKey: "solid:surface" },
+    { id: "process", variant: "numbered_steps", backgroundKey: "solid:page" },
+    { id: "gallery", variant: "media_mosaic", backgroundKey: "solid:surface" },
+    { id: "faq", variant: "faq_list", backgroundKey: "gradient:subtle" },
+    { id: "cta_band", variant: "editorial_statement", backgroundKey: "gradient:brand" },
+    { id: "location", variant: "location_showcase", backgroundKey: "solid:page" }
+  ];
+  const goodPlan = {
+    version: "composition-plan-v1" as const,
+    source: "model" as const,
+    sections: ["gallery", "story", "services", "process", "faq", "cta_band", "location"].map((intent) => ({
+      intent: intent as never,
+      why: "test"
+    }))
+  };
+  assert.deepEqual(
+    validateCompositionPlanV3(goodPlan, built, { hasLocationSection: true }),
+    [],
+    "A grammar-conforming plan should validate."
+  );
+  const missingRequired = { ...goodPlan, sections: goodPlan.sections.filter((entry) => entry.intent !== ("faq" as never)) };
+  assert.ok(
+    validateCompositionPlanV3(missingRequired, built, { hasLocationSection: true }).length > 0,
+    "Dropping faq must be rejected."
+  );
+  const adjacentDuplicate = {
+    ...goodPlan,
+    sections: [
+      { intent: "services" as never, why: "test" },
+      { intent: "process" as never, why: "test" },
+      { intent: "faq" as never, why: "test" },
+      { intent: "cta_band" as never, why: "test" },
+      { intent: "location" as never, why: "test" }
+    ]
+  };
+  const builtWithDuplicateTemplates = built.map((section) =>
+    section.id === "process" ? { ...section, variant: "side_intro_rows" } : section
+  );
+  assert.ok(
+    validateCompositionPlanV3(adjacentDuplicate, builtWithDuplicateTemplates, { hasLocationSection: true }).length > 0,
+    "Adjacent sections sharing a template must be rejected."
+  );
+  const darkStack = {
+    ...goodPlan,
+    sections: [
+      { intent: "services" as never, why: "test" },
+      { intent: "process" as never, why: "test" },
+      { intent: "faq" as never, why: "test" },
+      { intent: "location" as never, why: "test" },
+      { intent: "cta_band" as never, why: "test" }
+    ]
+  };
+  assert.ok(
+    validateCompositionPlanV3(darkStack, built, { hasLocationSection: true }).length > 0,
+    "A brand/dark cta_band directly above contact must be rejected."
+  );
+  const sections = [{ id: "hero" }, ...built.map(({ id }) => ({ id })), { id: "contact" }];
+  const applied = applyCompositionPlanV3(sections, goodPlan);
+  assert.equal(applied.sections[0]?.id, "hero", "Hero must stay first after plan application.");
+  assert.equal(applied.sections[applied.sections.length - 1]?.id, "contact", "Contact must stay last after plan application.");
+  assert.deepEqual(applied.dropped, ["facts"], "Unplanned middle sections drop with a record.");
+  assert.equal(applied.sections[1]?.id, "gallery", "Planned order should lead the middle sections.");
 }
 
 process.stdout.write(
   `${JSON.stringify(
     {
       ok: true,
-      modeDefault: defaultGeneratedSiteV3Mode,
       artifactTypes: generatedSiteV3ArtifactTypes,
       fontPairings: generatedSiteV3FontPairings.length,
       recipes: initialSiteArtDirectionRecipesV3.map((recipe) => recipe.id)
@@ -483,6 +670,17 @@ function visualSectionsFor(version: SiteVersionV3) {
 
 function visualTemplatesFor(version: SiteVersionV3) {
   return visualSectionsFor(version).map((section) => section.templateId);
+}
+
+function visualSectionsForPage(version: SiteVersionV3, slug: string) {
+  const page = version.pageComposition.pages.find((candidate) => candidate.slug === slug);
+  return (page?.sections ?? [])
+    .map((section) => getVisualSectionV3(section.props))
+    .filter((section): section is VisualSectionV3 => Boolean(section));
+}
+
+function visualTemplatesForPage(version: SiteVersionV3, slug: string) {
+  return visualSectionsForPage(version, slug).map((section) => section.templateId);
 }
 
 function collectStrings(value: unknown): string[] {

@@ -161,9 +161,13 @@ function stringsForVersion(version: SiteVersion) {
       )
     );
   }
-  return version.pages.flatMap((page) =>
-    page.layoutSections.flatMap((section) =>
-      stringsInValue(section.slots).map((text) => ({
+  if (version.rendererVersion !== "layout-v3") {
+    throw new Error(`Claim reports require layout-v3; received ${version.rendererVersion}.`);
+  }
+  const pages = version.pageComposition.pages;
+  return pages.flatMap((page) =>
+    page.sections.flatMap((section) =>
+      stringsInValue(section.props).map((text) => ({
         pageId: page.id,
         sectionId: section.id,
         text,

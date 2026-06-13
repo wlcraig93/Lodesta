@@ -12,11 +12,6 @@ export const localBusinessCopyProducerV2 = {
   version: "direct-module-v1"
 } as const;
 
-export const copyRefreshProducerV2 = {
-  id: "optimization.copy-refresh",
-  version: "direct-module-v1"
-} as const;
-
 export function createLocalBusinessCopyArtifactV2(input: {
   slotId: string;
   text: string;

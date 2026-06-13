@@ -283,6 +283,22 @@ export function openAiErrorMessage(payload: unknown) {
   return typeof payload.error.message === "string" ? payload.error.message : undefined;
 }
 
+/**
+ * The /v1/responses API returns `status: "incomplete"` when generation stopped
+ * before the model finished — almost always `max_output_tokens`. The output
+ * text is then a truncated, often mid-token string (a clipped multi-byte token
+ * can decode to a stray CJK glyph), which still passes length-only schema
+ * validation. Callers must treat an incomplete response as a failure and retry
+ * with a larger budget rather than shipping the fragment as copy.
+ */
+export function openAiResponseIncompleteReason(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (payload.status !== "incomplete") return undefined;
+  const details = payload.incomplete_details;
+  if (isRecord(details) && typeof details.reason === "string") return details.reason;
+  return "incomplete";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -17,15 +17,13 @@ export type OwnerSiteReport = {
 export function buildOwnerSiteReport(version: SiteVersion): OwnerSiteReport {
   const v3 = version as SiteVersion & {
     generationQa?: { qualityReport?: { overallScore: number; rubric: Record<string, number> } };
-    pageComposition?: { pages: Array<{ slug?: string }> };
-    pages?: Array<{ slug?: string; seo?: { title?: string; description?: string } }>;
+    pageComposition?: { pages: Array<{ slug?: string; seo?: { title?: string; description?: string } }> };
   };
   const rubric = v3.generationQa?.qualityReport?.rubric;
   const pages = v3.pageComposition?.pages ?? [];
   const slugs = pages.map((page) => page.slug || "home");
-  const legacyPages = v3.pages ?? [];
   const seoChecklist = [
-    { label: "Page titles and descriptions on every page", done: legacyPages.every((page) => Boolean(page.seo?.title && page.seo?.description)) },
+    { label: "Page titles and descriptions on every page", done: pages.every((page) => Boolean(page.seo?.title && page.seo?.description)) },
     { label: "Mobile rendering verified across phone, tablet, and desktop", done: (rubric?.mobileCredibility ?? 0) >= 60 },
     { label: "Readable text and accessible contrast verified", done: (rubric?.sectionQuality ?? 0) >= 60 },
     { label: "Dedicated service pages where your services support them", done: pages.length > 1 }

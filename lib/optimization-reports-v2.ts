@@ -355,8 +355,8 @@ function artifactForReport(input: {
 
 function pagesForVersion(version: SiteVersion | undefined) {
   if (!version) return [];
-  if (version.rendererVersion === "layout-v2") return version.compiledPages;
-  return version.pages;
+  if (version.rendererVersion === "layout-v3") return version.pageComposition.pages;
+  return [];
 }
 
 function durableFacts(facts: SourceAwareFactV2[], kind: SourceAwareFactV2["kind"]) {

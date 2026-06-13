@@ -5,6 +5,7 @@ import { getPublishedVersion } from "@/lib/sample-data";
 import { isIndexableSite } from "@/lib/site-publication";
 import { markdownCanonicalLinkHeader, markdownForPage } from "@/lib/public-site-markdown";
 import { recordAgentReadableRequest } from "@/lib/agent-readable-analytics";
+import { assertSiteVersionV3, findPageBySlugV3 } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   if (!isIndexableSite(bundle, claims)) return NextResponse.json({ error: "Site is not indexable" }, { status: 404 });
 
   const pageSlug = path?.join("/") ?? "";
-  const version = getPublishedVersion(bundle.siteModel);
-  const page = version.pages.find((candidate) => candidate.slug === pageSlug);
+  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published markdown version");
+  const page = findPageBySlugV3(version, pageSlug);
   if (!page) return NextResponse.json({ error: "Unknown page" }, { status: 404 });
   await recordAgentReadableRequest({ bundle, request, resource: "markdown_alternate", pageId: page.id });
 

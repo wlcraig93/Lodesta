@@ -10,6 +10,7 @@ import type {
   AgentRunSpanRecord,
   AnalyticsEvent,
   ClaimRecord,
+  GeneratedCopyDeckV2,
   Inquiry,
   InquiryEvent,
   JobRecord,
@@ -29,7 +30,7 @@ import { applyBusinessProfileUpdate } from "../lib/business-profile-update";
 import { applyFormSettingsUpdate } from "../lib/form-settings";
 import { validateFormSubmission } from "../lib/form-validation";
 import { executeInquiryNotificationWorkflows } from "../lib/workflows";
-import { createSiteFromInput } from "../lib/intake";
+import { createSiteV3FromInput } from "../lib/intake";
 import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
 import { isAdminUserId } from "../lib/auth-policy";
@@ -73,6 +74,8 @@ import { canonicalUrlForPage, siteRobotsTxt, siteSitemapXml } from "../lib/publi
 import { markdownCanonicalLinkHeader, markdownForPage, markdownUrlForPage, siteLlmsTxt } from "../lib/public-site-markdown";
 import { customDomainRoutedHeader, requestHostname, requestOrigin } from "../lib/host-routing";
 import { getPublishedVersion } from "../lib/sample-data";
+import { getVisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
+import { assertSiteVersionV3 } from "../lib/site-version-v3";
 import { coldUrlCheckableChecks, evaluateSiteAgainstStandard } from "../lib/standard-evaluation";
 import { applyVerifiedFacts, requiredClaimFactIds } from "../lib/fact-verification";
 import { claimGateForBundle, isIndexableSite } from "../lib/site-publication";
@@ -93,7 +96,6 @@ import {
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
 import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
 import { generateSite, type SiteCandidateRepository } from "../lib/site-candidate-service";
-import { applyPropsToLayoutSection, propsForLayoutSection, syncLegacySectionsFromLayout } from "../lib/layout-registry";
 import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
 import {
   ASSET_LIBRARY_ACTIVE_MANIFEST_NAME,
@@ -109,7 +111,7 @@ import {
   type ApprovedAssetLibraryAsset
 } from "../lib/asset-library";
 
-const bundle = createSiteFromInput({
+const bundle = createSiteV3FromInput({
   prompt: "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin."
 });
 const requiredFacts = requiredClaimFactIds(bundle.businessProfile);
@@ -131,7 +133,7 @@ const claimedClaim: ClaimRecord = {
   status: "claimed",
   claimedAt: new Date().toISOString()
 };
-const checkoutOnlyBundle = createSiteFromInput({
+const checkoutOnlyBundle = createSiteV3FromInput({
   prompt: "Build a website for Boundary Checkout HVAC, a call-first HVAC company in Austin."
 });
 const checkoutOnlyClaim: ClaimRecord = {
@@ -795,7 +797,7 @@ if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnviro
       assetLibraryPublicRouteSource.includes("path.startsWith(\"raw/\")"),
     "Asset library public route should serve only approved policy-safe non-raw derivative paths."
   );
-  const autoServicesBundle = createSiteFromInput({
+  const autoServicesBundle = createSiteV3FromInput({
     prompt: "Build a website for Boundary Tire and Auto, a tire and alignment shop in Austin. Services: tire rotation, wheel alignment, brake service. Phone: 512-555-0188."
   });
   autoServicesBundle.businessProfile.vertical = "auto_services";
@@ -881,7 +883,7 @@ if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnviro
     }).asset?.id === environmentHeroAsset.id,
     "Approved shop_environment assets should be selectable for photo-less auto-service heroes."
   );
-  const glassOnlyBundle = createSiteFromInput({
+  const glassOnlyBundle = createSiteV3FromInput({
     prompt: "Build a website for Austin Auto Glass, a windshield repair shop. Services: windshield chip repair, auto glass replacement. Phone: 512-555-0200."
   });
   glassOnlyBundle.businessProfile.vertical = "auto_services";
@@ -931,7 +933,7 @@ if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnviro
     }).asset,
     "General auto-service businesses should not receive collision or paint imagery by fallback."
   );
-  const realPhotoBundle = createSiteFromInput({
+  const realPhotoBundle = createSiteV3FromInput({
     prompt: "Build a website for Real Photo Tire, a tire shop in Austin. Services: tire rotation, brake service. Phone: 512-555-0201."
   });
   realPhotoBundle.businessProfile.vertical = "auto_services";
@@ -1181,7 +1183,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_1",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "pageview",
     timestamp: "2026-05-29T12:00:00.000Z",
     deviceType: "mobile",
@@ -1190,8 +1192,8 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_1",
-    pageId: "page_home",
-    sectionId: "hero_home",
+    pageId: "home",
+    sectionId: "hero",
     eventType: "section_view",
     timestamp: "2026-05-29T12:00:01.000Z",
     deviceType: "mobile",
@@ -1200,8 +1202,8 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_1",
-    pageId: "page_home",
-    sectionId: "hero_home",
+    pageId: "home",
+    sectionId: "hero",
     eventType: "tel_click",
     timestamp: "2026-05-29T12:00:03.000Z",
     elementRole: "sticky-tel",
@@ -1215,7 +1217,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_1",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "web_vital",
     timestamp: "2026-05-29T12:00:04.000Z",
     value: 4200,
@@ -1225,7 +1227,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_1",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "web_vital",
     timestamp: "2026-05-29T12:00:05.000Z",
     value: 0.18,
@@ -1235,7 +1237,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_2",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "pageview",
     timestamp: "2026-05-29T12:02:00.000Z",
     deviceType: "desktop",
@@ -1244,8 +1246,8 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_2",
-    pageId: "page_home",
-    sectionId: "contact_home",
+    pageId: "home",
+    sectionId: "contact",
     eventType: "form_start",
     timestamp: "2026-05-29T12:02:10.000Z",
     deviceType: "desktop"
@@ -1253,8 +1255,8 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "analytics_probe_2",
-    pageId: "page_home",
-    sectionId: "services_home",
+    pageId: "home",
+    sectionId: "services",
     eventType: "click",
     timestamp: "2026-05-29T12:02:12.000Z",
     elementRole: "div",
@@ -1267,7 +1269,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "agent_probe_1",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "agent_readable_request",
     timestamp: "2026-05-29T12:03:00.000Z",
     metadata: { resource: "llms_txt", path: "/llms.txt", agentFamily: "gptbot", verifiedBot: true }
@@ -1275,7 +1277,7 @@ const analyticsProbeEvents: AnalyticsEvent[] = [
   {
     siteId: bundle.businessProfile.siteId,
     sessionId: "agent_probe_2",
-    pageId: "page_home",
+    pageId: "home",
     eventType: "agent_readable_request",
     timestamp: "2026-05-29T12:03:05.000Z",
     metadata: { resource: "markdown_alternate", path: "/md", agentFamily: "chatgpt-user", acceptMarkdown: true }
@@ -1288,20 +1290,20 @@ assert(
 );
 assert(
   analyticsProbe.clickMap.some(
-    (point) => point.sectionId === "hero_home" && point.elementRole === "sticky-tel" && point.primaryActions === 1
+    (point) => point.sectionId === "hero" && point.elementRole === "sticky-tel" && point.primaryActions === 1
   ),
   "Analytics summary should aggregate normalized all-click coordinates into a click map."
 );
 assert(
   analyticsProbe.clickMap.some(
-    (point) => point.sectionId === "services_home" && point.elementRole === "div" && point.count === 1
+    (point) => point.sectionId === "services" && point.elementRole === "div" && point.count === 1
   ),
   "Analytics summary should include sanitized non-link/non-button clicks in all-click aggregation."
 );
 assert(
   analyticsProbe.sectionConversionPaths.some(
     (row) =>
-      row.sectionId === "hero_home" &&
+      row.sectionId === "hero" &&
       row.exposedSessions === 1 &&
       row.actionSessions === 1 &&
       row.primaryActions === 1 &&
@@ -1657,7 +1659,7 @@ const malformedForwardedHeaders = new Headers({
   "x-forwarded-proto": "javascript, https",
   [customDomainRoutedHeader]: "1"
 });
-const seoHome = getPublishedVersion(bundle.siteModel).pages[0];
+const seoHome = assertSiteVersionV3(getPublishedVersion(bundle.siteModel)).pageComposition.pages[0];
 assert(seoHome, "SEO verifier needs a generated home page.");
 assert(
   canonicalUrlForPage(bundle, seoHome, seoHeaders) === "https://www.boundary-verify.example/",
@@ -1906,15 +1908,31 @@ missingUniversalStandardBundle.businessProfile.address = undefined;
 missingUniversalStandardBundle.businessProfile.serviceAreas = ["Local area"];
 missingUniversalStandardBundle.businessProfile.reviewsSummary = undefined;
 for (const version of missingUniversalStandardBundle.siteModel.versions) {
-  version.pages = version.pages.filter((page) => !page.slug.startsWith("areas/"));
-  for (const page of version.pages) {
-    page.layoutSections = page.layoutSections.filter(
-      (section) => !["faq", "trust", "proof", "team", "map"].includes(section.kind)
-    );
-    for (const section of page.layoutSections) {
-      applyPropsToLayoutSection(section, scrubTrustProofTerms(propsForLayoutSection(section)));
+  const v3Version = assertSiteVersionV3(version);
+  v3Version.pageComposition.pages = v3Version.pageComposition.pages.filter((page) => !page.slug.startsWith("areas/"));
+  for (const page of v3Version.pageComposition.pages) {
+    page.sections = page.sections.filter((section) => {
+      const templateId = getVisualSectionV3(section.props)?.templateId ?? "";
+      return !(
+        section.family.startsWith("faq.") ||
+        section.family.startsWith("proof.") ||
+        section.family.startsWith("trust.") ||
+        section.family.startsWith("coverage.") ||
+        section.family.startsWith("team.") ||
+        templateId === "faq_list" ||
+        templateId === "quote_wall" ||
+        // editorial_statement/split_media double as team-proof surfaces in
+        // standard-evaluation, so trust proof only degrades once they go too.
+        templateId === "editorial_statement" ||
+        templateId === "split_media" ||
+        templateId === "location_directory" ||
+        templateId === "service_area_showcase" ||
+        templateId === "location_showcase"
+      );
+    });
+    for (const section of page.sections) {
+      section.props = scrubTrustProofTerms(section.props);
     }
-    syncLegacySectionsFromLayout(page);
   }
 }
 const universalStandardFindings = runAudit(
@@ -1976,7 +1994,7 @@ copyRiskCrawl.extractedFacts = {
   description: copiedSourceCopy,
   services: ["Emergency HVAC repair"]
 };
-const copySafeBundle = createSiteFromInput({ url: "https://boundary-copy.example/services", crawl: copyRiskCrawl });
+const copySafeBundle = createSiteV3FromInput({ url: "https://boundary-copy.example/services", crawl: copyRiskCrawl });
 assert(
   copySafeBundle.businessProfile.description !== copiedSourceCopy &&
     !JSON.stringify(copySafeBundle.siteModel.versions).includes(copiedSourceCopy),
@@ -1988,9 +2006,82 @@ assert(
     bundle.presenceAssessment.visualQa.findings.some((finding) => finding.id === "visual_qa.direction_alignment"),
   "Visual QA should fall back to deterministic SiteModel/design-direction checks without live screenshot credentials."
 );
+const serviceLandingBundle = createSiteV3FromInput({
+  prompt:
+    "Build a website for Boundary Service HVAC in Austin. services: Emergency HVAC Repair, AC Tune Ups. phone: 512-555-0188"
+});
+const serviceLandingCopyDeck: GeneratedCopyDeckV2 = {
+  version: "generated-copy-deck-v2",
+  source: "openai",
+  hero: {
+    eyebrow: "HVAC help",
+    heading: "Emergency HVAC repair with a clear first call.",
+    body: "Boundary Service HVAC helps Austin customers with emergency HVAC repair and AC tune ups."
+  },
+  servicesIntro: {
+    heading: "HVAC services customers can request.",
+    body: "Emergency HVAC repair and AC tune ups are the two documented services for this launch fixture."
+  },
+  serviceItems: [
+    {
+      title: "Emergency HVAC Repair",
+      body: "Emergency HVAC repair starts with the system issue, timing, and whether heat or cooling is out."
+    },
+    {
+      title: "AC Tune Ups",
+      body: "AC tune ups check documented comfort concerns before heavier repair decisions."
+    }
+  ],
+  processIntro: { heading: "Start with the system details.", body: "Call or send the HVAC issue, timing, and Austin location." },
+  processSteps: [
+    { title: "Share the issue", body: "Name the HVAC service and what changed." },
+    { title: "Confirm fit", body: "The team confirms the next repair or tune up step." },
+    { title: "Plan the visit", body: "Use the call path to confirm timing and location." }
+  ],
+  faqs: [
+    { question: "Can I request emergency HVAC repair?", answer: "Yes. Share the system issue, timing, and whether heating or cooling is out." },
+    { question: "Can I ask about AC tune ups?", answer: "Yes. AC tune ups are part of the documented service list." },
+    { question: "Should I call first?", answer: "Yes. Calling first confirms the best next step." },
+    { question: "Do you serve Austin?", answer: "Yes. Confirm the exact address when you reach out." }
+  ],
+  contactIntro: { heading: "Contact Boundary Service HVAC", body: "Use the call or form path with the HVAC service and timing." },
+  splitMedia: { heading: "HVAC service details before assumptions.", body: "The first contact starts with the source-backed service need." },
+  gallery: { heading: "HVAC context.", body: "Approved media can support the service detail after review." },
+  seo: {
+    title: "Boundary Service HVAC | Emergency HVAC Repair in Austin",
+    description: "Emergency HVAC repair and AC tune ups in Austin with a clear call or form path."
+  },
+  groundingNotes: ["Launch-boundary fixture copy for source-backed service pages."],
+  voiceProfile: { pov: "brand_direct" },
+  servicePages: [
+    {
+      serviceName: "Emergency HVAC Repair",
+      hero: {
+        heading: "Emergency HVAC repair starts with the urgent system problem.",
+        body: "Emergency HVAC repair calls should include what stopped working, when it happened, and whether heating or cooling is out."
+      },
+      detail: {
+        heading: "Emergency HVAC repair details before dispatch planning.",
+        body: "Emergency HVAC repair requests stay grounded in the system symptoms, timing, and Austin service address before the next step is confirmed."
+      },
+      faqs: [
+        { question: "When should I ask for emergency HVAC repair?", answer: "Ask for emergency HVAC repair when heating or cooling stops working and timing matters." },
+        { question: "What helps the first call?", answer: "Share the HVAC system issue, timing, and address." },
+        { question: "Can I confirm service fit first?", answer: "Yes, the first call confirms whether emergency HVAC repair is the right next step." },
+        { question: "Do I need an address?", answer: "Yes, share the Austin service address so the team can confirm fit." }
+      ],
+      seo: {
+        title: "Emergency HVAC Repair in Austin | Boundary Service HVAC",
+        description: "Emergency HVAC repair in Austin with clear questions, service details, and contact path."
+      }
+    }
+  ]
+};
+serviceLandingBundle.presenceAssessment.generatedCopyDeck = serviceLandingCopyDeck;
+const serviceLandingVersion = compileGeneratedSiteV3Site({ bundle: serviceLandingBundle }).version;
 assert(
-  bundle.siteModel.versions[0]?.pages.some((page) => page.slug.startsWith("services/")),
-  "Generated launch sites should include service landing pages when services are known."
+  serviceLandingVersion.pageComposition.pages.some((page) => page.slug === "services/emergency-hvac-repair"),
+  "Generated launch sites should include source-backed service landing pages."
 );
 assert(
   bundle.experiments.length > 0 && bundle.experiments.every((experiment) => experiment.status === "draft"),
@@ -2007,7 +2098,7 @@ assert(
   "Generated experiment candidates must cover the launch Experiment Mode surfaces."
 );
 
-const qaBundle = createSiteFromInput({
+const qaBundle = createSiteV3FromInput({
   prompt:
     "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin. services: Emergency HVAC repair, AC maintenance phone: 512-555-0101"
 });
@@ -2021,8 +2112,12 @@ assert(
 );
 
 const brokenCtaBundle = structuredClone(qaBundle);
-const brokenHero = brokenCtaBundle.siteModel.versions[0]?.pages[0]?.sections.find((section) => section.type === "hero");
-if (brokenHero) brokenHero.props.primaryCta = { label: "", href: "" };
+const brokenHero = assertSiteVersionV3(brokenCtaBundle.siteModel.versions[0]).pageComposition.pages[0]?.sections.find((section) =>
+  getVisualSectionV3(section.props)?.templateId.startsWith("hero_")
+);
+const brokenHeroVisual = brokenHero ? getVisualSectionV3(brokenHero.props) : undefined;
+const brokenHeroCopy = (brokenHeroVisual?.slots as Record<string, unknown> | undefined)?.copy as { actions?: Array<{ label: string; href: string }> } | undefined;
+if (brokenHeroCopy?.actions?.[0]) brokenHeroCopy.actions[0] = { ...brokenHeroCopy.actions[0], label: "", href: "" };
 const brokenCtaQa = runSiteQa(brokenCtaBundle);
 assert(
   brokenCtaQa.checks.some((check) => check.id === "primary_cta_guardrail" && check.severity === "fail") ||
@@ -2030,21 +2125,20 @@ assert(
   "QA must fail when the primary CTA is removed or blank."
 );
 
-const qaHome = qaBundle.siteModel.versions[0]?.pages[0];
-const qaHero = qaHome?.sections.find((section) => section.type === "hero");
-const qaLayoutHero = qaHome?.layoutSections.find((section) => section.kind === "hero");
-assert(qaHome && qaHero && qaLayoutHero, "Guardrail verifier needs a generated home hero.");
+const qaHome = assertSiteVersionV3(qaBundle.siteModel.versions[0]).pageComposition.pages[0];
+const qaHero = qaHome?.sections.find((section) => getVisualSectionV3(section.props)?.templateId.startsWith("hero_"));
+assert(qaHome && qaHero, "Guardrail verifier needs a generated home hero.");
 const brokenLinkBundle = structuredClone(qaBundle);
-brokenLinkBundle.siteModel.versions[0]?.pages[0]?.sections.push({
-  id: "press_bad_link",
-  type: "press_video",
-  variant: "links",
-  props: { links: [{ label: "Proof link", href: "javascript:alert(1)" }] },
-  bindings: {},
-  fieldPolicies: {
-    links: { editScope: "owner_choice", experimentEligible: false, factField: false }
-  }
-});
+const brokenLinkHome = assertSiteVersionV3(brokenLinkBundle.siteModel.versions[0]).pageComposition.pages[0];
+if (brokenLinkHome && qaHero) {
+  brokenLinkHome.sections.push({
+    ...structuredClone(qaHero),
+    id: "press_bad_link",
+    family: "press.link_strip",
+    variant: "links",
+    props: { links: [{ label: "Proof link", href: "javascript:alert(1)" }] }
+  });
+}
 const brokenLinkQa = runSiteQa(brokenLinkBundle);
 assert(
   brokenLinkQa.checks.some((check) => check.id.includes("press_bad_link") && check.severity === "fail"),
@@ -2196,23 +2290,24 @@ assert(
   approvedCtaEdit.ok,
   "Editor guardrails should allow approved owner-choice CTA changes that preserve conversion paths."
 );
-const approvedPresetEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
+const reorderedSectionIds = qaHome.sections.map((section) => section.id).reverse();
+const approvedOrderEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
   pageId: qaHome.id,
-  sectionPresets: { [qaLayoutHero.id]: "hero.centered_editorial" }
+  sectionOrder: reorderedSectionIds
 });
 assert(
-  approvedPresetEdit.ok && approvedPresetEdit.applied.sectionPresets?.[qaLayoutHero.id] === "hero.centered_editorial",
-  "Curated editor should allow approved section preset swaps."
+  approvedOrderEdit.ok && approvedOrderEdit.applied.sectionOrder?.join(",") === reorderedSectionIds.join(","),
+  "Curated editor should allow approved v3 section reordering."
 );
-const blockedPresetEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
+const blockedTemplateEdit = updateSiteDesignBundle(structuredClone(qaBundle), {
   siteId: qaBundle.businessProfile.siteId,
   pageId: qaHome.id,
-  sectionPresets: { [qaLayoutHero.id]: "arbitrary_custom_layout" as never }
+  sectionTemplates: { [qaHero.id]: "arbitrary_custom_layout" }
 });
 assert(
-  !blockedPresetEdit.ok,
-  "Curated editor should reject unapproved arbitrary section presets."
+  !blockedTemplateEdit.ok,
+  "Curated editor should reject direct v3 template mutation until it is represented as a compiler override."
 );
 const formSettingsBundle = structuredClone(qaBundle);
 const formSettingsResult = applyFormSettingsUpdate(formSettingsBundle, {
@@ -2318,7 +2413,7 @@ const unsafeWebhookEvent: InquiryEvent = {
   type: "form_submission",
   actor: "visitor",
   formId: unsafeWebhookBundle.extensionModel.forms[0]?.id ?? "form_contact",
-  pageId: "page_home",
+  pageId: "home",
   payload: { name: "Boundary Owner", email: "owner@example.com" },
   createdAt: new Date().toISOString()
 };
@@ -2339,7 +2434,7 @@ assert(
     workflowSource.includes("Math.min(Math.max(Math.trunc(parsed), 1000), 30000)"),
   "External workflow delivery fetches should use a bounded timeout without private-crawl URL override plumbing."
 );
-const ownerAssetBundle = createSiteFromInput({
+const ownerAssetBundle = createSiteV3FromInput({
   prompt: "Build a website for Boundary Verify Salon, a beauty salon in Austin. phone: 512-555-0141"
 });
 const ownerAssets = applyOwnerAssetsUpdate(ownerAssetBundle, {
@@ -2356,9 +2451,9 @@ assert(
     ownerAssets.logo?.rightsStatus === "customer_granted" &&
     ownerAssets.assets.every((asset) => asset.ownerApproved && asset.usageScope === "published_site") &&
     ownerAssetBundle.siteModel.versions.some((version) =>
-      version.pages.some((page) =>
+      assertSiteVersionV3(version).pageComposition.pages.some((page) =>
         page.sections.some(
-          (section) => section.type === "gallery" && JSON.stringify(section.props.images).includes("boundary-style.jpg")
+          (section) => JSON.stringify(section.props).includes("boundary-style.jpg")
         )
       )
     ),
@@ -2465,8 +2560,8 @@ assert(
   !isPublicLocalAssetPath(referenceOnlyAssetBundle, internalPlanningLocalStoragePath),
   "Public local asset serving should not expose internal-planning mockups even when the bytes are generated."
 );
-const referenceOnlyHero = referenceOnlyAssetBundle.siteModel.versions[0]?.pages[0]?.sections.find(
-  (section) => section.type === "hero"
+const referenceOnlyHero = assertSiteVersionV3(referenceOnlyAssetBundle.siteModel.versions[0]).pageComposition.pages[0]?.sections.find(
+  (section) => getVisualSectionV3(section.props)?.templateId.startsWith("hero_")
 );
 if (referenceOnlyHero) referenceOnlyHero.props.imageUrl = referenceOnlyUrl;
 assert(
@@ -2510,7 +2605,7 @@ assert(
   "QA must fail inaccessible primary button colors."
 );
 
-const aiPlannedBundle = createSiteFromInput({
+const aiPlannedBundle = createSiteV3FromInput({
   prompt: "Build a website for AI Planned Dental in Austin. phone: 512-555-0123",
   aiPlanning: {
     source: "openai",
@@ -2537,7 +2632,7 @@ assert(
 );
 
 const publicPresenceObservedAt = new Date().toISOString();
-const publicPresenceBundle = createSiteFromInput({
+const publicPresenceBundle = createSiteV3FromInput({
   prompt: "Build a website for Places Verify Salon, a beauty salon in Austin. phone: 512-555-0177",
   publicPresence: {
     provider: "google_places",
@@ -2631,7 +2726,7 @@ assert(
   ),
   "Render inspection should detect rendered forms."
 );
-const renderQaBundle = createSiteFromInput({
+const renderQaBundle = createSiteV3FromInput({
   prompt: "Build a website for Render QA HVAC, a call-first HVAC company in Austin. phone: 512-555-0124",
   renderInspection
 });
@@ -2641,10 +2736,10 @@ assert(
   "Visual QA should consume render inspection metrics when they are available."
 );
 
-const actionListBundle = createSiteFromInput({
+const actionListBundle = createSiteV3FromInput({
   prompt: "Build a website for Action List Verify Plumbing in Austin. phone: 512-555-0188"
 });
-const actionListHome = actionListBundle.siteModel.versions[0]?.pages[0];
+const actionListHome = assertSiteVersionV3(actionListBundle.siteModel.versions[0]).pageComposition.pages[0];
 assert(actionListHome, "Action-list verifier needs a generated home page.");
 if (actionListBundle.siteModel.versions[0]) actionListBundle.siteModel.versions[0].status = "published";
 const actionListFinding: OptimizationFinding = {
@@ -2751,7 +2846,7 @@ const learningResult = createExperimentLearning({
   }
 });
 assert(learningResult.ok, "Directional experiment winners should produce active learnings.");
-const learnedBundle = createSiteFromInput({
+const learnedBundle = createSiteV3FromInput({
   prompt: "Build a website for Learned Defaults HVAC in Austin. phone: 512-555-0199",
   experimentLearnings: [learningResult.learning]
 });
@@ -2768,7 +2863,7 @@ process.stdout.write(
       ok: true,
       siteId: bundle.businessProfile.siteId,
       generatedScore: generatedEvaluation.score,
-      pages: bundle.siteModel.versions[0]?.pages.length ?? 0,
+      pages: assertSiteVersionV3(bundle.siteModel.versions[0]).pageComposition.pages.length,
       designDirections: bundle.presenceAssessment.designDirections.length,
       mockupArtifacts: mockupArtifacts.length,
       assetInventory: assetInventory.length,
@@ -2860,7 +2955,7 @@ async function verifyCanonicalGenerationService() {
   );
 
   const localSiteCount = listLocalSiteBundles().length;
-  const candidateBundle = createSiteFromInput({
+  const candidateBundle = createSiteV3FromInput({
     prompt: "Build a site candidate acceptance candidate.",
     identity: { siteId: "sitecand_boundary_acceptance_candidate" }
   });

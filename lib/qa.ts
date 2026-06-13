@@ -1,20 +1,25 @@
 import type { QACheck, SiteBundle } from "./models";
 import { getPublishedVersion } from "./sample-data";
 import { evaluateSiteAgainstStandard } from "./standard-evaluation";
+import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { assertSiteVersionV3, type PageV3 } from "./site-version-v3";
 
 export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; versionStatus?: "draft" | "published" } = {}) {
-  const version =
+  const version = assertSiteVersionV3(
     options.versionId
       ? bundle.siteModel.versions.find((item) => item.id === options.versionId) ?? getPublishedVersion(bundle.siteModel)
       : options.versionStatus === "draft"
       ? bundle.siteModel.versions.find((item) => item.status === "draft") ?? getPublishedVersion(bundle.siteModel)
-      : getPublishedVersion(bundle.siteModel);
+      : getPublishedVersion(bundle.siteModel),
+    "QA version"
+  );
+  const pages = version.pageComposition.pages;
   const checks: QACheck[] = [];
   const targetIds = targetIdsForVersion(version);
   const allCtas: Array<{ pageId: string; sectionId: string; key: string; label?: string; href?: string }> = [];
   const activeTheme = version.theme ?? bundle.siteModel.theme;
 
-  for (const page of version.pages) {
+  for (const page of pages) {
     addCheck(checks, {
       id: `meta_title_${page.id}`,
       siteId: bundle.businessProfile.siteId,
@@ -48,25 +53,22 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     });
 
     for (const section of page.sections) {
-      for (const [key, value] of Object.entries(section.props)) {
-        if (key.toLowerCase().includes("cta")) {
-          const cta = value as { label?: string; href?: string };
-          allCtas.push({ pageId: page.id, sectionId: section.id, key, label: cta?.label, href: cta?.href });
-          const hrefValidation = validateHref(cta?.href, targetIds);
-          addCheck(checks, {
-            id: `cta_${page.id}_${section.id}_${key}`,
-            siteId: bundle.businessProfile.siteId,
-            category: "conversion",
-            severity: cta?.label?.trim() && cta?.href?.trim() && hrefValidation.ok ? "pass" : "fail",
-            title: `CTA ${key} in ${section.type}`,
-            detail:
-              cta?.label?.trim() && cta?.href?.trim() && hrefValidation.ok
-                ? "CTA has visible text and a valid destination."
-                : hrefValidation.reason ?? "CTA is missing visible text or destination.",
-            pageId: page.id,
-            sectionId: section.id
-          });
-        }
+      for (const cta of collectVisualCtas(getVisualSectionV3(section.props))) {
+        allCtas.push({ pageId: page.id, sectionId: section.id, key: cta.key, label: cta.label, href: cta.href });
+        const hrefValidation = validateHref(cta.href, targetIds);
+        addCheck(checks, {
+          id: `cta_${page.id}_${section.id}_${slugId(cta.key)}`,
+          siteId: bundle.businessProfile.siteId,
+          category: "conversion",
+          severity: cta.label?.trim() && cta.href?.trim() && hrefValidation.ok ? "pass" : "fail",
+          title: `CTA ${cta.key} in ${sectionLabel(section)}`,
+          detail:
+            cta.label?.trim() && cta.href?.trim() && hrefValidation.ok
+              ? "CTA has visible text and a valid destination."
+              : hrefValidation.reason ?? "CTA is missing visible text or destination.",
+          pageId: page.id,
+          sectionId: section.id
+        });
       }
 
       for (const link of collectLinks(section.props)) {
@@ -76,7 +78,7 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
           siteId: bundle.businessProfile.siteId,
           category: "technical",
           severity: hrefValidation.ok ? "pass" : "fail",
-          title: `Link ${link.path} in ${section.type}`,
+          title: `Link ${link.path} in ${sectionLabel(section)}`,
           detail: hrefValidation.ok
             ? "Link has a valid destination."
             : hrefValidation.reason ?? "Link destination is invalid.",
@@ -87,7 +89,7 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     }
   }
 
-  const duplicateSlugs = duplicateValues(version.pages.map((page) => page.slug));
+  const duplicateSlugs = duplicateValues(pages.map((page) => page.slug));
   addCheck(checks, {
     id: "unique_page_slugs",
     siteId: bundle.businessProfile.siteId,
@@ -97,9 +99,9 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     detail: duplicateSlugs.length === 0 ? "All page slugs are unique." : `Duplicate slugs detected: ${duplicateSlugs.join(", ")}.`
   });
 
-  const homePage = version.pages.find((page) => page.slug === "") ?? version.pages[0];
-  const homeHero = homePage?.sections.find((section) => section.type === "hero");
-  const heroPrimaryCta = ctaLike(homeHero?.props.primaryCta);
+  const homePage = pages.find((page) => page.slug === "") ?? pages[0];
+  const homeHero = homePage?.sections[0];
+  const heroPrimaryCta = collectVisualCtas(homeHero ? getVisualSectionV3(homeHero.props) : undefined)[0] ?? {};
   const heroPrimaryCtaHref = validateHref(heroPrimaryCta.href, targetIds);
   const heroPrimaryCtaValid = Boolean(heroPrimaryCta.label?.trim() && heroPrimaryCta.href?.trim() && heroPrimaryCtaHref.ok);
   addCheck(checks, {
@@ -124,7 +126,7 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     detail: allCtas.length > 0 ? `${allCtas.length} CTA slots exist.` : "No CTA slots exist in the structured site model."
   });
 
-  const hasContactSection = version.pages.some((page) => page.sections.some((section) => section.type === "contact"));
+  const hasContactSection = pages.some((page) => page.sections.some((section) => getVisualSectionV3(section.props)?.templateId === "contact_split"));
   addCheck(checks, {
     id: "contact_path",
     siteId: bundle.businessProfile.siteId,
@@ -181,7 +183,12 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     detail: hasHours ? "Business hours are available for visitors and schema." : "Hours are missing or unverified."
   });
 
-  const hasMapOrAreaSection = version.pages.some((page) => page.sections.some((section) => section.type === "map"));
+  const hasMapOrAreaSection = pages.some((page) =>
+    page.sections.some((section) => {
+      const templateId = getVisualSectionV3(section.props)?.templateId;
+      return templateId === "location_showcase" || templateId === "service_area_showcase" || templateId === "location_directory";
+    })
+  );
   addCheck(checks, {
     id: "map_or_service_area",
     siteId: bundle.businessProfile.siteId,
@@ -278,13 +285,15 @@ function qaCategoryForStandard(
   return "technical";
 }
 
-function targetIdsForVersion(version: SiteBundle["siteModel"]["versions"][number]) {
+function targetIdsForVersion(version: ReturnType<typeof assertSiteVersionV3>) {
   const ids = new Set(["contact"]);
-  for (const page of version.pages) {
+  for (const page of version.pageComposition.pages) {
     ids.add(page.id);
     for (const section of page.sections) {
       ids.add(section.id);
-      if (section.type === "contact") ids.add("contact");
+      const visualSection = getVisualSectionV3(section.props);
+      if (visualSection?.anchorId) ids.add(visualSection.anchorId);
+      if (visualSection?.templateId === "contact_split") ids.add("contact");
     }
   }
   return ids;
@@ -348,7 +357,7 @@ function businessLinks(bundle: SiteBundle) {
 
 function referenceOnlyAssetUrlsUsedInSiteModel(
   bundle: SiteBundle,
-  version: SiteBundle["siteModel"]["versions"][number]
+  version: ReturnType<typeof assertSiteVersionV3>
 ) {
   const allowedUrls = new Set<string>();
   const referenceUrls = new Set<string>();
@@ -379,7 +388,7 @@ function referenceOnlyAssetUrlsUsedInSiteModel(
   if (forbidden.size === 0) return [];
 
   const used = new Set<string>();
-  for (const page of version.pages) {
+  for (const page of version.pageComposition.pages) {
     for (const section of page.sections) {
       for (const url of collectUrlStrings(section.props)) {
         if (forbidden.has(url)) used.add(url);
@@ -415,13 +424,38 @@ function ctaLike(value: unknown) {
   };
 }
 
-function pageHasEnoughContent(page: SiteBundle["siteModel"]["versions"][number]["pages"][number]) {
+function collectVisualCtas(visualSection: ReturnType<typeof getVisualSectionV3>) {
+  if (!visualSection) return [];
+  const slots = visualSection.slots as Record<string, unknown>;
+  const ctas: Array<{ key: string; label?: string; href?: string }> = [];
+  if (isRecord(slots.copy) && Array.isArray(slots.copy.actions)) {
+    slots.copy.actions.forEach((action, index) => {
+      const cta = ctaLike(action);
+      ctas.push({ key: `copy action ${index + 1}`, label: cta.label, href: cta.href });
+    });
+  }
+  if (isRecord(slots.action) && isRecord(slots.action.cta)) {
+    const cta = ctaLike(slots.action.cta);
+    ctas.push({ key: "action cta", label: cta.label, href: cta.href });
+  }
+  return ctas;
+}
+
+function sectionLabel(section: PageV3["sections"][number]) {
+  return getVisualSectionV3(section.props)?.templateId ?? section.family;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function pageHasEnoughContent(page: PageV3) {
   if (page.sections.length < 2) return false;
   if (!page.slug.startsWith("services/") && !page.slug.startsWith("areas/")) return true;
   return pageText(page).length >= 240 && page.sections.length >= 3;
 }
 
-function pageText(page: SiteBundle["siteModel"]["versions"][number]["pages"][number]) {
+function pageText(page: PageV3) {
   return page.sections
     .flatMap((section) => textValues(section.props))
     .join(" ")

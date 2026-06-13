@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AssetReference, SiteBundle } from "./models";
 import { storeAssetBytes } from "./asset-storage";
+import { measureImageDimensions } from "./image-dimensions";
 import { validatePublicHostname } from "./url-safety";
 
 /**
@@ -83,9 +84,14 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
   const manifest: ScrapedMediaManifestEntry[] = [];
   const scrapedAt = new Date().toISOString();
 
-  const store = async (reference: AssetReference, kind: "photo" | "logo", index: number): Promise<AssetReference> => {
+  const store = async (
+    reference: AssetReference,
+    kind: "photo" | "logo",
+    index: number,
+    downloaded?: Awaited<ReturnType<typeof downloadImage>>
+  ): Promise<AssetReference> => {
     if (!/^https?:/i.test(reference.url)) return reference;
-    const downloaded = await downloadImage(reference.url);
+    downloaded ??= await downloadImage(reference.url);
     if (!downloaded) return reference;
     const contentHash = createHash("sha256").update(downloaded.bytes).digest("hex");
     const assetId = `${scrapedAssetFilePrefix}${kind}-${index + 1}-${contentHash.slice(0, 10)}`;
@@ -99,6 +105,9 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
       forceLocal: true
     });
     if (!stored.url) return reference;
+    // Measured from the file header at download time; the Playwright palette
+    // pass later re-measures, but render gating must not depend on it.
+    const dimensions = measureImageDimensions(downloaded.bytes, downloaded.mimeType);
     manifest.push({
       assetId,
       kind,
@@ -106,9 +115,10 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
       storedUrl: stored.url,
       contentHash,
       bytes: downloaded.bytes.byteLength,
-      scrapedAt
+      scrapedAt,
+      ...(dimensions ?? {})
     });
-    return { ...reference, url: stored.url, rightsStatus: "reference_only" };
+    return { ...reference, url: stored.url, rightsStatus: "reference_only", ...(dimensions ?? {}) };
   };
 
   const photos: AssetReference[] = [];
@@ -122,8 +132,10 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
   bundle.businessProfile.photos = photos;
 
   if (bundle.businessProfile.logo && bundle.businessProfile.logo.rightsStatus === "reference_only") {
-    bundle.businessProfile.logo = await store(bundle.businessProfile.logo, "logo", 0);
+    bundle.businessProfile.logo = await chooseAndStoreLogo(bundle, store);
+    rejectNonLogoBrandMark(bundle, manifest);
   }
+  bundle.businessProfile.logoCandidates = undefined;
 
   if (manifest.length) {
     bundle.presenceAssessment.scrapedMediaManifest = manifest;
@@ -132,6 +144,82 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
     );
   }
   return manifest;
+}
+
+/** Matches the renderer's retina floor for the 42px header brand slot. */
+const minUsableLogoPx = 84;
+
+/**
+ * A real header brand mark is a purpose-built logo: a square-ish icon or tight
+ * wordmark. A site's og:image / social share banner is a different artifact —
+ * the logo artwork floated on a wide marketing canvas — and crawlers often
+ * surface the same file as both the logo candidate and a gallery photo. Crammed
+ * into the 42px square header slot it renders as an illegible speck on a white
+ * field, so it reads far worse than the typographic lockup fallback.
+ *
+ * Signal: the chosen logo is byte-identical (content hash) to a scraped photo
+ * AND is not near-square. The hash collision alone is too aggressive — some
+ * businesses legitimately reuse a clean square logo as their og:image — so we
+ * only demote when both hold. Palette sampling still reads the logo bytes from
+ * the manifest, so dropping the brand-mark reference costs no brand color.
+ */
+const maxSquareBrandAspect = 1.4;
+
+function rejectNonLogoBrandMark(bundle: SiteBundle, manifest: ScrapedMediaManifestEntry[]): void {
+  const logo = bundle.businessProfile.logo;
+  if (!logo) return;
+  const logoEntry = manifest.find((entry) => entry.kind === "logo" && entry.storedUrl === logo.url);
+  if (!logoEntry) return;
+  const photoHashes = new Set(manifest.filter((entry) => entry.kind === "photo").map((entry) => entry.contentHash));
+  if (!photoHashes.has(logoEntry.contentHash)) return;
+  const width = logoEntry.width ?? logo.width;
+  const height = logoEntry.height ?? logo.height;
+  // Unmeasurable dimensions: a hash collision with a photo is itself enough to
+  // distrust the brand mark, so demote rather than risk a banner in the slot.
+  const aspect = width && height ? Math.max(width, height) / Math.min(width, height) : maxSquareBrandAspect + 1;
+  if (aspect <= maxSquareBrandAspect) return;
+  bundle.businessProfile.logo = undefined;
+  bundle.presenceAssessment.technicalNotes.push(
+    `Logo demoted to typographic lockup: brand mark is a non-square duplicate of a scraped photo (likely the og:image), not a purpose-built logo.`
+  );
+}
+
+/**
+ * Measure-then-choose logo selection: download the crawl's ranked logo
+ * candidates and decide by real pixels, not URL guesses. The first
+ * retina-adequate candidate wins; otherwise the largest measured one is
+ * stored anyway — palette sampling still wants the brand pixels even when
+ * the renderer falls back to the typographic lockup.
+ */
+async function chooseAndStoreLogo(
+  bundle: SiteBundle,
+  store: (
+    reference: AssetReference,
+    kind: "photo" | "logo",
+    index: number,
+    downloaded?: Awaited<ReturnType<typeof downloadImage>>
+  ) => Promise<AssetReference>
+): Promise<AssetReference | undefined> {
+  const profile = bundle.businessProfile;
+  const candidates = (profile.logoCandidates?.length ? profile.logoCandidates : profile.logo ? [profile.logo] : []).filter(
+    (candidate) => candidate.rightsStatus === "reference_only" && /^https?:/i.test(candidate.url)
+  );
+  if (!candidates.length) return profile.logo;
+
+  const fallbacks: { candidate: AssetReference; downloaded: NonNullable<Awaited<ReturnType<typeof downloadImage>>>; minSide: number }[] = [];
+  for (const candidate of candidates) {
+    const downloaded = await downloadImage(candidate.url);
+    if (!downloaded) continue;
+    const dimensions = measureImageDimensions(downloaded.bytes, downloaded.mimeType);
+    // Unmeasurable bytes rank just below the threshold: never auto-picked over
+    // an adequate candidate, but ahead of a measured favicon-sized one.
+    const minSide = dimensions ? Math.min(dimensions.width, dimensions.height) : minUsableLogoPx - 1;
+    if (minSide >= minUsableLogoPx) return store(candidate, "logo", 0, downloaded);
+    fallbacks.push({ candidate, downloaded, minSide });
+  }
+  const best = [...fallbacks].sort((left, right) => right.minSide - left.minSide)[0];
+  if (best) return store(best.candidate, "logo", 0, best.downloaded);
+  return profile.logo;
 }
 
 /**
@@ -143,6 +231,17 @@ export function castScrapedPhotos(bundle: SiteBundle): void {
   const manifest = bundle.presenceAssessment.scrapedMediaManifest;
   if (!manifest?.length) return;
   const dimensionsByUrl = new Map(manifest.map((entry) => [entry.storedUrl, entry]));
+  // Stamp measured dimensions onto the profile references the renderer reads,
+  // so render surfaces can refuse to display an asset above its natural size.
+  const stampDimensions = (reference: AssetReference): AssetReference => {
+    const entry = dimensionsByUrl.get(reference.url);
+    if (!entry?.width || !entry?.height) return reference;
+    return { ...reference, width: entry.width, height: entry.height };
+  };
+  bundle.businessProfile.photos = bundle.businessProfile.photos.map(stampDimensions);
+  if (bundle.businessProfile.logo) {
+    bundle.businessProfile.logo = stampDimensions(bundle.businessProfile.logo);
+  }
   // Composition floor: favicons/thumbnails (a 20x20 icon, a 147x98 thumb) are
   // palette inputs, never page imagery. Unknown dimensions stay eligible —
   // public-safe remote photos aren't measured.

@@ -7,6 +7,7 @@ import { requireSiteOwnerAccess } from "@/lib/page-access";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
+import { assertSiteVersionV3 } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +68,7 @@ export default async function OwnerSiteReviewPage({ params }: { params: Promise<
               businessName={profile.name}
               slug={slug}
               versionId={reviewVersion.id}
-              pages={reviewVersion.pages.map((page) => ({ slug: page.slug, title: page.title }))}
+              pages={assertSiteVersionV3(reviewVersion, "owner review version").pageComposition.pages.map((page) => ({ slug: page.slug, title: page.title }))}
             />
           ) : (
             <div className="candidate-review-pane-inner">

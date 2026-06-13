@@ -66,12 +66,12 @@ export type FactCoverageReport = {
  */
 export const factSurfaceMap: Record<FactCategory, { surfaces: string[]; requirement?: string }> = {
   services: { surfaces: ["services_section", "service_pages", "footer"] },
-  hours: { surfaces: ["location_panel", "footer", "hero_facts"] },
+  hours: { surfaces: ["location_showcase", "location_directory", "footer", "hero_facts"] },
   phone: { surfaces: ["header_cta", "hero_cta", "contact", "footer"] },
-  address: { surfaces: ["location_panel", "footer", "schema_org"] },
+  address: { surfaces: ["location_showcase", "location_directory", "footer", "schema_org"] },
   story: { surfaces: ["about_section"] },
   social_links: { surfaces: ["footer"] },
-  service_areas: { surfaces: ["location_panel"] },
+  service_areas: { surfaces: ["service_area_showcase", "location_showcase", "location_directory"] },
   financing: { surfaces: ["offer_band", "hero_facts"], requirement: "clear source text for the terms" },
   languages: { surfaces: ["owner_recommendation"], requirement: "actual bilingual copy exists (inferred market is a recommendation only)" },
   certifications: { surfaces: ["trust_facts"], requirement: "source proof" },
@@ -135,8 +135,10 @@ export function buildFactCoverageReport(input: { bundle: SiteBundle; version: Si
     });
   }
   if (business.phone) add("phone", business.phone, "website_crawl", { surfaced: surfacedCheck(business.phone.replace(/[^\d]/g, "").slice(-7)) || surfacedCheck(business.phone) });
-  const addressLine = [business.address?.street, business.address?.city].filter(Boolean).join(", ");
-  if (addressLine) add("address", addressLine.slice(0, 40), "website_crawl", { surfaced: surfacedCheck(business.address?.street ?? business.address?.city) });
+  const firstLocationAddress = input.bundle.locations?.find((location) => location.address)?.address;
+  const address = business.address ?? firstLocationAddress;
+  const addressLine = [address?.street, address?.city].filter(Boolean).join(", ");
+  if (addressLine) add("address", addressLine.slice(0, 40), "website_crawl", { surfaced: surfacedCheck(address?.street ?? address?.city) });
   if (business.email) add("email", business.email, "website_crawl", { surfaced: surfacedCheck(business.email) });
 
   const story = input.bundle.presenceAssessment.businessUnderstanding?.businessStory;
@@ -152,7 +154,10 @@ export function buildFactCoverageReport(input: { bundle: SiteBundle; version: Si
     });
   }
 
-  const serviceAreas = (business as { serviceAreas?: string[] }).serviceAreas;
+  const serviceAreas = [
+    ...((business as { serviceAreas?: string[] }).serviceAreas ?? []),
+    ...(input.bundle.locations?.flatMap((location) => location.serviceAreas) ?? [])
+  ].filter((area, index, areas) => area && areas.findIndex((candidate) => candidate.toLowerCase() === area.toLowerCase()) === index);
   if (serviceAreas?.length) {
     add("service_areas", `${serviceAreas.length} areas`, "website_crawl", {
       surfaced: serviceAreas.some((area) => surfacedCheck(area))

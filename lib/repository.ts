@@ -14,6 +14,7 @@ import type {
   ExperimentAnalysis,
   ExperimentLearning,
   FormDefinition,
+  GenerationQaReadiness,
   Inquiry,
   InquiryAiEnrichment,
   InquiryDelivery,
@@ -27,6 +28,9 @@ import type {
   OutboundProspect,
   OutboundSummary,
   PreviewToken,
+  ProspectPresenceReportResult,
+  ProspectReportLead,
+  ProspectReportRecord,
   SiteBundle,
   SiteCandidateRecord,
   SiteCandidateStatus,
@@ -55,12 +59,16 @@ import {
   createSiteCandidate as createSiteCandidateStore,
   listSiteArtifacts as listSiteArtifactsStore,
   createOutboundCampaign,
+  createProspectReport as createProspectReportStore,
+  createProspectReportLead as createProspectReportLeadStore,
   getForms,
   getDomainById,
   getDomainByHostname,
+  getProspectReport as getProspectReportStore,
   getSiteBundle,
   getSiteBundleBySlug,
   getSiteCandidate as getSiteCandidateStore,
+  updateSiteCandidateBundle as updateSiteCandidateBundleStore,
   listAnalyticsEvents,
   listClaims,
   listDomains,
@@ -73,6 +81,8 @@ import {
   listOutboundEvents,
   listOutboundProspects,
   listPreviewTokens,
+  findActiveProspectReportByPlaceId as findActiveProspectReportByPlaceIdStore,
+  findReusableProspectReportByPlaceId as findReusableProspectReportByPlaceIdStore,
   listSiteCandidates as listSiteCandidatesStore,
   listSiteBundles,
   mergeBusinesses as mergeBusinessesStore,
@@ -100,6 +110,7 @@ import {
   getInquiry,
   updateDomain,
   updateOwnerAssets,
+  updateProspectReport as updateProspectReportStore,
   updateSiteDesign as updateSiteDesignStore,
   updateSectionProps,
   upsertSiteArtifact as upsertSiteArtifactStore,
@@ -158,6 +169,54 @@ export type ListSiteCandidatesFilter = {
   limit?: number;
   offset?: number;
 };
+
+/**
+ * Lightweight candidate listing shape for queue-style surfaces. Carries the
+ * few bundle-derived facts those surfaces show (readiness, screenshot and
+ * compile state) without transferring the multi-megabyte bundle itself.
+ */
+export type SiteCandidateSummary = {
+  id: string;
+  businessName: string;
+  vertical: SiteCandidateRecord["vertical"];
+  status: SiteCandidateStatus;
+  sourceUrl?: string;
+  sourceHost?: string;
+  candidateSlug: string;
+  acceptedSiteId?: string;
+  acceptedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  readiness: GenerationQaReadiness;
+  hasScreenshot: boolean;
+  compiled: boolean;
+};
+
+export type ListSiteCandidateSummariesResult = {
+  summaries: SiteCandidateSummary[];
+  total: number;
+};
+
+export function siteCandidateSummaryFromRecord(record: SiteCandidateRecord): SiteCandidateSummary {
+  const versions = record.bundle.siteModel.versions;
+  const version = versions.find((candidateVersion) => candidateVersion.status === "draft") ?? versions[0];
+  return {
+    id: record.id,
+    businessName: record.businessName,
+    vertical: record.vertical,
+    status: record.status,
+    sourceUrl: record.sourceUrl,
+    sourceHost: record.sourceHost,
+    candidateSlug: record.candidateSlug,
+    acceptedSiteId: record.acceptedSiteId,
+    acceptedAt: record.acceptedAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    readiness: version?.generationQa?.readiness ?? "unavailable",
+    hasScreenshot: Boolean(version?.generationQa?.primaryScreenshot),
+    compiled: Boolean(version)
+  };
+}
 
 export type ListSiteCandidatesResult = {
   candidates: SiteCandidateRecord[];
@@ -338,6 +397,38 @@ export type UpdateInquiryStatusInput = {
   status: Inquiry["status"];
 };
 
+export type CreateProspectReportInput = {
+  id?: string;
+  placeId: string;
+  sourceUrl?: string;
+  sourceHost?: string;
+  websiteKind: ProspectReportRecord["websiteKind"];
+  jobId?: string;
+};
+
+export type UpdateProspectReportInput = {
+  reportId: string;
+  status?: ProspectReportRecord["status"];
+  jobId?: string;
+  sourceUrl?: string;
+  sourceHost?: string;
+  websiteKind?: ProspectReportRecord["websiteKind"];
+  result?: ProspectPresenceReportResult;
+  unlockedAt?: string;
+  leadId?: string;
+  errorCode?: string;
+  completedAt?: string;
+};
+
+export type CreateProspectReportLeadInput = {
+  reportId: string;
+  email: string;
+  contactName?: string;
+  phone?: string;
+  ipHash?: string;
+  metadata?: Record<string, string | number | boolean>;
+};
+
 type SectionUpdateResult =
   | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
   | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
@@ -407,7 +498,9 @@ export type LodestaRepository = {
   createAndStoreSite(input: CreateSiteInput, options?: CreateSiteOptions): Promise<SiteBundle>;
   createSiteCandidate(input: CreateSiteCandidateInput): Promise<SiteCandidateRecord>;
   listSiteCandidates(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidatesResult>;
+  listSiteCandidateSummaries(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidateSummariesResult>;
   getSiteCandidate(candidateId: string): Promise<SiteCandidateRecord | null>;
+  updateSiteCandidateBundle(candidateId: string, bundle: SiteBundle): Promise<SiteCandidateRecord | null>;
   acceptSiteCandidateAsSite(candidateId: string): Promise<AcceptSiteCandidateResult | null>;
   acceptSiteCandidateAsVersion(input: AcceptSiteCandidateAsVersionInput): Promise<AcceptSiteCandidateResult | null>;
   mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }): Promise<BusinessMergeResult>;
@@ -482,6 +575,12 @@ export type LodestaRepository = {
   recordOutboundEvent(input: RecordOutboundEventInput): Promise<OutboundEvent>;
   listOutboundEvents(campaignId?: string): Promise<OutboundEvent[]>;
   outboundSummary(campaignId?: string): Promise<OutboundSummary>;
+  createProspectReport(input: CreateProspectReportInput): Promise<ProspectReportRecord>;
+  getProspectReport(reportId: string): Promise<ProspectReportRecord | null>;
+  findActiveProspectReportByPlaceId(placeId: string): Promise<ProspectReportRecord | null>;
+  findReusableProspectReportByPlaceId(placeId: string, since: string): Promise<ProspectReportRecord | null>;
+  updateProspectReport(input: UpdateProspectReportInput): Promise<ProspectReportRecord | null>;
+  createProspectReportLead(input: CreateProspectReportLeadInput): Promise<ProspectReportLead | null>;
   enqueueJob(kind: JobKind, payload: Record<string, unknown>): Promise<JobRecord>;
   listJobs(status?: JobRecord["status"]): Promise<JobRecord[]>;
   getJob(id: string): Promise<JobRecord | null>;
@@ -536,8 +635,15 @@ export const localRepository: LodestaRepository = {
   async listSiteCandidates(filter) {
     return listSiteCandidatesStore(filter);
   },
+  async listSiteCandidateSummaries(filter) {
+    const result = listSiteCandidatesStore(filter);
+    return { summaries: result.candidates.map(siteCandidateSummaryFromRecord), total: result.total };
+  },
   async getSiteCandidate(candidateId) {
     return getSiteCandidateStore(candidateId);
+  },
+  async updateSiteCandidateBundle(candidateId, bundle) {
+    return updateSiteCandidateBundleStore(candidateId, bundle);
   },
   async acceptSiteCandidateAsSite(candidateId) {
     return acceptSiteCandidateAsSiteStore(candidateId);
@@ -782,6 +888,24 @@ export const localRepository: LodestaRepository = {
   async outboundSummary(campaignId) {
     return outboundSummary(campaignId);
   },
+  async createProspectReport(input) {
+    return createProspectReportStore(input);
+  },
+  async getProspectReport(reportId) {
+    return getProspectReportStore(reportId);
+  },
+  async findActiveProspectReportByPlaceId(placeId) {
+    return findActiveProspectReportByPlaceIdStore(placeId);
+  },
+  async findReusableProspectReportByPlaceId(placeId, since) {
+    return findReusableProspectReportByPlaceIdStore(placeId, since);
+  },
+  async updateProspectReport(input) {
+    return updateProspectReportStore(input);
+  },
+  async createProspectReportLead(input) {
+    return createProspectReportLeadStore(input);
+  },
   enqueueJob,
   listJobs,
   getJob,
@@ -971,6 +1095,8 @@ function createLocalJobContext(): JobExecutionContext {
     listInquiryEvents: localRepository.listInquiryEvents,
     processInquiryNotification: (input) => localRepository.processInquiryNotification(input),
     processInquiryAiEnrichment: (input) => localRepository.processInquiryAiEnrichment(input),
+    getProspectReport: localRepository.getProspectReport,
+    updateProspectReport: localRepository.updateProspectReport,
     cleanupAgentTelemetry: (input) => localRepository.cleanupAgentTelemetry(input)
   };
 }

@@ -1,5 +1,6 @@
 import type { SiteBundle, SiteVersion } from "@/lib/models";
 import { AdminButtonAnchor } from "@/components/admin/AdminButton";
+import { assertSiteVersionV3, firstPageTitleForVersionV3 } from "@/lib/site-version-v3";
 
 type AdminArtifactFrameProps = {
   bundle: SiteBundle;
@@ -8,7 +9,7 @@ type AdminArtifactFrameProps = {
 
 export function AdminArtifactFrame({ bundle, version }: AdminArtifactFrameProps) {
   const src = `/editor/${bundle.siteModel.slug}/preview?versionId=${encodeURIComponent(version.id)}`;
-  const homeTitle = version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Preview";
+  const homeTitle = firstPageTitleForVersionV3(assertSiteVersionV3(version, "artifact frame version"));
 
   return (
     <section className="panel workspace-artifact-panel">

@@ -93,6 +93,20 @@ export function imageMimeTypeMatchesBytes(mimeType: SupportedAssetMimeType, byte
   return buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
 }
 
+export async function readStoredAsset(storagePath: string): Promise<{ bytes: Buffer; mimeType: string } | undefined> {
+  const normalizedPath = normalizeStoragePath(storagePath);
+  if (!normalizedPath) return undefined;
+  if (process.env.LODESTA_ASSET_STORAGE !== "local") {
+    const { data, error } = await getSupabaseAdminClient().storage.from(ASSET_BUCKET_NAME).download(normalizedPath);
+    if (error || !data) return undefined;
+    return {
+      bytes: Buffer.from(await data.arrayBuffer()),
+      mimeType: mimeForExtension(normalizedPath)
+    };
+  }
+  return readLocalAsset(normalizedPath);
+}
+
 export async function readLocalAsset(storagePath: string, localRoot = join(process.cwd(), ".data", "assets")) {
   const normalizedPath = normalizeStoragePath(storagePath);
   if (!normalizedPath) return undefined;

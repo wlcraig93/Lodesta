@@ -51,6 +51,12 @@ type SiteRendererV3Props = {
    * sites, "none" (default) for QA/internal renders.
    */
   proofMode?: "ui_kit" | "link_only" | "none";
+  /**
+   * Allow reference_only/unknown-rights brand marks (scraped logos) to render.
+   * Admin and editor previews pass true; public/customer surfaces never do —
+   * scraped branding stays gated behind owner attestation there.
+   */
+  referenceBrandingEnabled?: boolean;
 };
 
 type Cta = { label: string; href: string };
@@ -68,7 +74,8 @@ export function SiteRendererV3({
   tracking = true,
   formsEnabled = true,
   basePath,
-  proofMode = "none"
+  proofMode = "none",
+  referenceBrandingEnabled = false
 }: SiteRendererV3Props) {
   // Custom-domain requests pass "" so nav never links back to platform URLs.
   const linkBase = basePath ?? `/sites/${site.slug}`;
@@ -104,6 +111,8 @@ export function SiteRendererV3({
       data-badge-style={version.artDirection.controls?.badgeStyle}
       data-fact-highlight={version.artDirection.controls?.factHighlight}
       data-header-surface={version.artDirection.controls?.headerSurface}
+      data-number-style={version.artDirection.controls?.numberStyle}
+      data-cta-band-tone={version.artDirection.controls?.ctaBandTone}
       style={artDirectionStyle(version)}
     >
       {tracking ? <AnalyticsTracker siteId={business.siteId} pageId={page.id} /> : null}
@@ -116,6 +125,7 @@ export function SiteRendererV3({
         version={version}
         firstVisualSection={firstVisualSection}
         linkBase={linkBase}
+        referenceBrandingEnabled={referenceBrandingEnabled}
       />
       <GoogleProofV3
         mode={proofMode}
@@ -134,7 +144,7 @@ export function SiteRendererV3({
           linkBase={linkBase}
         />
       ))}
-      <FooterV3 business={business} linkBase={linkBase} />
+      <FooterV3 business={business} version={version} linkBase={linkBase} artDirection={version.artDirection} />
       {business.phone && version.presentation?.mobileActionBehavior === "always" ? (
         <div className="site-mobile-call-bar-v3" data-reserved-space={version.presentation.reservedMobileActionSpace ? "true" : undefined}>
           <a className="site-button-v3 site-button-v3-primary" href={`tel:${phoneHrefValue(business.phone)}`}>
@@ -146,9 +156,22 @@ export function SiteRendererV3({
   );
 }
 
-function HeaderV3({ business, version, firstVisualSection, linkBase }: { business: BusinessProfile; site?: SiteModel; version: SiteVersionV3; firstVisualSection?: VisualSectionV3; linkBase: string }) {
+function HeaderV3({
+  business,
+  version,
+  firstVisualSection,
+  linkBase,
+  referenceBrandingEnabled
+}: {
+  business: BusinessProfile;
+  site?: SiteModel;
+  version: SiteVersionV3;
+  firstVisualSection?: VisualSectionV3;
+  linkBase: string;
+  referenceBrandingEnabled?: boolean;
+}) {
   const phoneHref = business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact";
-  const logoUrl = safeLogoUrl(business.logo);
+  const logoUrl = safeLogoUrl(business.logo, referenceBrandingEnabled);
   const visualMode = headerVisualMode(version.artDirection, firstVisualSection);
   const navLinks = servicePageNavLinks(linkBase, version);
   return (
@@ -165,10 +188,7 @@ function HeaderV3({ business, version, firstVisualSection, linkBase }: { busines
             <strong>{business.name}</strong>
           </>
         ) : (
-          <strong className="site-brand-lockup-v3">
-            {business.name}
-            <span aria-hidden="true">.</span>
-          </strong>
+          <BrandLockupV3 name={business.name} artDirection={version.artDirection} />
         )}
       </a>
       <nav className="site-nav-v3" aria-label={`${business.name} navigation`}>
@@ -237,16 +257,7 @@ function SectionV3({
       />
     );
   }
-  if (family.startsWith("hero.")) return <HeroV3 variant={variant} props={props} />;
-  if (family.startsWith("services.")) return <ServicesV3 variant={variant} props={props} />;
-  if (family.startsWith("proof.")) return <ProofV3 variant={variant} props={props} />;
-  if (family.startsWith("story.")) return <StoryV3 variant={variant} props={props} />;
-  if (family.startsWith("media.")) return <MediaStoryV3 variant={variant} props={props} />;
-  if (family.startsWith("local.")) return <LocalActionV3 variant={variant} props={props} business={business} />;
-  if (family.startsWith("process.") || family.startsWith("faq.")) return <FaqProcessV3 variant={variant} props={props} />;
-  if (family.startsWith("contact.")) return <ContactV3 variant={variant} props={props} business={business} formsEnabled={formsEnabled} pageId={pageId} />;
-  if (family.startsWith("cta.")) return <FinalCtaV3 variant={variant} props={props} />;
-  return null;
+  throw new Error(`layout-v3 section ${family}/${variant} is missing visualSectionV3.`);
 }
 
 export function VisualSectionRendererV3({
@@ -364,6 +375,28 @@ function VisualTemplateSlotsRendererV3({
           <SlotBlockV3 role="rows_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "program_rows")}</SlotBlockV3>
         </>
       );
+    case "numbered_steps":
+      return (
+        <>
+          <SlotBlockV3 role="steps_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="steps_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "stepper_vertical")}</SlotBlockV3>
+        </>
+      );
+    case "stat_band": {
+      const stat = section.slots.facts.items[0];
+      return (
+        <>
+          <SlotBlockV3 role="stat_value" kind="facts">
+            <div className="site-visual-stat-v3">
+              <strong>{stat?.value}</strong>
+              <span>{stat?.label}</span>
+            </div>
+          </SlotBlockV3>
+          <SlotBlockV3 role="stat_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="stat_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    }
     case "feature_band":
       return (
         <>
@@ -416,14 +449,82 @@ function VisualTemplateSlotsRendererV3({
           {section.slots.action ? <SlotBlockV3 role="statement_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
-    case "location_panel":
+    case "location_directory":
       return (
         <>
           <SlotBlockV3 role="location_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="location_list" kind="list">{renderLocationsSlotV3(section.slots.locations.locations)}</SlotBlockV3>
+          <SlotBlockV3 role="location_list" kind="list">{renderLocationDirectorySlotV3(section.slots.locations.locations, linkBase)}</SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="location_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
+    case "service_area_showcase":
+      return (
+        <>
+          <SlotBlockV3 role="service_area_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="service_area_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="service_area_action" kind="action_card" className="site-visual-block-v3-surface-card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+        </>
+      );
+    case "location_showcase": {
+      const showcaseLocations = section.slots.locations.locations;
+      const primary = showcaseLocations.find((location) => location.isPrimary) ?? showcaseLocations[0];
+      const mapSrc = primary?.mapEmbedIntent ? mapEmbedUrlForIntent(primary.mapEmbedIntent) : undefined;
+      return (
+        <>
+          <SlotBlockV3 role="showcase_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
+          <SlotBlockV3 role="showcase_visit" kind="facts">
+            <div className="site-location-showcase-v3">
+              <div className="site-location-showcase-head-v3">
+                <span>Visit the shop</span>
+                {primary?.addressLine ? <strong>{primary.addressLine}</strong> : null}
+                {primary?.localityLine ? <p>{primary.localityLine}</p> : null}
+              </div>
+              {primary?.hours?.length ? (
+                <dl className="site-location-showcase-hours-v3">
+                  {primary.hours.map((row) => (
+                    <div key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : primary?.serviceAreas.length ? (
+                <p className="site-location-showcase-coverage-v3">Serving {primary.serviceAreas.join(", ")}</p>
+              ) : null}
+              <div className="site-location-showcase-actions-v3">
+                {primary?.directionsUrl ? (
+                  <a className="site-button-v3 site-button-v3-primary" href={primary.directionsUrl} target="_blank" rel="noopener noreferrer">
+                    Get directions
+                  </a>
+                ) : null}
+                {primary?.phone ? (
+                  <a className="site-button-v3 site-button-v3-secondary" href={`tel:${phoneHrefValue(primary.phone)}`}>
+                    Call {formatPhone(primary.phone)}
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          </SlotBlockV3>
+          <SlotBlockV3 role="showcase_map" kind="media">
+            {mapSrc ? (
+              <div className="site-visual-location-map-v3 site-location-showcase-map-v3">
+                <iframe title={`Map to ${primary?.label ?? "our location"}`} src={mapSrc} loading="lazy" />
+              </div>
+            ) : (
+              <div className="site-location-showcase-areas-v3">
+                <span>{primary?.serviceAreas.length ? "Service areas" : "Find us"}</span>
+                <strong>
+                  {(primary?.serviceAreas.length
+                    ? primary.serviceAreas.slice(0, 6)
+                    : [primary?.localityLine ?? primary?.addressLine ?? "Local area"]
+                  ).join(" · ")}
+                </strong>
+              </div>
+            )}
+          </SlotBlockV3>
+        </>
+      );
+    }
     case "contact_split":
       return (
         <>
@@ -620,20 +721,20 @@ function renderFactsSlotV3(content: FactsSlotV3, presentation: FactsPresentation
   );
 }
 
-function renderLocationsSlotV3(locations: RenderableLocationV3[]) {
-  const primaryLocation = locations.find((location) => location.isPrimary) ?? locations[0];
-  const mapSrc = primaryLocation?.mapEmbedIntent ? mapEmbedUrlForIntent(primaryLocation.mapEmbedIntent) : undefined;
+function renderLocationDirectorySlotV3(locations: RenderableLocationV3[], linkBase?: string) {
   return (
-    <div className="site-visual-locations-v3">
+    <div className="site-visual-locations-v3" data-location-directory="true">
       <div className="site-visual-location-cards-v3">
         {locations.map((location) => (
           <article key={location.id} className="site-visual-location-card-v3" data-primary-location={location.isPrimary ? "true" : undefined}>
+            <div className="site-visual-location-card-mark-v3" aria-hidden="true">
+              <span>{location.localityLine?.slice(0, 2).toUpperCase() || location.label.slice(0, 2).toUpperCase()}</span>
+            </div>
             <div>
-              <span>{location.isPrimary ? "Primary location" : location.role === "covered" ? "Location" : "Service area"}</span>
+              <span>{location.isPrimary ? "Primary location" : "Location"}</span>
               <h3>{location.label}</h3>
             </div>
             {location.addressLine ? <p>{location.addressLine}</p> : null}
-            {!location.addressLine && location.serviceAreas.length ? <p>Serving {location.serviceAreas.join(", ")}</p> : null}
             <dl>
               {location.phone ? (
                 <div>
@@ -671,6 +772,11 @@ function renderLocationsSlotV3(locations: RenderableLocationV3[]) {
               ) : null}
             </dl>
             <div className="site-actions-v3">
+              {location.href ? (
+                <a className="site-button-v3 site-button-v3-primary" href={`${linkBase ?? ""}${location.href}`}>
+                  View location
+                </a>
+              ) : null}
               {location.directionsUrl ? (
                 <a className="site-button-v3 site-button-v3-secondary" href={location.directionsUrl} data-analytics-role="directions_click">
                   Get directions
@@ -685,16 +791,6 @@ function renderLocationsSlotV3(locations: RenderableLocationV3[]) {
           </article>
         ))}
       </div>
-      {mapSrc && primaryLocation ? (
-        <div className="site-visual-location-map-v3">
-          <iframe
-            title={`${primaryLocation.label} map`}
-            src={mapSrc}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1268,15 +1364,25 @@ function FinalCtaV3({ variant, props }: { variant: string; props: SectionProps }
   );
 }
 
-function FooterV3({ business, linkBase }: { business: BusinessProfile; linkBase: string }) {
+function FooterV3({
+  business,
+  version,
+  linkBase,
+  artDirection
+}: {
+  business: BusinessProfile;
+  version: SiteVersionV3;
+  linkBase: string;
+  artDirection: SiteVersionV3["artDirection"];
+}) {
   const services = business.services.slice(0, 5);
   const hours = hoursEntries(business.hours).slice(0, 4);
+  const locationPages = version.pageComposition.pages.filter((page) => page.purpose === "location_landing");
   return (
     <footer className="site-footer-v3" data-site-chrome="footer">
       <div className="site-footer-brand-v3">
-        <a className="site-brand-lockup-v3" href={linkBase || "/"}>
-          {business.name}
-          <span aria-hidden="true">.</span>
+        <a href={linkBase || "/"}>
+          <BrandLockupV3 name={business.name} artDirection={artDirection} />
         </a>
         <span>{[business.categories[0], business.address?.city].filter(Boolean).join(" in ") || "Local business"}</span>
       </div>
@@ -1290,6 +1396,14 @@ function FooterV3({ business, linkBase }: { business: BusinessProfile; linkBase:
         <div className="site-footer-column-v3">
           <strong>Services</strong>
           {services.map((service) => <span key={service}>{service}</span>)}
+        </div>
+      ) : null}
+      {locationPages.length ? (
+        <div className="site-footer-column-v3">
+          <strong>Locations</strong>
+          {locationPages.slice(0, 5).map((page) => (
+            <a key={page.slug} href={`${linkBase}/${page.slug}`}>{page.title.split("|")[0]?.trim() || page.slug}</a>
+          ))}
         </div>
       ) : null}
       {hours.length ? (
@@ -1380,15 +1494,14 @@ function visualCtaClass(style: "primary" | "secondary" | "text" | undefined) {
 }
 
 function headerVisualMode(artDirection: SiteArtDirectionV3, firstVisualSection?: VisualSectionV3) {
-  if (firstVisualSection && isHeroVisualSection(firstVisualSection)) {
-    return firstVisualSection.options.background.kind === "image" ? "transparent_overlay" : "solid";
+  // An image-backed hero always forces the overlay treatment; otherwise the
+  // art direction's selected header mode is the rendering authority. (The old
+  // recipe-name skin branches matched no fixture or production recipe in a
+  // way that ever rendered, and were removed with the headerMode wiring.)
+  if (firstVisualSection && isHeroVisualSection(firstVisualSection) && firstVisualSection.options.background.kind === "image") {
+    return "transparent_overlay";
   }
-  if (artDirection.headerMode === "transparent_overlay") return "transparent_overlay";
-  if (artDirection.recipeId.includes("canonical_editorial")) return "floating_pill";
-  if (artDirection.recipeId.includes("immersive_media")) return "transparent_overlay";
-  if (artDirection.recipeId.includes("premium_dark")) return "glass_overlay";
-  if (artDirection.recipeId.includes("minimal_studio")) return "floating_pill";
-  return "solid";
+  return artDirection.headerMode ?? "solid_editorial";
 }
 
 function isHeroVisualSection(section: VisualSectionV3) {
@@ -1527,10 +1640,88 @@ function arrayProp<T>(value: unknown): T[] {
 }
 
 
-function safeLogoUrl(logo: BusinessProfile["logo"] | undefined) {
+/**
+ * Wordmark treatment when no usable logo exists. Variant follows the art
+ * direction's font pairing so the fallback varies across sites instead of
+ * every business getting the identical "Name." lockup.
+ */
+type WordmarkVariantV3 = "plain" | "accent_period" | "two_tone" | "underline" | "monogram_chip" | "dot_lead";
+
+const wordmarkVariantByPairing: Record<SiteArtDirectionFontPairingIdV3, WordmarkVariantV3> = {
+  editorial_serif_clean_sans: "plain",
+  display_sans_humanist: "dot_lead",
+  condensed_service_sans: "two_tone",
+  warm_editorial_sans: "underline",
+  precision_grotesk: "monogram_chip",
+  friendly_rounded: "accent_period",
+  magazine_grotesk: "underline",
+  quiet_serif: "plain"
+};
+
+function BrandLockupV3({ name, artDirection }: { name: string; artDirection: SiteVersionV3["artDirection"] }) {
+  let variant = wordmarkVariantByPairing[artDirection.fontPairingId] ?? "plain";
+  const words = name.trim().split(/\s+/);
+  if (variant === "two_tone" && words.length < 2) variant = "accent_period";
+
+  if (variant === "two_tone") {
+    const head = words.slice(0, -1).join(" ");
+    const tail = words[words.length - 1];
+    return (
+      <strong className="site-brand-lockup-v3" data-wordmark="two_tone">
+        {head} <span className="site-brand-accent-v3">{tail}</span>
+      </strong>
+    );
+  }
+  if (variant === "monogram_chip") {
+    const initial = (words[0]?.[0] ?? "").toUpperCase();
+    return (
+      <strong className="site-brand-lockup-v3" data-wordmark="monogram_chip">
+        {initial ? (
+          <span className="site-brand-monogram-v3" aria-hidden="true">
+            {initial}
+          </span>
+        ) : null}
+        {name}
+      </strong>
+    );
+  }
+  return (
+    <strong className="site-brand-lockup-v3" data-wordmark={variant}>
+      {variant === "dot_lead" ? <span className="site-brand-accent-v3 site-brand-dot-v3" aria-hidden="true" /> : null}
+      {name}
+      {variant === "accent_period" ? (
+        <span className="site-brand-accent-v3" aria-hidden="true">
+          .
+        </span>
+      ) : null}
+    </strong>
+  );
+}
+
+// The header brand slot renders at 42 CSS px; below 84 natural px (2x for
+// retina) a raster logo upscales and pixelates, which reads worse than the
+// typographic lockup fallback. Unmeasured logos stay eligible.
+const minLogoNaturalPx = 84;
+// The brand slot is a 42px square next to the wordmark text. A very wide image
+// (an og:image / share banner, or a marketing lockup with the name baked in)
+// renders as an illegible sliver in that square and duplicates the wordmark, so
+// it reads worse than the lockup. Lenient bound: normal icon and tight-wordmark
+// logos sit well under this; only true banners trip it. Unmeasured logos stay
+// eligible (public-safe remote logos aren't always measured).
+const maxLogoAspect = 3.2;
+
+function safeLogoUrl(logo: BusinessProfile["logo"] | undefined, referenceBrandingEnabled = false) {
   if (!logo) return undefined;
-  if (logo.rightsStatus === "reference_only" || logo.rightsStatus === "unknown") return undefined;
   if (logo.source === "placeholder") return undefined;
+  // Favicons are never usable brand marks regardless of rights.
+  if (/\.ico(\?|#|$)/i.test(logo.url)) return undefined;
+  if (logo.width && logo.height && Math.min(logo.width, logo.height) < minLogoNaturalPx) return undefined;
+  if (logo.width && logo.height && Math.max(logo.width, logo.height) / Math.min(logo.width, logo.height) > maxLogoAspect) {
+    return undefined;
+  }
+  if (logo.rightsStatus === "reference_only" || logo.rightsStatus === "unknown") {
+    return referenceBrandingEnabled ? logo.url : undefined;
+  }
   return logo.url;
 }
 

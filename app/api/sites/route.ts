@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
+import { assertSiteVersionV3, pageCountForVersionV3 } from "@/lib/site-version-v3";
 
 export async function GET(request: Request) {
   const unauthorized = await requireAdmin(request);
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
         id: version.id,
         status: version.status,
         createdAt: version.createdAt,
-        pages: version.pages.length
+        pages: pageCountForVersionV3(assertSiteVersionV3(version, "site API version"))
       })),
       findings: bundle.optimizationFindings.length,
       experiments: bundle.experiments.length

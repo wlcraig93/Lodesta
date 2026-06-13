@@ -4,6 +4,7 @@ import { getEditingVersion } from "@/lib/sample-data";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { assertSiteVersionV3, findPageBySlugV3 } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,9 @@ export default async function DraftPreviewPage({
     ? bundle.siteModel.versions.find((candidate) => candidate.id === versionId)
     : getEditingVersion(bundle.siteModel);
   if (!version) notFound();
+  const v3Version = assertSiteVersionV3(version, "draft preview version");
   const pageSlug = path?.join("/") ?? "";
-  const page = version.pages.find((candidate) => candidate.slug === pageSlug);
+  const page = findPageBySlugV3(v3Version, pageSlug);
   if (!page) notFound();
 
   return (
@@ -43,11 +45,12 @@ export default async function DraftPreviewPage({
       extensions={bundle.extensionModel}
       locations={bundle.locations}
       locationBindings={bundle.locationBindings}
-      version={version}
+      version={v3Version}
       page={page}
-      theme={version.theme ?? bundle.siteModel.theme}
+      theme={v3Version.theme ?? bundle.siteModel.theme}
       tracking={false}
       formsEnabled={false}
+      referenceBrandingEnabled
     />
   );
 }

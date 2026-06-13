@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { DesignPlan, LayoutSectionKind, LayoutSectionPreset } from "@/lib/models";
+import type { DesignPlan } from "@/lib/models";
 
 type DesignControlsProps = {
   siteId: string;
@@ -9,10 +9,10 @@ type DesignControlsProps = {
   initialDesignPlan: DesignPlan;
   sections: Array<{
     id: string;
-    kind: LayoutSectionKind;
+    kind: string;
     label: string;
-    preset: LayoutSectionPreset;
-    presetOptions: Array<{ id: LayoutSectionPreset; label: string }>;
+    preset: string;
+    presetOptions: Array<{ id: string; label: string }>;
   }>;
 };
 
@@ -33,7 +33,7 @@ export function DesignControls({ siteId, pageId, initialDesignPlan, sections }: 
     });
   }
 
-  function updateSectionPreset(sectionId: string, preset: LayoutSectionPreset) {
+  function updateSectionPreset(sectionId: string, preset: string) {
     setSectionOrder((current) =>
       current.map((section) => (section.id === sectionId ? { ...section, preset } : section))
     );
@@ -51,8 +51,8 @@ export function DesignControls({ siteId, pageId, initialDesignPlan, sections }: 
           stylePack: designPlan.stylePack,
           typographyPack: designPlan.typographyPack
         },
-        layoutSectionOrder: sectionOrder.map((section) => section.id),
-        sectionPresets: Object.fromEntries(sectionOrder.map((section) => [section.id, section.preset]))
+        sectionOrder: sectionOrder.map((section) => section.id),
+        sectionTemplates: Object.fromEntries(sectionOrder.map((section) => [section.id, section.preset]))
       })
     });
     const result = await response.json();
@@ -109,7 +109,7 @@ export function DesignControls({ siteId, pageId, initialDesignPlan, sections }: 
             <strong>{section.label}</strong>
             <label className="section-variant-control">
               <span>Preset</span>
-              <select value={section.preset} onChange={(event) => updateSectionPreset(section.id, event.target.value as LayoutSectionPreset)}>
+              <select value={section.preset} onChange={(event) => updateSectionPreset(section.id, event.target.value)}>
                 {section.presetOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}

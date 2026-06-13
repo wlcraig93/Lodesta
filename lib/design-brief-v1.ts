@@ -8,6 +8,7 @@ import {
   type DesignControlsV3,
   type DesignProfileV3
 } from "./generated-site-v3-art-direction-catalog";
+import { compositionIntentMenuV3, type CompositionPlanV3 } from "./generated-site-v3-composition-plan";
 import { extractOpenAiResponseText, openAiErrorMessage } from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
 
@@ -31,7 +32,9 @@ const overrideKeys = [
   "figureTreatment",
   "headingCase",
   "badgeStyle",
-  "factHighlight"
+  "factHighlight",
+  "ctaBandTone",
+  "numberStyle"
 ] as const;
 
 const briefSchema = z.object({
@@ -47,7 +50,20 @@ const briefSchema = z.object({
         why: z.string().min(1).max(200)
       })
     )
-    .max(2)
+    .max(2),
+  /**
+   * Ordered middle-section plan from the fixed intent menu (workstream A).
+   * Empty array means "no opinion" — the compiler keeps its deterministic
+   * order. The compiler validates against the grammar either way.
+   */
+  compositionPlan: z
+    .array(
+      z.object({
+        intent: z.enum(compositionIntentMenuV3),
+        why: z.string().min(1).max(200)
+      })
+    )
+    .max(10)
 });
 
 export type DesignBriefResult = {
@@ -62,7 +78,9 @@ const controlValueUniverse: Record<(typeof overrideKeys)[number], string[]> = {
   figureTreatment: ["flush", "framed_shadow"],
   headingCase: ["standard", "display_upper"],
   badgeStyle: ["square", "rounded", "tilted"],
-  factHighlight: ["plain", "accent_value"]
+  factHighlight: ["plain", "accent_value"],
+  ctaBandTone: ["dark", "brand", "paper"],
+  numberStyle: ["oversized", "outlined", "filled_chip"]
 };
 
 export async function createDesignBrief(input: {
@@ -71,7 +89,10 @@ export async function createDesignBrief(input: {
   brandApplied: boolean;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
-}): Promise<{ profile: DesignProfileV3; overrides: Partial<DesignControlsV3>; source: "model" } | undefined> {
+}): Promise<
+  | { profile: DesignProfileV3; overrides: Partial<DesignControlsV3>; compositionPlan?: CompositionPlanV3; source: "model" }
+  | undefined
+> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || process.env.LODESTA_DESIGN_BRIEF === "off") return undefined;
   const model = process.env.LODESTA_DESIGN_BRIEF_MODEL ?? "gpt-5-mini";
@@ -88,7 +109,20 @@ export async function createDesignBrief(input: {
       steady_professional: "calm competence (law, home services): restrained, trustworthy",
       warm_boutique: "inviting and sensory (salons, restaurants): soft chrome, warm pacing"
     },
-    overrideVocabulary: controlValueUniverse
+    overrideVocabulary: controlValueUniverse,
+    evidence: {
+      photoCount: input.business.photos.length,
+      serviceCount: input.business.services.length,
+      hasStory: Boolean(input.understanding?.businessStory?.summary),
+      hasAddress: Boolean(input.business.address),
+      serviceAreaCount: input.business.serviceAreas.length
+    },
+    compositionIntentMenu: compositionIntentMenuV3,
+    compositionExemplars: {
+      media_led: ["facts", "gallery", "story", "services", "process", "testimonials", "faq", "cta_band", "location"],
+      conversion_led: ["facts", "services", "process", "story", "faq", "cta_band", "location"],
+      story_led: ["story", "about", "services", "gallery", "process", "faq", "cta_band", "location"]
+    }
   };
   const body = {
     model,
@@ -102,7 +136,12 @@ export async function createDesignBrief(input: {
               "You are an art director choosing a design direction for a small-business website.",
               "Pick the register and brand posture that fit THIS business, write one honest rationale sentence,",
               "and propose at most two control overrides ONLY when the business's story or services argue for them.",
-              "Default posture is reserved unless real brand cues exist (brandCuesApplied)."
+              "Default posture is reserved unless real brand cues exist (brandCuesApplied).",
+              "Also propose compositionPlan: order 4-10 middle sections from compositionIntentMenu so the page is shaped by THIS business's evidence",
+              "(deep photo set leads with media, strong story leads with story, sparse evidence stays lean).",
+              "Every entry needs a one-line evidence rationale. The exemplars are starting points, not rules — deviate when evidence argues for it.",
+              "Hard constraints the validator will enforce: services/faq/cta_band always included when available, location included when the business has one,",
+              "cta_band in the final three, no intent twice. Return an empty compositionPlan array if you have no strong opinion."
             ].join(" ")
           }
         ]
@@ -118,7 +157,7 @@ export async function createDesignBrief(input: {
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["register", "brandPosture", "rationale", "overrides"],
+          required: ["register", "brandPosture", "rationale", "overrides", "compositionPlan"],
           properties: {
             register: { type: "string", enum: ["punchy_retail", "steady_professional", "warm_boutique"] },
             brandPosture: { type: "string", enum: ["accent_forward", "reserved"] },
@@ -133,6 +172,19 @@ export async function createDesignBrief(input: {
                 properties: {
                   control: { type: "string", enum: [...overrideKeys] },
                   value: { type: "string" },
+                  why: { type: "string" }
+                }
+              }
+            },
+            compositionPlan: {
+              type: "array",
+              maxItems: 10,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["intent", "why"],
+                properties: {
+                  intent: { type: "string", enum: [...compositionIntentMenuV3] },
                   why: { type: "string" }
                 }
               }
@@ -173,7 +225,16 @@ export async function createDesignBrief(input: {
         overrides[override.control] = override.value as never;
       }
     }
-    return { profile, overrides, source: "model" };
+
+    // Fewer than four planned sections reads as "no strong opinion"; the
+    // compiler's grammar validator re-checks everything against built
+    // sections either way, with the deterministic order as the fallback.
+    const compositionPlan: CompositionPlanV3 | undefined =
+      brief.compositionPlan.length >= 4
+        ? { version: "composition-plan-v1", sections: brief.compositionPlan, source: "model" }
+        : undefined;
+
+    return { profile, overrides, compositionPlan, source: "model" };
   } catch {
     return undefined;
   }

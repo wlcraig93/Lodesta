@@ -5,6 +5,7 @@ import { supabaseRepository } from "../lib/supabase/repository";
 import { requiredClaimFactIds } from "../lib/fact-verification";
 import { ASSET_BUCKET_NAME, imageMimeTypeMatchesBytes, storeAssetBytes } from "../lib/asset-storage";
 import { ASSET_LIBRARY_BUCKET_NAME } from "../lib/asset-library";
+import { assertSiteVersionV3, pageCountForVersionV3 } from "../lib/site-version-v3";
 
 type CheckResult = {
   name: string;
@@ -73,7 +74,7 @@ async function main() {
     assert(loaded.locationBindings?.length === loaded.locations.length, "Persisted site did not hydrate coherent location bindings.");
     assert(loaded.locationBindings?.[0]?.role === "primary", "Persisted site did not hydrate a primary location binding.");
   }
-  checks.push({ name: "load_site", ok: true, detail: `Loaded persisted site with ${loaded.siteModel.versions[0]?.pages.length ?? 0} page(s).` });
+  checks.push({ name: "load_site", ok: true, detail: `Loaded persisted site with ${pageCountForVersionV3(assertSiteVersionV3(loaded.siteModel.versions[0]))} page(s).` });
 
   const bySlug = await supabaseRepository.getSiteBundleBySlug(bundle.siteModel.slug);
   assert(bySlug?.businessProfile.siteId === acceptedSiteId, "Persisted site could not be loaded by slug.");
@@ -146,7 +147,7 @@ async function main() {
     siteId: acceptedSiteId,
     sessionId: `verify_${runId}`,
     visitorId: `visitor_${runId}`,
-    pageId: "page_home",
+    pageId: "home",
     eventType: "pageview",
     timestamp: new Date().toISOString(),
     metadata: { smoke: true, runId }
@@ -155,7 +156,7 @@ async function main() {
     siteId: acceptedSiteId,
     sessionId: `verify_${runId}`,
     visitorId: `visitor_${runId}`,
-    pageId: "page_home",
+    pageId: "home",
     eventType: "tel_click",
     timestamp: new Date().toISOString(),
     metadata: { role: "tel", runId }
@@ -163,7 +164,7 @@ async function main() {
   await supabaseRepository.recordAnalyticsEvent({
     siteId: acceptedSiteId,
     sessionId: `verify_old_${runId}`,
-    pageId: "page_home",
+    pageId: "home",
     eventType: "pageview",
     timestamp: "2020-01-01T00:00:00.000Z",
     metadata: { runId }
@@ -171,7 +172,7 @@ async function main() {
   await supabaseRepository.recordAnalyticsEvent({
     siteId: acceptedSiteId,
     sessionId: `verify_agent_${runId}`,
-    pageId: "page_home",
+    pageId: "home",
     eventType: "agent_readable_request",
     timestamp: new Date().toISOString(),
     metadata: {
@@ -204,7 +205,7 @@ async function main() {
   const inquiryResult = await supabaseRepository.createInquiryFromForm({
     siteId: acceptedSiteId,
     form,
-    pageId: "page_home",
+    pageId: "home",
     visitorId: `visitor_${runId}`,
     payload: {
       name: "Supabase Verify",
@@ -294,7 +295,7 @@ async function main() {
     await supabaseRepository.recordAnalyticsEvent({
       siteId: acceptedSiteId,
       sessionId: `verify_experiment_${runId}_${index}`,
-      pageId: "page_home",
+      pageId: "home",
       eventType: "experiment_assignment",
       timestamp: new Date().toISOString(),
       metadata: { experimentId: experiment.id, variantId, runId }
@@ -304,7 +305,7 @@ async function main() {
     await supabaseRepository.recordAnalyticsEvent({
       siteId: acceptedSiteId,
       sessionId: `verify_experiment_${runId}_${index}`,
-      pageId: "page_home",
+      pageId: "home",
       eventType: "tel_click",
       timestamp: new Date().toISOString(),
       metadata: { runId }

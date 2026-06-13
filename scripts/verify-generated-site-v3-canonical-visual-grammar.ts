@@ -299,9 +299,16 @@ function slotShapeErrors(siteId: string, purposeId: SectionPurposeTemplateIdV3, 
     case "facts_cta":
       if (!withinRange(visualSection.slots.facts.items.length, { min: 3, max: 4 })) errors.push(`${context} should carry three or four facts.`);
       break;
-    case "location_panel":
+    case "location_directory":
       if (!visualSection.slots.locations.locations.length) errors.push(`${context} should carry at least one renderable location.`);
       if (!visualSection.slots.locations.locations.some((location) => location.isPrimary)) errors.push(`${context} should identify a primary location.`);
+      break;
+    case "location_showcase":
+      if (!visualSection.slots.locations.locations.length) errors.push(`${context} should carry one renderable location.`);
+      if (!visualSection.slots.locations.locations.every((location) => location.addressLine)) errors.push(`${context} location_showcase should only carry address-bearing locations.`);
+      break;
+    case "service_area_showcase":
+      if (!withinRange(visualSection.slots.facts.items.length, { min: 1, max: 6 })) errors.push(`${context} should carry one to six service-area facts.`);
       break;
     case "contact_split":
       if (!withinRange(visualSection.slots.contact.facts.length, { min: 3, max: 4 })) errors.push(`${context} should carry three or four contact facts.`);

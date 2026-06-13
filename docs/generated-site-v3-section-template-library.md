@@ -32,7 +32,9 @@ The canonical grammar is the source of truth for generic section-template compos
 | `facts_strip` | `proof.facts_strip` | `facts_strip.four_facts` | Compact facts-only trust band. |
 | `facts_cta` | `proof.facts_cta` | `facts_cta.request_guidance` | Facts plus one bounded CTA panel. |
 | `editorial_statement` | `statement.editorial` | `editorial_statement.centered_close` | Centered typographic break with inline CTA. |
-| `location_panel` | `local.location_panel` | `location_panel.location_cards` | First-party location facts, service areas, directions, and optional map intent. |
+| `location_showcase` | `local.location_showcase` | `location_showcase.destination` | Single address-bearing location with address, hours, directions, and map or coverage fallback. |
+| `location_directory` | `local.location_directory` | `location_directory.cards` | Multi-location directory with physical-location cards linking to `/locations/{slug}` pages. |
+| `service_area_showcase` | `local.service_area_showcase` | `service_area_showcase.coverage` | Coverage-first local section for service-area businesses without a physical address. |
 | `contact_split` | `contact.split` | `contact_split.dark_contact` | Contact copy plus contact facts. |
 
 ## Enforcement
@@ -65,7 +67,7 @@ The current V1 geometry library is intended to cover common polished landing-pag
 - first-viewport heroes: split media, text-led statement, and image-backed full-bleed statement
 - content/media rhythm: split media, wide media feature, and media mosaic
 - repeated content: intro card grid, comparison-treated intro grid, side intro rows, quote wall, and FAQ rows
-- proof/conversion: facts strip, facts CTA, editorial statement, location panel, contact split, header, and footer
+- proof/conversion: facts strip, facts CTA, editorial statement, location showcase, location directory, service-area showcase, contact split, header, and footer
 
 Deferred until separately proven:
 

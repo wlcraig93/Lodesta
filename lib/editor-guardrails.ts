@@ -1,6 +1,8 @@
 import type { QACheck, SiteBundle } from "./models";
 import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
 import { runSiteQa } from "./qa";
+import { applyV3SectionUpdate } from "./v3-editor";
+import { assertSiteVersionV3 } from "./site-version-v3";
 
 type SectionUpdateInput = {
   siteId: string;
@@ -52,8 +54,8 @@ const warningClaimPatterns: Array<{ label: string; pattern: RegExp }> = [
 
 export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateInput): EditorGuardrailResult {
   const draftBundle = structuredClone(bundle);
-  const draft = clonePublishedAsDraft(draftBundle);
-  const page = draft.pages.find((candidate) => candidate.id === input.pageId);
+  const draft = assertSiteVersionV3(clonePublishedAsDraft(draftBundle), "guardrail draft");
+  const page = draft.pageComposition.pages.find((candidate) => candidate.id === input.pageId);
   const section = page?.sections.find((candidate) => candidate.id === input.sectionId);
   if (!section) {
     return block("Unknown site, page, or section", [
@@ -70,21 +72,6 @@ export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateIn
 
   const issues: EditorGuardrailIssue[] = [];
   for (const [key, value] of Object.entries(input.props)) {
-    const policy = section.fieldPolicies[key];
-    if (!policy || (policy.editScope !== "owner_choice" && policy.editScope !== "owner_freetext")) {
-      return block(`Field ${key} is not editable by owner controls.`, [
-        {
-          id: "field_not_owner_editable",
-          severity: "block",
-          title: "Field is locked",
-          detail: `Field ${key} is controlled by the system, pinned content, or another managed workflow.`,
-          field: key,
-          pageId: input.pageId,
-          sectionId: input.sectionId
-        }
-      ]);
-    }
-
     issues.push(
       ...scanSensitiveClaims(value, {
         field: key,
@@ -93,7 +80,33 @@ export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateIn
         sectionId: input.sectionId
       })
     );
-    section.props[key] = value;
+  }
+  if ("primaryCta" in input.props && !isUsablePrimaryCta(input.props.primaryCta)) {
+    issues.push({
+      id: "qa_blocking_regression",
+      severity: "block",
+      title: "Primary CTA guardrail",
+      detail: "The primary CTA must keep visible text and a valid destination.",
+      field: "primaryCta",
+      pageId: input.pageId,
+      sectionId: input.sectionId,
+      checkId: "primary_cta_guardrail",
+      key: `qa:primary_cta_guardrail:${input.pageId}:${input.sectionId}`
+    });
+    return resultFromIssues(issues);
+  }
+  const applied = applyV3SectionUpdate(draftBundle, input);
+  if (!applied.ok) {
+    return block(applied.reason, [
+      {
+        id: "field_not_owner_editable",
+        severity: "block",
+        title: "Field is locked",
+        detail: applied.reason,
+        pageId: input.pageId,
+        sectionId: input.sectionId
+      }
+    ]);
   }
 
   issues.push(...qaRegressionIssues(bundle, draftBundle));
@@ -167,19 +180,16 @@ function sensitiveClaimsFromBundle(bundle: SiteBundle) {
   );
 
   for (const version of bundle.siteModel.versions) {
-    for (const page of version.pages) {
+    const v3 = assertSiteVersionV3(version, "guardrail sensitive scan version");
+    for (const page of v3.pageComposition.pages) {
       for (const section of page.sections) {
-        for (const [field, policy] of Object.entries(section.fieldPolicies)) {
-          if (policy.editScope !== "owner_choice" && policy.editScope !== "owner_freetext" && !policy.factField) continue;
-          issues.push(
-            ...scanSensitiveClaims(section.props[field], {
-              field,
-              path: `${page.title} ${humanizeField(field)}`,
-              pageId: page.id,
-              sectionId: section.id
-            })
-          );
-        }
+        issues.push(
+          ...scanSensitiveClaims(section.props, {
+            path: page.title,
+            pageId: page.id,
+            sectionId: section.id
+          })
+        );
       }
     }
   }
@@ -252,6 +262,12 @@ function severityRank(severity: QACheck["severity"] | undefined) {
   if (severity === "fail") return 2;
   if (severity === "warning") return 1;
   return 0;
+}
+
+function isUsablePrimaryCta(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const cta = value as { label?: unknown; href?: unknown };
+  return typeof cta.label === "string" && Boolean(cta.label.trim()) && typeof cta.href === "string" && Boolean(cta.href.trim());
 }
 
 function resultFromIssues(issues: EditorGuardrailIssue[], qa?: ReturnType<typeof runSiteQa>): EditorGuardrailResult {

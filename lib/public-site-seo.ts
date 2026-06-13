@@ -1,10 +1,12 @@
-import type { ClaimRecord, PageModel, SiteBundle } from "./models";
+import type { ClaimRecord, SiteBundle } from "./models";
 import { configuredAppOrigin } from "./app-origin";
 import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
+import type { PageV3 } from "./site-version-v3";
+import { assertSiteVersionV3 } from "./site-version-v3";
 
-export function canonicalUrlForPage(bundle: SiteBundle, page: PageModel, headers: HeaderReader) {
+export function canonicalUrlForPage(bundle: SiteBundle, page: PageV3, headers: HeaderReader) {
   const canonicalPath = normalizeCanonicalPath(page.seo.canonicalPath || page.slug);
   if (isCustomDomainRequest(headers)) return `${requestOrigin(headers)}${canonicalPath}`;
 
@@ -21,9 +23,9 @@ export function siteRobotsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers
 }
 
 export function siteSitemapXml(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
-  const version = getPublishedVersion(bundle.siteModel);
+  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published site sitemap version");
   const urls = isIndexableSite(bundle, claims)
-    ? version.pages.map((page) => ({
+    ? version.pageComposition.pages.map((page) => ({
         loc: canonicalUrlForPage(bundle, page, headers),
         lastmod: version.createdAt,
         changefreq: "weekly",

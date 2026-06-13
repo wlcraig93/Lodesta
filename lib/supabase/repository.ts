@@ -16,6 +16,7 @@ import type {
   ExperimentLearning,
   ExtensionModel,
   FormDefinition,
+  GenerationQaReadiness,
   Inquiry,
   InquiryAiEnrichment,
   InquiryDelivery,
@@ -29,6 +30,8 @@ import type {
   OutboundProspect,
   PresenceAssessment,
   PreviewToken,
+  ProspectReportLead,
+  ProspectReportRecord,
   SiteAsset,
   SiteBundle,
   SiteCandidateRecord,
@@ -43,21 +46,25 @@ import type {
   CreateAgentRunSpanInput,
   CreateSiteCandidateInput,
   CreateSiteInput,
+  CreateProspectReportInput,
+  CreateProspectReportLeadInput,
   ListSiteCandidatesFilter,
   ListAgentRunsFilter,
   ListAgentRunsResult,
+  SiteCandidateSummary,
   RecordAgentModelCallInput,
   RegisterDomainInput,
   LodestaRepository,
   UpdateAgentRunInput,
   UpdateAgentRunSpanInput,
+  UpdateProspectReportInput,
   UpdateSectionInput
 } from "../repository";
 import { runAudit } from "../audit";
 import { updateSiteDesignBundle } from "../design";
 import { createCheckoutSession } from "../billing";
 import { refreshCustomHostnameStatus, registerCustomHostname } from "../domains";
-import { createSiteFromInput } from "../intake";
+import { createSiteV3FromInput } from "../intake";
 import {
   defaultJobStaleAfterMs,
   executeJob,
@@ -71,6 +78,7 @@ import { mergeFindings, recommendFromAnalytics } from "../analytics-insights";
 import { analyzeExperiment, analyzeExperiments } from "../experiment-analysis";
 import { createExperimentLearning } from "../experiment-learning";
 import { applySuggestedEdit, preserveFindingLifecycle } from "../optimization";
+import { applyV3SectionUpdate } from "../v3-editor";
 import { applyAiEditToBundle } from "../ai-editor";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "../editor-guardrails";
 import { applyFormSettingsUpdate } from "../form-settings";
@@ -81,9 +89,9 @@ import { applyBusinessProfileUpdate } from "../business-profile-update";
 import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "../site-version-metadata";
-import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "../layout-registry";
 import { copyCandidateArtifactToSite } from "../site-artifacts";
 import { businessIdForProfile, businessLocationsFromProfile, businessRecordFromProfile, normalizeSiteLocationRole, withBusinessBundleFields } from "../business-model";
+import { assertBundleVersionsV3, assertSiteVersionV3 } from "../site-version-v3";
 import { getSupabaseAdminClient } from "./client";
 import { prepareIntakeInput } from "../intake-pipeline";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
@@ -169,6 +177,43 @@ type SiteCandidateRow = {
   accepted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// PostgREST JSON-path projection so queue surfaces never transfer bundle_json.
+// Generation writes a single draft version at index 0, so versions->0 is the
+// draft; the strict draft-or-first selection stays in full-bundle reads.
+const siteCandidateSummarySelect = [
+  "id",
+  "business_name",
+  "vertical",
+  "candidate_slug",
+  "status",
+  "source_url",
+  "source_host",
+  "accepted_site_id",
+  "accepted_at",
+  "created_at",
+  "updated_at",
+  "readiness:bundle_json->siteModel->versions->0->generationQa->>readiness",
+  "screenshot_path:bundle_json->siteModel->versions->0->generationQa->primaryScreenshot->>storagePath",
+  "renderer_version:bundle_json->siteModel->versions->0->>rendererVersion"
+].join(", ");
+
+type SiteCandidateSummaryRow = {
+  id: string;
+  business_name: string;
+  vertical: SiteCandidateRecord["vertical"];
+  candidate_slug: string;
+  status: SiteCandidateStatus;
+  source_url: string | null;
+  source_host: string | null;
+  accepted_site_id: string | null;
+  accepted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  readiness: string | null;
+  screenshot_path: string | null;
+  renderer_version: string | null;
 };
 
 type SiteArtifactRow = {
@@ -415,6 +460,34 @@ type OutboundEventRow = {
   metadata: unknown;
 };
 
+type ProspectReportRow = {
+  id: string;
+  place_id: string;
+  status: ProspectReportRecord["status"];
+  job_id: string | null;
+  source_url: string | null;
+  source_host: string | null;
+  website_kind: ProspectReportRecord["websiteKind"];
+  report_json: unknown;
+  unlocked_at: string | null;
+  lead_id: string | null;
+  error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+type ProspectReportLeadRow = {
+  id: string;
+  report_id: string;
+  email: string;
+  contact_name: string | null;
+  phone: string | null;
+  ip_hash: string | null;
+  metadata: unknown;
+  created_at: string;
+};
+
 type JobRow = {
   id: string;
   kind: JobKind;
@@ -536,7 +609,7 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async createAndStoreSite(input, options) {
-    let bundle = createSiteFromInput({
+    let bundle = createSiteV3FromInput({
       ...(await prepareIntakeInput(input, { telemetry: options?.telemetry })),
       experimentLearnings: await this.listExperimentLearnings({ status: "active" })
     });
@@ -579,7 +652,7 @@ export const supabaseRepository: LodestaRepository = {
     const businessId = input.intendedSiteId
       ? (await businessIdForSite(input.intendedSiteId)) ?? input.businessId ?? businessIdForProfile(input.bundle.businessProfile)
       : input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
-    const bundle = withBusinessBundleFields(input.bundle, { businessId, now });
+    const bundle = assertBundleVersionsV3(withBusinessBundleFields(input.bundle, { businessId, now }), "supabase create candidate bundle");
     await persistBusinessFromProfile(bundle.businessProfile, businessId);
     const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
@@ -621,10 +694,39 @@ export const supabaseRepository: LodestaRepository = {
     return { candidates, total: response.count ?? candidates.length };
   },
 
+  async listSiteCandidateSummaries(filter = {}) {
+    const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
+    const offset = Math.max(0, filter.offset ?? 0);
+    let query = getSupabaseAdminClient()
+      .from("site_candidates")
+      .select(siteCandidateSummarySelect, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+    query = applySiteCandidateFilters(query, filter);
+    const response = await query;
+    if (response.error) throw new Error(`List site candidate summaries: ${response.error.message}`);
+    const summaries = ((response.data ?? []) as unknown as SiteCandidateSummaryRow[]).map(rowToSiteCandidateSummary);
+    return { summaries, total: response.count ?? summaries.length };
+  },
+
   async getSiteCandidate(candidateId) {
     const row = await requireMaybe<SiteCandidateRow>(
       getSupabaseAdminClient().from("site_candidates").select("*").eq("id", candidateId).maybeSingle(),
       "Get site candidate"
+    );
+    return row ? rowToSiteCandidate(row) : null;
+  },
+
+  async updateSiteCandidateBundle(candidateId, bundle) {
+    const v3Bundle = assertBundleVersionsV3(bundle, "supabase update candidate bundle");
+    const row = await requireMaybe<SiteCandidateRow>(
+      getSupabaseAdminClient()
+        .from("site_candidates")
+        .update({ bundle_json: v3Bundle })
+        .eq("id", candidateId)
+        .select("*")
+        .maybeSingle(),
+      "Update site candidate bundle"
     );
     return row ? rowToSiteCandidate(row) : null;
   },
@@ -1803,6 +1905,115 @@ export const supabaseRepository: LodestaRepository = {
     return summarizeOutbound(campaigns, prospects, events, campaignId);
   },
 
+  async createProspectReport(input: CreateProspectReportInput) {
+    const now = new Date().toISOString();
+    const id = input.id ?? `prospect_report_${crypto.randomUUID().replace(/-/g, "")}`;
+    const row = await requireData<ProspectReportRow>(
+      getSupabaseAdminClient()
+        .from("prospect_reports")
+        .insert({
+          id,
+          place_id: input.placeId,
+          status: "queued",
+          job_id: input.jobId ?? null,
+          source_url: input.sourceUrl ?? null,
+          source_host: input.sourceHost ?? null,
+          website_kind: input.websiteKind,
+          report_json: null,
+          created_at: now,
+          updated_at: now
+        })
+        .select("*")
+        .single(),
+      "Create prospect report"
+    );
+    return rowToProspectReport(row);
+  },
+
+  async getProspectReport(reportId) {
+    const row = await requireMaybe<ProspectReportRow>(
+      getSupabaseAdminClient().from("prospect_reports").select("*").eq("id", reportId).maybeSingle(),
+      "Get prospect report"
+    );
+    return row ? rowToProspectReport(row) : null;
+  },
+
+  async findActiveProspectReportByPlaceId(placeId) {
+    const row = await requireMaybe<ProspectReportRow>(
+      getSupabaseAdminClient()
+        .from("prospect_reports")
+        .select("*")
+        .eq("place_id", placeId)
+        .in("status", ["queued", "running"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      "Find active prospect report"
+    );
+    return row ? rowToProspectReport(row) : null;
+  },
+
+  async findReusableProspectReportByPlaceId(placeId, since) {
+    const row = await requireMaybe<ProspectReportRow>(
+      getSupabaseAdminClient()
+        .from("prospect_reports")
+        .select("*")
+        .eq("place_id", placeId)
+        .eq("status", "completed")
+        .gte("completed_at", since)
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      "Find reusable prospect report"
+    );
+    return row ? rowToProspectReport(row) : null;
+  },
+
+  async updateProspectReport(input: UpdateProspectReportInput) {
+    const patch: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (input.status) patch.status = input.status;
+    if (input.jobId !== undefined) patch.job_id = input.jobId;
+    if (input.sourceUrl !== undefined) patch.source_url = input.sourceUrl;
+    if (input.sourceHost !== undefined) patch.source_host = input.sourceHost;
+    if (input.websiteKind !== undefined) patch.website_kind = input.websiteKind;
+    if (input.result !== undefined) patch.report_json = input.result;
+    if (input.unlockedAt !== undefined) patch.unlocked_at = input.unlockedAt;
+    if (input.leadId !== undefined) patch.lead_id = input.leadId;
+    if (input.errorCode !== undefined) patch.error_code = input.errorCode;
+    if (input.completedAt !== undefined) patch.completed_at = input.completedAt;
+    const row = await requireMaybe<ProspectReportRow>(
+      getSupabaseAdminClient().from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(),
+      "Update prospect report"
+    );
+    return row ? rowToProspectReport(row) : null;
+  },
+
+  async createProspectReportLead(input: CreateProspectReportLeadInput) {
+    const now = new Date().toISOString();
+    const leadId = `prospect_lead_${crypto.randomUUID().replace(/-/g, "")}`;
+    const row = await requireData<ProspectReportLeadRow>(
+      getSupabaseAdminClient()
+        .from("prospect_report_leads")
+        .insert({
+          id: leadId,
+          report_id: input.reportId,
+          email: input.email.toLowerCase(),
+          contact_name: input.contactName ?? null,
+          phone: input.phone ?? null,
+          ip_hash: input.ipHash ?? null,
+          metadata: input.metadata ?? {},
+          created_at: now
+        })
+        .select("*")
+        .single(),
+      "Create prospect report lead"
+    );
+    await this.updateProspectReport({ reportId: input.reportId, unlockedAt: now, leadId });
+    return rowToProspectReportLead(row);
+  },
+
   async createAgentRun(input) {
     const now = new Date().toISOString();
     const row = await requireData<AgentRunRow>(
@@ -2077,6 +2288,8 @@ export const supabaseRepository: LodestaRepository = {
         listInquiryEvents: (inquiryId) => this.listInquiryEvents(inquiryId),
         processInquiryNotification: (input) => this.processInquiryNotification(input),
         processInquiryAiEnrichment: (input) => this.processInquiryAiEnrichment(input),
+        getProspectReport: (reportId) => this.getProspectReport(reportId),
+        updateProspectReport: (input) => this.updateProspectReport(input),
         cleanupAgentTelemetry: (input) => this.cleanupAgentTelemetry(input)
       };
       const result = await executeJob(rowToJob(row), jobContext);
@@ -2155,11 +2368,12 @@ function siteVersionFromCandidate(input: {
 }): SiteVersion | null {
   const candidateBundle = structuredClone(input.candidateBundle);
   applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
+  assertBundleVersionsV3(candidateBundle, "supabase accepted candidate version bundle");
   const candidateVersion =
     candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
     candidateBundle.siteModel.versions[0];
   if (!candidateVersion) return null;
-  const version = structuredClone(candidateVersion);
+  const version = structuredClone(assertSiteVersionV3(candidateVersion, "accepted candidate version"));
   version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
   version.status = "draft";
   version.createdAt = input.acceptedAt;
@@ -2282,13 +2496,13 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
       assetInventory: assetRows.length ? assetRows.map(rowToSiteAsset) : presenceAssessment.assetInventory
     }
   };
-  return withBusinessBundleFields(bundle, { businessId: businessRow.id });
+  return assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: businessRow.id }), "supabase hydrated bundle");
 }
 
 async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: boolean; businessId?: string } = {}) {
   try {
     const businessId = options.businessId ?? (await businessIdForSite(bundle.businessProfile.siteId)) ?? businessIdForProfile(bundle.businessProfile);
-    const hydratedBundle = withBusinessBundleFields(bundle, { businessId });
+    const hydratedBundle = assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId }), "supabase persisted bundle");
     const siteShell = siteModelShell(hydratedBundle.siteModel);
     await persistBusinessFromProfile(hydratedBundle.businessProfile, businessId);
     await requireData<SiteRow>(
@@ -2599,30 +2813,14 @@ async function rollbackExperimentLearnings(experimentId: string, rolledBackAt: s
 }
 
 function updateBundleSection(bundle: SiteBundle, input: UpdateSectionInput) {
-  const draftVersion = bundle.siteModel.versions.find((version) => version.status === "draft") ?? clonePublishedAsDraft(bundle);
-  const page = draftVersion.pages.find((candidate) => candidate.id === input.pageId);
-  const layoutSection = page?.layoutSections.find((candidate) => candidate.id === input.sectionId);
-  if (!layoutSection || !page) return { ok: false as const, reason: "Unknown site, page, or section" };
-  const section = sectionFromLayoutSection(layoutSection);
-
-  for (const [key, value] of Object.entries(input.props)) {
-    const policy = section.fieldPolicies[key];
-    if (!policy || (policy.editScope !== "owner_choice" && policy.editScope !== "owner_freetext")) {
-      return { ok: false as const, reason: `Field ${key} is not editable by owner controls.` };
-    }
-  }
-
-  applyPropsToLayoutSection(layoutSection, input.props);
-  syncLegacySectionsFromLayout(page);
-  markVersionOwnerTouched(draftVersion);
-  return { ok: true as const, bundle };
+  return applyV3SectionUpdate(bundle, input);
 }
 
 function clonePublishedAsDraft(bundle: SiteBundle) {
   const existingDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
-  if (existingDraft) return existingDraft;
+  if (existingDraft) return assertSiteVersionV3(existingDraft, "supabase existing draft");
   const published = bundle.siteModel.versions.find((version) => version.status === "published") ?? bundle.siteModel.versions[0];
-  const draft = structuredClone(published);
+  const draft = structuredClone(assertSiteVersionV3(published, "supabase published version for draft"));
   draft.id = `version_${bundle.siteModel.slug}_draft_${Date.now()}`;
   draft.status = "draft";
   draft.createdAt = new Date().toISOString();
@@ -2670,6 +2868,9 @@ function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
     businessName: row.business_name,
     vertical: row.vertical,
     candidateSlug: row.candidate_slug,
+    // Candidate reads stay unchecked so admin repair surfaces can soft-check
+    // stale stored schemas (siteVersionV3Issue) instead of crashing; writes
+    // and render paths keep the strict assert.
     bundle: withBusinessBundleFields(row.bundle_json as SiteBundle, { businessId: row.business_id }),
     status: row.status,
     intendedSiteId: row.intended_site_id ?? undefined,
@@ -2679,6 +2880,29 @@ function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function rowToSiteCandidateSummary(row: SiteCandidateSummaryRow): SiteCandidateSummary {
+  return {
+    id: row.id,
+    businessName: row.business_name,
+    vertical: row.vertical,
+    status: row.status,
+    sourceUrl: row.source_url ?? undefined,
+    sourceHost: row.source_host ?? undefined,
+    candidateSlug: row.candidate_slug,
+    acceptedSiteId: row.accepted_site_id ?? undefined,
+    acceptedAt: row.accepted_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    readiness: isGenerationQaReadiness(row.readiness) ? row.readiness : "unavailable",
+    hasScreenshot: Boolean(row.screenshot_path),
+    compiled: Boolean(row.renderer_version)
+  };
+}
+
+function isGenerationQaReadiness(value: string | null): value is GenerationQaReadiness {
+  return value === "pending" || value === "ready" || value === "blocked" || value === "unavailable";
 }
 
 function rowToBusiness(row: BusinessRow): BusinessRecord {
@@ -2970,6 +3194,38 @@ function rowToOutboundEvent(row: OutboundEventRow): OutboundEvent {
     occurredAt: row.occurred_at,
     value: row.value ?? undefined,
     metadata: row.metadata as Record<string, string | number | boolean> | undefined
+  };
+}
+
+function rowToProspectReport(row: ProspectReportRow): ProspectReportRecord {
+  return {
+    id: row.id,
+    placeId: row.place_id,
+    status: row.status,
+    jobId: row.job_id ?? undefined,
+    sourceUrl: row.source_url ?? undefined,
+    sourceHost: row.source_host ?? undefined,
+    websiteKind: row.website_kind,
+    result: row.report_json ? (row.report_json as ProspectReportRecord["result"]) : undefined,
+    unlockedAt: row.unlocked_at ?? undefined,
+    leadId: row.lead_id ?? undefined,
+    errorCode: row.error_code ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at ?? undefined
+  };
+}
+
+function rowToProspectReportLead(row: ProspectReportLeadRow): ProspectReportLead {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    email: row.email,
+    contactName: row.contact_name ?? undefined,
+    phone: row.phone ?? undefined,
+    ipHash: row.ip_hash ?? undefined,
+    metadata: row.metadata as Record<string, string | number | boolean> | undefined,
+    createdAt: row.created_at
   };
 }
 

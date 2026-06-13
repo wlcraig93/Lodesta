@@ -3,7 +3,7 @@ import {
   startRequiredSiteCandidateTelemetry,
   type AgentTelemetryRepository
 } from "./agent-telemetry";
-import { createSiteFromInput } from "./intake";
+import { createSiteV3FromInput } from "./intake";
 import { slugify } from "./slug";
 import { prepareIntakeInput } from "./intake-pipeline";
 import { understandingVerticalConfidenceFloor } from "./business-understanding-v2";
@@ -13,10 +13,12 @@ import { castScrapedPhotos, scrapeAndStoreBusinessMedia } from "./scraped-media"
 import { extractImagePalette } from "./image-palette";
 import { createOpenAiGeneratedCopyDeck, lintGeneratedCopyDeck } from "./generated-copy-v2";
 import { runInitialGeneratedSiteReadiness } from "./generated-site-readiness";
+import { persistPrimaryQaScreenshot } from "./candidate-screenshot";
 import { runShadowCraftLoop } from "./craft-loop";
 import { createDesignBrief } from "./design-brief-v1";
-import { maybeApplyGeneratedSiteV3, maybeApplyGeneratedSiteV3WithAssetLibrary } from "./generated-site-v3-pipeline";
+import { applyGeneratedSiteV3, applyGeneratedSiteV3WithAssetLibrary } from "./generated-site-v3-pipeline";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { assertSiteVersionV3, pageCountForVersionV3 } from "./site-version-v3";
 import { evaluatePreCompileResolutionGateV2 } from "./precompile-resolution-gate";
 import type {
   AgentRunSource,
@@ -115,7 +117,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     const siteCandidateId = siteCandidateIdForRun(telemetry.runId);
     const identity = { siteId: siteCandidateId };
     const prepared = await prepareIntakeInput(input, { telemetry, identity });
-    const bundle = createSiteFromInput({
+    const bundle = createSiteV3FromInput({
       ...prepared,
       identity,
       experimentLearnings: await options.repository.listExperimentLearnings({ status: "active" })
@@ -137,6 +139,21 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     }
     assertVerticalResolutionForServiceBusiness(bundle, input.url);
     applyTextFirstFallbackApproval(bundle, options);
+    // Model design brief (Part 2.4): profile-level art direction reasoning.
+    // Runs before copy so the chosen register and section order brief the
+    // copywriter (plan→copy handoff). Non-fatal — the compiler's deterministic
+    // selector is the fallback tier.
+    try {
+      const brief = await createDesignBrief({
+        business: bundle.businessProfile,
+        understanding: bundle.presenceAssessment.businessUnderstanding,
+        brandApplied: Boolean(bundle.presenceAssessment.brandAssessment?.colorSignals?.length),
+        telemetry
+      });
+      if (brief) bundle.presenceAssessment.designBrief = brief;
+    } catch (briefError) {
+      console.warn("Design brief unavailable; deterministic selection will be used.", briefError instanceof Error ? briefError.message : briefError);
+    }
     const copySpan = await telemetry.startSpan({
       spanType: "generated_copy_deck",
       name: "Fact-grounded copy deck",
@@ -162,19 +179,6 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     } catch (error) {
       await copySpan.fail(error);
       throw error;
-    }
-    // Model design brief (Part 2.4): profile-level art direction reasoning.
-    // Non-fatal — the compiler's deterministic selector is the fallback tier.
-    try {
-      const brief = await createDesignBrief({
-        business: bundle.businessProfile,
-        understanding: bundle.presenceAssessment.businessUnderstanding,
-        brandApplied: Boolean(bundle.presenceAssessment.brandAssessment?.colorSignals?.length),
-        telemetry
-      });
-      if (brief) bundle.presenceAssessment.designBrief = brief;
-    } catch (briefError) {
-      console.warn("Design brief unavailable; deterministic selection will be used.", briefError instanceof Error ? briefError.message : briefError);
     }
     // Real photos for protected previews: download crawl media into private
     // storage (reference_only; publish requires per-photo attestation).
@@ -216,11 +220,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
         `Scraped media storage skipped: ${error instanceof Error ? error.message : String(error)}`
       );
     }
-    const v3Application = await maybeApplyGeneratedSiteV3WithAssetLibrary({
-      bundle,
-      sourceHost,
-      explicitOperatorRequest: isExplicitV3Request(options.metadata)
-    });
+    const v3Application = await applyGeneratedSiteV3WithAssetLibrary({ bundle });
     await recordGeneratedSiteV3Application({
       telemetry,
       bundle,
@@ -272,6 +272,15 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       }
     } catch (craftLoopError) {
       console.warn("Shadow craft loop failed (non-fatal):", craftLoopError instanceof Error ? craftLoopError.message : craftLoopError);
+    }
+    try {
+      const version = bundle.siteModel.versions[0];
+      if (version) await persistPrimaryQaScreenshot({ candidateId: siteCandidateId, version });
+    } catch (screenshotError) {
+      console.warn(
+        "QA screenshot persistence failed (non-fatal):",
+        screenshotError instanceof Error ? screenshotError.message : screenshotError
+      );
     }
     const generation = await options.repository.createSiteCandidate({
       id: siteCandidateId,
@@ -616,7 +625,7 @@ function createPreCompileBlockArtifact(input: {
 async function recordGeneratedSiteV3Application(input: {
   telemetry: Awaited<ReturnType<typeof startRequiredSiteCandidateTelemetry>>;
   bundle: SiteBundle;
-  application: Awaited<ReturnType<typeof maybeApplyGeneratedSiteV3>>;
+  application: Awaited<ReturnType<typeof applyGeneratedSiteV3>>;
 }) {
   const span = await input.telemetry.startSpan({
     spanType: "generated_site_v3",
@@ -650,10 +659,6 @@ function generatedSiteV3BackgroundKinds(bundle: SiteBundle) {
   return [...kinds].sort();
 }
 
-function isExplicitV3Request(metadata: Record<string, unknown> | undefined) {
-  return metadata?.generatedSiteV3 === true || metadata?.rendererVersion === "layout-v3";
-}
-
 function normalizeGenerationInput(input: CreateSiteInput): CreateSiteInput {
   const url = input.url ? normalizePublicFetchUrlInput(input.url) || undefined : undefined;
   const prompt = input.prompt?.trim() || undefined;
@@ -682,7 +687,7 @@ function baseRunMetadata(generation: SiteCandidateRecord, metadata: Record<strin
     siteCandidateId: generation.id,
     candidateSlug: generation.candidateSlug,
     generationUrl: `/admin/site-candidates/${generation.id}`,
-    pages: generation.bundle.siteModel.versions[0]?.pages.length ?? 0,
+    pages: generation.bundle.siteModel.versions[0] ? pageCountForVersionV3(assertSiteVersionV3(generation.bundle.siteModel.versions[0], "candidate run metadata version")) : 0,
     vertical: generation.vertical
   };
 }

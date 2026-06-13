@@ -211,7 +211,7 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
     assessment.extractedFacts = primarySummary.extractedFacts;
     assessment.formReferences = primarySummary.formReferences.slice(0, 12);
     assessment.linkReferences = primarySummary.linkReferences.slice(0, 40);
-    assessment.assetReferences = primarySummary.assetReferences.slice(0, 12);
+    assessment.assetReferences = capAssetReferences(primarySummary.assetReferences);
     assessment.sampledInternalPages = primarySummary.linkReferences
       .filter((reference) => reference.kind === "internal")
       .map((reference) => stripHash(reference.href))
@@ -290,7 +290,7 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
   summary.extractedFacts = extractBusinessFacts(html, { url: sourcePage.href, finalUrl: sourcePage.href, title }, sourcePage);
   summary.formReferences = signals.formReferences.slice(0, 12);
   summary.linkReferences = signals.linkReferences.slice(0, 40);
-  summary.assetReferences = signals.assetReferences.slice(0, 12);
+  summary.assetReferences = capAssetReferences(signals.assetReferences);
 
   for (const href of extractHrefs(html)) {
     try {
@@ -333,7 +333,21 @@ function mergePageSummaryIntoAssessment(assessment: CrawlAssessment, summary: Cr
   assessment.extractedFacts = mergeExtractedBusinessFacts(assessment.extractedFacts, summary.extractedFacts);
   assessment.formReferences = uniqueBy([...assessment.formReferences, ...summary.formReferences], formReferenceKey).slice(0, 12);
   assessment.linkReferences = uniqueBy([...assessment.linkReferences, ...summary.linkReferences], (reference) => `${reference.kind}:${reference.href}`).slice(0, 40);
-  assessment.assetReferences = uniqueBy([...assessment.assetReferences, ...summary.assetReferences], (reference) => reference.url).slice(0, 12);
+  assessment.assetReferences = capAssetReferences(
+    uniqueBy([...assessment.assetReferences, ...summary.assetReferences], (reference) => reference.url)
+  );
+}
+
+/**
+ * Cap logos and images separately: pages with many body images must not
+ * crowd logo candidates out before logo selection sees them — at per-page
+ * extraction, primary-page assignment, and cross-page merge alike.
+ */
+function capAssetReferences(references: CrawlAssetReference[]): CrawlAssetReference[] {
+  return [
+    ...references.filter((reference) => reference.kind === "logo").slice(0, 6),
+    ...references.filter((reference) => reference.kind === "image").slice(0, 12)
+  ];
 }
 
 export function scoreCrawlAssessment(assessment: CrawlAssessment): CrawlQualityScore {
@@ -854,8 +868,26 @@ function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetRefe
       // Ignore malformed icon URLs.
     }
   }
+  // Social share images are usually the site's best wide photo and are often
+  // higher-resolution than anything in the page body.
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    const property = extractAttribute(tag, "property") ?? extractAttribute(tag, "name") ?? "";
+    if (!/^(?:og:image|twitter:image)(?::src)?$/i.test(property)) continue;
+    const content = extractAttribute(tag, "content");
+    if (!content) continue;
+    try {
+      const url = new URL(content, sourceUrl);
+      if (!["http:", "https:"].includes(url.protocol)) continue;
+      references.push({ url: url.href, alt: "Social share image", kind: "image", rightsStatus: "reference_only" });
+    } catch {
+      // Ignore malformed share image URLs.
+    }
+  }
   for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
-    const src = extractAttribute(tag, "src") || extractAttribute(tag, "data-src");
+    const src =
+      largestSrcsetCandidate(extractAttribute(tag, "srcset") ?? extractAttribute(tag, "data-srcset")) ||
+      extractAttribute(tag, "src") ||
+      extractAttribute(tag, "data-src");
     if (!src) continue;
     try {
       const url = new URL(src, sourceUrl);
@@ -869,6 +901,28 @@ function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetRefe
     }
   }
   return uniqueBy(references, (reference) => reference.url);
+}
+
+/** Pick the highest-density srcset candidate so downloads get the best raster the site serves. */
+function largestSrcsetCandidate(srcset: string | undefined): string | undefined {
+  if (!srcset) return undefined;
+  let bestUrl: string | undefined;
+  let bestDensity = -1;
+  for (const candidate of srcset.split(",")) {
+    const parts = candidate.trim().split(/\s+/);
+    const url = parts[0];
+    if (!url) continue;
+    const descriptor = parts[1] ?? "";
+    // Width descriptors ("800w") and pixel-density descriptors ("2x") are
+    // comparable enough for max-selection within one srcset.
+    const match = descriptor.match(/^([\d.]+)([wx])$/i);
+    const density = match ? Number.parseFloat(match[1]) * (match[2].toLowerCase() === "x" ? 1000 : 1) : 0;
+    if (density > bestDensity) {
+      bestDensity = density;
+      bestUrl = url;
+    }
+  }
+  return bestUrl;
 }
 
 function extractJsonLdTypes(html: string) {

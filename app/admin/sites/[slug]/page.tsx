@@ -343,23 +343,6 @@ function OverviewPanel({
             ))}
           </div>
 
-          <h2>Copy refresh proposals</h2>
-          <div className="finding-list">
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "copy_diff").slice(0, 4).map((artifact) => {
-              const diff = artifact.payload.diff as { summary?: string; status?: string; targetSlotId?: string } | undefined;
-              return (
-                <article key={artifact.id} className="finding-card compact-card">
-                  <span className={`badge status-${diff?.status ?? "proposed"}`}>{diff?.status ?? "proposed"}</span>
-                  <h3>{diff?.targetSlotId ?? artifact.affectedSlotId ?? "Copy slot"}</h3>
-                  <p>{diff?.summary ?? "Copy refresh proposal is available for review."}</p>
-                </article>
-              );
-            })}
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "copy_diff").length === 0 ? (
-              <p className="muted">No copy refresh proposals yet.</p>
-            ) : null}
-          </div>
-
           <h2>Business context changes</h2>
           <div className="finding-list">
             {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "change_impact_report").slice(0, 2).map((artifact) => {

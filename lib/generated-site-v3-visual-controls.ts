@@ -10,6 +10,7 @@ export type SectionTemplateIdV3 =
   | "split_media"
   | "intro_grid"
   | "side_intro_rows"
+  | "numbered_steps"
   | "feature_band"
   | "media_feature"
   | "media_mosaic"
@@ -17,8 +18,11 @@ export type SectionTemplateIdV3 =
   | "faq_list"
   | "facts_strip"
   | "facts_cta"
+  | "stat_band"
   | "editorial_statement"
-  | "location_panel"
+  | "location_directory"
+  | "service_area_showcase"
+  | "location_showcase"
   | "contact_split";
 
 export type BackgroundFocalPointV3 = "center" | "top" | "bottom" | "left" | "right";
@@ -155,6 +159,7 @@ export type RenderableLocationV3 = {
   serviceAreas: string[];
   directionsUrl?: string;
   mapEmbedIntent?: MapEmbedIntentV3;
+  href?: string;
 };
 
 export type LocationsSlotV3 = {
@@ -210,6 +215,10 @@ export type IntroGridSectionV3 = {
   anchorId?: string;
 };
 export type SideIntroRowsSectionV3 = BaseVisualSectionV3<"side_intro_rows", { intro: CopySlotV3; items: ItemsSlotV3<StandardItemV3> }>;
+/** Full-width vertical stepper: intro above ordered numbered steps; per-step media via StandardItemV3.mediaUrl. */
+export type NumberedStepsSectionV3 = BaseVisualSectionV3<"numbered_steps", { intro: CopySlotV3; items: ItemsSlotV3<StandardItemV3> }>;
+/** Signature moment: one oversized verified stat beside short supporting copy. */
+export type StatBandSectionV3 = BaseVisualSectionV3<"stat_band", { copy: CopySlotV3; facts: FactsSlotV3; action?: ActionSlotV3 }>;
 export type FeatureBandSectionV3 = BaseVisualSectionV3<"feature_band", { copy: CopySlotV3; facts: FactsSlotV3; action?: ActionSlotV3 }>;
 export type MediaFeatureSectionV3 = BaseVisualSectionV3<"media_feature", { copy: CopySlotV3; media: MediaSlotV3 }>;
 export type MediaMosaicSectionV3 = BaseVisualSectionV3<"media_mosaic", { copy: CopySlotV3; media: MediaSlotV3 }>;
@@ -218,7 +227,10 @@ export type FaqListSectionV3 = BaseVisualSectionV3<"faq_list", { intro: CopySlot
 export type FactsStripSectionV3 = BaseVisualSectionV3<"facts_strip", { facts: FactsSlotV3 }>;
 export type FactsCtaSectionV3 = BaseVisualSectionV3<"facts_cta", { facts: FactsSlotV3; action: ActionSlotV3 }>;
 export type EditorialStatementSectionV3 = BaseVisualSectionV3<"editorial_statement", { copy: CopySlotV3; action?: ActionSlotV3 }>;
-export type LocationPanelSectionV3 = BaseVisualSectionV3<"location_panel", { copy: CopySlotV3; locations: LocationsSlotV3; action?: ActionSlotV3 }>;
+export type LocationDirectorySectionV3 = BaseVisualSectionV3<"location_directory", { copy: CopySlotV3; locations: LocationsSlotV3; action?: ActionSlotV3 }>;
+export type ServiceAreaShowcaseSectionV3 = BaseVisualSectionV3<"service_area_showcase", { copy: CopySlotV3; facts: FactsSlotV3; action?: ActionSlotV3 }>;
+/** Destination treatment for single-location businesses: display-scale hours, map, and direction actions. */
+export type LocationShowcaseSectionV3 = BaseVisualSectionV3<"location_showcase", { copy: CopySlotV3; locations: LocationsSlotV3; action?: ActionSlotV3 }>;
 export type ContactSplitSectionV3 = BaseVisualSectionV3<"contact_split", { copy: CopySlotV3; contact: ContactSlotV3; action?: ActionSlotV3 }>;
 
 export type VisualSectionV3 =
@@ -227,6 +239,8 @@ export type VisualSectionV3 =
   | SplitMediaSectionV3
   | IntroGridSectionV3
   | SideIntroRowsSectionV3
+  | NumberedStepsSectionV3
+  | StatBandSectionV3
   | FeatureBandSectionV3
   | MediaFeatureSectionV3
   | MediaMosaicSectionV3
@@ -235,7 +249,9 @@ export type VisualSectionV3 =
   | FactsStripSectionV3
   | FactsCtaSectionV3
   | EditorialStatementSectionV3
-  | LocationPanelSectionV3
+  | LocationDirectorySectionV3
+  | ServiceAreaShowcaseSectionV3
+  | LocationShowcaseSectionV3
   | ContactSplitSectionV3;
 
 export type VisualSectionDraftV3 = VisualSectionV3;
@@ -648,6 +664,8 @@ function knownTemplateIdV3(value: string): value is SectionTemplateIdV3 {
     value === "split_media" ||
     value === "intro_grid" ||
     value === "side_intro_rows" ||
+    value === "numbered_steps" ||
+    value === "stat_band" ||
     value === "feature_band" ||
     value === "media_feature" ||
     value === "media_mosaic" ||
@@ -656,7 +674,9 @@ function knownTemplateIdV3(value: string): value is SectionTemplateIdV3 {
     value === "facts_strip" ||
     value === "facts_cta" ||
     value === "editorial_statement" ||
-    value === "location_panel" ||
+    value === "location_directory" ||
+    value === "service_area_showcase" ||
+    value === "location_showcase" ||
     value === "contact_split"
   );
 }

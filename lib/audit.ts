@@ -1,10 +1,12 @@
 import { standardCriteria } from "./standard";
 import type { BusinessProfile, OptimizationFinding, SiteModel } from "./models";
 import { primaryCtaForBusiness, strongerMetadataForPage } from "./optimization";
+import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { activeSiteVersionV3, type PageV3 } from "./site-version-v3";
 
 export function runAudit(business: BusinessProfile, site: SiteModel): OptimizationFinding[] {
-  const version = site.versions.find((item) => item.status === "published") ?? site.versions[0];
-  const pages = version.pages;
+  const version = activeSiteVersionV3(site, "audit version");
+  const pages = version.pageComposition.pages;
   const findings: OptimizationFinding[] = [];
   const hasPhone = Boolean(business.phone);
   const hasLocation = Boolean(
@@ -13,21 +15,22 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
       business.serviceAreas.some((area) => !/^local area$/i.test(area.trim()))
   );
   const hasReviews = Boolean(business.reviewsSummary?.rating || business.reviewsSummary?.count);
-  const hasContactSection = pages.some((page) => page.sections.some((section) => section.type === "contact"));
-  const hasFaqSection = hasSection(pages, "faq");
+  const hasContactSection = hasSection(pages, "contact_split");
+  const hasFaqSection = hasSection(pages, "faq_list");
   const hasTrustProof =
     hasReviews ||
-    hasSection(pages, "trust_bar") ||
-    hasSection(pages, "testimonials") ||
-    hasSection(pages, "team") ||
+    hasSection(pages, "quote_wall") ||
+    hasSection(pages, "facts_strip") ||
+    hasSection(pages, "stat_band") ||
     pagesContainText(
       pages,
       /credential|certified|licensed|insured|years|award|provider|attorney|trainer|veterinarian|doctor|portfolio|project proof|results/i
     );
-  const hasServiceAreaClarity = hasLocation || hasSection(pages, "map") || pages.some((page) => page.slug.startsWith("areas/"));
+  const hasServiceAreaClarity = hasLocation || hasSection(pages, "location_showcase") || hasSection(pages, "service_area_showcase") || pages.some((page) => page.slug.startsWith("areas/"));
   const homePage = pages.find((page) => page.slug === "") ?? pages[0];
-  const homeHero = homePage?.sections.find((section) => section.type === "hero");
-  const hasHeroCta = Boolean(homeHero?.props.primaryCta);
+  const homeHero = homePage?.sections[0];
+  const homeHeroVisual = homeHero ? getVisualSectionV3(homeHero.props) : undefined;
+  const hasHeroCta = Boolean(homeHeroVisual && "copy" in homeHeroVisual.slots && homeHeroVisual.slots.copy.actions?.length);
 
   if (!hasPhone) {
     findings.push(makeFinding(business.siteId, "missing_phone", "conversion", "critical", "Phone number is missing", "Mobile callers cannot call from the site.", "Add and verify the main phone number.", "manual_service", "calls", undefined, "conversion.mobile_click_to_call"));
@@ -44,7 +47,7 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   if (!hasContactSection) {
     findings.push(makeFinding(business.siteId, "missing_contact", "conversion", "critical", "Contact path is missing", "Visitors need a clear way to reach the business.", "Add a contact section and form.", "one_click", "forms", {
       action: "add_contact_section",
-      pageId: pages[0]?.id ?? "page_home",
+      pageId: pages[0]?.id ?? "home",
       heading: `Contact ${business.name}`,
       formId: "form_contact",
       primaryCta: primaryCtaForBusiness(business)
@@ -70,7 +73,7 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   if (!hasFaqSection) {
     findings.push(makeFinding(business.siteId, "missing_faq", "content", "recommended", "Common customer questions are missing", "Unanswered questions create friction before calls, bookings, orders, or form submissions.", "Add a concise FAQ section using owner-reviewable business facts.", "one_click", "forms", {
       action: "add_faq_section",
-      pageId: homePage?.id ?? pages[0]?.id ?? "page_home",
+      pageId: homePage?.id ?? pages[0]?.id ?? "home",
       items: faqItemsForBusiness(business)
     }, "content.faqs"));
   }
@@ -96,11 +99,11 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   return findings;
 }
 
-function hasSection(pages: SiteModel["versions"][number]["pages"], sectionType: string) {
-  return pages.some((page) => page.sections.some((section) => section.type === sectionType));
+function hasSection(pages: PageV3[], templateId: string) {
+  return pages.some((page) => page.sections.some((section) => getVisualSectionV3(section.props)?.templateId === templateId));
 }
 
-function pagesContainText(pages: SiteModel["versions"][number]["pages"], pattern: RegExp) {
+function pagesContainText(pages: PageV3[], pattern: RegExp) {
   return pattern.test(JSON.stringify(pages));
 }
 

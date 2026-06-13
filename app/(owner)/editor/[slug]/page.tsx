@@ -3,14 +3,15 @@ import { notFound } from "next/navigation";
 import { AiEditChat } from "@/components/AiEditChat";
 import { DesignControls } from "@/components/DesignControls";
 import { ResponsivePreview } from "@/components/ResponsivePreview";
-import { SectionEditorForm, type EditableField } from "@/components/SectionEditorForm";
+import { SectionEditorForm } from "@/components/SectionEditorForm";
 import { getEditingVersion } from "@/lib/sample-data";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
 import { runSiteQa } from "@/lib/qa";
 import { claimGateForBundle } from "@/lib/site-publication";
-import { presetOptionsByKind, sectionFromLayoutSection } from "@/lib/layout-registry";
-import type { BusinessProfile, SectionModel } from "@/lib/models";
+import { assertSiteVersionV3 } from "@/lib/site-version-v3";
+import { designSectionsForV3, editableV3Sections } from "@/lib/v3-editor";
+import type { BusinessProfile, DesignPlan } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 
@@ -20,12 +21,9 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/editor/${slug}`);
 
-  const version = getEditingVersion(bundle.siteModel);
-  const home = version.pages[0];
-  const editableSections = home.layoutSections
-    .map(sectionFromLayoutSection)
-    .map((section) => ({ section, fields: editableFields(section, bundle.businessProfile) }))
-    .filter((item) => item.fields.length > 0);
+  const version = assertSiteVersionV3(getEditingVersion(bundle.siteModel), "owner editor version");
+  const home = version.pageComposition.pages.find((page) => page.slug === "") ?? version.pageComposition.pages[0];
+  const editableSections = editableV3Sections(bundle, version);
   const siteId = bundle.businessProfile.siteId;
   const [summary, inquiries, claims, domains] = await Promise.all([
     repository.analyticsSummary(siteId),
@@ -111,28 +109,19 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
           <DesignControls
             siteId={bundle.businessProfile.siteId}
             pageId={home.id}
-            initialDesignPlan={version.designPlan}
-            sections={home.layoutSections.map((section) => {
-              const projectedSection = sectionFromLayoutSection(section);
-              return {
-              id: section.id,
-              kind: section.kind,
-              label: String(projectedSection.props.heading ?? projectedSection.props.eyebrow ?? section.preset),
-              preset: section.preset,
-              presetOptions: presetOptionsByKind[section.kind] ?? [{ id: section.preset, label: section.preset }]
-              };
-            })}
+            initialDesignPlan={version.designPlan ?? fallbackDesignPlan(bundle.businessProfile)}
+            sections={designSectionsForV3(version)}
           />
 
           <h2>Editable sections</h2>
           <div className="finding-list">
-            {editableSections.map(({ section, fields }) => (
+            {editableSections.map(({ page, section, visual, fields }) => (
               <article key={section.id} className="finding-card">
-                <span className="badge">{section.type}</span>
-                <h3>{String(section.props.heading ?? section.variant)}</h3>
+                <span className="badge">{visual.templateId}</span>
+                <h3>{fields.find((field) => field.key === "heading")?.value.toString() ?? visual.templateId}</h3>
                 <SectionEditorForm
                   siteId={bundle.businessProfile.siteId}
-                  pageId={home.id}
+                  pageId={page.id}
                   sectionId={section.id}
                   fields={fields}
                 />
@@ -227,130 +216,15 @@ function ownerReadinessItems(input: {
   ];
 }
 
-function editableFields(section: SectionModel, business: BusinessProfile): EditableField[] {
-  const fields: EditableField[] = [];
-  for (const [key, policy] of Object.entries(section.fieldPolicies)) {
-    if (policy.editScope !== "owner_freetext" && policy.editScope !== "owner_choice") continue;
-    const value = section.props[key];
-    if (policy.editScope === "owner_freetext" && typeof value === "string") {
-      fields.push({
-        kind: "text",
-        key,
-        label: humanizeField(key),
-        value: String(value ?? ""),
-        multiline: key.toLowerCase().includes("body") || String(value ?? "").length > 90
-      });
-      continue;
-    }
-
-    if (policy.editScope === "owner_choice" && key.toLowerCase().includes("cta")) {
-      const cta = ctaValue(value);
-      if (!cta) continue;
-      fields.push({
-        kind: "cta",
-        key,
-        label: humanizeField(key),
-        value: cta,
-        options: ctaOptionsForBusiness(business, cta)
-      });
-      continue;
-    }
-
-    if ((policy.editScope === "owner_choice" || policy.editScope === "owner_freetext") && Array.isArray(value)) {
-      if (value.every((item) => typeof item === "string")) {
-        fields.push({
-          kind: "string_list",
-          key,
-          label: humanizeField(key),
-          value: value.map((item) => String(item))
-        });
-        continue;
-      }
-
-      const columns = objectListColumns(value);
-      if (columns.length) {
-        fields.push({
-          kind: "object_list",
-          key,
-          label: humanizeField(key),
-          value: value.map((item) => normalizeObjectListItem(item, columns)),
-          columns
-        });
-      }
-    }
-  }
-  return fields;
-}
-
-function humanizeField(key: string) {
-  return key
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function ctaOptionsForBusiness(business: BusinessProfile, current: { label: string; href: string; role: string }) {
-  const options = [
-    business.phone ? { label: "Call Now", href: `tel:${business.phone}`, role: "tel" } : undefined,
-    business.bookingLinks[0] ? { label: "Book Now", href: business.bookingLinks[0], role: "booking" } : undefined,
-    business.orderingLinks[0] ? { label: "Order Online", href: business.orderingLinks[0], role: "ordering" } : undefined,
-    { label: "Request Information", href: "#contact", role: "form" },
-    { label: "Get a Quote", href: "#contact", role: "form" },
-    { label: "Ask a Question", href: "#contact", role: "form" }
-  ].filter((option): option is { label: string; href: string; role: string } => Boolean(option));
-  if (!options.some((option) => sameCta(option, current))) options.unshift(current);
-  return dedupeCtas(options);
-}
-
-function ctaValue(value: unknown) {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as { label?: unknown; href?: unknown; role?: unknown };
-  if (typeof candidate.label !== "string" || typeof candidate.href !== "string") return undefined;
+function fallbackDesignPlan(business: BusinessProfile): DesignPlan {
   return {
-    label: candidate.label,
-    href: candidate.href,
-    role: typeof candidate.role === "string" ? candidate.role : "cta"
+    stylePack: business.vertical === "home_services" || business.vertical === "auto_services" ? "urgent_service" : "local_modern",
+    typographyPack: "clean_sans",
+    colorSystem: "warm",
+    spacingDensity: "standard",
+    buttonStyle: "solid",
+    radiusStyle: "soft",
+    imageTreatment: "natural",
+    motionPolicy: "subtle"
   };
-}
-
-function objectListColumns(value: unknown[]) {
-  const columns = new Set<string>();
-  for (const item of value) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    for (const [key, child] of Object.entries(item)) {
-      if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") columns.add(key);
-    }
-  }
-  return preferredColumnOrder([...columns]);
-}
-
-function normalizeObjectListItem(value: unknown, columns: string[]) {
-  const item = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  return Object.fromEntries(columns.map((column) => [column, String(item[column] ?? "")]));
-}
-
-function preferredColumnOrder(columns: string[]) {
-  const preferred = ["title", "label", "question", "quote", "author", "description", "answer", "href", "url", "alt"];
-  return columns.sort((left, right) => {
-    const leftIndex = preferred.indexOf(left);
-    const rightIndex = preferred.indexOf(right);
-    if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
-    if (leftIndex === -1) return 1;
-    if (rightIndex === -1) return -1;
-    return leftIndex - rightIndex;
-  });
-}
-
-function dedupeCtas(options: Array<{ label: string; href: string; role: string }>) {
-  const seen = new Set<string>();
-  return options.filter((option) => {
-    const key = `${option.role}|${option.href}|${option.label}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function sameCta(left: { label: string; href: string; role: string }, right: { label: string; href: string; role: string }) {
-  return left.label === right.label && left.href === right.href && left.role === right.role;
 }

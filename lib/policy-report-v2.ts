@@ -63,7 +63,13 @@ export function runPolicyReportV2(input: {
 
 function policyIssuesForBundle(bundle: SiteBundle, version: SiteVersion | undefined): PolicyReportIssueV2[] {
   const issues: PolicyReportIssueV2[] = [];
-  const compiledText = JSON.stringify(version?.rendererVersion === "layout-v2" ? version.compiledPages : version?.pages ?? []);
+  const compiledText = JSON.stringify(
+    version?.rendererVersion === "layout-v2"
+      ? version.compiledPages
+      : version?.rendererVersion === "layout-v3"
+      ? version.pageComposition.pages
+      : version?.pages ?? []
+  );
 
   for (const signal of bundle.presenceAssessment.publicPresenceSignals ?? []) {
     if (signal.source !== "places_api" && signal.provider !== "google_places") continue;

@@ -1,39 +1,4 @@
-import type { GeneratedSiteV3Mode, SiteArtDirectionRecipeV3 } from "./models";
-
-export const defaultGeneratedSiteV3Mode: GeneratedSiteV3Mode = "all_new_generations";
-
-export function getGeneratedSiteV3Mode(env: NodeJS.ProcessEnv = process.env): GeneratedSiteV3Mode {
-  const value = env.GENERATED_SITE_V3_MODE;
-  if (value === "off" || value === "fixture_only" || value === "operator_allowlist" || value === "all_new_generations") return value;
-  return defaultGeneratedSiteV3Mode;
-}
-
-export function generatedSiteV3AllowlistHosts(env: NodeJS.ProcessEnv = process.env): string[] {
-  return (env.GENERATED_SITE_V3_ALLOWLIST_HOSTS ?? "")
-    .split(",")
-    .map((host) => host.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-export function isGeneratedSiteV3Allowed(input: {
-  mode?: GeneratedSiteV3Mode;
-  sourceHost?: string;
-  fixture?: boolean;
-  explicitOperatorRequest?: boolean;
-  allowlistHosts?: string[];
-  env?: NodeJS.ProcessEnv;
-}): boolean {
-  const env = input.env ?? process.env;
-  const mode = input.mode ?? getGeneratedSiteV3Mode(env);
-  if (mode === "off") return false;
-  if (input.fixture) return true;
-  if (mode === "fixture_only") return false;
-  if (mode === "operator_allowlist") {
-    if (!input.explicitOperatorRequest || !input.sourceHost) return false;
-    return input.allowlistHosts?.includes(input.sourceHost.toLowerCase()) ?? false;
-  }
-  return true;
-}
+import type { SiteArtDirectionRecipeV3 } from "./models";
 
 export const generatedSiteV3ArtifactTypes = [
   "art_direction_decision",

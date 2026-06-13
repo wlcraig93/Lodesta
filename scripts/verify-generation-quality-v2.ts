@@ -23,7 +23,7 @@ import {
   findDuplicateTitles,
   qualityReadyThreshold
 } from "../lib/generation-quality-v2";
-import { createSiteFromInput, inferVertical } from "../lib/intake";
+import { createSiteV3FromInput, inferVertical } from "../lib/intake";
 import { defaultServicesForVertical } from "../lib/recipes";
 import { localRepository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
@@ -197,7 +197,7 @@ async function main() {
   assert.ok(badDeckViolations.some((violation) => violation.includes("duplicate questions")));
 
   // --- regression: Austin Tireman weak path (no LLM, no usable media) ---
-  const weakBundle = createSiteFromInput({ url: crawl.url, crawl, identity: { siteId: "site_austin_tireman_test" } });
+  const weakBundle = createSiteV3FromInput({ url: crawl.url, crawl, identity: { siteId: "site_austin_tireman_test" } });
   assert.equal(weakBundle.businessProfile.vertical, "auto_services", "tire shop must not classify as general_local");
   assert.ok(weakBundle.businessProfile.services.includes("10 Minute Flat Repair"));
   assert.ok(!weakBundle.businessProfile.services.includes("10 Minute Flat Repair 15 2"), "mangled scrape fragments must not survive");
@@ -286,7 +286,7 @@ async function main() {
   assert.ok(!repairedReport.findings.some((finding) => finding.id === "filler_facts_visible"), "repair must remove filler facts");
 
   // --- good path: understanding + copy deck + rights-safe media reaches ready ---
-  const goodBundle = createSiteFromInput({
+  const goodBundle = createSiteV3FromInput({
     url: crawl.url,
     crawl,
     identity: { siteId: "site_austin_tireman_good" },
@@ -349,7 +349,7 @@ async function main() {
   // --- P1 regression: vertical-default services are not source-backed grounding ---
   assert.equal(areServicesVerticalDefaults(defaultServicesForVertical("auto_body"), "auto_body"), true);
   assert.equal(areServicesVerticalDefaults(["10 Minute Flat Repair", "Delivery"], "auto_services"), false);
-  const defaultServicesBundle = createSiteFromInput({
+  const defaultServicesBundle = createSiteV3FromInput({
     prompt: "Create a website for Contract Collision, an auto body shop in Austin. Phone: (512) 555-0100. Address: 100 Test Road, Austin, TX 78702.",
     identity: { siteId: "site_default_services_test" }
   });
@@ -517,7 +517,7 @@ async function main() {
     }
   ];
   for (const shell of recipeShells) {
-    const shellBundle = createSiteFromInput({ prompt: shell.prompt, identity: { siteId: `site_recipe_${shell.vertical}` } });
+    const shellBundle = createSiteV3FromInput({ prompt: shell.prompt, identity: { siteId: `site_recipe_${shell.vertical}` } });
     assert.equal(shellBundle.businessProfile.vertical, shell.vertical, `${shell.prompt.slice(0, 40)} must classify as ${shell.vertical}`);
     shellBundle.businessProfile.photos = [1, 2, 3, 4].map((index) => ({
       id: `asset_safe_${shell.vertical}_${index}`,
@@ -543,7 +543,7 @@ async function main() {
   }
 
   // --- Slice 5: conversion-goal CTA selection ---
-  const orderingBundle = createSiteFromInput({ prompt: recipeShells[0].prompt, identity: { siteId: "site_recipe_ordering" } });
+  const orderingBundle = createSiteV3FromInput({ prompt: recipeShells[0].prompt, identity: { siteId: "site_recipe_ordering" } });
   orderingBundle.businessProfile.orderingLinks = ["https://order.example/casa-verde"];
   const orderingCompile = compileGeneratedSiteV3Site({ bundle: orderingBundle });
   assert.ok(
@@ -590,10 +590,10 @@ async function main() {
     multiBundle.presenceAssessment.generatedCopyDeck = multiDeck;
     const multiCompile = compileGeneratedSiteV3Site({ bundle: multiBundle });
     const pageSlugs = multiCompile.version.pageComposition.pages.map((page) => page.slug);
-    assert.ok(pageSlugs.includes("10-minute-flat-repair"), `source-backed service must get a landing page: ${pageSlugs.join(", ")}`);
+    assert.ok(pageSlugs.includes("services/10-minute-flat-repair"), `source-backed service must get a landing page: ${pageSlugs.join(", ")}`);
     assert.ok(!pageSlugs.some((slug) => slug.includes("widget")), "non-source-backed service must not get a page");
-    assert.equal(multiCompile.version.pages.map((page) => page.slug).join(","), pageSlugs.join(","), "legacy pages projection must include service pages for sitemap/claims");
-    const servicePage = multiCompile.version.pageComposition.pages.find((page) => page.slug === "10-minute-flat-repair");
+    assert.equal(multiCompile.version.pageComposition.pages.map((page) => page.slug).join(","), pageSlugs.join(","), "pageComposition must include service pages for sitemap/claims");
+    const servicePage = multiCompile.version.pageComposition.pages.find((page) => page.slug === "services/10-minute-flat-repair");
     assert.equal(servicePage?.purpose, "service_landing");
     assert.ok((servicePage?.sections.length ?? 0) >= 4, "service page must compose hero/detail/faq/contact");
     const multiReport = evaluateGenerationQualityV2({ bundle: multiBundle, version: multiCompile.version });
@@ -703,23 +703,24 @@ async function main() {
     ];
     multiPageBundle.presenceAssessment.generatedCopyDeck = navDeck;
 
-    const platformHtml = await renderHtml(multiPageBundle, "10-minute-flat-repair");
+    const servicePageSlug = "services/10-minute-flat-repair";
+    const platformHtml = await renderHtml(multiPageBundle, servicePageSlug);
     assert.ok(
-      platformHtml.includes(`value="page_10-minute-flat-repair"`),
+      platformHtml.includes(`value="page_services_10-minute-flat-repair"`),
       "service-page form must attribute leads to its own pageId"
     );
     assert.ok(
-      platformHtml.includes(`/sites/${multiPageBundle.siteModel.slug}/10-minute-flat-repair`),
+      platformHtml.includes(`/sites/${multiPageBundle.siteModel.slug}/${servicePageSlug}`),
       "platform render must use /sites base path in nav"
     );
 
-    const customDomainHtml = await renderHtml(multiPageBundle, "10-minute-flat-repair", "");
+    const customDomainHtml = await renderHtml(multiPageBundle, servicePageSlug, "");
     assert.ok(
       !customDomainHtml.includes(`href="/sites/`),
       "custom-domain render must never link back to /sites platform paths"
     );
     assert.ok(
-      customDomainHtml.includes(`href="/10-minute-flat-repair"`),
+      customDomainHtml.includes(`href="/${servicePageSlug}"`),
       "custom-domain render must use domain-root service links"
     );
   }
@@ -1272,10 +1273,8 @@ async function main() {
 
   // --- integration: full generateSite persistence + telemetry (deterministic, no LLM) ---
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
-  const previousV3Mode = process.env.GENERATED_SITE_V3_MODE;
   try {
     process.env.OPENAI_API_KEY = "";
-    delete process.env.GENERATED_SITE_V3_MODE;
 
     // Quality-fail path: tire shop with source-backed services but no usable media.
     const failGeneration = await generateSite({
@@ -1284,8 +1283,7 @@ async function main() {
         prompt:
           "Create a website for Verify Tire Shop, a tire shop in Austin. Services: flat repair, used tires, brake service. Phone: (512) 555-0199. Address: 200 Test Road, Austin, TX 78702."
       },
-      source: "api",
-      metadata: { generatedSiteV3: true }
+      source: "api"
     });
     const failQa = failGeneration.bundle.siteModel.versions[0]?.generationQa;
     assert.equal(failGeneration.generation.vertical, "auto_services");
@@ -1309,8 +1307,7 @@ async function main() {
         prompt:
           "Create a website for Verify Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair. Phone: (512) 555-0198. Address: 300 Test Road, Austin, TX 78702."
       },
-      source: "api",
-      metadata: { generatedSiteV3: true }
+      source: "api"
     });
     const passQa = passGeneration.bundle.siteModel.versions[0]?.generationQa;
     assert.ok(
@@ -1331,8 +1328,6 @@ async function main() {
     }
   } finally {
     process.env.OPENAI_API_KEY = previousOpenAiKey;
-    if (previousV3Mode === undefined) delete process.env.GENERATED_SITE_V3_MODE;
-    else process.env.GENERATED_SITE_V3_MODE = previousV3Mode;
   }
 
   // --- Scorecard slice 1a/1b: projection, gate states, unscored exclusion ---
@@ -1350,7 +1345,7 @@ async function main() {
     );
 
     // Projection from a full quality report + composed version SEO checks.
-    const scorecardBundle = createSiteFromInput({
+    const scorecardBundle = createSiteV3FromInput({
       prompt: "Build a website for Scorecard Tire, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0142"
     });
     const compiled = compileGeneratedSiteV3Site({ bundle: scorecardBundle });
@@ -1448,7 +1443,7 @@ async function main() {
     assert.ok(bad.length > 0, "brand_bar on transparent header is rejected");
 
     // Compiled versions store BOTH layers (reproducibility rule).
-    const controlsBundle = createSiteFromInput({
+    const controlsBundle = createSiteV3FromInput({
       prompt: "Build a website for Controls Tire, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0177"
     });
     const compiledControls = compileGeneratedSiteV3Site({ bundle: controlsBundle });
@@ -1465,7 +1460,7 @@ async function main() {
   // --- Fact coverage Phase A (slice 3) ---
   {
     const { buildFactCoverageReport } = await import("../lib/fact-coverage");
-    const coverageBundle = createSiteFromInput({
+    const coverageBundle = createSiteV3FromInput({
       prompt:
         "Build a website for Coverage Tire, a tire shop in Austin offering flat repair, new tires, and wheel alignment. phone: 512-555-0161. address: 100 Coverage Rd, Austin, TX"
     });
@@ -1483,16 +1478,13 @@ async function main() {
     assert.ok(typeof report.coverageRatio === "number" && report.coverageRatio > 0 && report.coverageRatio <= 1, "coverage ratio in range");
 
     // End-to-end: readiness attaches scorecard + coverage to QA metadata.
-    const previousV3ModeE2e = process.env.GENERATED_SITE_V3_MODE;
-    process.env.GENERATED_SITE_V3_MODE = "on";
     const e2e = await generateSite({
       repository: localRepository,
       input: {
         prompt:
           "Create a website for Coverage Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair. Phone: (512) 555-0162. Address: 410 Coverage Road, Austin, TX 78702."
       },
-      source: "api",
-      metadata: { generatedSiteV3: true }
+      source: "api"
     });
     const e2eQa = e2e.bundle.siteModel.versions[0]?.generationQa;
     assert.ok(e2eQa?.scorecard, "generated candidates carry the scorecard");
@@ -1501,8 +1493,6 @@ async function main() {
       e2eQa?.scorecard?.dimensions.find((d) => d.id === "seo_structure")?.state === "enforcing",
       "seo dimension scored in the live pipeline"
     );
-    if (previousV3ModeE2e === undefined) delete process.env.GENERATED_SITE_V3_MODE;
-    else process.env.GENERATED_SITE_V3_MODE = previousV3ModeE2e;
     console.log("fact coverage slice 3 checks passed");
   }
 
@@ -1511,7 +1501,7 @@ async function main() {
     const { runShadowCraftLoop, applyMutation } = await import("../lib/craft-loop");
 
     // Off by default.
-    const loopBundle = createSiteFromInput({
+    const loopBundle = createSiteV3FromInput({
       prompt: "Build a website for Loop Tire, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0151"
     });
     const compiledLoop = compileGeneratedSiteV3Site({ bundle: loopBundle });
@@ -1600,7 +1590,7 @@ async function main() {
     const { resolveDesignControlsV3 } = await import("../lib/generated-site-v3-art-direction-catalog");
 
     // No API key → no brief; the compiler's deterministic tier carries.
-    const briefBundle = createSiteFromInput({
+    const briefBundle = createSiteV3FromInput({
       prompt: "Build a website for Brief Tire, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0188"
     });
     assert.equal(
@@ -1643,7 +1633,7 @@ async function main() {
     const { applyMutation } = await import("../lib/craft-loop");
     const { compileGeneratedSiteV3Site: compileForOverrides } = await import("../lib/generated-site-v3-compiler");
 
-    const tierBundle = createSiteFromInput({
+    const tierBundle = createSiteV3FromInput({
       prompt: "Build a website for Tier Tire, a tire shop in Austin offering flat repair, new tires, and wheel alignment. phone: 512-555-0199"
     });
     tierBundle.businessProfile.photos = Array.from({ length: 4 }, (_, index) => ({
@@ -1710,10 +1700,10 @@ async function main() {
   // --- fingerprintV1 ---
   {
     const { computeFingerprintV1, fingerprintDistanceV1, minPairwiseDistanceV1 } = await import("../lib/fingerprint-v1");
-    const fpBundleA = createSiteFromInput({
+    const fpBundleA = createSiteV3FromInput({
       prompt: "Build a website for Fp Tire One, a tire shop in Austin offering flat repair and new tires. phone: 512-555-0301"
     });
-    const fpBundleB = createSiteFromInput({
+    const fpBundleB = createSiteV3FromInput({
       prompt: "Build a website for Fp Salon Two, a beauty salon in Austin offering haircuts, color, and styling. phone: 512-555-0302"
     });
     const fpA = computeFingerprintV1(compileGeneratedSiteV3Site({ bundle: fpBundleA }).version);

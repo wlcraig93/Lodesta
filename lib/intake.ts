@@ -6,17 +6,14 @@ import type {
   Experiment,
   ExperimentLearning,
   ExtensionModel,
-  FieldPolicy,
   FieldProvenance,
   GenerationBrief,
   GenerationCostEstimate,
   NormalizedBusinessFacts,
-  PageModel,
   PresenceAssessment,
   CreativeMockupArtifact,
   RenderableFact,
   RenderInspectionResult,
-  SectionModel,
   SiteAsset,
   SiteBundle,
   SiteModel,
@@ -42,22 +39,13 @@ import type { PublicPresenceEnrichment } from "./public-presence";
 import { themeForPreset } from "./theme-presets";
 import { createDeterministicVisualQa } from "./visual-qa";
 import { applyExperimentLearningsToVariants, activeLearningFor } from "./experiment-learning";
-import { galleryImageAssetsForBusiness, heroImageAssetForBusiness } from "./image-registry";
+import { heroImageAssetForBusiness } from "./image-registry";
 import { computeSiteModelHash, makePendingGenerationQa } from "./site-version-metadata";
 import { createBusinessFactGraph } from "./business-fact-graph";
-import { createGenerationPlanV2 } from "./generation-plan-v2";
-import { applyClaimVerificationToPlan, verifyGenerationClaims } from "./claim-verification";
 import { withBusinessBundleFields } from "./business-model";
-import {
-  defaultDesignPlanForVertical,
-  designSchemaVersion,
-  pageFromLegacySections,
-  rendererVersion,
-  repairLayoutDocument,
-  validateLayoutDocument
-} from "./layout-registry";
-import { pruneUnsupportedCatalogSections } from "./section-catalog";
 import { planGenerationCost } from "./generation-cost";
+import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { activeSiteVersionV3 } from "./site-version-v3";
 import {
   hoursRecordFromEntries,
   normalizeBusinessHours,
@@ -116,7 +104,7 @@ export function inferVertical(input: IntakeInput): Vertical {
   return "general_local";
 }
 
-export function createSiteFromInput(input: IntakeInput): SiteBundle {
+export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
   const understanding = input.understanding;
   const vertical =
     understanding && understanding.verticalConfidence >= understandingVerticalConfidenceFloor
@@ -187,15 +175,22 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
         source: "website_reference" as const,
         rightsStatus: "reference_only" as const
       })),
-    logo: input.crawl?.assetReferences.find((asset) => asset.kind === "logo")
-      ? {
-          id: "asset_reference_logo",
-          url: input.crawl.assetReferences.find((asset) => asset.kind === "logo")?.url ?? "",
-          alt: `${name} logo reference`,
-          source: "website_reference" as const,
-          rightsStatus: "reference_only" as const
-        }
-      : undefined,
+    ...(() => {
+      const ranked = rankedLogoReferences(input.crawl?.assetReferences);
+      const candidates = ranked.map((asset, index) => ({
+        id: `asset_reference_logo_${index + 1}`,
+        url: asset.url,
+        alt: `${name} logo reference`,
+        source: "website_reference" as const,
+        rightsStatus: "reference_only" as const
+      }));
+      return {
+        // Provisional pick by URL ranking; scraped-media re-decides from the
+        // candidates' measured pixel dimensions at download time.
+        logo: candidates[0],
+        logoCandidates: candidates.length > 1 ? candidates : undefined
+      };
+    })(),
     reviewsSummary: facts?.reviewsSummary,
     pressLinks: facts?.pressLinks ?? [],
     provenance: {
@@ -234,87 +229,13 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
   });
   const selectedDirection = selectedDesignDirection(designDirections);
   const selectedTheme = themeForPreset(vertical, selectedDirection.themePreset, themeForVertical(vertical, recipe.mood));
-  const selectedDesignPlan = defaultDesignPlanForVertical(vertical, selectedTheme);
-  const primaryCta =
-    recipe.primaryGoal === "calls" && businessProfile.phone
-      ? { label: "Call Now", href: `tel:${businessProfile.phone}`, role: "tel" }
-      : recipe.primaryGoal === "booking_clicks" && businessProfile.bookingLinks[0]
-        ? { label: "Book Now", href: businessProfile.bookingLinks[0], role: "booking" }
-        : recipe.primaryGoal === "order_clicks" && businessProfile.orderingLinks[0]
-          ? { label: "Order Online", href: businessProfile.orderingLinks[0], role: "ordering" }
-          : {
-              label:
-                recipe.primaryGoal === "booking_clicks"
-                  ? "Request Appointment"
-                  : recipe.primaryGoal === "order_clicks"
-                    ? "Start Order"
-                    : fallbackFormCtaLabel(vertical),
-              href: "#contact",
-              role: "form"
-            };
-
   const siteModel: SiteModel = {
     id: siteId,
     slug: siteSlug,
     pinList: [],
     theme: selectedTheme,
-    versions: [
-      {
-        id: `version_${identityKey}_draft_1`,
-        status: "draft" as const,
-        rendererVersion,
-        designSchemaVersion,
-        designPlan: selectedDesignPlan,
-        createdAt: now,
-        ownerTouched: false,
-        presentation: {
-          mobileActionBehavior: "after_hero",
-          reservedMobileActionSpace: true
-        },
-        pages: [
-          pageFromLegacySections({
-            id: "page_home",
-            slug: "",
-            title: "Home",
-            seo: {
-              title: `${name} | ${recipe.label}`,
-              description: `${name} is a ${recipe.label.toLowerCase()} built for fast local action, clear trust signals, and simple customer contact.`,
-              canonicalPath: "/"
-            },
-            vertical,
-            sections: buildHomeSections({
-              business: businessProfile,
-              recipe,
-              primaryCta,
-              name,
-              sectionOrder: selectedDirection.sectionEmphasis
-            })
-          }),
-          pageFromLegacySections({
-            id: "page_services",
-            slug: "services",
-            title: "Services",
-            seo: {
-              title: `Services | ${name}`,
-              description: `Explore the primary services offered by ${name}, with clear calls to action for local customers.`,
-              canonicalPath: "/services"
-            },
-            vertical,
-            sections: buildServicesPageSections({ business: businessProfile, recipe, primaryCta, name })
-          }),
-          ...buildLocalSeoPages({ business: businessProfile, recipe, primaryCta, name })
-        ]
-      }
-    ]
+    versions: []
   };
-  const initialGeneratedVersion = siteModel.versions[0];
-  if (initialGeneratedVersion) {
-    repairLayoutDocument(initialGeneratedVersion);
-    const blockingLayoutIssues = validateLayoutDocument(initialGeneratedVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
-    if (blockingLayoutIssues.length) {
-      throw new Error(`Generated layout-v1 document failed validation: ${blockingLayoutIssues.map((issue) => issue.message).join("; ")}`);
-    }
-  }
 
   const presenceAssessment: PresenceAssessment = {
     siteId,
@@ -366,50 +287,19 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
         submitLabel: submitLabelForVertical(vertical, recipe.primaryGoal)
       }))
     },
-    optimizationFindings: runAudit(businessProfile, siteModel),
+    optimizationFindings: [],
     experiments: defaultExperimentsForBusiness(businessProfile, recipe, input.experimentLearnings),
     presenceAssessment
   });
-  const initialVersion = bundle.siteModel.versions[0];
-  if (initialVersion) {
-    presenceAssessment.businessFactGraph = createBusinessFactGraph({
-      business: businessProfile,
-      presence: presenceAssessment,
-      observedAt: now
-    });
-    const catalogPruning = pruneUnsupportedCatalogSections({
-      bundle,
-      version: initialVersion,
-      factGraph: presenceAssessment.businessFactGraph,
-      primaryGoal: recipe.primaryGoal
-    });
-    if (catalogPruning.removedSections.length) {
-      presenceAssessment.technicalNotes.push(
-        `Section catalog omitted ${catalogPruning.removedSections.length} unsupported optional section${catalogPruning.removedSections.length === 1 ? "" : "s"} without safe source facts.`
-      );
-    }
-    const v2Plan = createGenerationPlanV2({
-      bundle,
-      version: initialVersion,
-      factGraph: presenceAssessment.businessFactGraph,
-      createdAt: now
-    });
-    presenceAssessment.generationPlanV2 = applyClaimVerificationToPlan(
-      v2Plan,
-      verifyGenerationClaims({ version: initialVersion, factGraph: presenceAssessment.businessFactGraph })
-    );
-    const activeInitialVersion = bundle.siteModel.versions[0] ?? initialVersion;
-    presenceAssessment.generationPlanV2 = applyClaimVerificationToPlan(
-      createGenerationPlanV2({
-        bundle,
-        version: activeInitialVersion,
-        factGraph: presenceAssessment.businessFactGraph,
-        createdAt: now
-      }),
-      verifyGenerationClaims({ version: activeInitialVersion, factGraph: presenceAssessment.businessFactGraph })
-    );
-    activeInitialVersion.generationQa = makePendingGenerationQa(computeSiteModelHash(bundle, activeInitialVersion));
-  }
+  applyGeneratedSiteV3({ bundle, now });
+  const activeInitialVersion = activeSiteVersionV3(bundle.siteModel, "generated intake bundle");
+  presenceAssessment.businessFactGraph = createBusinessFactGraph({
+    business: businessProfile,
+    presence: presenceAssessment,
+    observedAt: now
+  });
+  activeInitialVersion.generationQa = makePendingGenerationQa(computeSiteModelHash(bundle, activeInitialVersion));
+  bundle.optimizationFindings = runAudit(businessProfile, siteModel);
   presenceAssessment.qualityScore = createPresenceQualityScore({
     business: businessProfile,
     recipe,
@@ -431,63 +321,6 @@ export function createSiteFromInput(input: IntakeInput): SiteBundle {
     input.visualQa ?? createDeterministicVisualQa({ bundle, renderInspection: input.renderInspection });
 
   return bundle;
-}
-
-type Cta = { label: string; href: string; role: string };
-
-type SectionBuildContext = {
-  business: BusinessProfile;
-  recipe: VerticalRecipe;
-  primaryCta: Cta;
-  name: string;
-  sectionOrder?: SectionModel["type"][];
-};
-
-function buildHomeSections(context: SectionBuildContext): SectionModel[] {
-  const sectionOrder = context.sectionOrder?.length ? context.sectionOrder : context.recipe.defaultSections;
-  return sectionOrder.map((type, index) => sectionForType(type, context, "home", index));
-}
-
-function buildServicesPageSections(context: SectionBuildContext): SectionModel[] {
-  return [
-    {
-      id: "services_page_hero",
-      type: "hero",
-      variant: "compact",
-      props: {
-        eyebrow: "Services",
-        heading: `What ${context.name} can help with`,
-        body: "Review the core services, then call or send details when the fit is clear.",
-        primaryCta: context.primaryCta
-      },
-      bindings: {},
-      fieldPolicies: {
-        heading: policy("owner_freetext"),
-        body: policy("owner_freetext"),
-        primaryCta: policy("owner_choice", true)
-      }
-    },
-    makeServicesSection(context, "services_page_grid", "Primary services", "Service details stay focused on what customers can request today."),
-    makeFaqSection(context, "services_page_faq"),
-    makeCtaSection(context, "services_page_cta")
-  ];
-}
-
-function buildLocalSeoPages(context: SectionBuildContext): PageModel[] {
-  const servicePages = unique(context.business.services)
-    .slice(0, 6)
-    .map((service) => buildServiceLandingPage(context, service));
-  const areaPages = unique(
-    [
-      ...context.business.serviceAreas,
-      context.business.address?.city ? `${context.business.address.city}${context.business.address.region ? `, ${context.business.address.region}` : ""}` : ""
-    ].filter((area): area is string => Boolean(area))
-  )
-    .filter((area) => !/^local area$/i.test(area))
-    .slice(0, 5)
-    .map((area) => buildAreaLandingPage(context, area));
-
-  return [...dedupePages(servicePages), ...dedupePages(areaPages)];
 }
 
 function defaultExperimentsForBusiness(
@@ -611,519 +444,6 @@ function experimentMetricForGoal(goal: ConversionGoal): Experiment["primaryMetri
       return "form_submits";
   }
 }
-
-function buildServiceLandingPage(context: SectionBuildContext, service: string): PageModel {
-  const serviceSlug = slugify(service) || "service";
-  const area = context.business.serviceAreas[0] ?? context.business.address?.city ?? "your area";
-  return pageFromLegacySections({
-    id: `page_service_${serviceSlug}`,
-    slug: `services/${serviceSlug}`,
-    title: service,
-    seo: {
-      title: `${service} | ${context.name}`,
-      description: `${context.name} helps local customers with ${service.toLowerCase()} in ${area}. Get clear next steps, trust signals, and a direct way to contact the business.`,
-      canonicalPath: `/services/${serviceSlug}`
-    },
-    vertical: context.business.vertical,
-    sections: [
-      makeLandingHeroSection(
-        context,
-        `service_${serviceSlug}_hero`,
-        "Service",
-        `${service} in ${area}`,
-        `${serviceDescription(context.business.vertical, service)} Contact ${context.name} to confirm fit, timing, and next steps.`
-      ),
-      makeSingleServiceSection(context, `service_${serviceSlug}_detail`, service, area),
-      makeTestimonialsSection(context, `service_${serviceSlug}_trust`),
-      makeFaqSection(
-        {
-          ...context,
-          business: { ...context.business, services: [service], serviceAreas: context.business.serviceAreas }
-        },
-        `service_${serviceSlug}_faq`
-      ),
-      makeContactSection(context, `service_${serviceSlug}_contact`)
-    ]
-  });
-}
-
-function buildAreaLandingPage(context: SectionBuildContext, area: string): PageModel {
-  const areaSlug = slugify(area) || "service-area";
-  return pageFromLegacySections({
-    id: `page_area_${areaSlug}`,
-    slug: `areas/${areaSlug}`,
-    title: area,
-    seo: {
-      title: `${context.name} in ${area}`,
-      description: `${context.name} serves customers in ${area} with ${context.business.services.slice(0, 3).join(", ") || context.recipe.label.toLowerCase()}. Service details and contact options are easy to find.`,
-      canonicalPath: `/areas/${areaSlug}`
-    },
-    vertical: context.business.vertical,
-    sections: [
-      makeLandingHeroSection(
-        context,
-        `area_${areaSlug}_hero`,
-        "Service area",
-        `${context.name} in ${area}`,
-        `Confirm current availability in ${area}, then choose the service that matches the need.`
-      ),
-      makeAreaServicesSection(context, `area_${areaSlug}_services`, area),
-      makeMapSection(
-        {
-          ...context,
-          business: { ...context.business, serviceAreas: [area, ...context.business.serviceAreas.filter((item) => item !== area)] }
-        },
-        `area_${areaSlug}_map`
-      ),
-      makeFaqSection(
-        {
-          ...context,
-          business: { ...context.business, serviceAreas: [area] }
-        },
-        `area_${areaSlug}_faq`
-      ),
-      makeContactSection(context, `area_${areaSlug}_contact`)
-    ]
-  });
-}
-
-function makeLandingHeroSection(
-  context: SectionBuildContext,
-  id: string,
-  eyebrow: string,
-  heading: string,
-  body: string
-): SectionModel {
-  return {
-    id,
-    type: "hero",
-    variant: "compact",
-    props: {
-      eyebrow,
-      heading,
-      body,
-      primaryCta: context.primaryCta,
-      secondaryCta: context.business.phone && context.primaryCta.role !== "tel"
-        ? { label: "Call Now", href: `tel:${context.business.phone}`, role: "tel" }
-        : { label: "Ask a Question", href: "#contact", role: "form" }
-    },
-    bindings: {
-      phone: "business.phone"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      primaryCta: policy("owner_choice", true),
-      secondaryCta: policy("owner_choice", true),
-      layout: policy("system_only", true)
-    }
-  };
-}
-
-function makeSingleServiceSection(context: SectionBuildContext, id: string, service: string, area: string): SectionModel {
-  const audience = audiencePlural(context.business.vertical);
-  return {
-    id,
-    type: "services",
-    variant: "service_detail",
-    props: {
-      eyebrow: "Local service detail",
-      heading: `${service} without extra friction`,
-      body: `For ${area} ${audience}, ${service.toLowerCase()} requests should start with fit, timing, and next-step details.`,
-      items: [
-        {
-          title: "What to ask about",
-          description: serviceDescription(context.business.vertical, service)
-        },
-        {
-          title: "Service fit",
-          description: `Confirm whether ${service.toLowerCase()} matches the current need before scheduling or sending details.`
-        },
-        {
-          title: "Best next action",
-          description: nextActionDescription(context.recipe.primaryGoal)
-        }
-      ]
-    },
-    bindings: {
-      services: "business.services",
-      serviceAreas: "business.serviceAreas"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      items: policy("owner_choice", false, true)
-    }
-  };
-}
-
-function makeAreaServicesSection(context: SectionBuildContext, id: string, area: string): SectionModel {
-  const audience = audiencePlural(context.business.vertical);
-  return {
-    id,
-    type: "services",
-    variant: "area_service_grid",
-    props: {
-      eyebrow: "Available nearby",
-      heading: `Services for ${area} ${audience}`,
-      body: "Choose the service that matches the need, then call or send details.",
-      items: context.business.services.slice(0, 6).map((service) => ({
-        title: service,
-        description: `${serviceDescription(context.business.vertical, service)} Available for ${area} ${audience}.`
-      }))
-    },
-    bindings: {
-      services: "business.services",
-      serviceAreas: "business.serviceAreas"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext", false, true),
-      body: policy("owner_freetext"),
-      items: policy("owner_choice", false, true)
-    }
-  };
-}
-
-function dedupePages(pages: PageModel[]) {
-  const seen = new Set<string>();
-  return pages.filter((page) => {
-    if (seen.has(page.slug)) return false;
-    seen.add(page.slug);
-    return true;
-  });
-}
-
-function sectionForType(type: SectionModel["type"], context: SectionBuildContext, prefix: string, index: number): SectionModel {
-  const id = `${type}_${prefix}_${index + 1}`;
-  switch (type) {
-    case "hero":
-      return makeHeroSection(context, "hero_home");
-    case "trust_bar":
-      return makeTrustBarSection(context, id);
-    case "services":
-      return makeServicesSection(context, id, servicesHeading(context), servicesBody(context));
-    case "menu_deals":
-      return makeServicesSection(context, id, "Menu favorites, ready to order", "Keep popular items, catering, and takeout paths close to the next click.", "menu_deals");
-    case "gallery":
-      return makeGallerySection(context, id);
-    case "testimonials":
-      return makeTestimonialsSection(context, id);
-    case "faq":
-      return makeFaqSection(context, id);
-    case "cta":
-      return makeCtaSection(context, id);
-    case "contact":
-      return makeContactSection(context, "contact_home");
-    case "map":
-      return makeMapSection(context, id);
-    case "team":
-      return makeTeamSection(context, id);
-    case "press_video":
-      return makePressVideoSection(context, id);
-    case "before_after":
-      return makeBeforeAfterSection(context, id);
-  }
-}
-
-function makeHeroSection(context: SectionBuildContext, id: string): SectionModel {
-  const secondaryCta = context.business.phone && context.primaryCta.role !== "tel"
-    ? { label: "Call Now", href: `tel:${context.business.phone}`, role: "tel" }
-    : { label: "Ask a Question", href: "#contact", role: "form" };
-  return {
-    id,
-    type: "hero",
-    variant: heroVariantForVertical(context.business.vertical),
-    props: {
-      eyebrow: heroEyebrow(context),
-      heading: heroHeading(context),
-      body: heroBody(context),
-      primaryCta: context.primaryCta,
-      secondaryCta,
-      imageUrl: heroImageAssetForBusiness(context.business).url
-    },
-    bindings: {
-      heading: "business.name",
-      phone: "business.phone"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      primaryCta: policy("owner_choice", true),
-      secondaryCta: policy("owner_choice", true),
-      imageUrl: policy("owner_choice", false),
-      layout: policy("system_only", true)
-    }
-  };
-}
-
-function makeTrustBarSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "trust_bar",
-    variant: "local_signals",
-    props: {
-      items: trustItems(context)
-    },
-    bindings: {
-      rating: "business.reviewsSummary.rating",
-      hours: "business.hours",
-      serviceAreas: "business.serviceAreas"
-    },
-    fieldPolicies: {
-      items: policy("system_only", false, true)
-    }
-  };
-}
-
-function makeServicesSection(
-  context: SectionBuildContext,
-  id: string,
-  heading: string,
-  body: string,
-  type: "services" | "menu_deals" = "services"
-): SectionModel {
-  return {
-    id,
-    type,
-    variant: type === "menu_deals" ? "menu_cards" : "feature_grid",
-    props: {
-      eyebrow: type === "menu_deals" ? "Menu and offers" : "Services",
-      heading,
-      body,
-      items: context.business.services.slice(0, 6).map((service) => ({
-        title: service,
-        description: serviceDescription(context.business.vertical, service)
-      }))
-    },
-    bindings: {
-      services: "business.services"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      items: policy("owner_choice")
-    }
-  };
-}
-
-function makeGallerySection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "gallery",
-    variant: galleryVariantForVertical(context.business.vertical),
-    props: {
-      eyebrow: "Visual proof",
-      heading: galleryHeading(context.business.vertical),
-      body: galleryBody(context.business.vertical),
-      images: galleryImagesForBusiness(context.business)
-    },
-    bindings: {},
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      images: policy("owner_choice")
-    }
-  };
-}
-
-function makeTestimonialsSection(context: SectionBuildContext, id: string): SectionModel {
-  const hasReviewSummary = Boolean(context.business.reviewsSummary?.rating || context.business.reviewsSummary?.count);
-  return {
-    id,
-    type: "testimonials",
-    variant: "review_summary",
-    props: {
-      eyebrow: "Trust",
-      heading: hasReviewSummary ? "Public review profile" : "Proof customers can verify",
-      body: hasReviewSummary
-        ? `Public review signals help ${audiencePlural(context.business.vertical)} evaluate fit before taking the next step.`
-        : "Clear services, contact details, and public proof points make the decision easier.",
-      items: testimonialItems(context.business)
-    },
-    bindings: {
-      rating: "business.reviewsSummary.rating",
-      count: "business.reviewsSummary.count"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      items: policy("owner_choice", false, true)
-    }
-  };
-}
-
-function makeFaqSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "faq",
-    variant: "conversion_faq",
-    props: {
-      eyebrow: "Questions",
-      heading: "Answers before customers call",
-      items: faqItems(context)
-    },
-    bindings: {
-      services: "business.services",
-      serviceAreas: "business.serviceAreas"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      items: policy("owner_freetext")
-    }
-  };
-}
-
-function makeCtaSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "cta",
-    variant: "conversion_band",
-    props: {
-      eyebrow: "Next step",
-      heading: ctaHeading(context),
-      body: ctaBody(context),
-      primaryCta: context.primaryCta,
-      secondaryCta: context.primaryCta.role === "tel"
-        ? { label: "Request Service", href: "#contact", role: "form" }
-        : context.business.phone
-          ? { label: "Call Instead", href: `tel:${context.business.phone}`, role: "tel" }
-          : undefined
-    },
-    bindings: {
-      phone: "business.phone"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      primaryCta: policy("owner_choice", true),
-      secondaryCta: policy("owner_choice", true),
-      layout: policy("system_only", true)
-    }
-  };
-}
-
-function makeContactSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "contact",
-    variant: "split",
-    props: {
-      heading: `Contact ${context.name}`,
-      body: contactBody(context),
-      formId: "form_contact",
-      primaryCta: context.primaryCta
-    },
-    bindings: {
-      phone: "business.phone",
-      address: "business.address",
-      hours: "business.hours"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      formId: policy("owner_choice"),
-      primaryCta: policy("owner_choice", true)
-    }
-  };
-}
-
-function makeMapSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "map",
-    variant: "service_area",
-    props: {
-      eyebrow: "Where we help",
-      heading: context.business.address?.city ? `${context.business.name} in ${context.business.address.city}` : "Local service area",
-      body: "Use the contact details, hours, and service-area information before making the next call.",
-      areas: context.business.serviceAreas.slice(0, 8)
-    },
-    bindings: {
-      address: "business.address",
-      serviceAreas: "business.serviceAreas",
-      hours: "business.hours"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext", false, true),
-      body: policy("owner_freetext"),
-      areas: policy("owner_choice", false, true)
-    }
-  };
-}
-
-function makeTeamSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "team",
-    variant: "credential_cards",
-    props: {
-      eyebrow: "People",
-      heading: teamHeading(context.business.vertical),
-      body: "Team content should introduce the people customers will meet without inventing private details.",
-      items: teamItems(context.business.vertical)
-    },
-    bindings: {},
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      items: policy("owner_freetext", false, true)
-    }
-  };
-}
-
-function makePressVideoSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "press_video",
-    variant: "link_list",
-    props: {
-      eyebrow: "Around the web",
-      heading: "Bring outside proof onto the site",
-      body: "Real press, video, and social links give customers another way to check the business.",
-      links: [...context.business.pressLinks, ...context.business.socialLinks].slice(0, 4).map((href, index) => ({
-        label: index === 0 ? "Primary profile" : `Proof link ${index + 1}`,
-        href
-      }))
-    },
-    bindings: {
-      socialLinks: "business.socialLinks",
-      pressLinks: "business.pressLinks"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      links: policy("owner_choice", false, true)
-    }
-  };
-}
-
-function makeBeforeAfterSection(context: SectionBuildContext, id: string): SectionModel {
-  return {
-    id,
-    type: "before_after",
-    variant: "proof_cards",
-    props: {
-      eyebrow: "Before and after",
-      heading: beforeAfterHeading(context.business.vertical),
-      body: "Project examples show the kind of work customers can ask about.",
-      items: context.business.services.slice(0, 3).map((service) => ({
-        title: service,
-        beforeLabel: "Problem",
-        afterLabel: "Resolved",
-        description: `Use ${service.toLowerCase()} examples to connect the service to a concrete customer need.`
-      }))
-    },
-    bindings: {
-      services: "business.services"
-    },
-    fieldPolicies: {
-      heading: policy("owner_freetext"),
-      body: policy("owner_freetext"),
-      items: policy("owner_choice", false, true)
-    }
-  };
-}
-
 
 function inferBusinessName(input: IntakeInput, facts?: ExtractedBusinessFacts, hostname?: string) {
   return normalizeBusinessNameForIntake(extractPromptName(input.prompt) ?? facts?.name) ?? titleCaseHost(hostname) ?? "Sample Local Business";
@@ -1371,8 +691,8 @@ function createGenerationBrief(input: {
     businessName: input.business.name,
     vertical: input.business.vertical,
     primaryGoal: input.recipe.primaryGoal,
-    headline: heroHeading({ business: input.business, recipe: input.recipe, primaryCta: { label: "", href: "", role: "form" }, name: input.business.name }),
-    subheadline: heroBody({ business: input.business, recipe: input.recipe, primaryCta: { label: "", href: "", role: "form" }, name: input.business.name }),
+    headline: generationBriefHeadline(input.business),
+    subheadline: generationBriefSubheadline(input.business, input.recipe),
     proofSignals: input.normalizedBusinessFacts.proofSignals.map((proof) => String(proof.value)),
     renderableFacts,
     blockedClaims: input.normalizedBusinessFacts.blockedPlaceholders,
@@ -1383,6 +703,18 @@ function createGenerationBrief(input: {
       notes: ["Use curated preclaim-safe registry imagery until customer-owned photos are approved."]
     }
   };
+}
+
+function generationBriefHeadline(business: BusinessProfile) {
+  const service = business.services[0] ?? business.categories[0] ?? "local service";
+  const place = business.address?.city ?? business.serviceAreas[0];
+  return `${business.name} for ${service}${place ? ` in ${place}` : ""}`;
+}
+
+function generationBriefSubheadline(business: BusinessProfile, recipe: VerticalRecipe) {
+  const action = recipe.primaryGoal === "calls" ? "Call" : recipe.primaryGoal === "booking_clicks" ? "Book" : recipe.primaryGoal === "order_clicks" ? "Order" : "Request service";
+  const services = business.services.slice(0, 3).join(", ") || business.categories.slice(0, 2).join(", ") || "local services";
+  return `${action} with clear next steps for ${services.toLowerCase()}.`;
 }
 
 function fact(
@@ -1397,7 +729,6 @@ function fact(
 function formatAddress(address: NonNullable<ExtractedBusinessFacts["address"]>) {
   return [address.street, address.city, address.region, address.postalCode, address.country].filter(Boolean).join(", ");
 }
-
 
 function formNameForVertical(vertical: Vertical) {
   return "Contact request";
@@ -1446,10 +777,6 @@ function fallbackFormCtaLabel(vertical: Vertical) {
     home_services: "Request Service"
   };
   return labels[vertical] ?? "Request a Quote";
-}
-
-function policy(editScope: FieldPolicy["editScope"], experimentEligible = false, factField = false): FieldPolicy {
-  return { editScope, experimentEligible, factField };
 }
 
 function themeForVertical(vertical: Vertical, mood: Theme["mood"]): Theme {
@@ -1607,507 +934,6 @@ function themeForVertical(vertical: Vertical, mood: Theme["mood"]): Theme {
     density: "standard",
     mood
   };
-}
-
-function heroVariantForVertical(vertical: Vertical) {
-  const variants: Partial<Record<Vertical, string>> = {
-    restaurant: "fullbleed_food",
-    beauty_salon: "gallery_forward",
-    creative_studio: "portfolio_forward",
-    law_firm: "authority_split",
-    home_services: "emergency_action",
-    auto_body: "estimate_focused"
-  };
-  return variants[vertical] ?? "conversion_focused";
-}
-
-function heroEyebrow(context: SectionBuildContext) {
-  const city = cleanDisplayPlace(context.business.address?.city ?? context.business.serviceAreas[0]);
-  const category = context.business.categories[0] ?? context.recipe.label;
-  return city ? `${category} in ${city}` : category;
-}
-
-function heroHeading(context: SectionBuildContext) {
-  if (context.business.vertical === "restaurant") return restaurantHeroHeading(context);
-  if (context.business.vertical === "landscaping" || context.business.vertical === "creative_studio") {
-    return serviceLedHeroHeading(context);
-  }
-  const headings: Partial<Record<Vertical, string>> = {
-    auto_body: "Collision repair with clear damage details.",
-    beauty_salon: "Book the look without the back-and-forth.",
-    med_spa: "A polished path from interest to consultation.",
-    law_firm: professionalServicesHeroHeading(context),
-    dental: "Make the next appointment easy.",
-    home_services: "Fast help, clear service areas, easy contact.",
-    fitness: "Turn interest into a first visit.",
-    real_estate: "Make local expertise easy to trust.",
-    landscaping: "Project scope made easy to quote.",
-    veterinary: "Help pet owners act quickly and confidently.",
-    creative_studio: "Portfolio-led project inquiries."
-  };
-  return headings[context.business.vertical] ?? `${context.name} makes it easy to take the next step.`;
-}
-
-function heroBody(context: SectionBuildContext) {
-  const serviceList = context.business.services.slice(0, 3).join(", ");
-  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
-  const locationPhrase = area ? ` for ${audiencePlural(context.business.vertical)} in ${area}` : "";
-  if (context.business.vertical === "auto_body") {
-    const services = serviceList || "repair services";
-    const areaPhrase = area ? ` for ${area} drivers` : "";
-    return `${services} with quote request and call options up front${areaPhrase}.`;
-  }
-  if (context.business.vertical === "restaurant") {
-    return restaurantHeroBody(context, area);
-  }
-  if (context.business.vertical === "law_firm") {
-    return `Request a consultation with ${context.name}, or call to share the matter type and preferred follow-up${area ? ` in ${area}` : ""}.`;
-  }
-  if (context.business.vertical === "beauty_salon") {
-    return `${serviceList || "Salon services"} with booking and call options up front${locationPhrase}.`;
-  }
-  if (context.business.vertical === "home_services") {
-    return `${serviceList || "Home services"} with service-area details and call options up front${locationPhrase}.`;
-  }
-  if (context.business.vertical === "landscaping") {
-    return `Share project scope with ${context.name}, check service area, or request a quote${area ? ` in ${area}` : ""}.`;
-  }
-  if (context.business.vertical === "creative_studio") {
-    return `Send a brief to ${context.name}, compare portfolio context, or ask about timing${area ? ` in ${area}` : ""}.`;
-  }
-  const servicePhrase = serviceList || context.recipe.label.toLowerCase();
-  return `${servicePhrase} with clear next steps and contact options up front${locationPhrase}.`;
-}
-
-function serviceLedHeroHeading(context: SectionBuildContext) {
-  const services = context.business.services.slice(0, context.business.vertical === "creative_studio" ? 2 : 3);
-  if (services.length) return `${readableList(services)}.`;
-  return context.business.vertical === "creative_studio" ? "Portfolio-led project inquiries." : "Project scope made easy to quote.";
-}
-
-function restaurantHeroHeading(context: SectionBuildContext) {
-  const services = context.business.services.slice(0, 3);
-  if (services.length) return `${readableList(services)}.`;
-  const category = context.business.categories[0]?.replace(/\s*restaurant$/i, " favorites");
-  return category ? `${category}.` : `${context.name} is ready for online ordering.`;
-}
-
-function restaurantHeroBody(context: SectionBuildContext, area?: string) {
-  const hasTakeout = context.business.services.some((service) => /\b(takeout|pickup|to go)\b/i.test(service));
-  const hasCatering = context.business.services.some((service) => /\bcatering\b/i.test(service));
-  const location = area ? ` in ${area}` : "";
-  if (context.business.orderingLinks.length && context.business.phone) {
-    const callReason = hasCatering ? "catering questions" : "menu questions";
-    const visitReason = hasTakeout ? "pickup" : "a visit";
-    return `Order online from ${context.name}, call with ${callReason}, or check hours before ${visitReason}${location}.`;
-  }
-  if (context.business.orderingLinks.length) return `Order online from ${context.name} and check the menu before the next visit${location}.`;
-  if (context.business.phone) return `Call ${context.name} with menu questions, catering needs, or visit timing${location}.`;
-  return `Menu highlights and next-step details are easy to scan${location}.`;
-}
-
-function professionalServicesHeroHeading(context: SectionBuildContext) {
-  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
-  const location = area ? ` in ${area}` : "";
-  const services = context.business.vertical === "law_firm"
-    ? context.business.services.slice(0, 2).map(lawPracticeHeroLabel)
-    : context.business.services.slice(0, 2);
-  if (context.business.vertical === "law_firm" && services.length >= 2) return `${services[0]} & ${services[1]}.`;
-  if (services.length) return `${readableList(services)}${location}.`;
-  return `${context.name}${location}.`;
-}
-
-function lawPracticeHeroLabel(service: string, index: number) {
-  const label = service
-    .replace(/\b(attorney|lawyer)\b/gi, "law")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-  return index === 0 ? sentenceCap(label) : label;
-}
-
-function servicesHeading(context: SectionBuildContext) {
-  const primary = context.business.services[0];
-  const secondary = context.business.services[1];
-  if (primary && secondary) return `${primary} and ${secondary}`;
-  if (primary) return primary;
-  return `${context.recipe.label} services`;
-}
-
-function servicesBody(context: SectionBuildContext) {
-  const area = cleanDisplayPlace(context.business.serviceAreas[0] ?? context.business.address?.city);
-  const areaPhrase = area ? ` in ${area}` : "";
-  const audience = audiencePlural(context.business.vertical);
-  if (context.business.vertical === "auto_body") {
-    return `Compare the repair services customers can request today, then choose the fastest way to reach the shop${areaPhrase}.`;
-  }
-  if (context.business.vertical === "law_firm") {
-    return `Practice areas are listed plainly so clients can choose a consultation path${areaPhrase}.`;
-  }
-  if (context.business.vertical === "landscaping") {
-    return `Compare outdoor services, then send project scope and location for a quote${areaPhrase}.`;
-  }
-  if (context.business.vertical === "creative_studio") {
-    return `Match the project type to a simple inquiry path before sending a brief${areaPhrase}.`;
-  }
-  return `Clear service details and direct contact options help ${audience} decide whether ${context.name} is the right fit${areaPhrase}.`;
-}
-
-function galleryImagesForBusiness(business: Pick<BusinessProfile, "vertical" | "name" | "categories" | "services">) {
-  return galleryImageAssetsForBusiness(business).map((asset) => ({
-    url: asset.url,
-    alt: asset.alt,
-    label: asset.label
-  }));
-}
-
-function galleryVariantForVertical(vertical: Vertical) {
-  if (vertical === "creative_studio" || vertical === "beauty_salon") return "portfolio_grid";
-  if (vertical === "restaurant") return "food_grid";
-  return "proof_grid";
-}
-
-function galleryHeading(vertical: Vertical) {
-  const headings: Partial<Record<Vertical, string>> = {
-    restaurant: "Photos that make ordering easier",
-    beauty_salon: "A closer look before booking",
-    creative_studio: "Portfolio quality up front",
-    landscaping: "Project context before the quote",
-    auto_body: "Damage and finish details matter"
-  };
-  return headings[vertical] ?? "Visual proof that supports the next action";
-}
-
-function galleryBody(vertical: Vertical) {
-  const bodies: Partial<Record<Vertical, string>> = {
-    restaurant: "Dish and dining-room photos give guests a clear look before they order, pick up, or ask about catering.",
-    beauty_salon: "Use visual references to compare style, finish, and booking fit before taking the next step.",
-    creative_studio: "Portfolio images make the creative style clear before someone sends a brief.",
-    landscaping: "Project photos help homeowners understand fit, scope, and the kind of work to discuss.",
-    auto_body: "Repair visuals help drivers understand the shop's work before they call.",
-    home_services: "Service photos give homeowners context before they request help.",
-    law_firm: "A restrained visual section supports trust without adding unsupported claims."
-  };
-  return bodies[vertical] ?? "Relevant photos give customers context before they choose a next step.";
-}
-
-function trustItems(context: SectionBuildContext) {
-  const items: string[] = [];
-  const reviewSummary = isGoogleDerivedReviewSummary(context.business.reviewsSummary) ? undefined : context.business.reviewsSummary;
-  if (reviewSummary?.rating) {
-    items.push(`${reviewSummary.rating} rating`);
-  }
-  if (reviewSummary?.count) {
-    items.push(`${reviewSummary.count} reviews`);
-  }
-  if (context.business.serviceAreas[0]) {
-    items.push(`Serves ${cleanDisplayPlace(context.business.serviceAreas[0])}`);
-  }
-  if (context.business.phone) {
-    items.push(callTrustLabel(context.business.vertical));
-  }
-  for (const signal of context.recipe.trustSignals) {
-    if (items.length >= 4) break;
-    const safeSignal = safeTrustSignal(signal, context);
-    if (safeSignal) items.push(safeSignal);
-  }
-  return unique(items).slice(0, 4);
-}
-
-function safeTrustSignal(signal: string, context: SectionBuildContext) {
-  const normalized = signal.toLowerCase();
-  if (normalized.includes("rating")) return context.business.reviewsSummary?.rating ? `${context.business.reviewsSummary.rating} public rating` : undefined;
-  if (normalized.includes("review") && context.business.reviewsSummary?.count) return `${context.business.reviewsSummary.count} public reviews`;
-  if (normalized.includes("photo") || normalized.includes("before")) return photoTrustLabel(context.business.vertical);
-  if (normalized.includes("credential") || normalized.includes("certification") || normalized.includes("licensed") || normalized.includes("insured") || normalized.includes("insurance")) return undefined;
-  if (normalized.includes("response")) return "Direct contact";
-  if (normalized.includes("social")) return context.business.socialLinks.length ? "Social profile detected" : undefined;
-  if (normalized.includes("years")) return undefined;
-  return undefined;
-}
-
-function serviceDescription(vertical: Vertical, service: string) {
-  const lowered = service.toLowerCase();
-  if (vertical === "restaurant") return restaurantServiceDescription(lowered);
-  if (vertical === "landscaping") return landscapingServiceDescription(lowered);
-  if (vertical === "creative_studio") return creativeServiceDescription(lowered);
-  if (vertical === "auto_body") return autoBodyServiceDescription(lowered);
-  if (vertical === "home_services") return homeServicesServiceDescription(lowered);
-  if (vertical === "beauty_salon") return beautyServiceDescription(lowered);
-  if (vertical === "law_firm") return lawFirmServiceDescription(lowered);
-  const descriptions: Partial<Record<Vertical, string>> = {
-    med_spa: `Use the consultation path to ask about fit and next steps for ${lowered}.`,
-    dental: `Check appointment options and patient next steps for ${lowered}.`,
-    fitness: `Check schedule, first-visit fit, and membership context for ${lowered}.`,
-    real_estate: `Connect ${lowered} to local market context and a direct inquiry path.`,
-    veterinary: `Check care fit and appointment options for ${lowered}.`
-  };
-  return descriptions[vertical] ?? `Review fit, timing, and next steps for ${lowered}.`;
-}
-
-function autoBodyServiceDescription(loweredService: string) {
-  if (loweredService.includes("collision")) return "Start with damage photos, vehicle context, and timing so the shop can understand the collision repair need.";
-  if (loweredService.includes("paint")) return "Share affected panels, finish concerns, and timing so paint repair questions start with useful detail.";
-  if (loweredService.includes("bumper")) return "Send bumper damage details and contact preferences so the next step is clear before the call.";
-  if (loweredService.includes("dent")) return "Describe the dent location and severity so repair fit can be confirmed quickly.";
-  return `Send photos, vehicle context, and timing details for ${loweredService}.`;
-}
-
-function homeServicesServiceDescription(loweredService: string) {
-  if (loweredService.includes("hvac")) return "Share the system issue, location, and timing so service fit can be confirmed quickly.";
-  if (loweredService.includes("plumb")) return "Start with the fixture or leak context, urgency, and address details before the call.";
-  if (loweredService.includes("electric")) return "Send the electrical issue, access notes, and timing so the request starts with the right context.";
-  if (loweredService.includes("repair")) return "Describe the issue, location, and timing so the team can route the service request.";
-  return `Confirm location, timing, and service context for ${loweredService}.`;
-}
-
-function beautyServiceDescription(loweredService: string) {
-  if (loweredService.includes("color")) return "Share color goals, current hair context, and timing before requesting an appointment.";
-  if (loweredService.includes("cut")) return "Compare cut goals and availability, then send preferred timing or call the salon.";
-  if (loweredService.includes("styl")) return "Start with the occasion, style reference, and timing so booking fit is clear.";
-  if (loweredService.includes("nail")) return "Compare finish, service type, and appointment timing before booking.";
-  return `Share style goals, timing, and booking context for ${loweredService}.`;
-}
-
-function lawFirmServiceDescription(loweredService: string) {
-  if (loweredService.includes("estate")) return "Start with the planning need and preferred follow-up so the consultation request is clear.";
-  if (loweredService.includes("business")) return "Share the business matter type, timing, and best contact path for consultation follow-up.";
-  if (loweredService.includes("injury")) return "Send matter context and contact preferences so the office can confirm next steps.";
-  return `Share the matter type, timing, and preferred follow-up for ${loweredService}.`;
-}
-
-function restaurantServiceDescription(loweredService: string) {
-  if (loweredService.includes("catering")) return "Catering trays and group orders stay close to online ordering and a quick call.";
-  if (loweredService.includes("takeout") || loweredService.includes("pickup")) return "Takeout options are easy to scan before guests order ahead.";
-  if (loweredService.includes("breakfast") || loweredService.includes("taco")) return "Taco favorites are presented clearly for quick online ordering.";
-  if (loweredService.includes("delivery")) return "Delivery details stay close to the menu and ordering path.";
-  return "Menu favorites are easy to scan before guests choose how to order.";
-}
-
-function landscapingServiceDescription(loweredService: string) {
-  if (loweredService.includes("lawn")) return "Routine lawn care details stay close to service-area and quote options.";
-  if (loweredService.includes("design")) return "Landscape design inquiries start with scope, location, and timing.";
-  if (loweredService.includes("cleanup") || loweredService.includes("seasonal")) return "Seasonal cleanup requests can include property details and preferred timing.";
-  return "Outdoor project requests can include scope, location, and quote details.";
-}
-
-function creativeServiceDescription(loweredService: string) {
-  if (loweredService.includes("portrait")) return "Portrait session inquiries can include style, timing, and usage notes.";
-  if (loweredService.includes("commercial")) return "Commercial shoot requests can include brief, usage, timeline, and deliverables.";
-  if (loweredService.includes("project") || loweredService.includes("inquir")) return "Project inquiries can start with context, timeline, and contact details.";
-  return "Creative inquiries can include brief, timing, and project context.";
-}
-
-function callTrustLabel(vertical: Vertical) {
-  const labels: Partial<Record<Vertical, string>> = {
-    restaurant: "Call the restaurant",
-    law_firm: "Call the office",
-    dental: "Call the practice",
-    med_spa: "Call the clinic",
-    veterinary: "Call the clinic",
-    beauty_salon: "Call the salon",
-    auto_body: "Call the shop",
-    home_services: "Call for service",
-    landscaping: "Call about a project"
-  };
-  return labels[vertical] ?? "Direct phone line";
-}
-
-function photoTrustLabel(vertical: Vertical) {
-  const labels: Partial<Record<Vertical, string>> = {
-    restaurant: "Food photos",
-    beauty_salon: "Style photos",
-    creative_studio: "Portfolio images",
-    landscaping: "Project photos",
-    auto_body: "Repair photos",
-    home_services: "Service photos"
-  };
-  return labels[vertical] ?? "Relevant photos";
-}
-
-function cleanDisplayPlace(value: string | undefined) {
-  return value?.trim().replace(/[.,;:]+$/g, "");
-}
-
-function readableList(values: string[]) {
-  const cleaned = values.map((value) => value.trim()).filter(Boolean);
-  if (cleaned.length <= 1) return cleaned[0] ?? "";
-  if (cleaned.length === 2) return `${cleaned[0]} and ${cleaned[1]}`;
-  return `${cleaned.slice(0, -1).join(", ")}, and ${cleaned[cleaned.length - 1]}`;
-}
-
-function sentenceCap(value: string) {
-  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
-}
-
-function testimonialItems(business: BusinessProfile) {
-  const items = [];
-  const reviewSummary = isGoogleDerivedReviewSummary(business.reviewsSummary) ? undefined : business.reviewsSummary;
-  if (reviewSummary?.rating || reviewSummary?.count) {
-    return [
-      {
-        quote: [
-          reviewSummary.rating ? `${reviewSummary.rating} average rating` : undefined,
-          reviewSummary.count ? `${reviewSummary.count} public reviews` : undefined
-        ]
-          .filter(Boolean)
-          .join(" across "),
-        author: "Review profile"
-      }
-    ];
-  }
-  items.push(
-    {
-      quote: "Clear services and direct contact options help customers decide what to do next.",
-      author: "Customer decision path"
-    },
-    {
-      quote: "Project examples, public profiles, and service details can support the next action.",
-      author: "Conversion standard"
-    }
-  );
-  return items.slice(0, 3);
-}
-
-function faqItems(context: SectionBuildContext) {
-  const service = context.business.services[0] ?? context.recipe.label;
-  const area = context.business.serviceAreas[0] ?? context.business.address?.city;
-  const audience = audiencePlural(context.business.vertical);
-  return [
-    {
-      question: area ? `Do you help ${audience} in ${area}?` : `Do you help local ${audience}?`,
-      answer: `Yes. Contact ${context.business.name} to confirm the current service area and the best next step.`
-    },
-    {
-      question: `How do customers get started with ${service}?`,
-      answer: context.business.phone ? "Call the business or send the request details through the form." : "Send the request details through the form."
-    },
-    {
-      question: "What details should customers check before contacting the business?",
-      answer: "Confirm current availability, service fit, timing, and any details needed for the next step."
-    }
-  ];
-}
-
-function ctaHeading(context: SectionBuildContext) {
-  if (context.business.vertical === "law_firm" || context.business.vertical === "med_spa") {
-    return "Ready to request a consultation?";
-  }
-  if (context.business.vertical === "dental" || context.business.vertical === "veterinary" || context.business.vertical === "beauty_salon") {
-    return "Ready to book?";
-  }
-  if (context.business.vertical === "restaurant") return "Ready to order?";
-  if (context.business.vertical === "fitness") return "Ready for a first visit?";
-  if (context.business.vertical === "real_estate" || context.business.vertical === "creative_studio") return "Ready to send an inquiry?";
-  if (context.recipe.primaryGoal === "calls") return "Ready to talk now?";
-  if (context.recipe.primaryGoal === "directions" || context.recipe.primaryGoal === "store_visits") return "Ready to visit?";
-  return "Ready to request an estimate?";
-}
-
-function ctaBody(context: SectionBuildContext) {
-  const bodies: Partial<Record<Vertical, string>> = {
-    restaurant: "Choose the ordering link for the fastest path, or call with catering and pickup questions.",
-    auto_body: "Send repair details once, then let the shop confirm fit, timing, and next steps.",
-    law_firm: "Use the consultation path to share the matter type and preferred way to follow up.",
-    beauty_salon: "Book the service that fits, or call the salon with timing and style questions.",
-    home_services: "Call or send the request details so the team can confirm service fit and timing.",
-    landscaping: "Share the project scope and location so the team can confirm the best next step.",
-    creative_studio: "Send the brief, timeline, and project context so the studio can respond clearly.",
-    dental: "Choose the appointment path or call the practice with patient questions.",
-    veterinary: "Choose the appointment path or call the clinic with care questions.",
-    med_spa: "Start with a consultation request so the team can confirm fit before booking."
-  };
-  return bodies[context.business.vertical] ?? nextActionDescription(context.recipe.primaryGoal);
-}
-
-function contactBody(context: SectionBuildContext) {
-  const bodies: Partial<Record<Vertical, string>> = {
-    restaurant: "Send catering, pickup, or ordering questions directly to the restaurant.",
-    auto_body: "Send repair details, vehicle context, and timing so the shop can follow up.",
-    law_firm: "Share the matter type and preferred contact details for a consultation request.",
-    beauty_salon: "Share the service, timing, and style notes before booking or calling.",
-    home_services: "Send the service need, location, and timing so the team can respond.",
-    landscaping: "Share project scope, property details, and timing for a quote request.",
-    creative_studio: "Send project context, timeline, and contact details for an inquiry.",
-    dental: "Share patient questions and preferred appointment timing.",
-    veterinary: "Share care questions and preferred appointment timing.",
-    med_spa: "Share goals, timing, and consultation preferences."
-  };
-  return bodies[context.business.vertical] ?? nextActionDescription(context.recipe.primaryGoal);
-}
-
-function nextActionDescription(goal: ConversionGoal) {
-  switch (goal) {
-    case "calls":
-      return "Call to confirm availability, service fit, and timing.";
-    case "booking_clicks":
-      return "Open the booking flow after checking the service details.";
-    case "order_clicks":
-      return "Keep menu context and ordering links close together so hungry visitors do not have to search.";
-    case "directions":
-    case "store_visits":
-      return "Check the location, hours, and directions before visiting.";
-    case "forms":
-    default:
-      return "Send the request details, timing, and contact preferences through the form.";
-  }
-}
-
-function teamHeading(vertical: Vertical) {
-  const headings: Partial<Record<Vertical, string>> = {
-    law_firm: "Credentials should be visible before the consultation",
-    dental: "Help new patients meet the team",
-    med_spa: "Provider expertise belongs near the booking path",
-    veterinary: "Trust starts with the care team",
-    fitness: "Trainer proof turns interest into action"
-  };
-  return headings[vertical] ?? "Show the people behind the business";
-}
-
-function teamItems(vertical: Vertical) {
-  const role = vertical === "law_firm"
-    ? "Attorney profile"
-    : vertical === "dental"
-      ? "Provider bio"
-      : vertical === "fitness"
-        ? "Coach profile"
-        : "Team profile";
-  return [
-    {
-      title: role,
-      description: "Explain the customer-facing role and how that person helps with the service."
-    },
-    {
-      title: "Owner story",
-      description: "Share the local context and service philosophy when that information is available."
-    },
-    {
-      title: "Customer-facing expertise",
-      description: "Use this slot for care philosophy, process, or service approach."
-    }
-  ];
-}
-
-function beforeAfterHeading(vertical: Vertical) {
-  const headings: Partial<Record<Vertical, string>> = {
-    auto_body: "Before-and-after proof belongs above the estimate form",
-    med_spa: "Results need verified before-and-after context",
-    landscaping: "Project proof turns interest into quote requests"
-  };
-  return headings[vertical] ?? "Show the outcome customers are buying";
-}
-
-function audiencePlural(vertical: Vertical) {
-  const labels: Partial<Record<Vertical, string>> = {
-    law_firm: "clients",
-    dental: "patients",
-    veterinary: "pet owners",
-    restaurant: "guests",
-    fitness: "members",
-    real_estate: "clients",
-    creative_studio: "clients"
-  };
-  return labels[vertical] ?? "customers";
 }
 
 function titleCase(value: string) {
@@ -2353,6 +1179,48 @@ function buildAssetInventory({
     })) ?? [];
 
   return [...referencedPhotos, ...logo, ...screenshots, ...createMockupAssets(mockups)];
+}
+
+/**
+ * Logo extraction v3: rank crawled logo references by URL signals, then let
+ * scraped-media download the top candidates and choose by MEASURED pixels
+ * (`chooseAndStoreLogo`). URL scoring only orders the download attempts —
+ * a 180px apple-touch icon legitimately beats a 32px favicon, so the old
+ * blanket apple-touch penalty is now mild. Icon files still never qualify.
+ * Returning an empty list is deliberate — a favicon-only site keeps the
+ * typographic wordmark instead of rendering a bad mark.
+ */
+function rankedLogoReferences(
+  references: CrawlAssessment["assetReferences"] | undefined,
+  limit = 3
+): CrawlAssessment["assetReferences"] {
+  const logos = (references ?? []).filter((asset) => asset.kind === "logo");
+  if (!logos.length) return [];
+  return logos
+    .map((asset) => {
+      const url = asset.url.toLowerCase();
+      let score = 0;
+      if (/\.svg(\?|#|$)/.test(url)) score += 40;
+      else if (/\.png(\?|#|$)/.test(url)) score += 30;
+      else if (/\.webp(\?|#|$)/.test(url)) score += 25;
+      else if (/\.jpe?g(\?|#|$)/.test(url)) score += 15;
+      if (/\.ico(\?|#|$)/.test(url)) score -= 100;
+      if (/favicon|site-icon/.test(url)) score -= 60;
+      // Apple-touch icons are usually 180px brand marks: keep them above the
+      // score-zero filter so measurement can judge them, ranked below any
+      // real header logo. The generated icon alt must not double-penalize
+      // them back out.
+      const appleTouch = /apple-touch/.test(url);
+      if (appleTouch) score -= 15;
+      if (/logo/.test(url)) score += 25;
+      if (asset.alt === "Website icon reference") score -= appleTouch ? 0 : 30;
+      else if (asset.alt) score += 10;
+      return { asset, score };
+    })
+    .sort((left, right) => right.score - left.score)
+    .filter((entry) => entry.score > 0)
+    .slice(0, limit)
+    .map((entry) => entry.asset);
 }
 
 function unique(items: string[]) {

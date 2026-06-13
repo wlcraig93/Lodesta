@@ -15,6 +15,8 @@ export type SectionPurposeTemplateIdV3 =
   | "highlights.grid"
   | "feature.band"
   | "services.rows"
+  | "process.stepper"
+  | "proof.stat_band"
   | "media.feature"
   | "media.gallery"
   | "proof.quote_wall"
@@ -24,7 +26,9 @@ export type SectionPurposeTemplateIdV3 =
   | "proof.facts_strip"
   | "proof.facts_cta"
   | "statement.editorial"
-  | "local.location_panel"
+  | "local.location_directory"
+  | "local.service_area_showcase"
+  | "local.location_showcase"
   | "contact.split";
 
 export type SectionTemplateSlotIdV3 = "intro" | "copy" | "media" | "items" | "facts" | "action" | "contact" | "locations";
@@ -100,13 +104,17 @@ export const activeSectionTemplateOrderV3 = [
   "intro_grid",
   "feature_band",
   "side_intro_rows",
+  "numbered_steps",
+  "stat_band",
   "media_feature",
   "media_mosaic",
   "quote_wall",
   "faq_list",
   "facts_cta",
   "editorial_statement",
-  "location_panel",
+  "location_directory",
+  "service_area_showcase",
+  "location_showcase",
   "contact_split"
 ] as const satisfies readonly SectionTemplateIdV3[];
 
@@ -198,6 +206,30 @@ export const sectionTemplateCatalogV3: readonly SectionTemplateDefinitionV3[] = 
     tabletRule: "Intro stacks above rows.",
     mobileRule: "Intro and rows stack one by one."
   }),
+  template("numbered_steps", "NumberedSteps", "Full-width vertical stepper: intro above ordered, numbered steps with optional per-step media.", "rows", {
+    requiredSlots: ["intro", "items"],
+    optionalSlots: [],
+    defaultBackground: pageBackgroundV3,
+    allowedBackgrounds: nonImageBackgroundsV3,
+    visualDensity: "spacious",
+    visualWeight: "standard",
+    itemCount: { min: 3, max: 4 },
+    desktopRule: "Intro spans the top; steps stack vertically with oversized numerals and optional step media on alternating sides.",
+    tabletRule: "Steps keep the vertical stack; step media sits below step copy.",
+    mobileRule: "Intro and steps stack one by one; numerals stay legible at compact scale."
+  }),
+  template("stat_band", "StatBand", "Signature band: one oversized verified stat beside short supporting copy.", "feature", {
+    requiredSlots: ["copy", "facts"],
+    optionalSlots: ["action"],
+    defaultBackground: brandGradientBackgroundV3,
+    allowedBackgrounds: nonImageBackgroundsV3,
+    visualDensity: "compact",
+    visualWeight: "feature",
+    factCount: { min: 1, max: 1 },
+    desktopRule: "The stat value renders at display scale beside a constrained copy column.",
+    tabletRule: "Stat and copy keep a two-column relationship when space allows.",
+    mobileRule: "Stat stacks above copy; the numeral scales down but stays dominant."
+  }),
   template("media_feature", "MediaFeature", "Large below-hero media section with one wide image and a short supporting statement.", "media", {
     requiredSlots: ["copy", "media"],
     optionalSlots: [],
@@ -269,16 +301,39 @@ export const sectionTemplateCatalogV3: readonly SectionTemplateDefinitionV3[] = 
     tabletRule: "Copy remains centered with tighter measure.",
     mobileRule: "Copy remains centered and actions wrap."
   }),
-  template("location_panel", "LocationPanel", "First-party location facts, service areas, and direction actions.", "location", {
+  template("location_directory", "LocationDirectory", "Multi-location directory with cards that link to location landing pages.", "location", {
     requiredSlots: ["copy", "locations"],
     optionalSlots: ["action"],
     defaultBackground: surfaceBackgroundV3,
     allowedBackgrounds: nonImageBackgroundsV3,
     visualDensity: "standard",
     visualWeight: "standard",
-    desktopRule: "Location copy sits beside ordered location cards and one optional map frame.",
-    tabletRule: "Location copy stacks above cards while map content remains bounded.",
+    desktopRule: "Location copy sits above or beside a bounded grid of physical-location cards with landing-page CTAs.",
+    tabletRule: "Location copy stacks above two-column cards.",
     mobileRule: "Location copy, cards, and actions stack without a map requirement."
+  }),
+  template("service_area_showcase", "ServiceAreaShowcase", "Coverage-first section for service-area businesses with no physical address.", "location", {
+    requiredSlots: ["copy", "facts"],
+    optionalSlots: ["action"],
+    defaultBackground: surfaceBackgroundV3,
+    allowedBackgrounds: nonImageBackgroundsV3,
+    visualDensity: "standard",
+    visualWeight: "standard",
+    factCount: { min: 1, max: 6 },
+    desktopRule: "Coverage copy pairs with verified service-area facts and a contact CTA.",
+    tabletRule: "Coverage copy stacks above service-area facts.",
+    mobileRule: "Coverage copy, service areas, and CTA stack without implying a storefront."
+  }),
+  template("location_showcase", "LocationShowcase", "Destination location section: display-scale hours, map or coverage panel, and direction actions for a single-location business.", "location", {
+    requiredSlots: ["copy", "locations"],
+    optionalSlots: ["action"],
+    defaultBackground: pageBackgroundV3,
+    allowedBackgrounds: nonImageBackgroundsV3,
+    visualDensity: "spacious",
+    visualWeight: "feature",
+    desktopRule: "Intro copy and map share the left column; the visit card with full-week hours anchors the right column at display scale.",
+    tabletRule: "Copy, visit card, and map stack with the hours table at full width.",
+    mobileRule: "Copy, visit details, hours, and actions stack one by one."
   }),
   template("contact_split", "ContactSplit", "Contact copy and primary contact facts in a high-contrast split.", "contact", {
     requiredSlots: ["copy", "contact"],
@@ -307,11 +362,15 @@ export const sectionPurposeTemplateCatalogV3: readonly SectionPurposeTemplateDef
   { id: "proof.quote_wall", label: "Proof quote wall", sectionTemplateId: "quote_wall", family: "proof.section_template", anchorId: "proof" },
   { id: "pricing.packages", label: "Package comparison", sectionTemplateId: "intro_grid", family: "pricing.section_template", anchorId: "services" },
   { id: "process.steps", label: "Process steps", sectionTemplateId: "side_intro_rows", family: "process.section_template", anchorId: "process" },
+  { id: "process.stepper", label: "Process stepper", sectionTemplateId: "numbered_steps", family: "process.section_template", anchorId: "process" },
+  { id: "proof.stat_band", label: "Signature stat band", sectionTemplateId: "stat_band", family: "proof.section_template", anchorId: "proof" },
   { id: "faq.list", label: "FAQ list", sectionTemplateId: "faq_list", family: "faq.section_template", anchorId: "faq" },
   { id: "proof.facts_strip", label: "Proof facts strip", sectionTemplateId: "facts_strip", family: "proof.section_template" },
   { id: "proof.facts_cta", label: "Proof facts CTA", sectionTemplateId: "facts_cta", family: "local.section_template" },
   { id: "statement.editorial", label: "Editorial statement", sectionTemplateId: "editorial_statement", family: "statement.section_template" },
-  { id: "local.location_panel", label: "Location panel", sectionTemplateId: "location_panel", family: "local.section_template", anchorId: "location" },
+  { id: "local.location_directory", label: "Location directory", sectionTemplateId: "location_directory", family: "local.section_template", anchorId: "location" },
+  { id: "local.service_area_showcase", label: "Service area showcase", sectionTemplateId: "service_area_showcase", family: "local.section_template", anchorId: "location" },
+  { id: "local.location_showcase", label: "Location showcase", sectionTemplateId: "location_showcase", family: "local.section_template", anchorId: "location" },
   { id: "contact.split", label: "Contact split", sectionTemplateId: "contact_split", family: "contact.section_template", anchorId: "contact" }
 ];
 

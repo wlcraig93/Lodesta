@@ -1,4 +1,4 @@
-import { defaultDesignPlanForVertical } from "./layout-registry";
+import { defaultDesignPlanForVertical } from "./design-plan-defaults";
 import type {
   BusinessProfile,
   ComponentControlSchemaV3,
@@ -89,7 +89,7 @@ export const canonicalPageSectionPurposeOrderV3 = [
   "faq.list",
   "proof.facts_cta",
   "statement.editorial",
-  "local.location_panel",
+  "local.location_showcase",
   "contact.split"
 ] as const satisfies readonly SectionPurposeTemplateIdV3[];
 
@@ -363,7 +363,7 @@ export type GeneratedSiteV3CanonicalVisualGrammarSite = {
   expectations: {
     minSections: number;
     minImageCount: number;
-    expectedHeaderVisualMode: "solid" | "transparent_overlay";
+    expectedHeaderVisualMode: "minimal_wordmark" | "transparent_overlay";
     expectedPagePurposes: readonly SectionPurposeTemplateIdV3[];
     expectedSectionTemplates: readonly SectionGeometryTemplateIdV3[];
   };
@@ -393,9 +393,13 @@ export function createGeneratedSiteV3CanonicalVisualGrammarSites(): GeneratedSit
   });
 }
 
-function expectedHeaderVisualModeForCanonicalSections(sections: readonly CanonicalPageSectionTemplateInstanceV3[]): "solid" | "transparent_overlay" {
+function expectedHeaderVisualModeForCanonicalSections(
+  sections: readonly CanonicalPageSectionTemplateInstanceV3[]
+): "minimal_wordmark" | "transparent_overlay" {
+  // Non-image pages render the art direction's explicit headerMode — the
+  // canonical fixtures declare minimal_wordmark (see canonicalArtDirection).
   const firstSection = sections[0];
-  return firstSection?.visualSection.options.background.kind === "image" ? "transparent_overlay" : "solid";
+  return firstSection?.visualSection.options.background.kind === "image" ? "transparent_overlay" : "minimal_wordmark";
 }
 
 function versionForCanonicalSite(
@@ -406,24 +410,16 @@ function versionForCanonicalSite(
 ): SiteVersionV3 {
   const theme = canonicalTheme();
   const sections = pageSectionTemplates.map(templateSection);
-  const legacyHomePage: PageModel = {
-    id: "home",
-    slug: "",
-    title: business.name,
-    seo: {
-      title: `${business.name} | ${shell.category} in ${shell.city}`,
-      description: business.description ?? `${business.name} local website.`,
-      canonicalPath: "/"
-    },
-    layoutSections: [],
-    sections: []
+  const seo: PageModel["seo"] = {
+    title: `${business.name} | ${shell.category} in ${shell.city}`,
+    description: business.description ?? `${business.name} local website.`,
+    canonicalPath: "/"
   };
   return {
     id: `version_${business.siteId}`,
     status: "draft",
     rendererVersion: "layout-v3",
     designSchemaVersion: "design-v3",
-    pages: [legacyHomePage],
     designPlan: defaultDesignPlanForVertical(business.vertical, theme),
     createdAt,
     theme,
@@ -448,7 +444,7 @@ function versionForCanonicalSite(
           id: "home",
           slug: "",
           title: business.name,
-          seo: legacyHomePage.seo,
+          seo,
           purpose: "homepage",
           sections
         }
@@ -478,7 +474,7 @@ function canonicalPageSectionTemplates(
     canonicalSectionTemplate("faq.list", faqListSection(shell), control("editorial_rows", "wide", "surface")),
     canonicalSectionTemplate("proof.facts_cta", factsCtaSection(shell, business), control("two_column", "wide", "surface")),
     canonicalSectionTemplate("statement.editorial", editorialStatementSection(shell, business), control("single_column", "wide", "site_bg")),
-    canonicalSectionTemplate("local.location_panel", locationPanelSection(shell, business), control("two_column", "wide", "surface")),
+    canonicalSectionTemplate("local.location_showcase", locationShowcaseSection(shell, business), control("two_column", "wide", "surface")),
     canonicalSectionTemplate("contact.split", contactSplitSection(shell, business), control("two_column", "wide", "contrast"))
   ];
 }
@@ -788,11 +784,11 @@ function editorialStatementSection(shell: BusinessShell, business: BusinessProfi
   };
 }
 
-function locationPanelSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
+function locationShowcaseSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
   const addressLine = business.address ? [business.address.street, business.address.city, business.address.region].filter(Boolean).join(", ") : undefined;
   return {
     version: "visual-section-v3",
-    templateId: "location_panel",
+    templateId: "location_showcase",
     anchorId: "location",
     options: { background: canonicalSectionBackgroundsV3.light },
     slots: {
@@ -964,15 +960,20 @@ function sectionIdForPurpose(purposeId: SectionPurposeTemplateIdV3) {
     case "pricing.packages":
       return "packages";
     case "process.steps":
+    case "process.stepper":
       return "process";
+    case "proof.stat_band":
+      return "stat";
+    case "local.location_directory":
+    case "local.service_area_showcase":
+    case "local.location_showcase":
+      return "location";
     case "faq.list":
       return "faq";
     case "proof.facts_cta":
       return "proof";
     case "statement.editorial":
       return "statement";
-    case "local.location_panel":
-      return "location";
     case "contact.split":
       return "contact";
   }
@@ -990,7 +991,9 @@ function responsiveRulesForTemplate(templateId: SectionGeometryTemplateIdV3): Se
     "media_mosaic",
     "quote_wall",
     "faq_list",
-    "location_panel"
+    "location_directory",
+    "service_area_showcase",
+    "location_showcase"
   ]);
   return [
     { breakpoint: "mobile", behavior: "stack", notes: [`${templateId} stacks to one column and preserves source order.`] },

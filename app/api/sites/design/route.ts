@@ -18,8 +18,8 @@ const designSchema = z.object({
     motionPolicy: z.enum(["none", "subtle"]).optional(),
     hostedFontAssetId: z.string().min(1).optional()
   }).optional(),
-  layoutSectionOrder: z.array(z.string().min(1)).optional(),
-  sectionPresets: z.record(z.string().min(1)).optional()
+  sectionOrder: z.array(z.string().min(1)).optional(),
+  sectionTemplates: z.record(z.string().min(1)).optional()
 });
 
 export async function POST(request: Request) {
@@ -30,8 +30,8 @@ export async function POST(request: Request) {
   }
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
-  if (!parsed.data.designPlan && !parsed.data.layoutSectionOrder && !parsed.data.sectionPresets) {
-    return NextResponse.json({ error: "Provide a designPlan, layoutSectionOrder, or sectionPresets." }, { status: 400 });
+  if (!parsed.data.designPlan && !parsed.data.sectionOrder && !parsed.data.sectionTemplates) {
+    return NextResponse.json({ error: "Provide a designPlan, sectionOrder, or sectionTemplates." }, { status: 400 });
   }
 
   const result = await repository.updateSiteDesign(parsed.data as UpdateSiteDesignInput);

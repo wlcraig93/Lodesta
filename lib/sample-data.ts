@@ -1,15 +1,7 @@
-import type { BusinessProfile, ExtensionModel, PageModel, SiteBundle, SiteModel, SiteVersion } from "./models";
+import type { BusinessProfile, ExtensionModel, SiteBundle, SiteModel, SiteVersion, Theme } from "./models";
 import { runAudit } from "./audit";
 import { createCreativeBrief } from "./creative-brief";
 import { verticalRecipes } from "./recipes";
-import {
-  defaultDesignPlanForVertical,
-  designSchemaVersion,
-  pageFromLegacySections,
-  rendererVersion,
-  repairLayoutDocument,
-  validateLayoutDocument
-} from "./layout-registry";
 import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 
@@ -73,11 +65,14 @@ export const sampleBusinessProfile: BusinessProfile = {
   }
 };
 
-type LegacySamplePage = Omit<PageModel, "layoutSections">;
-type LegacySampleVersion = Omit<SiteVersion, "rendererVersion" | "designSchemaVersion" | "designPlan" | "pages"> & {
-  pages: LegacySamplePage[];
+type SampleVersionShell = {
+  id: string;
+  status: SiteVersion["status"];
+  createdAt: string;
+  theme?: Theme;
+  presentation?: SiteVersion["presentation"];
 };
-type LegacySampleSiteModel = Omit<SiteModel, "versions"> & { versions: LegacySampleVersion[] };
+type SampleSiteModelShell = Omit<SiteModel, "versions"> & { versions: SampleVersionShell[] };
 
 export const sampleSiteModel: SiteModel = hydrateSampleSiteModel({
   id: "site_joes_pizza",
@@ -111,232 +106,7 @@ export const sampleSiteModel: SiteModel = hydrateSampleSiteModel({
       presentation: {
         mobileActionBehavior: "after_hero",
         reservedMobileActionSpace: true
-      },
-      pages: [
-        {
-          id: "page_home",
-          slug: "",
-          title: "Home",
-          seo: {
-            title: "Joe's Pizza | Pizza, Pasta, and Takeout in Austin",
-            description:
-              "Order pizza, pasta, catering, and family dinners from Joe's Pizza in Austin. Dine in, take out, or order online today.",
-            canonicalPath: "/"
-          },
-          sections: [
-            {
-              id: "hero_home",
-              type: "hero",
-              variant: "fullbleed_food",
-              bindings: {
-                heading: "business.name",
-                phone: "business.phone"
-              },
-              props: {
-                eyebrow: "Austin pizza, pasta, and family dinners",
-                heading: "Pizza night should be easy.",
-                body:
-                  "Fresh pies, generous pasta, and quick takeout from a neighborhood restaurant built around real food and fast service.",
-                primaryCta: { label: "Order Online", href: "https://toast.example/joes-pizza", role: "ordering" },
-                secondaryCta: { label: "Call Now", href: "tel:+15551234567", role: "tel" },
-                imageUrl:
-                  "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1600&q=80"
-              },
-              fieldPolicies: {
-                heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false },
-                layout: { editScope: "system_only", experimentEligible: true, factField: false }
-              }
-            },
-            {
-              id: "trust_home",
-              type: "trust_bar",
-              variant: "rating_hours",
-              bindings: {
-                rating: "business.reviewsSummary.rating",
-                hours: "business.hours"
-              },
-              props: {
-                items: ["4.7 Google rating", "Open daily", "Takeout and catering", "Downtown Austin"]
-              },
-              fieldPolicies: {
-                items: { editScope: "system_only", experimentEligible: false, factField: true }
-              }
-            },
-            {
-              id: "menu_home",
-              type: "menu_deals",
-              variant: "feature_grid",
-              bindings: {
-                services: "business.services"
-              },
-              props: {
-                heading: "Favorites that make ordering simple",
-                items: [
-                  { title: "Classic Pepperoni", description: "Crisp crust, tomato sauce, mozzarella, and pepperoni." },
-                  { title: "Family Pasta Tray", description: "Baked pasta sized for weeknight dinners and small parties." },
-                  { title: "Catering Packs", description: "Pizza, salad, and pasta bundles for offices and events." }
-                ]
-              },
-              fieldPolicies: {
-                items: { editScope: "owner_choice", experimentEligible: false, factField: false }
-              }
-            },
-            {
-              id: "gallery_home",
-              type: "gallery",
-              variant: "food_grid",
-              bindings: {},
-              props: {
-                eyebrow: "Visual proof",
-                heading: "Food photos should make ordering easier",
-                body: "A clear look at the food and dining room helps customers choose the right order or visit.",
-                images: [
-                  {
-                    url: "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=1600&q=80",
-                    alt: "Fresh pizza on a wooden table",
-                    label: "Menu photography"
-                  },
-                  {
-                    url: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80",
-                    alt: "Restaurant dining room",
-                    label: "Dine-in experience"
-                  },
-                  {
-                    url: "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=80",
-                    alt: "Fresh ingredients",
-                    label: "Ingredient story"
-                  }
-                ]
-              },
-              fieldPolicies: {
-                heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                body: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                images: { editScope: "owner_choice", experimentEligible: false, factField: false }
-              }
-            },
-            {
-              id: "contact_home",
-              type: "contact",
-              variant: "split",
-              bindings: {
-                phone: "business.phone",
-                address: "business.address",
-                hours: "business.hours"
-              },
-              props: {
-                heading: "Order, visit, or ask about catering",
-                formId: "form_contact",
-                primaryCta: { label: "Call Joe's Pizza", href: "tel:+15551234567", role: "tel" }
-              },
-              fieldPolicies: {
-                formId: { editScope: "owner_choice", experimentEligible: false, factField: false },
-                primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false }
-              }
-            },
-            {
-              id: "testimonials_home",
-              type: "testimonials",
-              variant: "review_summary",
-              bindings: {
-                rating: "business.reviewsSummary.rating",
-                count: "business.reviewsSummary.count"
-              },
-              props: {
-                eyebrow: "Trust",
-                heading: "Proof customers can verify",
-                body: "Public review signals and practical details help customers evaluate fit before they call.",
-                items: [
-                  {
-                    quote: "Review profile detected at 4.7 stars across 328 reviews.",
-                    author: "Verified review profile"
-                  },
-                  {
-                    quote: "Regulars mention reliable timing, familiar favorites, and a straightforward ordering path.",
-                    author: "Customer review theme"
-                  },
-                  {
-                    quote: "Use this section for catering proof, local press, or customer outcomes.",
-                    author: "Business highlights"
-                  }
-                ]
-              },
-              fieldPolicies: {
-                heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                body: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                items: { editScope: "owner_choice", experimentEligible: false, factField: true }
-              }
-            },
-            {
-              id: "cta_home",
-              type: "cta",
-              variant: "conversion_band",
-              bindings: {
-                phone: "business.phone"
-              },
-              props: {
-                eyebrow: "Next step",
-                heading: "Ready for pizza night?",
-                body: "Choose the ordering path that fits the moment: online for speed, or phone for questions.",
-                primaryCta: { label: "Order Online", href: "https://toast.example/joes-pizza", role: "ordering" },
-                secondaryCta: { label: "Call Instead", href: "tel:+15551234567", role: "tel" }
-              },
-              fieldPolicies: {
-                heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                body: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false },
-                secondaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false },
-                layout: { editScope: "system_only", experimentEligible: true, factField: false }
-              }
-            }
-          ]
-        },
-        {
-          id: "page_menu",
-          slug: "menu",
-          title: "Menu",
-          seo: {
-            title: "Menu | Joe's Pizza Austin",
-            description: "See popular pizzas, pasta trays, catering packs, and takeout options from Joe's Pizza in Austin.",
-            canonicalPath: "/menu"
-          },
-          sections: [
-            {
-              id: "menu_page_hero",
-              type: "hero",
-              variant: "compact",
-              props: {
-                eyebrow: "Menu",
-                heading: "Pizza, pasta, and catering without the wait.",
-                body: "Use online ordering for the fastest pickup experience.",
-                primaryCta: { label: "Order Online", href: "https://toast.example/joes-pizza", role: "ordering" }
-              },
-              bindings: {},
-              fieldPolicies: {
-                heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-                primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false }
-              }
-            },
-            {
-              id: "menu_page_grid",
-              type: "menu_deals",
-              variant: "feature_grid",
-              props: {
-                heading: "Popular picks",
-                items: [
-                  { title: "Margherita", description: "Tomato, mozzarella, basil, olive oil." },
-                  { title: "Sausage & Peppers", description: "Italian sausage, roasted peppers, mozzarella." },
-                  { title: "Catering Salad", description: "Greens, tomatoes, olives, and house dressing." }
-                ]
-              },
-              bindings: {},
-              fieldPolicies: {
-                items: { editScope: "owner_choice", experimentEligible: false, factField: false }
-              }
-            }
-          ]
-        }
-      ]
+      }
     }
   ]
 });
@@ -372,28 +142,10 @@ export const sampleExtensionModel: ExtensionModel = {
   customBlocks: []
 };
 
-function hydrateSampleSiteModel(siteModel: LegacySampleSiteModel): SiteModel {
+function hydrateSampleSiteModel(siteModel: SampleSiteModelShell): SiteModel {
   const model: SiteModel = {
     ...siteModel,
     versions: siteModel.versions.map((version) => {
-      const activeTheme = version.theme ?? siteModel.theme;
-      const legacyVersion: SiteVersion = {
-        ...version,
-        rendererVersion,
-        designSchemaVersion,
-        designPlan: defaultDesignPlanForVertical(sampleBusinessProfile.vertical, activeTheme),
-        pages: version.pages.map((page) =>
-          pageFromLegacySections({
-            ...page,
-            vertical: sampleBusinessProfile.vertical
-          })
-        )
-      };
-      repairLayoutDocument(legacyVersion);
-      const blockingIssues = validateLayoutDocument(legacyVersion).filter((issue) => issue.repairMode === "fatal_schema" || issue.repairMode === "operator_blocked");
-      if (blockingIssues.length) {
-        throw new Error(`Sample layout-v1 document failed validation: ${blockingIssues.map((issue) => issue.message).join("; ")}`);
-      }
       const compiledV3 = compileGeneratedSiteV3Site({
         siteId: siteModel.id,
         business: sampleBusinessProfile,
@@ -401,16 +153,12 @@ function hydrateSampleSiteModel(siteModel: LegacySampleSiteModel): SiteModel {
       }).version;
       applySampleHeroCopy(compiledV3);
       return {
-        ...legacyVersion,
-        rendererVersion: "layout-v3",
-        designSchemaVersion: "design-v3",
+        ...compiledV3,
+        id: version.id,
+        status: version.status,
+        createdAt: version.createdAt,
+        presentation: version.presentation ?? compiledV3.presentation,
         theme: compiledV3.theme,
-        artifactRefs: compiledV3.artifactRefs,
-        mediaDecisions: compiledV3.mediaDecisions,
-        artDirection: compiledV3.artDirection,
-        artDirectionDecision: compiledV3.artDirectionDecision,
-        pageComposition: compiledV3.pageComposition,
-        visualQa: compiledV3.visualQa
       };
     })
   };

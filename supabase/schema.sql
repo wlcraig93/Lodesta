@@ -293,6 +293,34 @@ create table outbound_events (
   metadata jsonb not null default '{}'
 );
 
+create table prospect_reports (
+  id text primary key,
+  place_id text not null,
+  status text not null default 'queued' check (status in ('queued', 'running', 'completed', 'failed')),
+  job_id text,
+  source_url text,
+  source_host text,
+  website_kind text not null default 'no_website' check (website_kind in ('owned_website', 'no_website', 'social_or_aggregator')),
+  report_json jsonb,
+  unlocked_at timestamptz,
+  lead_id text,
+  error_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create table prospect_report_leads (
+  id text primary key,
+  report_id text not null references prospect_reports(id) on delete cascade,
+  email text not null,
+  contact_name text,
+  phone text,
+  ip_hash text,
+  metadata jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+
 create table claims (
   id text primary key,
   site_id text references sites(id) on delete cascade,
@@ -376,7 +404,7 @@ create table site_artifacts (
   site_candidate_id text references site_candidates(id) on delete cascade,
   site_id text references sites(id) on delete cascade,
   scope text not null check (scope in ('candidate_selected', 'candidate_alternative', 'site_selected', 'site_alternative', 'evaluation_candidate', 'qa_evidence')),
-  artifact_type text not null check (artifact_type in ('copy_artifact', 'copy_diff', 'business_context_report', 'change_impact_report', 'identity_reconcile_report', 'service_catalog_report', 'vertical_classification_report', 'conversion_path_report', 'information_architecture_report', 'brand_cue_report', 'brand_direction_report', 'brand_mark_generation_report', 'asset_selection_report', 'seo_metadata_report', 'performance_audit_report', 'social_proof_report', 'conversion_insights_report', 'local_seo_refresh_report', 'page_gap_analysis_report', 'experiment_recommendation_report', 'design_section_audit_report', 'design_system', 'blueprint', 'compiled_section', 'compiled_page', 'claim_report', 'policy_report', 'page_opportunity_report', 'visual_benchmark', 'art_direction_decision', 'media_asset_decision', 'copy_evaluation_report', 'v3_review_packet', 'generation_cost_report')),
+  artifact_type text not null check (artifact_type in ('copy_artifact', 'business_context_report', 'change_impact_report', 'identity_reconcile_report', 'service_catalog_report', 'vertical_classification_report', 'conversion_path_report', 'information_architecture_report', 'brand_cue_report', 'brand_direction_report', 'brand_mark_generation_report', 'asset_selection_report', 'seo_metadata_report', 'performance_audit_report', 'social_proof_report', 'conversion_insights_report', 'local_seo_refresh_report', 'page_gap_analysis_report', 'experiment_recommendation_report', 'design_section_audit_report', 'design_system', 'blueprint', 'compiled_section', 'compiled_page', 'claim_report', 'policy_report', 'page_opportunity_report', 'visual_benchmark', 'art_direction_decision', 'media_asset_decision', 'copy_evaluation_report', 'v3_review_packet', 'generation_cost_report')),
   artifact_version text not null,
   producer_id text not null,
   producer_version text not null,
@@ -553,6 +581,11 @@ create index outbound_prospects_preview_token_idx on outbound_prospects(preview_
 create index outbound_events_campaign_time_idx on outbound_events(campaign_id, occurred_at desc);
 create index outbound_events_prospect_time_idx on outbound_events(prospect_id, occurred_at desc);
 create index outbound_events_site_time_idx on outbound_events(site_id, occurred_at desc);
+create index prospect_reports_place_completed_idx on prospect_reports(place_id, completed_at desc)
+  where status = 'completed';
+create unique index prospect_reports_one_active_place_idx on prospect_reports(place_id)
+  where status in ('queued', 'running');
+create index prospect_report_leads_report_idx on prospect_report_leads(report_id, created_at desc);
 create index jobs_status_created_idx on jobs(status, created_at);
 create index jobs_queue_ready_idx on jobs(status, run_after, created_at);
 create index jobs_running_lock_idx on jobs(status, locked_at);
@@ -929,6 +962,8 @@ alter table domains enable row level security;
 alter table outbound_campaigns enable row level security;
 alter table outbound_prospects enable row level security;
 alter table outbound_events enable row level security;
+alter table prospect_reports enable row level security;
+alter table prospect_report_leads enable row level security;
 alter table claims enable row level security;
 alter table jobs enable row level security;
 alter table agent_runs enable row level security;

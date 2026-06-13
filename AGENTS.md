@@ -22,6 +22,13 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - If uncertain whether a utility, type, API handler, or component affects generated customer websites or public/customer flows, treat it as boundary-sensitive and confirm before changing it.
 - When intentionally changing a boundary-sensitive area, make the customer/public behavior explicit and update callers, docs, and tests in the same change.
 
+## Stored Artifact Schema Changes
+
+- Stored JSON artifacts (`site_candidates.bundle_json`, `site_versions.version_model`, and any persisted `SiteBundle`/`SiteVersion` shape) are re-interpreted live by current renderer code. Any change to these shapes must, in the same change, either ship a one-time backfill script (`scripts/backfill-*.ts` with a `--check` dry-run mode and an npm script) or explicitly regenerate the stale rows. Run it and report counts.
+- Do not delete stored rows from migrations to satisfy a schema change; backfill or report them so an operator decides. Deleting test data is fine when an operator does it deliberately.
+- Keep strict fail-loud assertions on boundary-sensitive surfaces (public `/sites/*`, owner editor, APIs). Admin/operator surfaces must degrade legibly instead: soft-check with `siteVersionV3Issue` and show a "stale schema — regenerate" notice, never a raw error page. Repository reads of internal candidate records stay unchecked so repair surfaces can load stale rows; writes assert.
+- When adding a new strict assertion over stored data, run the relevant backfill `--check` first to prove zero violations.
+
 ## Secrets And Data
 
 - Never log, commit, or invent real secrets.

@@ -1,4 +1,4 @@
-import { defaultDesignPlanForVertical } from "./layout-registry";
+import { defaultDesignPlanForVertical } from "./design-plan-defaults";
 import type {
   AssetReference,
   BusinessLocationRecord,
@@ -10,6 +10,7 @@ import type {
   SectionInstanceV3,
   SiteArtDirectionFontPairingIdV3,
   SiteBundle,
+  SiteHeaderModeV3,
   SiteLocationBinding,
   SiteVersionV3,
   Theme,
@@ -38,9 +39,12 @@ import {
   registerForVertical,
   resolveDesignControlsV3,
   validateDesignControlsV3,
+  type CtaBandToneV3,
+  type DesignControlsV3,
   type DesignProfileV3
 } from "./generated-site-v3-art-direction-catalog";
 import { areServicesVerticalDefaults, sentenceOverlapRatio, servicePageMaxOverlapRatio } from "./generation-quality-v2";
+import { applyCompositionPlanV3, validateCompositionPlanV3, type CompositionPlanV3 } from "./generated-site-v3-composition-plan";
 import { slugify } from "./slug";
 import type { GeneratedServicePageCopyV2 } from "./models";
 import {
@@ -85,7 +89,7 @@ export type GeneratedSiteV3EvidenceSignals = {
   hasQuoteProof: boolean;
   hasRealPricingEvidence: boolean;
   hasCredentialTrustProof: boolean;
-  hasLocationPanel: boolean;
+  hasLocationSection: boolean;
 };
 
 export type GeneratedSiteV3CompositionDecision = {
@@ -128,17 +132,14 @@ export function compileGeneratedSiteV3Site(input: ({
    * must reference an already-selected safe asset. Invalid overrides are
    * ignored, never guessed at.
    */
-  overrides?: {
-    heroVariant?: "image_statement" | "hero_split";
-    heroMediaUrl?: string;
-  };
+  overrides?: GeneratedSiteV3CompilerOverrides;
 }): GeneratedSiteV3CompileResult {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const bundle = withBusinessBundleFields("bundle" in input ? input.bundle : temporaryBundleForProfile(input.business, input.siteId));
   const business = bundle.businessProfile;
   const siteId = business.siteId;
   const copyDeck = bundle.presenceAssessment?.generatedCopyDeck;
-  const locationContext = locationCompileContextForBundle(bundle);
+  const baseLocationContext = locationCompileContextForBundle(bundle);
   const media = selectV3Media(business, input.assetLibraryAssets ?? []);
   const presetTheme = themeForV3Business(business, media.kind);
   const brandDerivation = deriveBrandThemeV2({
@@ -149,9 +150,25 @@ export function compileGeneratedSiteV3Site(input: ({
   });
   const theme = brandDerivation.theme ?? presetTheme;
   const brief = bundle.presenceAssessment?.designBrief;
+  const compilerOverrides = {
+    ...bundle.presenceAssessment?.v3CompilerOverrides,
+    ...input.overrides
+  };
   const designProfile = brief?.profile ?? designProfileForBusiness(business, brandDerivation.report.applied);
   const designControls = resolveBrief(designProfile, brief?.overrides, "solid_editorial");
-  const composition = v3PageSectionsForBusiness(business, media, locationContext, copyDeck, input.overrides);
+  const selectedHeaderMode = headerModeForBusiness(business, designProfile);
+  const pageSlugRegistry = createPageSlugRegistryV3();
+  const locationPages = buildLocationLandingPagesV3(business, baseLocationContext, copyDeck, pageSlugRegistry);
+  const locationContext = locationContextWithLandingPages(baseLocationContext, locationPages);
+  const composition = v3PageSectionsForBusiness(
+    business,
+    media,
+    locationContext,
+    copyDeck,
+    compilerOverrides,
+    designControls,
+    brief?.compositionPlan
+  );
   {
     // Validate controls against the COMPOSED header mode, not a static one:
     // an image-background hero makes the header transparent_overlay, which
@@ -163,42 +180,26 @@ export function compileGeneratedSiteV3Site(input: ({
       firstVisual && firstVisual.templateId === "hero_statement" && firstVisual.options.background.kind === "image"
     );
     const violations = validateDesignControlsV3(designControls, {
-      headerMode: imageHeroLeads ? "transparent_overlay" : "solid_editorial"
+      headerMode: imageHeroLeads ? "transparent_overlay" : selectedHeaderMode
     });
     if (violations.length && designControls.headerSurface === "brand_bar") {
       designControls.headerSurface = "neutral";
     }
   }
   const pageSections = composition.sections;
-  const servicePages = buildServiceLandingPagesV3(business, locationContext, copyDeck, pageSections);
+  const servicePages = buildServiceLandingPagesV3(business, locationContext, copyDeck, pageSections, media, pageSlugRegistry);
   linkServiceItemsToPages(pageSections, servicePages);
   applyBackgroundRhythm(pageSections, siteId);
-  const legacyHomePage: PageModel = {
-    id: "home",
-    slug: "",
-    title: business.name,
-    seo: {
-      title: copyDeck?.seo.title ?? seoTitleForBusiness(business),
-      description: copyDeck?.seo.description ?? seoDescriptionForBusiness(business),
-      canonicalPath: "/"
-    },
-    layoutSections: [],
-    sections: []
+  const homeSeo: PageModel["seo"] = {
+    title: copyDeck?.seo.title ?? seoTitleForBusiness(business),
+    description: copyDeck?.seo.description ?? seoDescriptionForBusiness(business),
+    canonicalPath: "/"
   };
-  const legacyServicePages: PageModel[] = servicePages.map((page) => ({
-    id: page.id,
-    slug: page.slug,
-    title: page.title,
-    seo: page.seo,
-    layoutSections: [],
-    sections: []
-  }));
   const version: SiteVersionV3 = {
     id: `version_${siteId}_layout_v3`,
     status: "draft",
     rendererVersion: "layout-v3",
     designSchemaVersion: "design-v3",
-    pages: [legacyHomePage, ...legacyServicePages],
     designPlan: defaultDesignPlanForVertical(business.vertical, theme),
     createdAt,
     theme,
@@ -215,12 +216,12 @@ export function compileGeneratedSiteV3Site(input: ({
           fontPairingId: fontPairingForBusiness(business),
           colorSystem: "high_contrast_neutral",
           spacingRhythm: spacingRhythmForBusiness(business),
-          headerMode: "solid_editorial",
+          headerMode: selectedHeaderMode,
           mediaTreatment: "editorial_crop",
           buttonSystem: "solid_with_quiet_secondary",
           cardTreatment: cardTreatmentForBusiness(business),
           density: "balanced",
-          sectionPresentation: sectionPresentationWithProfile(business, designProfile),
+          sectionPresentation: sectionPresentationWithProfile(business, designProfile, copyDeck),
           designProfile,
           controls: designControls
         }
@@ -230,12 +231,12 @@ export function compileGeneratedSiteV3Site(input: ({
           fontPairingId: fontPairingForBusiness(business),
           colorSystem: "quiet_boutique",
           spacingRhythm: spacingRhythmForBusiness(business),
-          headerMode: "solid_editorial",
+          headerMode: selectedHeaderMode,
           mediaTreatment: "text_first_fallback",
           buttonSystem: "understated",
           cardTreatment: cardTreatmentForBusiness(business),
           density: "open",
-          sectionPresentation: sectionPresentationWithProfile(business, designProfile),
+          sectionPresentation: sectionPresentationWithProfile(business, designProfile, copyDeck),
           designProfile,
           controls: designControls
         },
@@ -265,7 +266,7 @@ export function compileGeneratedSiteV3Site(input: ({
           id: "home",
           slug: "",
           title: business.name,
-          seo: legacyHomePage.seo,
+          seo: homeSeo,
           purpose: "homepage",
           sections: pageSections
         },
@@ -275,6 +276,14 @@ export function compileGeneratedSiteV3Site(input: ({
           title: page.title,
           seo: page.seo,
           purpose: "service_landing" as const,
+          sections: page.sections
+        })),
+        ...locationPages.map((page) => ({
+          id: page.id,
+          slug: page.slug,
+          title: page.title,
+          seo: page.seo,
+          purpose: "location_landing" as const,
           sections: page.sections
         }))
       ]
@@ -366,12 +375,42 @@ function axisPick<T>(siteId: string, axis: string, pool: readonly T[]): T {
 }
 
 /**
+ * Header mode axis: register-aware pools over the previously dead headerMode
+ * enum (it was hardcoded to solid_editorial). Image-backed heroes still force
+ * transparent_overlay at render time regardless of this pick.
+ */
+function headerModeForBusiness(business: BusinessProfile, profile: DesignProfileV3): SiteHeaderModeV3 {
+  const pools: Record<DesignProfileV3["register"], readonly SiteHeaderModeV3[]> = {
+    punchy_retail: ["solid_editorial", "utility_call_bar", "compact_sticky"],
+    steady_professional: ["solid_editorial", "compact_sticky"],
+    warm_boutique: ["solid_editorial", "minimal_wordmark"]
+  };
+  return axisPick(business.siteId, "header", pools[profile.register]);
+}
+
+/**
+ * Process presentation axis with one grammar rule baked in: when services
+ * render as side_intro_rows (4+ services), process may not repeat the same
+ * template directly below it (the audit-confirmed "two identical row sections
+ * back to back" smell), so it takes the vertical stepper. Otherwise the seed
+ * picks between row and stepper geometry.
+ */
+function processPresentationForBusiness(
+  business: BusinessProfile,
+  deck?: GeneratedCopyDeckV2
+): "program_rows" | "stepper_vertical" {
+  const services = serviceItemsForBusiness(business, deck);
+  if (services.length >= 4) return "stepper_vertical";
+  return axisPick(business.siteId, "process", ["program_rows", "stepper_vertical"] as const);
+}
+
+/**
  * B3 selector: per-section presentation choices from validated pools. Pools are
  * deliberately conservative — only presentations the grammar harness renders
  * cleanly on both text-only and media shells (e.g. menu_preview needs a dark
  * section and stays out until that combination is harness-validated).
  */
-function sectionPresentationForBusiness(business: BusinessProfile): SectionPresentationMapV3 {
+function sectionPresentationForBusiness(business: BusinessProfile, deck?: GeneratedCopyDeckV2): SectionPresentationMapV3 {
   const servicesPools: Partial<Record<Vertical, readonly ListPresentationIdV3[]>> = {
     restaurant: ["numbered_ledger", "card_grid", "action_tiles", "coaching_cards"],
     beauty_salon: ["card_grid", "coaching_cards", "numbered_ledger", "action_tiles"],
@@ -381,7 +420,7 @@ function sectionPresentationForBusiness(business: BusinessProfile): SectionPrese
   const servicesPool = servicesPools[business.vertical] ?? (["card_grid", "action_tiles", "coaching_cards", "numbered_ledger"] as const);
   const map: SectionPresentationMapV3 = {
     services: axisPick(business.siteId, "services", servicesPool),
-    process: "program_rows",
+    process: processPresentationForBusiness(business, deck),
     faq: "faq_accordion",
     factsStrip: axisPick(business.siteId, "facts", ["trust_bar", "utility_rail"] as const),
     heroFacts: "inline_strip",
@@ -459,14 +498,16 @@ function designProfileForBusiness(business: BusinessProfile, brandApplied: boole
  * strip into the marquee (accent-forward only), both seeded so a vertical's
  * fleet stays varied.
  */
-function sectionPresentationWithProfile(business: BusinessProfile, profile: DesignProfileV3) {
-  const base = sectionPresentationForBusiness(business) ?? {};
+function sectionPresentationWithProfile(business: BusinessProfile, profile: DesignProfileV3, deck?: GeneratedCopyDeckV2) {
+  const base = sectionPresentationForBusiness(business, deck) ?? {};
   if (profile.register !== "punchy_retail") return base;
   const seed = siteVariationSeedV2(`${business.siteId}:retail-presentation`);
   return {
     ...base,
     heroFacts: "hero_chips" as const,
-    ...(profile.brandPosture === "accent_forward" && seed % 2 === 0 ? { factsStrip: "marquee" as const } : {})
+    // Marquee eligibility widened to all punchy-retail sites (seeded): the
+    // ticker is a register expression, not a brand-cue privilege.
+    ...(seed % 2 === 0 ? { factsStrip: "marquee" as const } : {})
   };
 }
 
@@ -484,9 +525,17 @@ function spacingRhythmForBusiness(business: BusinessProfile): "standard" | "spac
 
 type LocationCompileContextV3 = {
   locations: RenderableLocationV3[];
+  physicalLocations: RenderableLocationV3[];
   primaryLocation?: RenderableLocationV3;
-  hasLocationPanel: boolean;
+  serviceAreas: string[];
+  hasLocationSection: boolean;
   hasPhysicalLocation: boolean;
+};
+
+type GeneratedSiteV3CompilerOverrides = {
+  heroVariant?: "image_statement" | "hero_split";
+  heroMediaUrl?: string;
+  heroPrimaryCta?: VisualCtaV3;
 };
 
 function v3PageSectionsForBusiness(
@@ -494,7 +543,9 @@ function v3PageSectionsForBusiness(
   media: SelectedV3Media,
   locationContext: LocationCompileContextV3,
   deck?: GeneratedCopyDeckV2,
-  overrides?: { heroVariant?: "image_statement" | "hero_split"; heroMediaUrl?: string }
+  overrides?: GeneratedSiteV3CompilerOverrides,
+  controls?: DesignControlsV3,
+  plan?: CompositionPlanV3
 ): V3Composition {
   const recipeId = v3RecipeIdForVertical(business.vertical);
   const services = serviceItemsForBusiness(business, deck);
@@ -543,12 +594,12 @@ function v3PageSectionsForBusiness(
           ? false
           : siteVariationSeedV2(`${business.siteId}:hero`) % 2 === 0 && gallery.length > 0;
     if (useImageHero) {
-      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, overrideHeroUrl ?? gallery[0].url, deck));
+      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, overrideHeroUrl ?? gallery[0].url, deck, overrides?.heroPrimaryCta));
     } else {
-      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available, so the recipe uses hero_split.", heroSplitSection(business, gallery, deck));
+      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available, so the recipe uses hero_split.", heroSplitSection(business, gallery, deck, overrides?.heroPrimaryCta));
     }
   } else {
-    include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "No safe hero media is available, so the recipe uses hero_statement.", heroStatementSection(business, deck));
+    include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "No safe hero media is available, so the recipe uses hero_statement.", heroStatementSection(business, deck, overrides?.heroPrimaryCta));
   }
 
   if (proofFactsForBusiness(business).length >= 3) {
@@ -598,7 +649,17 @@ function v3PageSectionsForBusiness(
     skip("pricing_packages", "hasRealPricingEvidence", "Skipped pricing/package comparison because no real pricing evidence was found.");
   }
 
-  include("process", "process.section_template", "process_steps", "serviceCount", "Process uses deterministic row geometry with vertical-specific steps.", processRowsSection(business, deck));
+  const processPresentation = processPresentationForBusiness(business, deck);
+  include(
+    "process",
+    "process.section_template",
+    "process_steps",
+    "serviceCount",
+    processPresentation === "stepper_vertical"
+      ? "Process renders as the full-width vertical stepper (axis pick, or the no-adjacent-duplicate-template rule when services use side_intro_rows)."
+      : "Process uses deterministic row geometry with vertical-specific steps.",
+    processPresentation === "stepper_vertical" ? processStepperSection(business, deck, gallery) : processRowsSection(business, deck)
+  );
 
   // Guideline: when the source reveals a story (family-owned, founders,
   // mascots), it gets its own section — distinctiveness is conversion surface.
@@ -638,19 +699,87 @@ function v3PageSectionsForBusiness(
     conversionBackgroundUrl
       ? "Approved generic category background gives the page a clear closing CTA before contact."
       : "Brand-colored conversion band gives the page a clear closing CTA before contact.",
-    conversionBandSection(business, conversionBackgroundUrl)
+    conversionBandSection(business, conversionBackgroundUrl, controls?.ctaBandTone)
   );
 
-  if (locationContext.hasLocationPanel) {
-    include("location", "local.section_template", "location_panel", "hasLocationPanel", "First-party location facts are available, so the recipe adds a dedicated location panel before contact.", locationPanelSection(business, locationContext, deck));
+  if (locationContext.physicalLocations.length === 1) {
+    include(
+      "location",
+      "local.section_template",
+      "location_showcase",
+      "hasLocationSection",
+      "One address-bearing physical location selects the destination-style location showcase.",
+      locationShowcaseSection(business, locationContextForLocations(locationContext, locationContext.physicalLocations), deck)
+    );
+  } else if (locationContext.physicalLocations.length > 1) {
+    include(
+      "location",
+      "local.section_template",
+      "location_directory",
+      "hasLocationSection",
+      "Multiple address-bearing physical locations select a directory with links to generated location pages.",
+      locationDirectorySection(business, locationContext, deck)
+    );
+  } else if (locationContext.serviceAreas.length) {
+    include(
+      "location",
+      "local.section_template",
+      "service_area_showcase",
+      "hasLocationSection",
+      "Coverage facts exist without a physical address, so the page uses a service-area showcase.",
+      serviceAreaShowcaseSection(business, locationContext, deck)
+    );
   } else {
-    skip("location_panel", "hasLocationPanel", "Skipped location_panel because no first-party location or service-area facts were available.");
+    skip("location", "hasLocationSection", "Skipped location section because no address-bearing location or service-area facts were available.");
   }
 
   include("contact", "contact.section_template", "contact", "hasPhone", "Contact is required in every V3 recipe and normalizes sparse contact data.", contactSplitSection(business, locationContext, deck));
 
+  // Grammar-bounded composition planning: a validated model plan reorders the
+  // middle sections; anything invalid keeps the deterministic default order.
+  let orderedSections = sections;
+  if (plan) {
+    const plannable = sections.map((section) => ({
+      id: section.id,
+      variant: section.variant,
+      backgroundKey: backgroundKeyForSectionInstance(section)
+    }));
+    const planViolations = validateCompositionPlanV3(plan, plannable, { hasLocationSection: locationContext.hasLocationSection });
+    if (planViolations.length) {
+      decisions.push({
+        id: "composition_plan.rejected",
+        status: "skipped",
+        sectionRole: "composition_plan",
+        evidenceSignal: "recipe",
+        reason: `Model composition plan rejected; deterministic order kept. ${planViolations.join(" ")}`,
+        skipReason: planViolations.join(" ")
+      });
+    } else {
+      const applied = applyCompositionPlanV3(sections, plan);
+      orderedSections = applied.sections;
+      decisions.push({
+        id: "composition_plan.applied",
+        status: "included",
+        sectionRole: "composition_plan",
+        evidenceSignal: "recipe",
+        reason: `Model composition plan applied: ${plan.sections.map((entry) => entry.intent).join(" → ")}.`,
+        selectedOptions: { dropped: applied.dropped }
+      });
+      for (const droppedId of applied.dropped) {
+        decisions.push({
+          id: `${droppedId}.excluded_by_plan`,
+          status: "skipped",
+          sectionRole: droppedId,
+          evidenceSignal: "recipe",
+          reason: `Section "${droppedId}" was built but excluded by the accepted composition plan.`,
+          skipReason: "excluded_by_composition_plan"
+        });
+      }
+    }
+  }
+
   return {
-    sections,
+    sections: orderedSections,
     report: {
       version: "generated-site-v3-composition-report-v1",
       selectedRecipe: recipeId,
@@ -671,13 +800,190 @@ function v3PageSectionsForBusiness(
   };
 }
 
+function backgroundKeyForSectionInstance(section: SectionInstanceV3): string | undefined {
+  const visual = getVisualSectionV3(section.props);
+  const background = visual?.options?.background as { kind?: string; token?: string } | undefined;
+  if (!background?.kind) return undefined;
+  return background.kind === "image" ? "image" : `${background.kind}:${background.token ?? ""}`;
+}
+
 type ServiceLandingPageV3 = {
   id: string;
   slug: string;
   title: string;
   seo: PageModel["seo"];
   sections: SectionInstanceV3[];
+  serviceName?: string;
 };
+
+type LocationLandingPageV3 = {
+  id: string;
+  slug: string;
+  title: string;
+  seo: PageModel["seo"];
+  sections: SectionInstanceV3[];
+  locationId: string;
+};
+
+type PageSlugRegistryV3 = Set<string>;
+
+function createPageSlugRegistryV3(): PageSlugRegistryV3 {
+  return new Set([""]);
+}
+
+function reserveUniquePageSlugV3(registry: PageSlugRegistryV3, rawSlug: string): string | undefined {
+  const normalized = rawSlug.replace(/^\/+|\/+$/g, "");
+  if (!normalized) return undefined;
+  const slashIndex = normalized.lastIndexOf("/");
+  const prefix = slashIndex >= 0 ? `${normalized.slice(0, slashIndex)}/` : "";
+  const stem = slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized;
+  let candidate = normalized;
+  let suffix = 2;
+  while (registry.has(candidate)) {
+    candidate = `${prefix}${stem}-${suffix}`;
+    suffix += 1;
+  }
+  registry.add(candidate);
+  return candidate;
+}
+
+function typedPageSlugV3(registry: PageSlugRegistryV3, prefix: "services" | "locations", rawName: string, fallbackStem: string): string | undefined {
+  const stem = slugify(rawName) || fallbackStem;
+  return reserveUniquePageSlugV3(registry, `${prefix}/${stem}`);
+}
+
+function buildLocationLandingPagesV3(
+  business: BusinessProfile,
+  locationContext: LocationCompileContextV3,
+  deck: GeneratedCopyDeckV2 | undefined,
+  pageSlugRegistry: PageSlugRegistryV3
+): LocationLandingPageV3[] {
+  if (locationContext.physicalLocations.length < 2) return [];
+
+  const serviceItems = serviceItemsForBusiness(business, deck).slice(0, 4);
+  return locationContext.physicalLocations.flatMap((location, index) => {
+    const slugSeed = [location.label, location.localityLine].filter(Boolean).join(" ");
+    const slug = typedPageSlugV3(pageSlugRegistry, "locations", slugSeed, `location-${index + 1}`);
+    if (!slug) return [];
+    const idPrefix = `loc_${slug.replace(/\//g, "_")}`;
+    const locationOnlyContext = locationContextForLocations(locationContext, [location]);
+    const locality = location.localityLine ? ` in ${location.localityLine}` : "";
+    const heroBody = location.addressLine
+      ? `${location.addressLine}${location.hoursSummary ? `. Hours: ${location.hoursSummary}.` : "."}`
+      : `Use this page to confirm the right ${business.name} location${locality}.`;
+    const sections: SectionInstanceV3[] = [
+      visualSection(`${idPrefix}_hero`, "hero.section_template", {
+        version: "visual-section-v3",
+        templateId: "hero_statement",
+        options: { align: "left", background: backgrounds.subtleGradient },
+        slots: {
+          copy: {
+            eyebrow: "Location",
+            heading: `${business.name} ${location.label}`,
+            body: heroBody,
+            actions: [
+              ...(location.directionsUrl ? [{ label: "Get directions", href: location.directionsUrl, style: "primary" as const }] : []),
+              ...(location.phone ? [{ label: `Call ${formatPhone(location.phone)}`, href: `tel:${phoneHref(location.phone)}`, style: "secondary" as const }] : [])
+            ]
+          },
+          facts: { items: locationFactsForLandingPage(location).slice(0, 4) }
+        }
+      }),
+      visualSection(`${idPrefix}_showcase`, "local.section_template", locationShowcaseSection(business, locationOnlyContext)),
+      serviceItems.length >= 3
+        ? visualSection(`${idPrefix}_services`, "services.section_template", {
+            version: "visual-section-v3",
+            templateId: "side_intro_rows",
+            anchorId: "services",
+            options: { background: backgrounds.surface },
+            slots: {
+              intro: {
+                eyebrow: "Services",
+                heading: `Services at ${location.label}.`,
+                body: serviceIntroForBusiness(business)
+              },
+              items: { items: dedupeStandardItems(serviceItems) }
+            }
+          })
+        : visualSection(`${idPrefix}_service_statement`, "statement.section_template", {
+            version: "visual-section-v3",
+            templateId: "editorial_statement",
+            options: { background: backgrounds.surface },
+            slots: {
+              copy: {
+                eyebrow: "Services",
+                heading: `Ask what fits this location.`,
+                body: serviceIntroForBusiness(business),
+                actions: [primaryCtaForBusiness(business)]
+              }
+            }
+          }),
+      visualSection(`${idPrefix}_contact`, "contact.section_template", contactSplitSection(business, locationOnlyContext, deck, { includeLocationAnchor: false }))
+    ];
+
+    return [{
+      id: `page_${slug.replace(/\//g, "_")}`,
+      slug,
+      locationId: location.id,
+      title: `${location.label} | ${business.name}`,
+      seo: {
+        title: `${location.label} | ${business.name}`,
+        description: location.addressLine
+          ? `${business.name} location details for ${location.addressLine}.`
+          : `${business.name} location details for ${location.label}.`,
+        canonicalPath: `/${slug}`
+      },
+      sections
+    }];
+  });
+}
+
+function locationFactsForLandingPage(location: RenderableLocationV3): VisualFactV3[] {
+  return [
+    ...(location.addressLine ? [{ label: "Address", value: location.addressLine }] : []),
+    ...(location.phone ? [{ label: "Phone", value: formatPhone(location.phone), href: `tel:${phoneHref(location.phone)}` }] : []),
+    ...(location.hoursSummary ? [{ label: "Hours", value: location.hoursSummary }] : []),
+    ...(location.serviceAreas.length ? [{ label: "Serves", value: location.serviceAreas.slice(0, 3).join(", ") }] : [])
+  ];
+}
+
+function locationContextWithLandingPages(
+  locationContext: LocationCompileContextV3,
+  locationPages: LocationLandingPageV3[]
+): LocationCompileContextV3 {
+  if (!locationPages.length) return locationContext;
+  const hrefByLocationId = new Map(locationPages.map((page) => [page.locationId, `/${page.slug}`]));
+  const locations = locationContext.locations.map((location) => {
+    const href = hrefByLocationId.get(location.id);
+    return href ? { ...location, href } : location;
+  });
+  return locationContextForLocations({ ...locationContext, locations }, locations);
+}
+
+function locationContextForLocations(
+  source: LocationCompileContextV3,
+  locations: RenderableLocationV3[]
+): LocationCompileContextV3 {
+  const physicalLocations = locations.filter(hasRenderableAddressV3);
+  const primaryLocation = physicalLocations.find((location) => location.isPrimary) ?? physicalLocations[0] ?? locations[0];
+  const normalizedLocations = locations.map((location) => ({
+    ...location,
+    isPrimary: location.id === primaryLocation?.id
+  }));
+  const normalizedPhysicalLocations = normalizedLocations.filter(hasRenderableAddressV3);
+  return {
+    ...source,
+    locations: normalizedLocations,
+    physicalLocations: normalizedPhysicalLocations,
+    primaryLocation: normalizedLocations.find((location) => location.isPrimary),
+    serviceAreas: dedupeStrings([
+      ...source.serviceAreas,
+      ...normalizedLocations.flatMap((location) => location.serviceAreas)
+    ]),
+    hasLocationSection: normalizedPhysicalLocations.length > 0 || source.serviceAreas.length > 0,
+    hasPhysicalLocation: normalizedPhysicalLocations.length > 0
+  };
+}
 
 /**
  * Service landing pages with anti-doorway enforcement: pages exist only for
@@ -710,15 +1016,17 @@ function buildServiceLandingPagesV3(
   business: BusinessProfile,
   locationContext: LocationCompileContextV3,
   deck: GeneratedCopyDeckV2 | undefined,
-  homepageSections: SectionInstanceV3[]
+  homepageSections: SectionInstanceV3[],
+  media: SelectedV3Media | undefined,
+  pageSlugRegistry: PageSlugRegistryV3
 ): ServiceLandingPageV3[] {
   if (!deck?.servicePages?.length) return [];
   // Vertical-default services are unverified claims; they never earn pages.
   if (areServicesVerticalDefaults(business.services, business.vertical)) return [];
 
+  const gallery = media ? galleryForSelectedMedia(media) : [];
   const homepageTexts = sectionTextsForOverlap(homepageSections);
   const accepted: ServiceLandingPageV3[] = [];
-  const usedSlugs = new Set<string>();
 
   for (const pageCopy of deck.servicePages.slice(0, 4)) {
     const matchedService = business.services.find(
@@ -740,11 +1048,10 @@ function buildServiceLandingPagesV3(
       continue;
     }
 
-    const slug = slugify(pageCopy.serviceName);
-    if (!slug || usedSlugs.has(slug)) continue;
-    usedSlugs.add(slug);
+    const slug = typedPageSlugV3(pageSlugRegistry, "services", pageCopy.serviceName, `service-${accepted.length + 1}`);
+    if (!slug) continue;
 
-    const idPrefix = `svc_${slug}`;
+    const idPrefix = `svc_${slug.replace(/\//g, "_")}`;
     const sections: SectionInstanceV3[] = [
       visualSection(`${idPrefix}_hero`, "hero.section_template", {
         version: "visual-section-v3",
@@ -760,19 +1067,40 @@ function buildServiceLandingPagesV3(
           facts: { items: proofFactsForBusiness(business).slice(0, 4) }
         }
       }),
-      visualSection(`${idPrefix}_detail`, "statement.section_template", {
-        version: "visual-section-v3",
-        templateId: "editorial_statement",
-        options: { background: backgrounds.surface },
-        slots: {
-          copy: {
-            eyebrow: "Details",
-            heading: pageCopy.detail.heading,
-            body: pageCopy.detail.body,
-            actions: [primaryCtaForBusiness(business)]
-          }
-        }
-      }),
+      // Service pages carry a real photo when safe media exists: split_media
+      // pairs the detail copy with a distinct gallery image per page, instead
+      // of every service page rendering as a text-only statement.
+      gallery.length
+        ? visualSection(`${idPrefix}_detail`, "story.section_template", {
+            version: "visual-section-v3",
+            templateId: "split_media",
+            options: {
+              background: backgrounds.surface,
+              mediaSide: accepted.length % 2 === 0 ? "right" : "left"
+            },
+            slots: {
+              copy: {
+                eyebrow: "Details",
+                heading: pageCopy.detail.heading,
+                body: pageCopy.detail.body,
+                actions: [primaryCtaForBusiness(business)]
+              },
+              media: mediaSlot([gallery[(accepted.length + 2) % gallery.length]])
+            }
+          })
+        : visualSection(`${idPrefix}_detail`, "statement.section_template", {
+            version: "visual-section-v3",
+            templateId: "editorial_statement",
+            options: { background: backgrounds.surface },
+            slots: {
+              copy: {
+                eyebrow: "Details",
+                heading: pageCopy.detail.heading,
+                body: pageCopy.detail.body,
+                actions: [primaryCtaForBusiness(business)]
+              }
+            }
+          }),
       visualSection(`${idPrefix}_faq`, "faq.section_template", {
         version: "visual-section-v3",
         templateId: "faq_list",
@@ -787,12 +1115,13 @@ function buildServiceLandingPagesV3(
           items: { items: pageCopy.faqs.map((faq) => ({ question: faq.question, answer: faq.answer })) }
         }
       }),
-      visualSection(`${idPrefix}_contact`, "contact.section_template", contactSplitSection(business, locationContext, deck))
+      visualSection(`${idPrefix}_contact`, "contact.section_template", contactSplitSection(business, locationContext, deck, { includeLocationAnchor: false }))
     ];
 
     accepted.push({
-      id: `page_${slug}`,
+      id: `page_${slug.replace(/\//g, "_")}`,
       slug,
+      serviceName: pageCopy.serviceName,
       title: `${pageCopy.serviceName} | ${business.name}`,
       seo: {
         title: pageCopy.seo.title,
@@ -807,7 +1136,7 @@ function buildServiceLandingPagesV3(
 
 function sectionTextsForOverlap(sections: SectionInstanceV3[]): string[] {
   const texts: string[] = [];
-  const sharedChrome = new Set(["contact_split", "facts_strip", "location_panel", "facts_cta"]);
+  const sharedChrome = new Set(["contact_split", "facts_strip", "location_directory", "location_showcase", "service_area_showcase", "facts_cta"]);
   for (const section of sections) {
     const props = section.props as { visualSectionV3?: VisualSectionV3 };
     const visual = props.visualSectionV3;
@@ -882,7 +1211,7 @@ function classifyAutoBodyV3Evidence(
     hasQuoteProof: quoteItems.length >= 3,
     hasRealPricingEvidence: pricingItemsForBusiness(business).length >= 3,
     hasCredentialTrustProof: Boolean(business.phone || business.address || business.reviewsSummary?.count || services.length),
-    hasLocationPanel: locationContext.hasLocationPanel
+    hasLocationSection: locationContext.hasLocationSection
   };
 }
 
@@ -908,12 +1237,37 @@ function locationCompileContextForBundle(bundle: SiteBundle): LocationCompileCon
     ...location,
     isPrimary: location.id === primaryLocation?.id
   }));
+  const physicalCount = normalizedLocations.filter(hasRenderableAddressV3).length;
+  const locationsWithHoursFallback = normalizedLocations.map((location) => {
+    if (physicalCount !== 1 || !hasRenderableAddressV3(location) || location.hours?.length || !business.hours) return location;
+    return {
+      ...location,
+      hoursSummary: hoursSummaryForHours(business.hours) ?? location.hoursSummary,
+      hours: hoursEntriesForHours(business.hours)
+    };
+  });
+  const physicalLocations = locationsWithHoursFallback.filter(hasRenderableAddressV3);
+  const canonicalServiceAreas = dedupeStrings([
+    ...business.serviceAreas,
+    ...locationsWithHoursFallback.flatMap((location) => location.serviceAreas)
+  ]);
+  const primaryPhysicalLocation = physicalLocations.find((location) => location.isPrimary) ?? physicalLocations[0];
+  const finalLocations = locationsWithHoursFallback.map((location) => ({
+    ...location,
+    isPrimary: location.id === (primaryPhysicalLocation?.id ?? primaryLocation?.id)
+  }));
   return {
-    locations: normalizedLocations,
-    primaryLocation: normalizedLocations.find((location) => location.isPrimary),
-    hasLocationPanel: normalizedLocations.length > 0,
-    hasPhysicalLocation: normalizedLocations.some((location) => Boolean(location.addressLine || location.mapEmbedIntent?.kind === "geo"))
+    locations: finalLocations,
+    physicalLocations: finalLocations.filter(hasRenderableAddressV3),
+    primaryLocation: finalLocations.find((location) => location.isPrimary),
+    serviceAreas: canonicalServiceAreas,
+    hasLocationSection: physicalLocations.length > 0 || canonicalServiceAreas.length > 0,
+    hasPhysicalLocation: physicalLocations.length > 0
   };
+}
+
+function hasRenderableAddressV3(location: RenderableLocationV3): boolean {
+  return Boolean(location.addressLine?.trim());
 }
 
 function orderedLocationBindings(bindings: SiteLocationBinding[], locations: BusinessLocationRecord[]): SiteLocationBinding[] {
@@ -932,7 +1286,7 @@ function renderableLocationForRecord(
 ): RenderableLocationV3 {
   const addressLine = location.address ? formatAddress(location.address) : undefined;
   const localityLine = [location.address?.city, location.address?.region].filter(Boolean).join(", ") || undefined;
-  const isPhysical = Boolean(location.address || location.geo);
+  const isPhysical = Boolean(addressLine);
   return {
     id: location.id,
     label: location.label ?? location.address?.city ?? location.serviceAreas[0] ?? business.name,
@@ -970,7 +1324,12 @@ function splitMediaSideForOccurrence(heroTemplateId: "hero_split" | "hero_statem
   return occurrenceIndex % 2 === 0 ? "left" : "right";
 }
 
-function heroSplitSection(business: BusinessProfile, gallery: Array<{ url: string; label: string }>, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+function heroSplitSection(
+  business: BusinessProfile,
+  gallery: Array<{ url: string; label: string }>,
+  deck?: GeneratedCopyDeckV2,
+  heroPrimaryCta?: VisualCtaV3
+): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "hero_split",
@@ -980,7 +1339,7 @@ function heroSplitSection(business: BusinessProfile, gallery: Array<{ url: strin
         eyebrow: deck?.hero.eyebrow ?? eyebrowForBusiness(business),
         heading: deck?.hero.heading ?? headlineForBusiness(business, "media"),
         body: deck?.hero.body ?? subheadlineForBusiness(business),
-        actions: heroActionsForBusiness(business)
+        actions: heroActionsForBusiness(business, heroPrimaryCta)
       },
       media: mediaSlot(gallery.slice(0, 1)),
       facts: { items: proofFactsForBusiness(business).slice(0, 4) }
@@ -988,7 +1347,11 @@ function heroSplitSection(business: BusinessProfile, gallery: Array<{ url: strin
   };
 }
 
-function heroStatementSection(business: BusinessProfile, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+function heroStatementSection(
+  business: BusinessProfile,
+  deck?: GeneratedCopyDeckV2,
+  heroPrimaryCta?: VisualCtaV3
+): VisualSectionV3 {
   // Seeded variation keeps same-vertical sites from rendering pixel-identical.
   const align = siteVariationSeedV2(business.siteId) % 2 === 0 ? "center" : "left";
   return {
@@ -1000,7 +1363,7 @@ function heroStatementSection(business: BusinessProfile, deck?: GeneratedCopyDec
         eyebrow: deck?.hero.eyebrow ?? eyebrowForBusiness(business),
         heading: deck?.hero.heading ?? headlineForBusiness(business, "text"),
         body: deck?.hero.body ?? subheadlineForBusiness(business),
-        actions: heroActionsForBusiness(business)
+        actions: heroActionsForBusiness(business, heroPrimaryCta)
       },
       facts: { items: proofFactsForBusiness(business).slice(0, 4) }
     }
@@ -1012,7 +1375,12 @@ function heroStatementSection(business: BusinessProfile, deck?: GeneratedCopyDec
  * highest-impact hero when a strong wide photo exists. CSS scrim +
  * foreground-token derivation keep text WCAG-safe; render QA gates it.
  */
-function heroImageStatementSection(business: BusinessProfile, heroUrl: string, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+function heroImageStatementSection(
+  business: BusinessProfile,
+  heroUrl: string,
+  deck?: GeneratedCopyDeckV2,
+  heroPrimaryCta?: VisualCtaV3
+): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "hero_statement",
@@ -1022,7 +1390,7 @@ function heroImageStatementSection(business: BusinessProfile, heroUrl: string, d
         eyebrow: deck?.hero.eyebrow ?? eyebrowForBusiness(business),
         heading: deck?.hero.heading ?? headlineForBusiness(business, "text"),
         body: deck?.hero.body ?? subheadlineForBusiness(business),
-        actions: heroActionsForBusiness(business)
+        actions: heroActionsForBusiness(business, heroPrimaryCta)
       },
       facts: { items: proofFactsForBusiness(business).slice(0, 4) }
     }
@@ -1097,6 +1465,36 @@ function processRowsSection(business: BusinessProfile, deck?: GeneratedCopyDeckV
         body: deck?.processIntro.body ?? processIntroForBusiness(business)
       },
       items: { items: dedupeStandardItems(items) }
+    }
+  };
+}
+
+function processStepperSection(
+  business: BusinessProfile,
+  deck: GeneratedCopyDeckV2 | undefined,
+  gallery: Array<{ url: string; label: string }>
+): VisualSectionV3 {
+  const baseItems = deck
+    ? deck.processSteps.map((step, index) => ({ title: step.title, body: step.body, meta: String(index + 1).padStart(2, "0") }))
+    : processItemsForBusiness(business);
+  // Per-step media only when the gallery is deep enough to keep steps visually
+  // distinct from the hero and mosaic usages.
+  const items =
+    gallery.length >= 4
+      ? dedupeStandardItems(baseItems).map((item, index) => ({ ...item, mediaUrl: gallery[(index + 1) % gallery.length].url }))
+      : dedupeStandardItems(baseItems);
+  return {
+    version: "visual-section-v3",
+    templateId: "numbered_steps",
+    anchorId: "process",
+    options: { background: backgrounds.page },
+    slots: {
+      intro: {
+        eyebrow: "Process",
+        heading: deck?.processIntro.heading ?? processHeadingForBusiness(business),
+        body: deck?.processIntro.body ?? processIntroForBusiness(business)
+      },
+      items: { items }
     }
   };
 }
@@ -1254,17 +1652,21 @@ function editorialStatementSection(business: BusinessProfile): VisualSectionV3 {
  * "Ready for new tires?" moment. Copy is deterministic and fact-grounded
  * (primary service + phone); the brand background carries the energy.
  */
-function conversionBandSection(business: BusinessProfile, backgroundUrl?: string): VisualSectionV3 {
+function conversionBandSection(business: BusinessProfile, backgroundUrl?: string, tone?: CtaBandToneV3): VisualSectionV3 {
   const primaryService = business.services[0];
   const heading = primaryService ? `Need ${primaryService.toLowerCase()}?` : `Ready when you are.`;
   const body = business.phone
     ? `Call ${formatPhone(business.phone)} for a straight answer on price and timing.`
     : "Send the details and we'll get right back to you.";
+  // ctaBandTone control: "paper" exists so page bottoms can avoid stacking two
+  // dark bands around the location panel. Default keeps the brand gradient.
+  const toneBackground: SectionBackgroundOptionV3 =
+    tone === "dark" ? { kind: "solid", token: "dark" } : tone === "paper" ? backgrounds.surface : backgrounds.brandGradient;
   return {
     version: "visual-section-v3",
     templateId: "editorial_statement",
     anchorId: "cta",
-    options: { background: backgroundUrl ? { kind: "image", url: backgroundUrl, focalPoint: "center" } : backgrounds.brandGradient },
+    options: { background: backgroundUrl ? { kind: "image", url: backgroundUrl, focalPoint: "center" } : toneBackground },
     slots: {
       copy: {
         heading,
@@ -1275,33 +1677,90 @@ function conversionBandSection(business: BusinessProfile, backgroundUrl?: string
   };
 }
 
-function locationPanelSection(business: BusinessProfile, locationContext: LocationCompileContextV3, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
-  const hasPhysicalLocation = locationContext.hasPhysicalLocation;
-  const locationCount = locationContext.locations.length;
+function locationDirectorySection(business: BusinessProfile, locationContext: LocationCompileContextV3, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+  const locationCount = locationContext.physicalLocations.length;
   return {
     version: "visual-section-v3",
-    templateId: "location_panel",
+    templateId: "location_directory",
     anchorId: "location",
     options: { background: backgrounds.surface },
     slots: {
       copy: {
-        eyebrow: hasPhysicalLocation ? "Location" : "Service area",
-        heading: deck?.locationIntro?.heading ?? (locationCount > 1 ? "Choose the right location before you reach out." : hasPhysicalLocation ? "Location, hours, and directions." : "Coverage details before you reach out."),
-        body: deck?.locationIntro?.body ?? (hasPhysicalLocation
-          ? `${business.name} keeps the practical visit details close to the contact path.`
-          : `${business.name} serves the listed areas and can confirm fit when you call or send details.`)
+        eyebrow: "Locations",
+        heading: deck?.locationIntro?.heading ?? "Choose the right location before you reach out.",
+        body:
+          deck?.locationIntro?.body ??
+          `${business.name} has ${locationCount} documented locations. Pick the one that fits your visit before calling or getting directions.`
       },
-      locations: { locations: locationContext.locations },
+      locations: { locations: locationContext.physicalLocations },
       action: {
-        title: business.phone ? "Confirm before you visit." : "Send the details first.",
-        body: business.phone ? "Use the call button to confirm timing, service fit, and arrival details." : "Use the contact path to confirm service fit and timing.",
+        title: business.phone ? "Not sure which location fits?" : "Need help choosing?",
+        body: business.phone ? "Call first to confirm timing, service fit, and arrival details." : "Use the contact path to confirm the right location and timing.",
         cta: primaryCtaForBusiness(business)
       }
     }
   };
 }
 
-function contactSplitSection(business: BusinessProfile, locationContext?: LocationCompileContextV3, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+function serviceAreaShowcaseSection(business: BusinessProfile, locationContext: LocationCompileContextV3, deck?: GeneratedCopyDeckV2): VisualSectionV3 {
+  const areas = locationContext.serviceAreas.slice(0, 6);
+  return {
+    version: "visual-section-v3",
+    templateId: "service_area_showcase",
+    anchorId: "location",
+    options: { background: backgrounds.surface },
+    slots: {
+      copy: {
+        eyebrow: "Service area",
+        heading: deck?.locationIntro?.heading ?? "Coverage details before you reach out.",
+        body:
+          deck?.locationIntro?.body ??
+          `${business.name} serves the listed areas and can confirm fit when you call or send details.`
+      },
+      facts: {
+        items: areas.map((area, index) => ({
+          label: index === 0 ? "Serves" : "Also serves",
+          value: area
+        }))
+      },
+      action: {
+        title: business.phone ? "Confirm service fit." : "Send the details first.",
+        body: business.phone ? "Use the call button to confirm coverage, timing, and next steps." : "Use the contact path to confirm coverage and timing.",
+        cta: primaryCtaForBusiness(business)
+      }
+    }
+  };
+}
+
+function locationShowcaseSection(
+  business: BusinessProfile,
+  locationContext: LocationCompileContextV3,
+  deck?: GeneratedCopyDeckV2
+): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "location_showcase",
+    anchorId: "location",
+    options: { background: backgrounds.page },
+    slots: {
+      copy: {
+        eyebrow: "Location & hours",
+        heading: deck?.locationIntro?.heading ?? "Location, hours, and directions.",
+        body:
+          deck?.locationIntro?.body ??
+          `${business.name} keeps the practical visit details — hours, address, and directions — one glance away.`
+      },
+      locations: { locations: locationContext.locations }
+    }
+  };
+}
+
+function contactSplitSection(
+  business: BusinessProfile,
+  locationContext?: LocationCompileContextV3,
+  deck?: GeneratedCopyDeckV2,
+  options?: { includeLocationAnchor?: boolean }
+): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "contact_split",
@@ -1314,7 +1773,7 @@ function contactSplitSection(business: BusinessProfile, locationContext?: Locati
         body: deck?.contactIntro.body ?? "Include what you need, any timing constraints, and the best callback details.",
         actions: [primaryCtaForBusiness(business)]
       },
-      contact: { facts: contactFactsForBusiness(business, locationContext) }
+      contact: { facts: contactFactsForBusiness(business, locationContext, options) }
     }
   };
 }
@@ -1365,9 +1824,11 @@ function controlLayoutForTemplate(templateId: SectionTemplateIdV3): ComponentCon
     case "quote_wall":
       return "card_grid";
     case "side_intro_rows":
+    case "numbered_steps":
     case "faq_list":
       return "editorial_rows";
     case "feature_band":
+    case "stat_band":
       return "architectural_split";
     case "media_feature":
       return "asymmetric_grid";
@@ -1375,7 +1836,9 @@ function controlLayoutForTemplate(templateId: SectionTemplateIdV3): ComponentCon
       return "mosaic_grid";
     case "facts_cta":
       return "story_panel";
-    case "location_panel":
+    case "location_directory":
+    case "service_area_showcase":
+    case "location_showcase":
       return "architectural_split";
     case "contact_split":
       return "contact_panel";
@@ -1388,6 +1851,23 @@ function responsiveRulesForTemplate(templateId: SectionTemplateIdV3): SectionIns
     { breakpoint: "tablet", behavior: "stack", notes: [`${templateId} uses deterministic tablet stacking to avoid horizontal overflow.`] },
     { breakpoint: "desktop", behavior: "preserve_crop", notes: [`${templateId} preserves the desktop section geometry.`] }
   ];
+}
+
+/**
+ * Backup imagery for the rights-declined path: the gallery this business
+ * would have received if its scraped photos did not exist (curated library /
+ * stock only). Used by preview rights simulation and, eventually, the
+ * publish-time fallback when an owner declines media attestation.
+ */
+export function backupGalleryForRightsFallbackV3(
+  business: BusinessProfile,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
+): Array<{ url: string; label: string }> {
+  const publicSafeBusiness: BusinessProfile = {
+    ...business,
+    photos: business.photos.filter((asset) => isPublicSafeMedia(asset))
+  };
+  return galleryForSelectedMedia(selectV3Media(publicSafeBusiness, assetLibraryAssets));
 }
 
 function selectV3Media(business: BusinessProfile, assetLibraryAssets: ApprovedAssetLibraryAsset[] = []): SelectedV3Media {
@@ -1764,6 +2244,19 @@ function dedupeStandardItems(items: StandardItemV3[]): StandardItemV3[] {
   return unique.map((item, index) => ({ ...item, meta: String(index + 1).padStart(2, "0") }));
 }
 
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values
+    .map((value) => value.trim())
+    .filter((value) => {
+      if (!value) return false;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function normalizeMediaItems(items: Array<{ url: string; label: string }>, count: number): Array<{ url: string; label: string }> {
   const seen = new Set<string>();
   return items
@@ -1960,7 +2453,11 @@ function proofFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
   ].slice(0, 4);
 }
 
-function contactFactsForBusiness(business: BusinessProfile, locationContext?: LocationCompileContextV3): VisualFactV3[] {
+function contactFactsForBusiness(
+  business: BusinessProfile,
+  locationContext?: LocationCompileContextV3,
+  options?: { includeLocationAnchor?: boolean }
+): VisualFactV3[] {
   const hoursSummary = hoursSummaryForBusiness(business);
   const fullFacts = () => {
     const facts: VisualFactV3[] = [
@@ -1980,12 +2477,14 @@ function contactFactsForBusiness(business: BusinessProfile, locationContext?: Lo
     return facts.slice(0, 4);
   };
 
-  if (!locationContext?.hasLocationPanel) return fullFacts();
+  if (!locationContext?.hasLocationSection) return fullFacts();
 
   const conversionFacts: VisualFactV3[] = [
     ...(business.phone ? [{ label: "Phone", value: formatPhone(business.phone), href: `tel:${phoneHref(business.phone)}` }] : []),
     ...(business.email ? [{ label: "Email", value: business.email, href: `mailto:${business.email}` }] : []),
-    { label: "Location", value: locationContext.locations.length > 1 ? "View locations" : "View details", href: "#location" },
+    ...(options?.includeLocationAnchor === false
+      ? [{ label: "Services", value: serviceNamesForBusiness(business).slice(0, 2).join(", ") || "Ask what fits", href: "#services" }]
+      : [{ label: "Location", value: locationContext.physicalLocations.length > 1 ? "View locations" : "View details", href: "#location" }]),
     { label: "Message", value: "Use the form", href: "#contact" }
   ];
   return conversionFacts.length >= 3 ? conversionFacts.slice(0, 4) : fullFacts();
@@ -2044,9 +2543,9 @@ function mediaSlot(items: Array<{ url: string; label: string }>): MediaSlotV3 {
   return { items: items.map((item) => ({ url: item.url, label: item.label })), focalPoint: "center", caption: "none" };
 }
 
-function heroActionsForBusiness(business: BusinessProfile): VisualCtaV3[] {
+function heroActionsForBusiness(business: BusinessProfile, primaryOverride?: VisualCtaV3): VisualCtaV3[] {
   return [
-    primaryCtaForBusiness(business),
+    primaryOverride ?? primaryCtaForBusiness(business),
     { label: "View services", href: "#services", style: "secondary" }
   ];
 }

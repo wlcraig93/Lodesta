@@ -5,11 +5,13 @@ import { PreviewWedge } from "@/components/PreviewWedge";
 import { AcceptSiteCandidateButton } from "@/components/admin/AcceptSiteCandidateButton";
 import { AdminButtonLink } from "@/components/admin/AdminButton";
 import { CandidateReviewPane } from "@/components/admin/CandidateReviewPane";
+import { CopyIdTag } from "@/components/admin/CopyIdTag";
 import { RegenerateCandidateButton } from "@/components/admin/RegenerateCandidateButton";
 import { requireAdminPageAccess } from "@/lib/page-access";
-import { repository } from "@/lib/repository";
+import { repository, type SiteCandidateSummary } from "@/lib/repository";
 import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
+import { assertSiteVersionV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type {
   AgentRunSpanRecord,
   GenerationQaReadiness,
@@ -44,18 +46,21 @@ export default async function AdminSiteCandidateDetailPage({
   const readiness: GenerationQaReadiness = selectedVersion
     ? getEffectiveGenerationQaReadiness(bundle, selectedVersion)
     : "unavailable";
-  const previewAvailable = Boolean(selectedVersion && selectedVersion.rendererVersion === "layout-v3");
+  const schemaIssue = selectedVersion ? siteVersionV3Issue(selectedVersion) : null;
+  const previewAvailable = Boolean(selectedVersion) && !schemaIssue;
 
   const [candidateArtifacts, queue, runDetail, managedBundle] = await Promise.all([
     repository.listSiteArtifacts({ siteCandidateId: candidate.id }),
-    repository.listSiteCandidates({ status: "ready", limit: 100 }),
+    repository.listSiteCandidateSummaries({ status: "ready", limit: 100 }),
     candidate.agentRunId ? repository.getAgentRunDetail(candidate.agentRunId).catch(() => null) : Promise.resolve(null),
     candidate.acceptedSiteId ? repository.getSiteBundle(candidate.acceptedSiteId) : Promise.resolve(null)
   ]);
 
-  const queueNav = buildQueueNav(queue.candidates, candidate.id);
+  const queueNav = buildQueueNav(queue.summaries, candidate.id);
   const acceptDisabledReason =
-    candidate.status !== "accepted" && (candidate.status === "blocked" || readiness !== "ready")
+    candidate.status !== "accepted" && schemaIssue
+      ? `Stored version schema is stale (${schemaIssue}); run the backfill or regenerate before promotion.`
+      : candidate.status !== "accepted" && (candidate.status === "blocked" || readiness !== "ready")
       ? `Candidate QA is ${readiness}; fix blockers before promotion.`
       : undefined;
 
@@ -68,7 +73,7 @@ export default async function AdminSiteCandidateDetailPage({
     : [];
   const visualQa = qa?.visualQa ?? bundle.presenceAssessment.visualQa;
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const replacementEvaluation = evaluateSiteAgainstStandard(bundle);
+  const replacementEvaluation = previewAvailable ? evaluateSiteAgainstStandard(bundle) : null;
   const timelineSpans = runDetail ? topLevelSpans(runDetail.spans) : [];
 
   return (
@@ -79,6 +84,7 @@ export default async function AdminSiteCandidateDetailPage({
             ← Queue
           </AdminButtonLink>
           <h1>{candidate.businessName}</h1>
+          <CopyIdTag id={candidate.id} />
           <span className={`badge status-${candidate.status}`}>{statusLabel(candidate.status)}</span>
           {candidate.sourceUrl ? (
             <a className="candidate-review-source" href={candidate.sourceUrl} target="_blank" rel="noopener noreferrer">
@@ -123,10 +129,16 @@ export default async function AdminSiteCandidateDetailPage({
           <CandidateReviewPane
             candidateId={candidate.id}
             businessName={candidate.businessName}
-            pages={(selectedVersion?.pages ?? []).map((page) => ({ slug: page.slug, title: page.title }))}
+            pages={previewAvailable && selectedVersion ? assertSiteVersionV3(selectedVersion, "candidate review version").pageComposition.pages.map((page) => ({ slug: page.slug, title: page.title })) : []}
             previewAvailable={previewAvailable}
-            fallbackSlot={<PreviewFallback candidate={candidate} version={selectedVersion} />}
-            reportSlot={<PreviewWedge bundle={bundle} replacementEvaluation={replacementEvaluation} />}
+            fallbackSlot={<PreviewFallback candidate={candidate} version={selectedVersion} schemaIssue={schemaIssue} />}
+            reportSlot={
+              replacementEvaluation ? (
+                <PreviewWedge bundle={bundle} replacementEvaluation={replacementEvaluation} />
+              ) : (
+                <p className="candidate-rail-footnote">Report unavailable until this candidate is regenerated.</p>
+              )
+            }
           />
         </section>
 
@@ -135,7 +147,7 @@ export default async function AdminSiteCandidateDetailPage({
             <p className="candidate-rail-label">QA verdict</p>
             <span className={`badge ${readinessBadgeClass(readiness)}`}>{readinessLabel(readiness)}</span>
             <div className="candidate-rail-checks">
-              <ScoreCompareRow sourcePercent={sourceEvaluation?.score.percent} generatedPercent={replacementEvaluation.score.percent} />
+              <ScoreCompareRow sourcePercent={sourceEvaluation?.score.percent} generatedPercent={replacementEvaluation?.score.percent} />
               {visualQa?.score ? (
                 <p className="candidate-rail-check">
                   <span className="candidate-rail-check-dot is-pass" aria-hidden="true" />
@@ -225,7 +237,15 @@ export default async function AdminSiteCandidateDetailPage({
   );
 }
 
-function PreviewFallback({ candidate, version }: { candidate: SiteCandidateRecord; version: SiteVersion | undefined }) {
+function PreviewFallback({
+  candidate,
+  version,
+  schemaIssue
+}: {
+  candidate: SiteCandidateRecord;
+  version: SiteVersion | undefined;
+  schemaIssue: string | null;
+}) {
   if (!version) {
     return (
       <div className="candidate-review-fallback-copy">
@@ -234,6 +254,18 @@ function PreviewFallback({ candidate, version }: { candidate: SiteCandidateRecor
         <p className="muted">
           This candidate was blocked before a renderable site version was compiled. Review the customer report, QA verdict, and
           agent run to resolve the source facts or policy blockers, then regenerate.
+        </p>
+      </div>
+    );
+  }
+  if (version.rendererVersion === "layout-v3" && schemaIssue) {
+    return (
+      <div className="candidate-review-fallback-copy">
+        <span className="badge status-blocked">stale schema</span>
+        <h2>Stored version schema is stale</h2>
+        <p className="muted">
+          This candidate ({candidate.candidateSlug}) was generated before the latest stored-version schema change: {schemaIssue}.
+          Run <code>npm run backfill:strip-pages-projection</code> or regenerate the candidate.
         </p>
       </div>
     );
@@ -250,7 +282,7 @@ function PreviewFallback({ candidate, version }: { candidate: SiteCandidateRecor
   );
 }
 
-function ScoreCompareRow({ sourcePercent, generatedPercent }: { sourcePercent?: number; generatedPercent: number }) {
+function ScoreCompareRow({ sourcePercent, generatedPercent }: { sourcePercent?: number; generatedPercent?: number }) {
   return (
     <div className="candidate-score-compare">
       <div className="candidate-score-cell is-source">
@@ -259,13 +291,13 @@ function ScoreCompareRow({ sourcePercent, generatedPercent }: { sourcePercent?: 
       </div>
       <div className="candidate-score-cell is-generated">
         <span>Generated draft</span>
-        <strong>{generatedPercent}</strong>
+        <strong>{typeof generatedPercent === "number" ? generatedPercent : "—"}</strong>
       </div>
     </div>
   );
 }
 
-function buildQueueNav(readyCandidates: SiteCandidateRecord[], candidateId: string) {
+function buildQueueNav(readyCandidates: SiteCandidateSummary[], candidateId: string) {
   const ordered = [...readyCandidates].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   const index = ordered.findIndex((candidate) => candidate.id === candidateId);
   if (index === -1) return null;
@@ -318,10 +350,8 @@ function statusLabel(status: SiteCandidateRecord["status"]) {
 }
 
 function versionPageCount(version: SiteVersion | undefined) {
-  if (!version) return 0;
-  if (version.rendererVersion === "layout-v3") return version.pageComposition.pages.length;
-  if (version.rendererVersion === "layout-v2") return version.compiledPages.length;
-  return version.pages.length;
+  if (!version || siteVersionV3Issue(version)) return 0;
+  return assertSiteVersionV3(version, "candidate version").pageComposition.pages.length;
 }
 
 function formatDate(input: string) {

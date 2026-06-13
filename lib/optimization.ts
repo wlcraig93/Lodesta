@@ -1,5 +1,8 @@
-import type { BusinessProfile, OptimizationFinding, PageModel, SectionModel, SiteBundle, SiteVersion } from "./models";
-import { applyPropsToLayoutSection, layoutSectionFromSection, propsForLayoutSection, syncVersionLegacySections } from "./layout-registry";
+import type { BusinessProfile, OptimizationFinding, SiteBundle } from "./models";
+import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { markVersionOwnerTouched } from "./site-version-metadata";
+import { assertSiteVersionV3, findPageByIdV3, type PageV3 } from "./site-version-v3";
+import type { GeneratedCopyDeckV2 } from "./models";
 
 type SuggestedEditPayload =
   | {
@@ -54,7 +57,7 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
   const payload = parseSuggestedEditPayload(finding.suggestedEditPayload);
   if (!payload) return { ok: false as const, reason: "Finding does not include a one-click edit payload." };
 
-  const draft = clonePublishedAsDraft(bundle);
+  const draft = assertSiteVersionV3(clonePublishedAsDraft(bundle), "optimization draft");
   let changeSummary: OptimizationChangeSummary;
   switch (payload.action) {
     case "update_page_metadata": {
@@ -72,145 +75,44 @@ export function applySuggestedEdit(bundle: SiteBundle, finding: OptimizationFind
       page.seo.description = payload.description;
       break;
     }
-    case "set_hero_cta": {
-      const page = getPage(draft, payload.pageId);
-      if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const section = page.layoutSections.find((candidate) => candidate.id === payload.sectionId && candidate.kind === "hero");
-      if (!section) return { ok: false as const, reason: "Target hero section was not found." };
-      const previousCta = propsForLayoutSection(section).primaryCta as { label?: string; href?: string } | undefined;
-      changeSummary = {
-        action: payload.action,
-        pageId: page.id,
-        pageTitle: page.title,
-        sectionId: section.id,
-        summary: `Updated the hero primary CTA on ${page.title}.`,
-        before: formatCta(previousCta),
-        after: formatCta(payload.cta)
-      };
-      applyPropsToLayoutSection(section, { primaryCta: payload.cta });
-      break;
-    }
-    case "add_contact_section": {
-      const page = getPage(draft, payload.pageId);
-      if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const existing = page.layoutSections.find((section) => section.kind === "contact");
-      if (existing) {
-        changeSummary = {
-          action: payload.action,
-          pageId: page.id,
-          pageTitle: page.title,
-          sectionId: existing.id,
-          summary: `${page.title} already has a contact section; no duplicate section was added.`
-        };
-        break;
-      }
-      const section = makeContactSection(bundle.businessProfile, payload);
-      page.layoutSections.push(layoutSectionFromSection(section, bundle.businessProfile.vertical));
-      changeSummary = {
-        action: payload.action,
-        pageId: page.id,
-        pageTitle: page.title,
-        sectionId: section.id,
-        summary: `Added a contact section to ${page.title}.`,
-        after: payload.heading
-      };
-      break;
-    }
-    case "add_cta_section": {
-      const page = getPage(draft, payload.pageId);
-      if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.layoutSections.some((section) => section.id === "cta_analytics_generated")) {
-        changeSummary = {
-          action: payload.action,
-          pageId: page.id,
-          pageTitle: page.title,
-          sectionId: "cta_analytics_generated",
-          summary: `${page.title} already has the recommended CTA section; no duplicate section was added.`
-        };
-        break;
-      }
-      const section = makeCtaSection(payload);
-      const insertAfterIndex = payload.insertAfterSectionId
-        ? page.layoutSections.findIndex((candidate) => candidate.id === payload.insertAfterSectionId)
-        : -1;
-      page.layoutSections.splice(insertAfterIndex >= 0 ? insertAfterIndex + 1 : page.layoutSections.length, 0, layoutSectionFromSection(section, bundle.businessProfile.vertical));
-      changeSummary = {
-        action: payload.action,
-        pageId: page.id,
-        pageTitle: page.title,
-        sectionId: section.id,
-        summary: `Added a recommended CTA section to ${page.title}.`,
-        after: `${payload.heading} ${formatCta(payload.primaryCta)}`
-      };
-      break;
-    }
-    case "add_trust_section": {
-      const page = getPage(draft, payload.pageId);
-      if (!page) return { ok: false as const, reason: "Target page was not found." };
-      if (page.layoutSections.some((section) => section.id === "trust_generated")) {
-        changeSummary = {
-          action: payload.action,
-          pageId: page.id,
-          pageTitle: page.title,
-          sectionId: "trust_generated",
-          summary: `${page.title} already has the generated trust section; no duplicate section was added.`
-        };
-        break;
-      }
-      const section: SectionModel = {
-        id: "trust_generated",
-        type: "trust_bar",
-        variant: "generated_proof",
-        bindings: {},
-        props: { items: payload.items },
-        fieldPolicies: {
-          items: { editScope: "system_only", experimentEligible: false, factField: true }
-        }
-      };
-      page.layoutSections.splice(Math.min(1, page.layoutSections.length), 0, layoutSectionFromSection(section, bundle.businessProfile.vertical));
-      changeSummary = {
-        action: payload.action,
-        pageId: page.id,
-        pageTitle: page.title,
-        sectionId: section.id,
-        summary: `Added a trust section to ${page.title}.`,
-        after: payload.items.join(", ")
-      };
-      break;
-    }
     case "add_faq_section": {
       const page = getPage(draft, payload.pageId);
       if (!page) return { ok: false as const, reason: "Target page was not found." };
-      const existing = page.layoutSections.find((section) => section.kind === "faq");
-      if (existing) {
-        changeSummary = {
-          action: payload.action,
-          pageId: page.id,
-          pageTitle: page.title,
-          sectionId: existing.id,
-          summary: `${page.title} already has an FAQ section; no duplicate section was added.`
-        };
-        break;
-      }
-      const section = makeFaqSection(payload);
-      page.layoutSections.push(layoutSectionFromSection(section, bundle.businessProfile.vertical));
+      if (!payload.items.length) return { ok: false as const, reason: "FAQ edit did not include any questions." };
+      const deck = ensureGeneratedCopyDeck(bundle);
+      deck.faqs = payload.items.map((item) => ({
+        question: item.question.trim(),
+        answer: item.answer.trim()
+      })).filter((item) => item.question && item.answer);
+      if (!deck.faqs.length) return { ok: false as const, reason: "FAQ edit did not include usable questions." };
+      applyGeneratedSiteV3({ bundle });
+      const updatedDraft = assertSiteVersionV3(
+        bundle.siteModel.versions.find((version) => version.status === "draft"),
+        "optimization FAQ draft"
+      );
       changeSummary = {
         action: payload.action,
         pageId: page.id,
         pageTitle: page.title,
-        sectionId: section.id,
-        summary: `Added an FAQ section to ${page.title}.`,
-        after: `${payload.items.length} question${payload.items.length === 1 ? "" : "s"}`
+        sectionId: "faq",
+        summary: `Added ${deck.faqs.length} FAQ questions to ${page.title}.`
       };
-      break;
+      markVersionOwnerTouched(updatedDraft);
+      finding.status = "applied";
+      return { ok: true as const, draft: updatedDraft, finding, changeSummary };
     }
+    case "set_hero_cta":
+    case "add_contact_section":
+    case "add_cta_section":
+    case "add_trust_section":
+      return { ok: false as const, reason: `One-click action ${payload.action} needs a v3 compiler-backed mapping before it can be applied.` };
     default: {
       const exhaustive: never = payload;
       return { ok: false as const, reason: `Unsupported edit payload: ${JSON.stringify(exhaustive)}` };
     }
   }
 
-  syncVersionLegacySections(draft);
+  markVersionOwnerTouched(draft);
   finding.status = "applied";
   return { ok: true as const, draft, finding, changeSummary };
 }
@@ -228,46 +130,6 @@ export function preserveFindingLifecycle(
     const status = lifecycleById.get(finding.id);
     return status ? { ...finding, status } : finding;
   });
-}
-
-function makeCtaSection(payload: Extract<SuggestedEditPayload, { action: "add_cta_section" }>): SectionModel {
-  return {
-    id: "cta_analytics_generated",
-    type: "cta",
-    variant: "analytics_recommendation",
-    bindings: {},
-    props: {
-      eyebrow: "Recommended next step",
-      heading: payload.heading,
-      body: payload.body ?? "This action was recommended from recent behavior patterns.",
-      primaryCta: payload.primaryCta
-    },
-    fieldPolicies: {
-      heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-      body: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-      primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false },
-      layout: { editScope: "system_only", experimentEligible: true, factField: false }
-    }
-  };
-}
-
-function makeFaqSection(payload: Extract<SuggestedEditPayload, { action: "add_faq_section" }>): SectionModel {
-  return {
-    id: "faq_generated",
-    type: "faq",
-    variant: "conversion_faq",
-    bindings: {},
-    props: {
-      eyebrow: "Questions",
-      heading: "Common questions before you reach out",
-      items: payload.items
-    },
-    fieldPolicies: {
-      eyebrow: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-      heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-      items: { editScope: "owner_freetext", experimentEligible: false, factField: true }
-    }
-  };
 }
 
 export function clonePublishedAsDraft(bundle: SiteBundle) {
@@ -289,7 +151,7 @@ export function primaryCtaForBusiness(business: BusinessProfile) {
   return { label: "Request Information", href: "#contact", role: "form" };
 }
 
-export function strongerMetadataForPage(business: BusinessProfile, page: PageModel) {
+export function strongerMetadataForPage(business: BusinessProfile, page: PageV3) {
   const location = business.address?.city || business.serviceAreas[0] || "nearby customers";
   const service = business.services[0] || business.categories[0] || "Local Service";
   const titleBase = page.slug ? `${page.title} | ${business.name}` : `${business.name} | ${service} in ${location}`;
@@ -306,37 +168,44 @@ function parseSuggestedEditPayload(payload: Record<string, unknown> | undefined)
   return payload as SuggestedEditPayload;
 }
 
-function formatCta(cta: { label?: string; href?: string } | undefined) {
-  if (!cta?.label && !cta?.href) return "No primary CTA";
-  return `${cta.label ?? "CTA"} -> ${cta.href ?? "no href"}`;
+function getPage(version: ReturnType<typeof assertSiteVersionV3>, pageId: string) {
+  return findPageByIdV3(version, pageId);
 }
 
-function getPage(version: SiteVersion, pageId: string) {
-  return version.pages.find((page) => page.id === pageId);
-}
-
-function makeContactSection(
-  business: BusinessProfile,
-  payload: Extract<SuggestedEditPayload, { action: "add_contact_section" }>
-): SectionModel {
-  return {
-    id: "contact_generated",
-    type: "contact",
-    variant: "split",
-    bindings: {
-      phone: "business.phone",
-      address: "business.address",
-      hours: "business.hours"
+function ensureGeneratedCopyDeck(bundle: SiteBundle): GeneratedCopyDeckV2 {
+  if (bundle.presenceAssessment.generatedCopyDeck) return bundle.presenceAssessment.generatedCopyDeck;
+  const business = bundle.businessProfile;
+  const services = business.services.length ? business.services : [business.categories[0] ?? "Local service"];
+  const description = business.description ?? `${business.name} provides local service with clear contact options.`;
+  const deck: GeneratedCopyDeckV2 = {
+    version: "generated-copy-deck-v2",
+    source: "openai",
+    hero: {
+      eyebrow: business.categories[0] ?? business.vertical,
+      heading: `${business.name} in ${business.address?.city ?? business.serviceAreas[0] ?? "your area"}`,
+      body: description
     },
-    props: {
-      heading: payload.heading,
-      formId: payload.formId ?? "form_contact",
-      primaryCta: payload.primaryCta ?? primaryCtaForBusiness(business)
-    },
-    fieldPolicies: {
-      heading: { editScope: "owner_freetext", experimentEligible: false, factField: false },
-      formId: { editScope: "owner_choice", experimentEligible: false, factField: false },
-      primaryCta: { editScope: "owner_choice", experimentEligible: true, factField: false }
-    }
+    servicesIntro: { heading: "Services", body: `Core services include ${services.slice(0, 3).join(", ")}.` },
+    serviceItems: services.slice(0, 4).map((service) => ({ title: service, body: `${business.name} can help with ${service}.` })),
+    processIntro: { heading: "How it works", body: "Reach out with the details and the team will confirm the next step." },
+    processSteps: [
+      { title: "Share details", body: "Send the service, timing, and location." },
+      { title: "Confirm fit", body: "The business confirms availability and next steps." },
+      { title: "Get help", body: "Use the agreed service path." }
+    ],
+    faqs: [
+      { question: "How do I get started?", answer: "Use the primary contact option and include the service you need." },
+      { question: "Where do you serve?", answer: business.serviceAreas.join(", ") || "Contact the business to confirm service area." },
+      { question: "Can I verify details first?", answer: "Yes. Confirm service, location, and timing before starting." },
+      { question: "What should I include?", answer: "Include the service, timeline, and best way to reach you." }
+    ],
+    contactIntro: { heading: `Contact ${business.name}`, body: "Use the contact options to ask a question or request service." },
+    splitMedia: { heading: business.name, body: description },
+    gallery: { heading: "Gallery", body: "A visual overview of the business context." },
+    seo: { title: `${business.name} | ${services[0] ?? "Local service"}`, description: description.slice(0, 165) },
+    groundingNotes: ["Deterministic v3 optimization fallback copy."],
+    voiceProfile: { pov: "brand_direct" }
   };
+  bundle.presenceAssessment.generatedCopyDeck = deck;
+  return deck;
 }

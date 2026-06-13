@@ -5,6 +5,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { getEditingVersion } from "@/lib/sample-data";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
+import { assertSiteVersionV3, pageCountForVersionV3 } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -78,7 +79,7 @@ export default async function AdminSitesPage() {
                     ) : (
                       <span className="muted">No source URL</span>
                     )}
-                    <small>{bundle.siteModel.versions[0]?.pages.length ?? 0} generated pages</small>
+                    <small>{bundle.siteModel.versions[0] ? pageCountForVersionV3(assertSiteVersionV3(bundle.siteModel.versions[0], "admin sites version")) : 0} generated pages</small>
                   </td>
                   <td>
                     <span className={`badge ${run ? `status-${run.status}` : ""}`}>{lastActivity.label}</span>

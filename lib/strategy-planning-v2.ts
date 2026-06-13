@@ -95,6 +95,23 @@ function conversionPathFor(bundle: SiteBundle, version: SiteVersion | undefined)
 }
 
 function informationArchitectureFor(version: SiteVersion | undefined): InformationArchitectureReportV2 {
+  if (version?.rendererVersion === "layout-v3") {
+    const pages = version.pageComposition.pages.map((page) => ({
+      id: page.id,
+      slug: page.slug,
+      title: page.title,
+      sections: page.sections.map((section) => ({
+        id: section.id,
+        family: section.family,
+        role: section.family.startsWith("hero.") ? "primary" : section.family.startsWith("contact.") ? "contact" : section.family.startsWith("cta.") ? "conversion" : "supporting"
+      }))
+    }));
+    return {
+      pages,
+      layoutDiversity: Array.from(new Set(pages.flatMap((page) => page.sections.map((section) => section.family.split(".")[0] ?? section.family)))),
+      notes: ["V3 pageComposition pages are canonical for public rendering."]
+    };
+  }
   if (version?.rendererVersion === "layout-v2") {
     const pages = version.compiledPages.map((page) => ({
       id: page.id,
@@ -112,16 +129,10 @@ function informationArchitectureFor(version: SiteVersion | undefined): Informati
       notes: ["Compiled V2 pages are canonical for public rendering."]
     };
   }
-  const pages = version?.pages.map((page) => ({
-    id: page.id,
-    slug: page.slug,
-    title: page.title,
-    sections: page.layoutSections.map((section) => ({ id: section.id, family: section.preset, role: section.kind }))
-  })) ?? [];
   return {
-    pages,
-    layoutDiversity: Array.from(new Set(pages.flatMap((page) => page.sections.map((section) => section.role)))),
-    notes: ["Legacy pages are projected through layout sections."]
+    pages: [],
+    layoutDiversity: [],
+    notes: version ? [`Unsupported renderer ${version.rendererVersion}; strategy audits require layout-v3.`] : ["No site version is available."]
   };
 }
 
@@ -173,6 +184,13 @@ function goalForVertical(vertical: Vertical): ConversionGoal {
 
 function primaryActionsForVersion(bundle: SiteBundle, version: SiteVersion | undefined) {
   const actions: Array<{ label: string; href: string; source: string }> = [];
+  if (version?.rendererVersion === "layout-v3") {
+    for (const page of version.pageComposition.pages) {
+      for (const section of page.sections) {
+        for (const cta of ctasInValue(section.props)) actions.push({ ...cta, source: section.id });
+      }
+    }
+  }
   if (version?.rendererVersion === "layout-v2") {
     for (const page of version.compiledPages) {
       for (const section of page.sections) {

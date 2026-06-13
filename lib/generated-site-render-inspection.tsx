@@ -42,6 +42,11 @@ export async function renderGeneratedSiteHtml(bundle: SiteBundle, version: SiteV
       experiments={bundle.experiments}
       tracking={false}
       formsEnabled={false}
+      // Render parity with the surfaces QA gates: admin candidate previews and
+      // the owner editor both show reference_only scraped branding, so QA must
+      // screenshot the same render. Without this, a broken scraped logo is
+      // invisible to every screenshot QA takes.
+      referenceBrandingEnabled
     />
   );
   await stream.allReady;

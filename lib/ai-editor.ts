@@ -1,24 +1,12 @@
-import type {
-  BusinessProfile,
-  FieldPolicy,
-  LayoutSection,
-  OptimizationFinding,
-  SectionModel,
-  SiteBundle,
-  SiteVersion
-} from "./models";
+import type { GeneratedCopyDeckV2, OptimizationFinding, SiteBundle, SiteVersionV3 } from "./models";
 import {
   guardrailIssueMessages,
   validateAiEditOutcome,
   type EditorGuardrailIssue
 } from "./editor-guardrails";
-import { themeForPreset, type ThemePresetId } from "./theme-presets";
-import {
-  applyPropsToLayoutSection,
-  layoutSectionFromSection,
-  sectionFromLayoutSection,
-  syncVersionLegacySections
-} from "./layout-registry";
+import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { markVersionOwnerTouched } from "./site-version-metadata";
+import { assertSiteVersionV3 } from "./site-version-v3";
 
 export type AiEditOperation = {
   type:
@@ -61,11 +49,11 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
   }
 
   const beforeBundle = structuredClone(bundle);
-  const lower = message.toLowerCase();
   const draft = clonePublishedAsDraft(bundle);
-  const home = draft.pages.find((page) => page.slug === "") ?? draft.pages[0];
+  const lower = message.toLowerCase();
   const operations: AiEditOperation[] = [];
   const warnings: string[] = [];
+  let needsRecompile = false;
 
   const addedServices = extractRequestedServices(message);
   if (addedServices.length) {
@@ -78,7 +66,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
         verified: false,
         observedAt: new Date().toISOString()
       };
-      updateServiceSections(draft, bundle.businessProfile);
+      needsRecompile = true;
       operations.push({
         type: "add_service",
         label: `Added ${newServices.join(", ")} to the structured service list.`,
@@ -87,85 +75,49 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     }
   }
 
-  if (mentionsTheme(lower)) {
-    const appliedTheme = themePresetFromIntent(lower);
-    draft.theme = themeForPreset(
-      bundle.businessProfile.vertical,
-      appliedTheme,
-      draft.theme ?? bundle.siteModel.theme
-    );
-    draft.designPlan = {
-      ...draft.designPlan,
-      colorSystem: appliedTheme,
-      stylePack: stylePackFromThemePreset(appliedTheme)
-    };
+  if (mentionsHero(lower)) {
+    const deck = ensureGeneratedCopyDeck(bundle);
+    deck.hero = directHeroCopyForBundle(bundle);
+    needsRecompile = true;
     operations.push({
-      type: "apply_theme",
-      label: `Applied ${appliedTheme} theme direction.`,
-      details: { theme: appliedTheme }
+      type: "rewrite_hero",
+      label: "Rewrote the hero copy from the v3 source copy deck.",
+      pageId: "home",
+      sectionId: "hero"
     });
   }
 
   if (mentionsCta(lower)) {
-    const cta = ctaFromIntent(bundle.businessProfile, lower);
-    for (const page of draft.pages) {
-      for (const section of page.layoutSections) {
-        const projected = sectionFromLayoutSection(section);
-        for (const key of ["primaryCta", "secondaryCta"]) {
-          if (projected.props[key]) setEditableLayoutProp(section, key, cta);
-        }
-      }
-    }
-    operations.push({
-      type: "update_cta",
-      label: `Updated editable CTA slots to ${cta.label}.`,
-      details: { label: cta.label, href: cta.href }
-    });
-  }
-
-  if (mentionsHero(lower) || operations.length === 0) {
-    const hero = home?.layoutSections.find((section) => section.kind === "hero");
-    if (hero) {
-      const heroCopy = heroCopyForIntent(bundle.businessProfile, lower);
-      setEditableLayoutProp(hero, "heading", heroCopy.heading);
-      setEditableLayoutProp(hero, "body", heroCopy.body);
+    const cta = callCtaForBundle(bundle);
+    if (cta) {
+      bundle.presenceAssessment.v3CompilerOverrides = {
+        ...bundle.presenceAssessment.v3CompilerOverrides,
+        heroPrimaryCta: cta
+      };
+      needsRecompile = true;
       operations.push({
-        type: "rewrite_hero",
-        label: "Rewrote the home hero copy as a draft.",
-        pageId: home.id,
-        sectionId: hero.id
+        type: "update_cta",
+        label: "Set the hero primary CTA to call.",
+        pageId: "home",
+        sectionId: "hero",
+        details: { href: cta.href }
       });
+    } else {
+      warnings.push("CTA edits need a verified phone number before a call CTA can be applied.");
     }
   }
 
-  for (const sectionType of requestedSectionTypes(lower)) {
-    if (!home) continue;
-    if (home.sections.some((section) => section.type === sectionType)) {
-      warnings.push(`${sectionLabel(sectionType)} already exists on the home page, so I left the existing section in place.`);
-      continue;
-    }
-    const section = makeRequestedSection(sectionType, bundle.businessProfile);
-    insertBeforeContact(home.layoutSections, layoutSectionFromSection(section, bundle.businessProfile.vertical));
-    operations.push({
-      type: "add_section",
-      label: `Added ${sectionLabel(sectionType)} to the home page draft.`,
-      pageId: home.id,
-      sectionId: section.id
-    });
+  if (needsRecompile) {
+    applyGeneratedSiteV3({ bundle });
+    const updatedDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
+    if (updatedDraft) markVersionOwnerTouched(assertSiteVersionV3(updatedDraft, "AI editor updated draft"));
   }
 
-  if (mentionsAudit(lower)) {
-    operations.push({
-      type: "run_audit",
-      label: "Requested a fresh audit after the draft change."
-    });
-  }
+  if (mentionsTheme(lower)) warnings.push("Theme edits need a v3 compiler-backed design override before they can be applied.");
+  if (mentionsSection(lower)) warnings.push("Section insertion/removal needs a v3 compiler-backed composition override before it can be applied.");
+  if (mentionsAudit(lower)) operations.push({ type: "run_audit", label: "Requested a fresh audit after the draft change." });
+  if (operations.length === 0) operations.push({ type: "no_op", label: "No supported v3 structured edit was detected." });
 
-  if (operations.length === 0) {
-    operations.push({ type: "no_op", label: "No supported structured edit was detected." });
-  }
-
-  syncVersionLegacySections(draft);
   const guardrails = validateAiEditOutcome(beforeBundle, bundle);
   if (!guardrails.ok) {
     Object.assign(bundle, structuredClone(beforeBundle));
@@ -184,7 +136,7 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
     ok: true,
     message: responseMessage(operations, warnings),
     mutated: operations.some((operation) => operation.type !== "run_audit" && operation.type !== "no_op"),
-    draftVersionId: draft.id,
+    draftVersionId: bundle.siteModel.versions.find((version) => version.status === "draft")?.id ?? draft.id,
     operations,
     warnings,
     guardrailWarnings: guardrails.warnings,
@@ -192,14 +144,15 @@ export function applyAiEditToBundle(bundle: SiteBundle, userMessage: string): Ai
   };
 }
 
-function clonePublishedAsDraft(bundle: SiteBundle): SiteVersion {
+function clonePublishedAsDraft(bundle: SiteBundle): SiteVersionV3 {
   const existingDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
   if (existingDraft) {
-    existingDraft.theme ??= structuredClone(bundle.siteModel.theme);
-    return existingDraft;
+    const draft = assertSiteVersionV3(existingDraft, "AI editor draft");
+    draft.theme ??= structuredClone(bundle.siteModel.theme);
+    return draft;
   }
   const published = bundle.siteModel.versions.find((version) => version.status === "published") ?? bundle.siteModel.versions[0];
-  const draft = structuredClone(published);
+  const draft = structuredClone(assertSiteVersionV3(published, "AI editor published version"));
   draft.id = `version_${bundle.siteModel.slug}_draft_${Date.now()}`;
   draft.status = "draft";
   draft.createdAt = new Date().toISOString();
@@ -208,12 +161,76 @@ function clonePublishedAsDraft(bundle: SiteBundle): SiteVersion {
   return draft;
 }
 
-function setEditableLayoutProp(section: LayoutSection, key: string, value: unknown) {
-  const projected = sectionFromLayoutSection(section);
-  const fieldPolicy = projected.fieldPolicies[key];
-  if (!fieldPolicy || (fieldPolicy.editScope !== "owner_choice" && fieldPolicy.editScope !== "owner_freetext")) return false;
-  applyPropsToLayoutSection(section, { [key]: value });
-  return true;
+function ensureGeneratedCopyDeck(bundle: SiteBundle): GeneratedCopyDeckV2 {
+  if (bundle.presenceAssessment.generatedCopyDeck) return bundle.presenceAssessment.generatedCopyDeck;
+  const business = bundle.businessProfile;
+  const services = business.services.length ? business.services : [business.categories[0] ?? "Local service"];
+  const description = business.description ?? `${business.name} provides local service with clear contact options.`;
+  const location = business.address?.city ?? business.serviceAreas.find((area) => !/^local area$/i.test(area)) ?? "your area";
+  const deck: GeneratedCopyDeckV2 = {
+    version: "generated-copy-deck-v2",
+    source: "openai",
+    hero: directHeroCopyForBundle(bundle),
+    servicesIntro: { heading: "Services", body: `Core services include ${services.slice(0, 3).join(", ")}.` },
+    serviceItems: services.slice(0, 4).map((service) => ({ title: service, body: `${business.name} can help with ${service}.` })),
+    processIntro: { heading: "How it works", body: "Reach out with the details and the team will confirm the next step." },
+    processSteps: [
+      { title: "Share details", body: "Send the service, timing, and location." },
+      { title: "Confirm fit", body: "The business confirms availability and next steps." },
+      { title: "Get help", body: "Use the agreed service path." }
+    ],
+    faqs: [
+      { question: "How do I get started?", answer: "Use the primary contact option and include the service you need." },
+      { question: "Where do you serve?", answer: business.serviceAreas.join(", ") || "Contact the business to confirm service area." },
+      { question: "Can I verify details first?", answer: "Yes. Confirm service, location, and timing before starting." },
+      { question: "What should I include?", answer: "Include the service, timeline, and best way to reach you." }
+    ],
+    contactIntro: { heading: `Contact ${business.name}`, body: "Use the contact options to ask a question or request service." },
+    splitMedia: { heading: business.name, body: description },
+    gallery: { heading: "Gallery", body: "A visual overview of the business context." },
+    seo: {
+      title: `${business.name} | ${services[0] ?? "Local service"} in ${location}`.slice(0, 70),
+      description: `${business.name} helps customers in ${location} with ${services.slice(0, 3).join(", ")}. Clear contact options and local details are built into the page.`.slice(0, 165)
+    },
+    groundingNotes: ["Deterministic v3 AI editor fallback copy."],
+    voiceProfile: { pov: "brand_direct" }
+  };
+  bundle.presenceAssessment.generatedCopyDeck = deck;
+  return deck;
+}
+
+function directHeroCopyForBundle(bundle: SiteBundle): GeneratedCopyDeckV2["hero"] {
+  const business = bundle.businessProfile;
+  const service = business.services[0] ?? business.categories[0] ?? "local service";
+  const location = business.address?.city ?? business.serviceAreas.find((area) => !/^local area$/i.test(area)) ?? "your area";
+  return {
+    eyebrow: business.categories[0] ?? business.vertical,
+    heading: `${business.name} for ${service} in ${location}.`,
+    body: business.phone
+      ? `Call ${business.name} for a clear answer on ${service.toLowerCase()}, timing, and next steps.`
+      : `${business.name} helps with ${service.toLowerCase()} using a clear contact path.`
+  };
+}
+
+function callCtaForBundle(bundle: SiteBundle) {
+  const phone = bundle.businessProfile.phone?.trim();
+  if (!phone) return undefined;
+  return { label: "Call now", href: `tel:${phone.replace(/[^\d+]/g, "")}`, style: "primary" as const };
+}
+
+function extractRequestedServices(message: string) {
+  const match =
+    message.match(/\badd (?:a |an )?service(?: called| named| for|:)?\s+([^.;]+)/i) ??
+    message.match(/\binclude (?:a |an )?service(?: called| named| for|:)?\s+([^.;]+)/i);
+  if (!match?.[1]) return [];
+  return match[1]
+    .split(/,| and /)
+    .map((service) => cleanService(service))
+    .filter((service): service is string => Boolean(service));
+}
+
+function cleanService(value: string) {
+  return value.replace(/\b(on|to|for) (the )?(site|website|page)$/i, "").trim();
 }
 
 function mentionsHero(message: string) {
@@ -232,272 +249,22 @@ function mentionsAudit(message: string) {
   return /\b(audit|check|score|qa|review)\b/.test(message);
 }
 
-function requestedSectionTypes(message: string): SectionModel["type"][] {
-  const requests: SectionModel["type"][] = [];
-  if (/\bfaq|questions?\b/.test(message)) requests.push("faq");
-  if (/\bgallery|photos?|portfolio|images?\b/.test(message)) requests.push("gallery");
-  if (/\breviews?|testimonials?|trust proof\b/.test(message)) requests.push("testimonials");
-  if (/\bmap|service area|directions|location\b/.test(message)) requests.push("map");
-  if (/\bteam|staff|attorney|provider|doctor|dentist|coach\b/.test(message)) requests.push("team");
-  if (/\bbefore.?after|before and after|results?|project proof\b/.test(message)) requests.push("before_after");
-  if (/\bpress|video|youtube|social proof|instagram\b/.test(message)) requests.push("press_video");
-  if (/\bfinal cta|closing cta|conversion band\b/.test(message)) requests.push("cta");
-  return Array.from(new Set(requests));
-}
-
-function extractRequestedServices(message: string) {
-  const match =
-    message.match(/\badd (?:a |an )?service(?: called| named| for|:)?\s+([^.;]+)/i) ??
-    message.match(/\binclude (?:a |an )?service(?: called| named| for|:)?\s+([^.;]+)/i);
-  if (!match?.[1]) return [];
-  return match[1]
-    .split(/,| and /)
-    .map((service) => cleanService(service))
-    .filter((service): service is string => Boolean(service));
-}
-
-function cleanService(value: string) {
-  return value.replace(/\b(on|to|for) (the )?(site|website|page)$/i, "").trim();
-}
-
-function updateServiceSections(draft: SiteVersion, business: BusinessProfile) {
-  for (const page of draft.pages) {
-    for (const section of page.layoutSections) {
-      if (section.kind !== "services" && section.kind !== "menu") continue;
-      setEditableLayoutProp(section, "items", business.services.slice(0, 8).map((service) => ({
-        title: service,
-        description: `Owner-approved details for ${service.toLowerCase()} can be expanded here.`
-      })));
-    }
-  }
-}
-
-function themePresetFromIntent(message: string): ThemePresetId {
-  if (/\bpremium|luxury|elegant\b/.test(message)) return "premium";
-  if (/\bbold|high contrast|contrast\b/.test(message)) return "bold";
-  if (/\bblue|clinical\b/.test(message)) return "clinical";
-  return "warm";
-}
-
-function stylePackFromThemePreset(preset: ThemePresetId) {
-  if (preset === "premium") return "premium_editorial";
-  if (preset === "clinical") return "clinical_trust";
-  if (preset === "bold") return "local_modern";
-  return "warm_neighborhood";
-}
-
-function ctaFromIntent(business: BusinessProfile, message: string) {
-  if (/\bquote|estimate\b/.test(message)) {
-    return { label: "Get a Free Estimate", href: "#contact", role: "form" };
-  }
-  if (/\border\b/.test(message) && business.orderingLinks[0]) {
-    return { label: "Order Online", href: business.orderingLinks[0], role: "ordering" };
-  }
-  if (/\bbook|booking|appointment|reserve\b/.test(message) && business.bookingLinks[0]) {
-    return { label: "Book Now", href: business.bookingLinks[0], role: "booking" };
-  }
-  if (/\bcall|phone|urgent|emergency\b/.test(message) && business.phone) {
-    return { label: "Call Now", href: `tel:${business.phone}`, role: "tel" };
-  }
-  if (/\bbook|booking|appointment|reserve\b/.test(message)) {
-    return { label: "Request Appointment", href: "#contact", role: "form" };
-  }
-  if (/\border\b/.test(message)) {
-    return { label: "Order Online", href: "#contact", role: "form" };
-  }
-  return business.phone
-    ? { label: "Call Now", href: `tel:${business.phone}`, role: "tel" }
-    : { label: "Request Information", href: "#contact", role: "form" };
-}
-
-function heroCopyForIntent(business: BusinessProfile, message: string) {
-  const area = business.serviceAreas.find((candidate) => !/^local area$/i.test(candidate)) ?? business.address?.city ?? "your area";
-  const serviceList = business.services.slice(0, 3).join(", ") || business.categories[0] || "local service";
-  if (/\burgent|emergency|fast|call/i.test(message)) {
-    return {
-      heading: `Fast help for ${serviceList.toLowerCase()} in ${area}.`,
-      body: `The page now leads with action, service-area clarity, and contact paths so visitors can call or request help without searching.`
-    };
-  }
-  if (/\bpremium|luxury|elegant|polished/i.test(message)) {
-    return {
-      heading: `${business.name} brings a more polished local experience online.`,
-      body: `The page now emphasizes trust, visual hierarchy, and a cleaner path from interest to inquiry for customers in ${area}.`
-    };
-  }
-  if (/\bfriendly|warm|personal|neighborhood/i.test(message)) {
-    return {
-      heading: `${business.name} makes the next step feel simple.`,
-      body: `The page now feels more approachable while keeping ${serviceList.toLowerCase()} and clear contact options close to the top.`
-    };
-  }
-  return {
-    heading: `${business.name} makes it easier for local customers to act.`,
-    body: `The top of the page now clarifies ${serviceList.toLowerCase()}, local fit, and the easiest contact option for customers in ${area}.`
-  };
-}
-
-function makeRequestedSection(type: SectionModel["type"], business: BusinessProfile): SectionModel {
-  switch (type) {
-    case "faq":
-      return baseSection("faq", "conversion_faq", {
-        eyebrow: "Questions",
-        heading: "Answers before customers contact you",
-        items: [
-          {
-            question: `Do you serve ${business.serviceAreas[0] ?? business.address?.city ?? "this area"}?`,
-            answer: "Yes. Service-area and location details should be verified by the owner before publishing."
-          },
-          {
-            question: "How do customers get started?",
-            answer: "Use the visible call button or contact form and include the timing, location, and service you need."
-          },
-          {
-            question: "Can these answers be customized?",
-            answer: "Yes. The business can confirm the final wording before the site goes live."
-          }
-        ]
-      });
-    case "gallery":
-      return baseSection("gallery", "proof_grid", {
-        eyebrow: "Visual proof",
-        heading: "Show the work customers want to inspect",
-        body: "Use licensed, generated, uploaded, or customer-granted images here.",
-        images: [
-          {
-            url: "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
-            alt: "Business preview image",
-            label: "Preview direction"
-          },
-          {
-            url: "https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1200&q=80",
-            alt: "Customer conversation",
-            label: "Customer experience"
-          },
-          {
-            url: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=1200&q=80",
-            alt: "Local business team",
-            label: "Trust signal"
-          }
-        ]
-      });
-    case "testimonials":
-      return baseSection("testimonials", "review_summary", {
-        eyebrow: "Trust",
-        heading: "Add proof customers can verify",
-        body: "Review excerpts and testimonials can help customers understand the business before they reach out.",
-        items: [
-          { quote: "Add a specific customer comment or review theme here.", author: "Customer review" },
-          { quote: "Use this space for credentials, outcomes, or project examples.", author: "Business highlight" }
-        ]
-      }, true);
-    case "map":
-      return baseSection("map", "service_area", {
-        eyebrow: "Where we help",
-        heading: business.address?.city ? `${business.name} in ${business.address.city}` : "Local service area",
-        body: "Location clarity supports visitors and local SEO.",
-        areas: business.serviceAreas
-      }, true);
-    case "team":
-      return baseSection("team", "credential_cards", {
-        eyebrow: "People",
-        heading: "Show the people behind the business",
-        body: "Names, credentials, and bios can give customers clearer context before they reach out.",
-        items: [
-          { title: "Team profile", description: "Add verified name, role, and credentials." },
-          { title: "Business story", description: "Add the local connection and reason customers choose the team." },
-          { title: "Customer-facing expertise", description: "Add certifications or specialties after verification." }
-        ]
-      }, true);
-    case "before_after":
-      return baseSection("before_after", "proof_cards", {
-        eyebrow: "Before and after",
-        heading: "Show the outcome customers are buying",
-        body: "Use clear photos and project details so customers can understand the work.",
-        items: business.services.slice(0, 3).map((service) => ({
-          title: service,
-          beforeLabel: "Problem",
-          afterLabel: "Resolved",
-          description: `Add a verified ${service.toLowerCase()} example here.`
-        }))
-      }, true);
-    case "press_video":
-      return baseSection("press_video", "link_list", {
-        eyebrow: "Around the web",
-        heading: "Bring outside proof onto the site",
-        body: "Connect press, YouTube, social profiles, and relevant third-party proof.",
-        links: [...business.pressLinks, ...business.socialLinks].slice(0, 4).map((href, index) => ({
-          label: index === 0 ? "Primary profile" : `Proof link ${index + 1}`,
-          href
-        }))
-      }, true);
-    case "cta":
-      return baseSection("cta", "conversion_band", {
-        eyebrow: "Next step",
-        heading: "Ready to take the next step?",
-        body: "Choose the fastest contact option and include the details the team needs to respond.",
-        primaryCta: business.phone
-          ? { label: "Call Now", href: `tel:${business.phone}`, role: "tel" }
-          : { label: "Request Information", href: "#contact", role: "form" }
-      });
-    default:
-      return baseSection("cta", "conversion_band", {
-        heading: "Ready to take the next step?",
-        primaryCta: { label: "Request Information", href: "#contact", role: "form" }
-      });
-  }
-}
-
-function baseSection(
-  type: SectionModel["type"],
-  variant: string,
-  props: Record<string, unknown>,
-  factField = false
-): SectionModel {
-  const id = `${type}_${Date.now()}`;
-  const fieldPolicies: Record<string, FieldPolicy> = Object.fromEntries(
-    Object.keys(props).map((key) => [
-      key,
-      {
-        editScope: key.toLowerCase().includes("cta") ? "owner_choice" : "owner_freetext",
-        experimentEligible: key.toLowerCase().includes("cta"),
-        factField
-      } satisfies FieldPolicy
-    ])
-  );
-  fieldPolicies.layout = { editScope: "system_only", experimentEligible: true, factField: false };
-  return {
-    id,
-    type,
-    variant,
-    props,
-    bindings: {},
-    fieldPolicies
-  };
-}
-
-function insertBeforeContact(sections: LayoutSection[], section: LayoutSection) {
-  const contactIndex = sections.findIndex((candidate) => candidate.kind === "contact");
-  if (contactIndex === -1) {
-    sections.push(section);
-    return;
-  }
-  sections.splice(contactIndex, 0, section);
-}
-
-function responseMessage(operations: AiEditOperation[], warnings: string[]) {
-  const changed = operations.filter((operation) => operation.type !== "run_audit" && operation.type !== "no_op");
-  if (changed.length === 0) {
-    return warnings[0] ?? "I did not find a supported structured edit in that request yet.";
-  }
-  const summary = changed.map((operation) => operation.label).join(" ");
-  return `${summary} I saved this as a draft so QA and publish can stay explicit.`;
-}
-
-function sectionLabel(type: SectionModel["type"]) {
-  return type.replace("_", " ");
+function mentionsSection(message: string) {
+  return /\b(add|remove|insert|hide|show).*\b(section|faq|gallery|testimonials?|reviews?|map|service area|team|press|video|final cta)\b/.test(message);
 }
 
 function sameText(left: string, right: string) {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
+  return normalizeText(left) === normalizeText(right);
+}
+
+function normalizeText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function responseMessage(operations: AiEditOperation[], warnings: string[]) {
+  const applied = operations.filter((operation) => operation.type !== "no_op").map((operation) => operation.label);
+  if (applied.length && warnings.length) return `${applied.join(" ")} ${warnings.join(" ")}`;
+  if (applied.length) return applied.join(" ");
+  if (warnings.length) return warnings.join(" ");
+  return "No supported v3 edit was detected.";
 }

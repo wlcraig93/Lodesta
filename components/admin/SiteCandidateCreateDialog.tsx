@@ -62,7 +62,12 @@ export function SiteCandidateCreateDialog() {
                 <p id={descriptionId}>Queue a source crawl and generated site snapshot for review.</p>
               </div>
             </div>
-            <AdminGenerateForm onJobCreated={() => router.refresh()} />
+            <AdminGenerateForm
+              onJobCreated={() => {
+                setOpen(false);
+                router.refresh();
+              }}
+            />
           </section>
         </div>
       ) : null}

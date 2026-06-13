@@ -1,5 +1,6 @@
 import { crawlUrl } from "./crawler";
-import { createSiteFromInput, type IntakeInput } from "./intake";
+import { createSiteV3FromInput, type IntakeInput } from "./intake";
+import { assertSiteVersionV3 } from "./site-version-v3";
 import { createOpenAiBusinessUnderstanding } from "./business-understanding-v2";
 import { createOpenAiMockupArtifacts, createPromptOnlyMockupArtifacts } from "./image-generation";
 import { createOpenAiGenerationPlanning } from "./openai-generation";
@@ -145,7 +146,7 @@ export async function prepareIntakeInput(
       name: "Build deterministic baseline",
       inputJson: { url: safeUrl, prompt: input.prompt }
     },
-    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, publicPresence, understanding }),
+    async () => createSiteV3FromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, publicPresence, understanding }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
   const aiPlanning = await runSpan(
@@ -181,7 +182,7 @@ export async function prepareIntakeInput(
       name: "Build planned site model",
       inputJson: { planningSource: aiPlanning?.source ?? "deterministic_fallback" }
     },
-    async () => createSiteFromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence, understanding }),
+    async () => createSiteV3FromInput({ ...input, identity: options.identity, url: safeUrl, crawl, renderInspection, aiPlanning, publicPresence, understanding }),
     (bundle) => ({ outputJson: summarizeBundle(bundle) })
   );
   const generationCostEstimate = planGenerationCost({
@@ -340,14 +341,14 @@ function summarizeRenderInspection(result: RenderInspectionResult) {
 }
 
 function summarizeBundle(bundle: SiteBundle) {
-  const version = bundle.siteModel.versions[0];
+  const version = bundle.siteModel.versions[0] ? assertSiteVersionV3(bundle.siteModel.versions[0], "intake pipeline summary version") : undefined;
   return {
     siteId: bundle.businessProfile.siteId,
     slug: bundle.siteModel.slug,
     businessName: bundle.businessProfile.name,
     vertical: bundle.businessProfile.vertical,
-    pages: version?.pages.length ?? 0,
-    layoutSections: version?.pages.reduce((sum, page) => sum + page.layoutSections.length, 0) ?? 0,
+    pages: version?.pageComposition.pages.length ?? 0,
+    sections: version?.pageComposition.pages.reduce((sum, page) => sum + page.sections.length, 0) ?? 0,
     findings: bundle.optimizationFindings.length,
     designDirections: bundle.presenceAssessment.designDirections?.length ?? 0
   };

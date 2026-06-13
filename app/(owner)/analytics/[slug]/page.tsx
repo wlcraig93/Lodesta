@@ -4,6 +4,8 @@ import { getPublishedVersion } from "@/lib/sample-data";
 import { repository } from "@/lib/repository";
 import type { AnalyticsEvent } from "@/lib/models";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
+import { getVisualSectionV3 } from "@/lib/generated-site-v3-visual-controls";
+import { assertSiteVersionV3 } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +21,15 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
     repository.listAnalyticsEvents(siteId),
     repository.listInquiries(siteId)
   ]);
-  const version = getPublishedVersion(bundle.siteModel);
+  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "analytics published version");
   const sectionNames = new Map(
-    version.pages.flatMap((page) =>
-      page.sections.map((section) => [
-        section.id,
-        `${page.slug || "home"} / ${String(section.props.heading ?? section.type)}`
-      ])
+    version.pageComposition.pages.flatMap((page) =>
+      page.sections.map((section) => {
+        const visual = getVisualSectionV3(section.props);
+        const copy = visual?.slots && "copy" in visual.slots ? visual.slots.copy : visual?.slots && "intro" in visual.slots ? visual.slots.intro : undefined;
+        const heading = copy && typeof copy === "object" && "heading" in copy ? String(copy.heading ?? visual?.templateId) : visual?.templateId ?? section.family;
+        return [section.id, `${page.slug || "home"} / ${heading}`] as const;
+      })
     )
   );
 

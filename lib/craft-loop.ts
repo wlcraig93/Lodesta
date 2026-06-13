@@ -118,7 +118,9 @@ const controlKeys: Array<keyof DesignControlsV3> = [
   "headingCase",
   "badgeStyle",
   "factHighlight",
-  "headerSurface"
+  "headerSurface",
+  "ctaBandTone",
+  "numberStyle"
 ];
 
 const controlValueUniverse: Record<keyof DesignControlsV3, string[]> = {
@@ -128,7 +130,9 @@ const controlValueUniverse: Record<keyof DesignControlsV3, string[]> = {
   headingCase: ["standard", "display_upper"],
   badgeStyle: ["square", "rounded", "tilted"],
   factHighlight: ["plain", "accent_value"],
-  headerSurface: ["neutral", "brand_bar"]
+  headerSurface: ["neutral", "brand_bar"],
+  ctaBandTone: ["dark", "brand", "paper"],
+  numberStyle: ["oversized", "outlined", "filled_chip"]
 };
 
 function hashString(value: string): string {

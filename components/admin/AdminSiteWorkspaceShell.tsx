@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AdminButtonLink } from "@/components/admin/AdminButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import type { AgentRunRecord, PreviewToken, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
+import { assertSiteVersionV3, firstPageTitleForVersionV3 } from "@/lib/site-version-v3";
 
 export type AdminSiteWorkspaceView = "overview" | "report" | "site" | "qa" | "versions" | "runs";
 
@@ -82,7 +83,7 @@ export function AdminSiteWorkspaceShell({
                     href={workspaceHref(slug, "site", version.id)}
                   >
                     <span>{version.status}</span>
-                    <strong>{version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Version"}</strong>
+                    <strong>{firstPageTitleForVersionV3(assertSiteVersionV3(version, "workspace version"))}</strong>
                     <small>{formatDate(version.createdAt)}</small>
                   </Link>
                 ))}

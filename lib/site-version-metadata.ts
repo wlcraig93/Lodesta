@@ -6,9 +6,24 @@ import type {
   RenderInspectionArtifactRef,
   RenderInspectionResult,
   RenderInspectionSummary,
+  SeoMetadata,
   SiteBundle,
   SiteVersion
 } from "./models";
+
+export type SiteVersionPageSummary = {
+  id: string;
+  slug: string;
+  title: string;
+  seo: SeoMetadata;
+};
+
+export function sitePagesForVersion(version: SiteVersion): SiteVersionPageSummary[] {
+  if (version.rendererVersion !== "layout-v3") {
+    throw new Error(`Site page summaries require layout-v3; received ${version.rendererVersion}.`);
+  }
+  return version.pageComposition.pages;
+}
 
 export function getEffectiveGenerationQaReadiness(
   bundle: SiteBundle,
@@ -27,25 +42,6 @@ export function computeSiteModelHash(bundle: SiteBundle, version: SiteVersion) {
       rendererVersion: version.rendererVersion,
       designSchemaVersion: version.designSchemaVersion,
       designPlan: version.designPlan,
-      pages: version.pages.map((page) => ({
-        slug: page.slug,
-        title: page.title,
-        seo: page.seo,
-        layoutSections: page.layoutSections.map((section) => ({
-          kind: section.kind,
-          preset: section.preset,
-          slots: section.slots,
-          background: section.background,
-          width: section.width,
-          spacing: section.spacing,
-          mobileBehavior: section.mobileBehavior,
-          visibility: section.visibility,
-          designOverrides: section.designOverrides
-        }))
-      })),
-      // layout-v3 renders from pageComposition, not legacy layoutSections; the
-      // hash must cover what actually renders or repairs/edits go undetected
-      // and stale `ready` statuses survive post-QA mutations.
       ...(version.rendererVersion === "layout-v3"
         ? {
             pageComposition: version.pageComposition,
@@ -93,7 +89,7 @@ export function summarizeRenderInspection(result: RenderInspectionResult): {
       warningFindingCount,
       metricsByViewport: result.metricsByViewport
     },
-    artifactRefs: result.screenshots.map((screenshot) => ({
+    artifactRefs: [...result.screenshots, ...(result.aboveFoldScreenshots ?? [])].map((screenshot) => ({
       viewport: screenshot.viewport,
       width: screenshot.width,
       height: screenshot.height,

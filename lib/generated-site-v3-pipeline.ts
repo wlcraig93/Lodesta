@@ -1,11 +1,7 @@
 import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
 import { approvedAssetLibraryAssetsForVerticals, type ApprovedAssetLibraryAsset } from "./asset-library";
 import { withBusinessBundleFields } from "./business-model";
-import {
-  generatedSiteV3AllowlistHosts,
-  getGeneratedSiteV3Mode,
-  isGeneratedSiteV3Allowed
-} from "./generated-site-v3";
+import { assertVisualSectionsForVersionV3 } from "./site-version-v3";
 import type { SiteBundle } from "./models";
 
 export type GeneratedSiteV3Application = {
@@ -13,21 +9,34 @@ export type GeneratedSiteV3Application = {
   reason: string;
 };
 
-export function maybeApplyGeneratedSiteV3(input: {
+export function applyGeneratedSiteV3(input: {
   bundle: SiteBundle;
-  sourceHost?: string;
-  explicitOperatorRequest?: boolean;
-  fixture?: boolean;
   now?: string;
+  assetLibraryAssets?: ApprovedAssetLibraryAsset[];
 }): GeneratedSiteV3Application {
-  return applyGeneratedSiteV3({ ...input, assetLibraryAssets: [] });
+  const hydratedBundle = withBusinessBundleFields(input.bundle);
+  const result = compileGeneratedSiteV3Site({
+    bundle: hydratedBundle,
+    createdAt: input.now,
+    assetLibraryAssets: input.assetLibraryAssets ?? []
+  });
+  assertVisualSectionsForVersionV3(result.version);
+  const previousDraftIndex = input.bundle.siteModel.versions.findIndex((version) => version.status === "draft");
+  if (previousDraftIndex >= 0) input.bundle.siteModel.versions[previousDraftIndex] = result.version;
+  else input.bundle.siteModel.versions.unshift(result.version);
+
+  input.bundle.siteModel.theme = result.version.theme ?? input.bundle.siteModel.theme;
+  input.bundle.presenceAssessment.brandCueReport = result.brandCueReport;
+  input.bundle.presenceAssessment.technicalNotes.push(`Generated-site V3 compiled for ${input.bundle.businessProfile.vertical}.`);
+  input.bundle.presenceAssessment.generationPlanningSource ??= "deterministic_fallback";
+  return {
+    applied: true,
+    reason: `layout-v3 compiled for ${input.bundle.businessProfile.vertical}.`
+  };
 }
 
-export async function maybeApplyGeneratedSiteV3WithAssetLibrary(input: {
+export async function applyGeneratedSiteV3WithAssetLibrary(input: {
   bundle: SiteBundle;
-  sourceHost?: string;
-  explicitOperatorRequest?: boolean;
-  fixture?: boolean;
   now?: string;
 }): Promise<GeneratedSiteV3Application> {
   const vertical = input.bundle.businessProfile.vertical;
@@ -42,41 +51,4 @@ export async function maybeApplyGeneratedSiteV3WithAssetLibrary(input: {
     }
   }
   return applyGeneratedSiteV3({ ...input, assetLibraryAssets });
-}
-
-function applyGeneratedSiteV3(input: {
-  bundle: SiteBundle;
-  sourceHost?: string;
-  explicitOperatorRequest?: boolean;
-  fixture?: boolean;
-  now?: string;
-  assetLibraryAssets: ApprovedAssetLibraryAsset[];
-}): GeneratedSiteV3Application {
-  const mode = getGeneratedSiteV3Mode();
-  const allowed = isGeneratedSiteV3Allowed({
-    mode,
-    sourceHost: input.sourceHost,
-    explicitOperatorRequest: input.explicitOperatorRequest,
-    fixture: input.fixture,
-    allowlistHosts: generatedSiteV3AllowlistHosts()
-  });
-  if (!allowed) return { applied: false, reason: `layout-v3 disabled for mode ${mode}.` };
-
-  const hydratedBundle = withBusinessBundleFields(input.bundle);
-  const result = compileGeneratedSiteV3Site({
-    bundle: hydratedBundle,
-    createdAt: input.now,
-    assetLibraryAssets: input.assetLibraryAssets
-  });
-  const previousDraftIndex = input.bundle.siteModel.versions.findIndex((version) => version.status === "draft");
-  if (previousDraftIndex >= 0) input.bundle.siteModel.versions[previousDraftIndex] = result.version;
-  else input.bundle.siteModel.versions.unshift(result.version);
-
-  input.bundle.presenceAssessment.brandCueReport = result.brandCueReport;
-  input.bundle.presenceAssessment.technicalNotes.push(`Generated-site V3 applied for ${input.bundle.businessProfile.vertical} via ${mode}.`);
-  input.bundle.presenceAssessment.generationPlanningSource = "deterministic_fallback";
-  return {
-    applied: true,
-    reason: `layout-v3 applied for ${input.bundle.businessProfile.vertical} via ${mode}.`
-  };
 }

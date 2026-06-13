@@ -1,13 +1,13 @@
 import type { AnalyticsSummary, OptimizationFinding, SiteBundle } from "./models";
 import { primaryCtaForBusiness } from "./optimization";
 import { formatWebVitalValue, normalizeWebVitalMetric, webVitalWithinThreshold } from "./web-vitals-standard";
+import { assertSiteVersionV3 } from "./site-version-v3";
 
 export function recommendFromAnalytics(bundle: SiteBundle, summary: AnalyticsSummary): OptimizationFinding[] {
   const findings: OptimizationFinding[] = [];
-  const homePage = bundle.siteModel.versions
-    .find((version) => version.status === "published")
-    ?.pages.find((page) => page.slug === "");
-  const homePageId = homePage?.id ?? "page_home";
+  const published = bundle.siteModel.versions.find((version) => version.status === "published") ?? bundle.siteModel.versions[0];
+  const homePage = published ? assertSiteVersionV3(published, "analytics insight version").pageComposition.pages.find((page) => page.slug === "") : undefined;
+  const homePageId = homePage?.id ?? "home";
   const primaryCta = primaryCtaForBusiness(bundle.businessProfile);
 
   if (summary.sessions < 1) return findings;
@@ -51,7 +51,7 @@ export function recommendFromAnalytics(bundle: SiteBundle, summary: AnalyticsSum
       suggestedEditPayload: {
         action: "set_hero_cta",
         pageId: homePageId,
-        sectionId: homePage?.sections.find((section) => section.type === "hero")?.id ?? "hero_home",
+        sectionId: homePage?.sections[0]?.id ?? "hero",
         cta: {
           ...primaryCta,
           label: "Call Now"

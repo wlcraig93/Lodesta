@@ -1,5 +1,4 @@
 import { factsByKind } from "./business-fact-graph";
-import { propsForLayoutSection } from "./layout-registry";
 import type { BusinessFactGraph, GenerationPlanV2, SiteVersion } from "./models";
 
 export type ClaimVerificationIssue = {
@@ -57,9 +56,14 @@ export function verifyGenerationClaims(input: {
   factGraph: BusinessFactGraph;
 }): ClaimVerificationResult {
   const issues: ClaimVerificationIssue[] = [];
-  for (const page of input.version.pages) {
-    for (const section of page.layoutSections) {
-      for (const text of stringsInValue(propsForLayoutSection(section))) {
+  if (input.version.rendererVersion !== "layout-v3") {
+    throw new Error(`Claim verification requires layout-v3; received ${input.version.rendererVersion}.`);
+  }
+  const sectionTexts = input.version.pageComposition.pages.flatMap((page) =>
+    page.sections.map((section) => ({ pageId: page.id, sectionId: section.id, texts: stringsInValue(section.props) }))
+  );
+  for (const { pageId, sectionId, texts } of sectionTexts) {
+    for (const text of texts) {
         for (const pattern of placeholderPatterns) {
           if (!pattern.test(text)) continue;
           issues.push({
@@ -67,8 +71,8 @@ export function verifyGenerationClaims(input: {
             category: "placeholder",
             text,
             reason: "Generated placeholder or internal review language is visible.",
-            pageId: page.id,
-            sectionId: section.id
+            pageId,
+            sectionId
           });
         }
         for (const sensitive of sensitivePatterns) {
@@ -79,13 +83,12 @@ export function verifyGenerationClaims(input: {
             category: sensitive.category,
             text,
             reason: `The claim requires ${sensitive.requiredEvidence} evidence in the business fact graph.`,
-            pageId: page.id,
-            sectionId: section.id
+            pageId,
+            sectionId
           });
         }
       }
     }
-  }
   return {
     status: issues.length ? "failed" : "passed",
     issues

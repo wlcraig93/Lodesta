@@ -16,14 +16,18 @@ import type {
   OutboundEvent,
   OutboundProspect,
   PreviewToken,
+  ProspectPresenceReportResult,
+  ProspectReportLead,
+  ProspectReportRecord,
   SiteBundle,
   SiteCandidateRecord,
   SiteCandidateStatus,
   SiteVersion,
 } from "./models";
 import { runAudit } from "./audit";
-import { createSiteFromInput } from "./intake";
+import { createSiteV3FromInput } from "./intake";
 import { applySuggestedEdit, preserveFindingLifecycle } from "./optimization";
+import { applyV3SectionUpdate } from "./v3-editor";
 import { sampleSiteBundle } from "./sample-data";
 import { summarizeAnalytics } from "./analytics";
 import { mergeFindings, recommendFromAnalytics } from "./analytics-insights";
@@ -40,9 +44,9 @@ import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-ass
 import { restoreVersionToDraftBundle } from "./site-versions";
 import { sanitizeAnalyticsMetadata } from "./privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "./site-version-metadata";
-import { applyPropsToLayoutSection, sectionFromLayoutSection, syncLegacySectionsFromLayout } from "./layout-registry";
 import { copyCandidateArtifactToSite } from "./site-artifacts";
 import { businessIdForProfile, withBusinessBundleFields } from "./business-model";
+import { assertBundleVersionsV3, assertSiteVersionV3 } from "./site-version-v3";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -75,6 +79,8 @@ type StoreState = {
   outboundCampaigns: OutboundCampaign[];
   outboundProspects: OutboundProspect[];
   outboundEvents: OutboundEvent[];
+  prospectReports: ProspectReportRecord[];
+  prospectReportLeads: ProspectReportLead[];
   experimentLearnings: ExperimentLearning[];
   siteArtifacts: SiteArtifactRecord[];
 };
@@ -86,7 +92,7 @@ const globalStore = globalThis as typeof globalThis & {
 function createInitialState(): StoreState {
   const bundles = new Map<string, SiteBundle>();
   const slugToSiteId = new Map<string, string>();
-  const sampleBundle = withBusinessBundleFields(structuredClone(sampleSiteBundle));
+  const sampleBundle = assertBundleVersionsV3(withBusinessBundleFields(structuredClone(sampleSiteBundle)), "initial sample bundle");
   bundles.set(sampleBundle.businessProfile.siteId, sampleBundle);
   slugToSiteId.set(sampleBundle.siteModel.slug, sampleBundle.businessProfile.siteId);
   return {
@@ -100,6 +106,8 @@ function createInitialState(): StoreState {
     outboundCampaigns: [],
     outboundProspects: [],
     outboundEvents: [],
+    prospectReports: [],
+    prospectReportLeads: [],
     experimentLearnings: [],
     siteArtifacts: [],
     claims: [],
@@ -138,17 +146,20 @@ function state() {
   globalStore.__lodestaStore.outboundCampaigns ??= [];
   globalStore.__lodestaStore.outboundProspects ??= [];
   globalStore.__lodestaStore.outboundEvents ??= [];
+  globalStore.__lodestaStore.prospectReports ??= [];
+  globalStore.__lodestaStore.prospectReportLeads ??= [];
   globalStore.__lodestaStore.experimentLearnings ??= [];
   globalStore.__lodestaStore.siteArtifacts ??= [];
   return globalStore.__lodestaStore;
 }
 
 export function listSiteBundles() {
-  return Array.from(state().bundles.values());
+  return Array.from(state().bundles.values()).map((bundle) => assertBundleVersionsV3(bundle, "store list bundle"));
 }
 
 export function getSiteBundle(siteId: string) {
-  return state().bundles.get(siteId) ?? null;
+  const bundle = state().bundles.get(siteId) ?? null;
+  return bundle ? assertBundleVersionsV3(bundle, "store get bundle") : null;
 }
 
 export function getSiteBundleBySlug(slug: string) {
@@ -156,11 +167,12 @@ export function getSiteBundleBySlug(slug: string) {
   return siteId ? getSiteBundle(siteId) : null;
 }
 
-export function createAndStoreSite(input: Parameters<typeof createSiteFromInput>[0]) {
-  let bundle = withBusinessBundleFields(createSiteFromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) }));
+export function createAndStoreSite(input: Parameters<typeof createSiteV3FromInput>[0]) {
+  let bundle = withBusinessBundleFields(createSiteV3FromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) }));
   const store = state();
   applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
   bundle = withBusinessBundleFields(bundle, { businessId: bundle.business?.id });
+  assertBundleVersionsV3(bundle, "store create bundle");
   store.bundles.set(bundle.businessProfile.siteId, bundle);
   store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
   return bundle;
@@ -178,7 +190,7 @@ export function createSiteCandidate(input: {
 }) {
   const now = new Date().toISOString();
   const businessId = input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
-  const bundle = withBusinessBundleFields(input.bundle, { businessId, now });
+  const bundle = assertBundleVersionsV3(withBusinessBundleFields(input.bundle, { businessId, now }), "store candidate bundle");
   const sourceUrl = input.sourceUrl ?? bundle.presenceAssessment.sourceUrl;
   const candidate: SiteCandidateRecord = {
     id: input.id ?? `sitecand_${crypto.randomUUID().replace(/-/g, "")}`,
@@ -286,7 +298,18 @@ export function listSiteCandidates(filter: {
 
 export function getSiteCandidate(candidateId: string) {
   const candidate = state().siteCandidates.get(candidateId);
-  return candidate ? structuredClone(candidate) : null;
+  if (!candidate) return null;
+  // Candidate reads stay unchecked so admin repair surfaces can soft-check
+  // stale stored schemas (siteVersionV3Issue) instead of crashing; writes
+  // and render paths keep the strict assert.
+  return structuredClone(candidate);
+}
+
+export function updateSiteCandidateBundle(candidateId: string, bundle: SiteBundle) {
+  const candidate = state().siteCandidates.get(candidateId);
+  if (!candidate) return null;
+  candidate.bundle = structuredClone(assertBundleVersionsV3(bundle, "store update candidate bundle"));
+  return structuredClone(candidate);
 }
 
 export function mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }) {
@@ -314,7 +337,7 @@ export function mergeBusinesses(input: { sourceBusinessId: string; targetBusines
   for (const bundle of store.bundles.values()) {
     if (bundle.business?.id !== sourceBusinessId) continue;
     const locationCount = bundle.locations?.length ?? 0;
-    const nextBundle = withBusinessBundleFields(bundle, { businessId: targetBusinessId, now });
+    const nextBundle = assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: targetBusinessId, now }), "store merge site bundle");
     nextBundle.locations = nextBundle.locations?.map((location) => ({ ...location, businessId: targetBusinessId, updatedAt: now }));
     store.bundles.set(nextBundle.businessProfile.siteId, nextBundle);
     movedSites += 1;
@@ -323,7 +346,7 @@ export function mergeBusinesses(input: { sourceBusinessId: string; targetBusines
   for (const candidate of store.siteCandidates.values()) {
     if (candidate.businessId !== sourceBusinessId && candidate.bundle.business?.id !== sourceBusinessId) continue;
     candidate.businessId = targetBusinessId;
-    candidate.bundle = withBusinessBundleFields(candidate.bundle, { businessId: targetBusinessId, now });
+    candidate.bundle = assertBundleVersionsV3(withBusinessBundleFields(candidate.bundle, { businessId: targetBusinessId, now }), "store merge candidate bundle");
     candidate.bundle.locations = candidate.bundle.locations?.map((location) => ({ ...location, businessId: targetBusinessId, updatedAt: now }));
     candidate.updatedAt = now;
     movedSiteCandidates += 1;
@@ -364,7 +387,7 @@ export function acceptSiteCandidateAsSite(candidateId: string) {
   const acceptedAt = new Date().toISOString();
   let bundle = structuredClone(candidate.bundle);
   applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
-  bundle = withBusinessBundleFields(bundle, { businessId: candidate.businessId, now: acceptedAt });
+  bundle = assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: candidate.businessId, now: acceptedAt }), "store accepted candidate bundle");
   store.bundles.set(bundle.businessProfile.siteId, bundle);
   store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
   copySelectedArtifactsToSite({
@@ -460,11 +483,12 @@ function siteVersionFromCandidate(input: {
 }): SiteVersion | null {
   const candidateBundle = structuredClone(input.candidateBundle);
   applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
+  assertBundleVersionsV3(candidateBundle, "store accepted candidate version bundle");
   const candidateVersion =
     candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
     candidateBundle.siteModel.versions[0];
   if (!candidateVersion) return null;
-  const version = structuredClone(candidateVersion);
+  const version = structuredClone(assertSiteVersionV3(candidateVersion, "accepted candidate version"));
   version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
   version.status = "draft";
   version.createdAt = input.acceptedAt;
@@ -543,6 +567,114 @@ export function listPreviewTokens(siteId?: string) {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+export function createProspectReport(input: {
+  id?: string;
+  placeId: string;
+  sourceUrl?: string;
+  sourceHost?: string;
+  websiteKind: ProspectReportRecord["websiteKind"];
+  jobId?: string;
+}) {
+  const active = findActiveProspectReportByPlaceId(input.placeId);
+  if (active) return active;
+  const now = new Date().toISOString();
+  const report: ProspectReportRecord = {
+    id: input.id ?? `prospect_report_${crypto.randomUUID().replace(/-/g, "")}`,
+    placeId: input.placeId,
+    status: "queued",
+    jobId: input.jobId,
+    sourceUrl: input.sourceUrl,
+    sourceHost: input.sourceHost,
+    websiteKind: input.websiteKind,
+    createdAt: now,
+    updatedAt: now
+  };
+  state().prospectReports.push(report);
+  return structuredClone(report);
+}
+
+export function getProspectReport(reportId: string) {
+  return structuredClone(state().prospectReports.find((report) => report.id === reportId) ?? null);
+}
+
+export function findActiveProspectReportByPlaceId(placeId: string) {
+  return structuredClone(
+    state().prospectReports.find((report) => report.placeId === placeId && (report.status === "queued" || report.status === "running")) ??
+      null
+  );
+}
+
+export function findReusableProspectReportByPlaceId(placeId: string, since: string) {
+  return structuredClone(
+    state()
+      .prospectReports.filter(
+        (report) => report.placeId === placeId && report.status === "completed" && report.completedAt && report.completedAt >= since
+      )
+      .sort((left, right) => right.completedAt!.localeCompare(left.completedAt!))[0] ?? null
+  );
+}
+
+export function updateProspectReport(input: {
+  reportId: string;
+  status?: ProspectReportRecord["status"];
+  jobId?: string;
+  sourceUrl?: string;
+  sourceHost?: string;
+  websiteKind?: ProspectReportRecord["websiteKind"];
+  result?: ProspectPresenceReportResult;
+  unlockedAt?: string;
+  leadId?: string;
+  errorCode?: string;
+  completedAt?: string;
+}) {
+  const reports = state().prospectReports;
+  const index = reports.findIndex((report) => report.id === input.reportId);
+  if (index < 0) return null;
+  const existing = reports[index];
+  const updated: ProspectReportRecord = {
+    ...existing,
+    status: input.status ?? existing.status,
+    jobId: input.jobId ?? existing.jobId,
+    sourceUrl: input.sourceUrl ?? existing.sourceUrl,
+    sourceHost: input.sourceHost ?? existing.sourceHost,
+    websiteKind: input.websiteKind ?? existing.websiteKind,
+    result: input.result ?? existing.result,
+    unlockedAt: input.unlockedAt ?? existing.unlockedAt,
+    leadId: input.leadId ?? existing.leadId,
+    errorCode: input.errorCode ?? existing.errorCode,
+    completedAt: input.completedAt ?? existing.completedAt,
+    updatedAt: new Date().toISOString()
+  };
+  reports[index] = updated;
+  return structuredClone(updated);
+}
+
+export function createProspectReportLead(input: {
+  reportId: string;
+  email: string;
+  contactName?: string;
+  phone?: string;
+  ipHash?: string;
+  metadata?: Record<string, string | number | boolean>;
+}) {
+  const report = state().prospectReports.find((candidate) => candidate.id === input.reportId);
+  if (!report) return null;
+  const now = new Date().toISOString();
+  const lead: ProspectReportLead = {
+    id: `prospect_lead_${crypto.randomUUID().replace(/-/g, "")}`,
+    reportId: input.reportId,
+    email: input.email.toLowerCase(),
+    contactName: input.contactName,
+    phone: input.phone,
+    ipHash: input.ipHash,
+    metadata: input.metadata,
+    createdAt: now
+  };
+  state().prospectReportLeads.push(lead);
+  updateProspectReport({ reportId: input.reportId, unlockedAt: now, leadId: lead.id });
+  return structuredClone(lead);
+}
+
 export function saveSiteVersion(input: { siteId: string; version: SiteBundle["siteModel"]["versions"][number] }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
@@ -580,27 +712,8 @@ export function updateSectionProps(input: {
     };
   }
 
-  const draftVersion =
-    bundle.siteModel.versions.find((version) => version.status === "draft") ??
-    clonePublishedAsDraft(bundle);
-  const page = draftVersion.pages.find((candidate) => candidate.id === input.pageId);
-  const layoutSection = page?.layoutSections.find((candidate) => candidate.id === input.sectionId);
-  if (!layoutSection || !page) return null;
-  const section = sectionFromLayoutSection(layoutSection);
-
-  for (const [key, value] of Object.entries(input.props)) {
-    const policy = section.fieldPolicies[key];
-    if (!policy || (policy.editScope !== "owner_choice" && policy.editScope !== "owner_freetext")) {
-      return {
-        ok: false as const,
-        reason: `Field ${key} is not editable by owner controls.`
-      };
-    }
-  }
-
-  applyPropsToLayoutSection(layoutSection, input.props);
-  syncLegacySectionsFromLayout(page);
-  markVersionOwnerTouched(draftVersion);
+  const applied = applyV3SectionUpdate(bundle, input);
+  if (!applied.ok) return applied;
   bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return {
     ok: true as const,

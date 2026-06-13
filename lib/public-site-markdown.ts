@@ -1,22 +1,23 @@
-import type { ClaimRecord, CompiledSectionV2, PageModel, SectionModel, SiteBundle } from "./models";
+import type { ClaimRecord, SectionInstanceV3, SiteBundle } from "./models";
 import { configuredAppOrigin } from "./app-origin";
 import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { canonicalUrlForPage } from "./public-site-seo";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
-import { sectionFromLayoutSection } from "./layout-registry";
 import { withBusinessBundleFields } from "./business-model";
+import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { assertSiteVersionV3, type PageV3 } from "./site-version-v3";
 
 export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
   if (!isIndexableSite(bundle, claims)) return null;
-  const version = getPublishedVersion(bundle.siteModel);
+  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published llms version");
   const lines = [
     `# ${markdownText(bundle.businessProfile.name)}`,
     "",
     oneLine(bundle.businessProfile.description) || `${bundle.businessProfile.name} is a local business website managed by Lodesta.`,
     "",
     "## Core Pages",
-    ...version.pages.map(
+    ...version.pageComposition.pages.map(
       (page) =>
         `- [${markdownText(page.title)}](${canonicalUrlForPage(bundle, page, headers)}) - [Markdown](${markdownUrlForPage(bundle, page, headers)})`
     ),
@@ -29,9 +30,7 @@ export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: 
   return `${lines.filter((line, index, all) => !(line === "" && all[index - 1] === "")).join("\n")}\n`;
 }
 
-export function markdownForPage(bundle: SiteBundle, page: PageModel, headers: HeaderReader) {
-  const version = getPublishedVersion(bundle.siteModel);
-  const compiledPage = version.rendererVersion === "layout-v2" ? version.compiledPages.find((candidate) => candidate.slug === page.slug) : undefined;
+export function markdownForPage(bundle: SiteBundle, page: PageV3, headers: HeaderReader) {
   const lines = [
     `# ${markdownText(page.title || bundle.businessProfile.name)}`,
     "",
@@ -42,12 +41,12 @@ export function markdownForPage(bundle: SiteBundle, page: PageModel, headers: He
     "## Business",
     ...businessFactLines(bundle),
     "",
-    ...(compiledPage ? compiledPage.sections.flatMap(compiledSectionMarkdown) : page.layoutSections.map(sectionFromLayoutSection).flatMap(sectionMarkdown))
+    ...page.sections.flatMap(v3SectionMarkdown)
   ];
   return `${lines.filter((line): line is string => line !== undefined).join("\n").replace(/\n{3,}/g, "\n\n").trim()}\n`;
 }
 
-export function markdownUrlForPage(bundle: SiteBundle, page: PageModel, headers: HeaderReader) {
+export function markdownUrlForPage(bundle: SiteBundle, page: PageV3, headers: HeaderReader) {
   const suffix = normalizePathSuffix(page.slug);
   if (isCustomDomainRequest(headers)) return `${requestOrigin(headers)}/md${suffix}`;
 
@@ -55,7 +54,7 @@ export function markdownUrlForPage(bundle: SiteBundle, page: PageModel, headers:
   return `${baseUrl}/sites/${bundle.siteModel.slug}/md${suffix}`;
 }
 
-export function markdownCanonicalLinkHeader(bundle: SiteBundle, page: PageModel, headers: HeaderReader) {
+export function markdownCanonicalLinkHeader(bundle: SiteBundle, page: PageV3, headers: HeaderReader) {
   return `<${canonicalUrlForPage(bundle, page, headers)}>; rel="canonical"; type="text/html"`;
 }
 
@@ -74,56 +73,103 @@ function businessFactLines(bundle: SiteBundle) {
   ].filter((line): line is string => Boolean(line));
 }
 
-function sectionMarkdown(section: SectionModel) {
-  const heading = stringProp(section.props.heading) || section.type.replace(/_/g, " ");
-  const body = stringProp(section.props.body);
-  const lines = [`## ${markdownText(heading)}`, body ? markdownText(body) : undefined, ...sectionItems(section)];
+function v3SectionMarkdown(section: SectionInstanceV3) {
+  const visual = getVisualSectionV3(section.props);
+  if (!visual) return [];
+  const slots = visual.slots as Record<string, unknown>;
+  const heading =
+    copyHeading(slots.copy) ||
+    copyHeading(slots.intro) ||
+    actionTitle(slots.action) ||
+    visual.templateId.replace(/_/g, " ");
+  const body = copyBody(slots.copy) || copyBody(slots.intro) || actionBody(slots.action);
+  const lines = [
+    `## ${markdownText(heading)}`,
+    body ? markdownText(body) : undefined,
+    ...slotFacts(slots.facts),
+    ...slotFacts(slots.contact),
+    ...slotItems(slots.items),
+    ...slotLocations(slots.locations),
+    ...slotAction(slots.action),
+    ...slotMedia(slots.media)
+  ];
   return lines.filter((line): line is string => Boolean(line));
 }
 
-function compiledSectionMarkdown(section: CompiledSectionV2) {
-  const heading = stringProp(section.props.heading) || stringProp(section.props.headline) || section.family.replace(/[._]/g, " ");
-  const body = stringProp(section.props.body) || stringProp(section.props.subheadline) || stringProp(section.props.intro);
-  return [`## ${markdownText(heading)}`, body ? markdownText(body) : undefined, ...compiledSectionItems(section)].filter(
-    (line): line is string => Boolean(line)
-  );
+function copyHeading(value: unknown) {
+  return isRecord(value) ? stringProp(value.heading) || stringProp(value.title) : "";
 }
 
-function compiledSectionItems(section: CompiledSectionV2) {
-  const props = section.props as Record<string, unknown>;
-  const items = [
-    ...(Array.isArray(props.services) ? props.services : []),
-    ...(Array.isArray(props.steps) ? props.steps : []),
-    ...(Array.isArray(props.proofItems) ? props.proofItems : [])
-  ];
-  return items.flatMap((item) => {
+function copyBody(value: unknown) {
+  return isRecord(value) ? stringProp(value.body) : "";
+}
+
+function actionTitle(value: unknown) {
+  return isRecord(value) ? stringProp(value.title) : "";
+}
+
+function actionBody(value: unknown) {
+  return isRecord(value) ? stringProp(value.body) : "";
+}
+
+function slotFacts(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.facts ?? value.items)) return [];
+  const facts = (value.facts ?? value.items) as unknown[];
+  return facts.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const label = stringProp(item.label);
+    const factValue = stringProp(item.value);
+    if (!label && !factValue) return [];
+    return [`- ${markdownText(label || factValue)}${label && factValue ? `: ${markdownText(factValue)}` : ""}`];
+  });
+}
+
+function slotItems(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.items)) return [];
+  return value.items.flatMap((item) => {
     if (typeof item === "string") return [`- ${markdownText(item)}`];
     if (!isRecord(item)) return [];
+    const question = stringProp(item.question);
+    const answer = stringProp(item.answer);
+    if (question || answer) return [`### ${markdownText(question || "Question")}`, answer ? markdownText(answer) : ""].filter(Boolean);
+    const quote = stringProp(item.quote);
+    if (quote) {
+      const attribution = stringProp(item.attribution) || stringProp(item.author);
+      return [`- "${markdownText(quote)}"${attribution ? ` - ${markdownText(attribution)}` : ""}`];
+    }
     const title = stringProp(item.title) || stringProp(item.label);
-    const body = stringProp(item.body) || stringProp(item.description);
+    const body = stringProp(item.body) || stringProp(item.description) || stringProp(item.meta);
     if (!title && !body) return [];
     return [`- ${markdownText(title || body)}${title && body ? `: ${markdownText(body)}` : ""}`];
   });
 }
 
-function sectionItems(section: SectionModel) {
-  const items = Array.isArray(section.props.items) ? section.props.items : [];
-  if (section.type === "faq") {
-    return items.flatMap((item) => {
-      if (!isRecord(item)) return [];
-      const question = stringProp(item.question);
-      const answer = stringProp(item.answer);
-      if (!question && !answer) return [];
-      return [`### ${markdownText(question || "Question")}`, answer ? markdownText(answer) : ""];
-    });
-  }
-  return items.flatMap((item) => {
-    if (typeof item === "string") return [`- ${markdownText(item)}`];
+function slotLocations(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.locations)) return [];
+  return value.locations.flatMap((item) => {
     if (!isRecord(item)) return [];
-    const title = stringProp(item.title) || stringProp(item.label) || stringProp(item.author) || stringProp(item.question);
-    const description = stringProp(item.description) || stringProp(item.body) || stringProp(item.quote) || stringProp(item.answer);
-    if (!title && !description) return [];
-    return [`- ${markdownText(title || description || "")}${title && description ? `: ${markdownText(description)}` : ""}`];
+    const label = stringProp(item.label);
+    const address = [stringProp(item.addressLine), stringProp(item.localityLine)].filter(Boolean).join(", ");
+    if (!label && !address) return [];
+    return [`- ${markdownText(label || address)}${label && address ? `: ${markdownText(address)}` : ""}`];
+  });
+}
+
+function slotAction(value: unknown) {
+  if (!isRecord(value)) return [];
+  const cta = value.cta;
+  if (!isRecord(cta)) return [];
+  const label = stringProp(cta.label);
+  const href = stringProp(cta.href);
+  return label ? [`- ${markdownText(label)}${href ? `: ${markdownText(href)}` : ""}`] : [];
+}
+
+function slotMedia(value: unknown) {
+  if (!isRecord(value) || !Array.isArray(value.items)) return [];
+  return value.items.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const caption = stringProp(item.publicCaption);
+    return caption ? [`- ${markdownText(caption)}`] : [];
   });
 }
 

@@ -188,6 +188,9 @@ function checkLocationMapConfig(): HealthCheck {
 }
 
 function checkAssetStorageConfig(): HealthCheck {
+  if (process.env.LODESTA_ASSET_STORAGE === "local") {
+    return ok("asset_storage", "Asset storage", "Generated asset bytes will use local development storage.");
+  }
   return ok(
     "asset_storage",
     "Asset storage",
@@ -196,6 +199,9 @@ function checkAssetStorageConfig(): HealthCheck {
 }
 
 async function checkAssetStorageReadiness(): Promise<HealthCheck> {
+  if (process.env.LODESTA_ASSET_STORAGE === "local") {
+    return ok("asset_storage", "Asset storage", "Local development asset storage is enabled.");
+  }
   try {
     const { data, error: bucketError } = await getSupabaseAdminClient().storage.getBucket(ASSET_BUCKET_NAME);
     if (bucketError || !data) {

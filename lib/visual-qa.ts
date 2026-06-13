@@ -97,6 +97,7 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
               "Score harshly: 8 means plausible but agency polish is missing; 9 means strong but still has visible refinements; 9.5+ means a business owner would reasonably prefer this over a typical polished template.",
               "Do not invent business facts, legal claims, offers, prices, credentials, or reviews.",
               "Treat screenshots as QA evidence only; they are not source-of-truth UI.",
+              "Screenshots are provided as full-resolution vertical bands sliced top-to-bottom per viewport (each image is preceded by its viewport and band position). Review every band — a defect low on the page is as disqualifying as one at the top.",
               "For every finding, set defectCategory to the single best-matching concrete defect (contrast, overflow, blank_layout, unreadable_text, broken_media, cramped_layout, repetition) or none when the finding is an editorial observation without a concrete rendering defect.",
               "unreadable_text means text that literally cannot be read: clipped, obscured, or rendered below legible size. Small-but-legible branding, weak hierarchy, or elements that fail to 'anchor' the design are editorial observations — category none.",
               "score.craft answers one question with brutal honesty: would a small-business owner be proud to pay for this site? Calibration anchors: 2 = broken or embarrassing; 4 = clean and correct but template-anonymous, generic imagery, no brand personality (most automated output); 6 = solid local-agency work with real brand color, relevant imagery, and a distinct voice; 8 = excellent custom work with strong identity, story, and conversion energy; 9-10 = flagship bespoke design. Do NOT inflate: a defect-free page with stock-feeling images and interchangeable copy is a 4, not a 7.",
@@ -112,11 +113,10 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
             type: "input_text",
             text: JSON.stringify(visualQaContext(input))
           },
-          ...screenshots.map((screenshot) => ({
-            type: "input_image" as const,
-            image_url: screenshot.imageUrl,
-            detail: "high" as const
-          }))
+          ...screenshots.flatMap((screenshot) => [
+            { type: "input_text" as const, text: screenshot.label },
+            { type: "input_image" as const, image_url: screenshot.imageUrl, detail: "high" as const }
+          ])
         ]
       }
     ],
@@ -299,22 +299,83 @@ export function createDeterministicVisualQa({
 
 function layoutPresetEvidence(version: SiteBundle["siteModel"]["versions"][number] | undefined) {
   if (!version) return [];
-  if (version.rendererVersion === "layout-v2") {
-    const home = version.compiledPages.find((page) => page.slug === "") ?? version.compiledPages[0];
-    return home?.sections.map((section) => section.family) ?? [];
+  if (version.rendererVersion === "layout-v3") {
+    const home = version.pageComposition.pages.find((page) => page.slug === "") ?? version.pageComposition.pages[0];
+    return home?.sections.map((section) => `${section.family}:${section.variant}`) ?? [];
   }
-  const home = version.pages.find((page) => page.slug === "") ?? version.pages[0];
-  return home?.layoutSections.map((section) => section.preset) ?? [];
+  return [];
 }
 
+// A full-page screenshot of a long site (a 1280x9691 desktop capture is
+// routine) is scaled by the vision API to ~270px wide before tiling — every
+// section becomes an illegible sliver, which is why squashed full-page review
+// missed real defects. Instead we slice each capture into vertical bands at
+// native width so the model reads each section at legible resolution. Bands
+// fully tile the page (no silent coverage gap); the per-viewport cap only grows
+// the band height for very tall pages, it never drops the tail.
+const maxBandsPerViewport: Record<string, number> = { desktop: 6, mobile: 5, tablet: 3 };
+const maxTotalBands = 14;
+const bandViewportOrder = ["desktop", "mobile", "tablet"];
+
 async function screenshotInputs(renderInspection?: RenderInspectionResult) {
-  const screenshots = renderInspection?.screenshots.filter((screenshot) => screenshot.path).slice(0, 3) ?? [];
-  const inputs: Array<{ imageUrl: string }> = [];
-  for (const screenshot of screenshots) {
-    if (!screenshot.path) continue;
+  const screenshots = (renderInspection?.screenshots ?? []).filter((screenshot) => screenshot.path);
+  const ordered = [...screenshots].sort(
+    (left, right) => bandViewportOrder.indexOf(left.viewport) - bandViewportOrder.indexOf(right.viewport)
+  );
+  const inputs: Array<{ imageUrl: string; label: string }> = [];
+
+  // sharp is a CJS `export =` module; under dynamic import the callable is on
+  // `.default` (esbuild/tsx) or the namespace itself (node CJS) — accept either.
+  type SharpFn = (input?: Buffer) => import("sharp").Sharp;
+  let sharp: SharpFn | undefined;
+  try {
+    const mod = (await import("sharp")) as unknown;
+    const candidate = typeof mod === "function" ? mod : (mod as { default?: unknown }).default;
+    sharp = typeof candidate === "function" ? (candidate as SharpFn) : undefined;
+  } catch {
+    sharp = undefined;
+  }
+
+  const pushWhole = (bytes: Buffer, viewport: string) =>
+    inputs.push({ imageUrl: `data:image/png;base64,${bytes.toString("base64")}`, label: `${viewport} (full page)` });
+
+  for (const screenshot of ordered) {
+    if (inputs.length >= maxTotalBands || !screenshot.path) continue;
     const bytes = await readFile(screenshot.path).catch(() => undefined);
     if (!bytes) continue;
-    inputs.push({ imageUrl: `data:image/png;base64,${bytes.toString("base64")}` });
+    if (!sharp) {
+      pushWhole(bytes, screenshot.viewport);
+      continue;
+    }
+    try {
+      const meta = await sharp(bytes).metadata();
+      const width = meta.width ?? screenshot.width;
+      const height = meta.height ?? screenshot.height;
+      const screenful = Math.max(1, screenshot.height);
+      // Short page: one screenful-ish — no banding needed.
+      if (height <= screenful * 1.25) {
+        pushWhole(bytes, screenshot.viewport);
+        continue;
+      }
+      const cap = Math.min(maxBandsPerViewport[screenshot.viewport] ?? 4, maxTotalBands - inputs.length);
+      const bandCount = Math.max(1, Math.min(cap, Math.ceil(height / screenful)));
+      const baseBand = Math.ceil(height / bandCount);
+      const overlap = 48;
+      for (let index = 0; index < bandCount; index += 1) {
+        if (inputs.length >= maxTotalBands) break;
+        const top = index * baseBand;
+        if (top >= height) break;
+        const bandHeight = Math.min(baseBand + (index < bandCount - 1 ? overlap : 0), height - top);
+        if (bandHeight <= 0) break;
+        const buffer = await sharp(bytes).extract({ left: 0, top, width, height: bandHeight }).png().toBuffer();
+        inputs.push({
+          imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+          label: `${screenshot.viewport} band ${index + 1}/${bandCount} (y ${top}-${top + bandHeight} of ${height}px)`
+        });
+      }
+    } catch {
+      pushWhole(bytes, screenshot.viewport);
+    }
   }
   return inputs;
 }

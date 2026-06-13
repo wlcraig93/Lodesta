@@ -32,7 +32,7 @@ type PageLike = {
   goto(url: string, options: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
   setContent(html: string, options: { waitUntil: "domcontentloaded" | "load"; timeout: number }): Promise<unknown>;
   route?(url: string | RegExp, handler: (route: RouteLike) => Promise<void> | void): Promise<void>;
-  screenshot(options: { path: string; fullPage: boolean }): Promise<Buffer>;
+  screenshot(options: { path: string; fullPage: boolean; type?: "png" | "jpeg"; quality?: number }): Promise<Buffer>;
   evaluate<T>(fn: (() => T | Promise<T>) | string): Promise<T>;
   close(): Promise<void>;
 };
@@ -247,6 +247,7 @@ async function inspectHtmlWithPlaywright(
 ): Promise<RenderInspectionResult> {
   const browser = await launchRenderBrowser(playwright);
   const screenshots: RenderScreenshotArtifact[] = [];
+  const aboveFoldScreenshots: RenderScreenshotArtifact[] = [];
   const findings: RenderInspectionFinding[] = [];
   let aggregate: BrowserMetrics = {};
   const metricsByViewport: Partial<Record<RenderViewportName, RenderViewportMetrics>> = {};
@@ -290,6 +291,19 @@ async function inspectHtmlWithPlaywright(
             evidence: `${file.size} bytes written to ${path}.`,
             viewport: viewport.name
           });
+          if (viewport.name === "desktop") {
+            const foldPath = join(artifactDir, `${viewport.name}-fold.jpg`);
+            await page.screenshot({ path: foldPath, fullPage: false, type: "jpeg", quality: 72 });
+            const foldFile = await stat(foldPath);
+            aboveFoldScreenshots.push({
+              viewport: viewport.name,
+              width: viewport.width,
+              height: viewport.height,
+              path: foldPath,
+              bytes: foldFile.size,
+              capturedAt
+            });
+          }
         }
       } finally {
         await page.close();
@@ -310,6 +324,7 @@ async function inspectHtmlWithPlaywright(
     adapter: "playwright",
     capturedAt,
     screenshots,
+    aboveFoldScreenshots,
     findings: normalizeFindings(findings),
     metrics: aggregate,
     metricsByViewport
@@ -849,6 +864,49 @@ function collectBrowserMetricsScript() {
       }
       return samples.slice(0, 6);
     })();
+    const oversizedImageSamples = (() => {
+      // Containment failure (the full-page-logo class): an image rendered far
+      // larger than its slot. The upscale check above skips images under 320px
+      // wide and only flags blurry *upscaling*, so a large-natural image that
+      // escapes its box renders near 1x and slips past it entirely. This is the
+      // inverse check — rendered box vs. intended size — and is pure geometry,
+      // no model judgement.
+      const samples = [];
+      const vh = window.innerHeight;
+      for (const image of Array.from(document.images)) {
+        if (!isVisible(image)) continue;
+        const rect = image.getBoundingClientRect();
+        const name = (image.getAttribute("src") || "image").split("/").pop().slice(0, 40);
+        if (image.matches("img.site-brand-mark-v3")) {
+          // The header brand slot is a fixed ~42px square; anything materially
+          // larger means CSS containment failed and the logo is eating the page.
+          if (Math.min(rect.width, rect.height) > 96) {
+            samples.push("brand mark " + name + " rendered " + Math.round(rect.width) + "x" + Math.round(rect.height) + "px (slot is 42px)");
+          }
+          continue;
+        }
+        // Content images: heroes and full-bleed media stay within ~1 viewport.
+        // Taller than 1.3 viewports with real width means it broke out of its box.
+        if (rect.height > vh * 1.3 && rect.width > 80) {
+          samples.push(name + " rendered " + Math.round(rect.width) + "x" + Math.round(rect.height) + "px exceeds viewport " + window.innerWidth + "x" + vh);
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const headerLogoSample = (() => {
+      // The generic upscale check skips images under 320px wide, so the 42px
+      // header brand slot needs its own resolution check (retina = 2x).
+      const logo = document.querySelector("img.site-brand-mark-v3");
+      if (!logo || !logo.complete || logo.naturalWidth === 0) return undefined;
+      const rect = logo.getBoundingClientRect();
+      if (rect.width <= 0) return undefined;
+      const needed = Math.round(Math.min(rect.width, rect.height) * 2);
+      const natural = Math.min(logo.naturalWidth, logo.naturalHeight);
+      const name = (logo.getAttribute("src") || "logo").split("/").pop().slice(0, 40);
+      return natural < needed
+        ? "low-res: " + name + " is " + logo.naturalWidth + "x" + logo.naturalHeight + " in a " + Math.round(rect.width) + "px slot (needs " + needed + "px for retina)"
+        : "ok: " + name + " " + logo.naturalWidth + "x" + logo.naturalHeight;
+    })();
     const sectionFillSamples = (() => {
       const samples = [];
       for (const section of Array.from(document.querySelectorAll(".site-visual-section-v3"))) {
@@ -862,6 +920,54 @@ function collectBrowserMetricsScript() {
         const fill = Math.min(1, contentArea / (rect.width * rect.height));
         if (fill < 0.22) {
           samples.push((section.getAttribute("data-section-template") || "section") + ": " + Math.round(fill * 100) + "% filled");
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const headingOverflowSamples = (() => {
+      // A heading wider than its parent column paints under adjacent blocks
+      // (the location/process defect class found by hand on 2026-06-11).
+      const samples = [];
+      for (const heading of Array.from(document.querySelectorAll("h1, h2, h3"))) {
+        const parent = heading.parentElement;
+        if (!parent) continue;
+        const rect = heading.getBoundingClientRect();
+        const parentRect = parent.getBoundingClientRect();
+        if (rect.width <= 0 || parentRect.width <= 0) continue;
+        // Two escape modes: the heading box outgrowing its column (grid
+        // min-content sizing) and text escaping a correctly-sized box.
+        const boxOverflow = rect.width - parentRect.width;
+        const textOverflow = heading.scrollWidth - heading.clientWidth;
+        const overflow = Math.max(boxOverflow, textOverflow);
+        if (overflow > 4) {
+          samples.push(
+            '"' + (heading.textContent || "").trim().slice(0, 32) + '" ' + Math.round(overflow) + "px past its column"
+          );
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const blockOverlapSamples = (() => {
+      // Section-level sibling blocks should never substantially intersect.
+      const samples = [];
+      for (const section of Array.from(document.querySelectorAll(".site-visual-section-v3, section"))) {
+        const blocks = Array.from(section.children).filter((child) => {
+          const rect = child.getBoundingClientRect();
+          return rect.width > 60 && rect.height > 60;
+        });
+        for (let a = 0; a < blocks.length; a += 1) {
+          for (let b = a + 1; b < blocks.length; b += 1) {
+            const ra = blocks[a].getBoundingClientRect();
+            const rb = blocks[b].getBoundingClientRect();
+            const ix = Math.max(0, Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left));
+            const iy = Math.max(0, Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top));
+            const intersection = ix * iy;
+            const smaller = Math.min(ra.width * ra.height, rb.width * rb.height);
+            if (smaller > 0 && intersection / smaller > 0.25) {
+              const template = section.getAttribute("data-section-template") || "section";
+              samples.push(template + ": sibling blocks intersect " + Math.round((intersection / smaller) * 100) + "%");
+            }
+          }
         }
       }
       return samples.slice(0, 6);
@@ -922,10 +1028,17 @@ function collectBrowserMetricsScript() {
       heroH1MaxLineWidthPx: h1LineRects.length ? Math.max(...h1LineRects.map((rect) => rect.width)) : undefined,
       visualOverlapCount: overlapSamples.length,
       visualOverlapSamples: overlapSamples,
+      headingOverflowCount: headingOverflowSamples.length,
+      headingOverflowSamples,
+      blockOverlapCount: blockOverlapSamples.length,
+      blockOverlapSamples,
       figureOverlapCount: figureOverlapSamples.length,
       figureOverlapSamples,
       upscaledImageCount: upscaledImageSamples.length,
       upscaledImageSamples,
+      oversizedImageCount: oversizedImageSamples.length,
+      oversizedImageSamples,
+      headerLogoSample,
       a11yStructureIssues,
       sectionLowFillCount: sectionFillSamples.length,
       sectionLowFillSamples: sectionFillSamples,
@@ -1134,6 +1247,30 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       viewport
     });
   }
+  if (typeof metrics.headingOverflowCount === "number") {
+    // Warning during burn-in (bespoke quality plan, workstream E); promote to
+    // fail once the detector has two clean weeks against real generations.
+    findings.push({
+      id: `render.heading_overflow${suffix}`,
+      severity: metrics.headingOverflowCount === 0 ? "pass" : "warning",
+      title: `Headings stay inside their columns${titleSuffix}`,
+      evidence: metrics.headingOverflowCount
+        ? `${metrics.headingOverflowCount} heading overflow samples: ${(metrics.headingOverflowSamples ?? []).join("; ")}`
+        : "No headings overflow their parent columns.",
+      viewport
+    });
+  }
+  if (typeof metrics.blockOverlapCount === "number") {
+    findings.push({
+      id: `render.block_overlap${suffix}`,
+      severity: metrics.blockOverlapCount === 0 ? "pass" : "warning",
+      title: `Section blocks do not intersect${titleSuffix}`,
+      evidence: metrics.blockOverlapCount
+        ? `${metrics.blockOverlapCount} block overlap samples: ${(metrics.blockOverlapSamples ?? []).join("; ")}`
+        : "No section-level sibling blocks intersect.",
+      viewport
+    });
+  }
   if (typeof metrics.crampedTextCount === "number") {
     findings.push({
       id: `render.cramped_text_columns${suffix}`,
@@ -1164,6 +1301,26 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       evidence: metrics.upscaledImageCount
         ? `${metrics.upscaledImageCount} blurry upscaled images: ${(metrics.upscaledImageSamples ?? []).join("; ")}`
         : "No images stretched beyond 2.2x natural size.",
+      viewport
+    });
+  }
+  if (typeof metrics.headerLogoSample === "string") {
+    findings.push({
+      id: `render.logo_low_res${suffix}`,
+      severity: metrics.headerLogoSample.startsWith("low-res") ? "fail" : "pass",
+      title: `Header logo renders at natural resolution${titleSuffix}`,
+      evidence: metrics.headerLogoSample,
+      viewport
+    });
+  }
+  if (typeof metrics.oversizedImageCount === "number") {
+    findings.push({
+      id: `render.image_oversized${suffix}`,
+      severity: metrics.oversizedImageCount === 0 ? "pass" : "fail",
+      title: `Images stay within their layout slots${titleSuffix}`,
+      evidence: metrics.oversizedImageCount
+        ? `${metrics.oversizedImageCount} oversized images: ${(metrics.oversizedImageSamples ?? []).join("; ")}`
+        : "No images escaped their layout slots.",
       viewport
     });
   }
@@ -1350,10 +1507,19 @@ function mergeMetrics(left: BrowserMetrics, right: BrowserMetrics): BrowserMetri
     heroH1LineCount: maxDefined(left.heroH1LineCount, right.heroH1LineCount),
     heroH1MaxLineWidthPx: maxDefined(left.heroH1MaxLineWidthPx, right.heroH1MaxLineWidthPx),
     visualOverlapCount: maxDefined(left.visualOverlapCount, right.visualOverlapCount),
+    headingOverflowCount: maxDefined(left.headingOverflowCount, right.headingOverflowCount),
+    headingOverflowSamples: left.headingOverflowSamples?.length ? left.headingOverflowSamples : right.headingOverflowSamples,
+    blockOverlapCount: maxDefined(left.blockOverlapCount, right.blockOverlapCount),
+    blockOverlapSamples: left.blockOverlapSamples?.length ? left.blockOverlapSamples : right.blockOverlapSamples,
     figureOverlapCount: maxDefined(left.figureOverlapCount, right.figureOverlapCount),
     upscaledImageCount: maxDefined(left.upscaledImageCount, right.upscaledImageCount),
     a11yStructureIssues: left.a11yStructureIssues?.length ? left.a11yStructureIssues : right.a11yStructureIssues,
     upscaledImageSamples: left.upscaledImageSamples?.length ? left.upscaledImageSamples : right.upscaledImageSamples,
+    headerLogoSample: left.headerLogoSample?.startsWith("low-res")
+      ? left.headerLogoSample
+      : right.headerLogoSample?.startsWith("low-res")
+      ? right.headerLogoSample
+      : left.headerLogoSample ?? right.headerLogoSample,
     figureOverlapSamples: left.figureOverlapSamples?.length ? left.figureOverlapSamples : right.figureOverlapSamples,
     sectionLowFillCount: maxDefined(left.sectionLowFillCount, right.sectionLowFillCount),
     sectionLowFillSamples: left.sectionLowFillSamples?.length ? left.sectionLowFillSamples : right.sectionLowFillSamples,

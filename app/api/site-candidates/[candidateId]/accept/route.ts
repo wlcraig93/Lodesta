@@ -3,6 +3,7 @@ import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
+import { siteVersionV3Issue } from "@/lib/site-version-v3";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   const candidate = await repository.getSiteCandidate(candidateId);
   if (!candidate) return NextResponse.json({ error: "Unknown site candidate" }, { status: 404 });
   const candidateVersion = candidate.bundle.siteModel.versions.find((version) => version.status === "draft") ?? candidate.bundle.siteModel.versions[0];
+  const schemaIssue = siteVersionV3Issue(candidateVersion);
+  if (schemaIssue) {
+    return NextResponse.json(
+      {
+        error: `Site candidate stored version schema is stale: ${schemaIssue}. Run npm run backfill:strip-pages-projection or regenerate the candidate.`,
+        candidateStatus: candidate.status
+      },
+      { status: 409 }
+    );
+  }
   const readiness = candidateVersion ? getEffectiveGenerationQaReadiness(candidate.bundle, candidateVersion) : "unavailable";
   if (candidate.status === "blocked" || candidate.status === "archived" || readiness !== "ready") {
     return NextResponse.json(

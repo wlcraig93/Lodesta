@@ -9,20 +9,21 @@ import type {
   JobKind,
   JobRecord,
   OptimizationFinding,
+  ProspectReportRecord,
   SiteBundle,
   SiteVersion
 } from "./models";
-import { crawlUrl } from "./crawler";
-import { createSiteFromInput } from "./intake";
+import { createSiteV3FromInput } from "./intake";
 import { runAudit } from "./audit";
 import { createPresenceIntakePlan } from "./presence-intake";
-import { gatherPublicPresenceSignals } from "./public-presence";
+import { runProspectPresenceReport } from "./prospect-reports";
+import { runUrlPresenceAssessment } from "./presence-assessment-runner";
 import { runSiteQa } from "./qa";
-import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
 import type { GenerateSiteOptions, GenerateSiteResult } from "./site-candidate-service";
+import { assertSiteVersionV3, pageCountForVersionV3 } from "./site-version-v3";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
 export const defaultJobMaxAttempts = 3;
@@ -44,6 +45,20 @@ export type JobExecutionContext = {
   listInquiryEvents?: (inquiryId: string) => Promise<InquiryEvent[]>;
   processInquiryNotification?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
   processInquiryAiEnrichment?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
+  getProspectReport?: (reportId: string) => Promise<ProspectReportRecord | null>;
+  updateProspectReport?: (input: {
+    reportId: string;
+    status?: ProspectReportRecord["status"];
+    jobId?: string;
+    sourceUrl?: string;
+    sourceHost?: string;
+    websiteKind?: ProspectReportRecord["websiteKind"];
+    result?: ProspectReportRecord["result"];
+    unlockedAt?: string;
+    leadId?: string;
+    errorCode?: string;
+    completedAt?: string;
+  }) => Promise<ProspectReportRecord | null>;
   cleanupAgentTelemetry?: (input?: { olderThanDays?: number; limit?: number }) => Promise<{ deleted: number; cutoff: string }>;
 };
 
@@ -120,18 +135,51 @@ export async function processAllQueuedJobs(limit = 25, context?: JobExecutionCon
 export async function executeJob(job: JobRecord, context?: JobExecutionContext): Promise<Record<string, unknown>> {
   switch (job.kind) {
     case "presence_assessment": {
-      const url = await assertPublicFetchUrl(assertString(job.payload.url, "url"));
-      assertLaunchMarket({ url });
-      const [crawl, renderInspection] = await Promise.all([
-        crawlUrl(url),
-        inspectUrlRender({
-          url,
-          captureScreenshots: job.payload.screenshots !== false
-        })
-      ]);
-      const publicPresence = await gatherPublicPresenceSignals({ url, crawl });
-      assertLaunchMarket({ url, crawl, publicPresence });
+      const run = await runUrlPresenceAssessment({
+        url: assertString(job.payload.url, "url"),
+        captureScreenshots: job.payload.screenshots !== false,
+        publicPresence: "google_places"
+      });
+      const { url, crawl, renderInspection, publicPresence } = run;
       return createPresenceIntakePlan(url, crawl, renderInspection, publicPresence) as unknown as Record<string, unknown>;
+    }
+    case "prospect_presence_report": {
+      const reportId = assertString(job.payload.reportId, "reportId");
+      if (!context?.getProspectReport || !context.updateProspectReport) {
+        throw new Error("prospect_presence_report requires repository-backed job context.");
+      }
+      const report = await context.getProspectReport(reportId);
+      if (!report) throw new Error("Unknown prospect report.");
+      if (report.status === "completed" && report.result) {
+        return { reportId, status: "completed", reused: true, websiteKind: report.websiteKind };
+      }
+      await context.updateProspectReport({ reportId, status: "running", jobId: job.id });
+      try {
+        const result = await runProspectPresenceReport(report);
+        const completedAt = new Date().toISOString();
+        await context.updateProspectReport({
+          reportId,
+          status: "completed",
+          sourceUrl: result.sourceUrl,
+          sourceHost: result.sourceHost,
+          websiteKind: result.websiteKind,
+          result,
+          completedAt
+        });
+        return {
+          reportId,
+          status: "completed",
+          websiteKind: result.websiteKind,
+          overallScore: result.overallScore
+        };
+      } catch (error) {
+        await context.updateProspectReport({
+          reportId,
+          status: "failed",
+          errorCode: "scan_failed"
+        });
+        throw new Error(`Prospect report scan failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
     }
     case "generate_site": {
       if (!context?.generateSite) {
@@ -208,7 +256,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             candidateSiteId: bundle.businessProfile.siteId,
             candidateSlug: bundle.siteModel.slug,
             vertical: bundle.businessProfile.vertical,
-            pages: bundle.siteModel.versions[0]?.pages.length ?? 0
+            pages: pageCountForVersionV3(assertSiteVersionV3(bundle.siteModel.versions[0]))
           });
         } catch (error) {
           results.push({
@@ -242,7 +290,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         };
       }
       const inputUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
-      const bundle = createSiteFromInput({
+      const bundle = createSiteV3FromInput({
         url: inputUrl,
         prompt: assertString(job.payload.prompt ?? "Build a website for Sample Local Business", "prompt")
       });
@@ -332,9 +380,7 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
 
 function versionPageCount(version: SiteVersion | undefined) {
   if (!version) return 0;
-  if (version.rendererVersion === "layout-v3") return version.pageComposition.pages.length;
-  if (version.rendererVersion === "layout-v2") return version.compiledPages.length;
-  return version.pages.length;
+  return pageCountForVersionV3(assertSiteVersionV3(version, "job version"));
 }
 
 function jobGenerationMetadata(job: JobRecord, context: JobExecutionContext) {

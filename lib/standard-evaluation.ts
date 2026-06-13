@@ -2,6 +2,8 @@ import type { CrawlAssessment } from "./crawler";
 import type { SiteBundle, StandardCheckResult, StandardCriterion, StandardEvaluation } from "./models";
 import { getCriteriaForVertical, getStandardCriterion } from "./standard";
 import { getPublishedVersion } from "./sample-data";
+import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { assertSiteVersionV3, type PageV3 } from "./site-version-v3";
 
 export function evaluateCrawlAgainstStandard(crawl: CrawlAssessment): StandardEvaluation {
   const checks: StandardCheckResult[] = crawl.score.checks.map((check) => {
@@ -38,15 +40,17 @@ export function evaluateSiteAgainstStandard(
   bundle: SiteBundle,
   options: { versionId?: string; versionStatus?: "draft" | "published" } = {}
 ): StandardEvaluation {
-  const version =
+  const version = assertSiteVersionV3(
     options.versionId
       ? bundle.siteModel.versions.find((item) => item.id === options.versionId) ?? getPublishedVersion(bundle.siteModel)
       : options.versionStatus === "draft"
       ? bundle.siteModel.versions.find((item) => item.status === "draft") ?? getPublishedVersion(bundle.siteModel)
-      : getPublishedVersion(bundle.siteModel);
-  const pages = version.pages;
+      : getPublishedVersion(bundle.siteModel),
+    "standard evaluation version"
+  );
+  const pages = version.pageComposition.pages;
   const homePage = pages.find((page) => page.slug === "") ?? pages[0];
-  const homeHero = homePage?.sections.find((section) => section.type === "hero");
+  const homeHero = homePage?.sections[0] ? getVisualSectionV3(homePage.sections[0].props) : undefined;
   const criteria = getCriteriaForVertical(bundle.businessProfile.vertical);
   const checks = criteria.map((criterion): StandardCheckResult => {
     const result = evaluateCriterion(criterion.id, bundle, pages, homeHero);
@@ -90,8 +94,8 @@ export function coldUrlCheckableChecks(checks: StandardCheckResult[]) {
 function evaluateCriterion(
   criterionId: string,
   bundle: SiteBundle,
-  pages: SiteBundle["siteModel"]["versions"][number]["pages"],
-  homeHero?: SiteBundle["siteModel"]["versions"][number]["pages"][number]["sections"][number]
+  pages: PageV3[],
+  homeHero?: ReturnType<typeof getVisualSectionV3>
 ) {
   const business = bundle.businessProfile;
   switch (criterionId) {
@@ -151,9 +155,9 @@ function evaluateCriterion(
     case "conversion.mobile_click_to_call":
       return result(Boolean(business.phone && hasTelCta(pages)), "fail", "At least one generated CTA should use a tel: link when phone is known.");
     case "conversion.primary_action_above_fold":
-      return result(Boolean(homeHero?.props.primaryCta), "fail", "The home hero should include a primary CTA.");
+      return result(Boolean(collectVisualCtas(homeHero).length), "fail", "The home hero should include a primary CTA.");
     case "conversion.mobile_sticky_action":
-      return result(Boolean(homeHero?.props.primaryCta), "warning", "Sticky action can be served from the home hero CTA by the renderer.");
+      return result(Boolean(collectVisualCtas(homeHero).length), "warning", "Sticky action can be served from the home hero CTA by the renderer.");
     case "conversion.lead_form":
       return result(bundle.extensionModel.forms.length > 0 && hasSection(pages, "contact"), "fail", "A contact section and at least one form should exist.");
     case "trust.reviews_visible":
@@ -238,44 +242,85 @@ function cleanCanonicalPath(path: string) {
   return path.startsWith("/") && !path.includes("?") && !/\.(php|asp|aspx|jsp|cfm|cgi|html?)$/i.test(path);
 }
 
-function hasSection(pages: SiteBundle["siteModel"]["versions"][number]["pages"], sectionType: string) {
-  return pages.some((page) => page.sections.some((section) => section.type === sectionType));
-}
-
-function hasTelCta(pages: SiteBundle["siteModel"]["versions"][number]["pages"]) {
+function hasSection(pages: PageV3[], sectionType: string) {
+  const templates = templatesForLegacySectionType(sectionType);
   return pages.some((page) =>
-    page.sections.some((section) =>
-      Object.entries(section.props).some(([key, value]) => {
-        if (!key.toLowerCase().includes("cta") || !value || typeof value !== "object") return false;
-        return String((value as { href?: unknown }).href ?? "").startsWith("tel:");
-      })
-    )
+    page.sections.some((section) => {
+      const templateId = getVisualSectionV3(section.props)?.templateId;
+      return Boolean(templateId && templates.has(templateId));
+    })
   );
 }
 
-function hasRoleCta(pages: SiteBundle["siteModel"]["versions"][number]["pages"], role: string) {
+function hasTelCta(pages: PageV3[]) {
+  return pages.some((page) => page.sections.some((section) => collectVisualCtas(getVisualSectionV3(section.props)).some((cta) => cta.href?.startsWith("tel:"))));
+}
+
+function hasRoleCta(pages: PageV3[], role: string) {
+  const matcher =
+    role === "booking"
+      ? /book|appointment|schedule/i
+      : role === "ordering"
+      ? /order|menu|toast|delivery/i
+      : role === "form"
+      ? /#contact|request|quote|estimate|contact/i
+      : new RegExp(role, "i");
   return pages.some((page) =>
-    page.sections.some((section) =>
-      Object.entries(section.props).some(([key, value]) => {
-        if (!key.toLowerCase().includes("cta") || !value || typeof value !== "object") return false;
-        return (value as { role?: unknown }).role === role;
-      })
-    )
+    page.sections.some((section) => collectVisualCtas(getVisualSectionV3(section.props)).some((cta) => matcher.test(`${cta.label ?? ""} ${cta.href ?? ""}`)))
   );
 }
 
-function hasBookingOrFormPath(pages: SiteBundle["siteModel"]["versions"][number]["pages"]) {
+function hasBookingOrFormPath(pages: PageV3[]) {
   return hasRoleCta(pages, "booking") || hasRoleCta(pages, "form") || hasSection(pages, "contact");
 }
 
-function pagesContainText(pages: SiteBundle["siteModel"]["versions"][number]["pages"], pattern: RegExp) {
+function pagesContainText(pages: PageV3[], pattern: RegExp) {
   return pattern.test(JSON.stringify(pages));
 }
 
-function pageImagesHaveAlt(pages: SiteBundle["siteModel"]["versions"][number]["pages"]) {
+function pageImagesHaveAlt(pages: PageV3[]) {
   return pages.every((page) =>
     page.sections.every((section) => Object.values(section.props).every((value) => imageValueHasAlt(value)))
   );
+}
+
+function templatesForLegacySectionType(sectionType: string) {
+  const mapped: Record<string, string[]> = {
+    contact: ["contact_split", "facts_cta"],
+    faq: ["faq_list"],
+    services: ["intro_grid", "side_intro_rows"],
+    menu_deals: ["intro_grid", "side_intro_rows"],
+    trust_bar: ["facts_strip", "stat_band", "feature_band"],
+    testimonials: ["quote_wall"],
+    team: ["editorial_statement", "split_media"],
+    map: ["location_showcase", "service_area_showcase", "location_directory"],
+    gallery: ["media_mosaic", "media_feature"],
+    before_after: ["media_mosaic", "media_feature"]
+  };
+  return new Set(mapped[sectionType] ?? [sectionType]);
+}
+
+function collectVisualCtas(visualSection: ReturnType<typeof getVisualSectionV3>) {
+  if (!visualSection) return [];
+  const slots = visualSection.slots as Record<string, unknown>;
+  const ctas: Array<{ label?: string; href?: string }> = [];
+  if (isRecord(slots.copy) && Array.isArray(slots.copy.actions)) {
+    slots.copy.actions.forEach((action) => ctas.push(ctaLike(action)));
+  }
+  if (isRecord(slots.action) && isRecord(slots.action.cta)) ctas.push(ctaLike(slots.action.cta));
+  return ctas;
+}
+
+function ctaLike(value: unknown) {
+  if (!isRecord(value)) return {};
+  return {
+    label: typeof value.label === "string" ? value.label : undefined,
+    href: typeof value.href === "string" ? value.href : undefined
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function imageValueHasAlt(value: unknown): boolean {

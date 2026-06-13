@@ -1,7 +1,7 @@
 import "../scripts/load-env";
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { createSiteFromInput } from "../lib/intake";
+import { createSiteV3FromInput } from "../lib/intake";
 import { repository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
@@ -21,7 +21,7 @@ async function main() {
   const command = process.argv[2] ?? "demo";
 
   if (command === "demo") {
-    const bundle = createSiteFromInput({
+    const bundle = createSiteV3FromInput({
       prompt: "Build a website for Sample Local Business, a home services company focused on calls."
     });
     const findings = runAudit(bundle.businessProfile, bundle.siteModel);

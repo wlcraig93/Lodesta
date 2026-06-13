@@ -12,7 +12,7 @@
  * matching the render-browser verification convention.
  */
 import assert from "node:assert";
-import { createSiteFromInput } from "../lib/intake";
+import { createSiteV3FromInput } from "../lib/intake";
 import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
 import { inspectGeneratedSiteBundleRender } from "../lib/generated-site-render-inspection";
 import type { SiteBundle } from "../lib/models";
@@ -91,7 +91,7 @@ async function main() {
   process.env.LODESTA_ACCENT_FORWARD = "on";
   const failures: string[] = [];
   for (const shape of shapes) {
-    const bundle: SiteBundle = createSiteFromInput({ prompt: shape.prompt, identity: { siteId: `site_matrix_${shape.id}` } });
+    const bundle: SiteBundle = createSiteV3FromInput({ prompt: shape.prompt, identity: { siteId: `site_matrix_${shape.id}` } });
     if (shape.hours) bundle.businessProfile.hours = shape.hours;
     if (shape.colorSignals) {
       bundle.presenceAssessment.brandAssessment = {

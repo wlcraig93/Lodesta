@@ -4,6 +4,7 @@ import { repository } from "@/lib/repository";
 import { runSiteQa } from "@/lib/qa";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { claimGateForBundle } from "@/lib/site-publication";
+import { assertSiteVersionV3, firstPageTitleForVersionV3, pageCountForVersionV3 } from "@/lib/site-version-v3";
 
 const versionActionSchema = z.object({
   siteId: z.string().min(1),
@@ -27,8 +28,8 @@ export async function GET(request: Request) {
         id: version.id,
         status: version.status,
         createdAt: version.createdAt,
-        pages: version.pages.length,
-        title: version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Untitled"
+        pages: pageCountForVersionV3(assertSiteVersionV3(version, "versions API version")),
+        title: firstPageTitleForVersionV3(assertSiteVersionV3(version, "versions API version"))
       }))
     }))
   });

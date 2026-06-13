@@ -44,6 +44,9 @@ export type AssetReference = {
   alt: string;
   source: "generated" | "licensed" | "uploaded" | "website_reference" | "placeholder";
   rightsStatus: "preclaim_safe" | "customer_granted" | "reference_only" | "unknown";
+  /** Natural pixel dimensions, when measured. Render surfaces must not display an asset above its natural size. */
+  width?: number;
+  height?: number;
 };
 
 export type AssetKind = "photo" | "logo" | "mockup" | "screenshot" | "icon" | "document" | "other";
@@ -208,6 +211,8 @@ export type BusinessProfile = {
   orderingLinks: string[];
   photos: AssetReference[];
   logo?: AssetReference;
+  /** Ranked crawl logo candidates; scraped-media picks the best by measured dimensions and clears this. */
+  logoCandidates?: AssetReference[];
   reviewsSummary?: {
     rating?: number;
     count?: number;
@@ -255,8 +260,6 @@ export type Theme = {
 export type RendererVersion = "layout-v1" | "layout-v2" | "layout-v3";
 
 export type DesignSchemaVersion = "design-v1" | "design-v2" | "design-v3";
-
-export type GeneratedSiteV3Mode = "off" | "fixture_only" | "operator_allowlist" | "all_new_generations";
 
 export type SiteStylePack = "local_modern" | "premium_editorial" | "urgent_service" | "warm_neighborhood" | "clinical_trust";
 
@@ -405,10 +408,9 @@ export type PageModel = {
   slug: string;
   title: string;
   seo: SeoMetadata;
-  layoutSections: LayoutSection[];
   /**
-   * Deprecated projection used only by legacy operational code during the pre-launch
-   * renderer cutover. Public generated-site rendering uses layoutSections.
+   * Deprecated legacy projection. Active generated-site rendering uses
+   * SiteVersionV3.pageComposition.
    */
   sections: SectionModel[];
 };
@@ -749,16 +751,6 @@ export type SiteVersionBase = {
   status: "draft" | "published";
   rendererVersion: RendererVersion;
   designSchemaVersion: DesignSchemaVersion;
-  /**
-   * Transitional projection for pre-cutover admin, SEO, and QA surfaces that still
-   * read the legacy page model. Canonical layout-v2 rendering uses compiledPages.
-   */
-  pages: PageModel[];
-  /**
-   * Transitional projection for pre-cutover surfaces. Canonical layout-v2 rendering
-   * uses siteDesignSystem.
-   */
-  designPlan: DesignPlan;
   createdAt: string;
   theme?: Theme;
   presentation?: SiteVersionPresentation;
@@ -767,12 +759,17 @@ export type SiteVersionBase = {
   generationQa?: GenerationQaMetadata;
 };
 
-export type SiteVersionV1 = SiteVersionBase & {
+export type LegacySiteVersionBase = SiteVersionBase & {
+  pages: PageModel[];
+  designPlan: DesignPlan;
+};
+
+export type SiteVersionV1 = LegacySiteVersionBase & {
   rendererVersion: "layout-v1";
   designSchemaVersion: "design-v1";
 };
 
-export type SiteVersionV2 = SiteVersionBase & {
+export type SiteVersionV2 = LegacySiteVersionBase & {
   rendererVersion: "layout-v2";
   designSchemaVersion: "design-v2";
   blueprint: BlueprintV2;
@@ -784,6 +781,7 @@ export type SiteVersionV2 = SiteVersionBase & {
 export type SiteVersionV3 = SiteVersionBase & {
   rendererVersion: "layout-v3";
   designSchemaVersion: "design-v3";
+  designPlan?: DesignPlan;
   artDirection: SiteArtDirectionV3;
   artDirectionDecision?: ArtDirectionDecisionV3;
   pageComposition: PageCompositionV3;
@@ -842,6 +840,14 @@ export type GenerationQaRepairLog = {
   unresolvedBlockerIds: string[];
 };
 
+export type GenerationQaPrimaryScreenshot = {
+  storagePath: string;
+  viewport: RenderViewportName;
+  width: number;
+  height: number;
+  capturedAt: string;
+};
+
 export type GenerationQaMetadata = {
   readiness: GenerationQaReadiness;
   siteModelHash?: string;
@@ -851,6 +857,8 @@ export type GenerationQaMetadata = {
   warnings: GenerationQaWarning[];
   inspectionSummary?: RenderInspectionSummary;
   artifactRefs?: RenderInspectionArtifactRef[];
+  /** Durable copy of the lead QA screenshot, stored in asset storage so admin surfaces can render thumbnails without re-rendering the site. */
+  primaryScreenshot?: GenerationQaPrimaryScreenshot;
   visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
   repair?: GenerationQaRepairLog;
@@ -1550,6 +1558,105 @@ export type OutboundSummary = {
   }>;
 };
 
+export type ProspectReportStatus = "queued" | "running" | "completed" | "failed";
+
+export type ProspectWebsiteKind = "owned_website" | "no_website" | "social_or_aggregator";
+
+export type ProspectReportBucketId =
+  | "search_visibility"
+  | "website_conversion"
+  | "local_content_coverage"
+  | "trust_mobile_readiness";
+
+export type ProspectReportSignal = {
+  id: string;
+  label: string;
+  passed: boolean;
+  points: number;
+  maxPoints: number;
+  source: "crawl" | "render";
+  evidence: string;
+};
+
+export type ProspectReportBucket = {
+  id: ProspectReportBucketId;
+  label: string;
+  score?: number;
+  scoredSignals: number;
+  maxPoints: number;
+  points: number;
+  status: "scored" | "not_enough_signal";
+  signals: ProspectReportSignal[];
+};
+
+export type ProspectReportFinding = {
+  id: string;
+  bucketId: ProspectReportBucketId;
+  bucketLabel: string;
+  severity: "fail" | "warning";
+  title: string;
+  consequence: string;
+  evidence: string;
+  lodestaFix: string;
+};
+
+export type ProspectReportStage = {
+  id: string;
+  label: string;
+  status: "queued" | "running" | "completed" | "skipped" | "failed";
+};
+
+export type ProspectReportGatedPlan = {
+  summary: string;
+  priorities: Array<{
+    title: string;
+    detail: string;
+  }>;
+};
+
+export type ProspectPresenceReportResult = {
+  version: "prospect-presence-report-v1";
+  generatedAt: string;
+  websiteKind: ProspectWebsiteKind;
+  sourceUrl?: string;
+  sourceHost?: string;
+  overallScore: number;
+  overallLabel: string;
+  scoreSource: "crawl_standard" | "no_owned_website";
+  buckets: ProspectReportBucket[];
+  findings: ProspectReportFinding[];
+  stages: ProspectReportStage[];
+  gatedPlan: ProspectReportGatedPlan;
+};
+
+export type ProspectReportRecord = {
+  id: string;
+  placeId: string;
+  status: ProspectReportStatus;
+  jobId?: string;
+  sourceUrl?: string;
+  sourceHost?: string;
+  websiteKind: ProspectWebsiteKind;
+  result?: ProspectPresenceReportResult;
+  unlockedAt?: string;
+  leadId?: string;
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type ProspectReportLead = {
+  id: string;
+  reportId: string;
+  email: string;
+  contactName?: string;
+  phone?: string;
+  ipHash?: string;
+  metadata?: Record<string, string | number | boolean>;
+  createdAt: string;
+};
+
 export type StandardCriterion = {
   id: string;
   layer: "technical_seo" | "conversion" | "trust" | "content_structure";
@@ -1652,10 +1759,19 @@ export type RenderViewportMetrics = {
   heroH1MaxLineWidthPx?: number;
   visualOverlapCount?: number;
   visualOverlapSamples?: string[];
+  headingOverflowCount?: number;
+  headingOverflowSamples?: string[];
+  blockOverlapCount?: number;
+  blockOverlapSamples?: string[];
   figureOverlapCount?: number;
   figureOverlapSamples?: string[];
   upscaledImageCount?: number;
   upscaledImageSamples?: string[];
+  /** Images that escaped their layout slot (full-page-logo class); geometric. */
+  oversizedImageCount?: number;
+  oversizedImageSamples?: string[];
+  /** Header brand-mark resolution check: "ok: ..." or "low-res: ...". */
+  headerLogoSample?: string;
   a11yStructureIssues?: string[];
   sectionLowFillCount?: number;
   sectionLowFillSamples?: string[];
@@ -1709,6 +1825,11 @@ export type RenderInspectionResult = {
   adapter: "playwright" | "fetch_fallback";
   capturedAt: string;
   screenshots: RenderScreenshotArtifact[];
+  /**
+   * Viewport-only thumbnail captures (e.g. desktop above-the-fold JPEG) kept
+   * separate from `screenshots` so model visual QA inputs stay unchanged.
+   */
+  aboveFoldScreenshots?: RenderScreenshotArtifact[];
   findings: RenderInspectionFinding[];
   metrics: {
     htmlBytes?: number;
@@ -1738,10 +1859,17 @@ export type RenderInspectionResult = {
     heroH1MaxLineWidthPx?: number;
     visualOverlapCount?: number;
     visualOverlapSamples?: string[];
+    headingOverflowCount?: number;
+    headingOverflowSamples?: string[];
+    blockOverlapCount?: number;
+    blockOverlapSamples?: string[];
     figureOverlapCount?: number;
     figureOverlapSamples?: string[];
     upscaledImageCount?: number;
     upscaledImageSamples?: string[];
+    oversizedImageCount?: number;
+    oversizedImageSamples?: string[];
+    headerLogoSample?: string;
     sectionLowFillCount?: number;
     sectionLowFillSamples?: string[];
     crampedTextCount?: number;
@@ -1985,10 +2113,19 @@ export type PresenceAssessment = {
   generationPlanningSource?: "openai" | "deterministic_fallback";
   businessUnderstanding?: BusinessUnderstandingV2;
   generatedCopyDeck?: GeneratedCopyDeckV2;
+  v3CompilerOverrides?: {
+    heroPrimaryCta?: {
+      label: string;
+      href: string;
+      style?: "primary" | "secondary" | "text";
+    };
+  };
   /** Model design brief (profile + validated control overrides); compiler falls back to deterministic selection when absent. */
   designBrief?: {
     profile: import("./generated-site-v3-art-direction-catalog").DesignProfileV3;
     overrides: Partial<import("./generated-site-v3-art-direction-catalog").DesignControlsV3>;
+    /** Grammar-bounded section-order proposal; the compiler validates it and keeps the deterministic order when invalid. */
+    compositionPlan?: import("./generated-site-v3-composition-plan").CompositionPlanV3;
     source: "model";
   };
   /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
@@ -2036,7 +2173,6 @@ export type SiteArtifactScope =
 
 export type SiteArtifactType =
   | "copy_artifact"
-  | "copy_diff"
   | "business_context_report"
   | "change_impact_report"
   | "identity_reconcile_report"
@@ -2367,6 +2503,7 @@ export type AgentRunDetail = {
 
 export type JobKind =
   | "presence_assessment"
+  | "prospect_presence_report"
   | "audit_site"
   | "generate_site"
   | "agent_telemetry_cleanup"

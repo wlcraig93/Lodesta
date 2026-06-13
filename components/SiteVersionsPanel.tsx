@@ -1,5 +1,6 @@
 import { VersionPublishForm } from "@/components/VersionPublishForm";
 import type { SiteVersion } from "@/lib/models";
+import { assertSiteVersionV3, firstPageTitleForVersionV3, pageCountForVersionV3 } from "@/lib/site-version-v3";
 
 type SiteVersionsPanelProps = {
   siteId: string;
@@ -40,8 +41,8 @@ export function SiteVersionsPanel({
                 {formatDate(version.createdAt)}
                 <small>{version.id}</small>
               </td>
-              <td>{version.pages.length}</td>
-              <td>{version.pages[0]?.seo.title ?? version.pages[0]?.title ?? "Untitled"}</td>
+              <td>{pageCountForVersionV3(assertSiteVersionV3(version, "version panel item"))}</td>
+              <td>{firstPageTitleForVersionV3(assertSiteVersionV3(version, "version panel item"))}</td>
               <td>
                 <VersionPublishForm
                   siteId={siteId}

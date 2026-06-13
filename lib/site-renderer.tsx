@@ -1,7 +1,8 @@
 import * as React from "react";
-import type { BusinessLocationRecord, BusinessProfile, Experiment, ExtensionModel, PageModel, SiteLocationBinding, SiteModel, SiteVersion, Theme } from "./models";
+import type { BusinessLocationRecord, BusinessProfile, Experiment, ExtensionModel, SiteLocationBinding, SiteModel, SiteVersion, Theme } from "./models";
 import { getPublishedVersion } from "./sample-data";
 import { SiteRendererV3 } from "./site-renderer-v3";
+import type { PageV3 } from "./site-version-v3";
 
 type SiteRendererProps = {
   business: BusinessProfile;
@@ -10,7 +11,7 @@ type SiteRendererProps = {
   version?: SiteVersion;
   locations?: BusinessLocationRecord[];
   locationBindings?: SiteLocationBinding[];
-  page?: PageModel;
+  page?: PageV3;
   pageSlug?: string;
   theme?: Theme;
   experiments?: Experiment[];
@@ -24,6 +25,8 @@ type SiteRendererProps = {
   basePath?: string;
   /** Google proof mode (see SiteRendererV3); defaults to "none" for QA/internal renders. */
   proofMode?: "ui_kit" | "link_only" | "none";
+  /** Allow scraped reference-rights branding (see SiteRendererV3); admin/editor previews only. */
+  referenceBrandingEnabled?: boolean;
 };
 
 export function SiteRenderer({
@@ -39,7 +42,8 @@ export function SiteRenderer({
   tracking = true,
   formsEnabled = true,
   basePath,
-  proofMode
+  proofMode,
+  referenceBrandingEnabled
 }: SiteRendererProps) {
   const version = selectedVersion ?? getPublishedVersion(site);
   if (version.rendererVersion !== "layout-v3") {
@@ -58,6 +62,7 @@ export function SiteRenderer({
       formsEnabled={formsEnabled}
       basePath={basePath}
       proofMode={proofMode}
+      referenceBrandingEnabled={referenceBrandingEnabled}
     />
   );
 }

@@ -14,7 +14,7 @@ import type {
 import { getVisualSectionV3, type VisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { isDynamicHoursStatus } from "./business-understanding-v2";
 import { defaultServicesForVertical } from "./recipes";
-import { detectMetaInstructionalCopy } from "./generated-copy-v2";
+import { detectCopyTasteIssues, detectMetaInstructionalCopy } from "./generated-copy-v2";
 
 /** Candidate readiness requires at least this overall quality score. */
 export const qualityReadyThreshold = 75;
@@ -325,6 +325,23 @@ export function evaluateGenerationQualityV2(input: {
       break;
     }
   }
+  // Taste issues (hedging, internal taxonomy, clipped sentences) survive the
+  // editor pass occasionally. Advisory, not blocking: they cap section quality
+  // so they show up in the report and depress score without forcing a fallback
+  // to template copy.
+  if (deck) {
+    const tasteIssues = detectCopyTasteIssues(deck);
+    if (tasteIssues.length) {
+      sectionQuality = Math.min(sectionQuality, 62);
+      findings.push({
+        id: "copy_taste_issues",
+        severity: "advisory",
+        category: "section_quality",
+        detail: `${tasteIssues.length} copy taste issue(s): ${tasteIssues.slice(0, 4).join(" | ")}`
+      });
+    }
+  }
+
   const fillerFacts = sections
     .flatMap((entry) => factEntries(entry.visual))
     .filter((fact) => isFillerFact(fact.label, fact.value));
@@ -592,7 +609,7 @@ function v3Sections(version: SiteVersionV3): V3SectionEntry[] {
 }
 
 /** Shared chrome (contact/facts/location) is intentionally identical across pages and excluded from overlap. */
-const sharedChromeTemplates = new Set(["contact_split", "facts_strip", "location_panel", "facts_cta"]);
+const sharedChromeTemplates = new Set(["contact_split", "facts_strip", "location_directory", "location_showcase", "service_area_showcase", "facts_cta"]);
 
 function v3PageTexts(version: SiteVersionV3): Array<{ slug: string; texts: string[] }> {
   return version.pageComposition.pages.map((page) => ({

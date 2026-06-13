@@ -127,8 +127,8 @@ function issueFor(passed: boolean, id: string, pageId: string, field: SeoMetadat
 
 function pagesForVersion(version: SiteVersion | undefined) {
   if (!version) return [];
-  if (version.rendererVersion === "layout-v2") return version.compiledPages;
-  return version.pages;
+  if (version.rendererVersion === "layout-v3") return version.pageComposition.pages;
+  return [];
 }
 
 function sourceFactIdsForVersion(version: SiteVersion | undefined) {

@@ -35,11 +35,12 @@ export function CandidateReviewPane({
   const firstSlug = pages[0]?.slug ?? "";
   const [tab, setTab] = useState<string>(previewAvailable ? firstSlug : REPORT_TAB);
   const [device, setDevice] = useState<ReviewPaneDevice>("desktop");
+  const [rightsApproved, setRightsApproved] = useState(true);
 
   const showingReport = tab === REPORT_TAB;
   const activeSlug = showingReport ? firstSlug : tab;
   const previewPath = activeSlug ? `/${activeSlug}` : "";
-  const previewSrc = `/site-candidate-previews/${candidateId}${previewPath}`;
+  const previewSrc = `/site-candidate-previews/${candidateId}${previewPath}${rightsApproved ? "" : "?rights=declined"}`;
   const width = deviceWidths[device];
 
   return (
@@ -76,6 +77,26 @@ export function CandidateReviewPane({
         </div>
         {!showingReport && previewAvailable ? (
           <div className="candidate-review-toolbar-right">
+            <div className="candidate-review-devices" role="group" aria-label="Scraped media rights simulation">
+              <button
+                type="button"
+                aria-pressed={rightsApproved}
+                className={rightsApproved ? "is-active" : ""}
+                title="Preview with scraped media (owner attests rights)"
+                onClick={() => setRightsApproved(true)}
+              >
+                rights: yes
+              </button>
+              <button
+                type="button"
+                aria-pressed={!rightsApproved}
+                className={!rightsApproved ? "is-active" : ""}
+                title="Preview with backup imagery (owner declines media rights)"
+                onClick={() => setRightsApproved(false)}
+              >
+                rights: no
+              </button>
+            </div>
             <div className="candidate-review-devices" role="group" aria-label="Preview width">
               {(Object.keys(deviceWidths) as ReviewPaneDevice[]).map((name) => (
                 <button
@@ -101,7 +122,7 @@ export function CandidateReviewPane({
       ) : previewAvailable ? (
         <div className="candidate-review-frame-wrap" data-device={device}>
           <iframe
-            key={`${activeSlug}:${device}`}
+            key={`${activeSlug}:${device}:${rightsApproved ? "rights" : "norights"}`}
             className="candidate-review-frame"
             src={previewSrc}
             title={`${businessName} preview`}

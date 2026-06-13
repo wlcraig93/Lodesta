@@ -12,6 +12,7 @@
 export type ListPresentationIdV3 =
   | "action_tiles"
   | "program_rows"
+  | "stepper_vertical"
   | "service_problem_rows"
   | "menu_preview"
   | "premium_showcase"
@@ -58,8 +59,9 @@ export type ArtDirectionSectionRoleV3 = keyof SectionPresentationMapV3;
  */
 export const compatiblePresentationsForRoleV3 = {
   services: ["action_tiles", "coaching_cards", "service_problem_rows", "premium_showcase", "menu_preview", "card_grid", "numbered_ledger"],
-  // side_intro_rows hardcodes its row geometry; process admits no alternates yet.
-  process: ["program_rows"],
+  // program_rows renders inside side_intro_rows; stepper_vertical selects the
+  // full-width numbered_steps template instead (compiler maps axis → template).
+  process: ["program_rows", "stepper_vertical"],
   faq: ["faq_accordion"],
   factsStrip: ["trust_bar", "utility_rail", "inline_strip", "marquee"],
   heroFacts: ["inline_strip", "trust_bar", "hero_chips"],
@@ -115,6 +117,10 @@ export type HeadingCaseV3 = "standard" | "display_upper";
 export type BadgeStyleV3 = "square" | "rounded" | "tilted";
 export type FactHighlightV3 = "plain" | "accent_value";
 export type HeaderSurfaceV3 = "neutral" | "brand_bar";
+/** Closing CTA band surface; "paper" exists so page bottoms can avoid stacking two dark bands. */
+export type CtaBandToneV3 = "dark" | "brand" | "paper";
+/** Numeral rendering for numbered lists/steps (program rows, vertical stepper, ledgers). */
+export type NumberStyleV3 = "oversized" | "outlined" | "filled_chip";
 
 /** Resolved control values — the rendering authority stored on the version. */
 export type DesignControlsV3 = {
@@ -125,6 +131,8 @@ export type DesignControlsV3 = {
   badgeStyle: BadgeStyleV3;
   factHighlight: FactHighlightV3;
   headerSurface: HeaderSurfaceV3;
+  ctaBandTone: CtaBandToneV3;
+  numberStyle: NumberStyleV3;
 };
 
 export type DesignRegisterV3 = "punchy_retail" | "steady_professional" | "warm_boutique";
@@ -187,7 +195,9 @@ export function resolveDesignControlsV3(profile: DesignProfileV3): DesignControl
         headingCase: accentForward ? "display_upper" : "standard",
         badgeStyle: "tilted",
         factHighlight: "accent_value",
-        headerSurface: accentForward ? "brand_bar" : "neutral"
+        headerSurface: accentForward ? "brand_bar" : "neutral",
+        ctaBandTone: accentForward ? "brand" : "dark",
+        numberStyle: accentForward ? "filled_chip" : "oversized"
       };
     case "warm_boutique":
       return {
@@ -197,7 +207,9 @@ export function resolveDesignControlsV3(profile: DesignProfileV3): DesignControl
         headingCase: "standard",
         badgeStyle: "rounded",
         factHighlight: accentForward ? "accent_value" : "plain",
-        headerSurface: "neutral"
+        headerSurface: "neutral",
+        ctaBandTone: "paper",
+        numberStyle: "oversized"
       };
     case "steady_professional":
       return {
@@ -207,7 +219,9 @@ export function resolveDesignControlsV3(profile: DesignProfileV3): DesignControl
         headingCase: "standard",
         badgeStyle: "square",
         factHighlight: accentForward ? "accent_value" : "plain",
-        headerSurface: "neutral"
+        headerSurface: "neutral",
+        ctaBandTone: "dark",
+        numberStyle: "outlined"
       };
   }
 }

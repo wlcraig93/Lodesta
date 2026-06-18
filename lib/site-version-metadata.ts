@@ -76,6 +76,9 @@ export function summarizeRenderInspection(result: RenderInspectionResult): {
 } {
   const failingFindingCount = result.findings.filter((finding) => finding.severity === "fail").length;
   const warningFindingCount = result.findings.filter((finding) => finding.severity === "warning").length;
+  const sectionFindings = (result.sectionInspections ?? []).flatMap((section) => section.findings);
+  const sectionFailingFindingCount = sectionFindings.filter((finding) => finding.severity === "fail").length;
+  const sectionWarningFindingCount = sectionFindings.filter((finding) => finding.severity === "warning").length;
   return {
     inspectionSummary: {
       target: result.target,
@@ -87,6 +90,10 @@ export function summarizeRenderInspection(result: RenderInspectionResult): {
       findingCount: result.findings.length,
       failingFindingCount,
       warningFindingCount,
+      sectionInspectionCount: result.sectionInspections?.length,
+      sectionFailingFindingCount,
+      sectionWarningFindingCount,
+      sectionScreenshotCount: result.sectionScreenshots?.length,
       metricsByViewport: result.metricsByViewport
     },
     artifactRefs: [...result.screenshots, ...(result.aboveFoldScreenshots ?? [])].map((screenshot) => ({

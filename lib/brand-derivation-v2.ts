@@ -229,9 +229,15 @@ export function deriveBrandThemeV2(input: {
 
 /** Deterministic per-site seed for bounded composition variation. */
 export function siteVariationSeedV2(siteId: string): number {
-  let hash = 0;
+  let hash = 2166136261;
   for (let index = 0; index < siteId.length; index += 1) {
-    hash = (hash * 31 + siteId.charCodeAt(index)) >>> 0;
+    hash ^= siteId.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-  return hash;
+  hash += hash << 13;
+  hash ^= hash >>> 7;
+  hash += hash << 3;
+  hash ^= hash >>> 17;
+  hash += hash << 5;
+  return hash >>> 0;
 }

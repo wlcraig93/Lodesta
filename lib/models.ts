@@ -47,6 +47,70 @@ export type AssetReference = {
   /** Natural pixel dimensions, when measured. Render surfaces must not display an asset above its natural size. */
   width?: number;
   height?: number;
+  /** Model vision analysis for source/customer assets; generated/library assets may omit it. */
+  analysisV1?: AssetAnalysisV1;
+};
+
+export type AssetAnalysisImageKindV1 =
+  | "logo"
+  | "storefront"
+  | "team"
+  | "person"
+  | "vehicle"
+  | "repair_detail"
+  | "before_after"
+  | "interior"
+  | "equipment"
+  | "product"
+  | "food"
+  | "space"
+  | "generic_graphic"
+  | "text_heavy_graphic"
+  | "low_quality"
+  | "unknown";
+
+export type AssetAnalysisUsableSlotV1 = "hero" | "service" | "proof" | "gallery" | "background" | "logo";
+export type AssetAnalysisFocalPointV1 = "center" | "top" | "bottom" | "left" | "right";
+export type AssetAnalysisCropIntentV1 = "subject" | "wide" | "portrait" | "center" | "detail_zoom";
+export type AssetAnalysisWarningV1 =
+  | "low_resolution"
+  | "blurry"
+  | "text_overlay"
+  | "logo_like"
+  | "collage_or_composite"
+  | "awkward_empty_space"
+  | "poor_lighting"
+  | "not_business_relevant"
+  | "rights_review_required";
+
+export type AssetAnalysisCropRecommendationV1 = {
+  focalPoint: AssetAnalysisFocalPointV1;
+  cropIntent: AssetAnalysisCropIntentV1;
+  suitability: number;
+  notes?: string;
+};
+
+export type AssetAnalysisV1 = {
+  version: "asset-analysis-v1";
+  source: "openai";
+  model: string;
+  analyzedAt: string;
+  imageKind: AssetAnalysisImageKindV1;
+  qualityScore: number;
+  usableSlots: AssetAnalysisUsableSlotV1[];
+  focalPoint: AssetAnalysisFocalPointV1;
+  subjectPlacement: "centered" | "left" | "right" | "top" | "bottom" | "full_frame" | "unclear";
+  recommendedCropIntent: AssetAnalysisCropIntentV1;
+  cropRecommendations: {
+    wide: AssetAnalysisCropRecommendationV1;
+    square: AssetAnalysisCropRecommendationV1;
+    portrait: AssetAnalysisCropRecommendationV1;
+    card: AssetAnalysisCropRecommendationV1;
+  };
+  warnings: AssetAnalysisWarningV1[];
+  contentTags: string[];
+  summary: string;
+  limitations: string[];
 };
 
 export type AssetKind = "photo" | "logo" | "mockup" | "screenshot" | "icon" | "document" | "other";
@@ -608,9 +672,26 @@ export type SiteArtDirectionRecipeV3 = {
   density: "open" | "balanced" | "dense";
 };
 
+export type SiteArtDirectionNavPlanV3 = {
+  source: "site_director";
+  items: Array<{
+    label: string;
+    kind: "anchor" | "page" | "dropdown";
+    target?: string;
+    children?: Array<{ label: string; target: string }>;
+  }>;
+  primaryCta: { label: string; target: string };
+};
+
 export type SiteArtDirectionV3 = {
   version: "site-art-direction-v3";
   recipeId: string;
+  /** Coherent visual direction assigned before section hydration; used for fleet differentiation diagnostics. */
+  designArchetypeId?: string;
+  /** Human-readable reason for the archetype assignment. */
+  archetypeAssignmentReason?: string;
+  /** Geometry pressure supplied to the SiteDirector/compiler for this generation. */
+  geometryDiversityDirective?: string;
   fontPairingId: SiteArtDirectionFontPairingIdV3;
   colorSystem: SiteArtDirectionRecipeV3["colorSystem"];
   spacingRhythm: SiteArtDirectionRecipeV3["spacingRhythm"];
@@ -623,6 +704,8 @@ export type SiteArtDirectionV3 = {
   weightScale?: import("./generated-site-v3-art-direction-catalog").ArtDirectionWeightScaleV3;
   /** Per-section-role presentation choices; unset roles keep compiler defaults. */
   sectionPresentation?: import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
+  /** Bounded header/nav plan emitted by the AI site director. */
+  navPlan?: SiteArtDirectionNavPlanV3;
   /**
    * Design profile (learning signal) + resolved dressing controls (rendering
    * authority). Renders ALWAYS read `controls`; the profile feeds analysis
@@ -786,11 +869,49 @@ export type SiteVersionV3 = SiteVersionBase & {
   artDirectionDecision?: ArtDirectionDecisionV3;
   pageComposition: PageCompositionV3;
   mediaDecisions: MediaAssetDecisionV3[];
+  designArchetypeId?: string;
+  archetypeAssignmentReason?: string;
+  geometryDiversityDirective?: string;
+  compilerDecisions?: GeneratedSiteCompilerDecisionV3[];
+  sectionOptionSequence?: string[];
+  mediaReuseDecisions?: GeneratedSiteMediaReuseDecisionV3[];
   visualQa?: VisualQaReportV3;
   artifactRefs: SiteVersionArtifactRefV2[];
 };
 
 export type SiteVersion = SiteVersionV1 | SiteVersionV2 | SiteVersionV3;
+
+export type GeneratedSiteCompilerDecisionV3 = {
+  id: string;
+  kind:
+    | "template_option_clamp"
+    | "archetype_assignment"
+    | "default_heavy_variant_selection"
+    | "composition_section_drop"
+    | "quality_profile_assignment"
+    | "media_suitability_reject"
+    | "proof_section_fallback"
+    | "service_semantic_dedupe"
+    | "profile_archetype_constraint"
+    | "repair_target_geometry"
+    | "repair_target_media_suitability";
+  severity: "info" | "warning";
+  sectionId?: string;
+  templateId?: string;
+  optionName?: string;
+  requestedValue?: string;
+  resolvedValue?: string;
+  reason: string;
+};
+
+export type GeneratedSiteMediaReuseDecisionV3 = {
+  id: string;
+  sectionId: string;
+  slotId: string;
+  originalUrl: string;
+  replacementUrl?: string;
+  reason: "duplicate_replaced" | "duplicate_allowed_no_alternative";
+};
 
 export type SiteModel = {
   id: string;
@@ -838,6 +959,66 @@ export type GenerationQaRepairLog = {
   attemptedAt?: string;
   mutationSummaries: string[];
   unresolvedBlockerIds: string[];
+  passCount?: number;
+  patches?: GenerationQaRepairPatch[];
+  unresolvedTargetIds?: string[];
+};
+
+export type GenerationQaRepairTarget = {
+  id: string;
+  target:
+    | "copy_slot"
+    | "asset_crop"
+    | "director_plan"
+    | "template_geometry"
+    | "source_evidence"
+    | "score_calibration";
+  activation: "live" | "telemetry_only" | "phase_2_pending";
+  priority: "high" | "medium" | "low";
+  source: "blocker" | "warning" | "scorecard" | "visual_qa" | "render_inspection";
+  findingId: string;
+  title: string;
+  detail: string;
+  sectionId?: string;
+  templateId?: string;
+  slotId?: string;
+  copyPart?: string;
+  itemIndex?: number;
+  viewport?: RenderViewportName;
+};
+
+export type GenerationQaRepairPatch = {
+  id: string;
+  version: "generation-repair-patch-v1";
+  pass: number;
+  targetId: string;
+  target: GenerationQaRepairTarget["target"];
+  kind: "director_plan" | "mechanical_cleanup" | "copy_slot" | "asset_crop" | "template_geometry";
+  status: "applied" | "rejected";
+  sourceFindingId: string;
+  sectionId?: string;
+  templateId?: string;
+  slotId?: string;
+  copyPart?: string;
+  itemIndex?: number;
+  viewport?: RenderViewportName;
+  beforeSummary?: string;
+  afterSummary?: string;
+  mutationSummary: string;
+  rejectionReason?: string;
+  clearedFindingIds?: string[];
+  introducedBlockerIds?: string[];
+};
+
+export type GenerationRepairStateV1 = {
+  version: "generation-repair-state-v1";
+  attemptedAt: string;
+  mode: "normal_generation" | "operator_premium_generation";
+  maxPasses: number;
+  passCount: number;
+  patches: GenerationQaRepairPatch[];
+  unresolvedTargetIds: string[];
+  unresolvedBlockerIds: string[];
 };
 
 export type GenerationQaPrimaryScreenshot = {
@@ -862,6 +1043,7 @@ export type GenerationQaMetadata = {
   visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
   repair?: GenerationQaRepairLog;
+  repairTargets?: GenerationQaRepairTarget[];
   qualityReport?: GenerationQualityReport;
   scorecard?: GenerationScorecard;
   factCoverage?: import("./fact-coverage").FactCoverageReport;
@@ -886,25 +1068,39 @@ export type ScorecardDimensionId =
   | "accessibility";
 
 export type ScorecardGateState = "unscored" | "shadow" | "enforcing" | "disabled";
+export type ScorecardDimensionRequirement = "required" | "tracked";
+export type GenerationQualityVerdict = "blocked" | "needs_review" | "ready" | "premium";
+
+export type ScorecardDimensionFinding = {
+  id: string;
+  severity: "blocking" | "major" | "warning";
+  title: string;
+  detail: string;
+  viewport?: RenderViewportName;
+};
 
 export type ScorecardDimension = {
   id: ScorecardDimensionId;
   /** 0-100; absent exactly when state is "unscored". */
   score?: number;
   state: ScorecardGateState;
-  /** Publish threshold this dimension is held to when enforcing. */
+  requirement: ScorecardDimensionRequirement;
+  /** Readiness threshold this dimension is held to when required. */
   gate: number;
+  /** Premium threshold this dimension is held to for premium verdicts. */
+  premiumTarget: number;
   /** Which existing signals fed the projection (for operator debugging). */
   signals: string[];
-  /** Defined only when the dimension is scored and its state can gate. */
+  findings: ScorecardDimensionFinding[];
+  /** `passes` is readiness-only for required dimensions; `premiumPasses` is defined for every scored dimension. */
   passes?: boolean;
+  premiumPasses?: boolean;
 };
 
 export type GenerationScorecard = {
-  version: "scorecard-v1";
+  version: "scorecard-v2";
   dimensions: ScorecardDimension[];
-  /** Informational weighted blend over scored dimensions only. */
-  overall?: number;
+  verdict: GenerationQualityVerdict;
   evaluatedAt: string;
 };
 
@@ -958,9 +1154,45 @@ export type GeneratedServicePageCopyV2 = {
   seo: { title: string; description: string };
 };
 
+export type GeneratedCopySlotJobV2 = {
+  slotId: string;
+  point: string;
+  proofToUse?: string;
+  customerQuestion?: string;
+  slotShape?: string;
+  avoid?: string;
+  genericRisk?: string;
+};
+
+export type GeneratedCopySectionJobV2 = {
+  sectionId: string;
+  /**
+   * Transitional summary retained for older fixtures and reports. Model-backed
+   * generation writes the structured fields below.
+   */
+  job?: string;
+  avoid?: string;
+  point?: string;
+  proofToUse?: string;
+  customerQuestion?: string;
+  slotShape?: string;
+  genericRisk?: string;
+  slotJobs?: GeneratedCopySlotJobV2[];
+};
+
+export type GeneratedCopyPlanV2 = {
+  siteArgument: string;
+  proofHierarchy: string[];
+  sectionJobs: GeneratedCopySectionJobV2[];
+  ctaRhythm: string;
+  repetitionRisks: string[];
+};
+
 export type GeneratedCopyDeckV2 = {
   version: "generated-copy-deck-v2";
   source: "openai";
+  /** Page-level copy strategy used before section slot writing. New model-backed decks include this; stale/internal fixtures may omit it. */
+  copyPlan?: GeneratedCopyPlanV2;
   hero: { eyebrow?: string; heading: string; body: string };
   servicesIntro: { heading: string; body: string };
   serviceItems: Array<{ title: string; body: string }>;
@@ -1024,10 +1256,9 @@ export type GenerationQualityReport = {
   version: "generation-quality-v2";
   overallScore: number;
   /**
-   * INTERNAL measurement instrument only: the critic judges on an anchored
-   * 1-10 scale (coarse anchored scales keep LLM judges consistent). The
-   * reported metric is the scorecard's visual_design dimension (craft x 10,
-   * 0-100). Never surface this raw value to operators — read the scorecard.
+   * INTERNAL measurement instrument only: native 0-100 visual-craft score
+   * from model visual QA. Never surface this raw value to operators — read
+   * the scorecard.
    */
   craft?: number;
   rubric: GenerationQualityRubricScores;
@@ -1706,12 +1937,31 @@ export type RenderScreenshotArtifact = {
   capturedAt: string;
 };
 
+export type RenderSectionScreenshotArtifact = RenderScreenshotArtifact & {
+  sectionIndex: number;
+  sectionId?: string;
+  templateId?: string;
+  label: string;
+  sectionTop: number;
+  sectionHeight: number;
+  clipped?: boolean;
+};
+
 export type RenderInspectionFinding = {
   id: string;
   severity: "pass" | "warning" | "fail";
   title: string;
   evidence: string;
   viewport?: RenderViewportName;
+  sectionId?: string;
+  templateId?: string;
+  slotRole?: string;
+  slotKind?: string;
+  copyPart?: string;
+  itemIndex?: number;
+  mediaIndex?: number;
+  factIndex?: number;
+  actionIndex?: number;
 };
 
 export type RenderInspectionTarget = "source_site" | "generated_site";
@@ -1723,6 +1973,27 @@ export type RenderElementRect = {
   bottom: number;
   width: number;
   height: number;
+};
+
+export type RenderSectionInspection = {
+  viewport: RenderViewportName;
+  sectionIndex: number;
+  sectionId?: string;
+  templateId?: string;
+  label: string;
+  rect: RenderElementRect;
+  textChars: number;
+  fillRatio: number;
+  imageCount: number;
+  brokenImageCount: number;
+  minTextContrastRatio?: number;
+  headingOverflowPx: number;
+  blockOverlapMaxRatio: number;
+  figureOverlapMaxRatio: number;
+  crampedTextCount: number;
+  findings: RenderInspectionFinding[];
+  screenshotPath?: string;
+  screenshotBytes?: number;
 };
 
 export type RenderViewportMetrics = {
@@ -1779,10 +2050,19 @@ export type RenderViewportMetrics = {
   crampedTextSamples?: string[];
   heroMediaEdgeClipCount?: number;
   heroMediaEdgeClipSamples?: string[];
+  sectionMediaOverflowCount?: number;
+  sectionMediaOverflowSamples?: string[];
+  formAffordanceIssueCount?: number;
+  formAffordanceIssueSamples?: string[];
+  contactFactWrapIssueCount?: number;
+  contactFactWrapIssueSamples?: string[];
+  consoleErrorCount?: number;
+  consoleErrorSamples?: string[];
   headingFontFamily?: string;
   bodyFontFamily?: string;
   /** Computed colors sampled from the page (header/buttons/links) for brand derivation. */
   brandColorSamples?: string[];
+  sectionInspections?: RenderSectionInspection[];
   rects?: {
     hero?: RenderElementRect;
     h1?: RenderElementRect;
@@ -1802,6 +2082,10 @@ export type RenderInspectionSummary = {
   findingCount: number;
   failingFindingCount: number;
   warningFindingCount: number;
+  sectionInspectionCount?: number;
+  sectionFailingFindingCount?: number;
+  sectionWarningFindingCount?: number;
+  sectionScreenshotCount?: number;
   metricsByViewport?: Partial<Record<RenderViewportName, RenderViewportMetrics>>;
 };
 
@@ -1830,6 +2114,8 @@ export type RenderInspectionResult = {
    * separate from `screenshots` so model visual QA inputs stay unchanged.
    */
   aboveFoldScreenshots?: RenderScreenshotArtifact[];
+  sectionScreenshots?: RenderSectionScreenshotArtifact[];
+  sectionInspections?: RenderSectionInspection[];
   findings: RenderInspectionFinding[];
   metrics: {
     htmlBytes?: number;
@@ -1876,6 +2162,14 @@ export type RenderInspectionResult = {
     crampedTextSamples?: string[];
     heroMediaEdgeClipCount?: number;
     heroMediaEdgeClipSamples?: string[];
+    sectionMediaOverflowCount?: number;
+    sectionMediaOverflowSamples?: string[];
+    formAffordanceIssueCount?: number;
+    formAffordanceIssueSamples?: string[];
+    contactFactWrapIssueCount?: number;
+    contactFactWrapIssueSamples?: string[];
+    consoleErrorCount?: number;
+    consoleErrorSamples?: string[];
     headingFontFamily?: string;
     bodyFontFamily?: string;
     brandColorSamples?: string[];
@@ -1923,8 +2217,10 @@ export type VisualQaResult = {
   screenshotCount: number;
   selectedDesignDirectionId?: string;
   summary: string;
+  /** Native score scale marker. Missing means pre-score-scale migration. */
+  scoreScale?: "visual_qa_score_100_v1";
   score?: {
-    /** Anchored "would an owner pay for this" craft grade; never inflated by floor metrics. */
+    /** 0-100 anchored "would an owner pay for this" craft grade; never inflated by floor metrics. */
     craft?: number;
     overall: number;
     brand: number;
@@ -2126,8 +2422,19 @@ export type PresenceAssessment = {
     overrides: Partial<import("./generated-site-v3-art-direction-catalog").DesignControlsV3>;
     /** Grammar-bounded section-order proposal; the compiler validates it and keeps the deterministic order when invalid. */
     compositionPlan?: import("./generated-site-v3-composition-plan").CompositionPlanV3;
+    /** Catalog-bounded model-selected section presentation map; omitted roles keep compiler defaults. */
+    presentationMap?: import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
     source: "model";
   };
+  /**
+   * Catalog-bounded AI site director runtime record. This is the staged
+   * replacement for hidden seed-owned creative decisions; current compiler
+   * stages consume its safe order/presentation controls while hydration is
+   * being split out.
+   */
+  siteDirectorPlanV1?: import("./site-director-plan-v1").SiteDirectorRuntimeV1;
+  /** Operator/debug metadata for bounded generation repair; public rendering reads the repaired site model, not this telemetry. */
+  generationRepairStateV1?: GenerationRepairStateV1;
   /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
   textFirstFallbackApproval?: {
     approvedBy: string;
@@ -2391,6 +2698,7 @@ export type BusinessLocationRecord = {
 };
 
 export type SiteCandidateStatus = "ready" | "blocked" | "accepted" | "archived";
+export type SiteCandidatePurpose = "customer_prospect" | "test_generation";
 
 export type SiteCandidateRecord = {
   id: string;
@@ -2403,6 +2711,7 @@ export type SiteCandidateRecord = {
   candidateSlug: string;
   bundle: SiteBundle;
   status: SiteCandidateStatus;
+  candidatePurpose: SiteCandidatePurpose;
   intendedSiteId?: string;
   acceptedSiteId?: string;
   acceptedVersionId?: string;

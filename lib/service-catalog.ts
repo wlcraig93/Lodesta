@@ -66,6 +66,17 @@ export const serviceCatalog: ServiceDefinition[] = [
   definition("auto_services", "brake-service", "Brake Service", ["brake repair", "brake service", "brakes", "brake pads"], [
     "How do I know when my brakes need service?"
   ]),
+  definition("auto_services", "auto-repair", "Auto Repair", ["auto repair", "car repair", "vehicle repair", "mechanic", "automotive repair"], [
+    "What details should I share before an auto repair visit?",
+    "Can you inspect the vehicle before quoting the repair?"
+  ]),
+  definition("auto_services", "diagnostics", "Diagnostics", ["diagnostics", "check engine", "diagnostic", "warning light"], [
+    "What information helps with a diagnostic visit?",
+    "Can I drive with the warning light on?"
+  ]),
+  definition("auto_services", "auto-glass", "Auto Glass", ["auto glass", "windshield", "glass replacement", "window replacement"], [
+    "Do you handle windshield or side-glass replacement?"
+  ]),
   definition("auto_services", "tire-delivery", "Tire Delivery", ["tire delivery", "delivery", "mobile tire"], [
     "Do you deliver and install tires on site?"
   ]),
@@ -84,6 +95,21 @@ export const serviceCatalog: ServiceDefinition[] = [
   ]),
   definition("auto_body", "bumper-repair", "Bumper Repair", ["bumper repair", "bumper"], [
     "Can plastic bumpers be repaired?"
+  ]),
+  definition("auto_body", "hail-damage", "Hail Damage Repair", ["hail damage", "storm damage", "hail repair"], [
+    "What photos help after hail damage?"
+  ]),
+  definition("auto_body", "frame-repair", "Frame & Structural Repair", ["frame repair", "frame straightening", "structural repair", "unibody"], [
+    "How do I know if frame or structural damage needs inspection?"
+  ]),
+  definition("auto_body", "repair-estimates", "Repair Estimates", ["estimate", "free estimate", "repair quote", "quote"], [
+    "What should I bring for a repair estimate?"
+  ]),
+  definition("auto_body", "insurance-claims", "Insurance Claim Support", ["insurance", "insurance claim", "claim support", "all insurance", "deductible"], [
+    "What information helps when insurance is involved?"
+  ]),
+  definition("auto_body", "custom-paint", "Custom Paint", ["custom paint", "custom painting", "paint work", "custom refinish"], [
+    "What details help plan custom paint work?"
   ]),
   // --- home_services ---
   definition("home_services", "plumbing-repair", "Plumbing Repair", ["plumbing repair", "plumbing", "plumber"], [

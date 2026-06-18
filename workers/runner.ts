@@ -6,6 +6,7 @@ import { repository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
 import { runAudit } from "../lib/audit";
+import { resolveWorkerIdleMs } from "../lib/worker-runtime";
 
 let shuttingDown = false;
 process.once("SIGTERM", () => {
@@ -55,7 +56,14 @@ async function main() {
   }
 
   if (command === "work") {
-    const idleMs = Number(process.argv[3] ?? 5000);
+    const idleResolution = resolveWorkerIdleMs({
+      positional: process.argv[3],
+      env: process.env.LODESTA_WORKER_IDLE_MS
+    });
+    for (const warning of idleResolution.warnings) {
+      console.warn(`[worker] ${warning}`);
+    }
+    const idleMs = idleResolution.idleMs;
     const maxLoops = process.argv[4] ? Number(process.argv[4]) : undefined;
     let loops = 0;
     while (!shuttingDown && (!maxLoops || loops < maxLoops)) {

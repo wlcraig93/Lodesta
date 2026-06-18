@@ -8,14 +8,17 @@
  * Invalid or absent plans fall back to the deterministic default order, so
  * generation never blocks on model output and today's behavior is the floor.
  *
- * Hero and contact are not plannable: hero is always first, contact always
- * last. Archetypes exist only as prompt exemplars, never as runtime code.
+ * Hero is not plannable: it is always first. Contact is plannable so
+ * conversion-led sites can place the form after enough service context instead
+ * of burying it at the bottom. Archetypes exist only as prompt exemplars,
+ * never as runtime code.
  */
 
 export const compositionIntentMenuV3 = [
   "facts",
   "story",
   "services",
+  "proof",
   "pricing",
   "process",
   "about",
@@ -24,6 +27,7 @@ export const compositionIntentMenuV3 = [
   "testimonials",
   "faq",
   "cta_band",
+  "contact",
   "location"
 ] as const;
 
@@ -77,7 +81,7 @@ export function validateCompositionPlanV3(
     }
   }
 
-  for (const required of ["services", "faq", "cta_band"] as const) {
+  for (const required of ["services", "proof", "faq", "cta_band", "contact"] as const) {
     if (builtById.has(required) && !seen.has(required)) {
       violations.push(`Intent "${required}" is required when available.`);
     }
@@ -100,27 +104,36 @@ export function validateCompositionPlanV3(
     }
   }
 
-  // Contact (always last, always a strong band) must not stack directly on a
-  // strong-band CTA: something must sit between, or the CTA tone must soften.
+  // Contact and a strong-band CTA must not stack directly: something must sit
+  // between, or the CTA tone must soften.
   const lastEntry = entries[entries.length - 1];
   if (lastEntry?.intent === "cta_band") {
     const cta = builtById.get("cta_band");
     if (cta?.backgroundKey && strongBandBackgrounds.has(cta.backgroundKey)) {
-      violations.push('A dark/brand "cta_band" may not sit directly above the contact band; move it earlier or use the paper tone.');
+      violations.push('A dark/brand "cta_band" may not be the final planned section; move it earlier or use the paper tone.');
+    }
+  }
+  for (let index = 1; index < entries.length; index += 1) {
+    const previous = entries[index - 1].intent;
+    const current = entries[index].intent;
+    const adjacentContactCta =
+      (previous === "cta_band" && current === "contact") || (previous === "contact" && current === "cta_band");
+    const cta = builtById.get("cta_band");
+    if (adjacentContactCta && cta?.backgroundKey && strongBandBackgrounds.has(cta.backgroundKey)) {
+      violations.push('A dark/brand "cta_band" may not sit directly beside the contact band; move a lighter section between them or use the paper tone.');
     }
   }
 
   return violations;
 }
 
-/** Reorders sections per an already-validated plan. Hero stays first, contact stays last; unplanned middles drop. */
+/** Reorders sections per an already-validated plan. Hero stays first; unplanned middles drop. */
 export function applyCompositionPlanV3<TSection extends { id: string }>(
   sections: readonly TSection[],
   plan: CompositionPlanV3
 ): { sections: TSection[]; dropped: string[] } {
   const head = sections.filter((section) => section.id === "hero");
-  const tail = sections.filter((section) => section.id === "contact");
-  const middle = sections.filter((section) => section.id !== "hero" && section.id !== "contact");
+  const middle = sections.filter((section) => section.id !== "hero");
   const middleById = new Map(middle.map((section) => [section.id, section]));
   const ordered: TSection[] = [];
   for (const entry of plan.sections) {
@@ -130,8 +143,13 @@ export function applyCompositionPlanV3<TSection extends { id: string }>(
       middleById.delete(entry.intent);
     }
   }
+  const unplannedContact = middleById.get("contact");
+  if (unplannedContact) {
+    ordered.push(unplannedContact);
+    middleById.delete("contact");
+  }
   return {
-    sections: [...head, ...ordered, ...tail],
+    sections: [...head, ...ordered],
     dropped: [...middleById.keys()]
   };
 }

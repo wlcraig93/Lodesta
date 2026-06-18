@@ -18,7 +18,7 @@ const heroCopy = {
 };
 
 const mediaSlot = {
-  items: [{ url: "/generated-site-assets/auto-body/bodywork-hero-v1.jpg", label: "Shop detail" }]
+  items: [{ url: "/generated-site-assets/auto-body/lift-bay-overview-v1.png", label: "Shop detail" }]
 };
 
 function baseHeroSplitSection(background: NonImageBackgroundV3 = { kind: "solid", token: "page" }): VisualSectionV3 {
@@ -65,7 +65,7 @@ assert.ok(legacyResult.violations.some((violation) => violation.id === "visual.l
 
 const splitWithImage = {
   ...baseHeroSplitSection({ kind: "solid", token: "page" }),
-  options: { background: { kind: "image", url: "/generated-site-assets/auto-body/bodywork-hero-v1.jpg" } }
+  options: { background: { kind: "image", url: "/generated-site-assets/auto-body/lift-bay-overview-v1.png" } }
 } as unknown as VisualSectionV3;
 const splitWithImageResult = compileVisualSectionV3(splitWithImage);
 assert.ok(splitWithImageResult.violations.some((violation) => violation.id === "visual.background_kind_disallowed" || violation.id === "visual.hero_split_image_background_disallowed"), "Split hero should reject image backgrounds.");

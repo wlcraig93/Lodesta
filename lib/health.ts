@@ -166,25 +166,41 @@ function checkGooglePlacesConfig(): HealthCheck {
 }
 
 function checkLocationMapConfig(): HealthCheck {
-  const mode = process.env.LODESTA_LOCATION_MAP_MODE || "link_only";
+  const hasPublicMapKey = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY);
+  const mode = process.env.LODESTA_LOCATION_MAP_MODE || "auto";
+  if (mode === "auto") {
+    return ok(
+      "location_maps",
+      "Location maps",
+      hasPublicMapKey
+        ? "Location panels use the designed map fallback by default; explicit embed mode can use the configured public key."
+        : "Location panels use the designed map fallback by default."
+    );
+  }
+  if (mode === "classic_embed") {
+    return ok("location_maps", "Location maps", "Location panels use keyless embedded Google Maps with link fallbacks.");
+  }
   if (mode === "embed") {
-    if (process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY) {
+    if (hasPublicMapKey) {
       return ok(
         "location_maps",
         "Location maps",
-        "Embedded location maps are enabled. Confirm the public Google Maps Embed key is HTTP-referrer restricted."
+        "Embedded location maps are enabled. Confirm the public Google Maps key is HTTP-referrer restricted."
       );
     }
     return warning(
       "location_maps",
       "Location maps",
-      "LODESTA_LOCATION_MAP_MODE=embed but NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY is not set; generated sites will fall back to map links."
+      "LODESTA_LOCATION_MAP_MODE=embed but no public Google Maps key is set; generated sites will use the designed map fallback."
     );
   }
-  if (mode !== "link_only") {
-    return warning("location_maps", "Location maps", "Unknown LODESTA_LOCATION_MAP_MODE; generated sites will use link-only map actions.");
+  if (mode === "off") {
+    return ok("location_maps", "Location maps", "Location map embeds are disabled; generated sites keep directions links.");
   }
-  return ok("location_maps", "Location maps", "Location panels use link-only Google Maps actions by default.");
+  if (mode !== "link_only") {
+    return warning("location_maps", "Location maps", "Unknown LODESTA_LOCATION_MAP_MODE; generated sites will use automatic map panels.");
+  }
+  return ok("location_maps", "Location maps", "Location panels use link-only Google Maps actions.");
 }
 
 function checkAssetStorageConfig(): HealthCheck {

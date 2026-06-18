@@ -3,7 +3,7 @@ import {
   startRequiredSiteCandidateTelemetry,
   type AgentTelemetryRepository
 } from "./agent-telemetry";
-import { createSiteV3FromInput } from "./intake";
+import { createSiteV3FromInput, type IntakeInput } from "./intake";
 import { slugify } from "./slug";
 import { prepareIntakeInput } from "./intake-pipeline";
 import { understandingVerticalConfidenceFloor } from "./business-understanding-v2";
@@ -15,7 +15,8 @@ import { createOpenAiGeneratedCopyDeck, lintGeneratedCopyDeck } from "./generate
 import { runInitialGeneratedSiteReadiness } from "./generated-site-readiness";
 import { persistPrimaryQaScreenshot } from "./candidate-screenshot";
 import { runShadowCraftLoop } from "./craft-loop";
-import { createDesignBrief } from "./design-brief-v1";
+import { createOpenAiSiteDirectorPlanV1 } from "./site-director-plan-generation-v1";
+import { analyzeBusinessAssetsV1 } from "./asset-analysis-v1";
 import { applyGeneratedSiteV3, applyGeneratedSiteV3WithAssetLibrary } from "./generated-site-v3-pipeline";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { assertSiteVersionV3, pageCountForVersionV3 } from "./site-version-v3";
@@ -26,6 +27,7 @@ import type {
   GenerationQaBlocker,
   SiteBundle,
   SiteCandidateRecord,
+  SiteCandidatePurpose,
   Vertical
 } from "./models";
 import type { CreateSiteInput, LodestaRepository } from "./repository";
@@ -43,6 +45,8 @@ export type GenerateSitePreviewOptions = {
   origin?: string;
 };
 
+export type ModelFallbackPolicy = "fail" | "allow";
+
 export type GenerateSiteOptions = {
   repository: SiteCandidateRepository;
   input: CreateSiteInput;
@@ -50,7 +54,14 @@ export type GenerateSiteOptions = {
   actorType?: string;
   actorId?: string;
   metadata?: Record<string, unknown>;
+  candidatePurpose?: SiteCandidatePurpose;
   preview?: GenerateSitePreviewOptions;
+  /**
+   * Canonical candidate generation must fail when model-backed understanding,
+   * planning, copy, or final visual QA is unavailable. Deterministic fallback is
+   * reserved for explicit tests/fixture rendering where the caller opts in.
+   */
+  modelFallbackPolicy?: ModelFallbackPolicy;
 };
 
 export type GenerateSiteResult = {
@@ -103,8 +114,21 @@ export function createPreCompileSiteCandidateBlock(input: PreCompileSiteCandidat
   return new PreCompileSiteCandidateBlockError(input);
 }
 
+function assertCanonicalModelStagesAvailable(prepared: IntakeInput, allowModelFallback: boolean) {
+  if (allowModelFallback) return;
+  const fallbackStages: string[] = [];
+  if (prepared.understanding?.source !== "openai") fallbackStages.push("business understanding");
+  if (!fallbackStages.length) return;
+  throw new Error(
+    `Canonical generateSite requires model-backed ${fallbackStages.join(" and ")}; deterministic fallback is disabled. ` +
+      "Use modelFallbackPolicy: 'allow' only for deterministic tests, fixtures, or isolated renderer workbench runs."
+  );
+}
+
 export async function generateSite(options: GenerateSiteOptions): Promise<GenerateSiteResult> {
   const input = normalizeGenerationInput(options.input);
+  const modelFallbackPolicy = options.modelFallbackPolicy ?? "fail";
+  const allowModelFallback = modelFallbackPolicy === "allow";
   const telemetry = await startRequiredSiteCandidateTelemetry(options.repository, {
     ...input,
     source: options.source,
@@ -116,11 +140,29 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
   try {
     const siteCandidateId = siteCandidateIdForRun(telemetry.runId);
     const identity = { siteId: siteCandidateId };
+    logGenerateSiteProgress("prepare_intake_start", { siteCandidateId });
     const prepared = await prepareIntakeInput(input, { telemetry, identity });
+    logGenerateSiteProgress("prepare_intake_done", {
+      siteCandidateId,
+      sourceUrl: prepared.url,
+      crawlStatus: prepared.crawl?.status,
+      understandingSource: prepared.understanding?.source,
+      understandingVertical: prepared.understanding?.vertical,
+      cleanedServices: prepared.understanding?.cleanedServices.length ?? 0,
+      sourceScreenshots: prepared.renderInspection?.screenshots.length ?? 0
+    });
+    assertCanonicalModelStagesAvailable(prepared, allowModelFallback);
+    logGenerateSiteProgress("compile_input_start", { siteCandidateId });
     const bundle = createSiteV3FromInput({
       ...prepared,
       identity,
       experimentLearnings: await options.repository.listExperimentLearnings({ status: "active" })
+    });
+    logGenerateSiteProgress("compile_input_done", {
+      siteCandidateId,
+      businessName: bundle.businessProfile.name,
+      vertical: bundle.businessProfile.vertical,
+      services: bundle.businessProfile.services.length
     });
     const sourceHost = hostFromUrl(bundle.presenceAssessment.sourceUrl ?? input.url);
     const resolutionGate = evaluatePreCompileResolutionGateV2(bundle);
@@ -139,51 +181,18 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     }
     assertVerticalResolutionForServiceBusiness(bundle, input.url);
     applyTextFirstFallbackApproval(bundle, options);
-    // Model design brief (Part 2.4): profile-level art direction reasoning.
-    // Runs before copy so the chosen register and section order brief the
-    // copywriter (plan→copy handoff). Non-fatal — the compiler's deterministic
-    // selector is the fallback tier.
-    try {
-      const brief = await createDesignBrief({
-        business: bundle.businessProfile,
-        understanding: bundle.presenceAssessment.businessUnderstanding,
-        brandApplied: Boolean(bundle.presenceAssessment.brandAssessment?.colorSignals?.length),
-        telemetry
-      });
-      if (brief) bundle.presenceAssessment.designBrief = brief;
-    } catch (briefError) {
-      console.warn("Design brief unavailable; deterministic selection will be used.", briefError instanceof Error ? briefError.message : briefError);
-    }
-    const copySpan = await telemetry.startSpan({
-      spanType: "generated_copy_deck",
-      name: "Fact-grounded copy deck",
-      inputJson: {
-        siteId: bundle.businessProfile.siteId,
-        vertical: bundle.businessProfile.vertical,
-        services: bundle.businessProfile.services.length
-      }
-    });
-    try {
-      bundle.presenceAssessment.generatedCopyDeck = await createOpenAiGeneratedCopyDeck({
-        bundle,
-        telemetry,
-        spanId: copySpan.id
-      });
-      await copySpan.end({
-        outputJson: {
-          source: bundle.presenceAssessment.generatedCopyDeck ? "openai" : "deterministic_fallback",
-          serviceItems: bundle.presenceAssessment.generatedCopyDeck?.serviceItems.length ?? 0,
-          faqs: bundle.presenceAssessment.generatedCopyDeck?.faqs.length ?? 0
-        }
-      });
-    } catch (error) {
-      await copySpan.fail(error);
-      throw error;
-    }
     // Real photos for protected previews: download crawl media into private
     // storage (reference_only; publish requires per-photo attestation).
     try {
+      logGenerateSiteProgress("scraped_media_start", {
+        siteCandidateId,
+        sourcePhotos: bundle.businessProfile.photos.length
+      });
       const scrapedManifest = await scrapeAndStoreBusinessMedia(bundle);
+      logGenerateSiteProgress("scraped_media_done", {
+        siteCandidateId,
+        storedMedia: scrapedManifest.length
+      });
       if (scrapedManifest.length) {
         // Brand palette from the pixels we just stored: logo first (it IS the
         // brand), then photos. Cues feed the existing WCAG-clamped derivation.
@@ -219,8 +228,166 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       bundle.presenceAssessment.technicalNotes.push(
         `Scraped media storage skipped: ${error instanceof Error ? error.message : String(error)}`
       );
+      logGenerateSiteProgress("scraped_media_failed", {
+        siteCandidateId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
+    const assetAnalysisSpan = await telemetry.startSpan({
+      spanType: "asset_analysis_v1",
+      name: "First-party image analysis",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        photos: bundle.businessProfile.photos.length,
+        hasLogo: Boolean(bundle.businessProfile.logo)
+      }
+    });
+    try {
+      logGenerateSiteProgress("asset_analysis_start", {
+        siteCandidateId,
+        photos: bundle.businessProfile.photos.length,
+        hasLogo: Boolean(bundle.businessProfile.logo)
+      });
+      const assetAnalysis = await analyzeBusinessAssetsV1({
+        bundle,
+        telemetry,
+        spanId: assetAnalysisSpan.id,
+        strict: !allowModelFallback
+      });
+      logGenerateSiteProgress("asset_analysis_done", {
+        siteCandidateId,
+        eligible: assetAnalysis.eligible,
+        selected: assetAnalysis.candidates,
+        analyzed: assetAnalysis.analyzed,
+        cached: assetAnalysis.cached,
+        skippedOverBudget: assetAnalysis.skippedOverBudget,
+        skippedUnreadable: assetAnalysis.skippedUnreadable,
+        failed: assetAnalysis.failed
+      });
+      await assetAnalysisSpan.end({ outputJson: assetAnalysis });
+    } catch (assetAnalysisError) {
+      await assetAnalysisSpan.fail(assetAnalysisError);
+      logGenerateSiteProgress("asset_analysis_failed", {
+        siteCandidateId,
+        error: assetAnalysisError instanceof Error ? assetAnalysisError.message : String(assetAnalysisError)
+      });
+      if (!allowModelFallback) {
+        throw new Error(
+          `Canonical generateSite requires model-backed AssetAnalysisV1 for first-party/source imagery; ${
+            assetAnalysisError instanceof Error ? assetAnalysisError.message : String(assetAnalysisError)
+          }`
+        );
+      }
+      console.warn("Asset analysis unavailable; explicit development fallback may use deterministic asset heuristics.", assetAnalysisError instanceof Error ? assetAnalysisError.message : assetAnalysisError);
+    }
+    const directorSpan = await telemetry.startSpan({
+      spanType: "site_director_plan_v1",
+      name: "Catalog-bounded site director plan",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        vertical: bundle.businessProfile.vertical,
+        services: bundle.businessProfile.services.length,
+        assets: bundle.businessProfile.photos.length + (bundle.businessProfile.logo ? 1 : 0)
+      }
+    });
+    try {
+      logGenerateSiteProgress("site_director_start", { siteCandidateId });
+      const siteDirector = await createOpenAiSiteDirectorPlanV1({
+        bundle,
+        telemetry,
+        spanId: directorSpan.id,
+        strict: !allowModelFallback
+      });
+      if (siteDirector) {
+        bundle.presenceAssessment.siteDirectorPlanV1 = siteDirector;
+        bundle.presenceAssessment.generationPlanningSource = "openai";
+      } else if (!allowModelFallback) {
+        throw new Error("OpenAI site director plan was unavailable.");
+      }
+      logGenerateSiteProgress("site_director_done", {
+        siteCandidateId,
+        source: siteDirector?.source ?? "none",
+        plannedSections: siteDirector?.plan.home.sections.length ?? 0,
+        catalogSchemaHash: siteDirector?.catalogSchemaHash,
+        businessDirectorInputHash: siteDirector?.businessDirectorInputHash
+      });
+      await directorSpan.end({
+        outputJson: {
+          source: siteDirector?.source ?? "none",
+          model: siteDirector?.model,
+          plannedSections: siteDirector?.plan.home.sections.map((section) => ({
+            id: section.id,
+            role: section.role,
+            templateId: section.templateId,
+            presentation: section.presentation
+          })),
+          catalogSchemaHash: siteDirector?.catalogSchemaHash,
+          businessDirectorInputHash: siteDirector?.businessDirectorInputHash,
+          planInputHash: siteDirector?.planInputHash,
+          validationStatus: siteDirector?.validation.status
+        }
+      });
+    } catch (directorError) {
+      await directorSpan.fail(directorError);
+      logGenerateSiteProgress("site_director_failed", {
+        siteCandidateId,
+        error: directorError instanceof Error ? directorError.message : String(directorError)
+      });
+      if (!allowModelFallback) {
+        throw new Error(
+          `Canonical generateSite requires a model-backed SiteDirectorPlanV1; deterministic creative fallback is disabled. ${
+            directorError instanceof Error ? directorError.message : String(directorError)
+          }`
+        );
+      }
+      console.warn("Site director unavailable; existing design brief/compiler controls will be used.", directorError instanceof Error ? directorError.message : directorError);
+    }
+    const copySpan = await telemetry.startSpan({
+      spanType: "generated_copy_deck",
+      name: "Fact-grounded copy deck",
+      inputJson: {
+        siteId: bundle.businessProfile.siteId,
+        vertical: bundle.businessProfile.vertical,
+        services: bundle.businessProfile.services.length,
+        siteDirectorPlan: bundle.presenceAssessment.siteDirectorPlanV1?.validation.status ?? "missing"
+      }
+    });
+    try {
+      logGenerateSiteProgress("copy_deck_start", { siteCandidateId });
+      bundle.presenceAssessment.generatedCopyDeck = await createOpenAiGeneratedCopyDeck({
+        bundle,
+        telemetry,
+        spanId: copySpan.id
+      });
+      if (!bundle.presenceAssessment.generatedCopyDeck && !allowModelFallback) {
+        throw new Error("Canonical generateSite requires a model-backed copy deck; deterministic copy fallback is disabled.");
+      }
+      logGenerateSiteProgress("copy_deck_done", {
+        siteCandidateId,
+        source: bundle.presenceAssessment.generatedCopyDeck ? "openai" : "deterministic_fallback",
+        serviceItems: bundle.presenceAssessment.generatedCopyDeck?.serviceItems.length ?? 0,
+        siteDirectorPlan: bundle.presenceAssessment.siteDirectorPlanV1?.validation.status ?? "missing"
+      });
+      await copySpan.end({
+        outputJson: {
+          source: bundle.presenceAssessment.generatedCopyDeck ? "openai" : "deterministic_fallback",
+          serviceItems: bundle.presenceAssessment.generatedCopyDeck?.serviceItems.length ?? 0,
+          faqs: bundle.presenceAssessment.generatedCopyDeck?.faqs.length ?? 0,
+          siteDirectorPlan: bundle.presenceAssessment.siteDirectorPlanV1?.validation.status ?? "missing"
+        }
+      });
+    } catch (error) {
+      await copySpan.fail(error);
+      throw error;
+    }
+    logGenerateSiteProgress("apply_v3_start", { siteCandidateId });
     const v3Application = await applyGeneratedSiteV3WithAssetLibrary({ bundle });
+    logGenerateSiteProgress("apply_v3_done", {
+      siteCandidateId,
+      pages: bundle.siteModel.versions[0]
+        ? pageCountForVersionV3(assertSiteVersionV3(bundle.siteModel.versions[0], "generateSite progress version"))
+        : 0
+    });
     await recordGeneratedSiteV3Application({
       telemetry,
       bundle,
@@ -236,7 +403,22 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     });
     let readiness: Awaited<ReturnType<typeof runInitialGeneratedSiteReadiness>>;
     try {
-      readiness = await runInitialGeneratedSiteReadiness({ bundle, telemetry, spanId: qaSpan.id });
+      logGenerateSiteProgress("readiness_start", { siteCandidateId });
+      readiness = await runInitialGeneratedSiteReadiness({
+        bundle,
+        telemetry,
+        spanId: qaSpan.id,
+        modelFallbackPolicy,
+        qualitySignals: v3Application.qualitySignals
+      });
+      logGenerateSiteProgress("readiness_done", {
+        siteCandidateId,
+        status: readiness.status,
+        readiness: readiness.qa.readiness,
+        verdict: readiness.qa.scorecard?.verdict,
+        visualQaSource: readiness.qa.visualQa?.source,
+        blockers: readiness.qa.blockers.length
+      });
       await qaSpan.end({
         outputJson: {
           readiness: readiness.qa.readiness,
@@ -245,7 +427,14 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
           repaired: readiness.repaired,
           repairAttempted: readiness.qa.repair?.attempted ?? false,
           repairSummaries: readiness.qa.repair?.mutationSummaries ?? [],
-          qualityScore: readiness.qa.qualityReport?.overallScore,
+          qualityVerdict: readiness.qa.scorecard?.verdict,
+          qualityDimensions: readiness.qa.scorecard?.dimensions.map((dimension) => ({
+            id: dimension.id,
+            score: dimension.score,
+            required: dimension.requirement === "required",
+            passes: dimension.passes,
+            premiumPasses: dimension.premiumPasses
+          })),
           qualityBlockingFindings: readiness.qa.qualityReport?.findings.filter((finding) => finding.severity === "blocking").length ?? 0,
           qualityRubric: readiness.qa.qualityReport?.rubric,
           visualQaSource: readiness.qa.visualQa?.source,
@@ -288,7 +477,13 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url,
       sourceHost,
       bundle,
-      status: readiness.status
+      status: readiness.status,
+      candidatePurpose: options.candidatePurpose
+    });
+    logGenerateSiteProgress("candidate_persisted", {
+      siteCandidateId,
+      status: generation.status,
+      candidatePurpose: generation.candidatePurpose
     });
     await persistCopyDeckArtifacts({ repository: options.repository, generation });
     await persistEvidenceLayer({ repository: options.repository, generation });
@@ -327,6 +522,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
         siteCandidateId: siteCandidateIdForRun(telemetry.runId),
         runId: telemetry.runId,
         input,
+        candidatePurpose: options.candidatePurpose,
         block: error
       });
       await telemetry.completeRun({
@@ -414,6 +610,11 @@ function applyTextFirstFallbackApproval(bundle: SiteBundle, options: GenerateSit
       : "Operator approved a text-first fallback for this candidate.",
     approvedAt: new Date().toISOString()
   };
+}
+
+function logGenerateSiteProgress(event: string, payload: Record<string, unknown>) {
+  if (process.env.LODESTA_GENERATE_SITE_PROGRESS !== "1") return;
+  console.error(JSON.stringify({ event, ...payload }));
 }
 
 /**
@@ -513,6 +714,7 @@ async function persistPreCompileBlockedGeneration(input: {
   siteCandidateId: string;
   runId: string;
   input: CreateSiteInput;
+  candidatePurpose?: SiteCandidatePurpose;
   block: PreCompileSiteCandidateBlockError;
 }) {
   const sourceUrl = input.block.sourceUrl ?? input.input.url;
@@ -529,7 +731,8 @@ async function persistPreCompileBlockedGeneration(input: {
     sourceUrl,
     sourceHost,
     bundle,
-    status: "blocked"
+    status: "blocked",
+    candidatePurpose: input.candidatePurpose
   });
   await input.repository.upsertSiteArtifact(
     createPreCompileBlockArtifact({

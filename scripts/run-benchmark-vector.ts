@@ -55,7 +55,7 @@ async function main() {
         JSON.stringify({
           url,
           status: result.generation.status,
-          overall: qa?.scorecard?.overall,
+          verdict: qa?.scorecard?.verdict,
           vector,
           coverage: qa?.factCoverage ? `${qa.factCoverage.surfacedCount}/${qa.factCoverage.eligibleCount}` : undefined,
           blockers: (qa?.blockers ?? []).map((blocker) => blocker.id)

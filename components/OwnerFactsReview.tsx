@@ -22,7 +22,13 @@ type ProfileSnapshot = {
 
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-export function OwnerFactsReview({ profile }: { profile: ProfileSnapshot }) {
+export function OwnerFactsReview({
+  profile,
+  saveUrl = "/api/business-profile"
+}: {
+  profile: ProfileSnapshot;
+  saveUrl?: string;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState<FactCardId | null>(null);
   const [busy, setBusy] = useState<FactCardId | null>(null);
@@ -50,7 +56,7 @@ export function OwnerFactsReview({ profile }: { profile: ProfileSnapshot }) {
     setBusy(card);
     setError(null);
     try {
-      const response = await fetch("/api/business-profile", {
+      const response = await fetch(saveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ siteId: profile.siteId, ...payload })

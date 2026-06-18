@@ -250,6 +250,8 @@ function understandingContext(input: BusinessUnderstandingInput) {
 export function cleanServiceName(raw: string): { name: string; price?: string } | undefined {
   let text = raw.replace(/\s+/g, " ").trim();
   if (!text) return undefined;
+  if (/^(?:&m?dash;|[–—-])\s*/i.test(text)) return undefined;
+  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(text)) return undefined;
 
   let price: string | undefined;
   const priceMatch = text.match(/(?:\b(?:starting at|starts at|from)\s+)?\$\s*\d[\d.,]*(?:\s*(?:and up|\+))?/i);
@@ -296,8 +298,9 @@ export function normalizeServiceList(raw: string[]): CleanedServiceV2[] {
   return cleaned;
 }
 
-const dayPattern = "(?:mon|tues?|wednes|thurs?|fri|satur|sun)days?";
-const dayRangePattern = new RegExp(`^(${dayPattern}(?:\\s*[–—-]\\s*${dayPattern})?)\\b[\\s:–—-]*`, "i");
+const dayPattern = "(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)";
+const dayRangePattern = new RegExp(`^(${dayPattern}(?:\\s*(?:[–—-]|to)\\s*${dayPattern})?)\\b[\\s:–—-]*`, "i");
+const dayRangeScanPattern = new RegExp(`(${dayPattern}(?:\\s*(?:[–—-]|to)\\s*${dayPattern})?)\\b[\\s:–—-]*`, "gi");
 
 /** Detects live status strings that must never be stored as recurring hours. */
 export function isDynamicHoursStatus(value: string) {
@@ -327,30 +330,61 @@ export function normalizeBusinessHours(
     if (isDynamicHoursStatus(value)) continue;
 
     const keyIsJunk = /^hours?[_\s-]*\d*$/i.test(rawKey) || /^\d+$/.test(rawKey);
-    let label = keyIsJunk ? "" : rawKey.replace(/_/g, " ").trim();
-    let times = value;
+    const segments = keyIsJunk ? splitRecurringHoursSegments(value) : [value];
+    for (const segment of segments) {
+      let label = keyIsJunk ? "" : rawKey.replace(/_/g, " ").trim();
+      let times = segment;
 
-    const closedMatch = value.match(new RegExp(`\\bclosed\\b[\\s:]*(?:on\\s+)?(${dayPattern})`, "i"));
-    if (closedMatch) {
-      label = titleCaseDays(closedMatch[1]);
-      times = "Closed";
-    } else {
-      const rangeMatch = value.match(dayRangePattern);
-      if (rangeMatch) {
-        label = titleCaseDays(rangeMatch[1]);
-        times = value.slice(rangeMatch[0].length).trim() || value;
-      } else if (!label) {
-        continue;
+      const closedMatch = segment.match(new RegExp(`\\bclosed\\b[\\s:]*(?:on\\s+)?(${dayPattern})`, "i"));
+      if (closedMatch) {
+        label = titleCaseDays(closedMatch[1]);
+        times = "Closed";
+      } else {
+        const rangeMatch = segment.match(dayRangePattern);
+        if (rangeMatch) {
+          label = titleCaseDays(rangeMatch[1]);
+          times = segment.slice(rangeMatch[0].length).replace(/^[,:;|]\s*/, "").trim() || segment;
+        } else if (!label) {
+          continue;
+        }
       }
-    }
 
-    if (!label) continue;
-    const dedupeKey = label.toLowerCase();
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-    entries.push({ label, value: times });
+      if (!label) continue;
+      times = normalizeHoursValue(times);
+      if (!times || isDynamicHoursStatus(times)) continue;
+      const dedupeKey = label.toLowerCase();
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      entries.push({ label, value: times });
+    }
   }
   return entries;
+}
+
+function splitRecurringHoursSegments(value: string) {
+  const matches = [...value.matchAll(dayRangeScanPattern)];
+  if (matches.length <= 1) return [value];
+  const segments: string[] = [];
+  for (let index = 0; index < matches.length; index += 1) {
+    const start = matches[index].index ?? 0;
+    const end = matches[index + 1]?.index ?? value.length;
+    const segment = value
+      .slice(start, end)
+      .replace(/^[,:;|]\s*/, "")
+      .replace(/[,:;|]\s*$/, "")
+      .trim();
+    if (segment) segments.push(segment);
+  }
+  return segments.length ? segments : [value];
+}
+
+function normalizeHoursValue(value: string) {
+  return value
+    .replace(/\b(a\.m\.|am)\b/gi, "AM")
+    .replace(/\b(p\.m\.|pm)\b/gi, "PM")
+    .replace(/\s*([–—-])\s*/g, " $1 ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 /** Projects normalized hours entries back into the BusinessProfile hours record shape. */

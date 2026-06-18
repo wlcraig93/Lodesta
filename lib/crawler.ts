@@ -813,6 +813,7 @@ function extractBusinessFacts(
     facts.serviceAreas = unique([...facts.serviceAreas, ...extractAreas(localNode)]);
     facts.reviewsSummary = extractRating(localNode);
   }
+  facts.pressLinks.push(...extractJsonLdReviewTestimonials(jsonLdNodes));
 
   facts.name = normalizeBusinessNameCandidate(facts.name, base.hostname);
   facts.name ||= normalizeBusinessNameCandidate(cleanText(extractMetaContent(html, "og:site_name")), base.hostname);
@@ -825,6 +826,7 @@ function extractBusinessFacts(
     ...extractServiceMentionsFromText(html)
   ]).slice(0, 12);
   facts.serviceHighlights = unique([...(facts.serviceHighlights ?? []), ...extractServiceHighlightsFromText(html)]).slice(0, 8);
+  facts.pressLinks.push(...extractVisibleTestimonials(html, page));
   facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
@@ -1007,12 +1009,12 @@ function extractGeo(value: unknown): ExtractedBusinessFacts["geo"] | undefined {
 }
 
 function extractHours(node: Record<string, unknown>) {
-  const values = [
+  const values = unique([
     ...toArray(node.openingHours).map((value) => String(value)),
     ...toArray(node.openingHoursSpecification).flatMap(openingHoursSpecificationEntries)
-  ];
+  ].map((value) => value.replace(/\s+/g, " ").trim()).filter(Boolean));
   if (values.length === 0) return undefined;
-  return Object.fromEntries(unique(values).map((value, index) => [`hours_${index + 1}`, value]));
+  return Object.fromEntries(values.map((value, index) => [`hours_${index + 1}`, value]));
 }
 
 function extractServices(node: Record<string, unknown>) {
@@ -1112,13 +1114,31 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
 function extractVisibleHours(html: string): Record<string, string> | undefined {
   const lines = htmlToTextLines(html);
   const entries: Array<[string, string]> = [];
+  const seen = new Set<string>();
+  const pushEntry = (value: string) => {
+    const compact = value.replace(/\s+/g, " ").trim();
+    if (!compact || compact.length > 120) return;
+    const key = compact.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push([`hours_${entries.length + 1}`, compact]);
+  };
+
   for (const line of lines) {
     if (!/\b(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|hours?)\b/i.test(line)) continue;
     if (!/\b(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?|closed|by appointment)\b/i.test(line)) continue;
-    const compact = line.replace(/\s+/g, " ").trim();
-    if (compact.length > 120) continue;
-    entries.push([`hours_${entries.length + 1}`, compact]);
+    pushEntry(line);
     if (entries.length >= 7) break;
+  }
+
+  const dayOnlyPattern = /^(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?:\s*[–—-]\s*(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))?$/i;
+  const timeOnlyPattern = /^(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)\s*[–—-]\s*(?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)$|^(?:closed|by appointment)$/i;
+  for (let index = 0; index < lines.length - 1 && entries.length < 7; index += 1) {
+    const dayMatch = lines[index].match(dayOnlyPattern);
+    if (!dayMatch) continue;
+    const next = lines[index + 1]?.trim();
+    if (!next || !timeOnlyPattern.test(next)) continue;
+    pushEntry(`${dayMatch[0]} ${next}`);
   }
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
@@ -1206,18 +1226,21 @@ function normalizeStateRegion(value: string | undefined) {
 
 function extractServiceMentionsFromText(html: string) {
   const text = htmlToTextLines(html).join(" ");
-  const servicePatterns: Array<[RegExp, string]> = [
+  const likelyFoodBusiness = /\b(restaurant|cafe|pizza|taqueria|bakery|coffee|dine[- ]?in|kitchen|bar and grill|breakfast|lunch|dinner)\b/i.test(text);
+  const servicePatterns: Array<[RegExp, string, { foodOnly?: boolean }?]> = [
+    [/\bhigh[-\s]?quality auto body repair\b|\bauto body repair\b|\bbody repair\b/i, "Auto Body Repair"],
     [/\bpaintless dent repair\b|\bPDR\b/i, "Paintless Dent Repair"],
     [/\bhail(?: damage)? repair\b|\bhail damage\b/i, "Hail Damage Repair"],
     [/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i, "Automotive Glass Services"],
     [/\bcollision repair\b|\bfender benders?\b/i, "Collision Repair"],
-    [/\bpaint\s*(?:and|&)\s*body\b|\bauto(?:motive)? paint\b|\bpaint repair\b/i, "Paint And Body Repair"],
+    [/\bprofessional paint services?\b|\bpaint services?\b|\bpaint\s*(?:and|&)\s*body\b|\bauto(?:motive)? paint\b|\bpaint repair\b/i, "Professional Paint Services"],
+    [/\bminor scratches\b|\bscratch(?:es)? repair\b|\bscratch damage\b|\bscuffs?\b/i, "Scratch Repair"],
     [/\bframe repair\b|\bstructural repair\b/i, "Frame Repair"],
     [/\bbumper repair\b/i, "Bumper Repair"],
     [/\bdent repair\b/i, "Dent Repair"],
-    [/\bcatering\b/i, "Catering"],
-    [/\btakeout\b|\bpickup\b/i, "Takeout And Pickup"],
-    [/\bdelivery\b/i, "Delivery"],
+    [/\bcatering\b/i, "Catering", { foodOnly: true }],
+    [/\btakeout\b|\bpickup\b/i, "Takeout And Pickup", { foodOnly: true }],
+    [/\bdelivery\b/i, "Delivery", { foodOnly: true }],
     [/\bconsultations?\b/i, "Consultations"],
     [/\bpreventive care\b|\bdental exams?\b/i, "Preventive Care"],
     [/\bcosmetic dentistry\b|\bwhitening\b/i, "Cosmetic Dentistry"],
@@ -1228,7 +1251,7 @@ function extractServiceMentionsFromText(html: string) {
     [/\bhvac\b|\bheating and cooling\b/i, "HVAC Service"],
     [/\belectrical repairs?\b/i, "Electrical Repair"]
   ];
-  return servicePatterns.flatMap(([pattern, label]) => (pattern.test(text) ? [label] : []));
+  return servicePatterns.flatMap(([pattern, label, options]) => (!options?.foodOnly || likelyFoodBusiness) && pattern.test(text) ? [label] : []);
 }
 
 function extractServiceHighlightsFromText(html: string) {
@@ -1249,10 +1272,81 @@ function extractServiceHighlightsFromText(html: string) {
   } else if (/\brental car\b/i.test(text)) {
     highlights.push("Ask about rental-car options");
   }
-  if (/\binsurance claims?\b/i.test(html)) {
-    highlights.push("Insurance-claim questions");
+  if (/\binsurance claims?\b/i.test(text) && /\bself[-\s]?pay\b|\bout of pocket\b|\bpayment options?\b/i.test(text)) {
+    highlights.push("Insurance claims and self-pay options");
+  } else if (/\binsurance claims?\b/i.test(text)) {
+    highlights.push("Insurance claim support");
+  }
+  if (/\bfree\s+(?:repair\s+)?(?:quote|estimate)\b/i.test(text)) {
+    highlights.push("Free repair quote");
+  } else if (/\b(?:repair\s+)?(?:quote|estimate)\s+(?:request|form|online)\b|\brequest\s+(?:a\s+)?(?:quote|estimate)\b/i.test(text)) {
+    highlights.push("Repair quote request");
   }
   return unique(highlights).slice(0, 6);
+}
+
+function extractJsonLdReviewTestimonials(nodes: Array<Record<string, unknown>>) {
+  return nodes
+    .filter((node) => hasType(node, ["Review"]))
+    .map((node) => {
+      const quote = normalizeTestimonialQuote(normalizeFact(node.reviewBody) ?? normalizeFact(node.description));
+      if (!quote) return undefined;
+      const author = node.author && typeof node.author === "object" ? normalizeFact((node.author as Record<string, unknown>).name) : normalizeFact(node.author);
+      return testimonialProofString(quote, author);
+    })
+    .filter((value): value is string => Boolean(value))
+    .slice(0, 4);
+}
+
+function extractVisibleTestimonials(html: string, page: { url: string; finalUrl?: string; title?: string }) {
+  const urlText = `${page.finalUrl ?? page.url} ${page.title ?? ""}`.toLowerCase();
+  const reviewPage = /\b(reviews?|testimonials?|customers?|feedback)\b/.test(urlText);
+  const lines = htmlToTextLines(html);
+  const candidates = lines
+    .map((line) => normalizeTestimonialQuote(line))
+    .filter((line): line is string => Boolean(line))
+    .filter((line) => (reviewPage || testimonialTextSignal(line)) && visibleCustomerTestimonialSignal(line))
+    .map((line) => testimonialProofString(line))
+    .filter((line): line is string => Boolean(line));
+  return unique(candidates).slice(0, 4);
+}
+
+function normalizeTestimonialQuote(value: string | undefined) {
+  const cleaned = cleanText(value)
+    ?.replace(/^[“"']+|[”"']+$/g, "")
+    .replace(/^\s*(?:★|⭐|\*)+\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return undefined;
+  if (cleaned.length < 45 || cleaned.length > 220) return undefined;
+  if (/@/.test(cleaned)) return undefined;
+  if (/©|all rights reserved/i.test(cleaned)) return undefined;
+  if (/\b(write|leave|read|see|view|submit)\s+(?:a\s+)?reviews?\b/i.test(cleaned)) return undefined;
+  if (/\b(contact|call|text|email|copyright|privacy|terms|login|home|services?|gallery)\b/i.test(cleaned)) return undefined;
+  const words = cleaned.split(/\s+/);
+  if (words.length < 7 || words.length > 42) return undefined;
+  if (!testimonialTextSignal(cleaned)) return undefined;
+  return cleaned;
+}
+
+function testimonialTextSignal(value: string) {
+  return /\b(great|excellent|amazing|professional|recommend|recommended|honest|helpful|friendly|fast|quality|perfect|happy|satisfied|best|thank|appreciate)\b/i.test(value);
+}
+
+function visibleCustomerTestimonialSignal(value: string) {
+  if (/^(?:where|restore|from|texas weather|no matter|appointments?|ready to|get a|serving)\b/i.test(value)) return false;
+  if (/\b(original condition|major structural damage|insurance companies|repair process|smooth and hassle-free|expert craftsmanship|exceptional results)\b/i.test(value)) return false;
+  const positiveExperience =
+    /\b(highly recommend|recommend(?:ed)?|great (?:service|job|work|experience)|excellent (?:service|work|job)|amazing|professional|honest|helpful|friendly|perfect|happy|satisfied|thank(?:s| you)?)\b/i.test(
+      value
+    );
+  if (!positiveExperience) return false;
+  return /\b(i|me|my|we|our|they|their|them|mencia|shop|team|staff|owner|service|job|work|repair)\b/i.test(value);
+}
+
+function testimonialProofString(quote: string, author?: string) {
+  const safeAuthor = author && !/@/.test(author) && author.length <= 60 ? author : "Customer review";
+  return `review: ${quote} -- ${safeAuthor}`;
 }
 
 function isServicePath(pathname: string) {
@@ -1277,12 +1371,18 @@ function serviceTextLooksSpecific(value: string) {
 }
 
 function cleanServiceCandidate(value: string | undefined) {
-  const cleaned = cleanText(value)
+  const raw = cleanText(value);
+  if (!raw) return undefined;
+  if (/^(?:&m?dash;|[–—-])\s*/i.test(raw)) return undefined;
+  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(raw)) return undefined;
+  const cleaned = raw
     ?.replace(/\b(learn more|read more|view all|all services|our services|services|service|menu|book now|schedule|contact|about|home)\b/gi, " ")
     .replace(/[|•·]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return undefined;
+  if (/^(?:&m?dash;|[–—-])\s*/i.test(cleaned)) return undefined;
+  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(cleaned)) return undefined;
   if (cleaned.length < 3 || cleaned.length > 64) return undefined;
   if (/[{}<>@]/.test(cleaned)) return undefined;
   if (/\b(home|about|contact|gallery|reviews?|testimonials?|blog|careers?|privacy|terms|login|sign in)\b/i.test(cleaned)) return undefined;
@@ -1350,7 +1450,12 @@ function extractMailtoLinks(html: string) {
 }
 
 function extractPhoneFromText(html: string) {
-  return cleanText(html)?.match(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0];
+  const text = cleanText(html);
+  if (!text) return undefined;
+  const candidates = Array.from(
+    text.matchAll(/(?:^|[^\d])((?:\+?1[\s.-]+)?(?:\(\d{3}\)|\d{3})[\s.-]+\d{3}[\s.-]+\d{4})(?=$|[^\d])/g)
+  ).map((match) => match[1]);
+  return candidates.find((candidate) => Boolean(normalizePhone(candidate)));
 }
 
 function extractEmailFromText(html: string) {
@@ -1361,14 +1466,24 @@ function normalizePhone(value?: string) {
   if (!value) return undefined;
   const digits = value.replace(/[^\d+]/g, "");
   if (digits.length < 10) return undefined;
-  if (digits.startsWith("+")) return digits;
+  if (digits.startsWith("+")) return /^\+\d{10,15}$/.test(digits) ? digits : undefined;
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return digits;
+  return undefined;
 }
 
 function normalizeEmail(value?: string) {
-  return value?.trim().toLowerCase();
+  const email = value?.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return undefined;
+  if (isPlaceholderEmail(email)) return undefined;
+  return email;
+}
+
+function isPlaceholderEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return true;
+  if (/^(example|domain|yourdomain|test)\./i.test(domain)) return true;
+  return /^(user|name|email|you|yourname|test|example)$/i.test(local) && /(?:domain|example|yourdomain)\./i.test(domain);
 }
 
 function inferNameFromTitle(title: string | undefined, hostname: string) {
@@ -1556,9 +1671,10 @@ function formReferenceKey(reference: CrawlFormReference) {
 function internalCrawlPriority(url: URL) {
   const value = `${url.pathname} ${url.search}`.toLowerCase();
   if (/contact|get-in-touch|quote|estimate|request/.test(value)) return 0;
-  if (/service|menu|order|book|appointment|schedule|reserve/.test(value)) return 1;
+  if (/review|testimonial|gallery|showroom|portfolio|work|before|after/.test(value)) return 1;
+  if (/service|menu|order|book|appointment|schedule|reserve/.test(value)) return 2;
   if (/location|hours|about|team|staff/.test(value)) return 2;
-  if (/faq|review|testimonial|gallery|work/.test(value)) return 3;
+  if (/faq/.test(value)) return 3;
   return 9;
 }
 

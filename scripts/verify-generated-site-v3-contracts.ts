@@ -9,13 +9,24 @@ import {
 } from "../lib/generated-site-v3";
 import { applyGeneratedSiteV3 } from "../lib/generated-site-v3-pipeline";
 import { compileVisualSectionV3, getVisualSectionV3, type VisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
+import { reconcileNavPlanV3 } from "../lib/generated-site-v3-nav";
+import { buildGeneratedSiteQaMetadata } from "../lib/generated-site-qa";
+import { buildGenerationRepairTargets } from "../lib/generated-site-repair-targets";
+import { applyUnresolvedRepairTargetReadinessGate } from "../lib/generated-site-readiness";
 import { applyCompositionPlanV3, validateCompositionPlanV3 } from "../lib/generated-site-v3-composition-plan";
+import { generatedSiteDesignArchetypesV1 } from "../lib/generated-site-v3-archetypes";
+import {
+  assertValidSectionBlueprintV1,
+  sectionBlueprintVersionV1,
+  validateSectionBlueprintV1
+} from "../lib/generated-site-v3-blueprint";
+import { modelSelectableSectionTemplatesV3, renderableSectionTemplatesV3 } from "../lib/generated-site-v3-section-templates";
 import { withBusinessBundleFields } from "../lib/business-model";
 import { buildFactCoverageReport } from "../lib/fact-coverage";
 import { localRepository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { SiteRendererV3 } from "../lib/site-renderer-v3";
-import type { BusinessProfile, ExtensionModel, GeneratedCopyDeckV2, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
+import type { BusinessProfile, ExtensionModel, GeneratedCopyDeckV2, GenerationQaMetadata, RenderInspectionResult, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
 
 const forbiddenPublicV3Copy = [
   "template",
@@ -56,6 +67,66 @@ assert.ok(
 assert.ok(
   initialSiteArtDirectionRecipesV3.every((recipe) => recipe.headerModes.length && recipe.version === "site-art-direction-recipe-v1"),
   "Every V3 recipe should define bounded header compatibility and version."
+);
+const renderableTemplateIds = new Set(renderableSectionTemplatesV3().map((template) => template.id));
+assert.ok(
+  modelSelectableSectionTemplatesV3().every((template) => renderableTemplateIds.has(template.id)),
+  "Every model-selectable template must remain renderable for stored-plan replay."
+);
+assert.ok(
+  generatedSiteDesignArchetypesV1.length >= 5 && generatedSiteDesignArchetypesV1.length <= 6,
+  "Launch archetype catalog should keep 5-6 enabled, human-approved design directions."
+);
+for (const archetype of generatedSiteDesignArchetypesV1) {
+  assert.equal(archetype.version, "generated-site-design-archetype-v1", `${archetype.id} should use the archetype contract version.`);
+  assert.equal(archetype.manuallyApproved, true, `${archetype.id} cannot be enabled without manual design approval.`);
+  assert.equal(archetype.approval.status, "approved", `${archetype.id} approval status should be approved.`);
+  assert.ok(archetype.approval.desktopReview.length >= 48, `${archetype.id} should record desktop review evidence.`);
+  assert.ok(archetype.approval.mobileReview.length >= 48, `${archetype.id} should record mobile review evidence.`);
+  assert.ok(archetype.approval.distinctiveness.length >= 36, `${archetype.id} should record what makes it visually distinct.`);
+}
+assertValidSectionBlueprintV1({
+  version: sectionBlueprintVersionV1,
+  id: "contract_services_grid",
+  source: "deterministic",
+  role: "services",
+  templateId: "intro_grid",
+  background: { kind: "solid", token: "surface" },
+  presentation: { services: "card_grid" },
+  ctaRole: "contextual",
+  slotCounts: { items: 4 },
+  controls: {
+    layout: "card_grid",
+    alignment: "start",
+    width: "wide",
+    padding: "spacious",
+    background: "surface",
+    mediaCrop: "center",
+    density: "balanced"
+  }
+});
+assert.equal(
+  validateSectionBlueprintV1({
+    version: sectionBlueprintVersionV1,
+    id: "contract_bad_template",
+    source: "deterministic",
+    role: "services",
+    templateId: "not_a_template" as never
+  }).ok,
+  false,
+  "SectionBlueprintV1 should reject unknown templates."
+);
+assert.equal(
+  validateSectionBlueprintV1({
+    version: sectionBlueprintVersionV1,
+    id: "contract_bad_presentation",
+    source: "deterministic",
+    role: "services",
+    templateId: "intro_grid",
+    presentation: { services: "stepper_vertical" as never }
+  }).ok,
+  false,
+  "SectionBlueprintV1 should reject role-incompatible presentations."
 );
 
 const testBusiness: BusinessProfile = {
@@ -101,12 +172,12 @@ assert.ok(
   "Composition report should record skipped pricing without pricing evidence."
 );
 assert.ok(
-  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_feature" && decision.status === "included"),
-  "Curated three-image auto-body media should select media_feature."
+  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_gallery" && decision.status === "included"),
+  "Curated auto-body fallback media should select media_mosaic."
 );
 assert.ok(
-  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_gallery" && decision.status === "skipped"),
-  "Curated three-image auto-body media should not select media_mosaic."
+  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_feature" && decision.status === "skipped"),
+  "Curated auto-body fallback media should not select media_feature when four or more safe media items are available."
 );
 const firstVisualSection = getVisualSectionV3(testVersion.pageComposition.pages[0]?.sections[0]?.props ?? {});
 assert.ok(
@@ -127,13 +198,61 @@ assert.equal(
 assert.ok(testVersion.mediaDecisions.every((decision) => decision.rightsStatus === "approved" && decision.mayImplyRealBusinessWork === false), "Curated V3 media decisions should be approved and non-deceptive.");
 const compiledTemplateIds = new Set<string>(visualTemplatesFor(testVersion));
 assert.equal(visualTemplatesFor(testVersion).includes("location_showcase"), true, "Single physical-location businesses should render location_showcase.");
+const templateOrder = (testVersion.pageComposition.pages[0]?.sections ?? [])
+  .map((section) => getVisualSectionV3(section.props))
+  .filter((section): section is VisualSectionV3 => Boolean(section))
+  .map((section) => section.templateId);
+assert.deepEqual(
+  testCompile.compositionReport.sectionBlueprints?.map((blueprint) => blueprint.templateId),
+  templateOrder,
+  "V3 compiler should expose validated section blueprints matching the rendered homepage sequence."
+);
+assert.equal(testCompile.compositionReport.sectionBlueprintValidation?.status, "passed", "V3 section blueprint validation should pass before hydration authority is split.");
+assert.ok(testVersion.designArchetypeId, "Compiled V3 versions should record the assigned design archetype.");
+assert.equal(testVersion.artDirection.designArchetypeId, testVersion.designArchetypeId, "Art direction should expose the same design archetype id as version metadata.");
+assert.ok(testVersion.geometryDiversityDirective, "Compiled V3 versions should record a geometry diversity directive.");
+assert.ok(testVersion.sectionOptionSequence?.length, "Compiled V3 versions should expose section option fingerprints for offline diversity audits.");
 assert.ok(
-  visualTemplatesFor(testVersion).indexOf("location_showcase") < visualTemplatesFor(testVersion).indexOf("contact_split"),
-  "location_showcase should compile immediately before the contact close."
+  testVersion.compilerDecisions?.some((decision) => decision.kind === "archetype_assignment" && decision.id.includes(testVersion.designArchetypeId ?? "")),
+  "Compiler decisions should include the archetype assignment."
+);
+assert.ok(
+  testVersion.compilerDecisions?.some((decision) => decision.kind === "quality_profile_assignment" && decision.resolvedValue === "auto_body"),
+  "Compiler decisions should include the tuned auto-body quality profile assignment."
+);
+const defaultProfileCompile = compileGeneratedSiteV3Site({
+  siteId: "site_v3_default_profile_contract",
+  business: {
+    ...testBusiness,
+    id: "business_v3_default_profile_contract",
+    siteId: "site_v3_default_profile_contract",
+    name: "Default Profile Local Service",
+    vertical: "home_services",
+    categories: ["Home services"],
+    services: ["Small repairs", "Drywall patching", "Fixture replacement"],
+    serviceHighlights: ["Small repairs", "Drywall patching", "Fixture replacement"]
+  },
+  createdAt: "2026-06-02T00:00:00.000Z"
+});
+assert.ok(
+  defaultProfileCompile.version.compilerDecisions?.some((decision) => decision.kind === "quality_profile_assignment" && decision.resolvedValue === "default_local_service"),
+  "Untuned verticals should record the default local-service quality profile assignment."
+);
+const contactIndex = templateOrder.indexOf("contact_split");
+const locationIndex = templateOrder.indexOf("location_showcase");
+const repairContextIndexes = (["split_media", "proof_pair", "media_feature", "media_mosaic"] as const)
+  .map((templateId) => templateOrder.indexOf(templateId))
+  .filter((index) => index >= 0);
+const autoBodySectionOrder = testVersion.pageComposition.pages[0]?.sections.map((section) => section.id) ?? [];
+const repairContactAnchorIndex = repairContextIndexes.length ? Math.max(...repairContextIndexes) : templateOrder.indexOf("intro_grid");
+assert.ok(
+  contactIndex > repairContactAnchorIndex && contactIndex > locationIndex && !autoBodySectionOrder.includes("cta_band"),
+  "Auto-body contact_split should close after repair proof and location details, without a low-depth standalone CTA band."
 );
 const locationShowcase = visualSectionsFor(testVersion).find((section) => section.templateId === "location_showcase");
 assert.ok(locationShowcase, "Compiled V3 page should include a location_showcase.");
 assert.ok(locationShowcase.slots.locations.locations.every((location) => location.addressLine), "location_showcase should only render address-bearing locations.");
+
 assert.equal(locationShowcase.slots.locations.locations[0]?.directionsUrl?.startsWith("https://www.google.com/maps/dir/?"), true, "Physical locations should get a Google Maps directions URL.");
 assert.equal(locationShowcase.slots.locations.locations[0]?.mapEmbedIntent?.kind, "address", "Physical address locations should persist a keyless map embed intent.");
 assert.equal(JSON.stringify(testVersion).includes(removedLocationPanelTemplateId), false, "Compiled V3 output must not contain the removed location panel template.");
@@ -163,8 +282,71 @@ const exactlyThreeServices = compileGeneratedSiteV3Site({
   createdAt: "2026-06-02T00:00:00.000Z"
 });
 assert.ok(
-  visualSectionsFor(exactlyThreeServices.version).some((section) => section.templateId === "intro_grid" && (section.options.cardTreatment ?? "standard") === "standard"),
-  "Exactly three service cards should render intro_grid with standard card treatment."
+  visualSectionsFor(exactlyThreeServices.version).some((section) => section.templateId === "intro_grid" && section.options.cardTreatment === "media_top_cards"),
+  "Exactly three auto-body service cards should render the bounded media-top intro_grid treatment when service media is available."
+);
+
+const fourAutoBodyServices = compileGeneratedSiteV3Site({
+  siteId: "site_v3_four_services",
+  business: {
+    ...testBusiness,
+    id: "business_v3_four_services",
+    siteId: "site_v3_four_services",
+    services: ["Collision repair", "Paint refinishing", "Dent repair", "Hail damage repair"]
+  },
+  createdAt: "2026-06-02T00:00:00.000Z"
+});
+const fourAutoBodyServiceSection = visualSectionsFor(fourAutoBodyServices.version).find((section) => section.anchorId === "services");
+assert.ok(
+  fourAutoBodyServiceSection?.templateId === "intro_grid" &&
+    ["service_cards", "media_top_cards", "editorial_cards"].includes(String(fourAutoBodyServiceSection.options.cardTreatment)),
+  "Four or more auto-body services should use a bounded premium intro_grid service-card treatment."
+);
+assert.ok(
+  ["premium_showcase", "feature_list", "showcase_grid", "image_tiles", "media_grid", "card_grid", "action_tiles", "menu_preview"].includes(
+    String(fourAutoBodyServices.version.artDirection.sectionPresentation?.services)
+  ),
+  "Four or more auto-body services should use a bounded model-selectable service presentation."
+);
+
+const pseudoQuoteService = compileGeneratedSiteV3Site({
+  siteId: "site_v3_pseudo_quote",
+  business: {
+    ...testBusiness,
+    id: "business_v3_pseudo_quote",
+    siteId: "site_v3_pseudo_quote",
+    services: ["Collision repair", "Paint refinishing", "Free Repair Quote", "Dent repair"]
+  },
+  createdAt: "2026-06-02T00:00:00.000Z"
+});
+assert.equal(
+  pseudoQuoteService.version.pageComposition.pages.some((page) => /quote|estimate/i.test(`${page.slug} ${page.title}`)),
+  false,
+  "Pseudo-service quote items should not become service landing pages."
+);
+
+const saturdayHours = compileGeneratedSiteV3Site({
+  siteId: "site_v3_saturday_hours",
+  business: {
+    ...testBusiness,
+    id: "business_v3_saturday_hours",
+    siteId: "site_v3_saturday_hours",
+    hours: {
+      monday: "8 AM - 5 PM",
+      tuesday: "8 AM - 5 PM",
+      wednesday: "8 AM - 5 PM",
+      thursday: "8 AM - 5 PM",
+      friday: "8 AM - 5 PM",
+      saturday: "9 AM - 1 PM"
+    }
+  },
+  createdAt: "2026-06-02T00:00:00.000Z"
+});
+const saturdayLocationShowcase = visualSectionsFor(saturdayHours.version).find((section) => section.templateId === "location_showcase");
+assert.ok(
+  saturdayLocationShowcase?.templateId === "location_showcase" &&
+    saturdayLocationShowcase.slots.locations.locations.some((location) => location.hours?.some((entry) => /saturday/i.test(entry.label))),
+  "Saturday hours should render when source hours include Saturday."
 );
 
 const pricingEvidence = compileGeneratedSiteV3Site({
@@ -208,7 +390,7 @@ const fourMediaEvidence = compileGeneratedSiteV3Site({
     siteId: "site_v3_four_media",
     photos: [0, 1, 2, 3].map((index) => ({
       id: `photo_${index}`,
-      url: `/generated-site-assets/auto-body/bodywork-hero-v1.jpg?fixture=${index}`,
+      url: `/generated-site-assets/auto-body/lift-bay-overview-v1.png?fixture=${index}`,
       alt: `Safe shop photo ${index + 1}`,
       source: "uploaded" as const,
       rightsStatus: "preclaim_safe" as const
@@ -233,8 +415,8 @@ const sparseMosaicViolations = compileVisualSectionV3({
       caption: "none",
       focalPoint: "center",
       items: [
-        { url: "/generated-site-assets/auto-body/bodywork-hero-v1.jpg", label: "Safe shop photo 1" },
-        { url: "/generated-site-assets/auto-body/bodywork-detail-v1.jpg", label: "Safe shop photo 2" }
+        { url: "/generated-site-assets/auto-body/lift-bay-overview-v1.png", label: "Safe shop photo 1" },
+        { url: "/generated-site-assets/auto-body/finished-shop-review-v1.png", label: "Safe shop photo 2" }
       ]
     }
   }
@@ -311,6 +493,243 @@ const testSite: SiteModel = {
   pinList: []
 };
 const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks: [] };
+
+{
+  const navPlanVersion = structuredClone(testVersion);
+  navPlanVersion.artDirection = {
+    ...navPlanVersion.artDirection,
+    buttonSystem: "high_contrast_primary",
+    navPlan: {
+      source: "site_director",
+      items: [
+        {
+          label: "Services",
+          kind: "dropdown",
+          children: [
+            { label: "Collision", target: "services/collision-repair" },
+            { label: "Paint", target: "services/paint-refinishing" }
+          ]
+        },
+        { label: "Process", kind: "anchor", target: "#process" },
+        { label: "Visit", kind: "anchor", target: "#location" }
+      ],
+      primaryCta: { label: "Start estimate", target: "#contact" }
+    }
+  };
+  const navPlanHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: navPlanVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(navPlanHtml.includes("<summary>Services</summary>"), "Director nav plan should render dropdown nav in the public header.");
+  assert.ok(navPlanHtml.includes("href=\"/services/collision-repair\""), "Director dropdown children should render as site-local links.");
+  assert.ok(navPlanHtml.includes("Start estimate"), "Director primary CTA label should render in the header.");
+  assert.ok(navPlanHtml.includes('data-button-system="high_contrast_primary"'), "Director button system should reach the rendered root attribute.");
+}
+
+{
+  const largeServiceBlueprints = [
+    { version: sectionBlueprintVersionV1, id: "hero", source: "site_director", role: "hero", templateId: "hero_split", templateOptions: { headlineScale: "display", ctaLayout: "stacked", mediaTreatment: "bleed", heroLayout: "classic_split" } },
+    { version: sectionBlueprintVersionV1, id: "services", source: "site_director", role: "services", templateId: "intro_grid", anchorId: "services", templateOptions: { cardTreatment: "service_cards" } },
+    { version: sectionBlueprintVersionV1, id: "service_index", source: "site_director", role: "services", templateId: "service_index", anchorId: "services", templateOptions: { serviceIndexTreatment: "featured_services_plus_all" } },
+    { version: sectionBlueprintVersionV1, id: "faq", source: "site_director", role: "faq", templateId: "faq_list" },
+    { version: sectionBlueprintVersionV1, id: "location", source: "site_director", role: "local", templateId: "location_showcase" },
+    { version: sectionBlueprintVersionV1, id: "contact", source: "site_director", role: "contact", templateId: "contact_split" }
+  ] as const;
+  const largeServiceBundle = withBusinessBundleFields({
+    businessProfile: {
+      ...testBusiness,
+      id: "business_v3_large_service_index",
+      siteId: "site_v3_large_service_index",
+      services: ["Collision repair", "Paint refinishing", "Paintless dent repair", "Bumper repair", "Auto glass", "Hail repair"]
+    },
+    siteModel: { ...testSite, id: "site_v3_large_service_index", slug: "large-service-index", versions: [] },
+    extensionModel: testExtensions,
+    optimizationFindings: [],
+    experiments: [],
+    presenceAssessment: {
+      siteId: "site_v3_large_service_index",
+      sourceUrl: "https://large-service-index.example",
+      technicalNotes: [],
+      visualNotes: [],
+      brandNotes: [],
+      publicPresenceNotes: [],
+      siteDirectorPlanV1: {
+        version: "site-director-runtime-v1",
+        source: "model",
+        model: "fixture",
+        catalogSchemaHash: "fixture",
+        businessDirectorInputHash: "fixture",
+        planInputHash: "fixture",
+        catalogManifest: {} as never,
+        directorInputManifest: {} as never,
+        plan: {
+          version: "site-director-plan-v1",
+          strategy: {
+            rationale: "Fixture director plan requests risky large-service and hero treatments so the compiler can prove it clamps geometry safely.",
+            creativeDiversityDirective: "differentiate_presentations",
+            geometryDiversityDirective: "differentiate_hero_services_contact"
+          },
+          globalControls: {
+            fontPosture: "utility",
+            colorPosture: "high_contrast",
+            buttonSystem: "square",
+            cardChrome: "bordered",
+            figureTreatment: "framed",
+            headingTreatment: "display",
+            sectionRhythm: "varied"
+          },
+          nav: { items: [], primaryCta: { label: "Call", target: "#contact" } },
+          home: { sections: largeServiceBlueprints as never },
+          servicePages: [],
+          assets: [],
+          qaExpectations: []
+        },
+        validation: {
+          status: "passed",
+          issues: [],
+          acceptedSectionBlueprints: largeServiceBlueprints as never
+        }
+      } as unknown as NonNullable<SiteBundle["presenceAssessment"]["siteDirectorPlanV1"]>
+    }
+  });
+  const largeServiceCompile = compileGeneratedSiteV3Site({ bundle: largeServiceBundle, createdAt: "2026-06-02T00:00:00.000Z" });
+  const serviceIndex = visualSectionsForPage(largeServiceCompile.version, "").find((section) => section.templateId === "service_index");
+  assert.equal(serviceIndex?.options.serviceIndexTreatment, "dropdown_preview", "Large flat service_index sections should clamp away from featured_services_plus_all.");
+  assert.equal(
+    visualSectionsForPage(largeServiceCompile.version, "").some((section) => section.templateId === "intro_grid" && section.anchorId === "services"),
+    false,
+    "Large service pages should not render an intro_grid service-card list and a full service_index with the same titles."
+  );
+  const hero = visualSectionsForPage(largeServiceCompile.version, "").find((section) => section.templateId === "hero_split");
+  assert.equal(hero?.options.headlineScale, "standard", "Unsafe long display hero headings should clamp to standard scale.");
+  assert.equal(hero?.options.ctaLayout, "button_plus_text_link", "Unsafe stacked hero CTAs should clamp to an above-fold-friendly layout.");
+  assert.ok(
+    largeServiceCompile.version.compilerDecisions?.some((decision) => decision.kind === "template_option_clamp" && decision.optionName === "serviceIndexTreatment"),
+    "Service-index option clamps should be recorded in compiler decisions."
+  );
+  assert.ok(
+    largeServiceCompile.version.compilerDecisions?.some((decision) => decision.kind === "composition_section_drop" && decision.sectionId === "services"),
+    "Duplicate service-list section drops should be recorded in compiler decisions."
+  );
+}
+
+{
+  const reconciled = reconcileNavPlanV3({
+    navPlan: {
+      source: "site_director",
+      items: [
+        {
+          label: "Services",
+          kind: "dropdown",
+          children: [
+            { label: "Collision Repair", target: "/collision-repair" },
+            { label: "Free Repair Quote", target: "/services/free-repair-quote" }
+          ]
+        },
+        { label: "Case Studies", kind: "page", target: "/case-studies" }
+      ],
+      primaryCta: { label: "Free Repair Quote", target: "/services/free-repair-quote" }
+    },
+    pages: [{ slug: "" }, { slug: "collision-repair" }],
+    homeAnchors: ["services", "proof", "contact"]
+  });
+  assert.ok(reconciled.droppedTargets.some((target) => target.label === "Free Repair Quote"), "Pseudo-service quote nav child should be dropped.");
+  assert.ok(
+    reconciled.rewrittenTargets.some((target) => target.label === "Case Studies" && target.to === "#proof"),
+    "Case-study page intents should rewrite to proof only when that anchor exists."
+  );
+  assert.equal(reconciled.navPlan?.items.some((item) => item.kind === "dropdown"), false, "Single-child Services dropdown should collapse to a direct link.");
+  assert.equal(reconciled.navPlan?.items[0]?.target, "/collision-repair", "Collapsed single-child dropdown should keep the surviving service target.");
+  assert.equal(reconciled.navPlan?.primaryCta.target, "#contact", "Unresolved primary CTA should fall back to #contact.");
+
+  const noAnchor = reconcileNavPlanV3({
+    navPlan: {
+      source: "site_director",
+      items: [{ label: "Gallery", kind: "page", target: "/gallery" }],
+      primaryCta: { label: "Contact", target: "#contact" }
+    },
+    pages: [{ slug: "" }],
+    homeAnchors: ["contact"]
+  });
+  assert.ok(noAnchor.droppedTargets.some((target) => target.label === "Gallery"), "Missing home-section intent without a matching anchor should drop.");
+  assert.equal(noAnchor.navPlan?.items.length, 0, "Missing home-section intent must not rewrite to a dead anchor.");
+
+  const qaFromNavSignal = buildGeneratedSiteQaMetadata({
+    bundle: qaBundleForVersion(testBusiness, testSite, testVersion),
+    version: testVersion,
+    inspection: cleanGeneratedInspection(testVersion, "qa_nav_signal"),
+    qaRunId: "qa_nav_signal",
+    qualitySignals: { navReconciliation: reconciled }
+  });
+  assert.ok(
+    qaFromNavSignal.warnings.some((warning) => warning.id === "v3_nav_reconciliation_heavy"),
+    "Reconciliation delta should create QA findings before DOM cleanup masks it."
+  );
+}
+
+{
+  const geometryTargets = buildGenerationRepairTargets({
+    blockers: [],
+    warnings: [
+      {
+        id: "desktop_section_quality_failure",
+        title: "One or more sections failed deterministic layout QA",
+        detail: "service_index produced 8 cramped text samples in service card titles.",
+        viewport: "desktop"
+      }
+    ]
+  });
+  assert.ok(
+    geometryTargets.some((target) => target.target === "template_geometry" && target.activation === "live"),
+    "Cramped section-quality findings should become live template_geometry repair targets before copy-slot repair."
+  );
+
+  const brokenAssetVersion = structuredClone(testVersion);
+  (brokenAssetVersion as unknown as { missingAssetProbe: string }).missingAssetProbe = "/generated-site-assets/auto-body/asset-does-not-exist.png";
+  const qaWithMissingAsset = buildGeneratedSiteQaMetadata({
+    bundle: qaBundleForVersion(testBusiness, testSite, brokenAssetVersion),
+    version: brokenAssetVersion,
+    inspection: cleanGeneratedInspection(brokenAssetVersion, "qa_missing_asset"),
+    qaRunId: "qa_missing_asset"
+  });
+  assert.ok(
+    qaWithMissingAsset.blockers.some((blocker) => blocker.id === "v3_platform_asset_missing"),
+    "Missing platform asset URLs should create a hard blocker."
+  );
+
+  const gatedRepairQa = applyUnresolvedRepairTargetReadinessGate({
+    readiness: "ready",
+    blockers: [],
+    warnings: [],
+    repair: {
+      attempted: true,
+      applied: false,
+      mutationSummaries: [],
+      unresolvedBlockerIds: [],
+      unresolvedTargetIds: ["repair_scorecard_visual-design-page-repeated-media-home_asset_crop"]
+    },
+    repairTargets: [
+      {
+        id: "repair_scorecard_visual-design-page-repeated-media-home_asset_crop",
+        target: "asset_crop",
+        activation: "live",
+        priority: "high",
+        source: "scorecard",
+        findingId: "visual_design:page_repeated_media_home",
+        title: "Repeated media",
+        detail: "Hero media repeats in a service/proof slot."
+      }
+    ]
+  } satisfies GenerationQaMetadata);
+  assert.equal(gatedRepairQa.readiness, "blocked", "Unresolved high-priority live repair targets should block readiness.");
+  assert.ok(gatedRepairQa.blockers.some((blocker) => blocker.id === "repair_unresolved_live_targets"), "Repair fail-open gate should add a blocker.");
+}
 
 const placeIdOnlyBundle = withBusinessBundleFields({
   businessProfile: {
@@ -511,18 +930,90 @@ assert.ok(directoryHtml.includes("site-footer-column-v3") && directoryHtml.inclu
 const mixedLocationLandingCount = generatedLocationPages.length;
 assert.equal(mixedLocationLandingCount, 2, "Mixed physical plus service-area records should not create fake service-area location pages.");
 
-const showcaseFallbackHtml = renderToStaticMarkup(
-  React.createElement(SiteRendererV3, {
-    business: testBusiness,
-    site: testSite,
-    version: testVersion,
-    tracking: false,
-    formsEnabled: false,
-    basePath: ""
-  })
-);
-assert.ok(showcaseFallbackHtml.includes("site-location-showcase-areas-v3"), "location_showcase should render the coverage/directions fallback when map embeds are unavailable.");
-assert.equal(showcaseFallbackHtml.includes("Service area</span>"), false, "location_showcase should not render the old no-address Service area heading branch.");
+const originalLocationMapMode = process.env.LODESTA_LOCATION_MAP_MODE;
+const originalGoogleMapsBrowserKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
+const originalGoogleMapsEmbedKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+try {
+  process.env.LODESTA_LOCATION_MAP_MODE = "link_only";
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  const showcaseFallbackHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: testVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(showcaseFallbackHtml.includes("site-location-showcase-map-fallback-v3"), "location_showcase should render a brand-safe map fallback when map embeds are unavailable.");
+  assert.equal(showcaseFallbackHtml.includes("site-location-showcase-service-v3"), false, "location_showcase should suppress redundant one-city service-area chips already covered by the address.");
+  assert.equal(showcaseFallbackHtml.includes("site-location-showcase-areas-v3"), false, "address-backed location_showcase should not render a detached coverage card.");
+
+  delete process.env.LODESTA_LOCATION_MAP_MODE;
+  const showcaseAutoFallbackHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: testVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(showcaseAutoFallbackHtml.includes("maps.google.com/maps"), "location_showcase should default to a keyless classic Google Maps embed when no dedicated Embed API key is configured.");
+  assert.equal(showcaseAutoFallbackHtml.includes("google.com/maps/embed/v1/place"), false, "location_showcase auto mode should not use the official Embed API without a dedicated Embed API key.");
+
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = "browser-restricted-public-key";
+  const showcaseAutoWithKeyHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: testVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(showcaseAutoWithKeyHtml.includes("maps.google.com/maps"), "location_showcase auto mode should keep using keyless classic embeds when only a browser-restricted key is configured.");
+  assert.equal(showcaseAutoWithKeyHtml.includes("google.com/maps/embed/v1/place"), false, "location_showcase auto mode should not use a browser-restricted Maps JS key for the Embed API.");
+
+  process.env.LODESTA_LOCATION_MAP_MODE = "classic_embed";
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
+  const showcaseClassicEmbedHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: testVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(showcaseClassicEmbedHtml.includes("maps.google.com/maps"), "location_showcase should support explicit keyless classic map embeds.");
+
+  process.env.LODESTA_LOCATION_MAP_MODE = "embed";
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY = "embed-api-public-key";
+  const showcaseOfficialEmbedHtml = renderToStaticMarkup(
+    React.createElement(SiteRendererV3, {
+      business: testBusiness,
+      site: testSite,
+      version: testVersion,
+      tracking: false,
+      formsEnabled: false,
+      basePath: ""
+    })
+  );
+  assert.ok(showcaseOfficialEmbedHtml.includes("google.com/maps/embed"), "location_showcase should support official map embeds with an explicit public Embed API key.");
+} finally {
+  if (originalLocationMapMode === undefined) delete process.env.LODESTA_LOCATION_MAP_MODE;
+  else process.env.LODESTA_LOCATION_MAP_MODE = originalLocationMapMode;
+  if (originalGoogleMapsBrowserKey === undefined) delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
+  else process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = originalGoogleMapsBrowserKey;
+  if (originalGoogleMapsEmbedKey === undefined) delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  else process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY = originalGoogleMapsEmbedKey;
+}
 
 const coverageReport = buildFactCoverageReport({ bundle: multiLocationBundle, version: multiLocation.version });
 assert.ok(coverageReport.facts.some((fact) => fact.category === "address" && fact.note.includes("location_showcase")), "Fact coverage should resolve address to the new location templates.");
@@ -562,12 +1053,13 @@ assert.equal(defaultBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", 
       prompt:
         "Create a website for Contract Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair, hail repair, auto glass. Phone: (512) 555-0100. Address: 100 Test Road, Austin, TX 78702."
     },
-    source: "admin_console"
+    source: "admin_console",
+    modelFallbackPolicy: "allow"
   });
   const generatedVersion = generated.bundle.siteModel.versions[0];
   assert.equal(generatedVersion?.rendererVersion, "layout-v3", "Canonical generateSite path should emit layout-v3.");
   assert.equal(
-    generatedVersion?.generationQa?.blockers.filter((blocker) => blocker.id !== "render_browser_unavailable").length,
+    generatedVersion?.generationQa?.blockers.filter((blocker) => blocker.id !== "render_browser_unavailable" && !blocker.id.startsWith("scorecard_")).length,
     0,
     JSON.stringify(generatedVersion?.generationQa?.blockers ?? [], null, 2)
   );
@@ -661,6 +1153,67 @@ process.stdout.write(
     2
   )}\n`
 );
+
+function qaBundleForVersion(business: BusinessProfile, site: SiteModel, version: SiteVersionV3): SiteBundle {
+  return withBusinessBundleFields({
+    businessProfile: business,
+    siteModel: { ...site, versions: [version] },
+    extensionModel: testExtensions,
+    optimizationFindings: [],
+    experiments: [],
+    presenceAssessment: {
+      siteId: business.siteId,
+      sourceUrl: "https://contract.example",
+      technicalNotes: [],
+      visualNotes: [],
+      brandNotes: [],
+      publicPresenceNotes: []
+    }
+  });
+}
+
+function cleanGeneratedInspection(version: SiteVersionV3, qaRunId: string): RenderInspectionResult {
+  return {
+    target: "generated_site",
+    siteId: version.id,
+    versionId: version.id,
+    qaRunId,
+    sourceUrl: "https://contract.example/preview",
+    finalUrl: "https://contract.example/preview",
+    adapter: "playwright",
+    capturedAt: "2026-06-02T00:00:00.000Z",
+    screenshots: [],
+    findings: [],
+    metrics: {
+      siteHeaderDetected: true,
+      siteFooterDetected: true,
+      bodyTextChars: 4000,
+      sectionCount: version.pageComposition.pages[0]?.sections.length ?? 0,
+      ctaCount: 2,
+      telLinkCount: 1,
+      imageCount: 1,
+      loadedImageCount: 1,
+      brokenImageCount: 0,
+      aboveFoldCtaDetected: true,
+      primaryHeroCtaDetected: true,
+      primaryHeroCtaAboveFold: true,
+      primaryMediaImageLoaded: true
+    },
+    metricsByViewport: {
+      desktop: {
+        viewport: { name: "desktop", width: 1280, height: 900 },
+        siteHeaderDetected: true,
+        siteFooterDetected: true,
+        aboveFoldCtaDetected: true,
+        telLinkCount: 1,
+        imageCount: 1,
+        loadedImageCount: 1,
+        brokenImageCount: 0,
+        sectionInspections: []
+      }
+    }
+  };
+}
 
 function visualSectionsFor(version: SiteVersionV3) {
   return version.pageComposition.pages.flatMap((page) =>

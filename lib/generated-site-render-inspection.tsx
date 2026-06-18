@@ -12,6 +12,9 @@ export async function inspectGeneratedSiteBundleRender(input: {
   version: SiteVersion;
   qaRunId: string;
   pageSlug?: string;
+  artifactRoot?: string;
+  captureScreenshots?: boolean;
+  captureSectionScreenshots?: boolean;
 }) {
   const html = await renderGeneratedSiteHtml(input.bundle, input.version, input.pageSlug);
   const pagePath = input.pageSlug ? `/${input.pageSlug.replace(/^\/+/, "")}` : "";
@@ -24,7 +27,9 @@ export async function inspectGeneratedSiteBundleRender(input: {
     versionId: input.version.id,
     siteModelHash: computeSiteModelHash(input.bundle, input.version),
     qaRunId: input.qaRunId,
-    captureScreenshots: true
+    captureScreenshots: input.captureScreenshots ?? true,
+    captureSectionScreenshots: input.captureSectionScreenshots ?? true,
+    artifactRoot: input.artifactRoot
   });
 }
 

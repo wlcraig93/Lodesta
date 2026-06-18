@@ -123,9 +123,12 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
     ? understanding.cleanedServices
     : normalizeServiceList(coalesceList(facts?.services, promptFacts.services));
   const serviceCandidates = removeBusinessNameServiceCandidates(
-    dedupeServiceNames(
-      removeBlockedPlaceholders(
-        cleanedServices.length ? cleanedServices.map((service) => service.name) : defaultServicesForVertical(vertical)
+    filterServicesForVertical(
+      vertical,
+      dedupeServiceNames(
+        removeBlockedPlaceholders(
+          cleanedServices.length ? cleanedServices.map((service) => service.name) : defaultServicesForVertical(vertical)
+        )
       )
     ),
     name
@@ -550,8 +553,25 @@ function coalesceList(...lists: Array<string[] | undefined>) {
 }
 
 function removeBlockedPlaceholders(values: string[]) {
-  const blocked = new Set(["local area", "core service", "local support"]);
+  const blocked = new Set(["local area", "core service", "local support", "skip to content", "view"]);
   return values.filter((value) => !blocked.has(value.trim().toLowerCase()));
+}
+
+function filterServicesForVertical(vertical: Vertical, values: string[]) {
+  const allowPattern = serviceAllowPatternForVertical(vertical);
+  if (!allowPattern) return values;
+  return values.filter((service) => allowPattern.test(service));
+}
+
+function serviceAllowPatternForVertical(vertical: Vertical) {
+  switch (vertical) {
+    case "auto_body":
+      return /\b(auto\s*body|body|collision|paint|refinish|dent|hail|glass|windshield|bumper|fender|panel|scratch|frame|pdr|repair)\b/i;
+    case "auto_services":
+      return /\b(auto|tire|wheel|alignment|oil|brake|mechanic|muffler|transmission|battery|inspection|smog|repair|service)\b/i;
+    default:
+      return undefined;
+  }
 }
 
 function dedupeServiceNames(values: string[]) {
@@ -1044,8 +1064,7 @@ function profileDescriptionForBusiness(input: {
   const category = input.vertical.replace(/_/g, " ");
   const servicePhrase = services || category;
   const areaPhrase = area && area !== "Local area" ? ` in ${area}` : "";
-  const sourcePhrase = input.sourceHostname ? ` based on public facts from ${input.sourceHostname}` : "";
-  return `${input.name} is a ${category} profile focused on ${servicePhrase}${areaPhrase}${sourcePhrase}. Key business details remain owner-verified before publishing.`;
+  return `${input.name} handles ${servicePhrase}${areaPhrase} with practical details gathered from its public business presence.`;
 }
 
 function buildTechnicalNotes(crawl?: CrawlAssessment) {

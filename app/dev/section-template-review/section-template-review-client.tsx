@@ -50,7 +50,7 @@ type ReviewSelection = {
 
 const imageBackgroundV3: ImageBackgroundV3 = {
   kind: "image",
-  url: "/generated-site-assets/auto-body/bodywork-hero-v1.jpg",
+  url: "/generated-site-assets/auto-body/lift-bay-overview-v1.png",
   focalPoint: "center"
 };
 

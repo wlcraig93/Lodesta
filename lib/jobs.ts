@@ -187,6 +187,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       }
       const rawUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
       const prompt = typeof job.payload.prompt === "string" ? job.payload.prompt : undefined;
+      const candidatePurpose = job.payload.candidatePurpose === "test_generation" ? "test_generation" : undefined;
+      const modelFallbackPolicy = job.payload.modelFallbackPolicy === "allow" ? "allow" : undefined;
       const url = rawUrl ? await assertPublicFetchUrl(rawUrl) : undefined;
       assertLaunchMarket({ url, prompt });
       const input = {
@@ -196,6 +198,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       const generation = await context.generateSite({
         input,
         source: "job",
+        candidatePurpose,
+        modelFallbackPolicy,
         metadata: jobGenerationMetadata(job, context)
       });
       const bundle = generation.bundle;

@@ -3,6 +3,16 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// npm injects `npm_*` metadata into script processes. Some HTTP stacks read
+// those keys as network/client configuration, which can make script-time fetches
+// fail even though the same command works under direct `node ...`. Lodesta
+// scripts do not depend on npm lifecycle metadata, so strip it before any
+// repository clients are initialized.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith("npm_")) delete process.env[key];
+}
+
 const shellEnvKeys = new Set(Object.keys(process.env));
 
 for (const fileName of [".env", ".env.local"]) {

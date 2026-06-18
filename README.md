@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-The default local app URL is `http://localhost:4330`. `npm run dev` starts both the Next.js app on `127.0.0.1:4330` and the Lodesta job worker, so queued site generations and maintenance jobs are processed in local development. Override with `PORT=4331 npm run dev` only when you intentionally need another port. Use `npm run dev:web` when you intentionally want the web server without a worker. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
+The default local app URL is `http://localhost:4330`. `npm run dev` starts both the Next.js app on `127.0.0.1:4330` and the Lodesta job worker, so queued site generations and maintenance jobs are processed in local development. The local supervisor keeps Next.js running if the worker exits and restarts only the worker with backoff; if the web process exits, the dev session shuts down. Local dev starts the worker with a 750 ms idle poll interval for faster job pickup. Override with `PORT=4331 npm run dev` only when you intentionally need another port. Use `npm run dev:web` when you intentionally want the web server without a worker. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
 
 To run the launch-flow smoke checks against a local dev server:
 
@@ -162,7 +162,7 @@ Optional launch integrations:
 Recommended Railway services:
 
 - Web: use root [railway.toml](/Users/williamcraig/Documents/GitHub/Lodesta/railway.toml), which installs Chromium during build, starts `npm run start`, and health-checks `/api/health`.
-- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically.
+- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically. Worker idle interval precedence is positional CLI arg, then `LODESTA_WORKER_IDLE_MS`, then the 5000 ms default; the Railway worker TOML does not pass an interval, so deployed workers keep the 5000 ms default unless explicitly configured.
 - Cron: schedule a protected `POST /api/jobs/schedule` call with `{ "task": "launch_maintenance" }` for recurring maintenance, or call `npm run cli -- schedule-maintenance launch_maintenance` from a Railway cron command.
 - Run `npm run verify:deployment-config` before deploying after changing package scripts or Railway config.
 

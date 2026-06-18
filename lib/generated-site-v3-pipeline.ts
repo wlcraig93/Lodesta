@@ -3,10 +3,12 @@ import { approvedAssetLibraryAssetsForVerticals, type ApprovedAssetLibraryAsset 
 import { withBusinessBundleFields } from "./business-model";
 import { assertVisualSectionsForVersionV3 } from "./site-version-v3";
 import type { SiteBundle } from "./models";
+import type { GeneratedSiteQualitySignalsV3 } from "./generated-site-v3-nav";
 
 export type GeneratedSiteV3Application = {
   applied: boolean;
   reason: string;
+  qualitySignals?: GeneratedSiteQualitySignalsV3;
 };
 
 export function applyGeneratedSiteV3(input: {
@@ -28,10 +30,12 @@ export function applyGeneratedSiteV3(input: {
   input.bundle.siteModel.theme = result.version.theme ?? input.bundle.siteModel.theme;
   input.bundle.presenceAssessment.brandCueReport = result.brandCueReport;
   input.bundle.presenceAssessment.technicalNotes.push(`Generated-site V3 compiled for ${input.bundle.businessProfile.vertical}.`);
-  input.bundle.presenceAssessment.generationPlanningSource ??= "deterministic_fallback";
+  input.bundle.presenceAssessment.generationPlanningSource ??=
+    input.bundle.presenceAssessment.siteDirectorPlanV1?.validation.status === "passed" ? "openai" : "deterministic_fallback";
   return {
     applied: true,
-    reason: `layout-v3 compiled for ${input.bundle.businessProfile.vertical}.`
+    reason: `layout-v3 compiled for ${input.bundle.businessProfile.vertical}.`,
+    qualitySignals: result.qualitySignals
   };
 }
 

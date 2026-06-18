@@ -33,6 +33,7 @@ import type {
   ProspectReportRecord,
   SiteBundle,
   SiteCandidateRecord,
+  SiteCandidatePurpose,
   SiteCandidateStatus,
   SiteVersion,
 } from "./models";
@@ -161,10 +162,12 @@ export type CreateSiteCandidateInput = {
   sourceHost?: string;
   intendedSiteId?: string;
   status?: SiteCandidateStatus;
+  candidatePurpose?: SiteCandidatePurpose;
 };
 
 export type ListSiteCandidatesFilter = {
   status?: SiteCandidateStatus;
+  candidatePurpose?: SiteCandidatePurpose;
   sourceHost?: string;
   limit?: number;
   offset?: number;
@@ -180,6 +183,7 @@ export type SiteCandidateSummary = {
   businessName: string;
   vertical: SiteCandidateRecord["vertical"];
   status: SiteCandidateStatus;
+  candidatePurpose: SiteCandidatePurpose;
   sourceUrl?: string;
   sourceHost?: string;
   candidateSlug: string;
@@ -205,6 +209,7 @@ export function siteCandidateSummaryFromRecord(record: SiteCandidateRecord): Sit
     businessName: record.businessName,
     vertical: record.vertical,
     status: record.status,
+    candidatePurpose: record.candidatePurpose,
     sourceUrl: record.sourceUrl,
     sourceHost: record.sourceHost,
     candidateSlug: record.candidateSlug,

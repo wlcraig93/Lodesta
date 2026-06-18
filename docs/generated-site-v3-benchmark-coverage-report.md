@@ -1,8 +1,8 @@
 # Generated Site V3 Benchmark Coverage Report
 
-Generated at: 2026-06-03T03:25:43.768Z
+Generated at: 2026-06-13T07:08:47.216Z
 Benchmark corpus collected at: 2026-06-03
-Screenshot artifact root: `/Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z`
+Screenshot artifact root: `/Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z`
 
 This report is produced by `npm run verify:generated-site-v3-benchmark-corpus`. It is a coverage and evidence report, not a claim that V3 design quality is solved.
 
@@ -227,8 +227,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"SwiftRooter - Plumbing Service Template","h1Text":"SwiftRooter - Fast & Reliable Plumbing Services","bodyTextChars":5207,"imageCount":45,"aboveFoldImageCount":8,"ctaLikeCount":6,"navLinkCount":5,"stickyHeaderCount":0,"sectionLikeCount":383,"maxTextWidth":1152,"bodyTextSample":"Home Services About Us Contact Us Get Template SwiftRooter - Fast & Reliable Plumbing Services Your trusted partner for fast, reliable, and professional plumbing and rooter services. Whether it's a clogged drain, emergency plumbing, or a full pipe replacement, SwiftRooter has you"}
 - Mobile metrics: {"title":"SwiftRooter - Plumbing Service Template","h1Text":"SwiftRooter - Fast & Reliable Plumbing Services","bodyTextChars":5160,"imageCount":45,"aboveFoldImageCount":8,"ctaLikeCount":4,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":378,"maxTextWidth":350,"bodyTextSample":"SwiftRooter - Fast & Reliable Plumbing Services Your trusted partner for fast, reliable, and professional plumbing and rooter services. Whether it's a clogged drain, emergency plumbing, or a full pipe replacement, SwiftRooter has you covered 24/7. 16 K+ Membership Enjoy our facil"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-swiftrooter/desktop.png (1584087 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-swiftrooter/mobile.png (275047 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-swiftrooter/desktop.png (1584087 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-swiftrooter/mobile.png (275047 bytes)
 
 ### framer:gardener
 
@@ -239,8 +239,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Gardener — Landscaper & Exterior Template","h1Text":"Your Outdoor Space, Rebuilt","bodyTextChars":5203,"imageCount":37,"aboveFoldImageCount":6,"ctaLikeCount":6,"navLinkCount":6,"stickyHeaderCount":0,"sectionLikeCount":377,"maxTextWidth":793,"bodyTextSample":"Home About Services Blog Contact Get template Your Outdoor Space, Rebuilt With our expert team of gardeners and landscapers, we turn ordinary gardens into extraordinary havens of beauty. From 2000+ ratings Book Your Free Appointment Select Your Location… Long Island Brooklyn Book"}
 - Mobile metrics: {"title":"Gardener — Landscaper & Exterior Template","h1Text":"Your Outdoor Space, Rebuilt","bodyTextChars":3532,"imageCount":29,"aboveFoldImageCount":6,"ctaLikeCount":3,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":261,"maxTextWidth":350,"bodyTextSample":"Your Outdoor Space, Rebuilt With our expert team of gardeners and landscapers, we turn ordinary gardens into extraordinary havens of beauty. From 2000+ ratings We take the time to understand your unique needs and preferences to ensure that your garden reflects your vision. Ricky "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-gardener/desktop.png (2420048 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-gardener/mobile.png (665158 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-gardener/desktop.png (2420678 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-gardener/mobile.png (663670 bytes)
 
 ### framer:camino
 
@@ -251,8 +251,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Camino Restaurant","h1Text":"Camino / Tradition      meets          modern  simplicity","bodyTextChars":4310,"imageCount":99,"aboveFoldImageCount":5,"ctaLikeCount":7,"navLinkCount":18,"stickyHeaderCount":0,"sectionLikeCount":399,"maxTextWidth":1312,"bodyTextSample":"EN / ES HOME EXPERIENCE MENU RESERVATION EVENTS LOCATION GIFT CARDS CONTACT FAQs Camino Modern Mediterranean Dining MAKE A RESERVATION WELCOME TO CAMINO Step inside Camino, a dining room where Murcia’s heritage meets modern Spanish cooking. A setting shaped by detail, where every"}
 - Mobile metrics: {"title":"Camino Restaurant","h1Text":"Camino / Tradition      meets          modern  simplicity","bodyTextChars":3918,"imageCount":71,"aboveFoldImageCount":2,"ctaLikeCount":7,"navLinkCount":17,"stickyHeaderCount":0,"sectionLikeCount":344,"maxTextWidth":410,"bodyTextSample":"EN / ES HOME EXPERIENCE MENU RESERVATION EVENTS LOCATION GIFT CARDS CONTACT FAQs Camino Modern Mediterranean Dining WELCOME TO CAMINO Step inside Camino, a dining room where Murcia’s heritage meets modern Spanish cooking. A setting shaped by detail, where every meal is shared in "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-camino/desktop.png (5803407 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-camino/mobile.png (1781220 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-camino/desktop.png (5803096 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-camino/mobile.png (1740526 bytes)
 
 ### framer:luxxcar
 
@@ -263,8 +263,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Luxury Cars Rental - LuxxCar Framer Template","h1Text":"The largest luxury car rental marketplace","bodyTextChars":4283,"imageCount":34,"aboveFoldImageCount":2,"ctaLikeCount":5,"navLinkCount":8,"stickyHeaderCount":0,"sectionLikeCount":521,"maxTextWidth":1290,"bodyTextSample":"Home Cars Chauffeur Service Pricing Blog About Us Contact Us Purchase Template The largest luxury car rental marketplace Explore both stylish sports cars and business-class models. Search for a car ... Scroll down to explore our fleet EXPLORE OUR FLEET The largest fleet of luxury"}
 - Mobile metrics: {"title":"Luxury Cars Rental - LuxxCar Framer Template","h1Text":"The largest luxury car rental marketplace","bodyTextChars":3757,"imageCount":24,"aboveFoldImageCount":2,"ctaLikeCount":4,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":413,"maxTextWidth":342,"bodyTextSample":"The largest luxury car rental marketplace Explore both stylish sports cars and business-class models. Search for a car ... EXPLORE OUR FLEET The largest fleet of luxury cars, supercars, SUVs, and more Discover an exclusive collection of world-class vehicles designed to deliver un"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-luxxcar/desktop.png (1169129 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-luxxcar/mobile.png (699436 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-luxxcar/desktop.png (1169058 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-luxxcar/mobile.png (684741 bytes)
 
 ### framer:fabrica
 
@@ -272,11 +272,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://fabrica.framer.media/?utm_source=framer
 - Type: live_demo
 - Category/archetype: studio_agency / studio_portfolio_editorial
-- Desktop metrics: {"title":"Fabrica® Studio – Web Design, Branding & Digital Growth","h1Text":"No generic websites. No empty marketing promises. Just tools and strategies that help your business grow and your brand shine.","bodyTextChars":8307,"imageCount":64,"aboveFoldImageCount":7,"ctaLikeCount":7,"navLinkCount":14,"stickyHeaderCount":0,"sectionLikeCount":896,"maxTextWidth":1025,"bodyTextSample":"fabrica® Studio Projects 27 Blog Contact Home Home Studio Studio Projects Projects Blog Blog Contact Contact (312) 555-2468 hello@fabrica.com Privacy Policy Terms of Service © 2025 fabrica® Studio fabrica® fabrica fabrica ® Studio Branding and Identity Social Media Marketing Web "}
+- Desktop metrics: {"title":"Fabrica® Studio – Web Design, Branding & Digital Growth","h1Text":"No generic websites. No empty marketing promises. Just tools and strategies that help your business grow and your brand shine.","bodyTextChars":8307,"imageCount":64,"aboveFoldImageCount":8,"ctaLikeCount":7,"navLinkCount":14,"stickyHeaderCount":0,"sectionLikeCount":896,"maxTextWidth":1025,"bodyTextSample":"fabrica® Studio Projects 27 Blog Contact Home Home Studio Studio Projects Projects Blog Blog Contact Contact (312) 555-2468 hello@fabrica.com Privacy Policy Terms of Service © 2025 fabrica® Studio fabrica® fabrica fabrica ® Studio Branding and Identity Social Media Marketing Web "}
 - Mobile metrics: {"title":"Fabrica® Studio – Web Design, Branding & Digital Growth","h1Text":"No generic websites. No empty marketing promises. Just tools and strategies that help your business grow and your brand shine.","bodyTextChars":8209,"imageCount":64,"aboveFoldImageCount":2,"ctaLikeCount":6,"navLinkCount":10,"stickyHeaderCount":0,"sectionLikeCount":855,"maxTextWidth":350,"bodyTextSample":"fabrica® Home Studio Projects Blog Contact (312) 555-2468 hello@fabrica.com Privacy Policy Terms of Service © 2025 fabrica® Studio fabrica® fabrica fabrica ® Studio Branding and Identity Social Media Marketing Web Design and Development SEO Optimization No generic websites. No em"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-fabrica/desktop.png (3486615 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-fabrica/mobile.png (1029671 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-fabrica/desktop.png (2941864 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-fabrica/mobile.png (1099711 bytes)
 
 ### framer:perform
 
@@ -287,8 +287,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Perform - Sports Coach Framer Template","h1Text":"Level Up Your / Performance","bodyTextChars":2260,"imageCount":19,"aboveFoldImageCount":2,"ctaLikeCount":10,"navLinkCount":14,"stickyHeaderCount":0,"sectionLikeCount":265,"maxTextWidth":1120,"bodyTextSample":"Perform Coaching Reviews About Contact Get template Experienced triathlon coach Level Up Your Performance Improve your triathlon performance with personalized training plans guided by an experienced coach committed to your success. Start now 100+ Positive Client Reviews From begi"}
 - Mobile metrics: {"title":"Perform - Sports Coach Framer Template","h1Text":"Level Up Your / Performance","bodyTextChars":2216,"imageCount":19,"aboveFoldImageCount":2,"ctaLikeCount":7,"navLinkCount":9,"stickyHeaderCount":0,"sectionLikeCount":250,"maxTextWidth":350,"bodyTextSample":"Perform Experienced triathlon coach Level Up Your Performance Improve your triathlon performance with personalized training plans guided by an experienced coach committed to your success. Start now 100+ Positive Client Reviews From beginners to seasoned pros, I create custom plan"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-perform/desktop.png (2576561 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-perform/mobile.png (1233645 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-perform/desktop.png (2576652 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-perform/mobile.png (1241832 bytes)
 
 ### webflow:healen
 
@@ -299,8 +299,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Healen - Webflow HTML Website Template","h1Text":"Healen – Women’s Health & Pregnancy Care Template","bodyTextChars":1056,"imageCount":43,"aboveFoldImageCount":17,"ctaLikeCount":1,"navLinkCount":46,"stickyHeaderCount":0,"sectionLikeCount":10,"maxTextWidth":1340,"bodyTextSample":"Home About Services Pages Consultation Now Consultation Now Healen – Women’s Health & Pregnancy Care Template Compassionate, doctor-led medical care designed for every stage of women’s health. Go to Homepage Go to Homepage What's included in this template 50+ Component & Section "}
 - Mobile metrics: {"title":"Healen - Webflow HTML Website Template","h1Text":"Healen – Women’s Health & Pregnancy Care Template","bodyTextChars":996,"imageCount":43,"aboveFoldImageCount":18,"ctaLikeCount":1,"navLinkCount":46,"stickyHeaderCount":0,"sectionLikeCount":10,"maxTextWidth":358,"bodyTextSample":"Healen – Women’s Health & Pregnancy Care Template Compassionate, doctor-led medical care designed for every stage of women’s health. Go to Homepage Go to Homepage What's included in this template 50+ Component & Section Figma file included To access the Figma file, email your rec"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-healen/desktop.png (659232 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-healen/mobile.png (214208 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-healen/desktop.png (660022 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-healen/mobile.png (214271 bytes)
 
 ### webflow:rally-padel
 
@@ -311,8 +311,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Rally Padel - Webflow HTML website template","h1Text":"Play Padel Without the Hassle","bodyTextChars":4093,"imageCount":17,"aboveFoldImageCount":2,"ctaLikeCount":5,"navLinkCount":4,"stickyHeaderCount":1,"sectionLikeCount":20,"maxTextWidth":747,"bodyTextSample":"About About Services Services How It Works How It Works FAQ FAQ Book a Court Sign in Join us on the court! Learn new padel strategies to up your game. Play Padel Without the Hassle Book courts instantly, join matches, and be part of a growing community. View Membership About Us F"}
 - Mobile metrics: {"title":"Rally Padel - Webflow HTML website template","h1Text":"Play Padel Without the Hassle","bodyTextChars":4008,"imageCount":17,"aboveFoldImageCount":2,"ctaLikeCount":5,"navLinkCount":4,"stickyHeaderCount":1,"sectionLikeCount":20,"maxTextWidth":350,"bodyTextSample":"Join us on the court! Learn new padel strategies to up your game. Play Padel Without the Hassle Book courts instantly, join matches, and be part of a growing community. View Membership About Us Finding and booking a court shouldn’t slow you down. With real-time availability, seam"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-rally-padel/desktop.png (2696135 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-rally-padel/mobile.png (404685 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-rally-padel/desktop.png (2696039 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-rally-padel/mobile.png (404656 bytes)
 
 ### framer:noksh
 
@@ -323,8 +323,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Noksh | Architecture & Spatial Strategy Studio","h1Text":"BUILT COMPLETELY AROUND HUMAN EXPERIENCE AND NEEDS / WE DESIGN SPACES WITH PURPOSE","bodyTextChars":3434,"imageCount":12,"aboveFoldImageCount":3,"ctaLikeCount":5,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":203,"maxTextWidth":2161,"bodyTextSample":"SAN FRANCISCO CA, USA OUR APPROACH FOCUSES ON PEOPLE FIRST, ENSURING EACH SPACE SUPPORTS HOW THEY LIVE, WORK, AND CONNECT. THOUGHTFUL DESIGN, CAREFUL PLANNING. BUILT COMPLETELY AROUND HUMAN EXPERIENCE AND NEEDS NAVIGATION HOME PROJECTS ABOUT CONTACT WE DESIGN SPACES WITH PURPOSE "}
 - Mobile metrics: {"title":"Noksh | Architecture & Spatial Strategy Studio","h1Text":"BUILT COMPLETELY AROUND HUMAN EXPERIENCE / DESIGNING SPACES WITH EXPERTISE","bodyTextChars":3030,"imageCount":12,"aboveFoldImageCount":3,"ctaLikeCount":4,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":196,"maxTextWidth":521,"bodyTextSample":"OUR APPROACH FOCUSES ON PEOPLE FIRST, ENSURING EACH SPACE SUPPORTS HOW THEY LIVE, WORK, AND CONNECT. THOUGHTFUL DESIGN, CAREFUL PLANNING. BUILT COMPLETELY AROUND HUMAN EXPERIENCE WE DESIGN SPACES WITH PURPOSE MAKE SPACES REAL VALUE IMPACT BUILD SPACES STRONG SMART IDEAS WE DELIVE"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-noksh/desktop.png (3913850 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-noksh/mobile.png (1005613 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-noksh/desktop.png (3915458 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-noksh/mobile.png (905305 bytes)
 
 ### framer:elevate
 
@@ -335,8 +335,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Elevate - Free Agency Template for Framer","h1Text":"Design & Development Agency","bodyTextChars":2684,"imageCount":13,"aboveFoldImageCount":5,"ctaLikeCount":8,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":158,"maxTextWidth":1400,"bodyTextSample":"elevate About Services Pricing Projects Get Template DESIGN & DEVELOPMENT AGENCY Partner With Award Winning Design Agency We partner with you to craft a successful business model that authentically reflects your unique vision while achieving your desired conversion goals. Get Sta"}
 - Mobile metrics: {"title":"Elevate - Free Agency Template for Framer","h1Text":"","bodyTextChars":2611,"imageCount":13,"aboveFoldImageCount":5,"ctaLikeCount":7,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":144,"maxTextWidth":350,"bodyTextSample":"elevate Partner With Award Winning Design Agency We partner with you to craft a successful business model that authentically reflects your unique vision while achieving your desired conversion goals. Get Started 50K+ Happy Clients 4.5/5 TRUSTED BY 400+ BUSINESSES AROUND THE GLOBE"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-elevate/desktop.png (1493407 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-elevate/mobile.png (503877 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-elevate/desktop.png (1492042 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-elevate/mobile.png (506149 bytes)
 
 ### framer:athletix
 
@@ -347,8 +347,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Athletix – Connecting Communities Through Sport","h1Text":"Connecting Communities Through Sport","bodyTextChars":1917,"imageCount":29,"aboveFoldImageCount":4,"ctaLikeCount":13,"navLinkCount":9,"stickyHeaderCount":0,"sectionLikeCount":295,"maxTextWidth":632,"bodyTextSample":"HOME ABOUT SPORTS MEMBERS EVENTS NEWS RESOURCES CONTACT ATHLETIX CONNECTING COMMUNITIES THROUGH SPORT Supporting clubs, organizing competitions, and promoting inclusive participation across local community sport. BECOME A MEMBER EXPLORE EVENTS ABOUT THE ASSOCIATION The Associatio"}
 - Mobile metrics: {"title":"Athletix – Connecting Communities Through Sport","h1Text":"Connecting Communities Through Sport","bodyTextChars":1933,"imageCount":29,"aboveFoldImageCount":3,"ctaLikeCount":13,"navLinkCount":10,"stickyHeaderCount":0,"sectionLikeCount":296,"maxTextWidth":342,"bodyTextSample":"HOME ABOUT SPORTS MEMBERS EVENTS NEWS RESOURCES CONTACT BECOME A MEMBER ATHLETIX CONNECTING COMMUNITIES THROUGH SPORT Supporting clubs, organizing competitions, and promoting inclusive participation across local community sport. BECOME A MEMBER EXPLORE EVENTS ABOUT THE ASSOCIATIO"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-athletix/desktop.png (4017078 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-athletix/mobile.png (1480949 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-athletix/desktop.png (4017078 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-athletix/mobile.png (1482529 bytes)
 
 ### framer:cassis
 
@@ -359,8 +359,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Cassis — Framer Template","h1Text":"Your projects deserve to stand out","bodyTextChars":4517,"imageCount":9,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":454,"maxTextWidth":1200,"bodyTextSample":"Cassis Blog Changelog Pricing About Careers Join waitlist NEW SPRING UPDATE Your projects deserve to stand out Upload your files and let our platform transform them into polished, professional results in seconds. Watch video Trusted by teams at FEATURES Built for clarity, built f"}
 - Mobile metrics: {"title":"Cassis — Framer Template","h1Text":"Your projects deserve to stand out","bodyTextChars":4250,"imageCount":7,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":423,"maxTextWidth":350,"bodyTextSample":"Cassis Blog 01 Changelog 02 Pricing 03 About 04 Careers 05 Join waitlist NEW SPRING UPDATE Your projects deserve to stand out Upload your files and let our platform transform them into polished, professional results in seconds. Watch video Trusted by teams at FEATURES Built for c"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-cassis/desktop.png (1435856 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-cassis/mobile.png (520274 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-cassis/desktop.png (1436159 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-cassis/mobile.png (520291 bytes)
 
 ### webflow:youga
 
@@ -371,8 +371,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Yoouga - Webflow HTML website template","h1Text":"YOOUGA","bodyTextChars":6079,"imageCount":128,"aboveFoldImageCount":7,"ctaLikeCount":12,"navLinkCount":18,"stickyHeaderCount":1,"sectionLikeCount":10,"maxTextWidth":1160,"bodyTextSample":"YOOUGA HOME SERVICE PAGES BLOG PRICING CONTACT YOOUGA Transform Your Body, Calm Your Mind Experience mindful yoga sessions designed to improve flexibility, reduce stress, and help you reconnect with your inner balance. START YOUR JOURNEY 250+ Trusted by 250+ happy clients WHO WE "}
 - Mobile metrics: {"title":"Yoouga - Webflow HTML website template","h1Text":"YOOUGA","bodyTextChars":6032,"imageCount":128,"aboveFoldImageCount":4,"ctaLikeCount":12,"navLinkCount":18,"stickyHeaderCount":1,"sectionLikeCount":10,"maxTextWidth":351,"bodyTextSample":"YOOUGA YOOUGA Transform Your Body, Calm Your Mind Experience mindful yoga sessions designed to improve flexibility, reduce stress, and help you reconnect with your inner balance. START YOUR JOURNEY 250+ Trusted by 250+ happy clients WHO WE ARE We Create a Peaceful Space Where Wel"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-youga/desktop.png (787611 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-youga/mobile.png (577180 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-youga/desktop.png (788978 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-youga/mobile.png (577085 bytes)
 
 ### webflow:pretty
 
@@ -383,8 +383,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Pretty - Webflow HTML website template","h1Text":"Power your process with tools that just work.","bodyTextChars":3474,"imageCount":28,"aboveFoldImageCount":2,"ctaLikeCount":7,"navLinkCount":6,"stickyHeaderCount":1,"sectionLikeCount":15,"maxTextWidth":1308,"bodyTextSample":"Home Features Blogs Pricing Contact Buy Template Power your process with tools that just work. Streamline your workflow with AI-driven dashboards built for speed, clarity, and control. Expore Template Buy the Template Everything you need for a client-ready workflow Designed for f"}
 - Mobile metrics: {"title":"Pretty - Webflow HTML website template","h1Text":"Power your process with tools that just work.","bodyTextChars":3425,"imageCount":28,"aboveFoldImageCount":2,"ctaLikeCount":7,"navLinkCount":6,"stickyHeaderCount":1,"sectionLikeCount":15,"maxTextWidth":364,"bodyTextSample":"Power your process with tools that just work. Streamline your workflow with AI-driven dashboards built for speed, clarity, and control. Expore Template Buy the Template Everything you need for a client-ready workflow Designed for freelancers and agencies who want the power of a t"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-pretty/desktop.png (436309 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-pretty/mobile.png (202539 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-pretty/desktop.png (435197 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-pretty/mobile.png (202821 bytes)
 
 ### webflow:fleety
 
@@ -392,11 +392,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://fleety-template.webflow.io/
 - Type: live_demo
 - Category/archetype: premium_media_led / premium_media_led
-- Desktop metrics: {"title":"Fleety Studio - Webflow HTML website template","h1Text":"Elevate brands with high-impact design.","bodyTextChars":4722,"imageCount":23,"aboveFoldImageCount":8,"ctaLikeCount":8,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":23,"maxTextWidth":1037,"bodyTextSample":"FLEETY HOMEABOUTWORKSCONTACT NEXT-GEN EXPERIENCE STUDIO Elevate brands with high-impact design. We combine strategy, creativity and design to craft digital experiences that inspire action and fuel growth. LET'S TALK TRUSTED BY STRATEGIC DESIGN Design systems crafted with purpose "}
+- Desktop metrics: {"title":"Fleety Studio - Webflow HTML website template","h1Text":"Elevate brands with high-impact design.","bodyTextChars":4694,"imageCount":23,"aboveFoldImageCount":8,"ctaLikeCount":8,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":23,"maxTextWidth":1037,"bodyTextSample":"FLEETY HOMEABOUTWORKSCONTACT NEXT-GEN EXPERIENCE STUDIO Elevate brands with high-impact design. We combine strategy, creativity and design to craft digital experiences that inspire action and fuel growth. LET'S TALK TRUSTED BY STRATEGIC DESIGN Design systems crafted with purpose "}
 - Mobile metrics: {"title":"Fleety Studio - Webflow HTML website template","h1Text":"Elevate brands with high-impact design.","bodyTextChars":4622,"imageCount":23,"aboveFoldImageCount":0,"ctaLikeCount":8,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":23,"maxTextWidth":351,"bodyTextSample":"FLEETY Menu NEXT-GEN EXPERIENCE STUDIO Elevate brands with high-impact design. We combine strategy, creativity and design to craft digital experiences that inspire action and fuel growth. LET'S TALK TRUSTED BY STRATEGIC DESIGN Design systems crafted with purpose and clarity. BRAN"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-fleety/desktop.png (3331866 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-fleety/mobile.png (866365 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-fleety/desktop.png (3332665 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-fleety/mobile.png (866365 bytes)
 
 ### webflow:adox-studio
 
@@ -407,8 +407,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Adox Studio - Webflow HTML Website Template","h1Text":"","bodyTextChars":4421,"imageCount":111,"aboveFoldImageCount":9,"ctaLikeCount":9,"navLinkCount":17,"stickyHeaderCount":1,"sectionLikeCount":25,"maxTextWidth":1380,"bodyTextSample":"STUDIO STUDIO SERVICES SERVICES PROJECTS PROJECTS CONTACT CONTACT LOS ANGELES, CA 3:24:50 PM AI AUTOMATION UI/UX DESIGN WEB DEVELOPMENT MOTION DESIGN BRANDING We integrate brand, experience, and technology to realize their vision and achieve their greatest impact. Founded in 2020"}
 - Mobile metrics: {"title":"Adox Studio - Webflow HTML Website Template","h1Text":"","bodyTextChars":4063,"imageCount":111,"aboveFoldImageCount":9,"ctaLikeCount":9,"navLinkCount":17,"stickyHeaderCount":1,"sectionLikeCount":25,"maxTextWidth":360,"bodyTextSample":"LOS ANGELES, CA 3:24:50 PM AI AUTOMATION UI/UX DESIGN WEB DEVELOPMENT MOTION DESIGN BRANDING We integrate brand, experience, and technology to realize their vision and achieve their greatest impact. Founded in 2020, adox studio drives transformative outcomes for the world’s most "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-adox-studio/desktop.png (473840 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-adox-studio/mobile.png (107532 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-adox-studio/desktop.png (473840 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-adox-studio/mobile.png (107532 bytes)
 
 ### webflow:brivex
 
@@ -416,11 +416,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://webflow.com/templates/html/brivex-website-template
 - Type: marketplace_detail
 - Category/archetype: home_services / urgent_service_conversion
-- Desktop metrics: {"title":"BriveX Website Page Template for Webflow","h1Text":"BriveX - Technology Website Template","bodyTextChars":1880,"imageCount":30,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Templates Technology , Professional Services BriveX - Technology Website Template Pentarox Preview in browser Preview in Webflow Buy $79 USD Fintech template for card issuing and payment platforms."}
-- Mobile metrics: {"title":"BriveX Website Page Template for Webflow","h1Text":"BriveX - Technology Website Template","bodyTextChars":1698,"imageCount":30,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started BriveX - Technology Website Template Pentarox Preview Buy $79 USD Fintech template for card issuing and payment platforms. Built for startups and enterprises launching card programs, with conversion-focused CTAs, pricing pages, and integration sho"}
+- Desktop metrics: {"title":"BriveX Website Page Template for Webflow","h1Text":"","bodyTextChars":1682,"imageCount":25,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Fintech template for card issuing and payment platforms. Built for startups and enterprises launching card programs, with conversion-focused CTAs, pricing pages, and integration showcases. Overview"}
+- Mobile metrics: {"title":"BriveX Website Page Template for Webflow","h1Text":"","bodyTextChars":1632,"imageCount":25,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Fintech template for card issuing and payment platforms. Built for startups and enterprises launching card programs, with conversion-focused CTAs, pricing pages, and integration showcases. Overview License Support FAQ BriveX — SaaS Webflow Templat"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-brivex/desktop.png (248972 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-brivex/mobile.png (52238 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-brivex/desktop.png (201464 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-brivex/mobile.png (67573 bytes)
 
 ### webflow:monocad
 
@@ -431,8 +431,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Monocad - Webflow HTML Website Template","h1Text":"","bodyTextChars":2046,"imageCount":54,"aboveFoldImageCount":0,"ctaLikeCount":6,"navLinkCount":6,"stickyHeaderCount":1,"sectionLikeCount":7,"maxTextWidth":1409,"bodyTextSample":"MONOCAD CLOSE MENU WE CREATE TIMELESS IMAGERY FOR BRANDS, INDIVIDUALS, AND CREATIVE TEAMS WHO VALUE CLARITY AND EMOTION IN EVERY FRAME. BOOK A SESSION BOOK A SESSION BOOK A SESSION M O N O C A D ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE EVERYDAY, 10 AM - 8 PM"}
 - Mobile metrics: {"title":"Monocad - Webflow HTML Website Template","h1Text":"","bodyTextChars":2202,"imageCount":54,"aboveFoldImageCount":9,"ctaLikeCount":6,"navLinkCount":6,"stickyHeaderCount":1,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"MONOCAD CLOSE MENU WE CREATE TIMELESS IMAGERY FOR BRANDS, INDIVIDUALS, AND CREATIVE TEAMS WHO VALUE CLARITY AND EMOTION IN EVERY FRAME. BOOK A SESSION BOOK A SESSION BOOK A SESSION M O N O C A D ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE ALUMEE EVERYDAY, 10 AM - 8 PM"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-monocad/desktop.png (601765 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-monocad/mobile.png (267936 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-monocad/desktop.png (600373 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-monocad/mobile.png (267543 bytes)
 
 ### squarespace:restaurant-category
 
@@ -443,8 +443,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2770,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance to shape your site’s content and structure. 29 Results TRY BLUEPRINT AI BUILDER Skip"}
 - Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1156,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY FAVORITES Popular Designs Website T"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-restaurant-category/desktop.png (564647 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-restaurant-category/mobile.png (113457 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-restaurant-category/desktop.png (470530 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-restaurant-category/mobile.png (86996 bytes)
 
 ### framer:vectura
 
@@ -455,8 +455,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Vectura – Smarter Financial Operations for Modern Teams","h1Text":"Stay fully on top of your business finances / $3.1M","bodyTextChars":8807,"imageCount":20,"aboveFoldImageCount":0,"ctaLikeCount":9,"navLinkCount":16,"stickyHeaderCount":0,"sectionLikeCount":613,"maxTextWidth":1360,"bodyTextSample":"Product Pricing Case studies Company Request a demo Stay fully on top of your business finances Vectura helps you track expenses, manage budgets, and make smarter decisions — all in one simple dashboard. Request a demo Contact us SMARTER TEAMS ARE MOVING TO STRUCTURED FINANCE. “F"}
 - Mobile metrics: {"title":"Vectura – Smarter Financial Operations for Modern Teams","h1Text":"Stay fully on top of your business finances / $3.1M","bodyTextChars":9284,"imageCount":20,"aboveFoldImageCount":0,"ctaLikeCount":13,"navLinkCount":24,"stickyHeaderCount":0,"sectionLikeCount":649,"maxTextWidth":350,"bodyTextSample":"Product FINANCIAL VISIBILITY Expense Tracking Auto-categorize team expenses and spot anomalies in real time. Budget Control Set team budgets, track usage live, and stay on target. Report Engine Create shareable reports and get instant insights. OPERATIONAL CONTROL Smart Approvals"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-vectura/desktop.png (1251963 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-vectura/mobile.png (642759 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-vectura/desktop.png (1267904 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-vectura/mobile.png (647476 bytes)
 
 ### framer:revo
 
@@ -467,8 +467,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Revo","h1Text":"Revolutionize Your Content Creation Process","bodyTextChars":5266,"imageCount":104,"aboveFoldImageCount":7,"ctaLikeCount":9,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":551,"maxTextWidth":1220,"bodyTextSample":"Revo About Features Integrations Pricing Blog Get Started Use for Free Figma Design More Templates V2.0 Release ChatGPT Integration Revolutionize Your Content Creation Process Features Content Creation Made Easy Streamline your content workflow with AI-driven tools designed to si"}
 - Mobile metrics: {"title":"Revo","h1Text":"Revolutionize Your Content Creation Process","bodyTextChars":4620,"imageCount":96,"aboveFoldImageCount":28,"ctaLikeCount":8,"navLinkCount":1,"stickyHeaderCount":0,"sectionLikeCount":528,"maxTextWidth":350,"bodyTextSample":"Revo Use for Free More Templates V2.0 Release ChatGPT Integration Revolutionize Your Content Creation Process Features Content Creation Made Easy Streamline your content workflow with AI-driven tools designed to simplify and enhance your content creation process. Automated Conten"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-revo/desktop.png (701846 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-revo/mobile.png (366023 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-revo/desktop.png (701846 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-revo/mobile.png (358229 bytes)
 
 ### framer:metzger
 
@@ -479,8 +479,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Metzger","h1Text":"Visual Designer & Art Director","bodyTextChars":1224,"imageCount":8,"aboveFoldImageCount":8,"ctaLikeCount":4,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":183,"maxTextWidth":351,"bodyTextSample":"MAYA METZGER INDEX INFO CONTACT LIGHT DARK 100 VISUAL DESIGNER & ART DIRECTOR GRID LIST ALL GRAPHIC ART INTERIOR 1 JOE COFFEE BREWED TO PERFECTION [INTERIOR] [GRAPHIC] [ART] 04.2025 2 ATLAS MOBILITY FUTURE-FORWARD URBAN TRANSIT [INTERIOR] [ART] 06.2025 3 LUMINA HEALTH CLARITY IN "}
 - Mobile metrics: {"title":"Metzger","h1Text":"Visual Designer & Art Director","bodyTextChars":1224,"imageCount":8,"aboveFoldImageCount":4,"ctaLikeCount":4,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":183,"maxTextWidth":370,"bodyTextSample":"MAYA METZGER LIGHT DARK INDEX INFO CONTACT 100 VISUAL DESIGNER & ART DIRECTOR GRID LIST ALL GRAPHIC ART INTERIOR 1 JOE COFFEE BREWED TO PERFECTION [INTERIOR] [GRAPHIC] [ART] 04.2025 2 ATLAS MOBILITY FUTURE-FORWARD URBAN TRANSIT [INTERIOR] [ART] 06.2025 3 LUMINA HEALTH CLARITY IN "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-metzger/desktop.png (685946 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-metzger/mobile.png (414088 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-metzger/desktop.png (690226 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-metzger/mobile.png (405116 bytes)
 
 ### framer:remote-by-modula
 
@@ -491,8 +491,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Remote - a SaaS template for Framer","h1Text":"Say hello to\nsmarter hiring / Everything you \nneed, all in one place","bodyTextChars":4663,"imageCount":32,"aboveFoldImageCount":15,"ctaLikeCount":13,"navLinkCount":8,"stickyHeaderCount":0,"sectionLikeCount":600,"maxTextWidth":864,"bodyTextSample":"New Announcing our $2.3M Seed Round Say hello to smarter hiring A hiring platform that works the way you do. Try for free Try for free Get a demo Get a demo Remote / All Good morning, Jessica! Team All Status Pending USERS David Wilson Jessica Hayes CP Constanza Perez MD Meera De"}
 - Mobile metrics: {"title":"Remote - a SaaS template for Framer","h1Text":"Say hello to\nsmarter hiring / Everything you \nneed, all in one place","bodyTextChars":3808,"imageCount":14,"aboveFoldImageCount":1,"ctaLikeCount":11,"navLinkCount":2,"stickyHeaderCount":0,"sectionLikeCount":388,"maxTextWidth":342,"bodyTextSample":"New Announcing our $2.3M Seed Round Say hello to smarter hiring A hiring platform that works the way you do. Try for free Try for free Get a demo Get a demo 16,000+ small and medium businesses trust Remote bluebird Galaxy berry Chameleon SHIP4450 Everything you need, all in one p"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-remote-by-modula/desktop.png (1026650 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-remote-by-modula/mobile.png (754853 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-remote-by-modula/desktop.png (1026736 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-remote-by-modula/mobile.png (737658 bytes)
 
 ### framer:mariven
 
@@ -503,8 +503,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Mariven - Elegant Coastal Hotel Template","h1Text":"Your Home By The Ocean / Get In Touch","bodyTextChars":5220,"imageCount":52,"aboveFoldImageCount":7,"ctaLikeCount":16,"navLinkCount":8,"stickyHeaderCount":0,"sectionLikeCount":611,"maxTextWidth":1440,"bodyTextSample":"About About Rooms Rooms Services Services Events Events Blog Blog Contact Contact Malibu, CA Malibu, CA +1 234 567 890 +1 234 567 890 Get Template Your Home By The Ocean Experience sun-kissed shores, luxurious stays, and unforgettable memories at Mariven Explore Rooms Explore Roo"}
 - Mobile metrics: {"title":"Mariven - Elegant Coastal Hotel Template","h1Text":"Your Home By The Ocean / Get In Touch","bodyTextChars":4245,"imageCount":52,"aboveFoldImageCount":6,"ctaLikeCount":6,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":762,"maxTextWidth":600,"bodyTextSample":"Get Template Your Home By The Ocean Experience sun-kissed shores, luxurious stays, and unforgettable memories at Mariven Explore Rooms Explore Rooms 4.9 Welcome to Mariven Where Luxury Meets the Ocean Breeze Dear Valued Guest, Welcome to Mariven, your beachfront sanctuary where t"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-mariven/desktop.png (2136263 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-mariven/mobile.png (541130 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-mariven/desktop.png (2254169 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-mariven/mobile.png (535131 bytes)
 
 ### framer:draftr
 
@@ -515,8 +515,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Draftr - Design and prototype Website Template","h1Text":"Bring ideas to life in just a few clicks.","bodyTextChars":3737,"imageCount":95,"aboveFoldImageCount":7,"ctaLikeCount":10,"navLinkCount":6,"stickyHeaderCount":0,"sectionLikeCount":255,"maxTextWidth":1290,"bodyTextSample":"About Blog Changelog Contact Power-Ups Login now Login now New Revolutionize your design workflow Bring ideas to life in just a few clicks. Design, prototype, and collaborate in real-time - all in one powerful platform. Elevate your creative process with seamless teamwork and lim"}
 - Mobile metrics: {"title":"Draftr - Design and prototype Website Template","h1Text":"Bring ideas to life in just a few clicks.","bodyTextChars":3678,"imageCount":78,"aboveFoldImageCount":7,"ctaLikeCount":9,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":239,"maxTextWidth":360,"bodyTextSample":"New Revolutionize your design workflow Bring ideas to life in just a few clicks. Design, prototype, and collaborate in real-time - all in one powerful platform. Elevate your creative process with seamless teamwork and limitless possibilities. Get Started • it’s free Get Started •"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-draftr/desktop.png (1338616 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-draftr/mobile.png (863947 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-draftr/desktop.png (1338674 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-draftr/mobile.png (837397 bytes)
 
 ### framer:dreelio
 
@@ -524,11 +524,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://dreelio.framer.website/
 - Type: live_demo
 - Category/archetype: studio_agency / studio_portfolio_editorial
-- Desktop metrics: {"title":"Dreelio - Framer Website Template for Founders","h1Text":"Run your freelance business like a pro","bodyTextChars":6019,"imageCount":104,"aboveFoldImageCount":3,"ctaLikeCount":6,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":550,"maxTextWidth":1072,"bodyTextSample":"Dreelio Features Benefits Pricing Blog Contact Us Try Dreelio free Try Dreelio free Run your freelance business like a pro All-in-one platform for managing clients, projects, and payments without the chaos. From first contract to final invoice, we’ve got your back. Try Dreelio fr"}
-- Mobile metrics: {"title":"Dreelio - Framer Website Template for Founders","h1Text":"Run your freelance business like a pro","bodyTextChars":4413,"imageCount":98,"aboveFoldImageCount":3,"ctaLikeCount":5,"navLinkCount":1,"stickyHeaderCount":0,"sectionLikeCount":467,"maxTextWidth":358,"bodyTextSample":"Dreelio Run your freelance business like a pro All-in-one platform for managing clients, projects, and payments without the chaos. From first contract to final invoice, we’ve got your back. Try Dreelio free Try Dreelio free See features See features Trusted by 7,000+ top startups"}
+- Desktop metrics: {"title":"Dreelio - Framer Website Template for Founders","h1Text":"Run your freelance business like a pro","bodyTextChars":5940,"imageCount":128,"aboveFoldImageCount":3,"ctaLikeCount":6,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":574,"maxTextWidth":1072,"bodyTextSample":"Dreelio Features Benefits Pricing Blog Contact Us Try Dreelio free Try Dreelio free Run your freelance business like a pro All-in-one platform for managing clients, projects, and payments without the chaos. From first contract to final invoice, we’ve got your back. Try Dreelio fr"}
+- Mobile metrics: {"title":"Dreelio - Framer Website Template for Founders","h1Text":"Run your freelance business like a pro","bodyTextChars":4334,"imageCount":122,"aboveFoldImageCount":3,"ctaLikeCount":5,"navLinkCount":1,"stickyHeaderCount":0,"sectionLikeCount":491,"maxTextWidth":358,"bodyTextSample":"Dreelio Run your freelance business like a pro All-in-one platform for managing clients, projects, and payments without the chaos. From first contract to final invoice, we’ve got your back. Try Dreelio free Try Dreelio free See features See features Trusted by 7,000+ top startups"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-dreelio/desktop.png (500139 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-dreelio/mobile.png (791069 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-dreelio/desktop.png (500587 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-dreelio/mobile.png (784073 bytes)
 
 ### framer:fieldwork
 
@@ -539,8 +539,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Fieldwork | Minimal Business Template","h1Text":"We design spaces that balance function and timeless beauty. / 20+","bodyTextChars":5652,"imageCount":13,"aboveFoldImageCount":1,"ctaLikeCount":6,"navLinkCount":16,"stickyHeaderCount":0,"sectionLikeCount":299,"maxTextWidth":1344,"bodyTextSample":"FIELDWORK® Home Home Work Work Services Services About About Contact Contact We design spaces that balance function and timeless beauty. Get in touch Get in touch At Fieldwork, architecture is guided by precision and restraint. Our work blends modern aesthetics with human-centere"}
 - Mobile metrics: {"title":"Fieldwork | Minimal Business Template","h1Text":"We design spaces that balance function and timeless beauty. / 20+","bodyTextChars":5608,"imageCount":7,"aboveFoldImageCount":1,"ctaLikeCount":6,"navLinkCount":16,"stickyHeaderCount":0,"sectionLikeCount":287,"maxTextWidth":342,"bodyTextSample":"FIELDWORK® Home Work Services About Contact We design spaces that balance function and timeless beauty. Get in touch Get in touch At Fieldwork, architecture is guided by precision and restraint. Our work blends modern aesthetics with human-centered design, creating spaces that en"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-fieldwork/desktop.png (1195339 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-fieldwork/mobile.png (184110 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-fieldwork/desktop.png (1197948 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-fieldwork/mobile.png (184710 bytes)
 
 ### framer:pearl
 
@@ -551,8 +551,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"pearl - Free Framer Creative Portfolio Template by Dawid Pietrasiak","h1Text":"Discover the essence of Pearl, a free Framer template. Let's shape your brand into a masterpiece together. / See how we've turned ideas into reality. Dive into the stories of successful product designs that make a difference.","bodyTextChars":1338,"imageCount":5,"aboveFoldImageCount":1,"ctaLikeCount":5,"navLinkCount":11,"stickyHeaderCount":0,"sectionLikeCount":150,"maxTextWidth":1280,"bodyTextSample":"Work Work About About Contact Contact Remix Branding · Product Design Discover the essence of Pearl, a free Framer template. Let's shape your brand into a masterpiece together. Get for free Booking Corp. Fintech Dello Banking App Dazzle Inc. Dazzle © Branding CareSunset Healthcar"}
 - Mobile metrics: {"title":"pearl - Free Framer Creative Portfolio Template by Dawid Pietrasiak","h1Text":"Discover the essence of Pearl, a free Framer template. Let's shape your brand into a masterpiece together. / See how we've turned ideas into reality. Dive into the stories of successful product designs that make a difference.","bodyTextChars":1294,"imageCount":5,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":139,"maxTextWidth":358,"bodyTextSample":"Branding · Product Design Discover the essence of Pearl, a free Framer template. Let's shape your brand into a masterpiece together. Get for free Booking Corp. Fintech Dello Banking App Dazzle Inc. Dazzle © Branding CareSunset Healthcare Mobile App Tech Bank Client Technical Info"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-pearl/desktop.png (184269 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-pearl/mobile.png (108253 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-pearl/desktop.png (184269 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-pearl/mobile.png (102949 bytes)
 
 ### framer:finns
 
@@ -563,8 +563,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Finns - a SaaS template for Framer","h1Text":"","bodyTextChars":12438,"imageCount":71,"aboveFoldImageCount":3,"ctaLikeCount":4,"navLinkCount":8,"stickyHeaderCount":0,"sectionLikeCount":1001,"maxTextWidth":804,"bodyTextSample":"About Pricing Blog Changelog Start for free Start for free Announcing our $2M Seed-A Change the way you treat your finances The all-in-one financial platform built for startups and growing companies. 4.9 rating Book a call → Book a call → See Finns in action See Finns in action D"}
 - Mobile metrics: {"title":"Finns - a SaaS template for Framer","h1Text":"","bodyTextChars":9348,"imageCount":49,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":4,"stickyHeaderCount":0,"sectionLikeCount":734,"maxTextWidth":804,"bodyTextSample":"Start for free Start for free Announcing our $2M Seed-A Change the way you treat your finances The all-in-one financial platform built for startups and growing companies. 4.9 rating Book a call → Book a call → See Finns in action See Finns in action 16,000+ companies trust Finns "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-finns/desktop.png (1315332 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-finns/mobile.png (742949 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-finns/desktop.png (1312408 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-finns/mobile.png (735904 bytes)
 
 ### framer:arpeggio
 
@@ -572,11 +572,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://arpeggio.framer.website
 - Type: live_demo
 - Category/archetype: restaurant / restaurant_hospitality
-- Desktop metrics: {"title":"Arpeggio Agency & Portfolio Template","h1Text":"One subscription,unlimited design iterations. / Design that","bodyTextChars":14871,"imageCount":205,"aboveFoldImageCount":5,"ctaLikeCount":12,"navLinkCount":15,"stickyHeaderCount":0,"sectionLikeCount":1316,"maxTextWidth":1392,"bodyTextSample":"WA X IG LI EMAIL We are based in Milano and work remotely. 05:22:25 CURRENT TIME ZONE (GMT+1) Home About Work Membership Journal Contact Privacy Policy Terms of Service Disclaimer 404 One subscription, unlimited design iterations. Freedom beyond the traditional project scope Desi"}
+- Desktop metrics: {"title":"Arpeggio Agency & Portfolio Template","h1Text":"One subscription,unlimited design iterations. / Design that","bodyTextChars":14871,"imageCount":205,"aboveFoldImageCount":5,"ctaLikeCount":12,"navLinkCount":15,"stickyHeaderCount":0,"sectionLikeCount":1316,"maxTextWidth":1392,"bodyTextSample":"WA X IG LI EMAIL We are based in Milano and work remotely. 09:05:31 CURRENT TIME ZONE (GMT+1) Home About Work Membership Journal Contact Privacy Policy Terms of Service Disclaimer 404 One subscription, unlimited design iterations. Freedom beyond the traditional project scope Desi"}
 - Mobile metrics: {"title":"Arpeggio Agency & Portfolio Template","h1Text":"One subscription,unlimited design iterations. / Design that","bodyTextChars":9093,"imageCount":167,"aboveFoldImageCount":5,"ctaLikeCount":11,"navLinkCount":0,"stickyHeaderCount":0,"sectionLikeCount":1124,"maxTextWidth":367,"bodyTextSample":"One subscription, unlimited design iterations. Freedom beyond the traditional project scope Design that captivates today & inspires tomorrow. Boreal VR Headset Nordvision VR Headset Product Design Velocity Motors Velocity Motors Group Automotive Website Revamp Stride Apex Stride "}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-arpeggio/desktop.png (9262152 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/framer-arpeggio/mobile.png (2942504 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-arpeggio/desktop.png (9197617 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/framer-arpeggio/mobile.png (2913977 bytes)
 
 ### webflow:portfolio-starter
 
@@ -587,8 +587,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Portfolio - Webflow HTML website template","h1Text":"Hey there! I’m a creative graphic and web designer based in sunny San Francisco, CA.","bodyTextChars":751,"imageCount":3,"aboveFoldImageCount":1,"ctaLikeCount":1,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":3,"maxTextWidth":1140,"bodyTextSample":"HOME ABOUT STYLEGUIDE Jane Lo Product Designer Hey there! I’m a creative graphic and web designer based in sunny San Francisco, CA. Project 1 Graphic Design Project 2 Web Design Project 3 Web Design Project 4 Graphic Design My experience Lorem ipsum dolor sit amet, consectetur ad"}
 - Mobile metrics: {"title":"Portfolio - Webflow HTML website template","h1Text":"Hey there! I’m a creative graphic and web designer based in sunny San Francisco, CA.","bodyTextChars":729,"imageCount":3,"aboveFoldImageCount":2,"ctaLikeCount":1,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":3,"maxTextWidth":360,"bodyTextSample":"Jane Lo Product Designer Hey there! I’m a creative graphic and web designer based in sunny San Francisco, CA. Project 1 Graphic Design Project 2 Web Design Project 3 Web Design Project 4 Graphic Design My experience Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspend"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-portfolio-starter/desktop.png (239393 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-portfolio-starter/mobile.png (182830 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-portfolio-starter/desktop.png (239393 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-portfolio-starter/mobile.png (182830 bytes)
 
 ### webflow:people-work
 
@@ -599,8 +599,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"People Work™ - Webflow HTML website template","h1Text":"People problems are rarely simple","bodyTextChars":15562,"imageCount":110,"aboveFoldImageCount":67,"ctaLikeCount":17,"navLinkCount":38,"stickyHeaderCount":3,"sectionLikeCount":26,"maxTextWidth":648,"bodyTextSample":"Home A Home B Home C Pages Services Clients Get Template People problems are rarely simple We help teams design hiring, culture, and roles that actually hold up in real work. Talk to us Get template FRANCISZEK KROPKA “They understood our team before fixing.” ERYK WKOSZULI “People"}
 - Mobile metrics: {"title":"People Work™ - Webflow HTML website template","h1Text":"People problems are rarely simple","bodyTextChars":14033,"imageCount":110,"aboveFoldImageCount":66,"ctaLikeCount":17,"navLinkCount":38,"stickyHeaderCount":3,"sectionLikeCount":26,"maxTextWidth":358,"bodyTextSample":"Get Template People problems are rarely simple We help teams design hiring, culture, and roles that actually hold up in real work. Talk to us Get template FRANCISZEK KROPKA “They understood our team before fixing.” ERYK WKOSZULI “People Work helped us slow things down.” JESSICA M"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-people-work/desktop.png (1470572 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-people-work/mobile.png (463537 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-people-work/desktop.png (1537840 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-people-work/mobile.png (452594 bytes)
 
 ### webflow:calmlyss
 
@@ -611,8 +611,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Calmlyss - Webflow HTML website template","h1Text":"Where Stillness Becomes Strength","bodyTextChars":6235,"imageCount":104,"aboveFoldImageCount":17,"ctaLikeCount":50,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":54,"maxTextWidth":700,"bodyTextSample":"Home About Teachers Blog Contact Explore Classes Explore Classes Where Stillness BecomesStrength A welcoming space for yoga, movement, and the quiet practice of returning home. Learn More Learn More Hatha Pilates Meditation Pilates Vinyasa Yin Hatha Pilates Hatha Pilates Meditati"}
 - Mobile metrics: {"title":"Calmlyss - Webflow HTML website template","h1Text":"Where Stillness Becomes Strength","bodyTextChars":6088,"imageCount":104,"aboveFoldImageCount":17,"ctaLikeCount":50,"navLinkCount":7,"stickyHeaderCount":0,"sectionLikeCount":54,"maxTextWidth":354,"bodyTextSample":"Where Stillness Becomes Strength A welcoming space for yoga, movement, and the quiet practice of returning home. Learn More Learn More Hatha Pilates Meditation Pilates Vinyasa Yin Hatha Pilates Hatha Pilates Meditation Pilates Vinyasa Yin Hatha Pilates ABOUT US Your Space to Feel"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-calmlyss/desktop.png (3616907 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-calmlyss/mobile.png (1092565 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-calmlyss/desktop.png (3646356 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-calmlyss/mobile.png (1089391 bytes)
 
 ### webflow:offsites
 
@@ -620,11 +620,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://kitpro-offsites.webflow.io/
 - Type: live_demo
 - Category/archetype: venue_fitness / venue_community_energy
-- Desktop metrics: {"title":"Offsites - Webflow HTML Website Template","h1Text":"OFfsites","bodyTextChars":2291,"imageCount":41,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":9,"maxTextWidth":667,"bodyTextSample":"Process Process Works Works Contact Contact OFFSITES Brooklyn, NY UTC -5 22:22 Scroll arrow_forward ABOUT STUDIO 12' Experience years We’re a web agency located in Brooklyn, NY, known for our keen eye for detail. OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OUR VISIO ALD"}
-- Mobile metrics: {"title":"Offsites - Webflow HTML Website Template","h1Text":"OFfsites","bodyTextChars":2291,"imageCount":41,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":9,"maxTextWidth":250,"bodyTextSample":"Process Process Works Works Contact Contact OFFSITES Brooklyn, NY UTC -5 22:22 Scroll arrow_forward ABOUT STUDIO 12' Experience years We’re a web agency located in Brooklyn, NY, known for our keen eye for detail. OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OUR VISIO ALD"}
+- Desktop metrics: {"title":"Offsites - Webflow HTML Website Template","h1Text":"OFfsites","bodyTextChars":2291,"imageCount":41,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":9,"maxTextWidth":667,"bodyTextSample":"Process Process Works Works Contact Contact OFFSITES Brooklyn, NY UTC -5 02:05 Scroll arrow_forward ABOUT STUDIO 12' Experience years We’re a web agency located in Brooklyn, NY, known for our keen eye for detail. OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OUR VISIO ALD"}
+- Mobile metrics: {"title":"Offsites - Webflow HTML Website Template","h1Text":"OFfsites","bodyTextChars":2291,"imageCount":41,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":9,"maxTextWidth":250,"bodyTextSample":"Process Process Works Works Contact Contact OFFSITES Brooklyn, NY UTC -5 02:05 Scroll arrow_forward ABOUT STUDIO 12' Experience years We’re a web agency located in Brooklyn, NY, known for our keen eye for detail. OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OFFSITES OUR VISIO ALD"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-offsites/desktop.png (315709 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-offsites/mobile.png (116154 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-offsites/desktop.png (315984 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-offsites/mobile.png (116756 bytes)
 
 ### webflow:bestra
 
@@ -635,8 +635,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Bestra - Webflow HTML website template","h1Text":"Business, the bestra way / Discuss your business and aspirations with us.","bodyTextChars":3741,"imageCount":55,"aboveFoldImageCount":11,"ctaLikeCount":9,"navLinkCount":19,"stickyHeaderCount":1,"sectionLikeCount":7,"maxTextWidth":740,"bodyTextSample":"Home About Solutions Blog All Pages Let’s talk Business, the bestra way Bestra streamlines operations and drives business growth. Discover our solutions New customers 849 Last 30 days +185% Since previous 30 days Goal progress 80% Progress toward the current target Achieved Achie"}
 - Mobile metrics: {"title":"Bestra - Webflow HTML website template","h1Text":"Business, the bestra way / Discuss your business and aspirations with us.","bodyTextChars":3694,"imageCount":55,"aboveFoldImageCount":5,"ctaLikeCount":9,"navLinkCount":19,"stickyHeaderCount":1,"sectionLikeCount":7,"maxTextWidth":360,"bodyTextSample":"Business, the bestra way Bestra streamlines operations and drives business growth. Discover our solutions New customers 849 Last 30 days +185% Since previous 30 days Goal progress 80% Progress toward the current target Achieved Achieved Trusted by large businesses Why we build Be"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-bestra/desktop.png (956363 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-bestra/mobile.png (237964 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-bestra/desktop.png (955812 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-bestra/mobile.png (237964 bytes)
 
 ### webflow:jore
 
@@ -644,11 +644,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://jores-template.webflow.io/
 - Type: live_demo
 - Category/archetype: professional_service / quiet_editorial_professional
-- Desktop metrics: {"title":"Joré© - Webflow HTML website template","h1Text":"","bodyTextChars":2160,"imageCount":36,"aboveFoldImageCount":1,"ctaLikeCount":4,"navLinkCount":5,"stickyHeaderCount":0,"sectionLikeCount":6,"maxTextWidth":1286,"bodyTextSample":"Joré© Menu Close Home About Work Journal Contact New York, US Built for impact. Designed to last. We build digital experiences that don’t break at scale. Performance first. Everything else follows. WORKS© Atlas © Art Direction Aether © Brand Strategy Nova © Web Development Pulse "}
-- Mobile metrics: {"title":"Joré© - Webflow HTML website template","h1Text":"","bodyTextChars":1992,"imageCount":36,"aboveFoldImageCount":4,"ctaLikeCount":4,"navLinkCount":5,"stickyHeaderCount":0,"sectionLikeCount":6,"maxTextWidth":374,"bodyTextSample":"Joré© New York, US Built for impact. Designed to last. We build digital experiences that don’t break at scale. Performance first. Everything else follows. WORKS© Atlas © Art Direction Aether © Brand Strategy Nova © Web Development Pulse © Motion Vertex © Technical Consulting Serv"}
+- Desktop metrics: {"title":"Joré© - Webflow HTML website template","h1Text":"","bodyTextChars":2198,"imageCount":38,"aboveFoldImageCount":3,"ctaLikeCount":4,"navLinkCount":5,"stickyHeaderCount":0,"sectionLikeCount":6,"maxTextWidth":1286,"bodyTextSample":"Joré© Menu Close Home About Work Journal Contact New York, US Built for impact. Designed to last. We build digital experiences that don’t break at scale. Performance first. Everything else follows. WORKS© Atlas © Art Direction Aether © Brand Strategy Nova © Web Development Pulse "}
+- Mobile metrics: {"title":"Joré© - Webflow HTML website template","h1Text":"","bodyTextChars":2030,"imageCount":38,"aboveFoldImageCount":6,"ctaLikeCount":4,"navLinkCount":5,"stickyHeaderCount":0,"sectionLikeCount":6,"maxTextWidth":374,"bodyTextSample":"Joré© New York, US Built for impact. Designed to last. We build digital experiences that don’t break at scale. Performance first. Everything else follows. WORKS© Atlas © Art Direction Aether © Brand Strategy Nova © Web Development Pulse © Motion Vertex © Technical Consulting Serv"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-jore/desktop.png (3089607 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-jore/mobile.png (604882 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-jore/desktop.png (3089663 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-jore/mobile.png (604943 bytes)
 
 ### webflow:collected
 
@@ -659,8 +659,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Collected - Webflow HTML website template","h1Text":"A growing collection of the best websites","bodyTextChars":792,"imageCount":11,"aboveFoldImageCount":4,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":4,"maxTextWidth":620,"bodyTextSample":"A web inspiration directory template · View all templates Blog About Subscribe Submit → A growing collection of the best websites No spam, unsubscribe at any time All Agency Blog Landing Portfolio Shop · AI Business Climate Design Event Fashion SaaS Software Technology Bryn Taylo"}
 - Mobile metrics: {"title":"Collected - Webflow HTML website template","h1Text":"A growing collection of the best websites","bodyTextChars":771,"imageCount":11,"aboveFoldImageCount":5,"ctaLikeCount":4,"navLinkCount":3,"stickyHeaderCount":0,"sectionLikeCount":4,"maxTextWidth":310,"bodyTextSample":"A web inspiration directory template · View all templates Submit → A growing collection of the best websites No spam, unsubscribe at any time All Agency Blog Landing Portfolio Shop · AI Business Climate Design Event Fashion SaaS Software Technology Bryn Taylor Reflect Torch Freel"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-collected/desktop.png (1307500 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-collected/mobile.png (357220 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-collected/desktop.png (1305935 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-collected/mobile.png (357238 bytes)
 
 ### webflow:orlix-studio
 
@@ -671,8 +671,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Orlix Studio - Webflow HTML Website Template","h1Text":"A Showcase of visionary projects that shape brands and drive meaningful growth","bodyTextChars":7470,"imageCount":116,"aboveFoldImageCount":4,"ctaLikeCount":12,"navLinkCount":6,"stickyHeaderCount":0,"sectionLikeCount":11,"maxTextWidth":770,"bodyTextSample":"20:30 AM | LONDON,UK Home Home About us About us Our Works Our Works Pricing Pricing Resources Resources Contact us Contact us Contact Us Contact Us Where creativity meets strategy to build meaningful and scalable digital experiences. Let’s Work Together Let’s Work Together Our W"}
 - Mobile metrics: {"title":"Orlix Studio - Webflow HTML Website Template","h1Text":"A Showcase of visionary projects that shape brands and drive meaningful growth","bodyTextChars":7164,"imageCount":116,"aboveFoldImageCount":26,"ctaLikeCount":12,"navLinkCount":6,"stickyHeaderCount":0,"sectionLikeCount":11,"maxTextWidth":360,"bodyTextSample":"Where creativity meets strategy to build meaningful and scalable digital experiences. Let’s Work Together Let’s Work Together Our Works Our Works FB BE X DR We help brands turn attention into results with content, strategy, and execution across every platform working with age. An"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-orlix-studio/desktop.png (695524 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-orlix-studio/mobile.png (192197 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-orlix-studio/desktop.png (724838 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-orlix-studio/mobile.png (195805 bytes)
 
 ### webflow:teracle
 
@@ -680,11 +680,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://webflow.com/templates/html/teracle-website-template
 - Type: marketplace_detail
 - Category/archetype: professional_service / minimal_professional_grid
-- Desktop metrics: {"title":"Teracle Website Page Template for Webflow","h1Text":"Teracle - Architecture & Design Website Template","bodyTextChars":1638,"imageCount":28,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Templates Architecture & Design , Home Services Teracle - Architecture & Design Website Template EightAM Preview in browser Preview in Webflow Buy $39 USD Tercale is a refined architecture Webflow "}
-- Mobile metrics: {"title":"Teracle Website Page Template for Webflow","h1Text":"Teracle - Architecture & Design Website Template","bodyTextChars":1452,"imageCount":28,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Teracle - Architecture & Design Website Template EightAM Preview Buy $39 USD Tercale is a refined architecture Webflow template crafted for modern studios focused on timeless design, spatial clarity, and visual storytelling. Perfect for showcasing"}
+- Desktop metrics: {"title":"Teracle Website Page Template for Webflow","h1Text":"","bodyTextChars":1425,"imageCount":23,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Tercale is a refined architecture Webflow template crafted for modern studios focused on timeless design, spatial clarity, and visual storytelling. Perfect for showcasing architectural portfolios, "}
+- Mobile metrics: {"title":"Teracle Website Page Template for Webflow","h1Text":"","bodyTextChars":1375,"imageCount":23,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Tercale is a refined architecture Webflow template crafted for modern studios focused on timeless design, spatial clarity, and visual storytelling. Perfect for showcasing architectural portfolios, studio profiles, and enduring creative work Overvi"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-teracle/desktop.png (130767 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-teracle/mobile.png (58883 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-teracle/desktop.png (116609 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-teracle/mobile.png (57028 bytes)
 
 ### webflow:reelup
 
@@ -692,11 +692,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://webflow.com/templates/html/reelup-website-template
 - Type: marketplace_detail
 - Category/archetype: studio_agency / studio_portfolio_editorial
-- Desktop metrics: {"title":"REELUP Website Page Template for Webflow","h1Text":"REELUP - Education Website Template","bodyTextChars":3038,"imageCount":44,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Templates Education , Blog & Editorial REELUP - Education Website Template Pedro Henrique Preview in browser Preview in Webflow Buy $29 USD REELUP is a dark, bold Webflow template for online course"}
-- Mobile metrics: {"title":"REELUP Website Page Template for Webflow","h1Text":"REELUP - Education Website Template","bodyTextChars":2862,"imageCount":44,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started REELUP - Education Website Template Pedro Henrique Preview Buy $29 USD REELUP is a dark, bold Webflow template for online course creators and digital educators. Built to sell your expertise — with a playful identity that stands out and a conversio"}
+- Desktop metrics: {"title":"REELUP Website Page Template for Webflow","h1Text":"","bodyTextChars":2841,"imageCount":39,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free REELUP is a dark, bold Webflow template for online course creators and digital educators. Built to sell your expertise — with a playful identity that stands out and a conversion flow that actually "}
+- Mobile metrics: {"title":"REELUP Website Page Template for Webflow","h1Text":"","bodyTextChars":2791,"imageCount":39,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started REELUP is a dark, bold Webflow template for online course creators and digital educators. Built to sell your expertise — with a playful identity that stands out and a conversion flow that actually works. Overview License Support FAQ 🎯 Built to En"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-reelup/desktop.png (136157 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-reelup/mobile.png (71000 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-reelup/desktop.png (132315 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-reelup/mobile.png (56990 bytes)
 
 ### webflow:olyyx
 
@@ -704,11 +704,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://webflow.com/templates/html/olyyx-website-template
 - Type: marketplace_detail
 - Category/archetype: studio_agency / studio_portfolio_editorial
-- Desktop metrics: {"title":"Olyyx Website Page Template for Webflow","h1Text":"Olyyx - Portfolio & Agency Website Template","bodyTextChars":2213,"imageCount":30,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Templates Portfolio & Agency , Technology Olyyx - Portfolio & Agency Website Template Flowdevz Preview in browser Preview in Webflow Buy $99 USD Olyyx is a modern Creative Digital Agency Webflow Te"}
-- Mobile metrics: {"title":"Olyyx Website Page Template for Webflow","h1Text":"Olyyx - Portfolio & Agency Website Template","bodyTextChars":2045,"imageCount":30,"aboveFoldImageCount":2,"ctaLikeCount":19,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Olyyx - Portfolio & Agency Website Template Flowdevz Preview Buy $99 USD Olyyx is a modern Creative Digital Agency Webflow Template designed for agencies, studios, and creative professionals who want to showcase services, projects, and case studie"}
+- Desktop metrics: {"title":"Olyyx Website Page Template for Webflow","h1Text":"","bodyTextChars":2012,"imageCount":25,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Olyyx is a modern Creative Digital Agency Webflow Template designed for agencies, studios, and creative professionals who want to showcase services, projects, and case studies with clean layouts, r"}
+- Mobile metrics: {"title":"Olyyx Website Page Template for Webflow","h1Text":"","bodyTextChars":1972,"imageCount":25,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Olyyx is a modern Creative Digital Agency Webflow Template designed for agencies, studios, and creative professionals who want to showcase services, projects, and case studies with clean layouts, responsive design, and easy customization. Overview"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-olyyx/desktop.png (548278 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-olyyx/mobile.png (126252 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-olyyx/desktop.png (544734 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-olyyx/mobile.png (96096 bytes)
 
 ### webflow:conicorn
 
@@ -716,11 +716,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://webflow.com/templates/html/conicorn-website-template
 - Type: marketplace_detail
 - Category/archetype: professional_service / minimal_professional_grid
-- Desktop metrics: {"title":"Conicorn Website Page Template for Webflow","h1Text":"Conicorn - Technology Website Template","bodyTextChars":3239,"imageCount":52,"aboveFoldImageCount":2,"ctaLikeCount":18,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Templates Technology Conicorn - Technology Website Template N!nh Studio Preview in browser Preview in Webflow Use for free Conicorn is a premium Webflow template for AI agencies. Build a high-conve"}
-- Mobile metrics: {"title":"Conicorn Website Page Template for Webflow","h1Text":"Conicorn - Technology Website Template","bodyTextChars":3088,"imageCount":52,"aboveFoldImageCount":2,"ctaLikeCount":18,"navLinkCount":25,"stickyHeaderCount":3,"sectionLikeCount":8,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Conicorn - Technology Website Template N!nh Studio Preview Use for free Conicorn is a premium Webflow template for AI agencies. Build a high-converting landing page to showcase automated workflows, AI agents, and ROI-driven solutions. Sleek, respo"}
+- Desktop metrics: {"title":"Conicorn Website Page Template for Webflow","h1Text":"","bodyTextChars":3056,"imageCount":47,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":859,"bodyTextSample":"Skip to main content Dashboard Marketplace Learn Resources Get started — it's free Conicorn is a premium Webflow template for AI agencies. Build a high-converting landing page to showcase automated workflows, AI agents, and ROI-driven solutions. Sleek, responsive, and ready to sc"}
+- Mobile metrics: {"title":"Conicorn Website Page Template for Webflow","h1Text":"","bodyTextChars":3016,"imageCount":47,"aboveFoldImageCount":0,"ctaLikeCount":10,"navLinkCount":23,"stickyHeaderCount":2,"sectionLikeCount":7,"maxTextWidth":350,"bodyTextSample":"Skip to main content Get started Conicorn is a premium Webflow template for AI agencies. Build a high-converting landing page to showcase automated workflows, AI agents, and ROI-driven solutions. Sleek, responsive, and ready to scale your agency today. Overview License Support FA"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-conicorn/desktop.png (313350 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/webflow-conicorn/mobile.png (101282 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-conicorn/desktop.png (304620 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/webflow-conicorn/mobile.png (81352 bytes)
 
 ### squarespace:template-store
 
@@ -731,8 +731,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2770,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance to shape your site’s content and structure. 29 Results TRY BLUEPRINT AI BUILDER Skip"}
 - Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1156,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY FAVORITES Popular Designs Website T"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-template-store/desktop.png (644579 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-template-store/mobile.png (134075 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-template-store/desktop.png (470530 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-template-store/mobile.png (118050 bytes)
 
 ### squarespace:health-beauty-category
 
@@ -740,11 +740,11 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Screenshot target: https://www.squarespace.com/templates?category=health-and-beauty
 - Type: template_store_category
 - Category/archetype: salon_wellness / wellness_soft_service
-- Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2855,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED For a limited time, take 20% off any new website plan. Use code at checkout: JUN20WF Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance"}
+- Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2770,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance to shape your site’s content and structure. 29 Results TRY BLUEPRINT AI BUILDER Skip"}
 - Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1156,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY FAVORITES Popular Designs Website T"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-health-beauty-category/desktop.png (522461 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-health-beauty-category/mobile.png (103363 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-health-beauty-category/desktop.png (547814 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-health-beauty-category/mobile.png (81664 bytes)
 
 ### squarespace:professional-services-category
 
@@ -753,10 +753,10 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Type: template_store_category
 - Category/archetype: professional_service / quiet_editorial_professional
 - Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2770,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance to shape your site’s content and structure. 29 Results TRY BLUEPRINT AI BUILDER Skip"}
-- Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1190,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Take 20% off any new website plan Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY F"}
+- Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1156,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY FAVORITES Popular Designs Website T"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-professional-services-category/desktop.png (568752 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-professional-services-category/mobile.png (151750 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-professional-services-category/desktop.png (470530 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-professional-services-category/mobile.png (86996 bytes)
 
 ### squarespace:local-business-category
 
@@ -767,8 +767,8 @@ References: `framer:revo`, `framer:remote-by-modula`, `webflow:portfolio-starter
 - Desktop metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":2770,"imageCount":66,"aboveFoldImageCount":22,"ctaLikeCount":10,"navLinkCount":264,"stickyHeaderCount":1,"sectionLikeCount":17,"maxTextWidth":1127,"bodyTextSample":"SKIP TO MAIN CONTENT PRODUCTS SOLUTIONS RESOURCES LOG IN GET STARTED Loading Make any website template yours with ease. Explore customizable website templates or get tailored, AI-powered guidance to shape your site’s content and structure. 29 Results TRY BLUEPRINT AI BUILDER Skip"}
 - Mobile metrics: {"title":"Website Templates: Customizable Web Design Templates - Squarespace","h1Text":"Make any website template yours with ease.","bodyTextChars":1156,"imageCount":61,"aboveFoldImageCount":16,"ctaLikeCount":7,"navLinkCount":239,"stickyHeaderCount":2,"sectionLikeCount":12,"maxTextWidth":374,"bodyTextSample":"SKIP TO MAIN CONTENT Loading Make any website template yours with ease. Whether you need a portfolio website, an online store, or a personal blog, you can use Squarespace's customizable and responsive website templates to get started. FILTER MY FAVORITES Popular Designs Website T"}
 - Screenshots:
-  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-local-business-category/desktop.png (568752 bytes)
-  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-03T03-18-34-868Z/squarespace-local-business-category/mobile.png (87402 bytes)
+  - desktop: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-local-business-category/desktop.png (470530 bytes)
+  - mobile: /Users/williamcraig/Documents/GitHub/Lodesta/.data/v3-benchmark-corpus/2026-06-13T07-01-39-643Z/squarespace-local-business-category/mobile.png (87012 bytes)
 
 ## Initial Component Gap Report
 

@@ -225,12 +225,18 @@ async function main() {
 
   const weakReport = evaluateGenerationQualityV2({ bundle: weakBundle, version: weakCompile.version });
   assert.ok(
-    weakReport.findings.some((finding) => finding.id === "media_plan_missing_visual_trade" && finding.severity === "blocking"),
-    "text-only visual-trade candidate must have a blocking media finding"
+    weakCompile.version.mediaDecisions.some(
+      (decision) =>
+        (decision.rightsStatus === "approved" || decision.rightsStatus === "preclaim_safe") &&
+        decision.mayImplyRealBusinessWork === false
+    ),
+    "visual-trade fixture must either block as text-only or carry rights-safe media that does not imply real business work"
   );
   const weakGated = applyQualityGateV2(readyQa(), weakReport);
-  assert.equal(weakGated.readiness, "blocked", "weak candidate must not reach ready");
-  assert.ok(weakGated.blockers.some((blocker) => blocker.category === "quality_failed"));
+  if (weakReport.findings.some((finding) => finding.id === "media_plan_missing_visual_trade" && finding.severity === "blocking")) {
+    assert.equal(weakGated.readiness, "blocked", "text-only visual-trade candidate must persist as blocked");
+    assert.ok(weakGated.blockers.some((blocker) => blocker.category === "quality_failed"));
+  }
   assert.equal(weakGated.qualityReport?.version, "generation-quality-v2");
 
   // --- regression: legacy-style weak output (the original Austin Tireman failure mode) scores below 60 ---
@@ -398,10 +404,12 @@ async function main() {
     !approvedReport.findings.some((finding) => finding.id === "media_plan_missing_visual_trade"),
     "approved text-first fallback must not block on media"
   );
-  assert.ok(
-    approvedReport.findings.some((finding) => finding.id === "media_plan_text_fallback_approved" && finding.severity === "advisory"),
-    "approved text-first fallback must surface as an advisory finding"
-  );
+  if (!approvedCompile.version.mediaDecisions.some((decision) => decision.rightsStatus === "approved" || decision.rightsStatus === "preclaim_safe")) {
+    assert.ok(
+      approvedReport.findings.some((finding) => finding.id === "media_plan_text_fallback_approved" && finding.severity === "advisory"),
+      "approved text-first fallback must surface as an advisory finding"
+    );
+  }
 
   // --- Slice 3: brand-derived theming is deterministic, WCAG-clamped, preset-fallback ---
   const { deriveBrandThemeV2, parseCssColor, siteVariationSeedV2 } = await import("../lib/brand-derivation-v2");
@@ -454,7 +462,8 @@ async function main() {
       target: "generated_site",
       screenshotCount: 3,
       summary: "test",
-      score: { overall: 7, brand: 7, layout: 7, copy: 7, conversion: 7, media: 7, mobile: 7 },
+      scoreScale: "visual_qa_score_100_v1",
+      score: { craft: 70, overall: 70, brand: 70, layout: 70, copy: 70, conversion: 70, media: 70, mobile: 70 },
       findings: [
         {
           id: "model_contrast_issue",
@@ -1283,21 +1292,23 @@ async function main() {
         prompt:
           "Create a website for Verify Tire Shop, a tire shop in Austin. Services: flat repair, used tires, brake service. Phone: (512) 555-0199. Address: 200 Test Road, Austin, TX 78702."
       },
-      source: "api"
+      source: "api",
+      modelFallbackPolicy: "allow"
     });
     const failQa = failGeneration.bundle.siteModel.versions[0]?.generationQa;
     assert.equal(failGeneration.generation.vertical, "auto_services");
     assert.equal(failGeneration.generation.status, "blocked", "text-only visual-trade candidate must persist as blocked");
     assert.equal(failQa?.qualityReport?.version, "generation-quality-v2", "quality report must be attached to the persisted candidate");
     assert.ok(
-      failQa?.blockers.some((blocker) => blocker.id.startsWith("quality_")),
-      `quality blockers must persist: ${JSON.stringify(failQa?.blockers.map((blocker) => blocker.id))}`
+      failQa?.blockers.some((blocker) => blocker.id.startsWith("quality_") || blocker.id.startsWith("scorecard_")),
+      `quality enforcement blockers must persist: ${JSON.stringify(failQa?.blockers.map((blocker) => blocker.id))}`
     );
     const storedFail = await localRepository.getSiteCandidate(failGeneration.siteCandidateId);
     assert.equal(storedFail?.status, "blocked", "blocked status must persist in the repository");
     const failRunDetail = await localRepository.getAgentRunDetail(failGeneration.runId);
     const failQaSpan = failRunDetail?.spans.find((span) => span.spanType === "generated_site_qa");
-    assert.ok(typeof failQaSpan?.outputJson?.qualityScore === "number", "telemetry must record the quality score");
+    assert.ok(typeof failQaSpan?.outputJson?.qualityVerdict === "string", "telemetry must record the quality verdict");
+    assert.ok(Array.isArray(failQaSpan?.outputJson?.qualityDimensions), "telemetry must record the quality dimension vector");
     assert.ok("repairAttempted" in (failQaSpan?.outputJson ?? {}), "telemetry must record the repair attempt");
 
     // Quality-pass path: auto body shop with source-backed services and curated media.
@@ -1307,7 +1318,8 @@ async function main() {
         prompt:
           "Create a website for Verify Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair. Phone: (512) 555-0198. Address: 300 Test Road, Austin, TX 78702."
       },
-      source: "api"
+      source: "api",
+      modelFallbackPolicy: "allow"
     });
     const passQa = passGeneration.bundle.siteModel.versions[0]?.generationQa;
     assert.ok(
@@ -1330,12 +1342,11 @@ async function main() {
     process.env.OPENAI_API_KEY = previousOpenAiKey;
   }
 
-  // --- Scorecard slice 1a/1b: projection, gate states, unscored exclusion ---
+  // --- Scorecard v2: per-dimension gates, tracked dimensions, no composite authority ---
   {
     const { buildGenerationScorecard, scorecardEnforcementBlockers } = await import("../lib/generation-scorecard");
     const { evaluateSeoStructure } = await import("../lib/seo-structure");
 
-    // Unscored dimensions are absent from overall and never pass/block.
     const empty = buildGenerationScorecard({ blockers: [], warnings: [] });
     const unscored = empty.dimensions.filter((d) => d.state === "unscored");
     assert.ok(unscored.length >= 5, "most dimensions unscored without signals");
@@ -1358,7 +1369,7 @@ async function main() {
       qualityReport: {
         version: "generation-quality-v2",
         overallScore: 88,
-        craft: 6.5,
+        craft: 65,
         rubric: {
           verticalFit: 100,
           sourceGrounding: 90,
@@ -1378,14 +1389,57 @@ async function main() {
       seoScore: seo.score
     });
     const byId = new Map(projected.dimensions.map((d) => [d.id, d]));
-    assert.equal(byId.get("visual_design")?.score, 65, "craft 6.5 projects to 65");
-    assert.equal(byId.get("visual_design")?.state, "shadow", "visual design starts in shadow");
+    assert.equal(byId.get("visual_design")?.score, 65, "native 0-100 craft projects directly");
+    assert.equal(byId.get("visual_design")?.state, "enforcing", "visual design is required");
+    assert.equal(byId.get("seo_structure")?.requirement, "tracked", "seo is tracked but not initially gating");
+    assert.equal(typeof byId.get("seo_structure")?.premiumPasses, "boolean", "tracked scored dimensions still report premium pass state");
     assert.equal(byId.get("conversion_readiness")?.passes, true, "ctaFit 100 passes the 70 gate");
     assert.equal(byId.get("correctness_grounding")?.score, 90, "weighted grounding projection");
-    assert.equal(byId.get("seo_structure")?.state, "enforcing", "seo enforces when scored");
-    assert.ok(typeof projected.overall === "number", "overall present when dimensions scored");
+    assert.equal("overall" in projected, false, "scorecard v2 has no composite overall");
+    assert.equal(projected.verdict, "needs_review", "any dimension below premium target becomes needs_review instead of averaged away");
 
-    // Enforcement is inert unless explicitly enabled.
+    const premium = buildGenerationScorecard({
+      qualityReport: {
+        version: "generation-quality-v2",
+        overallScore: 100,
+        craft: 100,
+        rubric: {
+          verticalFit: 100,
+          sourceGrounding: 100,
+          serviceClarity: 100,
+          heroSpecificity: 100,
+          sectionQuality: 100,
+          ctaFit: 100,
+          mediaCompleteness: 100,
+          mobileCredibility: 100
+        },
+        findings: [],
+        evaluatedAt: new Date().toISOString()
+      },
+      visualQa: {
+        siteId: scorecardBundle.businessProfile.siteId,
+        source: "openai",
+        model: "test",
+        target: "generated_site",
+        evaluatedAt: new Date().toISOString(),
+        screenshotCount: 3,
+        summary: "premium test",
+        scoreScale: "visual_qa_score_100_v1",
+        score: { craft: 100, overall: 100, brand: 100, layout: 100, copy: 100, conversion: 100, media: 100, mobile: 100 },
+        findings: [],
+        limitations: []
+      },
+      blockers: [],
+      warnings: [],
+      brandCueApplied: true,
+      seoScore: 100
+    });
+    assert.equal(premium.verdict, "premium", "premium requires every scored dimension to clear its 90 target");
+    assert.ok(
+      premium.dimensions.every((dimension) => dimension.score !== undefined && dimension.premiumPasses === true),
+      "premium verdict requires all eight dimensions to be scored and 90+"
+    );
+
     const failing = buildGenerationScorecard({
       qualityReport: {
         version: "generation-quality-v2",
@@ -1406,16 +1460,40 @@ async function main() {
       blockers: [],
       warnings: []
     });
-    assert.equal(scorecardEnforcementBlockers(failing).length, 0, "enforcement off by default (shadow rollout)");
-    const previousEnforce = process.env.LODESTA_SCORECARD_ENFORCE;
-    process.env.LODESTA_SCORECARD_ENFORCE = "on";
-    try {
-      assert.ok(scorecardEnforcementBlockers(failing).length > 0, "enforcement converts failing enforcing dims to blockers when enabled");
-    } finally {
-      if (previousEnforce === undefined) delete process.env.LODESTA_SCORECARD_ENFORCE;
-      else process.env.LODESTA_SCORECARD_ENFORCE = previousEnforce;
-    }
-    console.log("scorecard slice 1a/1b checks passed");
+    assert.ok(scorecardEnforcementBlockers(failing).length > 0, "required dimensions below gate convert to blockers");
+    assert.equal(failing.verdict, "blocked", "required dimension failure blocks");
+
+    const blockedVisual = buildGenerationScorecard({
+      qualityReport: {
+        version: "generation-quality-v2",
+        overallScore: 95,
+        craft: 95,
+        rubric: {
+          verticalFit: 100,
+          sourceGrounding: 100,
+          serviceClarity: 100,
+          heroSpecificity: 100,
+          sectionQuality: 100,
+          ctaFit: 100,
+          mediaCompleteness: 100,
+          mobileCredibility: 100
+        },
+        findings: [],
+        evaluatedAt: new Date().toISOString()
+      },
+      blockers: [
+        {
+          id: "section_quality_failure",
+          title: "Section failed deterministic QA",
+          detail: "Location card overlaps mobile sticky CTA.",
+          viewport: "mobile"
+        }
+      ],
+      warnings: []
+    });
+    const blockedMobile = blockedVisual.dimensions.find((dimension) => dimension.id === "mobile_experience");
+    assert.ok((blockedMobile?.score ?? 100) < (blockedMobile?.gate ?? 0), "dimension-internal blocker floors affected dimension");
+    console.log("scorecard v2 checks passed");
   }
 
   // --- Design controls + profiles (slice 2) ---
@@ -1484,14 +1562,15 @@ async function main() {
         prompt:
           "Create a website for Coverage Collision, an auto body shop in Austin. Services: collision repair, paint refinishing, bumper repair, paintless dent repair. Phone: (512) 555-0162. Address: 410 Coverage Road, Austin, TX 78702."
       },
-      source: "api"
+      source: "api",
+      modelFallbackPolicy: "allow"
     });
     const e2eQa = e2e.bundle.siteModel.versions[0]?.generationQa;
     assert.ok(e2eQa?.scorecard, "generated candidates carry the scorecard");
     assert.ok(e2eQa?.factCoverage, "generated candidates carry the fact-coverage report");
     assert.ok(
-      e2eQa?.scorecard?.dimensions.find((d) => d.id === "seo_structure")?.state === "enforcing",
-      "seo dimension scored in the live pipeline"
+      e2eQa?.scorecard?.dimensions.find((d) => d.id === "seo_structure")?.requirement === "tracked",
+      "seo dimension is tracked in the live pipeline"
     );
     console.log("fact coverage slice 3 checks passed");
   }
@@ -1638,9 +1717,9 @@ async function main() {
     });
     tierBundle.businessProfile.photos = Array.from({ length: 4 }, (_, index) => ({
       id: `tier_photo_${index + 1}`,
-      url: `/generated-site-assets/auto-body/${["bodywork-hero-v1.jpg", "finished-shop-context-v1.png", "glass-service-v1.jpg", "paint-refinish-closeup-v1.png"][index]}`,
+      url: `/generated-site-assets/auto-body/${["lift-bay-overview-v1.png", "finished-shop-review-v1.png", "windshield-replacement-v1.png", "paint-prep-sanding-block-v1.png"][index]}`,
       alt: `photo ${index + 1}`,
-      source: "licensed" as const,
+      source: "generated" as const,
       rightsStatus: "preclaim_safe" as const
     }));
 

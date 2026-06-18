@@ -93,6 +93,34 @@ export async function runFreshVisualQualityAuditV2(input: {
           bytes: screenshot.bytes,
           path: screenshot.path,
           capturedAt: screenshot.capturedAt
+        })),
+        sectionScreenshots: (inspection.sectionScreenshots ?? []).map((screenshot) => ({
+          viewport: screenshot.viewport,
+          sectionIndex: screenshot.sectionIndex,
+          sectionId: screenshot.sectionId,
+          templateId: screenshot.templateId,
+          label: screenshot.label,
+          width: screenshot.width,
+          height: screenshot.height,
+          bytes: screenshot.bytes,
+          path: screenshot.path,
+          capturedAt: screenshot.capturedAt,
+          clipped: screenshot.clipped
+        })),
+        sectionInspections: (inspection.sectionInspections ?? []).map((section) => ({
+          viewport: section.viewport,
+          sectionIndex: section.sectionIndex,
+          sectionId: section.sectionId,
+          templateId: section.templateId,
+          label: section.label,
+          fillRatio: section.fillRatio,
+          headingOverflowPx: section.headingOverflowPx,
+          blockOverlapMaxRatio: section.blockOverlapMaxRatio,
+          figureOverlapMaxRatio: section.figureOverlapMaxRatio,
+          crampedTextCount: section.crampedTextCount,
+          brokenImageCount: section.brokenImageCount,
+          minTextContrastRatio: section.minTextContrastRatio,
+          findings: section.findings
         }))
       },
       readiness: version.generationQa.readiness,
@@ -132,7 +160,7 @@ function visualQualityResult(input: {
   };
   const failures = input.visualQa.findings.filter((finding) => finding.severity === "fail").length;
   const warnings = input.visualQa.findings.filter((finding) => finding.severity === "warning").length;
-  const score = input.visualQa.score?.overall ? `; score ${input.visualQa.score.overall}/10` : "";
+  const score = input.visualQa.score?.overall ? `; score ${input.visualQa.score.overall}/100` : "";
   return {
     skillId: "design.visual-quality-audit",
     skillVersion: "direct-module-v1",

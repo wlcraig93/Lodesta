@@ -38,13 +38,13 @@ const createdAt = "2026-06-03T00:00:00.000Z";
 const canonicalRecipeId = "canonical_editorial";
 
 const media = {
-  hero: "/generated-site-assets/auto-body/bodywork-hero-v1.jpg",
-  workshop: "/generated-site-assets/auto-body/finished-shop-context-v1.png",
-  detail: "/generated-site-assets/auto-body/paint-refinish-closeup-v1.png",
-  panel: "/generated-site-assets/auto-body/before-after-body-panel-v1.png",
-  glass: "/generated-site-assets/auto-body/glass-service-v1.jpg",
-  texture: "/generated-site-assets/auto-body/pdr-closeup-v1.jpg",
-  exterior: "/generated-site-assets/auto-body/exterior-hail-dent-panel-v1.png"
+  hero: "/generated-site-assets/auto-body/lift-bay-overview-v1.png",
+  workshop: "/generated-site-assets/auto-body/finished-shop-review-v1.png",
+  detail: "/generated-site-assets/auto-body/paint-prep-sanding-block-v1.png",
+  panel: "/generated-site-assets/auto-body/before-after-body-panel-v2.png",
+  glass: "/generated-site-assets/auto-body/windshield-replacement-v1.png",
+  texture: "/generated-site-assets/auto-body/pdr-reflection-panel-v1.png",
+  exterior: "/generated-site-assets/auto-body/panel-gap-inspection-v1.png"
 } as const;
 
 const canonicalSectionBackgroundsV3: Record<"light" | "page" | "subtleGradient" | "brandGradient", NonImageBackgroundV3> = {
@@ -86,6 +86,12 @@ export const canonicalPageSectionPurposeOrderV3 = [
   "media.gallery",
   "proof.quote_wall",
   "process.steps",
+  "proof.eligibility_band",
+  "services.index",
+  "proof.case_study_preview",
+  "comparison.table",
+  "team.story",
+  "offer.band",
   "faq.list",
   "proof.facts_cta",
   "statement.editorial",
@@ -471,6 +477,12 @@ function canonicalPageSectionTemplates(
     canonicalSectionTemplate("media.gallery", mediaMosaicSection(shell, shellIndex), control("two_column", "wide", "site_bg")),
     canonicalSectionTemplate("proof.quote_wall", quoteWallSection(shell), control("card_grid", "wide", "surface")),
     canonicalSectionTemplate("process.steps", processStepsSection(shell), control("editorial_rows", "wide", "surface")),
+    canonicalSectionTemplate("proof.eligibility_band", eligibilityBandSection(shell, business), control("two_column", "wide", "surface")),
+    canonicalSectionTemplate("services.index", serviceIndexSection(shell, business), control("card_grid", "wide", "surface")),
+    canonicalSectionTemplate("proof.case_study_preview", caseStudyPreviewSection(shell, shellIndex), control("two_column", "wide", "surface")),
+    canonicalSectionTemplate("comparison.table", comparisonTableSection(shell, business), control("card_grid", "wide", "surface")),
+    canonicalSectionTemplate("team.story", teamStorySection(shell, business, shellIndex), control("two_column", "wide", "surface")),
+    canonicalSectionTemplate("offer.band", offerBandSection(shell, business), control("two_column", "wide", "contrast")),
     canonicalSectionTemplate("faq.list", faqListSection(shell), control("editorial_rows", "wide", "surface")),
     canonicalSectionTemplate("proof.facts_cta", factsCtaSection(shell, business), control("two_column", "wide", "surface")),
     canonicalSectionTemplate("statement.editorial", editorialStatementSection(shell, business), control("single_column", "wide", "site_bg")),
@@ -768,6 +780,143 @@ function factsCtaSection(shell: BusinessShell, business: BusinessProfile): Visua
   };
 }
 
+function eligibilityBandSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "eligibility_band",
+    anchorId: "proof",
+    options: { background: canonicalSectionBackgroundsV3.light, eligibilityTreatment: "statement_plus_list" },
+    slots: {
+      copy: copySlot({
+        eyebrow: "Fit check",
+        heading: "Confirm the details before you commit.",
+        body: `${shell.name} can make practical fit details clear without inventing proof the business has not supplied.`
+      }),
+      facts: { items: factItems(shell, business).slice(0, 4) },
+      action: actionSlot({
+        title: "Need a quick answer?",
+        body: "Start with the service, timing, and best contact path.",
+        cta: { label: business.phone ? "Call now" : "Contact", href: business.phone ? `tel:${phoneDigits(business.phone)}` : "#contact" }
+      })
+    }
+  };
+}
+
+function serviceIndexSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "service_index",
+    anchorId: "services",
+    options: { background: canonicalSectionBackgroundsV3.light, serviceIndexTreatment: "featured_services_plus_all" },
+    slots: {
+      intro: copySlot({
+        eyebrow: "Service index",
+        heading: "All the main ways to get started.",
+        body: `${shell.name} can show a fuller service set without making visitors hunt through a long paragraph.`
+      }),
+      items: {
+        items: shell.serviceHighlights.concat(shell.services).slice(0, 8).map((title, index) => ({
+          title,
+          body: serviceBody(shell, index),
+          href: index < 4 ? `/services/${slugSegment(title)}` : undefined
+        }))
+      },
+      action: actionSlot({
+        title: "Need help choosing?",
+        body: "Ask for the closest match and a practical next step.",
+        cta: { label: business.phone ? "Call now" : "Send details", href: business.phone ? `tel:${phoneDigits(business.phone)}` : "#contact" }
+      })
+    }
+  };
+}
+
+function caseStudyPreviewSection(shell: BusinessShell, shellIndex: number): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "case_study_preview",
+    anchorId: "proof",
+    options: { background: canonicalSectionBackgroundsV3.light, caseStudyTreatment: "media_plus_results" },
+    slots: {
+      copy: copySlot({
+        eyebrow: "Proof preview",
+        heading: "A focused example makes the work easier to judge.",
+        body: `${shell.name} can use a compact story with real media, clear context, and a few proof points instead of generic claims.`
+      }),
+      media: mediaSlot(rotatedMedia(shellIndex + 7).slice(0, 3), "below"),
+      facts: { items: featureFacts(shell).slice(0, 3) }
+    }
+  };
+}
+
+function comparisonTableSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "comparison_table",
+    anchorId: "services",
+    options: { background: canonicalSectionBackgroundsV3.subtleGradient, comparisonTreatment: "feature_compare" },
+    slots: {
+      intro: copySlot({
+        eyebrow: "Compare",
+        heading: "A clearer decision surface.",
+        body: `${shell.name} can separate common request types so visitors understand what to ask before they call.`
+      }),
+      items: {
+        items: shell.serviceHighlights.slice(0, 4).map((title, index) => ({
+          title,
+          body: serviceBody(shell, index),
+          meta: index === 0 ? "Most common" : undefined
+        }))
+      },
+      action: actionSlot({
+        title: "Still deciding?",
+        body: "A short call can route the request faster.",
+        cta: { label: business.phone ? "Call now" : "Contact", href: business.phone ? `tel:${phoneDigits(business.phone)}` : "#contact" }
+      })
+    }
+  };
+}
+
+function teamStorySection(shell: BusinessShell, business: BusinessProfile, shellIndex: number): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "team_story",
+    anchorId: "about",
+    options: { background: canonicalSectionBackgroundsV3.light, teamStoryTreatment: "portrait_split" },
+    slots: {
+      copy: copySlot({
+        eyebrow: "About",
+        heading: `The people behind ${shell.name}.`,
+        body: `${shell.description} This section keeps the human context present without turning the page into a generic origin story.`,
+        actions: [{ label: business.phone ? "Call now" : "Contact", href: business.phone ? `tel:${phoneDigits(business.phone)}` : "#contact", style: "text" }]
+      }),
+      media: mediaSlot(rotatedMedia(shellIndex + 9).slice(0, 1), "below"),
+      facts: { items: factItems(shell, business).slice(0, 3) }
+    }
+  };
+}
+
+function offerBandSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
+  return {
+    version: "visual-section-v3",
+    templateId: "offer_band",
+    anchorId: "contact",
+    options: { background: canonicalSectionBackgroundsV3.brandGradient, offerBandTreatment: "quiet_offer" },
+    slots: {
+      copy: copySlot({
+        eyebrow: "Next step",
+        heading: "Start with the details that matter.",
+        body: `${shell.name} can use one focused conversion moment instead of repeating the same button after every section.`
+      }),
+      action: actionSlot({
+        title: "Route the request.",
+        body: "Share the service, timing, and best callback details.",
+        cta: { label: business.phone ? "Call now" : "Send details", href: business.phone ? `tel:${phoneDigits(business.phone)}` : "#contact" }
+      }),
+      facts: { items: requestFacts(shell).slice(0, 3) }
+    }
+  };
+}
+
 function editorialStatementSection(shell: BusinessShell, business: BusinessProfile): VisualSectionV3 {
   return {
     version: "visual-section-v3",
@@ -847,6 +996,10 @@ function mediaSlot(items: MediaSlotV3["items"], caption: MediaSlotV3["caption"] 
 
 function actionSlot(content: ActionSlotV3): ActionSlotV3 {
   return content;
+}
+
+function slugSegment(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "service";
 }
 
 function businessForShell(shell: BusinessShell, shellIndex: number): BusinessProfile {
@@ -935,7 +1088,7 @@ function templateSection(instance: CanonicalPageSectionTemplateInstanceV3): Sect
   };
 }
 
-function sectionIdForPurpose(purposeId: SectionPurposeTemplateIdV3) {
+function sectionIdForPurpose(purposeId: SectionPurposeTemplateIdV3): string {
   switch (purposeId) {
     case "hero.split":
     case "hero.statement":
@@ -972,6 +1125,18 @@ function sectionIdForPurpose(purposeId: SectionPurposeTemplateIdV3) {
       return "faq";
     case "proof.facts_cta":
       return "proof";
+    case "proof.eligibility_band":
+      return "eligibility";
+    case "services.index":
+      return "service-index";
+    case "proof.case_study_preview":
+      return "case-study";
+    case "comparison.table":
+      return "comparison";
+    case "team.story":
+      return "team";
+    case "offer.band":
+      return "offer";
     case "statement.editorial":
       return "statement";
     case "contact.split":
@@ -987,6 +1152,12 @@ function responsiveRulesForTemplate(templateId: SectionGeometryTemplateIdV3): Se
     "intro_grid",
     "side_intro_rows",
     "feature_band",
+    "eligibility_band",
+    "service_index",
+    "case_study_preview",
+    "comparison_table",
+    "team_story",
+    "offer_band",
     "media_feature",
     "media_mosaic",
     "quote_wall",

@@ -42,18 +42,20 @@ const findingSchema = z.object({
 const visualQaSchema = z.object({
   summary: z.string().min(1).max(420),
   score: z.object({
-    craft: z.number().min(1).max(10),
-    overall: z.number().min(1).max(10),
-    brand: z.number().min(1).max(10),
-    layout: z.number().min(1).max(10),
-    copy: z.number().min(1).max(10),
-    conversion: z.number().min(1).max(10),
-    media: z.number().min(1).max(10),
-    mobile: z.number().min(1).max(10)
+    craft: z.number().min(0).max(100),
+    overall: z.number().min(0).max(100),
+    brand: z.number().min(0).max(100),
+    layout: z.number().min(0).max(100),
+    copy: z.number().min(0).max(100),
+    conversion: z.number().min(0).max(100),
+    media: z.number().min(0).max(100),
+    mobile: z.number().min(0).max(100)
   }),
   findings: z.array(findingSchema).min(3).max(10),
   limitations: z.array(z.string()).min(1).max(6)
 });
+
+const visualQaScoreScale = "visual_qa_score_100_v1" as const;
 
 export async function createOpenAiVisualQa(input: VisualQaInput): Promise<VisualQaResult> {
   if (input.modelReview && !input.modelReview.allowed) {
@@ -93,14 +95,17 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
               "The target is a polished production website that can credibly compete with high-quality Webflow, Framer, Duda, Squarespace, or custom agency work.",
               "Evaluate hierarchy, mobile usability, CTA clarity, trust proof, brand fit, accessibility risks, visual rhythm, media fit, component depth, and visible copy quality.",
               "Mark severity fail when copy sounds like template/planning language, media depicts the wrong work, sections repeat the same card pattern, the header feels disconnected, or the site looks like a generic WordPress template even if it renders correctly.",
-              "If the overall score is below 9.5, include at least one fail finding that explains the highest-leverage reason it is not production-grade yet.",
-              "Score harshly: 8 means plausible but agency polish is missing; 9 means strong but still has visible refinements; 9.5+ means a business owner would reasonably prefer this over a typical polished template.",
+              "Score every dimension on a native 0-100 scale with real resolution. Do not use a hidden 1-10 scale with a zero appended.",
+              "If the overall score is below 95, include at least one fail finding that explains the highest-leverage reason it is not flagship production-grade yet.",
+              "Calibration anchors: 100 = a small-business owner would be delighted to pay for this site as the finished product; 95 = flagship generated result with memorable identity, strong section craft, and no meaningful polish concerns; 90 = excellent production-grade, clearly better than a typical polished template, with only minor refinements visible; 85 = strong and credible but still visibly improvable; 80 = solid local-agency quality but not exceptional; 60 = generic, rough, or template-anonymous; 40 = weak or commercially risky; below 40 = broken or embarrassing.",
+              "Use the top band precisely: an 88 is strong but misses excellence, a 92 is excellent with small polish opportunities, a 97 is rare and should feel close to custom flagship work.",
               "Do not invent business facts, legal claims, offers, prices, credentials, or reviews.",
               "Treat screenshots as QA evidence only; they are not source-of-truth UI.",
-              "Screenshots are provided as full-resolution vertical bands sliced top-to-bottom per viewport (each image is preceded by its viewport and band position). Review every band — a defect low on the page is as disqualifying as one at the top.",
+              "Screenshots are provided as full-resolution vertical bands sliced top-to-bottom per viewport plus individual section crops labeled by viewport/template. Review every band and crop — a defect low on the page or isolated inside one section is as disqualifying as one at the top.",
+              "Cross-origin map iframes can render as gray placeholders in full-page screenshots while loading correctly in section crops. If a full-page band shows a gray map but the matching location section crop shows a loaded map, treat that as a screenshot-capture artifact: do not create a finding, do not classify it as broken_media/blank_layout, and do not penalize the score for it.",
               "For every finding, set defectCategory to the single best-matching concrete defect (contrast, overflow, blank_layout, unreadable_text, broken_media, cramped_layout, repetition) or none when the finding is an editorial observation without a concrete rendering defect.",
               "unreadable_text means text that literally cannot be read: clipped, obscured, or rendered below legible size. Small-but-legible branding, weak hierarchy, or elements that fail to 'anchor' the design are editorial observations — category none.",
-              "score.craft answers one question with brutal honesty: would a small-business owner be proud to pay for this site? Calibration anchors: 2 = broken or embarrassing; 4 = clean and correct but template-anonymous, generic imagery, no brand personality (most automated output); 6 = solid local-agency work with real brand color, relevant imagery, and a distinct voice; 8 = excellent custom work with strong identity, story, and conversion energy; 9-10 = flagship bespoke design. Do NOT inflate: a defect-free page with stock-feeling images and interchangeable copy is a 4, not a 7.",
+              "score.craft answers one question with brutal honesty: would a small-business owner be proud to pay for this site? Do NOT inflate: a defect-free page with stock-feeling images and interchangeable copy is around 60, not 80.",
               "Set confidence (0-1) to how certain you are the defect is real and visible in the screenshots; use below 0.5 when unsure."
             ].join(" ")
           }
@@ -180,6 +185,7 @@ export async function createOpenAiVisualQa(input: VisualQaInput): Promise<Visual
       screenshotCount: screenshots.length,
       selectedDesignDirectionId: input.bundle.presenceAssessment.selectedDesignDirectionId,
       summary: parsed.summary,
+      scoreScale: visualQaScoreScale,
       score: parsed.score,
       findings: normalizeFindings(parsed.findings),
       limitations: parsed.limitations
@@ -288,6 +294,7 @@ export function createDeterministicVisualQa({
     screenshotCount: renderInspection?.screenshots.length ?? 0,
     selectedDesignDirectionId: bundle.presenceAssessment.selectedDesignDirectionId,
     summary: summarizeFindings(findings),
+    scoreScale: visualQaScoreScale,
     score: scoreDeterministicFindings(findings),
     findings,
     limitations: [
@@ -315,13 +322,19 @@ function layoutPresetEvidence(version: SiteBundle["siteModel"]["versions"][numbe
 // the band height for very tall pages, it never drops the tail.
 const maxBandsPerViewport: Record<string, number> = { desktop: 6, mobile: 5, tablet: 3 };
 const maxTotalBands = 14;
+const maxSectionCrops = 24;
 const bandViewportOrder = ["desktop", "mobile", "tablet"];
 
 async function screenshotInputs(renderInspection?: RenderInspectionResult) {
   const screenshots = (renderInspection?.screenshots ?? []).filter((screenshot) => screenshot.path);
+  const sectionScreenshots = (renderInspection?.sectionScreenshots ?? []).filter((screenshot) => screenshot.path);
   const ordered = [...screenshots].sort(
     (left, right) => bandViewportOrder.indexOf(left.viewport) - bandViewportOrder.indexOf(right.viewport)
   );
+  const orderedSections = [...sectionScreenshots].sort((left, right) => {
+    const viewportDiff = bandViewportOrder.indexOf(left.viewport) - bandViewportOrder.indexOf(right.viewport);
+    return viewportDiff || left.sectionIndex - right.sectionIndex;
+  });
   const inputs: Array<{ imageUrl: string; label: string }> = [];
 
   // sharp is a CJS `export =` module; under dynamic import the callable is on
@@ -336,15 +349,15 @@ async function screenshotInputs(renderInspection?: RenderInspectionResult) {
     sharp = undefined;
   }
 
-  const pushWhole = (bytes: Buffer, viewport: string) =>
-    inputs.push({ imageUrl: `data:image/png;base64,${bytes.toString("base64")}`, label: `${viewport} (full page)` });
+  const pushWhole = async (bytes: Buffer, viewport: string) =>
+    inputs.push({ imageUrl: await encodeVisualQaImage(bytes, sharp), label: `${viewport} (full page)` });
 
   for (const screenshot of ordered) {
     if (inputs.length >= maxTotalBands || !screenshot.path) continue;
     const bytes = await readFile(screenshot.path).catch(() => undefined);
     if (!bytes) continue;
     if (!sharp) {
-      pushWhole(bytes, screenshot.viewport);
+      await pushWhole(bytes, screenshot.viewport);
       continue;
     }
     try {
@@ -354,7 +367,7 @@ async function screenshotInputs(renderInspection?: RenderInspectionResult) {
       const screenful = Math.max(1, screenshot.height);
       // Short page: one screenful-ish — no banding needed.
       if (height <= screenful * 1.25) {
-        pushWhole(bytes, screenshot.viewport);
+        await pushWhole(bytes, screenshot.viewport);
         continue;
       }
       const cap = Math.min(maxBandsPerViewport[screenshot.viewport] ?? 4, maxTotalBands - inputs.length);
@@ -369,15 +382,38 @@ async function screenshotInputs(renderInspection?: RenderInspectionResult) {
         if (bandHeight <= 0) break;
         const buffer = await sharp(bytes).extract({ left: 0, top, width, height: bandHeight }).png().toBuffer();
         inputs.push({
-          imageUrl: `data:image/png;base64,${buffer.toString("base64")}`,
+          imageUrl: await encodeVisualQaImage(buffer, sharp),
           label: `${screenshot.viewport} band ${index + 1}/${bandCount} (y ${top}-${top + bandHeight} of ${height}px)`
         });
       }
     } catch {
-      pushWhole(bytes, screenshot.viewport);
+      await pushWhole(bytes, screenshot.viewport);
     }
   }
+  for (const screenshot of orderedSections.slice(0, maxSectionCrops)) {
+    if (!screenshot.path) continue;
+    const bytes = await readFile(screenshot.path).catch(() => undefined);
+    if (!bytes) continue;
+    inputs.push({
+      imageUrl: await encodeVisualQaImage(bytes, sharp),
+      label: `${screenshot.viewport} ${screenshot.label}${screenshot.clipped ? " (top crop of tall section)" : ""}`
+    });
+  }
   return inputs;
+}
+
+async function encodeVisualQaImage(bytes: Buffer, sharp: ((input?: Buffer) => import("sharp").Sharp) | undefined) {
+  if (!sharp) return `data:image/png;base64,${bytes.toString("base64")}`;
+  try {
+    const encoded = await sharp(bytes)
+      .rotate()
+      .resize({ width: 960, height: 1600, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${encoded.toString("base64")}`;
+  } catch {
+    return `data:image/png;base64,${bytes.toString("base64")}`;
+  }
 }
 
 function visualQaContext({ bundle, renderInspection }: VisualQaInput) {
@@ -388,7 +424,7 @@ function visualQaContext({ bundle, renderInspection }: VisualQaInput) {
       editing: "curated controls",
       sourceMaterialPolicy: "public customer website material and assets are allowed in internal previews with provenance",
       qualityBar:
-        "9.5/10 production-ready local-business website: beautiful, responsive, conversion-focused, source-grounded, visually varied below the hero, and free of generic AI/template copy."
+        "95/100 production-ready local-business website: beautiful, responsive, conversion-focused, source-grounded, visually varied below the hero, and free of generic AI/template copy."
     },
     business: {
       name: bundle.businessProfile.name,
@@ -413,7 +449,22 @@ function visualQaContext({ bundle, renderInspection }: VisualQaInput) {
       ? {
           adapter: renderInspection.adapter,
           metrics: renderInspection.metrics,
-          findings: renderInspection.findings.slice(0, 12)
+          findings: renderInspection.findings.slice(0, 12),
+          sectionInspections: (renderInspection.sectionInspections ?? []).slice(0, 24).map((section) => ({
+            viewport: section.viewport,
+            label: section.label,
+            templateId: section.templateId,
+            fillRatio: Math.round(section.fillRatio * 100) / 100,
+            headingOverflowPx: Math.round(section.headingOverflowPx),
+            blockOverlapMaxRatio: Math.round(section.blockOverlapMaxRatio * 100) / 100,
+            figureOverlapMaxRatio: Math.round(section.figureOverlapMaxRatio * 100) / 100,
+            crampedTextCount: section.crampedTextCount,
+            brokenImageCount: section.brokenImageCount,
+            minTextContrastRatio:
+              typeof section.minTextContrastRatio === "number" ? Math.round(section.minTextContrastRatio * 100) / 100 : undefined,
+            failures: section.findings.filter((finding) => finding.severity === "fail").map((finding) => finding.id),
+            warnings: section.findings.filter((finding) => finding.severity === "warning").map((finding) => finding.id)
+          }))
         }
       : undefined
   };
@@ -439,8 +490,9 @@ function summarizeFindings(findings: VisualQaFinding[]) {
 function scoreDeterministicFindings(findings: VisualQaFinding[]): VisualQaResult["score"] {
   const failures = findings.filter((finding) => finding.severity === "fail").length;
   const warnings = findings.filter((finding) => finding.severity === "warning").length;
-  const overall = Math.max(1, Math.min(8.2, 8.2 - failures * 1.2 - warnings * 0.35));
+  const overall = Math.max(0, Math.min(82, 82 - failures * 12 - warnings * 3.5));
   return {
+    craft: overall,
     overall,
     brand: overall,
     layout: overall,
@@ -489,14 +541,14 @@ const responseJsonSchema = {
       additionalProperties: false,
       required: ["craft", "overall", "brand", "layout", "copy", "conversion", "media", "mobile"],
       properties: {
-        craft: { type: "number", minimum: 1, maximum: 10 },
-        overall: { type: "number", minimum: 1, maximum: 10 },
-        brand: { type: "number", minimum: 1, maximum: 10 },
-        layout: { type: "number", minimum: 1, maximum: 10 },
-        copy: { type: "number", minimum: 1, maximum: 10 },
-        conversion: { type: "number", minimum: 1, maximum: 10 },
-        media: { type: "number", minimum: 1, maximum: 10 },
-        mobile: { type: "number", minimum: 1, maximum: 10 }
+        craft: { type: "number", minimum: 0, maximum: 100 },
+        overall: { type: "number", minimum: 0, maximum: 100 },
+        brand: { type: "number", minimum: 0, maximum: 100 },
+        layout: { type: "number", minimum: 0, maximum: 100 },
+        copy: { type: "number", minimum: 0, maximum: 100 },
+        conversion: { type: "number", minimum: 0, maximum: 100 },
+        media: { type: "number", minimum: 0, maximum: 100 },
+        mobile: { type: "number", minimum: 0, maximum: 100 }
       }
     },
     findings: {

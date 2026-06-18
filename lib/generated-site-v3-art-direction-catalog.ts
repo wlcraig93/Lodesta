@@ -13,16 +13,21 @@ export type ListPresentationIdV3 =
   | "action_tiles"
   | "program_rows"
   | "stepper_vertical"
+  | "checklist_cards"
   | "service_problem_rows"
   | "menu_preview"
   | "premium_showcase"
+  | "feature_list"
+  | "showcase_grid"
+  | "image_tiles"
+  | "media_grid"
   | "coaching_cards"
   | "portfolio_index"
   | "card_grid"
   | "numbered_ledger";
 
 /** Presentations rendered by .site-visual-facts-v3. */
-export type FactsPresentationIdV3 = "trust_bar" | "utility_rail" | "inline_strip" | "stacked" | "hero_chips" | "marquee";
+export type FactsPresentationIdV3 = "trust_bar" | "utility_rail" | "inline_strip" | "stacked" | "hero_chips" | "marquee" | "proof_cards";
 
 /** Presentations rendered by .site-visual-media-v3. */
 export type MediaPresentationIdV3 = "single" | "mosaic" | "collage" | "editorial_strip" | "object_stage";
@@ -58,12 +63,12 @@ export type ArtDirectionSectionRoleV3 = keyof SectionPresentationMapV3;
  * presentations whose geometry makes sense for its content shape.
  */
 export const compatiblePresentationsForRoleV3 = {
-  services: ["action_tiles", "coaching_cards", "service_problem_rows", "premium_showcase", "menu_preview", "card_grid", "numbered_ledger"],
+  services: ["action_tiles", "coaching_cards", "service_problem_rows", "premium_showcase", "feature_list", "showcase_grid", "image_tiles", "media_grid", "menu_preview", "card_grid"],
   // program_rows renders inside side_intro_rows; stepper_vertical selects the
   // full-width numbered_steps template instead (compiler maps axis → template).
-  process: ["program_rows", "stepper_vertical"],
+  process: ["program_rows", "stepper_vertical", "checklist_cards", "numbered_ledger"],
   faq: ["faq_accordion"],
-  factsStrip: ["trust_bar", "utility_rail", "inline_strip", "marquee"],
+  factsStrip: ["trust_bar", "utility_rail", "inline_strip", "marquee", "proof_cards"],
   heroFacts: ["inline_strip", "trust_bar", "hero_chips"],
   contactFacts: ["stacked", "utility_rail"],
   // Each admitted after CSS completion + visual QA through the matrix:
@@ -72,6 +77,201 @@ export const compatiblePresentationsForRoleV3 = {
   gallery: ["mosaic", "collage", "editorial_strip"],
   quotes: ["action_tiles", "program_rows"]
 } as const satisfies Record<ArtDirectionSectionRoleV3, readonly string[]>;
+
+/**
+ * Model-selectable presentation pool. This is intentionally narrower than
+ * replay/render compatibility: demoting a weak variant removes it from future
+ * model choice without invalidating stored sites that already reference it.
+ */
+export const modelSelectablePresentationsForRoleV3 = {
+  ...compatiblePresentationsForRoleV3,
+  services: ["action_tiles", "coaching_cards", "premium_showcase", "feature_list", "showcase_grid", "image_tiles", "media_grid", "menu_preview", "card_grid"]
+} as const satisfies Record<ArtDirectionSectionRoleV3, readonly string[]>;
+
+export type PresentationGuidanceV3 = {
+  label: string;
+  visualEffect: string;
+  bestFor: string;
+  avoidWhen?: string;
+  requires?: readonly string[];
+};
+
+/**
+ * Compact model-facing guidance for choosing presentation enums. This is not a
+ * second catalog: values here describe renderer-backed enum options above, and
+ * the static manifest hash covers it so prompt/replay debugging can see changes.
+ */
+export const presentationGuidanceByRoleV3 = {
+  services: {
+    action_tiles: {
+      label: "Action tiles",
+      visualEffect: "Equal-height text cards with direct action links.",
+      bestFor: "Short service lists that need clear tap targets and restrained visuals.",
+      avoidWhen: "The section needs strong media or a lead service."
+    },
+    coaching_cards: {
+      label: "Coaching cards",
+      visualEffect: "Warm explanatory cards with softer service framing.",
+      bestFor: "Advisory or relationship-heavy businesses where education matters."
+    },
+    premium_showcase: {
+      label: "Premium showcase",
+      visualEffect: "Mixed-weight service cards with stronger hierarchy.",
+      bestFor: "Four strong offers where one or two should feel more prominent."
+    },
+    feature_list: {
+      label: "Feature list",
+      visualEffect: "One large feature card with compact editorial supporting rows.",
+      bestFor: "A primary service or offer supported by secondary options.",
+      avoidWhen: "All services are equally important."
+    },
+    showcase_grid: {
+      label: "Showcase grid",
+      visualEffect: "One large media-led card plus supporting media cards in a filled grid.",
+      bestFor: "Media-rich services or offers where the site needs more visual depth without becoming a gallery.",
+      requires: ["usable service or proof media"]
+    },
+    image_tiles: {
+      label: "Image tiles",
+      visualEffect: "Full-image tiles with dark overlay copy and no separate card body.",
+      bestFor: "Highly visual businesses with first-party photos and a need for a bolder, less generic section.",
+      avoidWhen: "Images are weak, sparse, or text clarity is more important than atmosphere.",
+      requires: ["usable first-party or source-safe media"]
+    },
+    media_grid: {
+      label: "Media grid",
+      visualEffect: "Consistent media-top cards with bottom-aligned actions.",
+      bestFor: "Service lists where every item can be paired with a relevant image.",
+      requires: ["service media"]
+    },
+    menu_preview: {
+      label: "Menu preview",
+      visualEffect: "Dense row preview with item, context, and supporting copy.",
+      bestFor: "Menu-like catalogs, packages, or lists where scan density matters."
+    },
+    card_grid: {
+      label: "Card grid",
+      visualEffect: "Simple responsive cards below a full-width section intro.",
+      bestFor: "Default service or offer lists when media is limited.",
+      avoidWhen: "The page already has several plain card grids."
+    }
+  },
+  process: {
+    program_rows: {
+      label: "Program rows",
+      visualEffect: "Horizontal rule-separated process rows.",
+      bestFor: "Simple three-to-four step flows with concise explanations."
+    },
+    stepper_vertical: {
+      label: "Vertical stepper",
+      visualEffect: "Numbered steps with a stronger procedural rhythm.",
+      bestFor: "Operational workflows where order and accountability matter."
+    },
+    checklist_cards: {
+      label: "Checklist cards",
+      visualEffect: "Compact check-mark cards in a responsive grid.",
+      bestFor: "Expectation-setting process sections where the items do not need to feel strictly sequential.",
+      avoidWhen: "The order of steps is legally, operationally, or emotionally important."
+    },
+    numbered_ledger: {
+      label: "Numbered ledger",
+      visualEffect: "Editorial numbered rows with stronger visual separation.",
+      bestFor: "Process sections that should feel premium, precise, and less card-like."
+    }
+  },
+  faq: {
+    faq_accordion: {
+      label: "FAQ accordion",
+      visualEffect: "Disclosure rows for questions and answers.",
+      bestFor: "Practical buyer questions that should not dominate the page."
+    }
+  },
+  factsStrip: {
+    trust_bar: {
+      label: "Trust bar",
+      visualEffect: "Even fact row for quick credibility scanning.",
+      bestFor: "Core proof points, contact facts, or operational facts."
+    },
+    utility_rail: {
+      label: "Utility rail",
+      visualEffect: "Compact utility-style facts.",
+      bestFor: "Hours, location, phone, service-area, or other practical facts."
+    },
+    inline_strip: {
+      label: "Inline strip",
+      visualEffect: "Lightweight inline facts.",
+      bestFor: "Secondary facts that should support copy without becoming a band."
+    },
+    marquee: {
+      label: "Marquee",
+      visualEffect: "Accent-forward repeating proof strip.",
+      bestFor: "Short, high-confidence signals that can tolerate visual emphasis."
+    },
+    proof_cards: {
+      label: "Proof cards",
+      visualEffect: "Individual proof cards with more separation.",
+      bestFor: "Several distinct proof points that need clearer hierarchy than a strip."
+    }
+  },
+  heroFacts: {
+    inline_strip: {
+      label: "Inline strip",
+      visualEffect: "Small supporting facts below hero copy.",
+      bestFor: "Quietly reinforcing the hero without visual noise."
+    },
+    trust_bar: {
+      label: "Trust bar",
+      visualEffect: "Structured hero proof row.",
+      bestFor: "Hero sections with strong factual proof."
+    },
+    hero_chips: {
+      label: "Hero chips",
+      visualEffect: "Compact pill-like hero facts.",
+      bestFor: "Retail or service pages that benefit from quick scannable claims."
+    }
+  },
+  contactFacts: {
+    stacked: {
+      label: "Stacked facts",
+      visualEffect: "Vertical contact facts.",
+      bestFor: "Contact sections where readability and low density matter."
+    },
+    utility_rail: {
+      label: "Utility rail",
+      visualEffect: "Compact practical contact facts.",
+      bestFor: "Dense contact or location facts that should scan quickly."
+    }
+  },
+  gallery: {
+    mosaic: {
+      label: "Mosaic",
+      visualEffect: "Mixed media mosaic.",
+      bestFor: "A small set of varied images with one stronger lead image."
+    },
+    collage: {
+      label: "Collage",
+      visualEffect: "Layered editorial image arrangement.",
+      bestFor: "Brand-forward or portfolio-like pages with strong photography."
+    },
+    editorial_strip: {
+      label: "Editorial strip",
+      visualEffect: "Even-width image strip.",
+      bestFor: "Proof or gallery images that should feel orderly and comparable."
+    }
+  },
+  quotes: {
+    action_tiles: {
+      label: "Quote tiles",
+      visualEffect: "Card-like testimonial blocks.",
+      bestFor: "Short review or testimonial snippets."
+    },
+    program_rows: {
+      label: "Quote rows",
+      visualEffect: "Rule-separated testimonial rows.",
+      bestFor: "Longer quotes that need more editorial breathing room."
+    }
+  }
+} as const satisfies Record<ArtDirectionSectionRoleV3, Record<string, PresentationGuidanceV3>>;
 
 export type SectionPresentationViolationV3 = {
   role: ArtDirectionSectionRoleV3;
@@ -139,7 +339,8 @@ export type DesignRegisterV3 = "punchy_retail" | "steady_professional" | "warm_b
 
 /** Vertical → register mapping shared by the design-profile selector and the copy pass. */
 export function registerForVertical(vertical: string): DesignRegisterV3 {
-  if (vertical === "auto_services" || vertical === "auto_body") return "punchy_retail";
+  if (vertical === "auto_services") return "punchy_retail";
+  if (vertical === "auto_body") return "steady_professional";
   if (vertical === "beauty_salon" || vertical === "restaurant") return "warm_boutique";
   return "steady_professional";
 }

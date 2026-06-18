@@ -187,6 +187,7 @@ export function createSiteCandidate(input: {
   sourceHost?: string;
   intendedSiteId?: string;
   status?: SiteCandidateStatus;
+  candidatePurpose?: SiteCandidateRecord["candidatePurpose"];
 }) {
   const now = new Date().toISOString();
   const businessId = input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
@@ -203,6 +204,7 @@ export function createSiteCandidate(input: {
     candidateSlug: bundle.siteModel.slug,
     bundle: structuredClone(bundle),
     status: input.status ?? "ready",
+    candidatePurpose: input.candidatePurpose ?? "customer_prospect",
     intendedSiteId: input.intendedSiteId,
     createdAt: now,
     updatedAt: now
@@ -280,6 +282,7 @@ export function listSiteArtifacts(filter: {
 
 export function listSiteCandidates(filter: {
   status?: SiteCandidateStatus;
+  candidatePurpose?: SiteCandidateRecord["candidatePurpose"];
   sourceHost?: string;
   limit?: number;
   offset?: number;
@@ -288,6 +291,7 @@ export function listSiteCandidates(filter: {
   const limit = Math.max(1, Math.min(filter.limit ?? 50, 100));
   const candidates = Array.from(state().siteCandidates.values())
     .filter((candidate) => !filter.status || candidate.status === filter.status)
+    .filter((candidate) => !filter.candidatePurpose || candidate.candidatePurpose === filter.candidatePurpose)
     .filter((candidate) => !filter.sourceHost || candidate.sourceHost === filter.sourceHost)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   return {

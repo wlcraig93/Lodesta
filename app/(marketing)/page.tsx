@@ -3,8 +3,36 @@ import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Lodesta | Managed websites for local businesses",
-  description: "Lodesta manages website and local-presence operations for US small businesses."
+  description:
+    "Lodesta builds, manages, and keeps local business websites found on Google — so customers reach you first. Nothing for you to maintain."
 };
+
+const WORKFLOW_STEPS = [
+  {
+    step: "01",
+    title: "Claim your business",
+    body: "Tell us your business. We pull your info, photos, and reviews and show you a preview built for your trade."
+  },
+  {
+    step: "02",
+    title: "We build and manage it",
+    body: "Approve the look. Lodesta handles the copy, hosting, SEO, and Google presence — and keeps it current."
+  },
+  {
+    step: "03",
+    title: "Customers find you",
+    body: "Your site stays fast, findable, and ready to turn local searches into calls, bookings, and visits."
+  }
+];
+
+const MANAGED_ITEMS = [
+  { tag: "Design", title: "Site design & copy", body: "A clean, mobile-first site written for your trade and refreshed as your business changes." },
+  { tag: "Speed", title: "Hosting & performance", body: "Fast, secure hosting that stays online and loads quickly on every phone." },
+  { tag: "Search", title: "Local SEO & Google", body: "Your Google Business Profile and on-site SEO kept aligned so you show up when neighbors search." },
+  { tag: "Trust", title: "Reviews & trust signals", body: "Reviews, hours, and contact details surfaced where customers look for them first." },
+  { tag: "Leads", title: "Lead capture & analytics", body: "Calls, forms, and directions tracked first-party, so you see what's actually working." },
+  { tag: "Upkeep", title: "Monthly optimization", body: "A standing action list and ongoing tuning — handled for you, every month." }
+];
 
 export default async function HomePage({
   searchParams
@@ -19,15 +47,17 @@ export default async function HomePage({
       <section className="marketing-hero" id="preview">
         <div className="marketing-hero-grid">
           <div className="marketing-hero-copy">
-            <p className="eyebrow">AI-managed website growth</p>
-            <h1>Put your website on autopilot.</h1>
-            <p className="marketing-hero-kicker">You control your brand. Lodesta optimizes your website.</p>
-            <p className="marketing-hero-body">
-              Lodesta manages the website operations that help local businesses stay findable, trusted, and ready for
-              the next customer.
+            <p className="eyebrow">AI-managed websites for local business</p>
+            <h1>A website that works while you do.</h1>
+            <p className="marketing-hero-kicker">
+              Lodesta builds, manages, and continuously optimizes the website for your local business.
             </p>
+            <p className="marketing-hero-body">We run your website. You run your business.</p>
             <div className="marketing-closing-actions">
-              <a className="button primary" href="/auth/login">
+              <a className="button primary" href="/presence-report">
+                Get your free presence report
+              </a>
+              <a className="button secondary" href="/auth/login">
                 Sign in
               </a>
             </div>
@@ -37,60 +67,80 @@ export default async function HomePage({
               <span>First-party analytics</span>
             </div>
           </div>
+        </div>
+      </section>
 
-          <div className="marketing-product-art" aria-label="Example generated website preview">
-            <div className="marketing-site-preview">
-              <div className="marketing-preview-topbar">
-                <span>Generated replacement preview</span>
-                <span className="marketing-window-dots" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              </div>
-              <div className="marketing-preview-body">
-                <div className="marketing-preview-hero">
-                  <div className="marketing-preview-nav">
-                    <span>WILLOW &amp; MAIN</span>
-                    <span className="marketing-preview-nav-lines" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </div>
-                  <div className="marketing-preview-title">A calmer site built to receive customers.</div>
-                  <div className="marketing-preview-cta" aria-hidden="true" />
-                </div>
-                <div className="marketing-preview-sections">
-                  <div className="marketing-preview-panel">
-                    <strong>Services</strong>
-                    <span className="marketing-lines" aria-hidden="true">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                  </div>
-                  <div className="marketing-preview-panel" aria-hidden="true">
-                    <span className="marketing-lines">
-                      <i />
-                      <i />
-                      <i />
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
+      <section className="marketing-proof-strip" aria-label="How Lodesta works for you">
+        <div className="marketing-proof-inner">
+          <div className="marketing-proof-item">
+            <strong>Days</strong>
+            <span>From claim to a live, managed site</span>
+          </div>
+          <div className="marketing-proof-item">
+            <strong>0 hrs</strong>
+            <span>Of your time spent maintaining it</span>
+          </div>
+          <div className="marketing-proof-item">
+            <strong>Monthly</strong>
+            <span>Optimization, updates, and presence checks</span>
+          </div>
+        </div>
+      </section>
 
-            <aside className="marketing-score-card" aria-label="Website quality score">
-              <div className="marketing-score-head">
-                <span>Site score</span>
-                <div className="marketing-score-value">84</div>
-              </div>
-              <div className="marketing-score-list">
-                <div className="marketing-score-item">Primary call path is visible on mobile.</div>
-                <div className="marketing-score-item">Monthly action list starts after claim.</div>
-              </div>
-            </aside>
+      <section className="marketing-section" aria-labelledby="problem-heading">
+        <div className="marketing-section-heading">
+          <p className="eyebrow">The problem</p>
+          <h2 id="problem-heading">Most local sites quietly lose customers.</h2>
+          <p>
+            Your next customer is searching right now. If your site is slow, dated, or hard to find, they call the
+            business above you instead. Fixing it means hiring an agency, learning a website builder, or finding hours
+            you don&apos;t have.
+          </p>
+        </div>
+      </section>
+
+      <section className="marketing-section" aria-labelledby="how-heading">
+        <div className="marketing-section-heading">
+          <p className="eyebrow">How it works</p>
+          <h2 id="how-heading">Three steps. Then you stop thinking about it.</h2>
+        </div>
+        <div className="marketing-workflow-list">
+          {WORKFLOW_STEPS.map((item) => (
+            <article key={item.step}>
+              <span className="marketing-step">{item.step}</span>
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="marketing-section" aria-labelledby="managed-heading">
+        <div className="marketing-section-heading">
+          <p className="eyebrow">What Lodesta handles</p>
+          <h2 id="managed-heading">Everything a managed website needs. None of the work.</h2>
+        </div>
+        <div className="marketing-workflow-list">
+          {MANAGED_ITEMS.map((item) => (
+            <article key={item.title}>
+              <span className="marketing-step">{item.tag}</span>
+              <h3>{item.title}</h3>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="marketing-closing" aria-labelledby="closing-heading">
+        <div className="marketing-closing-inner">
+          <h2 id="closing-heading">Stop managing your website. Start getting customers.</h2>
+          <div className="marketing-closing-actions">
+            <a className="button primary" href="/presence-report">
+              Get your free presence report
+            </a>
+            <a className="button secondary" href="/auth/login">
+              Sign in
+            </a>
           </div>
         </div>
       </section>

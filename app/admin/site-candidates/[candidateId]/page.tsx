@@ -15,6 +15,7 @@ import { assertSiteVersionV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type {
   AgentRunSpanRecord,
   GenerationQaReadiness,
+  ScorecardDimensionId,
   SiteCandidateRecord,
   SiteVersion
 } from "@/lib/models";
@@ -86,6 +87,7 @@ export default async function AdminSiteCandidateDetailPage({
           <h1>{candidate.businessName}</h1>
           <CopyIdTag id={candidate.id} />
           <span className={`badge status-${candidate.status}`}>{statusLabel(candidate.status)}</span>
+          <span className={`badge candidate-purpose-${candidate.candidatePurpose}`}>{candidate.candidatePurpose === "test_generation" ? "Test generation" : "Prospect"}</span>
           {candidate.sourceUrl ? (
             <a className="candidate-review-source" href={candidate.sourceUrl} target="_blank" rel="noopener noreferrer">
               {candidate.sourceHost ?? candidate.sourceUrl}
@@ -147,11 +149,28 @@ export default async function AdminSiteCandidateDetailPage({
             <p className="candidate-rail-label">QA verdict</p>
             <span className={`badge ${readinessBadgeClass(readiness)}`}>{readinessLabel(readiness)}</span>
             <div className="candidate-rail-checks">
+              {qa?.scorecard ? (
+                <div className="candidate-quality-vector">
+                  <div className="candidate-quality-vector-head">
+                    <span>Quality verdict</span>
+                    <strong>{qa.scorecard.verdict.replace("_", " ")}</strong>
+                  </div>
+                  {qa.scorecard.dimensions.map((dimension) => (
+                    <div key={dimension.id} className="candidate-quality-dimension">
+                      <span>{dimensionLabel(dimension.id)}{dimension.requirement === "tracked" ? " (tracked)" : ""}</span>
+                      <strong>{typeof dimension.score === "number" ? dimension.score : "—"}</strong>
+                      <div className="candidate-quality-bar" aria-hidden="true">
+                        <i style={{ width: `${Math.max(0, Math.min(100, dimension.score ?? 0))}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <ScoreCompareRow sourcePercent={sourceEvaluation?.score.percent} generatedPercent={replacementEvaluation?.score.percent} />
               {visualQa?.score ? (
                 <p className="candidate-rail-check">
                   <span className="candidate-rail-check-dot is-pass" aria-hidden="true" />
-                  Visual QA {visualQa.score.overall}/10 · {visualQa.screenshotCount} screenshots
+                  Visual QA captured · {visualQa.screenshotCount} screenshots
                 </p>
               ) : null}
               {verdictItems.slice(0, MAX_VERDICT_ITEMS).map((item) => (
@@ -295,6 +314,13 @@ function ScoreCompareRow({ sourcePercent, generatedPercent }: { sourcePercent?: 
       </div>
     </div>
   );
+}
+
+function dimensionLabel(id: ScorecardDimensionId) {
+  return id
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function buildQueueNav(readyCandidates: SiteCandidateSummary[], candidateId: string) {

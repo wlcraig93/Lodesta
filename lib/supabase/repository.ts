@@ -171,6 +171,7 @@ type SiteCandidateRow = {
   candidate_slug: string;
   bundle_json: unknown;
   status: SiteCandidateStatus;
+  candidate_purpose: SiteCandidateRecord["candidatePurpose"] | null;
   intended_site_id: string | null;
   accepted_site_id: string | null;
   accepted_version_id: string | null;
@@ -188,6 +189,7 @@ const siteCandidateSummarySelect = [
   "vertical",
   "candidate_slug",
   "status",
+  "candidate_purpose",
   "source_url",
   "source_host",
   "accepted_site_id",
@@ -205,6 +207,7 @@ type SiteCandidateSummaryRow = {
   vertical: SiteCandidateRecord["vertical"];
   candidate_slug: string;
   status: SiteCandidateStatus;
+  candidate_purpose: SiteCandidateRecord["candidatePurpose"] | null;
   source_url: string | null;
   source_host: string | null;
   accepted_site_id: string | null;
@@ -668,6 +671,7 @@ export const supabaseRepository: LodestaRepository = {
           candidate_slug: bundle.siteModel.slug,
           bundle_json: bundle,
           status: input.status ?? "ready",
+          candidate_purpose: input.candidatePurpose ?? "customer_prospect",
           intended_site_id: input.intendedSiteId,
           created_at: now,
           updated_at: now
@@ -2873,6 +2877,7 @@ function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
     // and render paths keep the strict assert.
     bundle: withBusinessBundleFields(row.bundle_json as SiteBundle, { businessId: row.business_id }),
     status: row.status,
+    candidatePurpose: row.candidate_purpose ?? "customer_prospect",
     intendedSiteId: row.intended_site_id ?? undefined,
     acceptedSiteId: row.accepted_site_id ?? undefined,
     acceptedVersionId: row.accepted_version_id ?? undefined,
@@ -2888,6 +2893,7 @@ function rowToSiteCandidateSummary(row: SiteCandidateSummaryRow): SiteCandidateS
     businessName: row.business_name,
     vertical: row.vertical,
     status: row.status,
+    candidatePurpose: row.candidate_purpose ?? "customer_prospect",
     sourceUrl: row.source_url ?? undefined,
     sourceHost: row.source_host ?? undefined,
     candidateSlug: row.candidate_slug,
@@ -3420,6 +3426,7 @@ async function attachModelCallTotals(runs: AgentRunRecord[]) {
 function applySiteCandidateFilters(query: any, filter: ListSiteCandidatesFilter) {
   let next = query;
   if (filter.status) next = next.eq("status", filter.status);
+  if (filter.candidatePurpose) next = next.eq("candidate_purpose", filter.candidatePurpose);
   if (filter.sourceHost) next = next.ilike("source_host", `%${filter.sourceHost.replace(/[%_]/g, "\\$&")}%`);
   return next;
 }

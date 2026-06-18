@@ -14,7 +14,7 @@ import type {
 import { getVisualSectionV3, type VisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { isDynamicHoursStatus } from "./business-understanding-v2";
 import { defaultServicesForVertical } from "./recipes";
-import { detectCopyTasteIssues, detectMetaInstructionalCopy } from "./generated-copy-v2";
+import { detectCopyTasteIssues, detectCopyTasteIssuesInTexts, detectMetaInstructionalCopy } from "./generated-copy-v2";
 
 /** Candidate readiness requires at least this overall quality score. */
 export const qualityReadyThreshold = 75;
@@ -242,7 +242,7 @@ export function evaluateGenerationQualityV2(input: {
   // --- service clarity ---
   let serviceClarity = 90;
   const serviceTitles = sections
-    .filter((entry) => entry.sectionId === "services")
+    .filter(isServiceClaritySection)
     .flatMap((entry) => itemTitles(entry.visual));
   const malformedTitles = serviceTitles.filter((title) => detectMalformedServiceTitle(title));
   if (malformedTitles.length) {
@@ -329,17 +329,20 @@ export function evaluateGenerationQualityV2(input: {
   // editor pass occasionally. Advisory, not blocking: they cap section quality
   // so they show up in the report and depress score without forcing a fallback
   // to template copy.
-  if (deck) {
-    const tasteIssues = detectCopyTasteIssues(deck);
-    if (tasteIssues.length) {
-      sectionQuality = Math.min(sectionQuality, 62);
-      findings.push({
-        id: "copy_taste_issues",
-        severity: "advisory",
-        category: "section_quality",
-        detail: `${tasteIssues.length} copy taste issue(s): ${tasteIssues.slice(0, 4).join(" | ")}`
-      });
-    }
+  const renderedCopyTexts = sections.flatMap((entry) => collectSectionBodyTexts(entry.visual));
+  const tasteIssues = input.version.rendererVersion === "layout-v3"
+    ? detectCopyTasteIssuesInTexts(renderedCopyTexts, renderedCopyTexts.filter(isRenderedBodyCopyForTasteCheck))
+    : deck
+      ? detectCopyTasteIssues(deck)
+      : [];
+  if (tasteIssues.length) {
+    sectionQuality = Math.min(sectionQuality, tasteIssues.length >= 3 ? 62 : 76);
+    findings.push({
+      id: "copy_taste_issues",
+      severity: "advisory",
+      category: "section_quality",
+      detail: `${tasteIssues.length} copy taste issue(s): ${tasteIssues.slice(0, 4).join(" | ")}`
+    });
   }
 
   const fillerFacts = sections
@@ -449,6 +452,16 @@ function evaluateCtaFit(
 ): { score: number; finding?: GenerationQualityFinding } {
   const heroActions = heroActionsForVisual(hero);
   const primary = heroActions.find((action) => action.style === "primary") ?? heroActions[0];
+  const hasTelAction = heroActions.some((action) => action.href?.startsWith("tel:"));
+  const hasAutoBodyQuotePrimary =
+    business.vertical === "auto_body" &&
+    primary?.href === "#contact" &&
+    /\bquote|estimate|repair request\b/i.test(primary.label ?? "") &&
+    hasAutoBodyQuoteEvidence(business);
+
+  if (hasAutoBodyQuotePrimary) {
+    return hasTelAction ? { score: 100 } : { score: 88 };
+  }
 
   const callFirst =
     Boolean(business.phone) &&
@@ -500,6 +513,11 @@ function evaluateCtaFit(
   }
 
   return { score: 80 };
+}
+
+function hasAutoBodyQuoteEvidence(business: BusinessProfile) {
+  const evidenceText = [...business.services, ...(business.serviceHighlights ?? []), business.description ?? ""].join(" ");
+  return /\b(free\s+)?(quote|estimate|repair request|request an estimate)\b/i.test(evidenceText);
 }
 
 function evaluateMediaCompleteness(
@@ -585,17 +603,23 @@ function dedupeById(blockers: GenerationQaBlocker[]) {
   });
 }
 
-function heroActionsForVisual(hero: VisualSectionV3 | undefined): Array<{ style?: string; href?: string }> {
+function heroActionsForVisual(hero: VisualSectionV3 | undefined): Array<{ label?: string; style?: string; href?: string }> {
   if (!hero) return [];
   const slots = hero.slots as Record<string, unknown>;
   const copy = slots.copy;
   if (!copy || typeof copy !== "object" || !("actions" in copy)) return [];
   const actions = (copy as { actions?: unknown }).actions;
   if (!Array.isArray(actions)) return [];
-  return actions.filter((action): action is { style?: string; href?: string } => Boolean(action) && typeof action === "object");
+  return actions.filter((action): action is { label?: string; style?: string; href?: string } => Boolean(action) && typeof action === "object");
 }
 
 type V3SectionEntry = { sectionId: string; visual: VisualSectionV3 };
+
+function isServiceClaritySection(entry: V3SectionEntry): boolean {
+  if (entry.sectionId === "services" || entry.sectionId === "service_index") return true;
+  if (entry.visual.anchorId === "services") return true;
+  return entry.visual.templateId === "service_index" || (entry.visual.templateId === "intro_grid" && entry.visual.anchorId === "services");
+}
 
 function v3Sections(version: SiteVersionV3): V3SectionEntry[] {
   // All pages are evaluated; section ids keep their page-scoped prefixes.
@@ -682,6 +706,34 @@ function collectSectionTexts(visual: VisualSectionV3): string[] {
         if (key === "url" || key === "href" || key === "id" || key === "mediaUrl") continue;
         visit(item);
       }
+    }
+  };
+  visit(visual.slots);
+  return texts;
+}
+
+function isRenderedBodyCopyForTasteCheck(text: string): boolean {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length < 36) return false;
+  if (!/[a-z][a-z]/i.test(normalized) || !/\s/.test(normalized)) return false;
+  if (/^(primary|secondary|text|button|anchor|page|dropdown)$/i.test(normalized)) return false;
+  return true;
+}
+
+function collectSectionBodyTexts(visual: VisualSectionV3): string[] {
+  const texts: string[] = [];
+  const bodyKeys = new Set(["body", "answer", "detail", "description"]);
+  const visit = (value: unknown, key?: string) => {
+    if (typeof value === "string") {
+      if (key && bodyKeys.has(key) && value.trim()) texts.push(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [childKey, item] of Object.entries(value)) visit(item, childKey);
     }
   };
   visit(visual.slots);

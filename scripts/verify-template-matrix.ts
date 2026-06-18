@@ -110,9 +110,9 @@ async function main() {
     }
     bundle.businessProfile.photos = Array.from({ length: shape.photoCount }, (_, index) => ({
       id: `matrix_${shape.id}_photo_${index + 1}`,
-      url: `/generated-site-assets/auto-body/${["bodywork-hero-v1.jpg", "finished-shop-context-v1.png", "glass-service-v1.jpg", "paint-refinish-closeup-v1.png"][index % 4]}`,
+      url: `/generated-site-assets/auto-body/${["lift-bay-overview-v1.png", "finished-shop-review-v1.png", "windshield-replacement-v1.png", "paint-prep-sanding-block-v1.png"][index % 4]}`,
       alt: `Service photo ${index + 1}`,
-      source: "licensed" as const,
+      source: "generated" as const,
       rightsStatus: "preclaim_safe" as const
     }));
     const { version } = compileGeneratedSiteV3Site({ bundle });

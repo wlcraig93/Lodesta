@@ -412,7 +412,8 @@ const authEnvSnapshot = {
   nextSupabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
   nextSupabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   locationMapMode: process.env.LODESTA_LOCATION_MAP_MODE,
-  googleMapsEmbedApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
+  googleMapsEmbedApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY,
+  googleMapsBrowserKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
 };
 try {
   setEnv("NODE_ENV", "development");
@@ -482,6 +483,7 @@ try {
   delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   delete process.env.LODESTA_LOCATION_MAP_MODE;
   delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
   const productionHealth = await getHealthReport();
   assert(
     healthCheckState(productionHealth, "repository") === "error",
@@ -501,7 +503,7 @@ try {
   );
   assert(
     healthCheckState(productionHealth, "location_maps") === "ok",
-    "Location maps should default to link-only without requiring a Google Maps key."
+    "Location maps should default to automatic map panels without requiring a Google Maps key."
   );
 
   process.env.LODESTA_APP_ORIGIN = "https://app.example";
@@ -515,16 +517,17 @@ try {
   assert(healthCheckState(configuredHealth, "app_url") === "ok", "Configured application URL health should pass.");
   assert(healthCheckState(configuredHealth, "supabase_auth") === "ok", "Configured Supabase Auth health should pass.");
   assert(healthCheckState(configuredHealth, "hash_secret") === "ok", "Configured hash secret health should pass.");
-  assert(healthCheckState(configuredHealth, "location_maps") === "ok", "Link-only location map health should pass without an embed key.");
+  assert(healthCheckState(configuredHealth, "location_maps") === "ok", "Default automatic location map health should pass without an embed key.");
 
   process.env.LODESTA_LOCATION_MAP_MODE = "embed";
   delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY;
+  delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
   const embedWithoutKeyHealth = await getHealthReport();
   assert(
     healthCheckState(embedWithoutKeyHealth, "location_maps") === "warning",
-    "Embed location map mode should warn until NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY is configured."
+    "Embed location map mode should warn until a public Google Maps key is configured."
   );
-  process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY = "browser-restricted-public-key";
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = "browser-restricted-public-key";
   const embedWithKeyHealth = await getHealthReport();
   assert(
     healthCheckState(embedWithKeyHealth, "location_maps") === "ok",
@@ -544,6 +547,7 @@ try {
   restoreEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", authEnvSnapshot.nextSupabaseAnonKey);
   restoreEnv("LODESTA_LOCATION_MAP_MODE", authEnvSnapshot.locationMapMode);
   restoreEnv("NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY", authEnvSnapshot.googleMapsEmbedApiKey);
+  restoreEnv("NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY", authEnvSnapshot.googleMapsBrowserKey);
 }
 
 const generatedEvaluation = evaluateSiteAgainstStandard(bundle);
@@ -1089,6 +1093,29 @@ assert(
     fixtureSummary.extractedFacts.phone === "+15125550191" &&
     fixtureSummary.extractedFacts.address?.country === "US",
   "Protected crawl fixture HTML should exercise schema, phone, form, internal link, booking, ordering, social, and business-fact extraction."
+);
+const noisyPhoneSummary = summarizeCrawlHtml(
+  `<html>
+    <head><title>Noisy Local Shop</title></head>
+    <body>
+      <script>window.__ids = ["314192535267336", "1733421077153"];</script>
+      <svg><path d="M40.038 24 47.224 27.956 48 32.038" /></svg>
+      <p>Call (512) 551-9434 before visiting.</p>
+    </body>
+  </html>`,
+  "https://boundary-crawl.example/noisy-phone"
+);
+assert(
+  noisyPhoneSummary.extractedFacts.phone === "+15125519434",
+  "Free-text phone extraction must ignore contiguous numeric IDs and choose formatted phone text."
+);
+const numericNoiseOnlySummary = summarizeCrawlHtml(
+  `<html><body><script>window.__ids = ["314192535267336", "1733421077153"];</script></body></html>`,
+  "https://boundary-crawl.example/no-phone"
+);
+assert(
+  !numericNoiseOnlySummary.extractedFacts.phone,
+  "Free-text phone extraction must not turn contiguous IDs into phone numbers."
 );
 const fixtureScore = scoreCrawlAssessment({
   url: fixtureUrl,
@@ -2886,7 +2913,8 @@ async function verifyCanonicalGenerationService() {
     await generateSite({
       repository: telemetryFailure.repository,
       input: { prompt: "Build a site for a telemetry failure probe." },
-      source: "api"
+      source: "api",
+      modelFallbackPolicy: "allow"
     });
   } catch {
     rejectedBeforePersistence = true;
@@ -2902,7 +2930,8 @@ async function verifyCanonicalGenerationService() {
     input: { prompt: "Build a site for a canonical service probe." },
     source: "api",
     metadata: { entrypoint: "boundary_verifier" },
-    preview: { create: true, origin: "https://app.example" }
+    preview: { create: true, origin: "https://app.example" },
+    modelFallbackPolicy: "allow"
   });
   assert(
     generated.runId === "run_generation_probe" &&
@@ -2921,12 +2950,14 @@ async function verifyCanonicalGenerationService() {
   const repeatedFirst = await generateSite({
     repository: createGenerationServiceProbe({ runId: "run_generation_repeat_a" }).repository,
     input: { prompt: "Build a repeated source candidate." },
-    source: "api"
+    source: "api",
+    modelFallbackPolicy: "allow"
   });
   const repeatedSecond = await generateSite({
     repository: createGenerationServiceProbe({ runId: "run_generation_repeat_b" }).repository,
     input: { prompt: "Build a repeated source candidate." },
-    source: "api"
+    source: "api",
+    modelFallbackPolicy: "allow"
   });
   const firstAssetIds = new Set(repeatedFirst.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
   const secondAssetIds = new Set(repeatedSecond.bundle.presenceAssessment.assetInventory?.map((asset) => asset.id) ?? []);
@@ -2941,7 +2972,8 @@ async function verifyCanonicalGenerationService() {
     repository: previewRequested.repository,
     input: { prompt: "Build a site for a post-acceptance preview probe." },
     source: "api",
-    preview: { create: true, origin: "https://app.example" }
+    preview: { create: true, origin: "https://app.example" },
+    modelFallbackPolicy: "allow"
   });
   assert(
     previewSkipped.preview === undefined &&
@@ -3065,6 +3097,7 @@ function createGenerationServiceProbe(options: { telemetryUnavailable?: boolean;
         candidateSlug: input.bundle.siteModel.slug,
         bundle: input.bundle,
         status: input.status ?? "ready",
+        candidatePurpose: input.candidatePurpose ?? "customer_prospect",
         createdAt: now,
         updatedAt: now
       };

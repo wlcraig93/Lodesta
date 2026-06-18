@@ -5,8 +5,11 @@ import {
   registerForVertical,
   resolveDesignControlsV3,
   validateDesignControlsV3,
+  modelSelectablePresentationsForRoleV3,
+  validateSectionPresentationMapV3,
   type DesignControlsV3,
-  type DesignProfileV3
+  type DesignProfileV3,
+  type SectionPresentationMapV3
 } from "./generated-site-v3-art-direction-catalog";
 import { compositionIntentMenuV3, type CompositionPlanV3 } from "./generated-site-v3-composition-plan";
 import { extractOpenAiResponseText, openAiErrorMessage } from "./openai-generation";
@@ -33,9 +36,12 @@ const overrideKeys = [
   "headingCase",
   "badgeStyle",
   "factHighlight",
+  "headerSurface",
   "ctaBandTone",
   "numberStyle"
 ] as const;
+
+const presentationDefault = "default" as const;
 
 const briefSchema = z.object({
   register: z.enum(["punchy_retail", "steady_professional", "warm_boutique"]),
@@ -63,7 +69,24 @@ const briefSchema = z.object({
         why: z.string().min(1).max(200)
       })
     )
-    .max(10)
+    .max(10),
+  /**
+   * Catalog-bounded presentation direction. Empty object means "no strong
+   * presentation opinion" and leaves the compiler's deterministic picks in
+   * place for those roles.
+   */
+  presentationMap: z
+    .object({
+      services: z.enum([...modelSelectablePresentationsForRoleV3.services, presentationDefault]),
+      process: z.enum([...modelSelectablePresentationsForRoleV3.process, presentationDefault]),
+      faq: z.enum([...modelSelectablePresentationsForRoleV3.faq, presentationDefault]),
+      factsStrip: z.enum([...modelSelectablePresentationsForRoleV3.factsStrip, presentationDefault]),
+      heroFacts: z.enum([...modelSelectablePresentationsForRoleV3.heroFacts, presentationDefault]),
+      contactFacts: z.enum([...modelSelectablePresentationsForRoleV3.contactFacts, presentationDefault]),
+      gallery: z.enum([...modelSelectablePresentationsForRoleV3.gallery, presentationDefault]),
+      quotes: z.enum([...modelSelectablePresentationsForRoleV3.quotes, presentationDefault])
+    })
+    .strict()
 });
 
 export type DesignBriefResult = {
@@ -79,6 +102,7 @@ const controlValueUniverse: Record<(typeof overrideKeys)[number], string[]> = {
   headingCase: ["standard", "display_upper"],
   badgeStyle: ["square", "rounded", "tilted"],
   factHighlight: ["plain", "accent_value"],
+  headerSurface: ["neutral", "brand_bar"],
   ctaBandTone: ["dark", "brand", "paper"],
   numberStyle: ["oversized", "outlined", "filled_chip"]
 };
@@ -89,12 +113,22 @@ export async function createDesignBrief(input: {
   brandApplied: boolean;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
+  strict?: boolean;
 }): Promise<
-  | { profile: DesignProfileV3; overrides: Partial<DesignControlsV3>; compositionPlan?: CompositionPlanV3; source: "model" }
+  | {
+      profile: DesignProfileV3;
+      overrides: Partial<DesignControlsV3>;
+      compositionPlan?: CompositionPlanV3;
+      presentationMap?: SectionPresentationMapV3;
+      source: "model";
+    }
   | undefined
 > {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || process.env.LODESTA_DESIGN_BRIEF === "off") return undefined;
+  if (!apiKey || process.env.LODESTA_DESIGN_BRIEF === "off") {
+    if (input.strict) throw new Error(!apiKey ? "OPENAI_API_KEY is not configured." : "LODESTA_DESIGN_BRIEF is off.");
+    return undefined;
+  }
   const model = process.env.LODESTA_DESIGN_BRIEF_MODEL ?? "gpt-5-mini";
   const context = {
     name: input.business.name,
@@ -117,11 +151,20 @@ export async function createDesignBrief(input: {
       hasAddress: Boolean(input.business.address),
       serviceAreaCount: input.business.serviceAreas.length
     },
+    presentationGuidance: {
+      services:
+        input.business.photos.length >= 4 && input.business.services.length >= 4
+          ? "Rich first-party/source-safe media plus a broad service list: prefer premium_showcase, action_tiles, or another visually differentiated service treatment over a plain card_grid."
+          : "Use card_grid only when it is the cleanest expression of sparse service evidence; otherwise choose a more differentiated bounded presentation.",
+      process:
+        "Process should feel like a real customer journey, not numbered service repetition. Avoid listing the same service taxonomy again."
+    },
     compositionIntentMenu: compositionIntentMenuV3,
+    compatiblePresentationsForRole: modelSelectablePresentationsForRoleV3,
     compositionExemplars: {
-      media_led: ["facts", "gallery", "story", "services", "process", "testimonials", "faq", "cta_band", "location"],
-      conversion_led: ["facts", "services", "process", "story", "faq", "cta_band", "location"],
-      story_led: ["story", "about", "services", "gallery", "process", "faq", "cta_band", "location"]
+      media_led: ["facts", "gallery", "story", "services", "proof", "process", "faq", "cta_band", "location", "contact"],
+      conversion_led: ["facts", "services", "proof", "contact", "process", "story", "faq", "cta_band", "location"],
+      story_led: ["story", "about", "services", "proof", "contact", "gallery", "process", "faq", "cta_band", "location"]
     }
   };
   const body = {
@@ -139,8 +182,16 @@ export async function createDesignBrief(input: {
               "Default posture is reserved unless real brand cues exist (brandCuesApplied).",
               "Also propose compositionPlan: order 4-10 middle sections from compositionIntentMenu so the page is shaped by THIS business's evidence",
               "(deep photo set leads with media, strong story leads with story, sparse evidence stays lean).",
+              "Use proof for grounded trust, evidence, expectation-setting, or repair-scope bands when that section is available.",
               "Every entry needs a one-line evidence rationale. The exemplars are starting points, not rules — deviate when evidence argues for it.",
-              "Hard constraints the validator will enforce: services/faq/cta_band always included when available, location included when the business has one,",
+              "For estimate-driven services, place contact after enough service/proof context instead of burying the form at the very end.",
+              "Also choose presentationMap values only from compatiblePresentationsForRole when the geometry helps this business; use default for any role where the compiler should decide.",
+              "Use presentation choices to avoid template sameness: services do not always need the same card grid, process does not always need numbered rows,",
+              "and gallery/facts treatments should match the amount and quality of source-safe evidence.",
+              "Header surface is also a real art-direction choice: use brand_bar only when the brand/color evidence supports a confident topbar; otherwise keep neutral.",
+              "When the input has several source-safe photos and several services, avoid plain card_grid unless there is a clear reason; choose a richer service presentation that makes the media and first service feel designed.",
+              "Process presentation should not repeat the service list. Use it for judgment points, handoffs, proof checks, or visit rhythm.",
+              "Hard constraints the validator will enforce: services/proof/faq/cta_band/contact always included when available, location included when the business has one,",
               "cta_band in the final three, no intent twice. Return an empty compositionPlan array if you have no strong opinion."
             ].join(" ")
           }
@@ -157,7 +208,7 @@ export async function createDesignBrief(input: {
         schema: {
           type: "object",
           additionalProperties: false,
-          required: ["register", "brandPosture", "rationale", "overrides", "compositionPlan"],
+          required: ["register", "brandPosture", "rationale", "overrides", "compositionPlan", "presentationMap"],
           properties: {
             register: { type: "string", enum: ["punchy_retail", "steady_professional", "warm_boutique"] },
             brandPosture: { type: "string", enum: ["accent_forward", "reserved"] },
@@ -188,6 +239,21 @@ export async function createDesignBrief(input: {
                   why: { type: "string" }
                 }
               }
+            },
+            presentationMap: {
+              type: "object",
+              additionalProperties: false,
+              required: ["services", "process", "faq", "factsStrip", "heroFacts", "contactFacts", "gallery", "quotes"],
+              properties: {
+                services: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.services, presentationDefault] },
+                process: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.process, presentationDefault] },
+                faq: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.faq, presentationDefault] },
+                factsStrip: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.factsStrip, presentationDefault] },
+                heroFacts: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.heroFacts, presentationDefault] },
+                contactFacts: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.contactFacts, presentationDefault] },
+                gallery: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.gallery, presentationDefault] },
+                quotes: { type: "string", enum: [...modelSelectablePresentationsForRoleV3.quotes, presentationDefault] }
+              }
             }
           }
         }
@@ -204,7 +270,7 @@ export async function createDesignBrief(input: {
     const payload = (await response.json().catch(() => null)) as unknown;
     if (!response.ok) throw new Error(openAiErrorMessage(payload) ?? `HTTP ${response.status}`);
     const text = extractOpenAiResponseText(payload);
-    if (!text) return undefined;
+    if (!text) throw new Error("OpenAI design brief response did not include output text.");
     const brief = briefSchema.parse(JSON.parse(text));
 
     // Posture honesty: accent_forward requires real brand cues regardless of
@@ -233,9 +299,17 @@ export async function createDesignBrief(input: {
       brief.compositionPlan.length >= 4
         ? { version: "composition-plan-v1", sections: brief.compositionPlan, source: "model" }
         : undefined;
+    const presentationChoices = Object.fromEntries(
+      Object.entries(brief.presentationMap).filter(([, value]) => value !== presentationDefault)
+    ) as SectionPresentationMapV3;
+    const presentationMap: SectionPresentationMapV3 | undefined =
+      Object.keys(presentationChoices).length && validateSectionPresentationMapV3(presentationChoices).length === 0
+        ? presentationChoices
+        : undefined;
 
-    return { profile, overrides, compositionPlan, source: "model" };
-  } catch {
+    return { profile, overrides, compositionPlan, presentationMap, source: "model" };
+  } catch (error) {
+    if (input.strict) throw error;
     return undefined;
   }
 }

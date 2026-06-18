@@ -164,6 +164,7 @@ const minUsableLogoPx = 84;
  * the manifest, so dropping the brand-mark reference costs no brand color.
  */
 const maxSquareBrandAspect = 1.4;
+const maxWideWordmarkAspect = 2.8;
 
 function rejectNonLogoBrandMark(bundle: SiteBundle, manifest: ScrapedMediaManifestEntry[]): void {
   const logo = bundle.businessProfile.logo;
@@ -178,6 +179,8 @@ function rejectNonLogoBrandMark(bundle: SiteBundle, manifest: ScrapedMediaManife
   // distrust the brand mark, so demote rather than risk a banner in the slot.
   const aspect = width && height ? Math.max(width, height) / Math.min(width, height) : maxSquareBrandAspect + 1;
   if (aspect <= maxSquareBrandAspect) return;
+  const logoSignals = `${logo.alt ?? ""} ${logoEntry.originalUrl} ${logo.url}`;
+  if (aspect <= maxWideWordmarkAspect && /\blogo\b|wordmark|brand\s*mark|brandmark/i.test(logoSignals)) return;
   bundle.businessProfile.logo = undefined;
   bundle.presenceAssessment.technicalNotes.push(
     `Logo demoted to typographic lockup: brand mark is a non-square duplicate of a scraped photo (likely the og:image), not a purpose-built logo.`

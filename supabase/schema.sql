@@ -391,6 +391,7 @@ create table site_candidates (
   candidate_slug text not null,
   bundle_json jsonb not null,
   status text not null default 'ready' check (status in ('ready', 'blocked', 'accepted', 'archived')),
+  candidate_purpose text not null default 'customer_prospect' check (candidate_purpose in ('customer_prospect', 'test_generation')),
   intended_site_id text references sites(id) on delete set null,
   accepted_site_id text references sites(id) on delete set null,
   accepted_version_id text,

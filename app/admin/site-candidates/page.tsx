@@ -43,16 +43,18 @@ export default async function AdminSiteCandidatesPage({
   ]);
 
   const candidates = result.summaries.filter((candidate) => candidate.status !== "archived");
+  const prospectCandidates = candidates.filter((candidate) => candidate.candidatePurpose !== "test_generation");
+  const testCandidates = candidates.filter((candidate) => candidate.candidatePurpose === "test_generation").sort(byUpdatedDesc);
   const activeJobs = [...runningJobs, ...queuedJobs].filter((job) => job.kind === "generate_site");
   const generatingCards = await Promise.all(activeJobs.map(loadGeneratingCard));
 
-  const reviewCandidates = candidates
+  const reviewCandidates = prospectCandidates
     .filter((candidate) => candidate.status === "ready")
     .sort(byUpdatedDesc);
-  const blockedCandidates = candidates
+  const blockedCandidates = prospectCandidates
     .filter((candidate) => candidate.status === "blocked")
     .sort(byUpdatedDesc);
-  const acceptedCandidates = candidates
+  const acceptedCandidates = prospectCandidates
     .filter((candidate) => candidate.status === "accepted")
     .sort((left, right) => (right.acceptedAt ?? right.updatedAt).localeCompare(left.acceptedAt ?? left.updatedAt));
 
@@ -60,14 +62,16 @@ export default async function AdminSiteCandidatesPage({
     { view: "review", label: "Needs review", count: reviewCandidates.length },
     { view: "generating", label: "Generating", count: generatingCards.length },
     { view: "blocked", label: "Blocked", count: blockedCandidates.length },
-    { view: "accepted", label: "Promoted", count: acceptedCandidates.length }
+    { view: "accepted", label: "Promoted", count: acceptedCandidates.length },
+    { view: "tests", label: "Test generations", count: testCandidates.length }
   ];
 
   const views: Record<QueueView, ReactNode> = {
     review: <QueueGrid generating={generatingCards} candidates={reviewCandidates} empty={emptyLabel("review")} />,
     generating: <QueueGrid generating={generatingCards} candidates={[]} empty={emptyLabel("generating")} />,
     blocked: <QueueGrid generating={[]} candidates={blockedCandidates} empty={emptyLabel("blocked")} />,
-    accepted: <QueueGrid generating={[]} candidates={acceptedCandidates} empty={emptyLabel("accepted")} />
+    accepted: <QueueGrid generating={[]} candidates={acceptedCandidates} empty={emptyLabel("accepted")} />,
+    tests: <QueueGrid generating={[]} candidates={testCandidates} empty={emptyLabel("tests")} />
   };
 
   return (
@@ -139,6 +143,7 @@ function CandidateCard({ candidate }: { candidate: SiteCandidateSummary }) {
           <ReadinessBadge candidate={candidate} />
         </div>
         <p className="candidate-card-meta">
+          {candidate.candidatePurpose === "test_generation" ? "test generation · " : ""}
           {candidate.vertical.replace(/_/g, " ")} · {candidate.sourceHost ?? sourceHost(candidate.sourceUrl) ?? "prompt only"} ·{" "}
           {timeAgo(candidate.updatedAt)}
         </p>
@@ -233,6 +238,7 @@ function emptyLabel(view: QueueView) {
   if (view === "review") return "No candidates need review. Create one to get started.";
   if (view === "generating") return "No generation jobs are queued or running.";
   if (view === "blocked") return "No blocked candidates.";
+  if (view === "tests") return "No test generations yet.";
   return "No promoted candidates yet.";
 }
 
@@ -241,7 +247,7 @@ function byUpdatedDesc(left: SiteCandidateSummary, right: SiteCandidateSummary) 
 }
 
 function parseView(input: string | undefined): QueueView {
-  if (input === "generating" || input === "blocked" || input === "accepted") return input;
+  if (input === "generating" || input === "blocked" || input === "accepted" || input === "tests") return input;
   return "review";
 }
 

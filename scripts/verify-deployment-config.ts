@@ -53,6 +53,7 @@ const assetLibraryAutoBodyWaveManifest = JSON.parse(readFileSync("asset-library/
 };
 const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8");
 const workerSource = readFileSync("workers/runner.ts", "utf8");
+const devSource = readFileSync("scripts/dev.mjs", "utf8");
 const cliSource = readFileSync("scripts/lodesta.mjs", "utf8");
 const devCrawlVerifierSource = readFileSync("scripts/verify-dev-crawl.mjs", "utf8");
 
@@ -60,6 +61,7 @@ assert(packageJson.dependencies?.playwright, "playwright must be a runtime depen
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
 assert(packageJson.scripts?.["verify:dev-crawl"], "package.json must expose npm run verify:dev-crawl.");
+assert(packageJson.scripts?.["verify:worker-runtime"], "package.json must expose npm run verify:worker-runtime.");
 assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
 assert(packageJson.scripts?.["asset-library"], "package.json must expose npm run asset-library for internal generated image batches.");
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
@@ -102,6 +104,14 @@ assertIncludes(workerConfig, "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browser
 assertIncludes(workerConfig, 'startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run worker -- work"', "Worker service must run the long-lived worker loop.");
 assertIncludes(workerConfig, "healthcheckPath = null", "Worker service should not expose an HTTP healthcheck.");
 assertIncludes(workerConfig, 'restartPolicyType = "ALWAYS"', "Worker service should restart continuously.");
+assertIncludes(
+  devSource,
+  '["--import", "tsx", "workers/runner.ts", "work", "750"]',
+  "Local dev must pass a faster worker idle interval without changing deployed worker TOML."
+);
+assertIncludes(devSource, "childExitDecision", "Local dev supervisor must use testable worker restart decisions.");
+assertIncludes(workerSource, "resolveWorkerIdleMs", "Worker runner must resolve idle interval through the shared parser.");
+assertIncludes(workerSource, "LODESTA_WORKER_IDLE_MS", "Worker runner must support the optional worker idle interval environment variable.");
 
 assertIncludes(schemaSql, "hostname text not null unique", "Supabase domains.hostname must be unique for direct host-header routing.");
 assertIncludes(

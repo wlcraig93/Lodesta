@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 
-export type QueueView = "review" | "generating" | "blocked" | "accepted";
+export type QueueView = "review" | "generating" | "blocked" | "accepted" | "tests";
 
 type QueueFilter = {
   view: QueueView;

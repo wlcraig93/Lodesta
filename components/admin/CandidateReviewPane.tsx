@@ -16,6 +16,8 @@ const deviceWidths: Record<ReviewPaneDevice, number | null> = {
 };
 
 const REPORT_TAB = "__report";
+const OWNER_UNCLAIMED_TAB = "__owner_unclaimed";
+const OWNER_CLAIMED_TAB = "__owner_claimed";
 
 export function CandidateReviewPane({
   candidateId,
@@ -38,37 +40,66 @@ export function CandidateReviewPane({
   const [rightsApproved, setRightsApproved] = useState(true);
 
   const showingReport = tab === REPORT_TAB;
-  const activeSlug = showingReport ? firstSlug : tab;
+  const showingOwnerUnclaimed = tab === OWNER_UNCLAIMED_TAB;
+  const showingOwnerClaimed = tab === OWNER_CLAIMED_TAB;
+  const showingOwner = showingOwnerUnclaimed || showingOwnerClaimed;
+  const showingSite = !showingReport && !showingOwner;
+  const activeSlug = showingSite ? tab : firstSlug;
   const previewPath = activeSlug ? `/${activeSlug}` : "";
-  const previewSrc = `/site-candidate-previews/${candidateId}${previewPath}${rightsApproved ? "" : "?rights=declined"}`;
+  const sitePreviewSrc = `/site-candidate-previews/${candidateId}${previewPath}${rightsApproved ? "" : "?rights=declined"}`;
+  const ownerPreviewSrc = `/site-candidate-owner-previews/${candidateId}${showingOwnerClaimed ? "?mode=claimed" : ""}`;
+  const activePreviewSrc = showingOwner ? ownerPreviewSrc : sitePreviewSrc;
   const width = deviceWidths[device];
 
   return (
     <div className="candidate-review-pane-inner">
       <div className="candidate-review-toolbar">
-        <div className="candidate-review-tabs" role="tablist" aria-label="Candidate artifacts">
-          {previewAvailable
-            ? pages.map((page) => (
-                <button
-                  key={page.slug}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === page.slug}
-                  className={tab === page.slug ? "is-active" : ""}
-                  onClick={() => setTab(page.slug)}
-                >
-                  {page.title}
-                </button>
-              ))
-            : (
-                <button type="button" role="tab" aria-selected={!showingReport} className={!showingReport ? "is-active" : ""} onClick={() => setTab(firstSlug)}>
-                  Site
-                </button>
-              )}
+        <div className="candidate-review-artifacts" role="group" aria-label="Candidate artifacts">
+          {previewAvailable && showingSite ? (
+            <label className="candidate-review-page-select">
+              <span>Page</span>
+              <select aria-label="Preview page" value={activeSlug} onChange={(event) => setTab(event.target.value)}>
+                {pages.map((page) => (
+                  <option key={page.slug} value={page.slug}>
+                    {page.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <button
+              type="button"
+              aria-pressed={showingSite}
+              className={showingSite ? "is-active" : ""}
+              onClick={() => setTab(firstSlug)}
+              disabled={!previewAvailable}
+            >
+              Generated site
+            </button>
+          )}
+          {previewAvailable ? (
+            <>
+              <button
+                type="button"
+                aria-pressed={showingOwnerUnclaimed}
+                className={showingOwnerUnclaimed ? "is-active" : ""}
+                onClick={() => setTab(OWNER_UNCLAIMED_TAB)}
+              >
+                Owner: unclaimed
+              </button>
+              <button
+                type="button"
+                aria-pressed={showingOwnerClaimed}
+                className={showingOwnerClaimed ? "is-active" : ""}
+                onClick={() => setTab(OWNER_CLAIMED_TAB)}
+              >
+                Owner: claimed
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
-            role="tab"
-            aria-selected={showingReport}
+            aria-pressed={showingReport}
             className={showingReport ? "is-active candidate-review-report-tab" : "candidate-review-report-tab"}
             onClick={() => setTab(REPORT_TAB)}
           >
@@ -77,26 +108,28 @@ export function CandidateReviewPane({
         </div>
         {!showingReport && previewAvailable ? (
           <div className="candidate-review-toolbar-right">
-            <div className="candidate-review-devices" role="group" aria-label="Scraped media rights simulation">
-              <button
-                type="button"
-                aria-pressed={rightsApproved}
-                className={rightsApproved ? "is-active" : ""}
-                title="Preview with scraped media (owner attests rights)"
-                onClick={() => setRightsApproved(true)}
-              >
-                rights: yes
-              </button>
-              <button
-                type="button"
-                aria-pressed={!rightsApproved}
-                className={!rightsApproved ? "is-active" : ""}
-                title="Preview with backup imagery (owner declines media rights)"
-                onClick={() => setRightsApproved(false)}
-              >
-                rights: no
-              </button>
-            </div>
+            {showingSite ? (
+              <div className="candidate-review-devices" role="group" aria-label="Scraped media rights simulation">
+                <button
+                  type="button"
+                  aria-pressed={rightsApproved}
+                  className={rightsApproved ? "is-active" : ""}
+                  title="Preview with scraped media (owner attests rights)"
+                  onClick={() => setRightsApproved(true)}
+                >
+                  rights: yes
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={!rightsApproved}
+                  className={!rightsApproved ? "is-active" : ""}
+                  title="Preview with backup imagery (owner declines media rights)"
+                  onClick={() => setRightsApproved(false)}
+                >
+                  rights: no
+                </button>
+              </div>
+            ) : null}
             <div className="candidate-review-devices" role="group" aria-label="Preview width">
               {(Object.keys(deviceWidths) as ReviewPaneDevice[]).map((name) => (
                 <button
@@ -110,7 +143,7 @@ export function CandidateReviewPane({
                 </button>
               ))}
             </div>
-            <a className="candidate-review-open" href={previewSrc} target="_blank" rel="noopener noreferrer">
+            <a className="candidate-review-open" href={activePreviewSrc} target="_blank" rel="noopener noreferrer">
               Open
             </a>
           </div>
@@ -122,10 +155,10 @@ export function CandidateReviewPane({
       ) : previewAvailable ? (
         <div className="candidate-review-frame-wrap" data-device={device}>
           <iframe
-            key={`${activeSlug}:${device}:${rightsApproved ? "rights" : "norights"}`}
+            key={`${activePreviewSrc}:${device}:${rightsApproved ? "rights" : "norights"}`}
             className="candidate-review-frame"
-            src={previewSrc}
-            title={`${businessName} preview`}
+            src={activePreviewSrc}
+            title={showingOwner ? `${businessName} owner experience mock` : `${businessName} preview`}
             style={width ? { width: `${width}px` } : undefined}
           />
         </div>

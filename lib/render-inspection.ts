@@ -4,6 +4,8 @@ import type {
   RenderInspectionFinding,
   RenderInspectionResult,
   RenderInspectionTarget,
+  RenderSectionInspection,
+  RenderSectionScreenshotArtifact,
   RenderScreenshotArtifact,
   RenderViewportMetrics,
   RenderViewportName
@@ -32,9 +34,32 @@ type PageLike = {
   goto(url: string, options: { waitUntil: "domcontentloaded"; timeout: number }): Promise<unknown>;
   setContent(html: string, options: { waitUntil: "domcontentloaded" | "load"; timeout: number }): Promise<unknown>;
   route?(url: string | RegExp, handler: (route: RouteLike) => Promise<void> | void): Promise<void>;
-  screenshot(options: { path: string; fullPage: boolean; type?: "png" | "jpeg"; quality?: number }): Promise<Buffer>;
+  screenshot(options: {
+    path: string;
+    fullPage?: boolean;
+    type?: "png" | "jpeg";
+    quality?: number;
+    clip?: { x: number; y: number; width: number; height: number };
+  }): Promise<Buffer>;
+  locator?(selector: string): {
+    nth(index: number): {
+      screenshot(options: { path: string; type?: "png" | "jpeg"; quality?: number }): Promise<Buffer>;
+    };
+  };
   evaluate<T>(fn: (() => T | Promise<T>) | string): Promise<T>;
+  on?(event: "console", handler: (message: { type(): string; text(): string }) => void): void;
   close(): Promise<void>;
+};
+
+type SectionScreenshotClip = {
+  sectionIndex: number;
+  sectionId?: string;
+  templateId?: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 type RouteLike = {
@@ -62,6 +87,7 @@ export type InspectUrlRenderInput = {
   siteModelHash?: string;
   qaRunId?: string;
   captureScreenshots?: boolean;
+  captureSectionScreenshots?: boolean;
   artifactRoot?: string;
 };
 
@@ -171,11 +197,14 @@ async function inspectWithPlaywright(
 ): Promise<RenderInspectionResult> {
   const browser = await launchRenderBrowser(playwright);
   const screenshots: RenderScreenshotArtifact[] = [];
+  const sectionScreenshots: RenderSectionScreenshotArtifact[] = [];
+  const sectionInspections: RenderSectionInspection[] = [];
   const findings: RenderInspectionFinding[] = [];
   let finalUrl: string | undefined;
   let aggregate: BrowserMetrics = {};
   const metricsByViewport: Partial<Record<RenderViewportName, RenderViewportMetrics>> = {};
   const captureScreenshots = input.captureScreenshots ?? true;
+  const captureSectionScreenshots = captureScreenshots && (input.captureSectionScreenshots ?? false);
   const artifactDir = captureScreenshots ? await createArtifactDir(input) : undefined;
 
   try {
@@ -184,15 +213,26 @@ async function inspectWithPlaywright(
         viewport: { width: viewport.width, height: viewport.height },
         userAgent: `LodestaRenderBot/0.1 ${viewport.name}`
       });
+      const consoleErrors: string[] = [];
+      page.on?.("console", (message) => {
+        if (isActionableRenderConsoleMessage(message.type(), message.text())) {
+          consoleErrors.push(message.text());
+        }
+      });
 
       try {
         await page.goto(input.url, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs() });
         await waitForImages(page);
+        await waitForMapEmbeds(page);
         const metrics = await page.evaluate<BrowserMetrics>(collectBrowserMetricsScript());
+        metrics.consoleErrorCount = consoleErrors.length;
+        metrics.consoleErrorSamples = consoleErrors.slice(0, 5);
         metrics.viewport = viewport;
+        metrics.sectionInspections = withViewportOnSectionInspections(metrics.sectionInspections, viewport.name);
         finalUrl ??= metrics.finalUrl;
         aggregate = mergeMetrics(aggregate, metrics);
         metricsByViewport[viewport.name] = metrics as RenderViewportMetrics;
+        sectionInspections.push(...(metrics.sectionInspections ?? []));
         findings.push(...findingsForMetrics(metrics, viewport.name));
 
         if (captureScreenshots && artifactDir) {
@@ -215,6 +255,11 @@ async function inspectWithPlaywright(
             viewport: viewport.name
           });
         }
+        if (captureSectionScreenshots && artifactDir) {
+          const captured = await captureSectionScreenshotArtifacts(page, artifactDir, viewport, capturedAt);
+          sectionScreenshots.push(...captured);
+          attachSectionScreenshotRefs(metrics.sectionInspections, captured);
+        }
       } finally {
         await page.close();
       }
@@ -234,6 +279,8 @@ async function inspectWithPlaywright(
     adapter: "playwright",
     capturedAt,
     screenshots,
+    sectionScreenshots,
+    sectionInspections,
     findings: normalizeFindings(findings),
     metrics: aggregate,
     metricsByViewport
@@ -248,10 +295,13 @@ async function inspectHtmlWithPlaywright(
   const browser = await launchRenderBrowser(playwright);
   const screenshots: RenderScreenshotArtifact[] = [];
   const aboveFoldScreenshots: RenderScreenshotArtifact[] = [];
+  const sectionScreenshots: RenderSectionScreenshotArtifact[] = [];
+  const sectionInspections: RenderSectionInspection[] = [];
   const findings: RenderInspectionFinding[] = [];
   let aggregate: BrowserMetrics = {};
   const metricsByViewport: Partial<Record<RenderViewportName, RenderViewportMetrics>> = {};
   const captureScreenshots = input.captureScreenshots ?? true;
+  const captureSectionScreenshots = captureScreenshots && (input.captureSectionScreenshots ?? false);
   const artifactDir = captureScreenshots ? await createArtifactDir({ ...input, url: input.sourceUrl }) : undefined;
 
   try {
@@ -260,16 +310,27 @@ async function inspectHtmlWithPlaywright(
         viewport: { width: viewport.width, height: viewport.height },
         userAgent: `LodestaRenderBot/0.1 ${viewport.name}`
       });
+      const consoleErrors: string[] = [];
+      page.on?.("console", (message) => {
+        if (isActionableRenderConsoleMessage(message.type(), message.text())) {
+          consoleErrors.push(message.text());
+        }
+      });
 
       try {
         await installPublicAssetRoute(page, input.sourceUrl);
         await page.setContent(input.html, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs() });
         await waitForImages(page);
+        await waitForMapEmbeds(page);
         const metrics = await page.evaluate<BrowserMetrics>(collectBrowserMetricsScript());
+        metrics.consoleErrorCount = consoleErrors.length;
+        metrics.consoleErrorSamples = consoleErrors.slice(0, 5);
         metrics.finalUrl = input.sourceUrl;
         metrics.viewport = viewport;
+        metrics.sectionInspections = withViewportOnSectionInspections(metrics.sectionInspections, viewport.name);
         aggregate = mergeMetrics(aggregate, metrics);
         metricsByViewport[viewport.name] = metrics as RenderViewportMetrics;
+        sectionInspections.push(...(metrics.sectionInspections ?? []));
         findings.push(...findingsForMetrics(metrics, viewport.name));
 
         if (captureScreenshots && artifactDir) {
@@ -305,6 +366,11 @@ async function inspectHtmlWithPlaywright(
             });
           }
         }
+        if (captureSectionScreenshots && artifactDir) {
+          const captured = await captureSectionScreenshotArtifacts(page, artifactDir, viewport, capturedAt);
+          sectionScreenshots.push(...captured);
+          attachSectionScreenshotRefs(metrics.sectionInspections, captured);
+        }
       } finally {
         await page.close();
       }
@@ -325,6 +391,8 @@ async function inspectHtmlWithPlaywright(
     capturedAt,
     screenshots,
     aboveFoldScreenshots,
+    sectionScreenshots,
+    sectionInspections,
     findings: normalizeFindings(findings),
     metrics: aggregate,
     metricsByViewport
@@ -435,6 +503,162 @@ function contentTypeForAsset(path: string) {
     default:
       return "application/octet-stream";
   }
+}
+
+const maxSectionScreenshotsPerViewport = 12;
+const maxSectionScreenshotHeight = 2200;
+
+async function captureSectionScreenshotArtifacts(
+  page: PageLike,
+  artifactDir: string,
+  viewport: BrowserViewport,
+  capturedAt: string
+): Promise<RenderSectionScreenshotArtifact[]> {
+  return withSectionScreenshotChromeHidden(page, async () => {
+    const clips = await page.evaluate<SectionScreenshotClip[]>(sectionScreenshotClipsScript()).catch(() => []);
+    const pageSize = await page
+      .evaluate<{ width: number; height: number }>(`(() => ({
+        width: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth ?? 0, window.innerWidth),
+        height: Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0, window.innerHeight)
+      }))()`)
+      .catch(() => ({ width: viewport.width, height: viewport.height }));
+    const artifacts: RenderSectionScreenshotArtifact[] = [];
+    for (const clip of clips.slice(0, maxSectionScreenshotsPerViewport)) {
+      const x = Math.max(0, Math.min(Math.floor(clip.x), Math.max(0, pageSize.width - 1)));
+      const y = Math.max(0, Math.min(Math.floor(clip.y), Math.max(0, pageSize.height - 1)));
+      const width = Math.min(Math.max(1, Math.ceil(clip.width)), Math.max(0, pageSize.width - x));
+      const height = Math.min(maxSectionScreenshotHeight, Math.max(1, Math.ceil(clip.height)), Math.max(0, pageSize.height - y));
+      if (width < 1 || height < 1) continue;
+      const path = join(
+        artifactDir,
+        `${viewport.name}-section-${String(clip.sectionIndex + 1).padStart(2, "0")}-${safeArtifactName(clip.templateId ?? "section")}.png`
+      );
+      try {
+        if (page.locator) {
+          await page.locator(".site-visual-section-v3").nth(clip.sectionIndex).screenshot({ path });
+        } else {
+          await page.screenshot({
+            path,
+            clip: {
+              x,
+              y,
+              width,
+              height
+            }
+          });
+        }
+      } catch {
+        continue;
+      }
+      const file = await stat(path).catch(() => undefined);
+      if (!file) continue;
+      artifacts.push({
+        viewport: viewport.name,
+        sectionIndex: clip.sectionIndex,
+        sectionId: clip.sectionId,
+        templateId: clip.templateId,
+        label: clip.label,
+        sectionTop: Math.round(clip.y),
+        sectionHeight: Math.round(clip.height),
+        clipped: page.locator ? false : clip.height > height,
+        width,
+        height: page.locator ? Math.round(clip.height) : height,
+        path,
+        bytes: file.size,
+        capturedAt
+      });
+    }
+    return artifacts;
+  });
+}
+
+function sectionScreenshotClipsScript() {
+  return `(() => {
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 80 && rect.height > 80 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    return Array.from(document.querySelectorAll(".site-visual-section-v3"))
+      .map((section, sectionIndex) => {
+        const rect = section.getBoundingClientRect();
+        const templateId = section.getAttribute("data-section-template") || undefined;
+        const sectionId = section.getAttribute("data-section-id") || section.id || undefined;
+        const label = [
+          "section " + (sectionIndex + 1),
+          templateId || "section",
+          sectionId ? "#" + sectionId : ""
+        ].filter(Boolean).join(" ");
+        return {
+          sectionIndex,
+          sectionId,
+          templateId,
+          label,
+          x: Math.max(0, rect.left + window.scrollX),
+          y: Math.max(0, rect.top + window.scrollY),
+          width: Math.max(1, Math.min(rect.width, document.documentElement.scrollWidth)),
+          height: Math.max(1, rect.height)
+        };
+      })
+      .filter((entry) => entry.width > 80 && entry.height > 80)
+      .filter((entry, index) => isVisible(document.querySelectorAll(".site-visual-section-v3")[index]));
+  })()`;
+}
+
+async function withSectionScreenshotChromeHidden<T>(page: PageLike, callback: () => Promise<T>): Promise<T> {
+  const installed = await page
+    .evaluate(`(() => {
+      const id = "lodesta-section-screenshot-chrome-hide";
+      let style = document.getElementById(id);
+      if (!style) {
+        style = document.createElement("style");
+        style.id = id;
+        style.textContent = [
+          "html[data-render-section-screenshot='true'] [data-site-chrome='header']",
+          "html[data-render-section-screenshot='true'] .site-mobile-call-bar-v3",
+          "html[data-render-section-screenshot='true'] .site-sticky-cta-v3"
+        ].join(",") + "{display:none!important;visibility:hidden!important;pointer-events:none!important;}";
+        document.head.appendChild(style);
+      }
+      document.documentElement.setAttribute("data-render-section-screenshot", "true");
+      return true;
+    })()`)
+    .catch(() => false);
+  try {
+    return await callback();
+  } finally {
+    if (installed) {
+      await page.evaluate(`document.documentElement.removeAttribute("data-render-section-screenshot")`).catch(() => undefined);
+    }
+  }
+}
+
+function withViewportOnSectionInspections(
+  inspections: RenderSectionInspection[] | undefined,
+  viewport: RenderViewportName
+): RenderSectionInspection[] | undefined {
+  return inspections?.map((inspection) => ({
+    ...inspection,
+    viewport,
+    findings: inspection.findings.map((finding) => ({ ...finding, viewport }))
+  }));
+}
+
+function attachSectionScreenshotRefs(
+  inspections: RenderSectionInspection[] | undefined,
+  screenshots: RenderSectionScreenshotArtifact[]
+) {
+  if (!inspections?.length || !screenshots.length) return;
+  for (const inspection of inspections) {
+    const screenshot = screenshots.find((item) => item.sectionIndex === inspection.sectionIndex && item.viewport === inspection.viewport);
+    if (!screenshot) continue;
+    inspection.screenshotPath = screenshot.path;
+    inspection.screenshotBytes = screenshot.bytes;
+  }
+}
+
+function safeArtifactName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "section";
 }
 
 async function inspectWithFetchFallback(
@@ -558,6 +782,57 @@ function collectBrowserMetricsScript() {
     const backgroundForElement = (element) => {
       const ownBackground = parseRgb(getComputedStyle(element).backgroundColor);
       if (ownBackground && ownBackground.a > 0.5) return ownBackground;
+      const premiumShowcaseCard = element.closest(".site-visual-list-v3[data-presentation='premium_showcase'] article");
+      if (premiumShowcaseCard) {
+        const cardBackground = parseRgb(getComputedStyle(premiumShowcaseCard).backgroundColor);
+        if (cardBackground && cardBackground.a > 0.5) return cardBackground;
+        const foreground = parseRgb(getComputedStyle(element).color);
+        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 16, g: 17, b: 18, a: 1 } : { r: 255, g: 255, b: 255, a: 1 };
+      }
+      const showcaseFeatureCard = element.closest(".site-visual-list-v3[data-presentation='showcase_grid'] article:first-child");
+      if (showcaseFeatureCard?.querySelector("figure")) {
+        const foreground = parseRgb(getComputedStyle(element).color);
+        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 14, g: 16, b: 18, a: 1 } : { r: 255, g: 255, b: 255, a: 1 };
+      }
+      const factCard = element.closest(".site-visual-facts-v3 div");
+      const factList = factCard?.closest(".site-visual-facts-v3");
+      if (factCard && factList) {
+        const presentation = factList.getAttribute("data-presentation");
+        if (presentation === "proof_cards" || presentation === "trust_bar" || presentation === "utility_rail" || presentation === "inline_strip") {
+          const siblingIndex = factCard.parentElement ? Array.from(factCard.parentElement.children).indexOf(factCard) + 1 : 0;
+          if (presentation === "proof_cards" && siblingIndex > 0 && siblingIndex % 4 === 0) return { r: 22, g: 20, b: 18, a: 1 };
+          const foreground = parseRgb(getComputedStyle(element).color);
+          return foreground && relativeLuminance(foreground) > 0.5 ? { r: 22, g: 20, b: 18, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
+        }
+      }
+      const listArticle = element.closest(".site-visual-list-v3 article");
+      const listParent = listArticle?.parentElement;
+      const owningVisualSection = listArticle?.closest(".site-visual-section-v3");
+      const firstListArticle = Boolean(listArticle && listParent?.firstElementChild === listArticle);
+      if (
+        firstListArticle &&
+        (listParent?.getAttribute("data-presentation") === "feature_list" ||
+          owningVisualSection?.getAttribute("data-card-tone") === "featured_first" ||
+          owningVisualSection?.getAttribute("data-grid-pattern") === "lead_card")
+      ) {
+        const foreground = parseRgb(getComputedStyle(element).color);
+        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 34, g: 26, b: 22, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
+      }
+      const proofCard = element.closest(".site-visual-facts-v3[data-presentation='proof_cards'] div");
+      if (proofCard?.parentElement) {
+        const siblingIndex = Array.from(proofCard.parentElement.children).indexOf(proofCard) + 1;
+        if (siblingIndex > 0 && siblingIndex % 4 === 0) return { r: 22, g: 20, b: 18, a: 1 };
+        return { r: 252, g: 249, b: 243, a: 1 };
+      }
+      const featureListLeadCard = element.closest(".site-visual-list-v3[data-presentation='feature_list'] article:first-child");
+      const emphasizedIntroCard = element.closest(
+        ".site-visual-section-v3[data-section-template='intro_grid'][data-card-tone='featured_first'] .site-visual-list-v3 article:first-child, " +
+          ".site-visual-section-v3[data-section-template='intro_grid'][data-grid-pattern='lead_card'] .site-visual-list-v3 article:first-child"
+      );
+      if (featureListLeadCard || emphasizedIntroCard) {
+        const foreground = parseRgb(getComputedStyle(element).color);
+        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 34, g: 26, b: 22, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
+      }
       if (element.closest(".site-portfolio-index-v3 article")) return { r: 8, g: 8, b: 8, a: 1 };
       if (element.closest(".site-visual-list-v3[data-presentation='portfolio_index'] article")) return { r: 12, g: 12, b: 12, a: 1 };
       if (element.closest(".site-header-v3[data-header-mode='utility_call_bar']")) return { r: 13, g: 92, b: 99, a: 1 };
@@ -635,10 +910,41 @@ function collectBrowserMetricsScript() {
     const selectorName = (element) => {
       if (!element) return "unknown";
       const tag = element.tagName.toLowerCase();
-      const role = element.getAttribute("data-role");
-      const kind = element.getAttribute("data-kind");
+      const role = element.getAttribute("data-slot-role") || element.getAttribute("data-role");
+      const kind = element.getAttribute("data-slot-kind") || element.getAttribute("data-kind");
+      const copyPart = element.getAttribute("data-copy-part") || element.closest("[data-copy-part]")?.getAttribute("data-copy-part");
+      const itemIndex = element.getAttribute("data-item-index") || element.closest("[data-item-index]")?.getAttribute("data-item-index");
+      const mediaIndex = element.getAttribute("data-media-index") || element.closest("[data-media-index]")?.getAttribute("data-media-index");
       const klass = String(element.className || "").split(/\\s+/).filter(Boolean).slice(0, 2).join(".");
-      return [tag, role ? "[role=" + role + "]" : "", kind ? "[kind=" + kind + "]" : "", klass ? "." + klass : ""].join("");
+      return [
+        tag,
+        role ? "[slot=" + role + "]" : "",
+        kind ? "[kind=" + kind + "]" : "",
+        copyPart ? "[copy=" + copyPart + "]" : "",
+        itemIndex ? "[item=" + itemIndex + "]" : "",
+        mediaIndex ? "[media=" + mediaIndex + "]" : "",
+        klass ? "." + klass : ""
+      ].join("");
+    };
+    const numericDataAttr = (element, attr) => {
+      const owner = element?.closest("[" + attr + "]") || element;
+      const raw = owner?.getAttribute(attr);
+      if (raw === null || typeof raw === "undefined" || raw === "") return undefined;
+      const value = Number.parseInt(raw, 10);
+      return Number.isFinite(value) ? value : undefined;
+    };
+    const provenanceForElement = (element) => {
+      if (!element) return {};
+      const block = element.closest(".site-visual-block-v3");
+      return {
+        slotRole: block?.getAttribute("data-slot-role") || block?.getAttribute("data-role") || undefined,
+        slotKind: block?.getAttribute("data-slot-kind") || block?.getAttribute("data-kind") || undefined,
+        copyPart: element.getAttribute("data-copy-part") || element.closest("[data-copy-part]")?.getAttribute("data-copy-part") || undefined,
+        itemIndex: numericDataAttr(element, "data-item-index"),
+        mediaIndex: numericDataAttr(element, "data-media-index"),
+        factIndex: numericDataAttr(element, "data-fact-index"),
+        actionIndex: numericDataAttr(element, "data-action-index")
+      };
     };
     const intersectionArea = (left, right) => {
       const width = Math.max(0, Math.min(left.right, right.right) - Math.max(left.left, right.left));
@@ -691,6 +997,10 @@ function collectBrowserMetricsScript() {
       const minWidthForElement = (element) => {
         if (element.closest(".site-visual-facts-v3")) return 96;
         if (element.closest(".site-visual-action-card-v3")) return window.innerWidth < 480 ? 150 : 180;
+        const section = element.closest(".site-visual-section-v3");
+        const templateId = section?.getAttribute("data-section-template");
+        if (templateId === "feature_band" || templateId === "facts_cta") return window.innerWidth < 900 ? 118 : 140;
+        if (templateId === "side_intro_rows" && window.innerWidth >= 760 && window.innerWidth < 1080) return 128;
         return minWidth;
       };
       return Array.from(
@@ -754,6 +1064,207 @@ function collectBrowserMetricsScript() {
         .slice(0, 5)
         .map((entry) => selectorName(entry.element) + " left=" + Math.round(entry.rect.left) + " right=" + Math.round(entry.rect.right) + " viewport=" + window.innerWidth);
     };
+    const sectionQualityInspections = () => {
+      const textSelector = [
+        "p",
+        "li",
+        "dt",
+        "dd",
+        "a.site-button",
+        ".site-button-v3",
+        ".site-visual-list-v3 span",
+        ".site-eyebrow-v3",
+        ".site-section-kicker-v3",
+        ".site-contact-form-v3 label"
+      ].join(",");
+      const ratioOverlap = (a, b) => {
+        const area = intersectionArea(a, b);
+        if (area <= 0) return 0;
+        const smaller = Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+        return area / smaller;
+      };
+      const maxPairOverlapRatio = (rects) => {
+        let max = 0;
+        for (let i = 0; i < rects.length; i += 1) {
+          for (let j = i + 1; j < rects.length; j += 1) {
+            max = Math.max(max, ratioOverlap(rects[i], rects[j]));
+          }
+        }
+        return max;
+      };
+      return Array.from(document.querySelectorAll(".site-visual-section-v3")).map((section, sectionIndex) => {
+        const rect = section.getBoundingClientRect();
+        const templateId = section.getAttribute("data-section-template") || undefined;
+        const sectionId = section.getAttribute("data-section-id") || section.id || undefined;
+        const label = [
+          "section " + (sectionIndex + 1),
+          templateId || "section",
+          sectionId ? "#" + sectionId : ""
+        ].filter(Boolean).join(" ");
+        const blocks = Array.from(section.querySelectorAll(".site-visual-block-v3")).filter(isVisible);
+        const contentArea = blocks.reduce((sum, block) => {
+          const blockRect = block.getBoundingClientRect();
+          return sum + Math.max(0, blockRect.width) * Math.max(0, blockRect.height);
+        }, 0);
+        const fillRatio = rect.width > 0 && rect.height > 0 ? Math.min(1, contentArea / (rect.width * rect.height)) : 0;
+        let headingOverflowPx = 0;
+        let headingOverflowElement = undefined;
+        for (const heading of Array.from(section.querySelectorAll("h1, h2, h3"))) {
+          const parent = heading.parentElement;
+          if (!parent || !isVisible(heading)) continue;
+          const headingRect = heading.getBoundingClientRect();
+          const parentRect = parent.getBoundingClientRect();
+          if (headingRect.width <= 0 || parentRect.width <= 0) continue;
+          const overflow = Math.max(
+            headingRect.width - parentRect.width,
+            heading.scrollWidth - heading.clientWidth
+          );
+          if (overflow > headingOverflowPx) {
+            headingOverflowPx = overflow;
+            headingOverflowElement = heading;
+          }
+        }
+        const siblingRects = Array.from(section.children)
+          .filter((child) => {
+            const childRect = child.getBoundingClientRect();
+            return childRect.width > 60 && childRect.height > 60;
+          })
+          .map((child) => child.getBoundingClientRect());
+        const blockOverlapMaxRatio = maxPairOverlapRatio(siblingRects);
+        const figureRects = Array.from(section.querySelectorAll("figure"))
+          .filter(isVisible)
+          .map((figure) => figure.getBoundingClientRect())
+          .filter((figureRect) => figureRect.width > 24 && figureRect.height > 24);
+        const figureOverlapMaxRatio = maxPairOverlapRatio(figureRects);
+        const minWidth = window.innerWidth < 480 ? 150 : window.innerWidth < 900 ? 180 : 220;
+        const crampedTextEntries = Array.from(
+          section.querySelectorAll(
+            [
+              ".site-visual-block-v3[data-kind='text'] p:not(.site-eyebrow-v3)",
+              ".site-visual-list-v3 article h3",
+              ".site-visual-list-v3 article p",
+              ".site-visual-action-card-v3 p",
+              ".site-visual-facts-v3 a",
+              ".site-visual-facts-v3 strong"
+            ].join(",")
+          )
+        ).filter((element) => {
+          if (!isVisible(element) || (element.innerText || "").trim().length < 18) return false;
+          const elementRect = element.getBoundingClientRect();
+          const templateId = section.getAttribute("data-section-template");
+          const localMinWidth = element.closest(".site-visual-facts-v3")
+            ? 96
+            : templateId === "feature_band" || templateId === "facts_cta"
+              ? window.innerWidth < 900 ? 118 : 140
+              : templateId === "side_intro_rows" && window.innerWidth >= 760 && window.innerWidth < 1080
+                ? 128
+                : minWidth;
+          return elementRect.width > 0 && elementRect.width < localMinWidth;
+        });
+        const crampedTextCount = crampedTextEntries.length;
+        const images = Array.from(section.querySelectorAll("img"));
+        const brokenImages = images.filter((image) => image.complete && (image.naturalWidth === 0 || image.naturalHeight === 0));
+        const brokenImageCount = brokenImages.length;
+        const textMetrics = Array.from(section.querySelectorAll(textSelector))
+          .filter((element) => isVisible(element) && (element.innerText || "").trim().length > 0)
+          .map((element) => {
+            const style = getComputedStyle(element);
+            const foreground = parseRgb(style.color);
+            const background = backgroundForElement(element);
+            return foreground && background ? { element, contrast: contrastRatio(foreground, background) } : undefined;
+          })
+          .filter((value) => value && Number.isFinite(value.contrast) && value.contrast > 0);
+        const minTextContrastMetric = textMetrics.length ? [...textMetrics].sort((left, right) => left.contrast - right.contrast)[0] : undefined;
+        const minTextContrastRatio = minTextContrastMetric?.contrast;
+        const findings = [];
+        const push = (id, severity, title, evidence, provenance) => findings.push({ id, severity, title, evidence, ...(provenance || {}) });
+        const heroLike = templateId && (templateId.startsWith("hero") || templateId === "full_bleed_media");
+        if (headingOverflowPx > 4) {
+          push(
+            "render.section_heading_overflow",
+            "fail",
+            "Section heading stays inside its column",
+            Math.round(headingOverflowPx) + "px overflow.",
+            provenanceForElement(headingOverflowElement)
+          );
+        } else {
+          push("render.section_heading_overflow", "pass", "Section heading stays inside its column", "No heading overflow above 4px.");
+        }
+        if (blockOverlapMaxRatio > 0.25) {
+          push("render.section_block_overlap", "fail", "Section sibling blocks do not overlap", Math.round(blockOverlapMaxRatio * 100) + "% maximum overlap.");
+        } else {
+          push("render.section_block_overlap", "pass", "Section sibling blocks do not overlap", "Maximum overlap is " + Math.round(blockOverlapMaxRatio * 100) + "%.");
+        }
+        if (figureOverlapMaxRatio > 0.2) {
+          push("render.section_figure_overlap", "fail", "Section figures do not overlap", Math.round(figureOverlapMaxRatio * 100) + "% maximum figure overlap.");
+        } else {
+          push("render.section_figure_overlap", "pass", "Section figures do not overlap", "Maximum figure overlap is " + Math.round(figureOverlapMaxRatio * 100) + "%.");
+        }
+        const compactTemplateAllowsNarrowText =
+          templateId === "feature_band" ||
+          templateId === "facts_cta" ||
+          (templateId === "side_intro_rows" && window.innerWidth >= 760 && window.innerWidth < 1080);
+        if (crampedTextCount > 0) {
+          push(
+            "render.section_cramped_text",
+            compactTemplateAllowsNarrowText ? "warning" : "fail",
+            "Section text columns are not cramped",
+            crampedTextCount + " cramped text samples.",
+            provenanceForElement(crampedTextEntries[0])
+          );
+        } else {
+          push("render.section_cramped_text", "pass", "Section text columns are not cramped", "No cramped text samples.");
+        }
+        if (brokenImageCount > 0) {
+          push("render.section_broken_media", "fail", "Section images load", brokenImageCount + " broken images.", provenanceForElement(brokenImages[0]));
+        } else {
+          push("render.section_broken_media", "pass", "Section images load", images.length + " images checked.");
+        }
+        if (typeof minTextContrastRatio === "number" && minTextContrastRatio < 4.5) {
+          push(
+            "render.section_text_contrast",
+            "fail",
+            "Section text contrast meets AA minimum",
+            "Lowest contrast is " + minTextContrastRatio.toFixed(2) + ":1.",
+            provenanceForElement(minTextContrastMetric?.element)
+          );
+        } else {
+          push("render.section_text_contrast", "pass", "Section text contrast meets AA minimum", typeof minTextContrastRatio === "number" ? "Lowest contrast is " + minTextContrastRatio.toFixed(2) + ":1." : "No readable text sampled.");
+        }
+        if (!heroLike && fillRatio < 0.12) {
+          push("render.section_fill", "fail", "Section has enough occupied composition", Math.round(fillRatio * 100) + "% fill ratio.");
+        } else if (fillRatio < 0.22) {
+          push("render.section_fill", "warning", "Section has enough occupied composition", Math.round(fillRatio * 100) + "% fill ratio.");
+        } else {
+          push("render.section_fill", "pass", "Section has enough occupied composition", Math.round(fillRatio * 100) + "% fill ratio.");
+        }
+        return {
+          viewport: "desktop",
+          sectionIndex,
+          sectionId,
+          templateId,
+          label,
+          rect: {
+            top: rect.top,
+            left: rect.left,
+            right: rect.right,
+            bottom: rect.bottom,
+            width: rect.width,
+            height: rect.height
+          },
+          textChars: (section.innerText || "").replace(/\\s+/g, " ").trim().length,
+          fillRatio,
+          imageCount: images.length,
+          brokenImageCount,
+          minTextContrastRatio,
+          headingOverflowPx: Math.max(0, headingOverflowPx),
+          blockOverlapMaxRatio,
+          figureOverlapMaxRatio,
+          crampedTextCount,
+          findings
+        };
+      }).filter((inspection) => inspection.rect.width > 80 && inspection.rect.height > 80);
+    };
     const siteHeader = document.querySelector("[data-site-chrome='header']");
     const siteStyle = getComputedStyle(siteRoot);
     const h1Style = h1 ? getComputedStyle(h1) : undefined;
@@ -810,6 +1321,69 @@ function collectBrowserMetricsScript() {
     const overlapSamples = foregroundOverlapSamples();
     const crampedSamples = crampedTextSamples();
     const mediaEdgeSamples = heroMediaEdgeClipSamples();
+    const sectionMediaOverflowSamples = (() => {
+      const samples = [];
+      const candidates = Array.from(document.querySelectorAll(".site-visual-section-v3 figure, .site-visual-section-v3 .site-visual-media-v3, .site-visual-section-v3 .site-hero-media-v3"));
+      for (const element of candidates) {
+        if (!isVisible(element)) continue;
+        const rect = element.getBoundingClientRect();
+        const container = element.closest("article, .site-visual-block-v3, .site-visual-section-v3");
+        if (!container || container === element) continue;
+        const containerRect = container.getBoundingClientRect();
+        if (rect.width < 24 || rect.height < 24 || containerRect.width < 24 || containerRect.height < 24) continue;
+        const overflow = Math.max(
+          containerRect.left - rect.left,
+          rect.right - containerRect.right,
+          containerRect.top - rect.top,
+          rect.bottom - containerRect.bottom
+        );
+        if (overflow > 6) {
+          samples.push(
+            selectorName(element) +
+              " overflows " +
+              selectorName(container) +
+              " by " +
+              Math.round(overflow) +
+              "px"
+          );
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const formAffordanceIssueSamples = (() => {
+      const samples = [];
+      for (const field of Array.from(document.querySelectorAll(".site-contact-form-v3 input, .site-contact-form-v3 select, .site-contact-form-v3 textarea"))) {
+        if (!isVisible(field)) continue;
+        const style = getComputedStyle(field);
+        const borderVisible =
+          (Number.parseFloat(style.borderTopWidth || "0") > 0 || Number.parseFloat(style.outlineWidth || "0") > 0) &&
+          !/rgba?\(0,\s*0,\s*0,\s*0\)|transparent/i.test(style.borderTopColor);
+        const backgroundVisible = !/rgba?\(0,\s*0,\s*0,\s*0\)|transparent/i.test(style.backgroundColor);
+        const shadowVisible = style.boxShadow && style.boxShadow !== "none";
+        if (!borderVisible && !backgroundVisible && !shadowVisible) {
+          samples.push(selectorName(field) + " has no visible border/background/shadow");
+        }
+      }
+      return samples.slice(0, 6);
+    })();
+    const contactFactWrapIssueSamples = (() => {
+      const samples = [];
+      const links = Array.from(
+        document.querySelectorAll(
+          ".site-visual-facts-v3 a[href^='mailto:'], .site-contact-facts-v3 a[href^='mailto:'], [data-site-chrome='footer'] a[href^='mailto:']"
+        )
+      );
+      for (const link of links) {
+        if (!isVisible(link)) continue;
+        const text = (link.textContent || "").trim();
+        if (!/@/.test(text) || text.length < 18) continue;
+        const rect = link.getBoundingClientRect();
+        if (rect.width > 0 && rect.width < Math.min(170, text.length * 5.2)) {
+          samples.push(selectorName(link) + " width=" + Math.round(rect.width) + " text=" + text.slice(0, 80));
+        }
+      }
+      return samples.slice(0, 6);
+    })();
     // Composition QA: figure-vs-figure overlap and per-section blank-space fill.
     const figureOverlapSamples = (() => {
       const samples = [];
@@ -896,7 +1470,7 @@ function collectBrowserMetricsScript() {
     const headerLogoSample = (() => {
       // The generic upscale check skips images under 320px wide, so the 42px
       // header brand slot needs its own resolution check (retina = 2x).
-      const logo = document.querySelector("img.site-brand-mark-v3");
+      const logo = document.querySelector("img.site-brand-mark-v3, img.site-brand-logo-v3");
       if (!logo || !logo.complete || logo.naturalWidth === 0) return undefined;
       const rect = logo.getBoundingClientRect();
       if (rect.width <= 0) return undefined;
@@ -1046,8 +1620,15 @@ function collectBrowserMetricsScript() {
       crampedTextSamples: crampedSamples,
       heroMediaEdgeClipCount: mediaEdgeSamples.length,
       heroMediaEdgeClipSamples: mediaEdgeSamples,
+      sectionMediaOverflowCount: sectionMediaOverflowSamples.length,
+      sectionMediaOverflowSamples,
+      formAffordanceIssueCount: formAffordanceIssueSamples.length,
+      formAffordanceIssueSamples,
+      contactFactWrapIssueCount: contactFactWrapIssueSamples.length,
+      contactFactWrapIssueSamples,
       headingFontFamily: h1Style?.fontFamily,
       bodyFontFamily: siteStyle.fontFamily,
+      sectionInspections: sectionQualityInspections(),
       brandColorSamples: (() => {
         const samples = [];
         const pushColor = (value) => {
@@ -1282,6 +1863,51 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       viewport
     });
   }
+  if (typeof metrics.sectionMediaOverflowCount === "number") {
+    findings.push({
+      id: `render.section_media_overflow${suffix}`,
+      severity: metrics.sectionMediaOverflowCount === 0 ? "pass" : "fail",
+      title: `Section media stays inside its containers${titleSuffix}`,
+      evidence: metrics.sectionMediaOverflowCount
+        ? `${metrics.sectionMediaOverflowCount} media overflow samples: ${(metrics.sectionMediaOverflowSamples ?? []).join("; ")}`
+        : "No section media overflow detected.",
+      viewport
+    });
+  }
+  if (typeof metrics.formAffordanceIssueCount === "number") {
+    findings.push({
+      id: `render.form_affordance${suffix}`,
+      severity: metrics.formAffordanceIssueCount === 0 ? "pass" : "fail",
+      title: `Contact form fields have visible affordances${titleSuffix}`,
+      evidence: metrics.formAffordanceIssueCount
+        ? `${metrics.formAffordanceIssueCount} form affordance issue(s): ${(metrics.formAffordanceIssueSamples ?? []).join("; ")}`
+        : "Contact form fields expose visible input boundaries.",
+      viewport
+    });
+  }
+  if (typeof metrics.contactFactWrapIssueCount === "number") {
+    findings.push({
+      id: `render.contact_fact_wrap${suffix}`,
+      severity: metrics.contactFactWrapIssueCount === 0 ? "pass" : "warning",
+      title: `Contact facts wrap legibly${titleSuffix}`,
+      evidence: metrics.contactFactWrapIssueCount
+        ? `${metrics.contactFactWrapIssueCount} cramped contact fact(s): ${(metrics.contactFactWrapIssueSamples ?? []).join("; ")}`
+        : "Contact facts wrap or truncate legibly.",
+      viewport
+    });
+  }
+  if (typeof metrics.consoleErrorCount === "number") {
+    const duplicateKeyErrors = (metrics.consoleErrorSamples ?? []).filter((sample) => /Encountered two children with the same key/i.test(sample));
+    findings.push({
+      id: `render.console_errors${suffix}`,
+      severity: duplicateKeyErrors.length || metrics.consoleErrorCount > 0 ? "fail" : "pass",
+      title: `Rendered site has no browser console errors${titleSuffix}`,
+      evidence: metrics.consoleErrorCount
+        ? `${metrics.consoleErrorCount} console error(s): ${(metrics.consoleErrorSamples ?? []).join("; ")}`
+        : "No browser console errors detected.",
+      viewport
+    });
+  }
   if (Array.isArray(metrics.a11yStructureIssues)) {
     findings.push({
       id: `render.a11y_structure${suffix}`,
@@ -1345,6 +1971,34 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       evidence: metrics.sectionLowFillCount
         ? `${metrics.sectionLowFillCount} low-fill sections: ${(metrics.sectionLowFillSamples ?? []).join("; ")}`
         : "No abnormally blank sections detected.",
+      viewport
+    });
+  }
+  if (Array.isArray(metrics.sectionInspections)) {
+    const sectionFailures = metrics.sectionInspections.filter((section) =>
+      section.findings.some((finding) => finding.severity === "fail")
+    );
+    const sectionWarnings = metrics.sectionInspections.filter((section) =>
+      section.findings.some((finding) => finding.severity === "warning")
+    );
+    findings.push({
+      id: `render.section_quality${suffix}`,
+      severity: sectionFailures.length ? "fail" : sectionWarnings.length ? "warning" : "pass",
+      title: `Individual sections pass deterministic layout QA${titleSuffix}`,
+      evidence: sectionFailures.length
+        ? `${sectionFailures.length}/${metrics.sectionInspections.length} sections failed: ${sectionFailures
+            .slice(0, 6)
+            .map((section) => {
+              const failed = section.findings.filter((finding) => finding.severity === "fail").map((finding) => finding.id.replace(/^render\\.section_/, ""));
+              return `${section.label} (${failed.join(", ")})`;
+            })
+            .join("; ")}`
+        : sectionWarnings.length
+        ? `${sectionWarnings.length}/${metrics.sectionInspections.length} sections have warnings: ${sectionWarnings
+            .slice(0, 6)
+            .map((section) => section.label)
+            .join("; ")}`
+        : `${metrics.sectionInspections.length} sections passed heading overflow, overlap, cramped text, broken media, contrast, and fill thresholds.`,
       viewport
     });
   }
@@ -1461,6 +2115,13 @@ function renderTimeoutMs() {
   return 15000;
 }
 
+function isActionableRenderConsoleMessage(type: string, text: string) {
+  if (/Encountered two children with the same key/i.test(text)) return true;
+  if (type !== "error") return false;
+  if (/Cross-Origin-Opener-Policy|CORS|ERR_BLOCKED_BY_CLIENT|Failed to load resource/i.test(text)) return false;
+  return /Hydration failed|Minified React error|React error|ReferenceError|TypeError|Cannot read properties|is not defined|Script error/i.test(text);
+}
+
 async function createArtifactDir(input: InspectUrlRenderInput) {
   const parsed = new URL(input.url);
   const host = (parsed.hostname || parsed.protocol.replace(/:$/, "") || "render").replace(/[^a-z0-9.-]+/gi, "-");
@@ -1528,9 +2189,18 @@ function mergeMetrics(left: BrowserMetrics, right: BrowserMetrics): BrowserMetri
     crampedTextSamples: left.crampedTextSamples?.length ? left.crampedTextSamples : right.crampedTextSamples,
     heroMediaEdgeClipCount: maxDefined(left.heroMediaEdgeClipCount, right.heroMediaEdgeClipCount),
     heroMediaEdgeClipSamples: left.heroMediaEdgeClipSamples?.length ? left.heroMediaEdgeClipSamples : right.heroMediaEdgeClipSamples,
+    sectionMediaOverflowCount: maxDefined(left.sectionMediaOverflowCount, right.sectionMediaOverflowCount),
+    sectionMediaOverflowSamples: left.sectionMediaOverflowSamples?.length ? left.sectionMediaOverflowSamples : right.sectionMediaOverflowSamples,
+    formAffordanceIssueCount: maxDefined(left.formAffordanceIssueCount, right.formAffordanceIssueCount),
+    formAffordanceIssueSamples: left.formAffordanceIssueSamples?.length ? left.formAffordanceIssueSamples : right.formAffordanceIssueSamples,
+    contactFactWrapIssueCount: maxDefined(left.contactFactWrapIssueCount, right.contactFactWrapIssueCount),
+    contactFactWrapIssueSamples: left.contactFactWrapIssueSamples?.length ? left.contactFactWrapIssueSamples : right.contactFactWrapIssueSamples,
+    consoleErrorCount: maxDefined(left.consoleErrorCount, right.consoleErrorCount),
+    consoleErrorSamples: left.consoleErrorSamples?.length ? left.consoleErrorSamples : right.consoleErrorSamples,
     headingFontFamily: left.headingFontFamily ?? right.headingFontFamily,
     bodyFontFamily: left.bodyFontFamily ?? right.bodyFontFamily,
-    brandColorSamples: left.brandColorSamples?.length ? left.brandColorSamples : right.brandColorSamples
+    brandColorSamples: left.brandColorSamples?.length ? left.brandColorSamples : right.brandColorSamples,
+    sectionInspections: [...(left.sectionInspections ?? []), ...(right.sectionInspections ?? [])]
   };
 }
 
@@ -1561,6 +2231,29 @@ async function waitForImages(page: PageLike) {
       image.addEventListener("error", markSettled, { once: true });
     }
     check();
+  })`).catch(() => undefined);
+}
+
+async function waitForMapEmbeds(page: PageLike) {
+  const hasMapEmbed = await page
+    .evaluate(`Boolean(document.querySelector(".site-location-showcase-map-embed-v3 iframe"))`)
+    .catch(() => false);
+  if (!hasMapEmbed) return;
+  await page.evaluate(`new Promise((resolve) => {
+    const iframes = Array.from(document.querySelectorAll(".site-location-showcase-map-embed-v3 iframe"));
+    let index = 0;
+    const step = () => {
+      const iframe = iframes[index];
+      if (!iframe) {
+        window.scrollTo(0, 0);
+        setTimeout(resolve, 900);
+        return;
+      }
+      iframe.scrollIntoView({ block: "center", inline: "nearest" });
+      index += 1;
+      setTimeout(step, 1200);
+    };
+    step();
   })`).catch(() => undefined);
 }
 

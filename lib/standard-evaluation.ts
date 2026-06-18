@@ -295,7 +295,7 @@ function templatesForLegacySectionType(sectionType: string) {
     team: ["editorial_statement", "split_media"],
     map: ["location_showcase", "service_area_showcase", "location_directory"],
     gallery: ["media_mosaic", "media_feature"],
-    before_after: ["media_mosaic", "media_feature"]
+    before_after: ["media_mosaic", "media_feature", "proof_pair"]
   };
   return new Set(mapped[sectionType] ?? [sectionType]);
 }

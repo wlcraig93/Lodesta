@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "generation-fixture-manifest-v1",
+  "fixtures": [
+    {
+      "id": "austin-dent-paint-rich-media",
+      "sourceUrl": "https://austindentpaint.example/",
+      "htmlPath": "fixtures/market-benchmark/austin-auto/sites/austin-dent-paint.html",
+      "profile": "rich_media_and_first_party_testimonials",
+      "expectedDesignSystem": "precision_shop_editorial",
+      "evidenceProposals": [
+        { "kind": "testimonial", "proposedText": "Clear estimate, great paint match, and regular updates." },
+        { "kind": "testimonial", "proposedText": "They helped with the insurance claim and the bumper looks new." },
+        { "kind": "testimonial", "proposedText": "Local shop, honest timeline, and the hail repair photos were excellent." },
+        { "kind": "credential", "proposedText": "I-CAR trained" },
+        { "kind": "warranty", "proposedText": "Lifetime paint warranty" }
+      ]
+    },
+    {
+      "id": "south-congress-tire-service-breadth",
+      "sourceUrl": "https://southcongresstireauto.example/",
+      "htmlPath": "fixtures/market-benchmark/austin-auto/sites/south-congress-tire-auto.html",
+      "profile": "service_breadth_with_single_media_asset",
+      "expectedDesignSystem": "precision_shop_editorial",
+      "evidenceProposals": []
+    },
+    {
+      "id": "austin-auto-glass-sparse",
+      "sourceUrl": "https://austinautoglassexpress.example/",
+      "htmlPath": "fixtures/market-benchmark/austin-auto/sites/austin-auto-glass-express.html",
+      "profile": "sparse_source_no_usable_media",
+      "expectedDesignSystem": "trusted_local_service",
+      "evidenceProposals": []
+    },
+    {
+      "id": "north-loop-collision-no-media-proof",
+      "sourceUrl": "https://northloopcollision.example/",
+      "htmlPath": "fixtures/generation-pipeline/north-loop-collision.html",
+      "profile": "no_media_with_credentials_reviews_and_negated_claim",
+      "expectedDesignSystem": "trusted_local_service",
+      "evidenceProposals": [
+        { "kind": "credential", "proposedText": "I-CAR Gold Class" },
+        { "kind": "years_in_business", "proposedText": "Established in 2004" },
+        { "kind": "insurance_support", "proposedText": "work with your insurance company" },
+        { "kind": "warranty", "proposedText": "lifetime warranty" },
+        { "kind": "testimonial", "proposedText": "The estimate was clear, the updates were consistent, and the repaired door looked excellent.", "attribution": "Jordan R." },
+        { "kind": "testimonial", "proposedText": "They explained the insurance process and finished the bumper repair when promised.", "attribution": "Casey M." }
+      ]
+    }
+  ]
+}

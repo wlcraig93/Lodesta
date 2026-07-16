@@ -1,6 +1,7 @@
 import { getStandardCriterion } from "./standard";
 import { validatePublicFetchUrl } from "./url-safety";
 import type { SiteEvidenceCandidateV1, SiteEvidenceKindV1 } from "./evidence-ledger-v1";
+import { extractSourceTextBlocks, type SourceTextBlock } from "./source-text-blocks";
 
 export type CrawlAssessment = {
   url: string;
@@ -41,6 +42,8 @@ export type CrawlPageSummary = {
   canonical?: string;
   /** Cleaned visible prose retained for evidence/dossier generation, capped per page. */
   mainText?: string;
+  /** Semantic visible-text blocks retained with deterministic token-to-display provenance. */
+  sourceTextBlocks: SourceTextBlock[];
   hasViewportMeta: boolean;
   hasLocalBusinessSchema: boolean;
   hasTelLink: boolean;
@@ -297,6 +300,7 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
     metaDescription,
     canonical: extractLinkHref(html, "canonical"),
     mainText: extractMainText(html, maxMainTextCharsPerPage),
+    sourceTextBlocks: extractSourceTextBlocks(html, sourcePage.href),
     hasViewportMeta: /<meta[^>]+name=["']viewport["'][^>]*>/i.test(html),
     hasLocalBusinessSchema: /LocalBusiness|Restaurant|Dentist|LegalService|HomeAndConstructionBusiness/i.test(html),
     hasTelLink: /href=["']tel:/i.test(html),

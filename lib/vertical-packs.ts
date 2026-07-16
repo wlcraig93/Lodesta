@@ -46,8 +46,8 @@ export function buildGenerationPlan(input: {
   const pack = verticalPackFor(input.business.vertical);
   const heroAsset = firstPartyHeroAsset(input.assets);
   const designSystem = input.designSystemOverride ?? (heroAsset ? "precision_shop_editorial" : "trusted_local_service");
-  if (designSystem === "precision_shop_editorial" && !heroAsset) {
-    throw new Error("precision_shop_editorial requires a first-party hero asset that clears the media floor.");
+  if (!compatibleDesignSystems(input.assets).includes(designSystem)) {
+    throw new Error(`${designSystem} is not compatible with the retained asset floor.`);
   }
   const evidenceIds = input.evidence.items
     .filter((item) => item.renderPolicy === "durable_render")
@@ -167,6 +167,20 @@ export function buildGenerationPlan(input: {
     pages,
     formId: `form_${input.business.siteId}_estimate`
   };
+}
+
+export function compatibleDesignSystems(assets: SiteAsset[]): ShippingDesignSystemId[] {
+  return [
+    "trusted_local_service",
+    ...(firstPartyHeroAsset(assets) ? ["precision_shop_editorial" as const] : [])
+  ];
+}
+
+export function alternateDesignSystem(
+  current: ShippingDesignSystemId,
+  assets: SiteAsset[]
+): ShippingDesignSystemId | undefined {
+  return compatibleDesignSystems(assets).find((candidate) => candidate !== current);
 }
 
 function firstPartyHeroAsset(assets: SiteAsset[]) {

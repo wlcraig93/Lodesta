@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRenderInspectionRuntimeStatus } from "../lib/render-inspection";
 import { runObjectiveGenerationGate } from "../lib/generation-objective-gate";
+import { buildGenerationJudgePacket } from "../lib/generation-judge";
 import { buildCanonicalFixture, loadCanonicalFixtureDefinitions } from "./canonical-generation-fixtures";
 
 const runtime = await getRenderInspectionRuntimeStatus({ launch: true });
@@ -35,11 +36,21 @@ try {
     assert(gate.routes.every((route) => route.inspection.adapter === "playwright"));
     assert(gate.routes.every((route) => route.inspection.screenshots.length === 3));
     assert(gate.routes.every((route) => route.inspection.screenshots.every((screenshot) => (screenshot.bytes ?? 0) > 0)));
+    const judgePacket = await buildGenerationJudgePacket({
+      plan: fixture.plan,
+      version: fixture.version,
+      assets: fixture.assets,
+      gate,
+      artifactRoot
+    });
+    assert.equal(judgePacket.images.length, 4);
+    assert(judgePacket.images.every((image) => image.bytes > 0 && image.imageUrl.startsWith("data:image/")));
     results.push({
       id: definition.id,
       designSystem: fixture.plan.designSystem,
       routes: gate.routes.length,
       screenshots: gate.routes.reduce((sum, route) => sum + route.inspection.screenshots.length, 0),
+      judgePacketImages: judgePacket.images.length,
       warnings: gate.warnings.length,
       trace: { plans: 1, copies: 1, compiles: 1, gates: 1, judges: 0 }
     });

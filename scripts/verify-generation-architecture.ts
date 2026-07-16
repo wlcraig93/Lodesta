@@ -11,7 +11,9 @@ const canonicalFiles = [
   "lib/vertical-packs.ts",
   "lib/site-copy.ts",
   "lib/site-compiler.ts",
-  "lib/generation-objective-gate.ts"
+  "lib/generation-objective-gate.ts",
+  "lib/generation-judge.ts",
+  "lib/generation-pipeline.ts"
 ];
 const forbiddenImports = [
   "deterministic-site-director-plan-v1",

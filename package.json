@@ -48,6 +48,8 @@
     "verify:evidence-ledger": "node --import tsx scripts/verify-evidence-ledger.ts",
     "verify:canonical-generation": "node --import tsx scripts/verify-canonical-generation.ts",
     "verify:canonical-render-browser": "node --import tsx scripts/verify-canonical-render-browser.ts",
+    "verify:generation-judge": "node --import tsx scripts/verify-generation-judge.ts",
+    "verify:generation-pipeline": "node --import tsx scripts/verify-generation-pipeline.ts",
     "verify:generation-architecture": "node --import tsx scripts/verify-generation-architecture.ts",
     "report:generation-stored-data": "node --import tsx --import ./scripts/load-env.ts scripts/report-generation-stored-data.ts",
     "verify:generated-site-v3-variant-coverage": "node --import tsx scripts/verify-generated-site-v3-variant-coverage.ts",

@@ -1,6 +1,6 @@
 # Generation Simplification Plan: Commit to Design Systems, Collapse the Judgment Stack
 
-**Status:** Draft for review
+**Status:** Superseded by `docs/generation-pipeline-clean-break.md`
 **Date:** 2026-07-09
 **Decision this plan implements:** Approach (a) — hand-crafted design systems are the product. The
 model's job is facts → copy → brand mapping → conversational edits, not layout design. Approach (b)

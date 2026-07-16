@@ -47,6 +47,7 @@
     "verify:vertical-profile-ratchet": "node --import tsx scripts/verify-vertical-profile-ratchet.ts",
     "verify:evidence-ledger": "node --import tsx scripts/verify-evidence-ledger.ts",
     "verify:canonical-generation": "node --import tsx scripts/verify-canonical-generation.ts",
+    "report:generation-stored-data": "node --import tsx --import ./scripts/load-env.ts scripts/report-generation-stored-data.ts",
     "verify:generated-site-v3-variant-coverage": "node --import tsx scripts/verify-generated-site-v3-variant-coverage.ts",
     "verify:generated-site-v3-section-template-library": "node --import tsx scripts/verify-generated-site-v3-canonical-visual-grammar.ts",
     "verify:generated-site-v3-validation-pack": "node --import tsx scripts/verify-generated-site-v3-validation-pack.ts",

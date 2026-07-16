@@ -1,8 +1,11 @@
 # Canonical Generation Pipeline Clean Break
 
-**Status:** In implementation  
-**Approved:** 2026-07-15  
-**Branch:** `codex/generation-pipeline-rebuild`  
+**Status:** In implementation
+
+**Approved:** 2026-07-15
+
+**Branch:** `codex/generation-pipeline-rebuild`
+
 **Baseline:** `b4f0946`
 
 This document supersedes `docs/generation-simplification-plan.md`. The product is pre-launch. The

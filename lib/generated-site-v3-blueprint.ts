@@ -234,7 +234,7 @@ export const componentControlOptionsForBlueprintV1 = {
 
 export const templateOptionsForBlueprintV1 = {
   hero_split: {
-    heroLayout: ["classic_split", "media_left", "editorial_overlap", "card_overlay", "full_bleed_masthead", "text_first"],
+    heroLayout: ["classic_split", "media_left", "editorial_overlap", "card_overlay", "full_bleed_masthead", "text_first", "no_media_editorial", "service_matrix"],
     proofPlacement: ["below_copy", "side_panel", "bottom_strip", "none"],
     ctaLayout: ["inline", "stacked", "button_plus_text_link", "callout_card"],
     mediaTreatment: ["flush", "framed", "rounded_panel", "bleed", "collage_pair"],
@@ -262,7 +262,7 @@ export const templateOptionsForBlueprintV1 = {
   },
   hero_statement: {
     heroAlign: ["left", "center"],
-    heroLayout: ["classic_split", "media_left", "editorial_overlap", "card_overlay", "full_bleed_masthead", "text_first"],
+    heroLayout: ["classic_split", "media_left", "editorial_overlap", "card_overlay", "full_bleed_masthead", "text_first", "no_media_editorial", "service_matrix"],
     proofPlacement: ["below_copy", "side_panel", "bottom_strip", "none"],
     ctaLayout: ["inline", "stacked", "button_plus_text_link", "callout_card"],
     mediaTreatment: ["flush", "framed", "rounded_panel", "bleed", "collage_pair"],

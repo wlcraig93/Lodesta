@@ -1,12 +1,17 @@
 import type { SiteBundle } from "./models";
 import { runAudit } from "./audit";
 import { applyVerifiedFacts } from "./fact-verification";
+import { createBusinessFactGraph } from "./business-fact-graph";
+import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { markRegenerableArtifactProvenanceStaleV1 } from "./regenerable-artifact-provenance";
 
 export type BusinessProfileUpdateInput = {
   siteId: string;
   phone?: string;
   email?: string;
   services?: string[];
+  credentials?: string[];
+  offers?: string[];
   serviceAreas?: string[];
   bookingLinks?: string[];
   orderingLinks?: string[];
@@ -46,6 +51,14 @@ export function applyBusinessProfileUpdate(bundle: SiteBundle, input: BusinessPr
     profile.services = cleanList(input.services);
     changedFacts.push("services");
   }
+  if (input.credentials !== undefined) {
+    profile.credentials = cleanList(input.credentials);
+    changedFacts.push("credentials");
+  }
+  if (input.offers !== undefined) {
+    profile.offers = cleanList(input.offers);
+    changedFacts.push("offers");
+  }
   if (input.serviceAreas !== undefined) {
     profile.serviceAreas = cleanList(input.serviceAreas);
     changedFacts.push("service_areas");
@@ -68,6 +81,35 @@ export function applyBusinessProfileUpdate(bundle: SiteBundle, input: BusinessPr
   }
 
   applyVerifiedFacts(profile, changedFacts);
+  if (changedFacts.length) {
+    const staleReason = `Owner business facts changed: ${changedFacts.join(", ")}`;
+    bundle.presenceAssessment.businessUnderstanding = bundle.presenceAssessment.businessUnderstanding
+      ? {
+          ...bundle.presenceAssessment.businessUnderstanding,
+          provenance: markRegenerableArtifactProvenanceStaleV1(
+            bundle.presenceAssessment.businessUnderstanding.provenance,
+            staleReason
+          )
+        }
+      : undefined;
+    if (bundle.presenceAssessment.siteDossierV1) {
+      bundle.presenceAssessment.siteDossierV1 = {
+        ...bundle.presenceAssessment.siteDossierV1,
+        stale: true
+      };
+    }
+    bundle.presenceAssessment.siteDirectorPlanV1 = undefined;
+    bundle.presenceAssessment.generationPlanningSource = "deterministic_design_system";
+    bundle.presenceAssessment.businessFactGraph = createBusinessFactGraph({
+      business: profile,
+      presence: bundle.presenceAssessment
+    });
+    bundle.presenceAssessment.generatedCopyDeck = undefined;
+    const recompile = applyGeneratedSiteV3({ bundle });
+    bundle.presenceAssessment.technicalNotes.push(
+      `Owner business facts changed (${changedFacts.join(", ")}); source copy was invalidated and ${recompile.reason}`
+    );
+  }
   bundle.optimizationFindings = runAudit(bundle.businessProfile, bundle.siteModel);
   return bundle;
 }

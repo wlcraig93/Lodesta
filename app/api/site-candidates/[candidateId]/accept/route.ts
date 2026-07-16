@@ -4,6 +4,11 @@ import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { siteVersionV3Issue } from "@/lib/site-version-v3";
+import {
+  latestOperatorDecisionArtifactV1,
+  operatorDecisionPassedV1,
+  parseOperatorDecisionArtifactV1
+} from "@/lib/operator-decision-v1";
 
 export const runtime = "nodejs";
 
@@ -44,6 +49,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
         candidateStatus: candidate.status,
         readiness,
         blockers: candidateVersion?.generationQa?.blockers ?? []
+      },
+      { status: 409 }
+    );
+  }
+  const reviewArtifacts = await repository.listSiteArtifacts({ siteCandidateId: candidateId, artifactType: "v3_review_packet" });
+  const latestDecisionArtifact = latestOperatorDecisionArtifactV1(reviewArtifacts);
+  const decisionPayload = latestDecisionArtifact ? parseOperatorDecisionArtifactV1(latestDecisionArtifact) : undefined;
+  if (!operatorDecisionPassedV1(decisionPayload)) {
+    return NextResponse.json(
+      {
+        error: "Operator must approve this candidate for outreach before promotion.",
+        candidateStatus: candidate.status,
+        decisionStatus: decisionPayload?.status ?? "missing"
       },
       { status: 409 }
     );

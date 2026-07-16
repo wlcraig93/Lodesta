@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { repository } from "@/lib/repository";
 import {
+  asStripeInvoice,
   asStripeCheckoutSession,
   parseStripeWebhookEvent,
   stripeStringId,
   verifyStripeWebhookSignature
 } from "@/lib/stripe-webhook";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
+import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 
 export const runtime = "nodejs";
 
@@ -41,6 +43,42 @@ export async function POST(request: Request) {
   } catch {
     return applyRateLimitHeaders(NextResponse.json({ error: "Malformed Stripe webhook payload." }, { status: 400 }), limit);
   }
+  if (event.type === "invoice.payment_failed") {
+    const invoice = asStripeInvoice(event.data?.object);
+    const claims = await repository.listClaims(invoice.metadata?.site_id);
+    const invoiceCustomerId = stripeStringId(invoice.customer);
+    const invoiceSubscriptionId = stripeStringId(invoice.subscription);
+    const claim = claims.find(
+      (candidate) =>
+        candidate.id === invoice.metadata?.claim_id ||
+        (invoiceCustomerId && candidate.stripeCustomerId === invoiceCustomerId) ||
+        (invoiceSubscriptionId && candidate.stripeSubscriptionId === invoiceSubscriptionId)
+    );
+    const bundle = claim ? await repository.getSiteBundle(claim.siteId) : null;
+    const notification =
+      bundle && claim
+        ? await sendOwnerOperationalEmail({
+            bundle,
+            claims: [claim],
+            kind: "payment_failure",
+            subject: `${bundle.businessProfile.name}: payment needs attention`,
+            summaryLines: [
+              "Stripe reported a failed subscription payment.",
+              invoice.amount_due ? `Amount due: ${(invoice.amount_due / 100).toFixed(2)} ${invoice.currency?.toUpperCase() ?? ""}` : undefined,
+              invoice.attempt_count ? `Attempt count: ${invoice.attempt_count}` : undefined,
+              invoice.hosted_invoice_url ? `Invoice: ${invoice.hosted_invoice_url}` : undefined
+            ].filter((line): line is string => Boolean(line)),
+            actionPath: `/dashboard/${bundle.siteModel.slug}`
+          })
+        : {
+            kind: "payment_failure" as const,
+            siteId: invoice.metadata?.site_id ?? "",
+            status: "skipped" as const,
+            message: "Payment failure notification skipped because no matching claim/site was found."
+          };
+    return applyRateLimitHeaders(NextResponse.json({ received: true, type: event.type, notification }), limit);
+  }
+
   if (event.type !== "checkout.session.completed") {
     return applyRateLimitHeaders(NextResponse.json({ received: true, ignored: true, type: event.type }), limit);
   }
@@ -66,6 +104,21 @@ export async function POST(request: Request) {
 
   if (!claim) {
     return applyRateLimitHeaders(NextResponse.json({ error: "No matching claim found for checkout session." }, { status: 404 }), limit);
+  }
+  if (claim.outboundCampaignId) {
+    await repository.recordOutboundEvent({
+      campaignId: claim.outboundCampaignId,
+      prospectId: claim.outboundProspectId,
+      siteId: claim.siteId,
+      type: "paid",
+      value: 1,
+      metadata: {
+        source: "stripe_webhook",
+        checkoutSessionId: checkoutSessionId ?? "",
+        stripeCustomerId: claim.stripeCustomerId ?? "",
+        stripeSubscriptionId: claim.stripeSubscriptionId ?? ""
+      }
+    });
   }
 
   return applyRateLimitHeaders(NextResponse.json({ received: true, claim }), limit);

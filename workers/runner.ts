@@ -6,7 +6,15 @@ import { repository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
 import { runAudit } from "../lib/audit";
-import { resolveWorkerIdleMs } from "../lib/worker-runtime";
+import { getProcessWorkerId } from "../lib/worker-identity";
+import {
+  buildProcessWorkerHeartbeat,
+  buildWorkerQueueStatus,
+  defaultWorkerHeartbeatMs,
+  repositoryModeFromEnv,
+  resolveWorkerIdleMs,
+  workerHeartbeatStaleMs
+} from "../lib/worker-runtime";
 
 let shuttingDown = false;
 process.once("SIGTERM", () => {
@@ -43,19 +51,52 @@ async function main() {
   }
 
   if (command === "process-once") {
+    const workerId = getProcessWorkerId();
+    const heartbeat = startWorkerHeartbeat(workerId);
     const job = await repository.processNextJob();
+    await heartbeat.beat();
+    heartbeat.stop();
     console.log(JSON.stringify({ processed: job ? 1 : 0, job }, null, 2));
     return;
   }
 
   if (command === "process-all") {
+    const workerId = getProcessWorkerId();
+    const heartbeat = startWorkerHeartbeat(workerId);
     const limit = Number(process.argv[3] ?? 25);
     const jobs = await repository.processAllQueuedJobs(limit);
+    await heartbeat.beat();
+    heartbeat.stop();
     console.log(JSON.stringify({ processed: jobs.length, jobs }, null, 2));
     return;
   }
 
+  if (command === "status") {
+    const [jobs, heartbeats] = await Promise.all([repository.listJobs(), repository.listWorkerHeartbeats()]);
+    console.log(
+      JSON.stringify(
+        buildWorkerQueueStatus({
+          jobs,
+          heartbeats,
+          staleAfterMs: workerHeartbeatStaleMs(),
+          repositoryMode: repositoryModeFromEnv()
+        }),
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  if (command === "requeue") {
+    const jobId = process.argv[3];
+    if (!jobId) throw new Error("usage: npm run worker -- requeue <jobId>");
+    console.log(JSON.stringify(await repository.requeueJob(jobId), null, 2));
+    return;
+  }
+
   if (command === "work") {
+    const workerId = getProcessWorkerId();
     const idleResolution = resolveWorkerIdleMs({
       positional: process.argv[3],
       env: process.env.LODESTA_WORKER_IDLE_MS
@@ -64,16 +105,26 @@ async function main() {
       console.warn(`[worker] ${warning}`);
     }
     const idleMs = idleResolution.idleMs;
+    const heartbeat = startWorkerHeartbeat(workerId);
+    await heartbeat.beat();
+    console.log(
+      `[worker] started workerId=${workerId} pid=${process.pid} repository=${repositoryModeFromEnv()} poll=${idleMs}ms heartbeat=${defaultWorkerHeartbeatMs}ms`
+    );
     const maxLoops = process.argv[4] ? Number(process.argv[4]) : undefined;
     let loops = 0;
-    while (!shuttingDown && (!maxLoops || loops < maxLoops)) {
-      loops += 1;
-      const job = await repository.processNextJob();
-      if (job) {
-        console.log(JSON.stringify({ event: "job_processed", jobId: job.id, kind: job.kind, status: job.status }));
-        continue;
+    try {
+      while (!shuttingDown && (!maxLoops || loops < maxLoops)) {
+        loops += 1;
+        const job = await repository.processNextJob();
+        await heartbeat.beat();
+        if (job) {
+          console.log(JSON.stringify({ event: "job_processed", jobId: job.id, kind: job.kind, status: job.status }));
+          continue;
+        }
+        await sleep(Math.max(250, idleMs));
       }
-      await sleep(Math.max(250, idleMs));
+    } finally {
+      heartbeat.stop();
     }
     console.log(JSON.stringify({ event: "worker_stopped", loops }));
     return;
@@ -86,3 +137,24 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+function startWorkerHeartbeat(workerId: string) {
+  let stopped = false;
+  async function beat() {
+    if (stopped) return;
+    await repository.recordWorkerHeartbeat(buildProcessWorkerHeartbeat({ workerId }));
+  }
+  const interval = setInterval(() => {
+    void beat().catch((error) => {
+      console.warn(`[worker] heartbeat failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, defaultWorkerHeartbeatMs);
+  interval.unref?.();
+  return {
+    beat,
+    stop() {
+      stopped = true;
+      clearInterval(interval);
+    }
+  };
+}

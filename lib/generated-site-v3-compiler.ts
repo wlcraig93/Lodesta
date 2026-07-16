@@ -1,7 +1,6 @@
 import { defaultDesignPlanForVertical } from "./design-plan-defaults";
 import type {
   AssetReference,
-  BrandAssessment,
   BusinessLocationRecord,
   BusinessProfile,
   ComponentControlSchemaV3,
@@ -11,7 +10,6 @@ import type {
   MediaAssetDecisionV3,
   PageModel,
   SectionInstanceV3,
-  SiteArtDirectionFontPairingIdV3,
   SiteArtDirectionRecipeV3,
   SiteBundle,
   SiteHeaderModeV3,
@@ -39,8 +37,7 @@ import {
 } from "./generated-site-v3-visual-controls";
 import { withBusinessBundleFields } from "./business-model";
 import { isDynamicHoursStatus } from "./business-understanding-v2";
-import { deriveBrandThemeV2, siteVariationSeedV2, type BrandCueReportV2 } from "./brand-derivation-v2";
-import { resolveBrief } from "./design-brief-v1";
+import { resolveBrandExpressionV1, siteVariationSeedV2, validateThemeContrastV1, type BrandCueReportV2 } from "./brand-expression-v1";
 import {
   registerForVertical,
   resolveDesignControlsV3,
@@ -49,7 +46,7 @@ import {
   type DesignControlsV3,
   type DesignProfileV3
 } from "./generated-site-v3-art-direction-catalog";
-import { areServicesVerticalDefaults, sentenceOverlapRatio, servicePageMaxOverlapRatio } from "./generation-quality-v2";
+import { areServicesVerticalDefaults, sentenceOverlapRatio, servicePageMaxOverlapRatio } from "./generation-objective-signals";
 import {
   applyCompositionPlanV3,
   validateCompositionPlanV3,
@@ -57,18 +54,19 @@ import {
   type CompositionPlanV3
 } from "./generated-site-v3-composition-plan";
 import { sectionBlueprintsFromSectionInstancesV1, type SectionBlueprintV1 } from "./generated-site-v3-blueprint";
-import { assignGeneratedSiteDesignArchetypeV1, type GeneratedSiteDesignArchetypeV1 } from "./generated-site-v3-archetypes";
 import {
-  buttonSystemFromSiteDirectorPlanV1,
-  cardTreatmentFromSiteDirectorPlanV1,
-  designControlOverridesFromSiteDirectorPlanV1,
-  fontPairingFromSiteDirectorPlanV1,
-  headerModeFromSiteDirectorPlanV1,
+  assignGeneratedSiteDesignSystemV1,
+  fontPairingForGeneratedSiteDesignSystemV1,
+  generatedSiteDesignSystemByIdV1,
+  type GeneratedSiteDesignSystemV1
+} from "./generated-site-design-systems-v1";
+import {
   navPlanFromSiteDirectorPlanV1,
-  spacingRhythmFromSiteDirectorPlanV1,
   presentationMapFromSiteDirectorPlanV1,
+  type SiteDirectorPlanV1,
   type SiteDirectorServicePageProposalV1
 } from "./site-director-plan-v1";
+import type { DesignSystemPlannerInputManifestV1, DesignSystemPlannerMediaCandidateV1 } from "./design-system-planner-manifest-v1";
 import { homeAnchorsFromSectionsV3, reconcileNavPlanV3, type GeneratedSiteQualitySignalsV3 } from "./generated-site-v3-nav";
 import {
   generatedSiteVerticalQualityProfileForBusinessV1,
@@ -92,7 +90,17 @@ import {
   selectApprovedAssetLibraryMedia,
   type ApprovedAssetLibraryAsset
 } from "./asset-library";
-import { imageAssetsForVertical } from "./image-registry";
+import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
+import {
+  testimonialEvidenceItemsV1,
+  trustEvidenceItemsV1,
+  type SiteEvidenceLedgerV1
+} from "./evidence-ledger-v1";
+import {
+  firstPartyMediaScoreV1,
+  mediaFloorSlotVerdictV1
+} from "./media-floor-v1";
+import { autoBodyServiceDescriptionV1 } from "./auto-body-service-copy-v1";
 
 const compilerVersion = "generated-site-v3-compiler-v1-minimal-template-options";
 
@@ -185,71 +193,118 @@ export function compileGeneratedSiteV3Site(input: ({
   const profileCompilerDecisions: GeneratedSiteCompilerDecisionV3[] = [qualityProfileAssignmentDecisionV1(qualityProfile)];
   const copyDeck = bundle.presenceAssessment?.generatedCopyDeck;
   const baseLocationContext = locationCompileContextForBundle(bundle);
-  const media = selectV3Media(business, input.assetLibraryAssets ?? []);
-  const presetTheme = themeForV3Business(business, media.kind);
-  const brandDerivation = deriveBrandThemeV2({
-    vertical: business.vertical,
-    presetTheme,
-    renderInspection: bundle.presenceAssessment?.renderInspection,
-    brandAssessment: bundle.presenceAssessment?.brandAssessment
-  });
-  const theme = brandDerivation.theme ?? presetTheme;
-  const archetypeAssignment = assignGeneratedSiteDesignArchetypeV1({
-    business,
-    brandApplied: brandDerivation.report.applied
-  });
-  const designArchetype = archetypeAssignment.archetype;
-  const brief = bundle.presenceAssessment?.designBrief;
-  const compilerOverrides = {
-    ...bundle.presenceAssessment?.v3CompilerOverrides,
-    ...input.overrides
-  };
-  const designProfile = brief?.profile ?? designProfileForBusiness(business, brandDerivation.report.applied);
-  let designControls = resolveBrief(designProfile, brief?.overrides, "solid_editorial");
-  applyDesignArchetypeControlsV1(designControls, designArchetype, { brandApplied: brandDerivation.report.applied });
   const siteDirectorRuntime = bundle.presenceAssessment.siteDirectorPlanV1;
   const acceptedSiteDirectorPlan =
     siteDirectorRuntime?.validation.status === "passed" ? siteDirectorRuntime.plan : undefined;
-  const acceptedSiteDirectorBlueprints =
-    siteDirectorRuntime?.validation.status === "passed" ? siteDirectorRuntime.validation.acceptedSectionBlueprints : undefined;
-  const siteDirectorHeaderMode = acceptedSiteDirectorPlan
-    ? headerModeFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
+  const ownerDesignSystemEdits = bundle.presenceAssessment.ownerDesignSystemEditsV1;
+  const requiredOwnerVisibleSectionIds = new Set(["hero", "services", "location", "faq", "contact"]);
+  const hiddenOwnerSectionIds = new Set(
+    (ownerDesignSystemEdits?.hiddenSectionIds ?? []).filter((sectionId) => !requiredOwnerVisibleSectionIds.has(sectionId))
+  );
+  const acceptedSiteDirectorBlueprints = siteDirectorRuntime?.validation.status === "passed"
+    ? siteDirectorRuntime.validation.acceptedSectionBlueprints.filter((blueprint) => !hiddenOwnerSectionIds.has(blueprint.id))
     : undefined;
-  const siteDirectorFontPairing = acceptedSiteDirectorPlan
-    ? fontPairingFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
-    : undefined;
-  const selectedHeaderMode = siteDirectorHeaderMode ?? headerModeForBusiness(business, designProfile);
-  if (acceptedSiteDirectorPlan) {
-    const directorControls = {
-      ...designControls,
-      ...designControlOverridesFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
-    };
-    if (!validateDesignControlsV3(directorControls, { headerMode: "solid_editorial" }).length) {
-      designControls = directorControls;
+  const acceptedSiteDirectorInputManifest = acceptedSiteDirectorPlan ? siteDirectorRuntime?.plannerInputManifest : undefined;
+  const media = acceptedSiteDirectorPlan && acceptedSiteDirectorInputManifest?.mediaCandidates?.length
+    ? selectV3MediaFromSiteDirectorPlan(business, acceptedSiteDirectorPlan, acceptedSiteDirectorInputManifest, input.assetLibraryAssets ?? [])
+    : selectV3Media(business, input.assetLibraryAssets ?? []);
+  const siteIdentity = resolveBrandExpressionV1({
+    business,
+    profile: qualityProfile,
+    mediaKind: media.kind,
+    renderInspection: bundle.presenceAssessment?.renderInspection,
+    brandAssessment: bundle.presenceAssessment?.brandAssessment,
+    suppressBrandCues: ownerDesignSystemEdits?.paletteMode === "neutral",
+    brandExpression: ownerDesignSystemEdits?.paletteMode
+      ? {
+          ...(bundle.presenceAssessment.businessUnderstanding?.brandExpression ?? {
+            version: "brand-expression-v1" as const,
+            mood: "quiet" as const,
+            fontPosture: "utility" as const,
+            voiceRegister: "plainspoken" as const,
+            paletteSeed: { strategy: "category_default" as const },
+            rationale: "Owner edit uses the assigned design system's bounded expression surface."
+          }),
+          paletteSeed: ownerDesignSystemEdits.paletteMode === "neutral"
+            ? { strategy: "neutral" as const }
+            : {
+                ...(bundle.presenceAssessment.businessUnderstanding?.brandExpression?.paletteSeed ?? { strategy: "logo_color" as const }),
+                strategy: bundle.presenceAssessment.businessUnderstanding?.brandExpression?.paletteSeed.strategy === "photo_color"
+                  ? "photo_color" as const
+                  : "logo_color" as const
+              }
+        }
+      : bundle.presenceAssessment.businessUnderstanding?.brandExpression
+  });
+  siteIdentity.brandCueReport.provenance = createRegenerableArtifactProvenanceV1({
+    producerId: "brand-expression-v1",
+    producerVersion: "brand-expression-v1",
+    modelId: "deterministic",
+    createdAt,
+    inputs: {
+      vertical: business.vertical,
+      profileId: qualityProfile.id,
+      identitySignature: siteIdentity.signature,
+      renderInspection: bundle.presenceAssessment?.renderInspection,
+      brandAssessment: bundle.presenceAssessment?.brandAssessment
     }
-  } else if (!brief) {
-    applyAutoBodyControlVariation(business, designControls, brandDerivation.report.applied);
+  });
+  const theme = siteIdentity.theme;
+  const themeContrastIssues = validateThemeContrastV1(theme);
+  if (themeContrastIssues.length) {
+    throw new Error(`Final generated-site theme failed contrast validation: ${themeContrastIssues.join(" ")}`);
   }
+  const plannedDesignSystem = acceptedSiteDirectorPlan
+    ? generatedSiteDesignSystemByIdV1(siteDirectorRuntime?.designSystem?.id)
+    : undefined;
+  const designSystemAssignment = plannedDesignSystem
+    ? {
+        designSystem: plannedDesignSystem,
+        reason: `${plannedDesignSystem.label} was selected by the accepted deterministic design-system plan.`
+      }
+    : assignGeneratedSiteDesignSystemV1({
+        business,
+        brandApplied: siteIdentity.brandCueReport.applied,
+        hasHeroMedia: media.kind === "media" && Boolean(media.heroUrl)
+      });
+  const designSystem = designSystemAssignment.designSystem;
+  const ownerHeroMediaCandidate = siteDirectorRuntime?.plannerInputManifest.mediaCandidates?.find(
+    (candidate) =>
+      candidate.id === ownerDesignSystemEdits?.heroMediaAssetId &&
+      candidate.allowedUses.includes("hero") &&
+      Boolean(candidate.url)
+  );
+  const compilerOverrides = {
+    ...bundle.presenceAssessment?.v3CompilerOverrides,
+    ...(ownerHeroMediaCandidate?.url
+      ? {
+          heroMediaUrl: ownerHeroMediaCandidate.url,
+          ...(ownerDesignSystemEdits?.heroMediaFocalPoint ? { heroFocalPoint: ownerDesignSystemEdits.heroMediaFocalPoint } : {})
+        }
+      : {}),
+    ...input.overrides
+  };
+  const designProfile = siteIdentity.designProfile;
+  let designControls = { ...siteIdentity.controls };
+  applyDesignSystemControlsV1(designControls, designSystem);
+  if (selectedAutoBodyProofNeedsFramedTreatmentV1(business, media)) {
+    designControls.figureTreatment = "framed_shadow";
+  }
+  const selectedHeaderMode = designSystem.chassis.headerMode;
+  const selectedFontPairing = fontPairingForGeneratedSiteDesignSystemV1(
+    designSystem,
+    ownerDesignSystemEdits?.fontPosture ?? bundle.presenceAssessment.businessUnderstanding?.brandExpression?.fontPosture
+  );
   const siteDirectorPresentationMap = acceptedSiteDirectorPlan
     ? presentationMapFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
     : undefined;
-  const siteDirectorButtonSystem = acceptedSiteDirectorPlan
-    ? buttonSystemFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
-    : undefined;
-  const siteDirectorCardTreatment = acceptedSiteDirectorPlan
-    ? cardTreatmentFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
-    : undefined;
-  const siteDirectorSpacingRhythm = acceptedSiteDirectorPlan
-    ? spacingRhythmFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
-    : undefined;
-  const siteDirectorGeometryDiversityDirective = acceptedSiteDirectorPlan?.strategy.geometryDiversityDirective;
   const siteDirectorNavPlan = acceptedSiteDirectorPlan
     ? navPlanFromSiteDirectorPlanV1(acceptedSiteDirectorPlan)
     : undefined;
   const requestedPresentationMap = acceptedSiteDirectorPlan
     ? siteDirectorPresentationMap
-    : brief?.presentationMap;
-  const effectivePresentationMap = presentationMapWithArchetypeV1(requestedPresentationMap, designArchetype);
+    : undefined;
+  const effectivePresentationMap = presentationMapWithDesignSystemV1(requestedPresentationMap, designSystem);
   const pageSlugRegistry = createPageSlugRegistryV3();
   const locationPages = buildLocationLandingPagesV3(business, baseLocationContext, copyDeck, pageSlugRegistry);
   const locationContext = locationContextWithLandingPages(baseLocationContext, locationPages);
@@ -260,10 +315,12 @@ export function compileGeneratedSiteV3Site(input: ({
     copyDeck,
     compilerOverrides,
     designControls,
-    acceptedSiteDirectorPlan ? undefined : brief?.compositionPlan,
+    undefined,
     effectivePresentationMap,
     acceptedSiteDirectorBlueprints,
-    designArchetype
+    designSystem,
+    input.assetLibraryAssets ?? [],
+    bundle.presenceAssessment.evidenceLedgerV1
   );
   const pageSections = composition.sections;
   const mediaReuseDecisions = applyPageMediaDedupeV1(pageSections, galleryForSelectedMedia(media));
@@ -298,13 +355,13 @@ export function compileGeneratedSiteV3Site(input: ({
     ...applyVerticalQualityProfileToSectionsV1({
       business,
       profile: qualityProfile,
-      designArchetype,
+      designSystem,
       sections: pageSections,
       gallery: galleryForSelectedMedia(media)
     })
   );
   if (!acceptedSiteDirectorPlan) {
-    applyBackgroundRhythm(pageSections, siteId, business.vertical);
+    applyBackgroundRhythm(pageSections, siteId, siteIdentity.backgroundRhythm);
   }
   const homeSeo: PageModel["seo"] = {
     title: copyDeck?.seo.title ?? seoTitleForBusiness(business),
@@ -348,12 +405,14 @@ export function compileGeneratedSiteV3Site(input: ({
   const compilerDecisions = compilerDecisionsForVersionV1({
     compositionDecisions: composition.report.decisions,
     sections: pageSections,
-    archetype: designArchetype,
-    archetypeReason: archetypeAssignment.reason,
+    designSystem,
+    designSystemReason: designSystemAssignment.reason,
     acceptedSiteDirectorPlan: Boolean(acceptedSiteDirectorPlan),
     profileDecisions: profileCompilerDecisions
   });
-  const geometryDiversityDirective = siteDirectorGeometryDiversityDirective ?? designArchetype.geometryDiversityDirective;
+  const geometryDiversityDirective = designSystem.compositionDirective;
+  const rightsDeclinedBackupGallerySnapshot = backupGalleryForRightsFallbackV3(business, input.assetLibraryAssets ?? []);
+  const mediaLeadsArtDirection = media.kind === "media" && Boolean(media.heroUrl);
   const version: SiteVersionV3 = {
     id: `version_${siteId}_layout_v3`,
     status: "draft",
@@ -368,27 +427,28 @@ export function compileGeneratedSiteV3Site(input: ({
     },
     artifactRefs: [],
     mediaDecisions: media.decisions,
-    designArchetypeId: designArchetype.id,
-    archetypeAssignmentReason: archetypeAssignment.reason,
+    rightsDeclinedBackupGallerySnapshot,
+    designArchetypeId: designSystem.id,
+    archetypeAssignmentReason: designSystemAssignment.reason,
     geometryDiversityDirective,
     compilerDecisions,
     sectionOptionSequence,
     mediaReuseDecisions,
-    artDirection: media.kind === "media"
+    artDirection: mediaLeadsArtDirection
       ? {
           version: "site-art-direction-v3",
-          recipeId: `precision-service-v1:${designArchetype.id}`,
-          designArchetypeId: designArchetype.id,
-          archetypeAssignmentReason: archetypeAssignment.reason,
+          recipeId: `precision-service-v1:${designSystem.id}`,
+          designArchetypeId: designSystem.id,
+          archetypeAssignmentReason: designSystemAssignment.reason,
           geometryDiversityDirective,
-          fontPairingId: siteDirectorFontPairing ?? fontPairingForBusinessWithArchetypeV1(business, bundle.presenceAssessment?.brandAssessment, designArchetype),
-          colorSystem: designArchetype.chassis.colorSystem,
-          spacingRhythm: siteDirectorSpacingRhythm ?? designArchetype.chassis.spacingRhythm,
+          fontPairingId: selectedFontPairing,
+          colorSystem: designSystem.chassis.colorSystem,
+          spacingRhythm: designSystem.chassis.spacingRhythm,
           headerMode: selectedHeaderMode,
           mediaTreatment: "editorial_crop",
-          buttonSystem: siteDirectorButtonSystem ?? designArchetype.chassis.buttonSystem,
-          cardTreatment: siteDirectorCardTreatment ?? designArchetype.chassis.cardTreatment,
-          density: designArchetype.chassis.density,
+          buttonSystem: designSystem.chassis.buttonSystem,
+          cardTreatment: designSystem.chassis.cardTreatment,
+          density: designSystem.chassis.density,
           sectionPresentation: acceptedSiteDirectorPlan
             ? (effectivePresentationMap ?? {})
             : sectionPresentationWithProfile(business, designProfile, copyDeck, effectivePresentationMap),
@@ -398,18 +458,18 @@ export function compileGeneratedSiteV3Site(input: ({
         }
       : {
           version: "site-art-direction-v3",
-          recipeId: `quiet-boutique-v1:${designArchetype.id}`,
-          designArchetypeId: designArchetype.id,
-          archetypeAssignmentReason: archetypeAssignment.reason,
+          recipeId: business.vertical === "auto_body" ? `auto-body-premium-no-media-v1:${designSystem.id}` : `quiet-boutique-v1:${designSystem.id}`,
+          designArchetypeId: designSystem.id,
+          archetypeAssignmentReason: designSystemAssignment.reason,
           geometryDiversityDirective,
-          fontPairingId: siteDirectorFontPairing ?? fontPairingForBusinessWithArchetypeV1(business, bundle.presenceAssessment?.brandAssessment, designArchetype),
-          colorSystem: designArchetype.chassis.colorSystem,
-          spacingRhythm: siteDirectorSpacingRhythm ?? designArchetype.chassis.spacingRhythm,
+          fontPairingId: selectedFontPairing,
+          colorSystem: designSystem.chassis.colorSystem,
+          spacingRhythm: designSystem.chassis.spacingRhythm,
           headerMode: selectedHeaderMode,
-          mediaTreatment: "text_first_fallback",
-          buttonSystem: siteDirectorButtonSystem ?? designArchetype.chassis.buttonSystem,
-          cardTreatment: siteDirectorCardTreatment ?? designArchetype.chassis.cardTreatment,
-          density: designArchetype.chassis.density,
+          mediaTreatment: business.vertical === "auto_body" ? "media_independent" : "text_first_fallback",
+          buttonSystem: designSystem.chassis.buttonSystem,
+          cardTreatment: designSystem.chassis.cardTreatment,
+          density: designSystem.chassis.density,
           sectionPresentation: acceptedSiteDirectorPlan
             ? (effectivePresentationMap ?? {})
             : sectionPresentationWithProfile(business, designProfile, copyDeck, effectivePresentationMap),
@@ -420,18 +480,20 @@ export function compileGeneratedSiteV3Site(input: ({
     artDirectionDecision: {
       id: `art_${siteId}_layout_v3`,
       version: "art-direction-decision-v3",
-      selectedRecipeId: media.kind === "media" ? "precision-service-v1" : "quiet-boutique-v1",
-      rejectedRecipeIds: media.kind === "media" ? ["quiet-boutique-v1"] : ["precision-service-v1", "media-led-local-v1"],
+      selectedRecipeId: mediaLeadsArtDirection ? "precision-service-v1" : business.vertical === "auto_body" ? "auto-body-premium-no-media-v1" : "quiet-boutique-v1",
+      rejectedRecipeIds: mediaLeadsArtDirection ? ["quiet-boutique-v1"] : ["precision-service-v1", "media-led-local-v1"],
       inputSignals: [
         business.vertical,
-        media.kind === "media" ? "public-safe contextual media available" : "text-first fallback selected",
+        mediaLeadsArtDirection ? "hero-safe contextual media available" : business.vertical === "auto_body" ? "no-media-first floor selected" : "text-first fallback selected",
         business.phone ? "phone-first conversion available" : "generic contact conversion",
         business.address ? "location fact available" : "location unavailable"
       ],
       rationale:
-        media.kind === "media"
-          ? "Use a media-led local-service composition because the selected media is rights-safe and does not imply documented customer-specific work."
-          : "Use a text-first editorial composition because no safe business-specific media should be implied.",
+        mediaLeadsArtDirection
+          ? "Use a media-led local-service composition because selected media clears the hero floor."
+          : business.vertical === "auto_body"
+            ? "Use the no-media-first auto-body composition because no real media cleared the hero/background floor."
+            : "Use a text-first editorial composition because no safe business-specific media should be implied.",
       validation: { status: "passed", issues: [] },
       tokenVersions: { fontPool: "v3-font-pool-v1", recipeCatalog: "v3-recipe-catalog-v1", componentControls: "visual-section-v3" }
     },
@@ -452,7 +514,7 @@ export function compileGeneratedSiteV3Site(input: ({
       sectionBlueprints,
       sectionBlueprintValidation: { status: "passed", issues: [] }
     },
-    brandCueReport: brandDerivation.report,
+    brandCueReport: siteIdentity.brandCueReport,
     qualitySignals: {
       navReconciliation,
       compilerDecisions,
@@ -515,46 +577,6 @@ function v3RecipeIdForVertical(vertical: Vertical): GeneratedSiteV3RecipeId {
   if (vertical === "auto_body") return "auto_body_v1";
   if (vertical === "auto_services") return "auto_services_v1";
   return "general_local_v1";
-}
-
-/**
- * Typography rotation: each vertical has an affinity pool over the loaded font
- * catalog; the site seed picks within it so same-vertical sites vary.
- */
-const fontPairingPools: Partial<Record<Vertical, SiteArtDirectionFontPairingIdV3[]>> = {
-  auto_services: ["precision_grotesk", "condensed_service_sans", "display_sans_humanist", "magazine_grotesk"],
-  auto_body: ["precision_grotesk", "condensed_service_sans", "magazine_grotesk", "display_sans_humanist"],
-  home_services: ["precision_grotesk", "display_sans_humanist", "condensed_service_sans", "friendly_rounded"],
-  restaurant: ["warm_editorial_sans", "editorial_serif_clean_sans", "friendly_rounded", "magazine_grotesk"],
-  beauty_salon: ["quiet_serif", "editorial_serif_clean_sans", "warm_editorial_sans", "magazine_grotesk"],
-  med_spa: ["quiet_serif", "editorial_serif_clean_sans", "display_sans_humanist", "magazine_grotesk"],
-  law_firm: ["editorial_serif_clean_sans", "display_sans_humanist", "quiet_serif", "precision_grotesk"],
-  dental: ["display_sans_humanist", "friendly_rounded", "precision_grotesk", "editorial_serif_clean_sans"],
-  fitness: ["condensed_service_sans", "display_sans_humanist", "magazine_grotesk", "precision_grotesk"],
-  real_estate: ["editorial_serif_clean_sans", "quiet_serif", "display_sans_humanist", "magazine_grotesk"],
-  landscaping: ["warm_editorial_sans", "friendly_rounded", "display_sans_humanist", "precision_grotesk"],
-  veterinary: ["friendly_rounded", "warm_editorial_sans", "display_sans_humanist", "editorial_serif_clean_sans"],
-  creative_studio: ["magazine_grotesk", "editorial_serif_clean_sans", "quiet_serif", "display_sans_humanist"]
-};
-
-const defaultFontPairingPool: SiteArtDirectionFontPairingIdV3[] = [
-  "display_sans_humanist",
-  "magazine_grotesk",
-  "editorial_serif_clean_sans",
-  "friendly_rounded"
-];
-
-function fontPairingForBusiness(business: BusinessProfile, brandAssessment?: BrandAssessment): SiteArtDirectionFontPairingIdV3 {
-  const typographySignals = brandAssessment?.typographySignals.join(" ").toLowerCase() ?? "";
-  if (/\b(serif|baskerville|georgia|editorial|traditional)\b/.test(typographySignals)) {
-    return business.vertical === "auto_body" ? "editorial_serif_clean_sans" : "quiet_serif";
-  }
-  const pool = fontPairingPools[business.vertical] ?? defaultFontPairingPool;
-  if (business.vertical === "auto_body") {
-    const serviceBreadthOffset = Math.max(0, business.services.length - 3);
-    return pool[(siteVariationSeedV2(`${business.siteId}:font`) + serviceBreadthOffset) % pool.length];
-  }
-  return pool[siteVariationSeedV2(business.siteId) % pool.length];
 }
 
 /** Axis-salted seed so per-axis picks decorrelate across one site id. */
@@ -662,18 +684,19 @@ function servicePresentationForBusiness(
  * deliberate backgrounds; contrast safety is enforced by the existing
  * foreground-token derivation + render QA.
  */
-function applyBackgroundRhythm(sections: SectionInstanceV3[], siteId: string, vertical: Vertical): void {
+function applyBackgroundRhythm(sections: SectionInstanceV3[], siteId: string, rhythmId: string): void {
   const basePatterns: Array<Array<keyof typeof backgrounds>> = [
     ["surface", "page", "subtleGradient", "page", "surface"],
     ["page", "subtleGradient", "page", "surface", "subtleGradient"],
     ["subtleGradient", "surface", "page", "subtleGradient", "page"]
   ];
-  const autoBodyPatterns: Array<Array<keyof typeof backgrounds>> = [
-    ["page", "surface", "dark", "page", "brandGradient", "surface"],
-    ["surface", "page", "brandGradient", "surface", "dark", "page"],
-    ["page", "dark", "surface", "brandGradient", "page", "surface"]
-  ];
-  const patterns = vertical === "auto_body" ? autoBodyPatterns : basePatterns;
+  const patternsByRhythm: Record<string, Array<Array<keyof typeof backgrounds>>> = {
+    base: basePatterns,
+    auto_body_dark_brand: [["page", "surface", "dark", "page", "brandGradient", "surface"]],
+    auto_body_brand_dark: [["surface", "page", "brandGradient", "surface", "dark", "page"]],
+    auto_body_dark_surface: [["page", "dark", "surface", "brandGradient", "page", "surface"]]
+  };
+  const patterns = patternsByRhythm[rhythmId] ?? basePatterns;
   const pattern = patterns[siteVariationSeedV2(`${siteId}:rhythm`) % patterns.length];
   const rhythmSectionIds = new Set(["story", "services", "proof", "process", "about", "gallery", "faq"]);
   let index = 0;
@@ -776,36 +799,24 @@ function sectionPresentationWithProfile(
   };
 }
 
-function presentationMapWithArchetypeV1(
+function presentationMapWithDesignSystemV1(
   requested: SectionPresentationMapV3 | undefined,
-  archetype: GeneratedSiteDesignArchetypeV1
+  designSystem: GeneratedSiteDesignSystemV1
 ): SectionPresentationMapV3 {
   return {
-    services: archetype.services.presentation,
+    services: designSystem.services.presentation,
     ...requested
   };
 }
 
-function applyDesignArchetypeControlsV1(
+function applyDesignSystemControlsV1(
   controls: DesignControlsV3,
-  archetype: GeneratedSiteDesignArchetypeV1,
-  context: { brandApplied: boolean }
+  designSystem: GeneratedSiteDesignSystemV1
 ) {
-  const archetypeControls = archetype.chassis.controls;
-  for (const [key, value] of Object.entries(archetypeControls) as Array<[keyof DesignControlsV3, DesignControlsV3[keyof DesignControlsV3]]>) {
+  for (const [key, value] of Object.entries(designSystem.chassis.controls) as Array<[keyof DesignControlsV3, DesignControlsV3[keyof DesignControlsV3]]>) {
     if (value === undefined) continue;
-    if (context.brandApplied && key === "headerSurface") continue;
     (controls as Record<keyof DesignControlsV3, DesignControlsV3[keyof DesignControlsV3]>)[key] = value;
   }
-}
-
-function fontPairingForBusinessWithArchetypeV1(
-  business: BusinessProfile,
-  brandAssessment: BrandAssessment | undefined,
-  archetype: GeneratedSiteDesignArchetypeV1
-): SiteArtDirectionFontPairingIdV3 {
-  if (brandAssessment?.typographySignals.length) return fontPairingForBusiness(business, brandAssessment);
-  return archetype.chassis.fontPairingId;
 }
 
 function sectionOptionSequenceV1(sections: SectionInstanceV3[]): string[] {
@@ -851,27 +862,37 @@ function sanitizeGeneratedSiteTextV1(text: string): string {
     .replace(/\bfocused option\b/gi, "repair choice")
     .replace(/\bfocused help\b/gi, "repair help")
     .replace(/\bclear next steps\b/gi, "the next repair step")
+    .replace(/\brepair paths?\b/gi, "repair work")
     .replace(/\bpractical support\b/gi, "repair support")
     .replace(/\bneed a shop to look at the damage\b/gi, "need collision or paint repair")
     .replace(/\bcan talk through\b/gi, "will review")
     .replace(/\bcan discuss\b/gi, "will review")
-    .replace(/\bcan help with\b/gi, "handles");
+    .replace(/\bcan help with\b/gi, "handles")
+    .replace(/\breview the estimate route\b/gi, "review the repair estimate")
+    .replace(
+      /\ba detailed repair estimate supports the decision between an insurance claim and self-pay work\b/gi,
+      "Review the proposed repair work and decide whether to use insurance or pay directly"
+    )
+    .replace(
+      /\bthe estimate provides the basis for reviewing the repair work\b/gi,
+      "Use the estimate to review the proposed repair work"
+    );
 }
 
 function compilerDecisionsForVersionV1(input: {
   compositionDecisions: GeneratedSiteV3CompositionDecision[];
   sections: SectionInstanceV3[];
-  archetype: GeneratedSiteDesignArchetypeV1;
-  archetypeReason: string;
+  designSystem: GeneratedSiteDesignSystemV1;
+  designSystemReason: string;
   acceptedSiteDirectorPlan: boolean;
   profileDecisions: GeneratedSiteCompilerDecisionV3[];
 }): GeneratedSiteCompilerDecisionV3[] {
   const decisions: GeneratedSiteCompilerDecisionV3[] = [
     {
-      id: `archetype.${input.archetype.id}`,
+      id: `design_system.${input.designSystem.id}`,
       kind: "archetype_assignment",
       severity: "info",
-      reason: input.archetypeReason
+      reason: input.designSystemReason
     },
     ...input.profileDecisions
   ];
@@ -892,14 +913,18 @@ function compilerDecisionsForVersionV1(input: {
       });
       continue;
     }
-    if (decision.skipReason === "duplicate_service_list_with_service_index") {
+    if (
+      decision.skipReason === "duplicate_service_list_with_service_index" ||
+      decision.skipReason === "copy_quality_unresolved" ||
+      decision.skipReason === "media_selection_unavailable"
+    ) {
       decisions.push({
         id: decision.id,
         kind: "composition_section_drop",
         severity: "warning",
         sectionId: decision.id.split(".")[1],
         ...(decision.selectedTemplateId ? { templateId: String(decision.selectedTemplateId), requestedValue: String(decision.selectedTemplateId) } : {}),
-        resolvedValue: "dropped",
+        resolvedValue: decision.skipReason,
         reason: decision.reason
       });
     }
@@ -931,14 +956,14 @@ function defaultHeavyVariantSelectionDecisionV1(
     id: "variant_selection.default_heavy",
     kind: "default_heavy_variant_selection",
     severity: "warning",
-    reason: `SiteDirector selected mostly default-like section options (${defaultLike.length}/${optionPairs.length}); archetype/default diversity should be more visible.`
+    reason: `The accepted design-system plan selected mostly default-like section options (${defaultLike.length}/${optionPairs.length}); the system's fixed geometry should be more visible.`
   };
 }
 
 function applyVerticalQualityProfileToSectionsV1(input: {
   business: BusinessProfile;
   profile: GeneratedSiteVerticalQualityProfileV1;
-  designArchetype: GeneratedSiteDesignArchetypeV1;
+  designSystem: GeneratedSiteDesignSystemV1;
   sections: SectionInstanceV3[];
   gallery: SiteMediaItemV3[];
 }): GeneratedSiteCompilerDecisionV3[] {
@@ -960,18 +985,18 @@ function applyVerticalQualityProfileToSectionsV1(input: {
     }));
     decisions.push(...normalizedDecisions);
     if (
-      input.designArchetype.hero.proofPlacement !== "none" &&
+      input.designSystem.hero.proofPlacement !== "none" &&
       normalizedDecisions.some((decision) => decision.kind === "proof_section_fallback")
     ) {
       decisions.push({
-        id: `profile_archetype_constraint.${input.designArchetype.id}.${section.id}`,
+        id: `profile_archetype_constraint.${input.designSystem.id}.${section.id}`,
         kind: "profile_archetype_constraint",
         severity: "warning",
         sectionId: section.id,
         templateId: next.templateId,
-        requestedValue: input.designArchetype.hero.proofPlacement,
+        requestedValue: input.designSystem.hero.proofPlacement,
         resolvedValue: "context_process_section",
-        reason: `${input.designArchetype.label} is proof-capable, but ${input.profile.label} evidence policy rejected all proof-slot media for this section; the compiler retained the archetype chassis and converted the proof moment to honest context/process content.`
+        reason: `${input.designSystem.label} is proof-capable, but ${input.profile.label} evidence policy rejected all proof-slot media for this section; the compiler retained the design-system chassis and converted the proof moment to honest context/process content.`
       });
     }
   }
@@ -982,7 +1007,12 @@ function applyProfileServicePolicyV1(
   profile: GeneratedSiteVerticalQualityProfileV1,
   visual: VisualSectionV3
 ): GeneratedSiteCompilerDecisionV3[] {
-  if (visual.templateId !== "service_index" && visual.templateId !== "intro_grid" && visual.templateId !== "comparison_table") return [];
+  if (
+    visual.templateId !== "service_index" &&
+    visual.templateId !== "intro_grid" &&
+    visual.templateId !== "side_intro_rows" &&
+    visual.templateId !== "comparison_table"
+  ) return [];
   const slots = visual.slots as Record<string, unknown>;
   const itemsSlot = slots.items;
   if (!itemsSlot || typeof itemsSlot !== "object" || !Array.isArray((itemsSlot as { items?: unknown }).items)) return [];
@@ -1032,25 +1062,13 @@ function applyProfileProofMediaPolicyV1(
     return decisions;
   }
 
-  const fallback = normalizeMediaItems(
-    [...accepted, ...fallbackContextMediaForProofSlotV1(business, profile, gallery, mediaSlotRef.items)],
-    Math.max(minimumMediaCount, Math.min(3, mediaSlotRef.items.length || minimumMediaCount))
-  ).slice(0, Math.max(minimumMediaCount, Math.min(3, mediaSlotRef.items.length || minimumMediaCount)));
-  if (fallback.length < minimumMediaCount) return decisions;
-  mediaSlotRef.items = fallback.map((item) => ({
-    ...item,
-    publicCaption: undefined,
-    cropIntent: item.cropIntent ?? "wide"
-  }));
-  rewriteProofSectionAsContextSectionV1(visual, profile);
   decisions.push({
-    id: `proof_section_fallback.${visual.templateId}`,
+    id: `proof_section_blocked.${visual.templateId}`,
     kind: "proof_section_fallback",
     severity: "warning",
     requestedValue: "proof_media",
-    resolvedValue: "generic_context_media",
-    reason:
-      "All candidate proof media was unsuitable for a source-backed proof section, so the compiler kept a generic process/context section without implying business-specific repair proof."
+    resolvedValue: "insufficient_proof_media",
+    reason: "All candidate proof media was unsuitable for a source-backed proof section; deterministic context-media substitution is disabled."
   });
   return decisions;
 }
@@ -1068,45 +1086,6 @@ function isProofLikeVisualSectionV1(visual: VisualSectionV3) {
     visual.templateId === "proof_pair" ||
     visual.templateId === "media_mosaic"
   );
-}
-
-function fallbackContextMediaForProofSlotV1(
-  business: BusinessProfile,
-  profile: GeneratedSiteVerticalQualityProfileV1,
-  gallery: SiteMediaItemV3[],
-  rejectedItems: SiteMediaItemV3[]
-) {
-  const rejected = new Set(rejectedItems.map((item) => mediaIdentityKeyV1(item.url)));
-  const cleanGallery = gallery.filter((item) => {
-    if (rejected.has(mediaIdentityKeyV1(item.url))) return false;
-    return mediaSuitabilityForProfileV1({ profile, business, item, slot: "service" }).allowed;
-  });
-  const registryFallback = imageAssetsForVertical(business.vertical).map((asset) => ({
-    url: asset.url,
-    label: asset.label || asset.alt || "Generic service context",
-    focalPoint: "center" as const,
-    cropIntent: "wide" as const
-  }));
-  return normalizeMediaItems([...cleanGallery, ...registryFallback], 8);
-}
-
-function rewriteProofSectionAsContextSectionV1(
-  visual: VisualSectionV3,
-  profile: GeneratedSiteVerticalQualityProfileV1
-) {
-  const slots = visual.slots as Record<string, unknown>;
-  const copy = slots.copy;
-  if (!copy || typeof copy !== "object") return;
-  const copyRecord = copy as Record<string, unknown>;
-  if (profile.id === "auto_body") {
-    copyRecord.eyebrow = "Damage details";
-    copyRecord.heading = "What to share before the vehicle comes in.";
-    copyRecord.body = "Share where the vehicle was hit, whether panels rub or doors bind, paint color concerns, photos, timing, and whether it can be driven.";
-    return;
-  }
-  copyRecord.eyebrow = "Service details";
-  copyRecord.heading = "Confirm the request before scheduling.";
-  copyRecord.body = "The business can respond best with the service need, timing, location, access notes, and contact details.";
 }
 
 function spacingRhythmForBusiness(business: BusinessProfile): "standard" | "spacious" | "cinematic" {
@@ -1133,8 +1112,17 @@ type LocationCompileContextV3 = {
 type GeneratedSiteV3CompilerOverrides = {
   heroVariant?: "image_statement" | "hero_split";
   heroMediaUrl?: string;
+  heroFocalPoint?: BackgroundFocalPointV3;
   heroPrimaryCta?: VisualCtaV3;
 };
+
+function ownerOrderedHeroGalleryV1(items: SiteMediaItemV3[], overrides?: GeneratedSiteV3CompilerOverrides) {
+  if (!overrides?.heroMediaUrl) return items;
+  const selected = items.find((item) => item.url === overrides.heroMediaUrl);
+  if (!selected) return items;
+  const ownerSelected = overrides.heroFocalPoint ? { ...selected, focalPoint: overrides.heroFocalPoint } : selected;
+  return [ownerSelected, ...items.filter((item) => item.url !== selected.url)];
+}
 
 function v3PageSectionsForBusiness(
   business: BusinessProfile,
@@ -1146,12 +1134,14 @@ function v3PageSectionsForBusiness(
   plan?: CompositionPlanV3,
   presentationPlan?: SectionPresentationMapV3,
   directorBlueprints?: readonly SectionBlueprintV1[],
-  designArchetype?: GeneratedSiteDesignArchetypeV1
+  designSystem?: GeneratedSiteDesignSystemV1,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = [],
+  evidenceLedger?: SiteEvidenceLedgerV1
 ): V3Composition {
   const recipeId = v3RecipeIdForVertical(business.vertical);
   const services = serviceItemsForBusiness(business, deck);
   const gallery = normalizeMediaItems(galleryForSelectedMedia(media), 12);
-  const evidence = classifyAutoBodyV3Evidence(business, media, gallery, services, locationContext);
+  const evidence = classifyAutoBodyV3Evidence(business, media, gallery, services, locationContext, evidenceLedger);
   const decisions: GeneratedSiteV3CompositionDecision[] = [
     {
       id: `recipe.${recipeId}`,
@@ -1194,21 +1184,23 @@ function v3PageSectionsForBusiness(
       gallery,
       evidence,
       directorBlueprints,
-      designArchetype
+      designSystem,
+      assetLibraryAssets,
+      evidenceLedger
     });
   }
 
   const heroBlueprint = directorBlueprintById.get("hero");
   if (heroBlueprint?.templateId === "hero_statement") {
     if (evidence.hasSafeHeroMedia) {
-      const heroItem = gallery[0];
+      const heroItem = ownerOrderedHeroGalleryV1(gallery, overrides)[0];
       include(
         "hero",
         "hero.section_template",
         "hero",
         "hasSafeHeroMedia",
         "SiteDirectorPlanV1 selected hero_statement; safe hero media is available, so it renders as an image-backed statement hero.",
-        heroImageStatementSection(business, heroItem?.url ?? "", deck, overrides?.heroPrimaryCta, designArchetype?.hero, heroItem?.focalPoint)
+        heroImageStatementSection(business, heroItem?.url ?? "", deck, overrides?.heroPrimaryCta, designSystem?.hero, heroItem?.focalPoint)
       );
     } else {
       include(
@@ -1217,7 +1209,7 @@ function v3PageSectionsForBusiness(
         "hero",
         "hasSafeHeroMedia",
         "SiteDirectorPlanV1 selected hero_statement; no safe hero media is available, so it renders as a text-led statement hero.",
-        heroStatementSection(business, deck, overrides?.heroPrimaryCta, heroBlueprint.templateOptions?.heroAlign, designArchetype?.hero)
+        heroStatementSection(business, deck, overrides?.heroPrimaryCta, heroBlueprint.templateOptions?.heroAlign, designSystem?.hero)
       );
     }
   } else if (heroBlueprint?.templateId === "hero_split" && evidence.hasSafeHeroMedia) {
@@ -1227,7 +1219,7 @@ function v3PageSectionsForBusiness(
       "hero",
       "hasSafeHeroMedia",
       "SiteDirectorPlanV1 selected hero_split and safe hero media is available.",
-      heroSplitSection(business, gallery, deck, overrides?.heroPrimaryCta, designArchetype?.hero)
+      heroSplitSection(business, ownerOrderedHeroGalleryV1(gallery, overrides), deck, overrides?.heroPrimaryCta, designSystem?.hero)
     );
   } else if (evidence.hasSafeHeroMedia) {
     // Hero family rotation: full-bleed image hero vs split hero, by seed.
@@ -1238,25 +1230,26 @@ function v3PageSectionsForBusiness(
       overrides?.heroMediaUrl && gallery.some((item) => item.url === overrides.heroMediaUrl)
         ? overrides.heroMediaUrl
         : undefined;
-    const heroItem = (overrideHeroUrl ? gallery.find((item) => item.url === overrideHeroUrl) : undefined) ?? gallery[0];
-    const hasProtectedAutoBodyReferenceMedia =
-      business.vertical === "auto_body" && media.decisions.some((decision) => decision.rightsStatus === "owner_attestation_required");
+    const orderedHeroGallery = ownerOrderedHeroGalleryV1(gallery, overrides);
+    const heroItem = (overrideHeroUrl ? orderedHeroGallery.find((item) => item.url === overrideHeroUrl) : undefined) ?? orderedHeroGallery[0];
     const useImageHero =
       overrides?.heroVariant === "image_statement"
         ? gallery.length > 0
         : overrides?.heroVariant === "hero_split"
           ? false
-          : !hasProtectedAutoBodyReferenceMedia && siteVariationSeedV2(`${business.siteId}:hero`) % 2 === 0 && gallery.length > 0;
+          : siteVariationSeedV2(`${business.siteId}:hero`) % 2 === 0 && gallery.length > 0;
     if (useImageHero) {
-      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, heroItem.url, deck, overrides?.heroPrimaryCta, designArchetype?.hero, heroItem.focalPoint));
+      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available; the seed selects the full-bleed image hero.", heroImageStatementSection(business, heroItem.url, deck, overrides?.heroPrimaryCta, designSystem?.hero, heroItem.focalPoint));
     } else {
-      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available, so the recipe uses hero_split.", heroSplitSection(business, gallery, deck, overrides?.heroPrimaryCta, designArchetype?.hero));
+      include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "Safe hero media is available, so the recipe uses hero_split.", heroSplitSection(business, orderedHeroGallery, deck, overrides?.heroPrimaryCta, designSystem?.hero));
     }
   } else {
-    include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "No safe hero media is available, so the recipe uses hero_statement.", heroStatementSection(business, deck, overrides?.heroPrimaryCta, heroBlueprint?.templateOptions?.heroAlign, designArchetype?.hero));
+    include("hero", "hero.section_template", "hero", "hasSafeHeroMedia", "No safe hero media is available, so the recipe uses hero_statement.", heroStatementSection(business, deck, overrides?.heroPrimaryCta, heroBlueprint?.templateOptions?.heroAlign, designSystem?.hero));
   }
 
-  if (proofFactsForBusiness(business).length >= 3) {
+  if (business.vertical === "auto_body" && media.kind !== "media") {
+    skip("facts_strip", "recipe", "Skipped facts_strip because the auto-body no-media hero already carries the primary proof facts.");
+  } else if (proofFactsForBusiness(business).length >= 3) {
     include("facts", "proof.section_template", "facts_strip", "hasCredentialTrustProof", "Facts strip renders because at least three real business facts are available.", factsStripSection(business));
   } else {
     skip("facts_strip", "hasCredentialTrustProof", "Skipped facts_strip because fewer than three real business facts are available; filler facts are not rendered.");
@@ -1291,7 +1284,8 @@ function v3PageSectionsForBusiness(
   const servicesWithMedia = allowAutoBodyServiceMedia ? servicesWithCompleteMedia(services, serviceGallery, visibleServiceCount) : services;
   const galleryUsedByServices = servicesWithMedia.flatMap((item) => (item.mediaUrl ? [item.mediaUrl] : []));
   const servicesBlueprint = directorBlueprintById.get("services");
-  if (servicesBlueprint?.templateId === "side_intro_rows" && services.length >= 3) {
+  const requestedPlainServiceRows = servicesBlueprint?.templateId === "side_intro_rows" && services.length >= 3;
+  if (requestedPlainServiceRows && !shouldAvoidPlainServiceRowsV1(business, presentationPlan?.services)) {
     include(
       "services",
       "services.section_template",
@@ -1300,13 +1294,15 @@ function v3PageSectionsForBusiness(
       "SiteDirectorPlanV1 selected side_intro_rows for the services section.",
       serviceRowsSection(business, servicesWithMedia, deck, servicesBlueprint.background)
     );
-  } else if (services.length >= 4) {
+  } else if (services.length >= 4 || requestedPlainServiceRows) {
     include(
       "services",
       "services.section_template",
       "services",
       "serviceCount",
-      "Four to six service items render as a responsive service card grid.",
+      requestedPlainServiceRows
+        ? "Side-intro service rows were upgraded to a media-capable service grid for this visual direction."
+        : "Four to six service items render as a responsive service card grid.",
       serviceCardGridSection(business, servicesWithMedia, deck, presentationPlan?.services, servicesBlueprint?.templateOptions?.cardTreatment, servicesBlueprint?.background)
     );
   } else {
@@ -1492,7 +1488,7 @@ function v3PageSectionsForBusiness(
   }
 
   if (evidence.hasQuoteProof) {
-    include("testimonials", "proof.section_template", "testimonials", "hasQuoteProof", "Renderable testimonial/quote proof is present, so quote_wall is included.", quoteWallSection(business));
+    include("testimonials", "proof.section_template", "testimonials", "hasQuoteProof", "Renderable testimonial/quote proof is present, so quote_wall is included.", quoteWallSection(evidenceLedger));
   } else {
     skip("testimonials", "hasQuoteProof", "Skipped quote_wall because no renderable testimonial/quote proof was found.");
   }
@@ -1674,7 +1670,9 @@ function v3PageSectionsFromDirectorBlueprints(input: {
   gallery: Array<{ url: string; label: string }>;
   evidence: GeneratedSiteV3EvidenceSignals;
   directorBlueprints: readonly SectionBlueprintV1[];
-  designArchetype?: GeneratedSiteDesignArchetypeV1;
+  designSystem?: GeneratedSiteDesignSystemV1;
+  assetLibraryAssets: ApprovedAssetLibraryAsset[];
+  evidenceLedger?: SiteEvidenceLedgerV1;
 }): V3Composition {
   const decisions: GeneratedSiteV3CompositionDecision[] = [
     {
@@ -1707,7 +1705,8 @@ function v3PageSectionsFromDirectorBlueprints(input: {
     serviceBlueprint,
     serviceThumbnailGalleryForBusiness(input.business, input.gallery, visibleServiceCount),
     visibleServiceCount,
-    ["media"]
+    ["media"],
+    input.assetLibraryAssets
   );
   const allowAutoBodyServiceMedia = input.business.vertical !== "auto_body" || serviceGallery.length >= visibleServiceCount;
   const servicesWithMedia = allowAutoBodyServiceMedia ? servicesWithCompleteMedia(input.services, serviceGallery, visibleServiceCount) : input.services;
@@ -1738,7 +1737,11 @@ function v3PageSectionsFromDirectorBlueprints(input: {
       return;
     }
     includedIds.add(blueprint.id);
-    const resolvedSection = sectionWithBlueprintBackgroundV1(section, blueprint);
+    const resolvedSection = applyBlueprintCtaRoleV1(
+      sectionWithBlueprintBackgroundV1(section, blueprint),
+      blueprint,
+      input.business
+    );
     const optionDeltas = templateOptionDeltasForDecisionV1(blueprint, resolvedSection);
     sections.push(visualSection(blueprint.id, family, resolvedSection));
     decisions.push({
@@ -1800,7 +1803,10 @@ function v3PageSectionsFromDirectorBlueprints(input: {
   for (const blueprint of input.directorBlueprints) {
     switch (blueprint.templateId) {
       case "hero_split": {
-        const heroGallery = directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 3, ["media", "background"]);
+        const heroGallery = ownerOrderedHeroGalleryV1(
+          directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 3, ["media", "background"], input.assetLibraryAssets),
+          input.overrides
+        );
         if (heroGallery.length) {
           include(
             blueprint,
@@ -1810,19 +1816,24 @@ function v3PageSectionsFromDirectorBlueprints(input: {
             heroSplitSection(input.business, heroGallery, input.deck, input.overrides?.heroPrimaryCta, blueprint.templateOptions)
           );
         } else {
+          const repairedTemplateOptions = templateOptionsForAutoBodyNoMediaHeroRepairV1(input.business, input.media, blueprint.templateOptions, input.designSystem);
           include(
             blueprint,
             "hero.section_template",
             "hasSafeHeroMedia",
             "SiteDirectorPlanV1 selected hero_split, but no safe hero media is available; repaired to the text-led hero_statement geometry.",
-            heroStatementSection(input.business, input.deck, input.overrides?.heroPrimaryCta, blueprint.templateOptions?.heroAlign ?? "left", blueprint.templateOptions),
+            heroStatementSection(input.business, input.deck, input.overrides?.heroPrimaryCta, repairedTemplateOptions?.heroAlign ?? "left", repairedTemplateOptions),
             { repair: "hero_split_without_media_to_hero_statement" }
           );
         }
         break;
       }
       case "hero_statement": {
-        const heroBackgroundAsset = directorAssetForBlueprintV1(input.business, blueprint, ["background", "media"]);
+        const ownerHeroAsset = ownerOrderedHeroGalleryV1(input.gallery, input.overrides)[0];
+        const heroBackgroundAsset = ownerHeroAsset && input.overrides?.heroMediaUrl === ownerHeroAsset.url
+          ? ownerHeroAsset
+          : directorAssetForBlueprintV1(input.business, blueprint, ["background", "media"], input.assetLibraryAssets);
+        const textLedTemplateOptions = templateOptionsForAutoBodyNoMediaHeroRepairV1(input.business, input.media, blueprint.templateOptions, input.designSystem);
         include(
           blueprint,
           "hero.section_template",
@@ -1832,32 +1843,36 @@ function v3PageSectionsFromDirectorBlueprints(input: {
             : "SiteDirectorPlanV1 selected hero_statement; the compiler hydrates it without seed-picked hero-family rotation.",
           heroBackgroundAsset
             ? heroImageStatementSection(input.business, heroBackgroundAsset.url, input.deck, input.overrides?.heroPrimaryCta, blueprint.templateOptions, heroBackgroundAsset.focalPoint)
-            : heroStatementSection(input.business, input.deck, input.overrides?.heroPrimaryCta, blueprint.templateOptions?.heroAlign ?? "left", blueprint.templateOptions)
+            : heroStatementSection(input.business, input.deck, input.overrides?.heroPrimaryCta, textLedTemplateOptions?.heroAlign ?? "left", textLedTemplateOptions)
         );
         break;
       }
       case "facts_strip": {
-        const facts = proofFactsForBusiness(input.business);
+        if (input.business.vertical === "auto_body" && input.media.kind !== "media") {
+          skip(blueprint, "recipe", "SiteDirectorPlanV1 selected facts_strip, but the auto-body no-media hero already carries the primary proof facts.", "auto_body_no_media_duplicate_facts_strip");
+          break;
+        }
+        const facts = proofFactsForBusiness(input.business, input.evidenceLedger);
         if (facts.length >= 3) {
-          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_strip and at least three grounded facts are available.", factsStripSection(input.business));
+          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_strip and at least three grounded facts are available.", factsStripSection(input.business, input.evidenceLedger));
         } else {
           skip(blueprint, "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_strip, but fewer than three grounded facts are available.", "insufficient_facts_for_facts_strip");
         }
         break;
       }
       case "facts_cta": {
-        const facts = proofFactsForBusiness(input.business);
+        const facts = proofFactsForBusiness(input.business, input.evidenceLedger);
         if (facts.length >= 3) {
-          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_cta and grounded facts are available.", factsCtaSection(input.business, blueprint.background));
+          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_cta and grounded facts are available.", factsCtaSection(input.business, blueprint.background, input.evidenceLedger));
         } else {
           skip(blueprint, "hasCredentialTrustProof", "SiteDirectorPlanV1 selected facts_cta, but fewer than three grounded facts are available.", "insufficient_facts_for_facts_cta");
         }
         break;
       }
       case "stat_band": {
-        const facts = proofFactsForBusiness(input.business);
+        const facts = proofFactsForBusiness(input.business, input.evidenceLedger);
         if (facts.length) {
-          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected stat_band and a grounded fact is available.", statBandSection(input.business, blueprint.background));
+          include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected stat_band and a grounded fact is available.", statBandSection(input.business, blueprint.background, input.evidenceLedger));
         } else {
           skip(blueprint, "hasCredentialTrustProof", "SiteDirectorPlanV1 selected stat_band, but no grounded fact is available.", "insufficient_facts_for_stat_band");
         }
@@ -1926,7 +1941,25 @@ function v3PageSectionsFromDirectorBlueprints(input: {
             "duplicate_service_list_with_service_index"
           );
         } else if (input.services.length >= 3) {
-          include(blueprint, "services.section_template", "serviceCount", "SiteDirectorPlanV1 selected side_intro_rows for services.", serviceRowsSection(input.business, servicesWithMedia, input.deck, blueprint.background));
+          if (shouldAvoidPlainServiceRowsV1(input.business, servicePresentationForBlueprintV1(blueprint, input.presentationPlan))) {
+            include(
+              blueprint,
+              "services.section_template",
+              "serviceCount",
+              "SiteDirectorPlanV1 selected side_intro_rows for services, but this visual direction requires media-capable service presentation.",
+              serviceCardGridSection(
+                input.business,
+                servicesWithMedia,
+                input.deck,
+                servicePresentationForBlueprintV1(blueprint, input.presentationPlan),
+                blueprint.templateOptions?.cardTreatment,
+                blueprint.background,
+                blueprint.templateOptions
+              )
+            );
+          } else {
+            include(blueprint, "services.section_template", "serviceCount", "SiteDirectorPlanV1 selected side_intro_rows for services.", serviceRowsSection(input.business, servicesWithMedia, input.deck, blueprint.background));
+          }
         } else {
           skip(blueprint, "serviceCount", "SiteDirectorPlanV1 selected side_intro_rows, but fewer than three service/process items are available.", "insufficient_items_for_side_intro_rows");
         }
@@ -1944,7 +1977,7 @@ function v3PageSectionsFromDirectorBlueprints(input: {
       }
       case "feature_band": {
         if (blueprint.role === "conversion" || blueprint.id === "cta_band") {
-          const conversionBackgroundAsset = directorAssetForBlueprintV1(input.business, blueprint, ["background", "media"]);
+          const conversionBackgroundAsset = directorAssetForBlueprintV1(input.business, blueprint, ["background", "media"], input.assetLibraryAssets);
           include(
             blueprint,
             "conversion.section_template",
@@ -1958,9 +1991,9 @@ function v3PageSectionsFromDirectorBlueprints(input: {
             )
           );
         } else {
-          const facts = proofFactsForBusiness(input.business);
+          const facts = proofFactsForBusiness(input.business, input.evidenceLedger);
           if (facts.length >= 3) {
-            include(blueprint, "feature.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected feature_band and grounded proof facts are available.", genericFeatureBandSection(input.business, blueprint.background));
+            include(blueprint, "feature.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected feature_band and grounded proof facts are available.", genericFeatureBandSection(input.business, blueprint.background, input.evidenceLedger));
           } else {
             skip(blueprint, "hasCredentialTrustProof", "SiteDirectorPlanV1 selected feature_band, but not enough grounded facts are available.", "insufficient_facts_for_feature_band");
           }
@@ -1973,23 +2006,25 @@ function v3PageSectionsFromDirectorBlueprints(input: {
           [input.gallery[0]?.url, ...galleryUsedByServices].filter((url): url is string => Boolean(url)),
           1
         );
-        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 1, ["media"]);
+        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 1, ["media"], input.assetLibraryAssets);
         if (mediaItems.length) {
           include(
             blueprint,
             blueprint.role === "story" ? "story.section_template" : "media.section_template",
             "safeMediaCount",
             "SiteDirectorPlanV1 selected split_media and safe media is available.",
-            splitMediaSection(input.business, mediaItems, blueprint.templateOptions?.mediaSide ?? "left", input.deck, blueprint.templateOptions)
+            blueprint.role === "story"
+              ? aboutStorySplitMediaSection(input.business, mediaItems, blueprint.templateOptions?.mediaSide ?? "right", input.deck, blueprint.templateOptions)
+              : splitMediaSection(input.business, mediaItems, blueprint.templateOptions?.mediaSide ?? "left", input.deck, blueprint.templateOptions)
           );
         } else {
-          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected split_media, but no distinct safe media remained for this section.", "insufficient_media_for_split_media");
+          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected split_media, but no valid media candidate remained for this required media section.", "media_selection_unavailable");
         }
         break;
       }
       case "proof_pair": {
         const proofPairMedia = selectAutoBodyRepairProofPairMedia(
-          directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 6, ["media"]).filter(isAutoBodyProofMedia)
+          directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 6, ["media"], input.assetLibraryAssets).filter(isAutoBodyProofMedia)
         );
         if (proofPairMedia.length >= 2) {
           include(blueprint, "proof.section_template", "hasBeforeAfterProof", "SiteDirectorPlanV1 selected proof_pair and a distinct before/after repair media pair is available.", autoBodyBeforeAfterProofSection(input.business, proofPairMedia));
@@ -2004,11 +2039,11 @@ function v3PageSectionsFromDirectorBlueprints(input: {
           [input.gallery[0]?.url, ...galleryUsedByServices].filter((url): url is string => Boolean(url)),
           1
         );
-        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 1, ["media"]);
+        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 1, ["media"], input.assetLibraryAssets);
         if (mediaItems.length) {
           include(blueprint, "media.section_template", "safeMediaCount", "SiteDirectorPlanV1 selected media_feature and safe media is available.", mediaFeatureSection(input.business, mediaItems));
         } else {
-          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected media_feature, but no distinct safe media is available.", "insufficient_media_for_media_feature");
+          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected media_feature, but no valid media candidate remained for this required media section.", "media_selection_unavailable");
         }
         break;
       }
@@ -2018,16 +2053,24 @@ function v3PageSectionsFromDirectorBlueprints(input: {
           [input.gallery[0]?.url, ...galleryUsedByServices].filter((url): url is string => Boolean(url)),
           3
         );
-        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 3, ["media"]);
+        const mediaItems = directorGalleryForBlueprintV1(input.business, blueprint, fallbackMediaItems, 3, ["media"], input.assetLibraryAssets);
         if (mediaItems.length >= 3) {
           include(blueprint, "media.section_template", "safeMediaCount", "SiteDirectorPlanV1 selected media_mosaic and at least three safe media items are available.", mediaMosaicSection(input.business, mediaItems, input.deck, blueprint.templateOptions));
+        } else if (mediaItems.length) {
+          include(
+            blueprint,
+            "media.section_template",
+            "safeMediaCount",
+            "SiteDirectorPlanV1 selected media_mosaic, but only one or two valid media candidates remained; repaired mechanically to media_feature.",
+            mediaFeatureSection(input.business, mediaItems)
+          );
         } else {
-          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected media_mosaic, but fewer than three safe media items are available.", "insufficient_media_for_media_mosaic");
+          skip(blueprint, "safeMediaCount", "SiteDirectorPlanV1 selected media_mosaic, but fewer than three valid media candidates remained for this required media section.", "media_selection_unavailable");
         }
         break;
       }
       case "eligibility_band": {
-        const facts = proofFactsForBusiness(input.business).slice(0, 6);
+        const facts = proofFactsForBusiness(input.business, input.evidenceLedger).slice(0, 6);
         if (facts.length >= 2) {
           include(blueprint, "proof.section_template", "hasCredentialTrustProof", "SiteDirectorPlanV1 selected eligibility_band and grounded proof facts are available.", eligibilityBandSection(input.business, input.deck, facts, blueprint.templateOptions, blueprint.background));
         } else {
@@ -2044,7 +2087,7 @@ function v3PageSectionsFromDirectorBlueprints(input: {
         break;
       }
       case "case_study_preview": {
-        const proofMedia = directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 3, ["media"]);
+        const proofMedia = directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 3, ["media"], input.assetLibraryAssets);
         if (proofMedia.length) {
           include(blueprint, "proof.section_template", "safeMediaCount", "SiteDirectorPlanV1 selected case_study_preview and safe media is available.", caseStudyPreviewSection(input.business, proofMedia, input.deck, blueprint.templateOptions, blueprint.background));
         } else {
@@ -2062,17 +2105,25 @@ function v3PageSectionsFromDirectorBlueprints(input: {
         break;
       }
       case "team_story": {
-        const storyMedia = directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 1, ["media"]);
+        const storyMedia = directorGalleryForBlueprintV1(input.business, blueprint, input.gallery, 1, ["media"], input.assetLibraryAssets);
         include(blueprint, "about.section_template", "recipe", "SiteDirectorPlanV1 selected team_story for business story/proof.", teamStorySection(input.business, storyMedia, input.deck, blueprint.templateOptions, blueprint.background));
         break;
       }
       case "offer_band": {
-        include(blueprint, "conversion.section_template", "hasPhone", "SiteDirectorPlanV1 selected offer_band for a source-safe conversion moment.", offerBandSection(input.business, input.deck, blueprint.templateOptions, blueprint.background));
+        if (input.business.vertical === "auto_body" && blueprint.id === "cta_band") {
+          skip(blueprint, "recipe", "Standalone auto-body cta_band is omitted because contact_split already owns the estimate conversion moment.", "auto_body_standalone_cta_band_omitted");
+          break;
+        }
+        if (input.deck?.contactIntro) {
+          include(blueprint, "conversion.section_template", "hasPhone", "SiteDirectorPlanV1 selected offer_band for a source-safe conversion moment.", offerBandSection(input.business, input.deck, blueprint.templateOptions, blueprint.background));
+        } else {
+          skip(blueprint, "recipe", "SiteDirectorPlanV1 selected offer_band, but generated contact-intro copy was unavailable.", "copy_quality_unresolved");
+        }
         break;
       }
       case "quote_wall": {
         if (input.evidence.hasQuoteProof) {
-          include(blueprint, "proof.section_template", "hasQuoteProof", "SiteDirectorPlanV1 selected quote_wall and renderable quote proof is present.", quoteWallSection(input.business));
+          include(blueprint, "proof.section_template", "hasQuoteProof", "SiteDirectorPlanV1 selected quote_wall and renderable quote proof is present.", quoteWallSection(input.evidenceLedger));
         } else {
           skip(blueprint, "hasQuoteProof", "SiteDirectorPlanV1 selected quote_wall, but no renderable quote proof was found.", "insufficient_quote_proof");
         }
@@ -2086,6 +2137,8 @@ function v3PageSectionsFromDirectorBlueprints(input: {
         const deterministicStory = autoBodyBusinessStoryForBusiness(input.business);
         if (blueprint.id === "about" || blueprint.role === "story") {
           include(blueprint, "about.section_template", "recipe", "SiteDirectorPlanV1 selected editorial_statement for business story/about copy.", aboutStorySection(input.business, input.deck, deterministicStory));
+        } else if (input.business.vertical === "auto_body" && blueprint.id === "cta_band") {
+          skip(blueprint, "recipe", "Standalone auto-body cta_band is omitted because contact_split already owns the estimate conversion moment.", "auto_body_standalone_cta_band_omitted");
         } else if (blueprint.role === "conversion" || blueprint.id === "cta_band") {
           include(blueprint, "conversion.section_template", "hasPhone", "SiteDirectorPlanV1 selected editorial_statement for a conversion break.", editorialStatementSection(input.business));
         } else {
@@ -2195,9 +2248,10 @@ function hydrateDirectorLocationBlueprintV1(input: {
 function directorAssetForBlueprintV1(
   business: BusinessProfile,
   blueprint: SectionBlueprintV1 | undefined,
-  slots: Array<"media" | "background" | "logo">
+  slots: Array<"media" | "background" | "logo">,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
 ): SiteMediaItemV3 | undefined {
-  return directorGalleryForBlueprintV1(business, blueprint, [], 1, slots)[0];
+  return directorGalleryForBlueprintV1(business, blueprint, [], 1, slots, assetLibraryAssets)[0];
 }
 
 function directorGalleryForBlueprintV1(
@@ -2205,9 +2259,10 @@ function directorGalleryForBlueprintV1(
   blueprint: SectionBlueprintV1 | undefined,
   fallbackGallery: SiteMediaItemV3[],
   count: number,
-  slots: Array<"media" | "background" | "logo">
+  slots: Array<"media" | "background" | "logo">,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
 ): SiteMediaItemV3[] {
-  const directorItems = directorAssetItemsForBlueprintV1(business, blueprint, slots, fallbackGallery);
+  const directorItems = directorAssetItemsForBlueprintV1(business, blueprint, slots, fallbackGallery, assetLibraryAssets);
   return normalizeMediaItems([...directorItems, ...fallbackGallery], count);
 }
 
@@ -2215,19 +2270,30 @@ function directorAssetItemsForBlueprintV1(
   business: BusinessProfile,
   blueprint: SectionBlueprintV1 | undefined,
   slots: Array<"media" | "background" | "logo">,
-  admittedGallery: SiteMediaItemV3[]
+  admittedGallery: SiteMediaItemV3[],
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
 ): SiteMediaItemV3[] {
   if (!blueprint?.assetRefs?.length) return [];
   const allowedSlots = new Set(slots);
   const photosById = new Map(business.photos.map((asset) => [asset.id, asset]));
+  const libraryById = new Map(assetLibraryAssets.map((asset) => [`library_${asset.id}`, asset]));
   const admittedAssetKeys = new Set(admittedGallery.map((item) => mediaIdentityKey(item.url)));
   return blueprint.assetRefs.flatMap((assetRef) => {
     if (!allowedSlots.has(assetRef.slot)) return [];
     if (assetRef.slot === "logo") return [];
+    const libraryAsset = libraryById.get(assetRef.assetId);
+    if (libraryAsset?.publicUrl) {
+      return [{
+        url: libraryAsset.publicUrl,
+        label: libraryAssetAlt(libraryAsset),
+        focalPoint: "center" as const,
+        cropIntent: assetRef.cropIntent
+      }];
+    }
     const asset = photosById.get(assetRef.assetId);
     if (!asset) return [];
     if (isLikelyLogoOnlyMedia(asset, business)) return [];
-    if (!isPublicSafeMedia(asset) && !admittedAssetKeys.has(mediaIdentityKey(asset.url))) return [];
+    if (!admittedAssetKeys.has(mediaIdentityKey(asset.url)) && !assetClearsBlueprintSlotV1(asset, business, blueprint, assetRef.slot)) return [];
     return [{
       url: asset.url,
       label: asset.alt || "Business photo",
@@ -2235,6 +2301,21 @@ function directorAssetItemsForBlueprintV1(
       cropIntent: assetRef.cropIntent
     }];
   });
+}
+
+function assetClearsBlueprintSlotV1(
+  asset: AssetReference,
+  business: BusinessProfile,
+  blueprint: SectionBlueprintV1,
+  slot: "media" | "background" | "logo"
+) {
+  if (slot === "logo") return false;
+  if (slot === "background") return mediaFloorSlotVerdictV1(asset, business, "background").allowed;
+  if (blueprint.role === "hero") return mediaFloorSlotVerdictV1(asset, business, "hero").allowed;
+  if (blueprint.role === "proof" || blueprint.role === "media") {
+    return mediaFloorSlotVerdictV1(asset, business, "proof").allowed || mediaFloorSlotVerdictV1(asset, business, "gallery").allowed;
+  }
+  return mediaFloorSlotVerdictV1(asset, business, "gallery").allowed || mediaFloorSlotVerdictV1(asset, business, "hero").allowed;
 }
 
 function focalPointForAssetCropIntentV1(
@@ -2249,7 +2330,15 @@ function focalPointForAssetCropIntentV1(
 
 function cropIntentForBusinessPhotoV1(asset: AssetReference): SiteMediaCropIntentV3 {
   if (asset.analysisV1?.version === "asset-analysis-v1") {
-    return cropIntentFromAssetAnalysisV1(asset.analysisV1.recommendedCropIntent);
+    if (asset.analysisV1.imageKind === "repair_detail" || asset.analysisV1.imageKind === "before_after") return "subject";
+    if (asset.width && asset.height) {
+      const ratio = asset.width / asset.height;
+      if (ratio >= 1.45) return "wide";
+      if (ratio <= 0.85) return "portrait";
+    }
+    return asset.analysisV1.subjectPlacement === "full_frame" || asset.analysisV1.subjectPlacement === "centered"
+      ? "center"
+      : "subject";
   }
   if (asset.width && asset.height) {
     const ratio = asset.width / asset.height;
@@ -2272,11 +2361,6 @@ function focalPointForAssetContentV1(asset: AssetReference): BackgroundFocalPoin
   if (/\b(windshield|hood|roof|sign|storefront|team|owner|face|person|people|logo)\b/i.test(text)) return "top";
   if (asset.width && asset.height && asset.width / asset.height < 0.85) return "top";
   return "center";
-}
-
-function cropIntentFromAssetAnalysisV1(intent: NonNullable<AssetReference["analysisV1"]>["recommendedCropIntent"]): SiteMediaCropIntentV3 {
-  if (intent === "detail_zoom") return "subject";
-  return intent;
 }
 
 function mediaTextForAssetV1(asset: AssetReference): string {
@@ -2302,11 +2386,75 @@ function sectionWithBlueprintBackgroundV1(section: VisualSectionV3, blueprint: S
   } as VisualSectionV3;
 }
 
+function applyBlueprintCtaRoleV1(
+  section: VisualSectionV3,
+  blueprint: SectionBlueprintV1,
+  business: BusinessProfile
+): VisualSectionV3 {
+  if (!blueprint.ctaRole || blueprint.ctaRole === "primary") return section;
+  const next = structuredClone(section) as VisualSectionV3;
+  const slots = next.slots as Record<string, unknown>;
+  const copy = slots.copy && typeof slots.copy === "object"
+    ? slots.copy as { actions?: VisualCtaV3[] }
+    : undefined;
+
+  // Contextual conversion belongs to item links or the section's content.
+  // A second full-width estimate prompt here competes with the hero and the
+  // final contact form instead of helping the visitor decide.
+  if (blueprint.ctaRole === "none" || blueprint.ctaRole === "contextual") {
+    delete slots.action;
+    if (copy) delete copy.actions;
+    return next;
+  }
+
+  const secondaryCta = (cta: VisualCtaV3): VisualCtaV3 =>
+    business.vertical === "auto_body" && business.phone
+      ? { label: "Call the shop", href: `tel:${phoneHref(business.phone)}`, style: "secondary" }
+      : { ...cta, style: "secondary" };
+  const action = slots.action && typeof slots.action === "object"
+    ? slots.action as { cta?: VisualCtaV3 }
+    : undefined;
+  if (action?.cta) action.cta = secondaryCta(action.cta);
+  if (copy?.actions) copy.actions = copy.actions.map(secondaryCta);
+  return next;
+}
+
+function templateOptionsForAutoBodyNoMediaHeroRepairV1(
+  business: BusinessProfile,
+  media: SelectedV3Media,
+  templateOptions: SectionBlueprintV1["templateOptions"] | undefined,
+  designSystem?: GeneratedSiteDesignSystemV1
+): SectionBlueprintV1["templateOptions"] | undefined {
+  if (business.vertical !== "auto_body" || media.kind === "media") return templateOptions;
+  const floorHero = designSystem?.hero;
+  return {
+    ...templateOptions,
+    heroAlign: templateOptions?.heroAlign ?? "left",
+    heroLayout: floorHero?.heroLayout ?? "no_media_editorial",
+    proofPlacement: floorHero?.proofPlacement ?? "bottom_strip",
+    ctaLayout: floorHero?.ctaLayout ?? "button_plus_text_link",
+    mediaTreatment: floorHero?.mediaTreatment ?? "flush",
+    headlineScale: floorHero?.headlineScale ?? "standard"
+  };
+}
+
 function servicePresentationForBlueprintV1(
   blueprint: SectionBlueprintV1,
   presentationPlan?: SectionPresentationMapV3
 ): SectionPresentationMapV3["services"] {
   return (blueprint.presentation?.services ?? presentationPlan?.services) as SectionPresentationMapV3["services"];
+}
+
+function shouldAvoidPlainServiceRowsV1(
+  business: BusinessProfile,
+  servicePresentation?: SectionPresentationMapV3["services"]
+) {
+  return (
+    business.vertical === "auto_body" ||
+    servicePresentation === "media_grid" ||
+    servicePresentation === "image_tiles" ||
+    servicePresentation === "premium_showcase"
+  );
 }
 
 function backgroundIdentityForDecisionV1(background: SectionBlueprintV1["background"]) {
@@ -2675,14 +2823,14 @@ function linkServiceItemsToPages(sections: SectionInstanceV3[], servicePages: Ar
     .filter((entry) => entry.name);
   for (const section of sections) {
     const visual = section.props?.visualSectionV3 as VisualSectionV3 | undefined;
-    if (!visual || (visual.templateId !== "intro_grid" && visual.templateId !== "side_intro_rows")) continue;
-    if (section.id !== "services") continue;
+    if (!visual || (visual.templateId !== "intro_grid" && visual.templateId !== "side_intro_rows" && visual.templateId !== "service_index")) continue;
+    if (section.id !== "services" && !section.id.endsWith("_related_services")) continue;
     const slots = visual.slots as { items?: { items?: StandardItemV3[] } };
-    for (const [index, item] of (slots.items?.items ?? []).entries()) {
+    for (const item of slots.items?.items ?? []) {
       const title = item.title.toLowerCase();
       const match = pageByService.find((entry) => title.includes(entry.name) || entry.name.includes(title));
       if (match) item.href = `/${match.slug}`;
-      else if (servicePages[index]) item.href = `/${servicePages[index].slug}`;
+      else item.href = "#contact";
     }
   }
 }
@@ -2740,6 +2888,8 @@ function buildServiceLandingPagesV3(
     if (!slug) continue;
 
     const idPrefix = `svc_${slug.replace(/\//g, "_")}`;
+    const localDetailsSection = servicePageLocalDetailsSection(business, locationContext, pageCopy.serviceName);
+    const relatedServicesSection = servicePageRelatedServicesSection(business, deck, pageCopy.serviceName);
     const sections: SectionInstanceV3[] = [
       visualSection(`${idPrefix}_hero`, "hero.section_template", {
         version: "visual-section-v3",
@@ -2789,6 +2939,8 @@ function buildServiceLandingPagesV3(
               }
             }
           }),
+      localDetailsSection ? visualSection(`${idPrefix}_local_details`, "local.section_template", localDetailsSection) : undefined,
+      relatedServicesSection ? visualSection(`${idPrefix}_related_services`, "services.section_template", relatedServicesSection) : undefined,
       visualSection(`${idPrefix}_faq`, "faq.section_template", {
         version: "visual-section-v3",
         templateId: "faq_list",
@@ -2804,7 +2956,7 @@ function buildServiceLandingPagesV3(
         }
       }),
       visualSection(`${idPrefix}_contact`, "contact.section_template", contactSplitSection(business, locationContext, deck, { includeLocationAnchor: false }))
-    ];
+    ].filter((section): section is SectionInstanceV3 => Boolean(section));
 
     accepted.push({
       id: `page_${slug.replace(/\//g, "_")}`,
@@ -2819,7 +2971,96 @@ function buildServiceLandingPagesV3(
       sections
     });
   }
+  for (const page of accepted) {
+    linkServiceItemsToPages(page.sections, accepted);
+  }
   return accepted;
+}
+
+function servicePageLocalDetailsSection(
+  business: BusinessProfile,
+  locationContext: LocationCompileContextV3,
+  serviceName: string
+): VisualSectionV3 | undefined {
+  const facts = servicePageLocalFactsV3(business, locationContext);
+  if (facts.length < 2) return undefined;
+  const serviceLabel = sentenceCasePhrase(serviceName).toLowerCase();
+  return {
+    version: "visual-section-v3",
+    templateId: "facts_cta",
+    anchorId: "location",
+    options: { background: backgrounds.subtleGradient },
+    slots: {
+      facts: { items: facts.slice(0, 4) },
+      action: {
+        title: business.phone ? `Confirm ${serviceLabel} details.` : "Confirm local details.",
+        body:
+          business.vertical === "auto_body"
+            ? "Use the location, hours, and contact facts to decide whether to call first or bring the vehicle in."
+            : "Use the local details to confirm fit, timing, and the best next step before you reach out.",
+        cta: primaryCtaForBusiness(business)
+      }
+    }
+  };
+}
+
+function servicePageLocalFactsV3(business: BusinessProfile, locationContext: LocationCompileContextV3): VisualFactV3[] {
+  const facts: VisualFactV3[] = [];
+  if (business.address) {
+    facts.push({ label: "Visit", value: formatAddress(business.address) });
+  } else if (locationContext.serviceAreas.length) {
+    facts.push({ label: "Service area", value: joinServiceNames(locationContext.serviceAreas.slice(0, 3)) });
+  } else {
+    const location = locationLineForBusiness(business);
+    if (location) facts.push({ label: "Location", value: location });
+  }
+  const hours = compactHoursSummaryForBusiness(business);
+  if (hours) facts.push({ label: "Hours", value: hours });
+  if (business.phone) facts.push({ label: "Call", value: formatPhone(business.phone) });
+  if (business.email) {
+    const email = publicEmailForBusiness(business.email);
+    if (email) facts.push({ label: "Email", value: email });
+  }
+  return facts;
+}
+
+function servicePageRelatedServicesSection(
+  business: BusinessProfile,
+  deck: GeneratedCopyDeckV2 | undefined,
+  currentServiceName: string
+): VisualSectionV3 | undefined {
+  const relatedItems = dedupeStandardItems(
+    [
+      ...serviceItemsForBusiness(business, deck),
+      ...serviceNamesForBusiness(business).map((service) => serviceItemForBusiness(service, business))
+    ].filter((item) => !serviceItemMatchesServiceNameV3(item, currentServiceName))
+  ).slice(0, 4);
+  if (relatedItems.length < 3) return undefined;
+  return {
+    version: "visual-section-v3",
+    templateId: "side_intro_rows",
+    anchorId: "services",
+    options: { background: backgrounds.surface },
+    slots: {
+      intro: {
+        eyebrow: "Related services",
+        heading: "Compare nearby service needs before you call.",
+        body: `If ${currentServiceName.toLowerCase()} is only part of the visit, these related services help shape the first conversation.`
+      },
+      items: { items: relatedItems }
+    }
+  };
+}
+
+function serviceItemMatchesServiceNameV3(item: StandardItemV3, serviceName: string) {
+  const itemTitle = normalizeServiceMatchTextV3(item.title);
+  const serviceTitle = normalizeServiceMatchTextV3(serviceName);
+  if (!itemTitle || !serviceTitle) return false;
+  return itemTitle.includes(serviceTitle) || serviceTitle.includes(itemTitle);
+}
+
+function normalizeServiceMatchTextV3(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function isPseudoServicePageCandidateV3(value: string) {
@@ -2853,8 +3094,6 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
   const serviceLower = service.toLowerCase();
   const location = locationLineForBusiness(business);
   const place = location ? ` in ${location}` : "";
-  const insuranceEvidence = autoBodyHasPublishableInsuranceServiceEvidence(business);
-  const insuranceDetail = insuranceEvidence ? " Keep claim or adjuster details nearby if insurance is involved." : "";
   const title = `${service} | ${business.name}`;
   const page = (input: {
     heading: string;
@@ -2885,7 +3124,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Paintless dent repair${place}.`,
       heroBody: `${business.name} checks shallow dents, door dings, and finish condition before paintless dent repair is recommended.`,
       detailHeading: "When paintless repair fits.",
-      detailBody: `Useful details include dent size, panel location, whether the paint is cracked, and whether the dent is easy to see in natural light.${insuranceDetail}`,
+      detailBody: "Useful details include dent size, panel location, whether the paint is cracked, and whether the dent is easy to see in natural light.",
       faqs: [
         { question: "What makes paintless dent repair different?", answer: "It focuses on shallow dents where the finish is still intact." },
         { question: "What should I photograph?", answer: "A wide panel photo and a close detail photo usually give the shop enough to start the first call." },
@@ -2901,7 +3140,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Hail damage repair${place}.`,
       heroBody: `${business.name} reviews hail marks across the hood, roof, doors, and trim so storm damage is not treated as one isolated dent.`,
       detailHeading: "Panel-by-panel hail review.",
-      detailBody: `Helpful details include when the storm hit, which panels show dents most clearly, and whether trim or glass was affected.${insuranceDetail}`,
+      detailBody: "Helpful details include when the storm hit, which panels show dents most clearly, and whether trim or glass was affected.",
       faqs: [
         { question: "Why does hail need a full-panel look?", answer: "Hail often leaves clusters of shallow marks across several panels." },
         { question: "Which photos are useful?", answer: "Photos with reflected light across the panel show shallow dents more clearly than a single flat view." },
@@ -2917,7 +3156,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Collision repair${place}.`,
       heroBody: `${business.name} looks beyond the visible dent to bumpers, panel gaps, trim, lights, paint, and nearby impact marks.`,
       detailHeading: "Accident damage rarely stops at one panel.",
-      detailBody: `Share where the impact happened, whether the vehicle drives normally, dashboard warnings, photos, and timing.${insuranceDetail}`,
+      detailBody: "Share where the impact happened, whether the vehicle drives normally, dashboard warnings, photos, and timing.",
       faqs: [
         { question: "What details matter after a collision?", answer: "Where the vehicle was hit, warning lights, drivability, loose trim, and nearby panel gaps all matter." },
         { question: "Why mention panel gaps or trim?", answer: "Gaps, clips, trim, and lights reveal related damage that is easy to miss in one photo." },
@@ -2933,7 +3172,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Bumper repair${place}.`,
       heroBody: `${business.name} checks scuffs, cracks, clips, sensor areas, and nearby paint before bumper repair direction is discussed.`,
       detailHeading: "Bumper damage includes more than the cover.",
-      detailBody: `Photos of corners, lower edges, lights, and trim help show whether damage is cosmetic or tied to nearby parts.${insuranceDetail}`,
+      detailBody: "Photos of corners, lower edges, lights, and trim help show whether damage is cosmetic or tied to nearby parts.",
       faqs: [
         { question: "What should bumper photos show?", answer: "Show the full bumper, close damage, lower edge, lights, trim, and any loose pieces." },
         { question: "Do clips and tabs matter?", answer: "Clips and tabs affect how the cover sits and whether nearby parts need attention." },
@@ -2949,7 +3188,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Auto glass damage${place}.`,
       heroBody: `${business.name} keeps glass damage connected to the surrounding body work so a second issue is not missed during the visit.`,
       detailHeading: "Glass damage and nearby panels.",
-      detailBody: `Share which glass is damaged, whether the door or frame was hit, and whether water, wind noise, or loose trim is present.${insuranceDetail}`,
+      detailBody: "Share which glass is damaged, whether the door or frame was hit, and whether water, wind noise, or loose trim is present.",
       faqs: [
         { question: "What glass details should I share?", answer: "Mention windshield, side glass, rear glass, cracks, missing pieces, and nearby impact marks." },
         { question: "Why mention trim or frame damage?", answer: "Trim, seals, and frames affect how glass damage is handled with body work." },
@@ -2965,7 +3204,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
       heading: `Paint refinishing${place}.`,
       heroBody: `${business.name} looks at scraped paint, repaired panels, adjacent finish, and blend areas before paint refinishing is discussed.`,
       detailHeading: "Paint work depends on the surrounding finish.",
-      detailBody: `Helpful details include the damaged panel, nearby paint edges, and whether the color difference is visible in daylight.${insuranceDetail}`,
+      detailBody: "Helpful details include the damaged panel, nearby paint edges, and whether the color difference is visible in daylight.",
       faqs: [
         { question: "What paint photos are useful?", answer: "Show the whole panel, the damaged finish, and adjacent panels in natural light." },
         { question: "Why do adjacent panels matter?", answer: "Nearby panels affect how paint refinishing is planned around the existing finish." },
@@ -2980,7 +3219,7 @@ function autoBodyServicePageCopy(business: BusinessProfile, service: string): Ge
     heading: `${sentenceCasePhrase(serviceLower)}${place}.`,
     heroBody: `${business.name} handles ${serviceLower}${place} with attention to the damaged area, driveability, visible panels, and timing.`,
     detailHeading: `Details that matter for ${serviceLower}.`,
-    detailBody: `Vehicle year, make, model, affected area, and clear photos help shape the first shop review.${insuranceDetail}`,
+    detailBody: "Vehicle year, make, model, affected area, and clear photos help shape the first shop review.",
     faqs: [
       { question: `What matters most for ${serviceLower}?`, answer: "Where the damage sits, how it happened, whether the vehicle drives, and what the surrounding panels look like." },
       { question: "Should I call before visiting?", answer: `Call first with vehicle details and timing so ${business.name} knows what to look for.` },
@@ -3032,7 +3271,17 @@ function autoServicesServicePageCopy(business: BusinessProfile, service: string)
 
 function sectionTextsForOverlap(sections: SectionInstanceV3[]): string[] {
   const texts: string[] = [];
-  const sharedChrome = new Set(["contact_split", "facts_strip", "location_directory", "location_showcase", "service_area_showcase", "facts_cta"]);
+  const sharedChrome = new Set([
+    "contact_split",
+    "facts_strip",
+    "location_directory",
+    "location_showcase",
+    "service_area_showcase",
+    "facts_cta",
+    "numbered_steps",
+    "side_intro_rows",
+    "service_index"
+  ]);
   for (const section of sections) {
     const props = section.props as { visualSectionV3?: VisualSectionV3 };
     const visual = props.visualSectionV3;
@@ -3090,11 +3339,13 @@ function classifyAutoBodyV3Evidence(
   media: SelectedV3Media,
   gallery: Array<{ url: string; label: string }>,
   services: StandardItemV3[],
-  locationContext: LocationCompileContextV3
+  locationContext: LocationCompileContextV3,
+  evidenceLedger?: SiteEvidenceLedgerV1
 ): GeneratedSiteV3EvidenceSignals {
-  const quoteItems = quoteItemsForBusiness(business);
+  const quoteItems = quoteItemsForEvidence(evidenceLedger);
+  const trustEvidence = trustEvidenceItemsV1(evidenceLedger);
   const eligibleAutoBodyProofMedia = business.vertical === "auto_body"
-    ? business.photos.filter((asset) => (isPublicSafeMedia(asset) || isProtectedPreviewEligibleMedia(asset)) && !isLikelyLogoOnlyMedia(asset, business) && isLikelyAutoBodyProofReferenceMedia(asset))
+    ? business.photos.filter((asset) => mediaFloorSlotVerdictV1(asset, business, "proof").allowed && !isLikelyLogoOnlyMedia(asset, business) && isLikelyAutoBodyProofReferenceMedia(asset))
     : [];
   const hasEligibleAutoBodyProofMedia = eligibleAutoBodyProofMedia.length > 0;
   const hasBeforeAfterPair =
@@ -3110,13 +3361,15 @@ function classifyAutoBodyV3Evidence(
     hasServiceAreas: business.serviceAreas.length > 0,
     mediaCount: business.photos.length,
     safeMediaCount: media.kind === "media" ? gallery.length : 0,
-    hasSafeHeroMedia: media.kind === "media" && gallery.length > 0,
+    hasSafeHeroMedia: media.kind === "media" && Boolean(media.heroUrl),
     hasEnoughGalleryMedia: media.kind === "media" && gallery.length >= 2,
     hasBeforeAfterProof: hasBeforeAfterPair,
     hasRepairReferenceMedia: hasEligibleAutoBodyProofMedia,
-    hasQuoteProof: quoteItems.length >= 3,
+    hasQuoteProof: quoteItems.length >= 2,
     hasRealPricingEvidence: pricingItemsForBusiness(business).length >= 3,
-    hasCredentialTrustProof: Boolean(business.phone || business.address || business.reviewsSummary?.count || services.length),
+    hasCredentialTrustProof: trustEvidence.length > 0 || Boolean(
+      business.phone || business.address || business.reviewsSummary?.count || business.credentials?.length || business.offers?.length || services.length
+    ),
     hasLocationSection: locationContext.hasLocationSection
   };
 }
@@ -3341,12 +3594,18 @@ function splitMediaSection(
   deck?: GeneratedCopyDeckV2,
   templateOptions?: SectionBlueprintV1["templateOptions"]
 ): VisualSectionV3 {
+  const autoBodyHasProofMedia = business.vertical === "auto_body" && gallery.some(isAutoBodyProofMedia);
   const autoBodyCopy =
     business.vertical === "auto_body"
-      ? {
-          heading: "The first look goes beyond the obvious dent.",
-          body: `${business.name} checks the obvious hit together with nearby panel gaps, trim, lights, paint edges, and finish lines before recommending the repair direction.`
-        }
+      ? autoBodyHasProofMedia
+        ? {
+            heading: "One documented repair, from damage to finished vehicle.",
+            body: "The repair example pairs the damaged vehicle with the completed body work from several angles."
+          }
+        : {
+            heading: deck?.splitMedia.heading ?? splitMediaFallbackHeading(business),
+            body: deck?.splitMedia.body ?? splitMediaFallbackBody(business)
+          }
       : undefined;
   return withDirectorTemplateOptionsV1({
     version: "visual-section-v3",
@@ -3366,7 +3625,34 @@ function splitMediaSection(
           }
         ]
       },
-      media: mediaSlot(gallery.slice(1, 2).length ? gallery.slice(1, 2) : gallery.slice(0, 1))
+      media: autoBodyHasProofMedia
+        ? autoBodyProofMediaSlot(gallery)
+        : mediaSlot(gallery.slice(1, 2).length ? gallery.slice(1, 2) : gallery.slice(0, 1))
+    }
+  }, templateOptions);
+}
+
+function aboutStorySplitMediaSection(
+  business: BusinessProfile,
+  media: Array<{ url: string; label: string }>,
+  mediaSide: "left" | "right" = "right",
+  deck?: GeneratedCopyDeckV2,
+  templateOptions?: SectionBlueprintV1["templateOptions"]
+): VisualSectionV3 {
+  const deterministicStory = autoBodyBusinessStoryForBusiness(business);
+  return withDirectorTemplateOptionsV1({
+    version: "visual-section-v3",
+    templateId: "split_media",
+    anchorId: "about",
+    options: { background: backgrounds.subtleGradient, mediaSide },
+    slots: {
+      copy: {
+        eyebrow: "About",
+        heading: deck?.about?.heading ?? deterministicStory?.heading ?? `The people behind ${business.name}.`,
+        body: deck?.about?.body ?? deterministicStory?.body ?? "",
+        actions: [primaryCtaForBusiness(business)]
+      },
+      media: mediaSlot(media.slice(0, 1))
     }
   }, templateOptions);
 }
@@ -3577,7 +3863,7 @@ function processItemsForSection(business: BusinessProfile, deck?: GeneratedCopyD
 
 function isWeakAutoBodyProcessCopy(text: string) {
   if (/\b(conversation|discussion|repair-related|centered on the vehicle|work involved|claim and deductible answers)\b/i.test(text)) return true;
-  if (/\b(body,\s*dent,\s*hail|vehicle damage in person|repair quote for the auto body|performs the needed|damaged areas|once repairs are finished)\b/i.test(text)) {
+  if (/\b(body,\s*dent,\s*hail|vehicle damage in person|repair quote for the auto body|performs the needed|damaged areas|once repairs are finished|depending on the damage|repair decisions are made)\b/i.test(text)) {
     return true;
   }
   const serviceTermHits = text.match(/\b(auto body|paint|dent|hail|scratch|collision|bumper|panel|insurance|self-pay)\b/gi)?.length ?? 0;
@@ -3714,7 +4000,7 @@ function autoBodyBeforeAfterProofSection(business: BusinessProfile, gallery: Arr
   };
 }
 
-function quoteWallSection(business: BusinessProfile): VisualSectionV3 {
+function quoteWallSection(evidenceLedger?: SiteEvidenceLedgerV1): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "quote_wall",
@@ -3723,10 +4009,9 @@ function quoteWallSection(business: BusinessProfile): VisualSectionV3 {
     slots: {
       intro: {
         eyebrow: "Reviews",
-        heading: "What customers have said.",
-        body: "Customer comments help show what people noticed about the work, service, and visit."
+        heading: "What customers have said."
       },
-      items: { items: quoteItemsForBusiness(business).slice(0, 3) }
+      items: { items: quoteItemsForEvidence(evidenceLedger).slice(0, 3) }
     }
   };
 }
@@ -3774,25 +4059,26 @@ function faqIntroForBusiness(business: BusinessProfile) {
   return "The questions customers ask most before a first visit.";
 }
 
-function factsStripSection(business: BusinessProfile): VisualSectionV3 {
+function factsStripSection(business: BusinessProfile, evidenceLedger?: SiteEvidenceLedgerV1): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "facts_strip",
     options: { background: backgrounds.subtleGradient },
-    slots: { facts: { items: proofFactsForBusiness(business) } }
+    slots: { facts: { items: proofFactsForBusiness(business, evidenceLedger) } }
   };
 }
 
 function factsCtaSection(
   business: BusinessProfile,
-  background: SectionBackgroundOptionV3 = backgrounds.subtleGradient
+  background: SectionBackgroundOptionV3 = backgrounds.subtleGradient,
+  evidenceLedger?: SiteEvidenceLedgerV1
 ): VisualSectionV3 {
   return {
     version: "visual-section-v3",
     templateId: "facts_cta",
     options: { background },
     slots: {
-      facts: { items: proofFactsForBusiness(business).slice(0, 4) },
+      facts: { items: proofFactsForBusiness(business, evidenceLedger).slice(0, 4) },
       action: {
         title: business.phone ? "Talk through the details." : "Start with the details.",
         body:
@@ -3819,19 +4105,22 @@ function eligibilityBandSection(
     options: { background, eligibilityTreatment: templateOptions?.eligibilityTreatment ?? "statement_plus_list" },
     slots: {
       copy: {
-        eyebrow: business.vertical === "auto_body" ? "Insurance & visit fit" : "Good fit",
-        heading: business.vertical === "auto_body" ? "Know what the shop can confirm before you visit." : "Confirm the details that make the next step easy.",
+        eyebrow: business.vertical === "auto_body" ? "Insurance & estimates" : "Good fit",
+        heading: business.vertical === "auto_body" ? "Using insurance or paying directly? Start with the damage." : "Confirm the details that make the next step easy.",
         body:
-          deck?.splitMedia.body ??
-          deck?.servicesIntro.body ??
-          (business.vertical === "auto_body"
-            ? "Service scope, hours, contact details, and visit expectations are easier to act on when they are listed together."
-            : "Verified service, location, and contact details make the first decision easier.")
+          business.vertical === "auto_body"
+            ? "Share where the vehicle was hit and whether the repair may go through insurance. The shop can tell you what it needs for an estimate."
+            : deck?.splitMedia.body ?? deck?.servicesIntro.body ?? "Verified service, location, and contact details make the first decision easier."
       },
       facts: { items: facts.slice(0, 6) },
       action: {
-        title: business.phone ? "Need a quick confirmation?" : "Need to confirm fit?",
-        body: business.phone ? "Call with the service, timing, and any practical constraints." : "Send the details and ask for the best next step.",
+        title: business.vertical === "auto_body" ? "Have a repair question?" : business.phone ? "Need a quick confirmation?" : "Need to confirm fit?",
+        body:
+          business.vertical === "auto_body"
+            ? "Call with the damaged area, vehicle details, and timing."
+            : business.phone
+              ? "Call with the service, timing, and any practical constraints."
+              : "Send the details and ask for the best next step.",
         cta: primaryCtaForBusiness(business)
       }
     }
@@ -3960,7 +4249,8 @@ function prioritizeCleanCaseStudyMediaForBusinessV1(
   if (items.length < 2) return items;
   const clean = items.filter((item) => isCleanCaseStudyLeadMediaV1(business, item));
   if (clean.length) return clean;
-  return items.filter((item) => !isLikelyComposedProofArtifactMediaV1(item));
+  const lessRisky = items.filter((item) => !isLikelyComposedProofArtifactMediaV1(item));
+  return lessRisky.length ? lessRisky : items;
 }
 
 function isCleanCaseStudyLeadMediaV1(business: BusinessProfile, item: { url: string; label: string }) {
@@ -4037,7 +4327,7 @@ function teamStorySection(
 
 function offerBandSection(
   business: BusinessProfile,
-  deck: GeneratedCopyDeckV2 | undefined,
+  deck: GeneratedCopyDeckV2,
   templateOptions?: SectionBlueprintV1["templateOptions"],
   background: SectionBackgroundOptionV3 = backgrounds.brandGradient
 ): VisualSectionV3 {
@@ -4048,13 +4338,8 @@ function offerBandSection(
     options: { background, offerBandTreatment: templateOptions?.offerBandTreatment ?? "quiet_offer" },
     slots: {
       copy: {
-        eyebrow: business.vertical === "auto_body" ? "Estimate" : "Next step",
-        heading: deck?.contactIntro.heading ?? (business.vertical === "auto_body" ? "Start with the vehicle details." : "Start with the details that matter."),
-        body:
-          deck?.contactIntro.body ??
-          (business.vertical === "auto_body"
-            ? "Share where the vehicle was hit, whether it still drives, and the timing you need so the first response can stay focused."
-            : "Send the service, timing, and best callback details so the first response can stay focused.")
+        heading: deck.contactIntro.heading,
+        body: deck.contactIntro.body
       },
       action: {
         title: business.phone ? "Talk through the next step." : "Send the request.",
@@ -4068,9 +4353,10 @@ function offerBandSection(
 
 function statBandSection(
   business: BusinessProfile,
-  background: SectionBackgroundOptionV3 = backgrounds.brandGradient
+  background: SectionBackgroundOptionV3 = backgrounds.brandGradient,
+  evidenceLedger?: SiteEvidenceLedgerV1
 ): VisualSectionV3 {
-  const fact = proofFactsForBusiness(business)[0] ?? { label: "Service", value: business.categories[0] ?? business.vertical };
+  const fact = proofFactsForBusiness(business, evidenceLedger)[0] ?? { label: "Service", value: business.categories[0] ?? business.vertical };
   return {
     version: "visual-section-v3",
     templateId: "stat_band",
@@ -4096,7 +4382,8 @@ function statBandSection(
 
 function genericFeatureBandSection(
   business: BusinessProfile,
-  background: SectionBackgroundOptionV3 = backgrounds.brandGradient
+  background: SectionBackgroundOptionV3 = backgrounds.brandGradient,
+  evidenceLedger?: SiteEvidenceLedgerV1
 ): VisualSectionV3 {
   return {
     version: "visual-section-v3",
@@ -4112,7 +4399,7 @@ function genericFeatureBandSection(
             ? "Panel location, paint condition, trim, lighting, and whether the vehicle still drives all shape the first estimate conversation."
             : "The page brings the verified service and contact details forward so the next step is clear."
       },
-      facts: { items: proofFactsForBusiness(business).slice(0, 4) },
+      facts: { items: proofFactsForBusiness(business, evidenceLedger).slice(0, 4) },
       action: {
         title: business.phone ? "Confirm the fit." : "Send the request.",
         cta: primaryCtaForBusiness(business)
@@ -4337,24 +4624,22 @@ function contactSplitSection(
 ): VisualSectionV3 {
   const contactIntro =
     business.vertical === "auto_body"
-      ? autoBodyHasQuoteCtaEvidence(business)
-        ? {
-            heading: "Request a repair estimate.",
-            body: `Share where the vehicle was hit, whether it still drives normally, and when you are hoping to bring it in. ${business.name} can start the estimate from the repair details that matter.`
-          }
-        : {
-            heading: business.address?.city ? `Call ${business.name} in ${business.address.city}.` : `Call ${business.name}.`,
-            body: "Keep the first call focused on the vehicle: where it was damaged, whether it drives normally, timing, and the best callback number."
-          }
+      ? {
+          heading: "Request a repair estimate.",
+          body: `Share where the vehicle was hit, whether it still drives normally, and when you are hoping to bring it in. ${business.name} can start with the repair details that matter.`
+        }
       : {
           heading: deck?.contactIntro.heading ?? (business.phone ? "Call or send a short message." : "Send a short message."),
-          body: deck?.contactIntro.body ?? "Include what you need, any timing constraints, and the best callback details."
+          body:
+            deck?.contactIntro.body ??
+            `${business.name} is the local provider for these service requests. Include what you need, any timing constraints, and the best callback details.`
         };
+  const contactOptions = contactSplitOptionsForBusinessV3(business, locationContext, options);
   return withDirectorTemplateOptionsV1({
     version: "visual-section-v3",
     templateId: "contact_split",
     anchorId: "contact",
-    options: { background: backgrounds.brandGradient },
+    options: { background: backgrounds.brandGradient, ...contactOptions },
     slots: {
       copy: {
         eyebrow: "Contact",
@@ -4365,6 +4650,35 @@ function contactSplitSection(
       contact: { facts: contactFactsForBusiness(business, locationContext, options) }
     }
   }, options?.templateOptions);
+}
+
+function contactSplitOptionsForBusinessV3(
+  business: BusinessProfile,
+  locationContext: LocationCompileContextV3 | undefined,
+  options: { includeLocationAnchor?: boolean } | undefined
+): Omit<Extract<VisualSectionV3, { templateId: "contact_split" }>["options"], "background"> {
+  if (options?.includeLocationAnchor !== false && locationContext?.hasLocationSection) {
+    return {
+      contactLayout: "visit_first",
+      formComplexity: "short",
+      proofSidebar: "location",
+      ctaMode: "directions"
+    };
+  }
+  if (business.vertical === "auto_body") {
+    return {
+      contactLayout: "quote_card",
+      formComplexity: "detailed",
+      proofSidebar: "response_expectation",
+      ctaMode: "estimate"
+    };
+  }
+  return {
+    contactLayout: "call_first",
+    formComplexity: "short",
+    proofSidebar: "trust_facts",
+    ctaMode: "phone"
+  };
 }
 
 function visualSection(id: string, family: string, section: VisualSectionV3): SectionInstanceV3 {
@@ -4539,65 +4853,201 @@ export function backupGalleryForRightsFallbackV3(
     ...business,
     photos: business.photos.filter((asset) => isPublicSafeMedia(asset))
   };
-  return galleryForSelectedMedia(selectV3Media(publicSafeBusiness, assetLibraryAssets));
+  const publicSafeGallery = galleryForSelectedMedia(selectV3Media(publicSafeBusiness, assetLibraryAssets));
+  if (publicSafeGallery.length) return publicSafeGallery;
+  const libraryBackup = selectAutomotiveLibraryMedia(publicSafeBusiness, assetLibraryAssets);
+  return libraryBackup ? galleryForSelectedMedia(libraryBackup) : [];
 }
 
-function selectV3Media(business: BusinessProfile, assetLibraryAssets: ApprovedAssetLibraryAsset[] = []): SelectedV3Media {
-  // Customer-granted/preclaim-safe business photos win. Privately scraped
-  // reference media is a later fallback for non-automotive verticals; for
-  // automotive sites, curated category media is usually stronger and publishable
-  // without owner attestation than low-quality source-page thumbnails.
-  const publicSafePhotos = business.photos.filter(isPublicSafeMedia);
-  const publicSafeHero = publicSafePhotos[0];
-  if (publicSafeHero) {
-    return businessMediaSelection(business, publicSafeHero, publicSafePhotos);
+function selectV3MediaFromSiteDirectorPlan(
+  business: BusinessProfile,
+  plan: SiteDirectorPlanV1,
+  plannerInputManifest: DesignSystemPlannerInputManifestV1,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
+): SelectedV3Media {
+  const candidateById = new Map((plannerInputManifest.mediaCandidates ?? []).map((candidate) => [candidate.id, candidate]));
+  let selected = plan.assets
+    .map((assignment) => ({ assignment, candidate: candidateById.get(assignment.assetId) }))
+    .filter((entry): entry is { assignment: SiteDirectorPlanV1["assets"][number]; candidate: DesignSystemPlannerMediaCandidateV1 } => Boolean(entry.candidate?.url));
+  selected = selected.filter((entry) => mediaCandidateAllowsAssignmentV1(business, entry.candidate, entry.assignment.use));
+  const hero = selected.find((entry) => entry.assignment.use === "hero" && entry.candidate.allowedUses.includes("hero"));
+  const background = selected.find((entry) => entry.assignment.use === "background" && entry.candidate.allowedUses.includes("background"));
+  if (plan.assets.length && !selected.length) {
+    const librarySelection = selectAutomotiveLibraryMedia(business, assetLibraryAssets);
+    if (librarySelection) return librarySelection;
+    return textLayoutFallbackSelectionV1(business, [
+      "SiteDirectorPlanV1 selected media, but no selected asset cleared the slot-aware media floor.",
+      "Text-first layout is preferred until real or approved category media clears the target slot floor."
+    ]);
   }
-  if (business.vertical === "auto_services" || business.vertical === "auto_body") {
-    const libraryMedia = selectAutomotiveLibraryMedia(business, assetLibraryAssets);
-    if (business.vertical !== "auto_body" && libraryMedia) return libraryMedia;
-    if (business.vertical === "auto_services") return autoServicesFallbackContextMedia(business);
-    if (business.vertical === "auto_body") {
-      const protectedPreviewPhotos = business.photos.filter(
-        (asset) =>
-          isProtectedPreviewEligibleMedia(asset) &&
-          !isLikelyLogoOnlyMedia(asset, business)
-      );
-      const proofPhotos = protectedPreviewPhotos.filter(isLikelyAutoBodyProofReferenceMedia);
-      const contextPreviewPhotos = protectedPreviewPhotos.filter((asset) => !isLikelyCompositedAutoBodyGraphicMedia(asset));
-      const strongContextPhotos = contextPreviewPhotos.filter(isUsableFirstPartyContextMedia);
-      const protectedHeroPhoto = strongestFirstPartyHeroPhoto(strongContextPhotos);
-      if (protectedHeroPhoto && (strongContextPhotos.length >= 2 || proofPhotos.length)) {
-        return autoBodyMediaSelectionWithProof(
-          business,
-          businessMediaSelection(business, protectedHeroPhoto, prioritizeFirstPartyMediaForGallery(strongContextPhotos, protectedHeroPhoto)),
-          proofPhotos.length ? proofPhotos : contextPreviewPhotos
-        );
-      }
-      if (libraryMedia) return autoBodyMediaSelectionWithProof(business, libraryMedia, proofPhotos.length ? proofPhotos : contextPreviewPhotos);
-      if (proofPhotos.length || contextPreviewPhotos.length >= 2) return autoBodyMediaSelectionWithProof(business, autoBodyFallbackContextMedia(business), proofPhotos.length ? proofPhotos : contextPreviewPhotos);
+  const gallery = normalizeMediaItems(
+    selected
+      .filter((entry) => entry.assignment.use !== "background" && entry.assignment.use !== "logo")
+      .map((entry) => mediaItemFromCandidateV1(entry.candidate, entry.assignment.use)),
+    12
+  );
+  if (!hero?.candidate.url && !gallery.length) {
+    const librarySelection = selectAutomotiveLibraryMedia(business, assetLibraryAssets);
+    if (librarySelection) return librarySelection;
+    return textLayoutFallbackSelectionV1(business, ["SiteDirectorPlanV1 did not select a renderable media candidate."], "site_director_unavailable");
+  }
+  const heroUrl = hero?.candidate.url ?? "";
+  return {
+    kind: "media",
+    heroUrl,
+    conversionBackgroundUrl: background?.candidate.url,
+    conversionBackgroundFocalPoint: "center",
+    gallery: gallery.length ? gallery : hero ? [mediaItemFromCandidateV1(hero.candidate, hero.assignment.use)] : [],
+    decisions: selected.map((entry) => mediaDecisionFromCandidateV1(business, entry.candidate, entry.assignment.use))
+  };
+}
+
+function mediaCandidateAllowsAssignmentV1(
+  business: BusinessProfile,
+  candidate: DesignSystemPlannerMediaCandidateV1,
+  use: SiteDirectorPlanV1["assets"][number]["use"]
+) {
+  if (business.vertical === "auto_body" && candidate.source === "asset_library") {
+    if (use === "hero" || use === "proof" || use === "gallery") return false;
+    if (candidate.mayImplyRealBusinessWork) return false;
+  }
+  if (candidate.allowedUses.includes(use)) return true;
+  return use === "service" && candidate.allowedUses.includes("context");
+}
+
+function mediaItemFromCandidateV1(
+  candidate: DesignSystemPlannerMediaCandidateV1,
+  use: SiteDirectorPlanV1["assets"][number]["use"]
+): SiteMediaItemV3 {
+  return {
+    url: candidate.url as string,
+    label: mediaCandidateLabelV1(candidate),
+    focalPoint: focalPointFromCandidateV1(candidate),
+    cropIntent: use === "hero" || use === "background" ? "wide" : "subject"
+  };
+}
+
+function mediaDecisionFromCandidateV1(
+  business: BusinessProfile,
+  candidate: DesignSystemPlannerMediaCandidateV1,
+  use: SiteDirectorPlanV1["assets"][number]["use"]
+): MediaAssetDecisionV3 {
+  const rightsStatus = mediaDecisionRightsForCandidateV1(candidate);
+  const source = candidate.source === "asset_library" ? "generated_ai" : "first_party";
+  return {
+    id: `media_${business.siteId}_${candidate.id}_${use}`.replace(/[^a-z0-9_]+/gi, "_"),
+    version: "media-asset-decision-v3",
+    slotId: `home.${use}.media`,
+    source,
+    rightsStatus,
+    usageScope: use === "hero" ? "hero" : use === "background" ? "background" : "section",
+    sourceUrl: candidate.url,
+    artifactRef: candidate.artifactRef,
+    policyNotes: [...candidate.policyNotes],
+    mayImplyRealBusinessWork: candidate.mayImplyRealBusinessWork,
+    selectionSnapshot: {
+      version: "media-selection-snapshot-v1",
+      id: candidate.id,
+      url: candidate.url,
+      artifactRef: candidate.artifactRef,
+      rightsStatus,
+      source,
+      policyNotes: [...candidate.policyNotes],
+      mayImplyRealBusinessWork: candidate.mayImplyRealBusinessWork
     }
+  };
+}
+
+function mediaDecisionRightsForCandidateV1(candidate: DesignSystemPlannerMediaCandidateV1): MediaAssetDecisionV3["rightsStatus"] {
+  if (candidate.rightsStatus === "customer_granted") return "approved";
+  if (candidate.rightsStatus === "preclaim_safe") return "preclaim_safe";
+  if (candidate.rightsStatus === "reference_only") return "owner_attestation_required";
+  return "unknown";
+}
+
+function mediaCandidateLabelV1(candidate: DesignSystemPlannerMediaCandidateV1) {
+  if (candidate.source === "asset_library") return "Approved category media";
+  if (candidate.source === "business_logo") return "Business logo";
+  return candidate.tags[0]?.replace(/[_-]+/g, " ") ?? "Business media";
+}
+
+function focalPointFromCandidateV1(candidate: DesignSystemPlannerMediaCandidateV1): BackgroundFocalPointV3 {
+  if (candidate.focalPoint === "top" || candidate.focalPoint === "bottom" || candidate.focalPoint === "left" || candidate.focalPoint === "right") {
+    return candidate.focalPoint;
   }
+  return "center";
+}
+
+function selectV3Media(
+  business: BusinessProfile,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[] = []
+): SelectedV3Media {
+  const businessPhotos = business.photos.filter((asset) => !isLikelyLogoOnlyMedia(asset, business));
   if (business.vertical === "auto_body") {
-    return autoBodyFallbackContextMedia(business);
+    const heroPhotos = businessPhotos.filter((asset) => mediaFloorSlotVerdictV1(asset, business, "hero").allowed);
+    const proofPhotos = businessPhotos.filter((asset) => mediaFloorSlotVerdictV1(asset, business, "proof").allowed && isLikelyAutoBodyProofReferenceMedia(asset));
+    const galleryPhotos = businessPhotos.filter((asset) => mediaFloorSlotVerdictV1(asset, business, "gallery").allowed);
+    const heroPhoto = strongestFirstPartyHeroPhoto(heroPhotos);
+    if (heroPhoto) {
+      const contextPhotos = prioritizeFirstPartyMediaForGallery(galleryPhotos.length ? galleryPhotos : heroPhotos, heroPhoto);
+      return autoBodyMediaSelectionWithProof(
+        business,
+        businessMediaSelection(business, heroPhoto, contextPhotos),
+        proofPhotos.length ? proofPhotos : galleryPhotos
+      );
+    }
+    const proofOnlyPhotos = proofPhotos.length ? proofPhotos : galleryPhotos;
+    if (proofOnlyPhotos.length) return autoBodyProofOnlyMediaSelection(business, proofOnlyPhotos);
+    const librarySelection = selectAutomotiveLibraryMedia(business, assetLibraryAssets);
+    if (librarySelection) return librarySelection;
+  } else {
+    const heroPhoto = businessPhotos[0];
+    if (heroPhoto) return businessMediaSelection(business, heroPhoto, businessPhotos);
   }
-  // Protected preview fallback: useful when no stronger public-safe media exists,
-  // but publish still requires owner attestation.
-  const heroPhoto = business.photos.find((asset) => isProtectedPreviewEligibleMedia(asset));
-  if (heroPhoto) {
-    return businessMediaSelection(business, heroPhoto, business.photos.filter(isProtectedPreviewEligibleMedia));
-  }
+  return textLayoutFallbackSelectionV1(
+    business,
+    business.vertical === "auto_body"
+      ? ["No real media cleared the slot-aware auto-body media floor; the no-media-first hero remains selected."]
+      : ["Text-first layout selected because no business-specific media is available."]
+  );
+}
+
+function selectedAutoBodyProofNeedsFramedTreatmentV1(business: BusinessProfile, media: SelectedV3Media) {
+  if (business.vertical !== "auto_body" || media.kind !== "media") return false;
+  const selectedMediaKeys = new Set(galleryForSelectedMedia(media).map((item) => mediaIdentityKey(item.url)));
+  return business.photos.some((asset) => {
+    if (!selectedMediaKeys.has(mediaIdentityKey(asset.url))) return false;
+    const proofVerdict = mediaFloorSlotVerdictV1(asset, business, "proof");
+    const galleryVerdict = mediaFloorSlotVerdictV1(asset, business, "gallery");
+    return (proofVerdict.allowed && proofVerdict.treatment === "framed") || (galleryVerdict.allowed && galleryVerdict.treatment === "framed");
+  });
+}
+
+function textLayoutFallbackSelectionV1(
+  business: BusinessProfile,
+  policyNotes: string[],
+  suffix = "text_fallback"
+): SelectedV3Media {
   return {
     kind: "text",
     decisions: [
       {
-        id: `media_${business.siteId}_text_fallback`,
+        id: `media_${business.siteId}_${suffix}`,
         version: "media-asset-decision-v3",
         slotId: "home.hero.panel",
         source: "text_layout_fallback",
         rightsStatus: "approved",
         usageScope: "hero",
-        policyNotes: ["Text-first layout selected because no approved public-safe media is available."],
-        mayImplyRealBusinessWork: false
+        policyNotes,
+        mayImplyRealBusinessWork: false,
+        selectionSnapshot: {
+          version: "media-selection-snapshot-v1",
+          id: `media_${business.siteId}_${suffix}`,
+          rightsStatus: "approved",
+          source: "text_layout_fallback",
+          policyNotes,
+          mayImplyRealBusinessWork: false
+        }
       }
     ]
   };
@@ -4636,76 +5086,69 @@ function businessMediaSelection(
         usageScope: "hero",
         sourceUrl: heroPhoto.url,
         policyNotes: requiresAttestation
-          ? ["Real scraped business media on a protected preview; publishing requires per-photo owner attestation."]
-          : ["Selected from public-safe business media."],
-        mayImplyRealBusinessWork: heroPhoto.rightsStatus === "customer_granted"
+          ? ["First-party scraped business media selected for protected preview; publishing requires per-photo owner attestation."]
+          : ["Selected from first-party business media."],
+        mayImplyRealBusinessWork: mediaSourceForAsset(heroPhoto) === "first_party",
+        selectionSnapshot: {
+          version: "media-selection-snapshot-v1",
+          id: heroPhoto.id,
+          url: heroPhoto.url,
+          rightsStatus: requiresAttestation ? "owner_attestation_required" : "approved",
+          source: mediaSourceForAsset(heroPhoto),
+          policyNotes: requiresAttestation
+            ? ["First-party scraped business media selected for protected preview; publishing requires per-photo owner attestation."]
+            : ["Selected from first-party business media."],
+          mayImplyRealBusinessWork: mediaSourceForAsset(heroPhoto) === "first_party"
+        }
       }
     ]
   };
 }
 
-function autoBodyFallbackContextMedia(business: BusinessProfile): SelectedV3Media {
-  return generatedRegistryMediaSelection({
-    business,
-    vertical: "auto_body",
-    decisionId: `media_${business.siteId}_auto_context`,
-    policyNote: "Generated generic auto-body category media. Does not imply real business staff, location, or documented customer work."
-  });
-}
-
-function autoServicesFallbackContextMedia(business: BusinessProfile): SelectedV3Media {
-  return generatedRegistryMediaSelection({
-    business,
-    vertical: "auto_services",
-    decisionId: `media_${business.siteId}_auto_services_context`,
-    policyNote: "Generated generic auto-service category media. Does not imply real business staff, location, vehicles, or documented customer work."
-  });
-}
-
-function generatedRegistryMediaSelection(input: {
-  business: BusinessProfile;
-  vertical: Vertical;
-  decisionId: string;
-  policyNote: string;
-}): SelectedV3Media {
-  const gallery: SiteMediaItemV3[] = imageAssetsForVertical(input.vertical).map((asset) => ({
-    url: asset.url,
-    label: asset.label || asset.alt || "Generated category media",
-    focalPoint: "center",
-    cropIntent: "wide"
-  }));
-  if (!gallery.length) {
-    return {
-      kind: "text",
-      decisions: [
-        {
-          id: `${input.decisionId}_text_fallback`,
-          version: "media-asset-decision-v3",
-          slotId: "home.hero.panel",
-          source: "text_layout_fallback",
-          rightsStatus: "approved",
-          usageScope: "hero",
-          policyNotes: ["Text-first layout selected because no approved generated registry media is available."],
-          mayImplyRealBusinessWork: false
-        }
-      ]
-    };
-  }
+function autoBodyProofOnlyMediaSelection(
+  business: BusinessProfile,
+  photos: AssetReference[]
+): SelectedV3Media {
+  const gallery = normalizeMediaItems(
+    photos.map((asset) => ({
+      url: asset.url,
+      label: /\bbefore\b|\bafter\b|\brepair\b|\bfinished\b|\bproof\b/i.test(asset.alt)
+        ? asset.alt
+        : "Repair proof reference",
+      focalPoint: focalPointForAssetContentV1(asset),
+      cropIntent: "subject" as const
+    })),
+    12
+  );
+  const requiresAttestation = photos.some((asset) => !isPublicSafeMedia(asset));
   return {
     kind: "media",
-    heroUrl: gallery[0].url,
+    heroUrl: "",
     gallery,
     decisions: [
       {
-        id: input.decisionId,
+        id: `media_${business.siteId}_auto_body_proof_gallery`,
         version: "media-asset-decision-v3",
-        slotId: "home.hero.media",
-        source: "generated_ai",
-        rightsStatus: "approved",
-        usageScope: "hero",
-        sourceUrl: gallery[0].url,
-        policyNotes: [input.policyNote],
-        mayImplyRealBusinessWork: false
+        slotId: "home.proof.gallery",
+        source: "first_party",
+        rightsStatus: requiresAttestation ? "owner_attestation_required" : "approved",
+        usageScope: "section",
+        sourceUrl: gallery[0]?.url,
+        policyNotes: requiresAttestation
+          ? ["First-party scraped repair media selected for protected preview; publishing requires owner attestation."]
+          : ["First-party repair media selected for proof/gallery sections."],
+        mayImplyRealBusinessWork: true,
+        selectionSnapshot: {
+          version: "media-selection-snapshot-v1",
+          id: `media_${business.siteId}_auto_body_proof_gallery`,
+          url: gallery[0]?.url,
+          rightsStatus: requiresAttestation ? "owner_attestation_required" : "approved",
+          source: "first_party",
+          policyNotes: requiresAttestation
+            ? ["First-party scraped repair media selected for protected preview; publishing requires owner attestation."]
+            : ["First-party repair media selected for proof/gallery sections."],
+          mayImplyRealBusinessWork: true
+        }
       }
     ]
   };
@@ -4745,8 +5188,17 @@ function autoBodyMediaSelectionWithProof(
         rightsStatus: "owner_attestation_required",
         usageScope: "section",
         sourceUrl: proofGallery[0]?.url ?? contextMedia.heroUrl,
-        policyNotes: ["Real scraped business repair media is reserved for protected preview proof sections; publishing requires owner attestation."],
-        mayImplyRealBusinessWork: true
+        policyNotes: ["First-party scraped repair media selected for protected preview proof sections; publishing requires owner attestation."],
+        mayImplyRealBusinessWork: true,
+        selectionSnapshot: {
+          version: "media-selection-snapshot-v1",
+          id: `media_${business.siteId}_auto_body_reference_proof`,
+          url: proofGallery[0]?.url ?? contextMedia.heroUrl,
+          rightsStatus: "owner_attestation_required",
+          source: "first_party",
+          policyNotes: ["First-party scraped repair media selected for protected preview proof sections; publishing requires owner attestation."],
+          mayImplyRealBusinessWork: true
+        }
       }
     ]
   };
@@ -4765,6 +5217,9 @@ function selectAutomotiveLibraryMedia(
   business: BusinessProfile,
   assetLibraryAssets: ApprovedAssetLibraryAsset[]
 ): SelectedV3Media | undefined {
+  if (business.vertical === "auto_body") {
+    return selectAutoBodyLibraryContextMedia(business, assetLibraryAssets);
+  }
   const allApproved = assetLibraryAssets.filter(
     (asset) => asset.publicUrl && assessAssetLibraryPolicy(asset).siteSelectable && isAssetLibraryAssetAllowedForBusiness(asset, business)
   );
@@ -4847,7 +5302,20 @@ function selectAutomotiveLibraryMedia(
         ...heroSelection.notes,
         assetLibraryApprovedLicenseNote(heroAsset.id)
       ],
-      mayImplyRealBusinessWork: false
+      mayImplyRealBusinessWork: false,
+      selectionSnapshot: {
+        version: "media-selection-snapshot-v1",
+        id: heroAsset.id,
+        url: heroAsset.publicUrl,
+        artifactRef: heroAsset.id,
+        rightsStatus: "preclaim_safe",
+        source: "generated_ai",
+        policyNotes: [
+          ...heroSelection.notes,
+          assetLibraryApprovedLicenseNote(heroAsset.id)
+        ],
+        mayImplyRealBusinessWork: false
+      }
     }
   ];
   if (backgroundAsset?.publicUrl) {
@@ -4864,7 +5332,20 @@ function selectAutomotiveLibraryMedia(
         ...backgroundSelection.notes,
         assetLibraryApprovedLicenseNote(backgroundAsset.id)
       ],
-      mayImplyRealBusinessWork: false
+      mayImplyRealBusinessWork: false,
+      selectionSnapshot: {
+        version: "media-selection-snapshot-v1",
+        id: backgroundAsset.id,
+        url: backgroundAsset.publicUrl,
+        artifactRef: backgroundAsset.id,
+        rightsStatus: "preclaim_safe",
+        source: "generated_ai",
+        policyNotes: [
+          ...backgroundSelection.notes,
+          assetLibraryApprovedLicenseNote(backgroundAsset.id)
+        ],
+        mayImplyRealBusinessWork: false
+      }
     });
   }
   return {
@@ -4877,27 +5358,129 @@ function selectAutomotiveLibraryMedia(
   };
 }
 
+function selectAutoBodyLibraryContextMedia(
+  business: BusinessProfile,
+  assetLibraryAssets: ApprovedAssetLibraryAsset[]
+): SelectedV3Media | undefined {
+  const allApproved = assetLibraryAssets.filter(
+    (asset) =>
+      asset.publicUrl &&
+      assessAssetLibraryPolicy(asset).siteSelectable &&
+      isAssetLibraryAssetAllowedForBusiness(asset, business) &&
+      isAutoBodyContextLibraryAssetV1(asset, business)
+  );
+  const visualAssets = orderAutoBodyContextLibraryAssetsV1(
+    business,
+    allApproved.filter((asset) => asset.intendedUses.some((use) => use === "section" || use === "card" || use === "gallery"))
+  ).slice(0, 4);
+  if (!visualAssets.length) return undefined;
+  const backgroundAsset = orderAutoBodyContextLibraryAssetsV1(
+    business,
+    allApproved.filter((asset) => asset.intendedUses.includes("background") && asset.promptMetadata?.compositionTemplate === "soft_blur_background")
+  )[0];
+  const gallery = visualAssets.map((asset) => ({
+    url: asset.publicUrl as string,
+    label: libraryAssetAlt(asset)
+  }));
+  const decisions: MediaAssetDecisionV3[] = visualAssets.map((asset, index) => ({
+    id: `media_${business.siteId}_asset_library_context_${asset.id}`.replace(/[^a-z0-9_]+/gi, "_"),
+    version: "media-asset-decision-v3",
+    slotId: `home.context.media_${index + 1}`,
+    source: "generated_ai",
+    rightsStatus: "preclaim_safe",
+    usageScope: "section",
+    sourceUrl: asset.publicUrl,
+    artifactRef: asset.id,
+    policyNotes: [
+      "Approved library context image. Generic Lodesta category image, not this specific business.",
+      assetLibraryApprovedLicenseNote(asset.id)
+    ],
+    mayImplyRealBusinessWork: false,
+    selectionSnapshot: {
+      version: "media-selection-snapshot-v1",
+      id: asset.id,
+      url: asset.publicUrl,
+      artifactRef: asset.id,
+      rightsStatus: "preclaim_safe",
+      source: "generated_ai",
+      policyNotes: [
+        "Approved library context image. Generic Lodesta category image, not this specific business.",
+        assetLibraryApprovedLicenseNote(asset.id)
+      ],
+      mayImplyRealBusinessWork: false
+    }
+  }));
+  if (backgroundAsset?.publicUrl) {
+    decisions.push({
+      id: `media_${business.siteId}_asset_library_context_${backgroundAsset.id}_background`.replace(/[^a-z0-9_]+/gi, "_"),
+      version: "media-asset-decision-v3",
+      slotId: "home.context.background",
+      source: "generated_ai",
+      rightsStatus: "preclaim_safe",
+      usageScope: "background",
+      sourceUrl: backgroundAsset.publicUrl,
+      artifactRef: backgroundAsset.id,
+      policyNotes: [
+        "Approved library background texture. Generic Lodesta category image, not this specific business.",
+        assetLibraryApprovedLicenseNote(backgroundAsset.id)
+      ],
+      mayImplyRealBusinessWork: false,
+      selectionSnapshot: {
+        version: "media-selection-snapshot-v1",
+        id: backgroundAsset.id,
+        url: backgroundAsset.publicUrl,
+        artifactRef: backgroundAsset.id,
+        rightsStatus: "preclaim_safe",
+        source: "generated_ai",
+        policyNotes: [
+          "Approved library background texture. Generic Lodesta category image, not this specific business.",
+          assetLibraryApprovedLicenseNote(backgroundAsset.id)
+        ],
+        mayImplyRealBusinessWork: false
+      }
+    });
+  }
+  return {
+    kind: "media",
+    heroUrl: "",
+    conversionBackgroundUrl: backgroundAsset?.publicUrl,
+    conversionBackgroundFocalPoint: "center",
+    gallery,
+    decisions
+  };
+}
+
+function orderAutoBodyContextLibraryAssetsV1(business: BusinessProfile, assets: ApprovedAssetLibraryAsset[]) {
+  const seed = siteVariationSeedV2(`${business.siteId}:auto-body-context-media`);
+  return [...assets].sort((left, right) => {
+    const priorityDelta = autoBodyContextAssetPriorityV1(left, business) - autoBodyContextAssetPriorityV1(right, business);
+    if (priorityDelta) return priorityDelta;
+    const leftRank = siteVariationSeedV2(`${seed}:${left.id}`);
+    const rightRank = siteVariationSeedV2(`${seed}:${right.id}`);
+    return leftRank - rightRank;
+  });
+}
+
+function isAutoBodyContextLibraryAssetV1(asset: ApprovedAssetLibraryAsset, business: BusinessProfile) {
+  return autoBodyContextAssetPriorityV1(asset, business) < 90;
+}
+
+function autoBodyContextAssetPriorityV1(asset: ApprovedAssetLibraryAsset, business: BusinessProfile) {
+  const family = asset.promptMetadata?.imageFamily ?? asset.tags.find((tag) => tag.startsWith("family_"))?.replace(/^family_/, "");
+  const template = asset.promptMetadata?.compositionTemplate;
+  if (template === "wide_environment" || family === "shop_environment") return 99;
+  if (family === "detail_texture" || template === "macro_detail" || template === "surface_texture" || template === "machine_detail") return 0;
+  if (family === "paint_refinish" || family === "collision_body") return 1;
+  if (family === "auto_glass" && /\b(glass|windshield|window)\b/i.test([business.name, ...business.categories, ...business.services].join(" "))) return 2;
+  return 99;
+}
+
 function libraryAssetAlt(asset: ApprovedAssetLibraryAsset) {
   return `${asset.promptMetadata.title}. Generic Lodesta category image, not this specific business.`;
 }
 
 function isPublicSafeMedia(asset: AssetReference) {
   return asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe";
-}
-
-/**
- * Protected-preview policy (product decision): privately stored scraped media
- * (reference_only, served only to authenticated admin/owner sessions) is
- * eligible for candidate composition so v1 sites show the business's real
- * photos. The public /sites route refuses to render any version whose media
- * decisions include reference_only assets — publishing requires per-photo
- * owner attestation, which converts assets to customer_granted and triggers
- * recompile.
- */
-function isProtectedPreviewEligibleMedia(asset: AssetReference) {
-  if (isPublicSafeMedia(asset)) return true;
-  if ((process.env.LODESTA_PROTECTED_PREVIEW_REAL_MEDIA ?? "on") === "off") return false;
-  return asset.rightsStatus === "reference_only" && /^\/api\/assets\/[^/]+\/scraped-/.test(asset.url);
 }
 
 function isLikelyLogoOnlyMedia(asset: AssetReference, business?: BusinessProfile) {
@@ -4910,12 +5493,7 @@ function isLikelyLogoOnlyMedia(asset: AssetReference, business?: BusinessProfile
 }
 
 function isLikelyCompositedAutoBodyGraphicMedia(asset: AssetReference) {
-  const aspectRatio = asset.width && asset.height ? asset.width / asset.height : undefined;
-  if (!aspectRatio) return false;
-  // Wide scraped repair graphics are commonly social before/after composites
-  // with black bars, motion backgrounds, and watermarks. They are useful as
-  // owner review references, but they consistently fail as premium site media.
-  return aspectRatio >= 1.55 && asset.rightsStatus === "reference_only";
+  return Boolean(asset.analysisV1?.warnings.includes("collage_or_composite") || asset.analysisV1?.imageKind === "text_heavy_graphic");
 }
 
 function isLikelyAutoBodyProofReferenceMedia(asset: AssetReference) {
@@ -4923,24 +5501,8 @@ function isLikelyAutoBodyProofReferenceMedia(asset: AssetReference) {
   return /\bbefore\b|\bafter\b|\bproof\b|\brepair\b|\bfinished\b|\bshowroom\b|\bportfolio\b|\bwork\b/.test(text) || isLikelyCompositedAutoBodyGraphicMedia(asset);
 }
 
-function isUsableFirstPartyContextMedia(asset: AssetReference) {
-  if (asset.width && asset.height && (asset.width < 500 || asset.height < 300)) return false;
-  return !isLikelyCompositedAutoBodyGraphicMedia(asset);
-}
-
 function strongestFirstPartyHeroPhoto(photos: AssetReference[]) {
-  return [...photos].sort((left, right) => firstPartyHeroScore(right) - firstPartyHeroScore(left))[0];
-}
-
-function firstPartyHeroScore(asset: AssetReference) {
-  if (!asset.width || !asset.height) return 0.35;
-  const aspect = asset.width / asset.height;
-  let score = Math.min(asset.width, 1600) / 1600;
-  if (aspect >= 1.15 && aspect <= 2.3) score += 1;
-  if (asset.width >= 900 && asset.height >= 500) score += 0.4;
-  if (aspect < 0.85) score -= 0.6;
-  if (isLikelyCompositedAutoBodyGraphicMedia(asset)) score -= 1;
-  return score;
+  return [...photos].sort((left, right) => firstPartyMediaScoreV1(right) - firstPartyMediaScoreV1(left))[0];
 }
 
 function prioritizeFirstPartyMediaForGallery(photos: AssetReference[], heroPhoto: AssetReference) {
@@ -4949,7 +5511,7 @@ function prioritizeFirstPartyMediaForGallery(photos: AssetReference[], heroPhoto
     heroPhoto,
     ...photos
       .filter((asset) => mediaIdentityKey(asset.url) !== heroKey)
-      .sort((left, right) => firstPartyHeroScore(right) - firstPartyHeroScore(left))
+      .sort((left, right) => firstPartyMediaScoreV1(right) - firstPartyMediaScoreV1(left))
   ];
 }
 
@@ -4964,151 +5526,17 @@ function mediaSourceForAsset(asset: AssetReference): MediaAssetDecisionV3["sourc
   return "first_party";
 }
 
-function themeForV3Business(business: BusinessProfile, mediaKind: SelectedV3Media["kind"]): Theme {
-  if (business.vertical === "restaurant") {
-    return {
-      paletteName: "v3-restaurant-warm",
-      colors: {
-        background: "#fdf8f1",
-        surface: "#fffdf8",
-        text: "#26190f",
-        muted: "#70614f",
-        primary: "#9a3412",
-        primaryText: "#ffffff",
-        accent: "#d99022",
-        border: "#e9dcc9"
-      },
-      typography: { heading: "magazine_grotesk", body: "magazine_grotesk" },
-      radius: "md",
-      density: "spacious",
-      mood: "warm"
-    };
-  }
-  if (business.vertical === "home_services") {
-    return {
-      paletteName: "v3-home-services-utility",
-      colors: {
-        background: "#f4f7f8",
-        surface: "#ffffff",
-        text: "#15222b",
-        muted: "#5a6b75",
-        primary: "#155e75",
-        primaryText: "#ffffff",
-        accent: "#e0a325",
-        border: "#d8e2e6"
-      },
-      typography: { heading: "precision_grotesk", body: "precision_grotesk" },
-      radius: "sm",
-      density: "spacious",
-      mood: "utilitarian"
-    };
-  }
-  if (business.vertical === "beauty_salon") {
-    return {
-      paletteName: "v3-beauty-premium",
-      colors: {
-        background: "#fbf7f5",
-        surface: "#fffdfb",
-        text: "#241a1a",
-        muted: "#6f5e5e",
-        primary: "#7c2d4e",
-        primaryText: "#ffffff",
-        accent: "#c9a36a",
-        border: "#ead9d3"
-      },
-      typography: { heading: "magazine_grotesk", body: "magazine_grotesk" },
-      radius: "md",
-      density: "spacious",
-      mood: "premium"
-    };
-  }
-  if (business.vertical === "auto_services") {
-    return {
-      paletteName: "v3-auto-services-utility",
-      colors: {
-        background: "#eef2f4",
-        surface: "#ffffff",
-        text: "#16181a",
-        muted: "#59646f",
-        primary: "#1f3a5f",
-        primaryText: "#ffffff",
-        accent: "#d94a1e",
-        border: "#d2dde4"
-      },
-      typography: { heading: "precision_grotesk", body: "precision_grotesk" },
-      radius: "sm",
-      density: "spacious",
-      mood: "utilitarian"
-    };
-  }
-  if (business.vertical === "auto_body") {
-    return {
-      paletteName: "v3-auto-precision",
-      colors: {
-        background: "#eef2f4",
-        surface: "#ffffff",
-        text: "#14181c",
-        muted: "#5a646d",
-        primary: "#17324a",
-        primaryText: "#ffffff",
-        accent: "#d94a1e",
-        border: "#d2dde4"
-      },
-      typography: { heading: "precision_grotesk", body: "precision_grotesk" },
-      radius: "sm",
-      density: "spacious",
-      mood: "editorial"
-    };
-  }
-  return {
-    paletteName: mediaKind === "media" ? "v3-local-media" : "v3-local-text-first",
-    colors: {
-      background: "#f3f6ef",
-      surface: "#fffdf7",
-      text: "#13231b",
-      muted: "#5f6a61",
-      primary: "#145c48",
-      primaryText: "#ffffff",
-      accent: "#c59d44",
-      border: "#d9dfd3"
-    },
-    typography: { heading: "magazine_grotesk", body: "magazine_grotesk" },
-    radius: "md",
-    density: "spacious",
-    mood: "editorial"
-  };
-}
-
 function serviceItemsForBusiness(business: BusinessProfile, deck?: GeneratedCopyDeckV2): StandardItemV3[] {
-  if (deck) {
-    const deckItems =
-      business.vertical === "auto_body" && business.services.length
-        ? deck.serviceItems.slice(0, business.services.length)
-        : deck.serviceItems;
-    return deckItems.map((item, index) => (
-      business.vertical === "auto_body" ? autoBodyDeckServiceItemForBusiness(item, business, index) : item
-    ));
+  if (deck && business.vertical === "auto_body" && business.services.length) {
+    return business.services.map((service) => {
+      const deckItem = deck.serviceItems.find((item) => serviceItemMatchesServiceNameV3(item, service));
+      return deckItem
+        ? { title: sentenceCasePhrase(service), body: deckItem.body }
+        : serviceItemForBusiness(service, business);
+    });
   }
+  if (deck) return deck.serviceItems;
   return serviceNamesForBusiness(business).map((service) => serviceItemForBusiness(service, business));
-}
-
-function autoBodyDeckServiceItemForBusiness(
-  item: Pick<StandardItemV3, "title" | "body">,
-  business: BusinessProfile,
-  index: number
-): Pick<StandardItemV3, "title" | "body"> {
-  const sourceService = business.services[index] ?? item.title;
-  const deterministic = autoBodyServiceItemForBusiness(sourceService);
-  if (/insurance|claim|deductible/i.test(`${deterministic.title} ${deterministic.body}`) && !autoBodyHasPublishableInsuranceServiceEvidence(business)) {
-    return {
-      title: "Repair questions",
-      body: "Call with where the vehicle was hit, whether it still drives normally, and which panels, lights, or trim look different."
-    };
-  }
-  return {
-    title: sentenceCasePhrase(sourceService),
-    body: deterministic.body
-  };
 }
 
 function serviceItemForBusiness(service: string, business: BusinessProfile): Pick<StandardItemV3, "title" | "body"> {
@@ -5120,58 +5548,8 @@ function serviceItemForBusiness(service: string, business: BusinessProfile): Pic
 }
 
 function autoBodyServiceItemForBusiness(service: string): Pick<StandardItemV3, "title" | "body"> {
-  if (/insurance|claim/i.test(service)) {
-    return {
-      title: "Insurance Claim Support",
-      body: "If insurance is involved, claim details stay connected to the vehicle and the repair plan so paperwork does not drift away from the work."
-    };
-  }
-  if (/collision|body/i.test(service)) {
-    return {
-      title: "Impact and Panel Repair",
-      body: "Panels, nearby lights, clips, bumper covers, and gaps are checked together so related accident damage is not missed."
-    };
-  }
-  if (/hail/i.test(service)) {
-    return {
-      title: "Hail Damage Repair",
-      body: "Roof, hood, door, rail, and trim dents are mapped together so hail damage is handled as a full-vehicle repair pattern."
-    };
-  }
-  if (/\bpaint\b|refinish/i.test(service)) {
-    return {
-      title: "Auto Paint and Refinishing",
-      body: "Scraped or repaired panels are matched against adjacent finish, edges, and trim so the blend disappears in daylight."
-    };
-  }
-  if (/scratch|scuff/i.test(service)) {
-    return {
-      title: "Scratch and Scuff Repair",
-      body: "The shop separates surface scuffs from paint or panel damage so the recommendation fits the depth, edge location, and trim nearby."
-    };
-  }
-  if (/glass|windshield|window/i.test(service)) {
-    return {
-      title: "Glass and Trim Damage",
-      body: "Broken or cracked glass is considered with nearby seals, trim, and body fit when damage reaches beyond the pane."
-    };
-  }
-  if (/\bdents?\b|\bpdr\b|paintless dent/i.test(service)) {
-    return {
-      title: "Paintless Dent Repair",
-      body: "Best for shallow dents with intact paint and clean panel access, so the original finish can stay in place."
-    };
-  }
-  if (/bumper/i.test(service)) {
-    return {
-      title: "Bumper and Panel Repair",
-      body: "Scuffs, cracks, loose clips, and shifted covers are checked with nearby lights and panels so the bumper sits cleanly again."
-    };
-  }
-  return {
-    title: service,
-    body: `${service} starts with the affected panels, visible changes, and whether the vehicle still drives normally.`
-  };
+  const title = sentenceCasePhrase(service);
+  return { title, body: autoBodyServiceDescriptionV1(service) };
 }
 
 /**
@@ -5335,13 +5713,7 @@ function serviceThumbnailGalleryForBusiness(
   const preferred = cleanGallery.slice(2);
   const fallback = cleanGallery.slice(1);
   const base = preferred.length >= visibleCount ? preferred : fallback;
-  const contextFallback = autoBodyFallbackContextMedia(business);
-  const fallbackGallery =
-    contextFallback.kind === "media"
-      ? galleryForSelectedMedia(contextFallback)
-          .filter((item) => !isAutoBodyProofMedia(item))
-      : [];
-  return normalizeMediaItems([...base, ...fallbackGallery], visibleCount);
+  return normalizeMediaItems(base, visibleCount);
 }
 
 function mediaIdentityKey(url: string) {
@@ -5380,7 +5752,7 @@ function serviceNamesForBusiness(business: BusinessProfile) {
   };
   for (const service of sourceServices) {
     if (!service.trim() || overlapsExisting(service)) continue;
-    if (business.vertical === "auto_body" && /insurance|claim|deductible/i.test(service) && !autoBodyHasPublishableInsuranceServiceEvidence(business)) continue;
+    if (business.vertical === "auto_body" && /insurance|claim|deductible|rental[ -]?car|(?:free\s+)?(?:quote|estimate)/i.test(service)) continue;
     names.push(service);
     if (names.length >= maxNames) break;
   }
@@ -5392,36 +5764,14 @@ function serviceNamesForBusiness(business: BusinessProfile) {
   return names;
 }
 
-function autoBodyEvidenceText(business: BusinessProfile): string {
-  return [business.description, ...business.services, ...(business.serviceHighlights ?? []), ...business.categories]
-    .filter(Boolean)
-    .join(" ");
-}
-
-function autoBodyHasPublishableInsuranceServiceEvidence(business: BusinessProfile): boolean {
-  if (business.vertical !== "auto_body") return false;
-  const serviceText = autoBodyEvidenceText(business);
-  if (!/\binsurance\b|\bclaim\b|\bdeductible\b/i.test(serviceText)) return false;
-  return /\b(insurance claims?|insurance claim support|works?\s+with\s+insurance|handles?\s+insurance\s+claims?|accepts?\s+insurance|direct\s+repair|drp|claim\s+(handling|process|repair)|insurance\s+(claims?|work|repairs?)\s+(handled|accepted|supported|managed))\b/i.test(serviceText);
-}
-
 function autoBodyHasGlassEvidence(business: BusinessProfile): boolean {
   if (business.vertical !== "auto_body") return false;
   return /\b(glass|windshield|window)\b/i.test([business.description, ...business.services].filter(Boolean).join(" "));
 }
 
-function autoBodyHasQuoteCtaEvidence(business: BusinessProfile): boolean {
-  if (business.vertical !== "auto_body") return false;
-  return /\b(?:free\s+)?(?:repair\s+)?(?:quote|estimate)\b|\brequest\s+(?:a\s+)?(?:quote|estimate)\b/i.test(autoBodyEvidenceText(business));
-}
-
-function autoBodyHasFreeQuoteEvidence(business: BusinessProfile): boolean {
-  if (business.vertical !== "auto_body") return false;
-  return /\bfree\s+(?:repair\s+)?(?:quote|estimate)\b/i.test(autoBodyEvidenceText(business));
-}
-
 function autoBodyBusinessStoryForBusiness(business: BusinessProfile): { heading: string; body: string } | undefined {
   if (business.vertical !== "auto_body" || !business.description?.trim()) return undefined;
+  if (!business.provenance.description?.verified) return undefined;
   const sourceText = business.description.trim();
   const foundedYear = sourceText.match(/\bfounded\s+in\s+(\d{4})\b/i)?.[1];
   const familyOwned = /\bfamily[-\s]?owned\b/i.test(sourceText);
@@ -5433,10 +5783,9 @@ function autoBodyBusinessStoryForBusiness(business: BusinessProfile): { heading:
     city ? `in ${city}` : "",
     foundedYear ? `since ${foundedYear}` : ""
   ].filter(Boolean);
-  const optionCopy = autoBodyHasPublishableInsuranceServiceEvidence(business) ? " The shop can keep insurance or self-pay questions tied to the vehicle details." : "";
   return {
     heading: `${headingParts.join(" ")}.`,
-    body: `${business.name} is a ${familyOwned ? "family-owned " : ""}${city ? `${city} ` : ""}auto body shop${foundedYear ? ` founded in ${foundedYear}` : ""} handling ${serviceSummary}.${optionCopy}`
+    body: `${business.name} is a ${familyOwned ? "family-owned " : ""}${city ? `${city} ` : ""}auto body shop${foundedYear ? ` founded in ${foundedYear}` : ""} handling ${serviceSummary}.`
   };
 }
 
@@ -5466,17 +5815,14 @@ function serviceBodyForBusiness(service: string, business: BusinessProfile) {
 }
 
 function processItemsForBusiness(business: BusinessProfile): StandardItemV3[] {
-  const autoBodyHasInsurance = autoBodyHasPublishableInsuranceServiceEvidence(business);
   const autoBodyItems = [
     {
       title: "Start with the whole hit area",
       body: "A good estimate looks past the obvious mark to nearby trim, lights, panel gaps, and paint edges so the repair matches what actually needs to line up again."
     },
     {
-      title: autoBodyHasInsurance ? "Review insurance and payment details" : "Choose the repair scope",
-      body: autoBodyHasInsurance
-        ? "If insurance is involved, the claim details and self-pay questions stay connected to the same visible repair scope before work begins."
-        : "The estimate separates what can be repaired from what may need parts, paint, or a closer look in the shop."
+      title: "Choose the repair scope",
+      body: "The estimate separates what can be repaired from what may need parts, paint, or a closer look in the shop."
     },
     {
       title: "Finish with fit and paint",
@@ -5520,39 +5866,35 @@ function processItemsForBusiness(business: BusinessProfile): StandardItemV3[] {
   return dedupeStandardItems(items.map((item, index) => ({ ...item, meta: String(index + 1).padStart(2, "0") })));
 }
 
-function quoteItemsForBusiness(business: BusinessProfile): QuoteItemV3[] {
-  return business.pressLinks
-    .map((link) => testimonialFromString(link))
-    .filter((item): item is QuoteItemV3 => Boolean(item))
-    .slice(0, 3);
+function quoteItemsForEvidence(evidenceLedger?: SiteEvidenceLedgerV1): QuoteItemV3[] {
+  return testimonialEvidenceItemsV1(evidenceLedger).map((item) => {
+    const location = reviewLocationFromEvidenceV1(item.source.url, item.source.pageTitle);
+    const suppliedAttribution = item.value.attribution?.trim();
+    return {
+      quote: item.value.quote ?? item.value.text,
+      attribution:
+        suppliedAttribution && !/^customer review$/i.test(suppliedAttribution)
+          ? suppliedAttribution
+          : location
+            ? `Customer, ${location}`
+            : "Website customer",
+      context: location ? "Published customer review" : "Business review page",
+      sourceHref: /^https?:\/\//i.test(item.source.url ?? "") ? item.source.url : undefined
+    };
+  });
 }
 
-function testimonialFromString(value: string): QuoteItemV3 | undefined {
-  const match = value.match(/^(?:testimonial|quote|review)\s*:\s*(.+)$/i);
-  if (!match) return undefined;
-  const [quoteText, attributionText] = match[1].split(/\s+(?:--|—|-)\s+/);
-  const quote = quoteText?.trim();
-  if (!quote) return undefined;
-  if (/^review\s*:/i.test(value) && !isRenderableCustomerReviewQuote(quote)) return undefined;
-  return {
-    quote,
-    attribution: attributionText?.trim() || "Customer review"
-  };
-}
-
-function isRenderableCustomerReviewQuote(value: string) {
-  if (value.length < 45 || value.length > 220) return false;
-  if (/@|©|all rights reserved/i.test(value)) return false;
-  if (/^(?:where|restore|from|texas weather|no matter|appointments?|ready to|get a|serving)\b/i.test(value)) return false;
-  if (/\b(original condition|major structural damage|insurance companies|repair process|smooth and hassle-free|expert craftsmanship|exceptional results)\b/i.test(value)) {
-    return false;
+function reviewLocationFromEvidenceV1(url: string | undefined, pageTitle: string | undefined) {
+  const titlePrefix = pageTitle?.split("|")[0]?.replace(/\b(?:customer )?reviews?\b/gi, "").replace(/[\s|:–—-]+$/g, "").trim();
+  if (titlePrefix && titlePrefix.length <= 60) return titlePrefix;
+  if (!url) return undefined;
+  try {
+    const segment = new URL(url).pathname.split("/").filter(Boolean).at(-1) ?? "";
+    const location = segment.replace(/-(?:customer-)?reviews?$/i, "").replace(/-/g, " ").replace(/\b\w/g, (character) => character.toUpperCase()).trim();
+    return location || undefined;
+  } catch {
+    return undefined;
   }
-  const positiveExperience =
-    /\b(highly recommend|recommend(?:ed)?|great (?:service|job|work|experience)|excellent (?:service|work|job)|amazing|professional|honest|helpful|friendly|perfect|happy|satisfied|thank(?:s| you)?)\b/i.test(
-      value
-    );
-  if (!positiveExperience) return false;
-  return /\b(i|me|my|we|our|they|their|them|mencia|shop|team|staff|owner|service|job|work|repair)\b/i.test(value);
 }
 
 function pricingItemsForBusiness(business: BusinessProfile): StandardItemV3[] {
@@ -5597,9 +5939,11 @@ function isOpenSevenDays(business: BusinessProfile): boolean {
   return dayCount >= 7;
 }
 
-function proofFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
+function proofFactsForBusiness(business: BusinessProfile, evidenceLedger?: SiteEvidenceLedgerV1): VisualFactV3[] {
   const hoursSummary = hoursSummaryForBusiness(business);
   const autoBodyServiceFact = autoBodyTopServiceFactForBusiness(business);
+  const trustFacts = trustEvidenceFactsV1(evidenceLedger);
+  const reviewFact = evidenceLedger ? sourceBackedReviewSummaryFactV1(business) : undefined;
   // Open-7-days is a selling point (demo-parity): promoted as an explicit
   // fact, grounded in the structured weekly schedule, never inferred.
   const openSeven = isOpenSevenDays(business);
@@ -5608,12 +5952,41 @@ function proofFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
     ...(business.address ? [{ label: "Location", value: locationLineForBusiness(business) }] : [])
   ];
   return [
+    ...trustFacts.slice(0, 1),
+    ...(reviewFact ? [reviewFact] : []),
+    ...trustFacts.slice(1),
     ...coreFacts,
     ...(openSeven ? [{ label: "Hours", value: "Open 7 days a week" }] : hoursSummary ? [{ label: "Hours", value: hoursSummary }] : []),
-    ...autoBodyProofFactsForBusiness(business),
     ...(autoBodyServiceFact ? [autoBodyServiceFact] : []),
     ...(business.serviceAreas.length && !business.address ? [{ label: "Serves", value: business.serviceAreas.slice(0, 2).join(", ") }] : [])
   ].slice(0, 4);
+}
+
+export function sourceBackedReviewSummaryFactV1(business: BusinessProfile): VisualFactV3 | undefined {
+  const summary = business.reviewsSummary;
+  if (!summary?.rating || !summary.count) return undefined;
+  if (!summary.sources.some((source) => source === "website_schema" || source === "owner")) return undefined;
+  const sourceUrl = business.provenance.reviewsSummary?.sourceUrl;
+  return {
+    label: summary.sources.includes("owner") ? "Verified reviews" : "Customer rating",
+    value: `${summary.rating}/5 · ${summary.count} reviews`,
+    ...(sourceUrl ? { href: sourceUrl } : {})
+  };
+}
+
+function trustEvidenceFactsV1(evidenceLedger?: SiteEvidenceLedgerV1): VisualFactV3[] {
+  const labels: Partial<Record<ReturnType<typeof trustEvidenceItemsV1>[number]["kind"], string>> = {
+    credential: "Credential",
+    warranty: "Warranty",
+    insurance_support: "Insurance",
+    award: "Recognition",
+    years_in_business: "Experience",
+    offer: "Offer"
+  };
+  return trustEvidenceItemsV1(evidenceLedger).map((item) => ({
+    label: labels[item.kind] ?? "Proof",
+    value: item.value.displayText ?? item.value.text
+  }));
 }
 
 function autoBodyTopServiceFactForBusiness(business: BusinessProfile): VisualFactV3 | undefined {
@@ -5628,32 +6001,13 @@ function autoBodyTopServiceFactForBusiness(business: BusinessProfile): VisualFac
   return { label: "Repairs", value: parts.slice(0, 3).join(" / ") };
 }
 
-function autoBodyProofFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
-  if (business.vertical !== "auto_body") return [];
-  const sourceText = [business.description, ...business.services, ...(business.serviceHighlights ?? [])].filter(Boolean).join(" ");
-  const hasInsurance = autoBodyHasPublishableInsuranceServiceEvidence(business);
-  const hasSelfPay = /\bself[-\s]?pay\b|out of pocket|payment options?/i.test(sourceText);
-  const facts: VisualFactV3[] = [];
-  if (autoBodyHasFreeQuoteEvidence(business)) {
-    facts.push({ label: "Quote", value: "Free repair quote", href: "#contact" });
-  } else if (autoBodyHasQuoteCtaEvidence(business)) {
-    facts.push({ label: "Quote", value: "Repair quote request", href: "#contact" });
-  }
-  if (hasInsurance && hasSelfPay) facts.push({ label: "Options", value: "Insurance and self-pay" });
-  else if (hasInsurance) facts.push({ label: "Insurance", value: "Claim details welcome" });
-  else if (hasSelfPay) facts.push({ label: "Payment", value: "Self-pay options" });
-  return facts;
-}
-
 function autoBodyRepairScopeFactsForBusiness(business: BusinessProfile): VisualFactV3[] {
   if (business.vertical !== "auto_body") return [];
-  const sourceText = [business.description, ...business.services, ...(business.serviceHighlights ?? [])].filter(Boolean).join(" ");
-  const hasInsurance = autoBodyHasPublishableInsuranceServiceEvidence(business);
   return [
     { label: "Impact area", value: "Wide and close views" },
     { label: "Body fit", value: "Panel gaps and trim" },
     { label: "Finish", value: "Paint edges" },
-    hasInsurance ? { label: "Claim notes", value: "Photos and details ready" } : { label: "Visit plan", value: "Driveability and timing" }
+    { label: "Visit plan", value: "Driveability and timing" }
   ];
 }
 
@@ -5704,14 +6058,10 @@ function contactFactsForBusiness(
           }
         ]),
     {
-      label: business.vertical === "auto_body" && autoBodyHasQuoteCtaEvidence(business) ? "Quote" : "Message",
+      label: business.vertical === "auto_body" ? "Estimate" : "Message",
       value:
         business.vertical === "auto_body"
-          ? autoBodyHasFreeQuoteEvidence(business)
-            ? "Free repair quote"
-            : autoBodyHasQuoteCtaEvidence(business)
-              ? "Repair quote request"
-              : "Repair request"
+          ? "Repair estimate request"
           : "Send a message",
       href: "#contact"
     }
@@ -5764,8 +6114,9 @@ function faqItemsForBusiness(business: BusinessProfile): FaqItemV3[] {
 }
 
 function autoBodyFaqItemsForBusiness(business: BusinessProfile): FaqItemV3[] {
-  const sourceText = autoBodyEvidenceText(business);
-  const hasInsurance = autoBodyHasPublishableInsuranceServiceEvidence(business);
+  const sourceText = [business.description, ...business.services, ...(business.serviceHighlights ?? []), ...business.categories]
+    .filter(Boolean)
+    .join(" ");
   const hasDent = /\bdent\b|\bhail\b|\bpdr\b|paintless dent/i.test(sourceText);
   const hasGlass = /\bglass\b|\bwindshield\b|\bwindow\b/i.test(sourceText);
   const hasPaint = /\bpaint\b|\brefinish\b|\bscratch\b/i.test(sourceText);
@@ -5774,12 +6125,6 @@ function autoBodyFaqItemsForBusiness(business: BusinessProfile): FaqItemV3[] {
   const items: FaqItemV3[] = [
     { question: "What should I have ready when I call?", answer: "Vehicle year, make, model, the damaged area, whether it drives, and any photos you already have." }
   ];
-  if (hasInsurance) {
-    items.push({
-      question: "What if insurance is involved?",
-      answer: "Have the claim number, adjuster contact, and vehicle details nearby so the first call starts with the right facts."
-    });
-  }
   if (hasDent) {
     items.push({
       question: "What helps with dent or hail questions?",
@@ -5885,7 +6230,7 @@ function autoBodyProofMediaSlot(items: SiteMediaItemV3[]): MediaSlotV3 {
 
 function heroActionsForBusiness(business: BusinessProfile, primaryOverride?: VisualCtaV3): VisualCtaV3[] {
   const primary = primaryOverride ?? primaryCtaForBusiness(business);
-  if (!primaryOverride && business.vertical === "auto_body" && autoBodyHasQuoteCtaEvidence(business) && business.phone) {
+  if (!primaryOverride && business.vertical === "auto_body" && business.phone) {
     return [
       primary,
       { label: "Call the shop", href: `tel:${phoneHref(business.phone)}`, style: "secondary" }
@@ -5902,8 +6247,8 @@ function heroActionsForBusiness(business: BusinessProfile, primaryOverride?: Vis
  * restaurants, booking for appointment trades, phone-first otherwise.
  */
 function primaryCtaForBusiness(business: BusinessProfile): VisualCtaV3 {
-  if (business.vertical === "auto_body" && autoBodyHasQuoteCtaEvidence(business)) {
-    return { label: autoBodyHasFreeQuoteEvidence(business) ? "Get a free quote" : "Get a quote", href: "#contact", style: "primary" };
+  if (business.vertical === "auto_body") {
+    return { label: "Request an estimate", href: "#contact", style: "primary" };
   }
   if (business.vertical === "restaurant" && business.orderingLinks[0]) {
     return { label: "Order online", href: business.orderingLinks[0], style: "primary" };
@@ -5915,7 +6260,7 @@ function primaryCtaForBusiness(business: BusinessProfile): VisualCtaV3 {
     return { label: "Book now", href: business.bookingLinks[0], style: "primary" };
   }
   return business.phone
-    ? { label: business.vertical === "auto_body" ? "Call the shop" : "Call now", href: `tel:${phoneHref(business.phone)}`, style: "primary" }
+    ? { label: "Call now", href: `tel:${phoneHref(business.phone)}`, style: "primary" }
     : { label: "Send details", href: "#contact", style: "primary" };
 }
 
@@ -5943,10 +6288,7 @@ function subheadlineForBusiness(business: BusinessProfile) {
     const shopLocation = business.address?.street ? ` from its ${shortStreetLabel(business.address.street).replace(/\.+$/, "")} shop` : location ? ` in ${location}` : "";
     const audience = business.address?.city ? `${business.address.city} drivers` : "drivers";
     const servicePhrase = autoBodyServicePhraseForBusiness(business);
-    const evidenceText = autoBodyEvidenceText(business);
-    const hasInsuranceAndSelfPay = autoBodyHasPublishableInsuranceServiceEvidence(business) && /\bself[-\s]?pay\b|out of pocket|payment options?/i.test(evidenceText);
-    const optionPhrase = hasInsuranceAndSelfPay ? " with insurance and self-pay options" : "";
-    return `${business.name} handles ${servicePhrase}${optionPhrase} for ${audience}${shopLocation}.`;
+    return `${business.name} handles ${servicePhrase} for ${audience}${shopLocation}.`;
   }
   if (business.vertical === "auto_services") {
     return `${business.name} handles ${services.toLowerCase()}${location ? ` in ${location}` : ""}. Pull in or call for a quick answer on price and timing.`;
@@ -6064,9 +6406,10 @@ function serviceHeadingForBusiness(business: BusinessProfile) {
 
 function serviceIntroForBusiness(business: BusinessProfile) {
   if (business.vertical === "auto_body") {
-    const city = business.address?.city;
-    const glassCopy = autoBodyHasGlassEvidence(business) ? ", glass" : "";
-    return `${business.name}${city ? ` in ${city}` : ""} handles the visible damage and the details around it: dents, hail marks, bumper hits, paint scuffs${glassCopy}, and panels that need to line up cleanly again.`;
+    const namedServices = business.services.slice(0, 3);
+    return namedServices.length
+      ? `Services include ${joinPlainList(namedServices.map((service) => service.toLowerCase()))}. Start an estimate with the damaged area and vehicle details.`
+      : "Start an estimate with the damaged area and vehicle details.";
   }
   if (business.vertical === "auto_services") return "Straightforward tire and auto work with the price confirmed before anything starts.";
   if (business.vertical === "restaurant") return "Scan the main options, then call or order with the timing and group size in mind.";

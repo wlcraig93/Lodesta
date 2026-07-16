@@ -19,6 +19,20 @@ export type StripeCheckoutSession = {
   };
 };
 
+export type StripeInvoice = {
+  id?: string;
+  customer?: unknown;
+  subscription?: unknown;
+  metadata?: {
+    claim_id?: string;
+    site_id?: string;
+  };
+  hosted_invoice_url?: string;
+  amount_due?: number;
+  currency?: string;
+  attempt_count?: number;
+};
+
 export function verifyStripeWebhookSignature(input: {
   payload: string;
   signatureHeader: string | null;
@@ -54,6 +68,10 @@ export function stripeStringId(value: unknown) {
 
 export function asStripeCheckoutSession(value: unknown): StripeCheckoutSession {
   return isRecord(value) ? (value as StripeCheckoutSession) : {};
+}
+
+export function asStripeInvoice(value: unknown): StripeInvoice {
+  return isRecord(value) ? (value as StripeInvoice) : {};
 }
 
 function parseStripeSignature(header: string) {

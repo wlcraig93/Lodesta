@@ -1,14 +1,15 @@
 -- Phase 1.5: claim verification levels, owner audit log, fact revisions.
 --
 -- Verification levels are honest about what they prove:
+--   unverified        — no checkout, publish, or owner power
 --   contact_verified  — code to the business's publicly listed number (access)
 --   owner_verified    — domain email / DNS proof / documentation (ownership)
 --   operator_verified — manual operator review (disputes, legal-sensitive)
 -- Higher-risk actions check the level; phone access alone cannot repoint a
 -- domain or delete data.
 
-alter table claims add column if not exists verification_level text not null default 'contact_verified'
-  check (verification_level in ('contact_verified', 'owner_verified', 'operator_verified'));
+alter table claims add column if not exists verification_level text not null default 'unverified'
+  check (verification_level in ('unverified', 'contact_verified', 'owner_verified', 'operator_verified'));
 alter table claims add column if not exists verification_method text;
 alter table claims add column if not exists verified_by text;
 alter table claims add column if not exists verified_at timestamptz;

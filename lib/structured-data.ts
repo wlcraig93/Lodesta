@@ -1,14 +1,20 @@
-import type { BusinessLocationRecord, BusinessProfile, SiteLocationBinding } from "./models";
+import type { BusinessLocationRecord, BusinessProfile, SiteLocationBinding, SiteModel } from "./models";
 
-export function makeLocalBusinessJsonLd(business: BusinessProfile) {
+type LocalBusinessJsonLdOptions = {
+  url?: string;
+};
+
+export function makeLocalBusinessJsonLd(business: BusinessProfile, options: LocalBusinessJsonLdOptions = {}) {
   if (!schemaEligible(business, "name")) return null;
 
   return compactJsonLd({
     "@context": "https://schema.org",
     "@type": schemaTypeForBusiness(business),
     name: business.name,
+    url: options.url,
     telephone: schemaEligible(business, "phone") ? business.phone : undefined,
     email: schemaEligible(business, "email", { requireVerified: true }) ? business.email : undefined,
+    image: schemaImageForBusiness(business),
     address: schemaEligible(business, "address") && business.address
       ? {
           "@type": "PostalAddress",
@@ -36,19 +42,20 @@ export function makeLocalBusinessJsonLd(business: BusinessProfile) {
           reviewCount: business.reviewsSummary.count
         }
       : undefined,
-    openingHours: schemaEligible(business, "hours") && business.hours
-      ? Object.entries(business.hours).map(([day, hours]) => `${day} ${hours}`)
-      : undefined,
+    openingHoursSpecification: schemaEligible(business, "hours") && business.hours ? openingHoursSpecifications(business.hours) : undefined,
+    hasOfferCatalog: schemaEligible(business, "services") && business.services.length ? serviceOfferCatalog(business.services) : undefined,
     sameAs: schemaEligible(business, "socialLinks") && business.socialLinks.length ? business.socialLinks : undefined
   });
 }
 
 export function makeLocalBusinessJsonLdForBundle(input: {
   business: BusinessProfile;
+  site?: Pick<SiteModel, "slug">;
+  url?: string;
   locations?: BusinessLocationRecord[];
   locationBindings?: SiteLocationBinding[];
 }) {
-  const base = makeLocalBusinessJsonLd(input.business);
+  const base = makeLocalBusinessJsonLd(input.business, { url: input.url ?? (input.site ? `/sites/${input.site.slug}` : undefined) });
   if (!base) return null;
   const locations = input.locations ?? [];
   if (locations.length <= 1) return base;
@@ -139,10 +146,110 @@ function locationJsonLd(business: BusinessProfile, location: BusinessLocationRec
     areaServed: verifiedLocation(location, "serviceAreas") && location.serviceAreas.length
       ? location.serviceAreas.map((area) => ({ "@type": "Place", name: area }))
       : undefined,
-    openingHours: verifiedLocation(location, "hours") && location.hours
-      ? Object.entries(location.hours).map(([day, hours]) => `${day} ${hours}`)
-      : undefined
+    openingHoursSpecification: verifiedLocation(location, "hours") && location.hours ? openingHoursSpecifications(location.hours) : undefined
   });
+}
+
+function schemaImageForBusiness(business: BusinessProfile) {
+  const asset = business.photos.find(isSchemaSafeImage) ?? (business.logo && isSchemaSafeImage(business.logo) ? business.logo : undefined);
+  return asset?.url;
+}
+
+function isSchemaSafeImage(asset: BusinessProfile["photos"][number]) {
+  return asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe";
+}
+
+function serviceOfferCatalog(services: string[]) {
+  return {
+    "@type": "OfferCatalog",
+    name: "Services",
+    itemListElement: services.slice(0, 12).map((service) => ({
+      "@type": "Offer",
+      itemOffered: {
+        "@type": "Service",
+        name: service
+      }
+    }))
+  };
+}
+
+function openingHoursSpecifications(hours: Record<string, string>) {
+  const specs = Object.entries(hours)
+    .map(([day, value]) => {
+      const parsed = parseHoursRange(value);
+      const dayOfWeek = schemaDayOfWeek(day);
+      if (!parsed || !dayOfWeek) return undefined;
+      return {
+        "@type": "OpeningHoursSpecification",
+        dayOfWeek,
+        opens: parsed.opens,
+        closes: parsed.closes
+      };
+    })
+    .filter((spec): spec is { "@type": "OpeningHoursSpecification"; dayOfWeek: string | string[]; opens: string; closes: string } => Boolean(spec));
+  return specs.length ? specs : undefined;
+}
+
+function schemaDayOfWeek(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized.includes("-")) {
+    const [start, end] = normalized.split(/\s*-\s*/, 2);
+    const startDay = schemaDayOfWeek(start);
+    const endDay = schemaDayOfWeek(end);
+    if (typeof startDay !== "string" || typeof endDay !== "string") return undefined;
+    const ordered = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const startIndex = ordered.indexOf(startDay);
+    const endIndex = ordered.indexOf(endDay);
+    if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return undefined;
+    return ordered.slice(startIndex, endIndex + 1);
+  }
+  const map: Record<string, string> = {
+    monday: "Monday",
+    mon: "Monday",
+    tuesday: "Tuesday",
+    tue: "Tuesday",
+    tues: "Tuesday",
+    wednesday: "Wednesday",
+    wed: "Wednesday",
+    thursday: "Thursday",
+    thu: "Thursday",
+    thur: "Thursday",
+    thurs: "Thursday",
+    friday: "Friday",
+    fri: "Friday",
+    saturday: "Saturday",
+    sat: "Saturday",
+    sunday: "Sunday",
+    sun: "Sunday"
+  };
+  return map[normalized];
+}
+
+function parseHoursRange(value: string) {
+  const normalized = value.replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  if (!normalized || /\bclosed\b/i.test(normalized)) return undefined;
+  const [openRaw, closeRaw] = normalized.split(/\s*-\s*/, 2);
+  if (!openRaw || !closeRaw) return undefined;
+  const opens = parseTime(openRaw);
+  const closes = parseTime(closeRaw);
+  return opens && closes ? { opens, closes } : undefined;
+}
+
+function parseTime(value: string) {
+  const match = value.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/);
+  if (!match) return undefined;
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const meridiem = match[3]?.replace(/\./g, "");
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) return undefined;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return undefined;
+    if (meridiem === "pm" && hour !== 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return undefined;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function schemaSafeReviewSummary(
@@ -167,7 +274,7 @@ function schemaTypeForBusiness(business: BusinessProfile) {
     case "landscaping":
       return "HomeAndConstructionBusiness";
     case "auto_body":
-      return "AutoRepair";
+      return "AutoBodyShop";
     case "beauty_salon":
       return "BeautySalon";
     case "veterinary":

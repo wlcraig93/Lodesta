@@ -38,6 +38,7 @@ import type {
   SiteCandidateStatus,
   SiteModel,
   SiteVersion,
+  WorkerHeartbeatRecord,
 } from "../models";
 import type {
   CreateClaimInput,
@@ -71,7 +72,8 @@ import {
   maxAttemptsFromPayload,
   retryDelayMs,
   runAfterFromPayload,
-  type JobExecutionContext
+  type JobExecutionContext,
+  type JobHeartbeatResult
 } from "../jobs";
 import { summarizeAnalytics } from "../analytics";
 import { mergeFindings, recommendFromAnalytics } from "../analytics-insights";
@@ -105,6 +107,13 @@ import {
   newOutboundProspect,
   summarizeOutbound
 } from "../outbound";
+import { claimVerificationSatisfies } from "../owner-access";
+import {
+  generationFailureDetail,
+  isRetryableGenerationFailure,
+  serializeGenerationFailure
+} from "../generation-failure";
+import { setWorkerCurrentJob } from "../worker-runtime";
 
 type SiteRow = {
   id: string;
@@ -400,6 +409,10 @@ type ClaimRow = {
   site_id: string;
   owner_user_id: string | null;
   owner_email: string | null;
+  verification_level: ClaimRecord["verificationLevel"];
+  verification_method: string | null;
+  verified_by: string | null;
+  verified_at: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_checkout_session_id: string | null;
@@ -507,6 +520,17 @@ type JobRow = {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+};
+
+type WorkerHeartbeatRow = {
+  worker_id: string;
+  pid: number;
+  host: string;
+  repository_mode: WorkerHeartbeatRecord["repositoryMode"];
+  started_at: string;
+  last_seen_at: string;
+  current_job_id: string | null;
+  current_job_kind: JobKind | null;
 };
 
 type PreviewTokenRow = {
@@ -733,6 +757,22 @@ export const supabaseRepository: LodestaRepository = {
       "Update site candidate bundle"
     );
     return row ? rowToSiteCandidate(row) : null;
+  },
+
+  async archiveSiteCandidates(candidateIds) {
+    const uniqueIds = Array.from(new Set(candidateIds.map((id) => id.trim()).filter(Boolean))).slice(0, 100);
+    if (!uniqueIds.length) return [];
+    const now = new Date().toISOString();
+    const rows = await requireData<SiteCandidateRow[]>(
+      getSupabaseAdminClient()
+        .from("site_candidates")
+        .update({ status: "archived", updated_at: now })
+        .in("id", uniqueIds)
+        .neq("status", "accepted")
+        .select("*"),
+      "Archive site candidates"
+    );
+    return rows.map(rowToSiteCandidate);
   },
 
   async acceptSiteCandidateAsSite(candidateId) {
@@ -1597,7 +1637,7 @@ export const supabaseRepository: LodestaRepository = {
   async applyAiEdit(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
-    const result = applyAiEditToBundle(bundle, input.message);
+    const result = await applyAiEditToBundle(bundle, input.message);
     if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
       if (result.mutated && result.draftVersionId) {
         const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
@@ -1612,6 +1652,7 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async createClaim(input) {
+    if (!claimVerificationSatisfies(input.verificationLevel)) return null;
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
     const acceptedAt = new Date().toISOString();
@@ -1625,11 +1666,19 @@ export const supabaseRepository: LodestaRepository = {
           site_id: input.siteId,
           owner_user_id: input.ownerUserId,
           owner_email: input.ownerEmail?.toLowerCase(),
+          verification_level: input.verificationLevel ?? "unverified",
+          verification_method: input.verificationMethod,
+          verified_by: input.verifiedBy,
+          verified_at: input.verifiedAt ?? (input.verificationLevel ? acceptedAt : null),
           status: "checkout_required",
           fact_verification: {
             verifiedFacts: input.verifiedFacts ?? [],
             acceptedTermsAt: input.acceptedTerms ? acceptedAt : undefined,
-            acceptedManagementAt: input.acceptedManagement ? acceptedAt : undefined
+            acceptedManagementAt: input.acceptedManagement ? acceptedAt : undefined,
+            assetRightsAcceptedAt: input.acceptedAssetRights ? acceptedAt : undefined,
+            attestedAssetIds: input.attestedAssetIds ?? [],
+            outboundCampaignId: input.outboundCampaignId,
+            outboundProspectId: input.outboundProspectId
           }
         })
         .select("*")
@@ -1854,6 +1903,14 @@ export const supabaseRepository: LodestaRepository = {
     if (campaignId) query = query.eq("campaign_id", campaignId);
     const rows = await requireData<OutboundProspectRow[]>(query, "List outbound prospects");
     return rows.map(rowToOutboundProspect);
+  },
+
+  async findOutboundProspectByPreviewToken(previewToken) {
+    const row = await requireMaybe<OutboundProspectRow>(
+      getSupabaseAdminClient().from("outbound_prospects").select("*").eq("preview_token", previewToken).maybeSingle(),
+      "Find outbound prospect by preview token"
+    );
+    return row ? rowToOutboundProspect(row) : null;
   },
 
   async recordOutboundEvent(input) {
@@ -2282,6 +2339,7 @@ export const supabaseRepository: LodestaRepository = {
     try {
       const jobContext: JobExecutionContext = {
         workerId,
+        heartbeatJob: heartbeatSupabaseJob,
         generateSite: supabaseJobGenerateSite,
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
         runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
@@ -2289,6 +2347,7 @@ export const supabaseRepository: LodestaRepository = {
         analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
         listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
         listInquiries: (siteId) => this.listInquiries(siteId),
+        listClaims: (siteId) => this.listClaims(siteId),
         listInquiryEvents: (inquiryId) => this.listInquiryEvents(inquiryId),
         processInquiryNotification: (input) => this.processInquiryNotification(input),
         processInquiryAiEnrichment: (input) => this.processInquiryAiEnrichment(input),
@@ -2296,7 +2355,9 @@ export const supabaseRepository: LodestaRepository = {
         updateProspectReport: (input) => this.updateProspectReport(input),
         cleanupAgentTelemetry: (input) => this.cleanupAgentTelemetry(input)
       };
-      const result = await executeJob(rowToJob(row), jobContext);
+      const claimedJob = rowToJob(row);
+      setWorkerCurrentJob(claimedJob);
+      const result = await executeJob(claimedJob, jobContext);
       const completedAt = new Date().toISOString();
       const completed = await requireData<JobRow>(
         getSupabaseAdminClient()
@@ -2318,13 +2379,22 @@ export const supabaseRepository: LodestaRepository = {
       return rowToJob(completed);
     } catch (error) {
       const completedAt = new Date().toISOString();
-      const retryable = row.attempts < row.max_attempts;
+      const detail = generationFailureDetail(error, {
+        stage: "queued",
+        code: "unknown_generation_failure",
+        jobId: row.id
+      });
+      const retryable = isRetryableGenerationFailure(detail) && row.attempts < Math.min(row.max_attempts, 2);
       const failed = await requireData<JobRow>(
         getSupabaseAdminClient()
           .from("jobs")
           .update({
             status: retryable ? "queued" : "failed",
             error: error instanceof Error ? error.message : "Unknown job error",
+            result: {
+              ...asRecord(row.result),
+              generationFailureDetail: serializeGenerationFailure(detail)
+            },
             run_after: retryable ? new Date(Date.now() + retryDelayMs(row.attempts)).toISOString() : row.run_after,
             completed_at: retryable ? null : completedAt,
             locked_by: null,
@@ -2338,6 +2408,8 @@ export const supabaseRepository: LodestaRepository = {
         retryable ? "Requeue failed job attempt" : "Mark job failed"
       );
       return rowToJob(failed);
+    } finally {
+      setWorkerCurrentJob(undefined);
     }
   },
 
@@ -2349,8 +2421,73 @@ export const supabaseRepository: LodestaRepository = {
       processed.push(job);
     }
     return processed;
+  },
+
+  async recordWorkerHeartbeat(heartbeat) {
+    const row = await requireData<WorkerHeartbeatRow>(
+      getSupabaseAdminClient()
+        .from("worker_heartbeats")
+        .upsert({
+          worker_id: heartbeat.workerId,
+          pid: heartbeat.pid,
+          host: heartbeat.host,
+          repository_mode: heartbeat.repositoryMode,
+          started_at: heartbeat.startedAt,
+          last_seen_at: heartbeat.lastSeenAt,
+          current_job_id: heartbeat.currentJobId ?? null,
+          current_job_kind: heartbeat.currentJobKind ?? null
+        })
+        .select("*")
+        .single(),
+      "Record worker heartbeat"
+    );
+    return rowToWorkerHeartbeat(row);
+  },
+
+  async listWorkerHeartbeats() {
+    const rows = await requireData<WorkerHeartbeatRow[]>(
+      getSupabaseAdminClient().from("worker_heartbeats").select("*").order("last_seen_at", { ascending: false }),
+      "List worker heartbeats"
+    );
+    return rows.map(rowToWorkerHeartbeat);
+  },
+
+  async requeueJob(jobId) {
+    const now = new Date().toISOString();
+    const row = await requireMaybe<JobRow>(
+      getSupabaseAdminClient()
+        .from("jobs")
+        .update({
+          status: "queued",
+          run_after: now,
+          locked_by: null,
+          locked_at: null,
+          updated_at: now,
+          error: "Job was manually requeued."
+        })
+        .eq("id", jobId)
+        .eq("status", "running")
+        .select("*")
+        .maybeSingle(),
+      "Requeue job"
+    );
+    return row ? { ok: true as const, job: rowToJob(row) } : { ok: false as const, reason: "Running job not found." };
   }
 };
+
+async function heartbeatSupabaseJob(jobId: string, workerId: string): Promise<JobHeartbeatResult> {
+  const now = new Date().toISOString();
+  const { data, error } = await getSupabaseAdminClient()
+    .from("jobs")
+    .update({ locked_at: now, updated_at: now })
+    .eq("id", jobId)
+    .eq("locked_by", workerId)
+    .eq("status", "running")
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return data ? { status: "ok" } : { status: "lock_lost" };
+}
 
 function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
   if (candidate.status === "blocked") {
@@ -3122,15 +3259,27 @@ function rowToClaim(row: ClaimRow): ClaimRecord {
     verifiedFacts?: string[];
     acceptedTermsAt?: string;
     acceptedManagementAt?: string;
+    assetRightsAcceptedAt?: string;
+    attestedAssetIds?: string[];
+    outboundCampaignId?: string;
+    outboundProspectId?: string;
   } | null;
   return {
     id: row.id,
     siteId: row.site_id,
     ownerUserId: row.owner_user_id ?? undefined,
     ownerEmail: row.owner_email ?? undefined,
+    verificationLevel: row.verification_level ?? "unverified",
+    verificationMethod: row.verification_method ?? undefined,
+    verifiedBy: row.verified_by ?? undefined,
+    verifiedAt: row.verified_at ?? undefined,
+    outboundCampaignId: factVerification?.outboundCampaignId,
+    outboundProspectId: factVerification?.outboundProspectId,
     verifiedFacts: factVerification?.verifiedFacts ?? [],
     acceptedTermsAt: factVerification?.acceptedTermsAt,
     acceptedManagementAt: factVerification?.acceptedManagementAt,
+    assetRightsAcceptedAt: factVerification?.assetRightsAcceptedAt,
+    attestedAssetIds: factVerification?.attestedAssetIds ?? [],
     claimedAt: row.claimed_at ?? undefined,
     status: row.status,
     createdAt: row.created_at,
@@ -3300,6 +3449,19 @@ function rowToJob(row: JobRow): JobRecord {
   };
 }
 
+function rowToWorkerHeartbeat(row: WorkerHeartbeatRow): WorkerHeartbeatRecord {
+  return {
+    workerId: row.worker_id,
+    pid: row.pid,
+    host: row.host,
+    repositoryMode: row.repository_mode,
+    startedAt: row.started_at,
+    lastSeenAt: row.last_seen_at,
+    currentJobId: row.current_job_id ?? undefined,
+    currentJobKind: row.current_job_kind ?? undefined
+  };
+}
+
 function rowToAgentRun(row: AgentRunRow): AgentRunRecord {
   const metadata = asRecord(row.metadata);
   return {
@@ -3434,6 +3596,7 @@ function applySiteCandidateFilters(query: any, filter: ListSiteCandidatesFilter)
 function applyAgentRunFilters(query: any, filter: ListAgentRunsFilter) {
   let next = query;
   if (filter.status) next = next.eq("status", filter.status);
+  if (filter.metadataJobId) next = next.contains("metadata", { jobId: filter.metadataJobId });
   if (filter.runType) next = next.eq("run_type", filter.runType);
   if (filter.agentType) next = next.eq("agent_type", filter.agentType);
   if (filter.source) next = next.eq("source", filter.source);

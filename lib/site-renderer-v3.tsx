@@ -58,6 +58,8 @@ type SiteRendererV3Props = {
    * scraped branding stays gated behind owner attestation there.
    */
   referenceBrandingEnabled?: boolean;
+  /** Scoped token for noindex preview packets to load private scraped media. */
+  assetAccessToken?: string;
 };
 
 type Cta = { label: string; href: string };
@@ -76,17 +78,21 @@ export function SiteRendererV3({
   formsEnabled = true,
   basePath,
   proofMode = "none",
-  referenceBrandingEnabled = false
+  referenceBrandingEnabled = false,
+  assetAccessToken
 }: SiteRendererV3Props) {
   // Custom-domain requests pass "" so nav never links back to platform URLs.
   const linkBase = basePath ?? `/sites/${site.slug}`;
   const page = version.pageComposition.pages.find((candidate) => candidate.slug === (pageSlug ?? "")) ?? version.pageComposition.pages[0];
   const rendererLocations = normalizeRendererLocations(business, locations, locationBindings);
-  const localBusinessJson = makeLocalBusinessJsonLdForBundle({
-    business,
-    locations: rendererLocations.locations,
-    locationBindings: rendererLocations.locationBindings
-  });
+  const localBusinessJson = tracking
+    ? makeLocalBusinessJsonLdForBundle({
+        business,
+        site,
+        locations: rendererLocations.locations,
+        locationBindings: rendererLocations.locationBindings
+      })
+    : undefined;
   if (!page) return null;
   // FAQ structured data only on claimed (tracked) renders: generated copy is
   // not pre-claim-verifiable, and unclaimed pages must emit no JSON-LD.
@@ -127,6 +133,7 @@ export function SiteRendererV3({
         firstVisualSection={firstVisualSection}
         linkBase={linkBase}
         referenceBrandingEnabled={referenceBrandingEnabled}
+        assetAccessToken={assetAccessToken}
       />
       <GoogleProofV3
         mode={proofMode}
@@ -144,6 +151,7 @@ export function SiteRendererV3({
           pageId={page.id}
           sectionPresentation={version.artDirection.sectionPresentation}
           linkBase={linkBase}
+          assetAccessToken={assetAccessToken}
         />
       ))}
       <FooterV3 business={business} version={version} linkBase={linkBase} artDirection={version.artDirection} />
@@ -163,7 +171,8 @@ function HeaderV3({
   version,
   firstVisualSection,
   linkBase,
-  referenceBrandingEnabled
+  referenceBrandingEnabled,
+  assetAccessToken
 }: {
   business: BusinessProfile;
   site?: SiteModel;
@@ -171,6 +180,7 @@ function HeaderV3({
   firstVisualSection?: VisualSectionV3;
   linkBase: string;
   referenceBrandingEnabled?: boolean;
+  assetAccessToken?: string;
 }) {
   const phoneHref = business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact";
   const headerLogo = headerLogoForBusiness(business.logo, referenceBrandingEnabled);
@@ -198,7 +208,7 @@ function HeaderV3({
       <a className="site-brand-v3" href={linkBase || "/"} aria-label={`${business.name} home`}>
         {headerLogo ? (
           <>
-            <img className={headerLogo.treatment === "wide" ? "site-brand-logo-v3" : "site-brand-mark-v3"} src={headerLogo.url} alt="" aria-hidden="true" />
+            <img className={headerLogo.treatment === "wide" ? "site-brand-logo-v3" : "site-brand-mark-v3"} src={previewAssetUrl(headerLogo.url, assetAccessToken)} alt="" aria-hidden="true" />
             {headerLogo.treatment === "mark" ? (
               <span className="site-brand-text-v3">
                 <strong>{business.name}</strong>
@@ -293,7 +303,21 @@ const headerDropdownBehaviorScriptV3 = `(() => {
     });
   };
   document.addEventListener("click", (event) => {
-    const current = event.target instanceof Element ? event.target.closest(".site-nav-services-v3") : null;
+    const target = event.target instanceof Element ? event.target : null;
+    const copyButton = target?.closest("[data-copy-address]");
+    if (copyButton instanceof HTMLElement) {
+      const value = copyButton.getAttribute("data-copy-address") || "";
+      if (value && navigator.clipboard?.writeText) {
+        const original = copyButton.textContent || "Copy address";
+        navigator.clipboard.writeText(value).then(() => {
+          copyButton.textContent = "Copied";
+          window.setTimeout(() => {
+            copyButton.textContent = original;
+          }, 1800);
+        }).catch(() => undefined);
+      }
+    }
+    const current = target?.closest(".site-nav-services-v3") ?? null;
     if (!current) closeAll();
   });
   document.addEventListener("keydown", (event) => {
@@ -325,7 +349,8 @@ function SectionV3({
   formsEnabled,
   pageId,
   sectionPresentation,
-  linkBase
+  linkBase,
+  assetAccessToken
 }: {
   family: string;
   variant: string;
@@ -336,6 +361,7 @@ function SectionV3({
   pageId?: string;
   sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
+  assetAccessToken?: string;
 }) {
   const visualSection = getVisualSectionV3(props);
   if (visualSection) {
@@ -350,6 +376,7 @@ function SectionV3({
         pageId={pageId}
         sectionPresentation={sectionPresentation}
         linkBase={linkBase}
+        assetAccessToken={assetAccessToken}
       />
     );
   }
@@ -364,7 +391,8 @@ export function VisualSectionRendererV3({
   formsEnabled = true,
   pageId,
   sectionPresentation,
-  linkBase
+  linkBase,
+  assetAccessToken
 }: {
   section: VisualSectionV3;
   violations?: VisualSectionConstraintViolationV3[];
@@ -374,6 +402,7 @@ export function VisualSectionRendererV3({
   pageId?: string;
   sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
+  assetAccessToken?: string;
 }) {
   const errorCount = violations.filter((violation) => violation.severity === "error").length;
   const renderState = visualSectionRenderStateV3(section);
@@ -441,7 +470,7 @@ export function VisualSectionRendererV3({
       style={
         {
           "--site-visual-grid-columns": renderState.gridColumns,
-          "--site-section-bg": sectionBackgroundCssV3(background),
+          "--site-section-bg": sectionBackgroundCssV3(background, assetAccessToken),
           "--site-section-fg": sectionForeground?.foreground ?? "#171512",
           "--site-section-muted": sectionForeground?.muted ?? "rgba(23, 21, 18, 0.72)",
           "--site-section-label": lightForegroundSection ? sectionForeground?.foreground ?? "#ffffff" : "var(--site-v3-primary)",
@@ -456,7 +485,7 @@ export function VisualSectionRendererV3({
         } as React.CSSProperties
       }
     >
-      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} sectionPresentation={sectionPresentation} linkBase={linkBase} />
+      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} sectionPresentation={sectionPresentation} linkBase={linkBase} assetAccessToken={assetAccessToken} />
     </section>
   );
 }
@@ -467,7 +496,8 @@ function VisualTemplateSlotsRendererV3({
   formsEnabled,
   pageId,
   sectionPresentation,
-  linkBase
+  linkBase,
+  assetAccessToken
 }: {
   section: VisualSectionV3;
   business?: BusinessProfile;
@@ -475,6 +505,7 @@ function VisualTemplateSlotsRendererV3({
   pageId?: string;
   sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
+  assetAccessToken?: string;
 }) {
   const effectiveSectionPresentation = section.presentation ?? sectionPresentation;
   switch (section.templateId) {
@@ -485,7 +516,7 @@ function VisualTemplateSlotsRendererV3({
         <>
           <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
           {section.options.heroLayout === "text_first" ? null : (
-            <SlotBlockV3 role="hero_media" kind="media">{renderMediaSlotV3(section.slots.media, mediaPresentation, heroMediaCropForOptions(section), heroMediaRadiusForOptions(section))}</SlotBlockV3>
+            <SlotBlockV3 role="hero_media" kind="media">{renderMediaSlotV3(section.slots.media, mediaPresentation, heroMediaCropForOptions(section), heroMediaRadiusForOptions(section), assetAccessToken)}</SlotBlockV3>
           )}
           {section.slots.facts && section.options.proofPlacement !== "none" ? <SlotBlockV3 role="hero_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, factsPresentation)}</SlotBlockV3> : null}
         </>
@@ -504,7 +535,7 @@ function VisualTemplateSlotsRendererV3({
     case "split_media":
       return (
         <>
-          <SlotBlockV3 role="story_media" kind="media">{renderMediaSlotV3(section.slots.media, "single", "portrait", "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="story_media" kind="media">{renderMediaSlotV3(section.slots.media, "single", "portrait", "soft", assetAccessToken)}</SlotBlockV3>
           <SlotBlockV3 role="story_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
           {section.slots.facts ? <SlotBlockV3 role="story_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
         </>
@@ -515,7 +546,7 @@ function VisualTemplateSlotsRendererV3({
         <>
           <SlotBlockV3 role="intro_grid_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
           <SlotBlockV3 role="intro_grid_items" kind="list">
-            {renderStandardItemsSlotV3(section.slots.items.items, introGridServicesPresentation, linkBase, { showMeta: false })}
+            {renderStandardItemsSlotV3(section.slots.items.items, introGridServicesPresentation, linkBase, { showMeta: false, assetAccessToken })}
           </SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="intro_grid_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
@@ -524,14 +555,14 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="rows_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          <SlotBlockV3 role="rows_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "program_rows")}</SlotBlockV3>
+          <SlotBlockV3 role="rows_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, "program_rows", linkBase, { assetAccessToken })}</SlotBlockV3>
         </>
       );
     case "numbered_steps":
       return (
         <>
           <SlotBlockV3 role="steps_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          <SlotBlockV3 role="steps_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, section.options.stepTreatment ?? "stepper_vertical")}</SlotBlockV3>
+          <SlotBlockV3 role="steps_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, section.options.stepTreatment ?? "stepper_vertical", undefined, { assetAccessToken })}</SlotBlockV3>
         </>
       );
     case "stat_band": {
@@ -561,7 +592,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="proof_pair_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="proof_pair_media" kind="media">{renderProofPairSlotV3(section.slots.media)}</SlotBlockV3>
+          <SlotBlockV3 role="proof_pair_media" kind="media">{renderProofPairSlotV3(section.slots.media, assetAccessToken)}</SlotBlockV3>
           {section.slots.facts ? <SlotBlockV3 role="proof_pair_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
         </>
       );
@@ -569,7 +600,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="media_feature_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="media_feature_image" kind="media">{renderMediaSlotV3(section.slots.media, "single", "wide", "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="media_feature_image" kind="media">{renderMediaSlotV3(section.slots.media, "single", "wide", "soft", assetAccessToken)}</SlotBlockV3>
         </>
       );
     case "media_mosaic":
@@ -578,7 +609,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="gallery_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="gallery_mosaic" kind="media">{renderMediaSlotV3(gallerySlot, galleryPresentation, mediaMosaicCropForOptions(section), "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="gallery_mosaic" kind="media">{renderMediaSlotV3(gallerySlot, galleryPresentation, mediaMosaicCropForOptions(section), "soft", assetAccessToken)}</SlotBlockV3>
         </>
       );
     case "quote_wall":
@@ -616,7 +647,12 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="service_index_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          <SlotBlockV3 role="service_index_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, serviceIndexPresentationForOptions(section), linkBase, { showMeta: false })}</SlotBlockV3>
+          {business?.vertical === "auto_body" ? (
+            <SlotBlockV3 role="auto_body_schematic" kind="facts">
+              <AutoBodyRepairSchematicV3 />
+            </SlotBlockV3>
+          ) : null}
+          <SlotBlockV3 role="service_index_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, serviceIndexPresentationForOptions(section), linkBase, { showMeta: false, assetAccessToken })}</SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="service_index_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
@@ -624,7 +660,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="case_study_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          <SlotBlockV3 role="case_study_media" kind="media">{renderMediaSlotV3(section.slots.media, caseStudyPresentationForOptions(section), caseStudyCropForOptions(section), "soft")}</SlotBlockV3>
+          <SlotBlockV3 role="case_study_media" kind="media">{renderMediaSlotV3(section.slots.media, caseStudyPresentationForOptions(section), caseStudyCropForOptions(section), "soft", assetAccessToken)}</SlotBlockV3>
           {section.slots.facts ? <SlotBlockV3 role="case_study_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, "inline_strip")}</SlotBlockV3> : null}
         </>
       );
@@ -632,7 +668,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="comparison_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          <SlotBlockV3 role="comparison_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, comparisonPresentationForOptions(section), linkBase, { showMeta: true })}</SlotBlockV3>
+          <SlotBlockV3 role="comparison_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, comparisonPresentationForOptions(section), linkBase, { showMeta: true, assetAccessToken })}</SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="comparison_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
@@ -640,7 +676,7 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="team_story_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
-          {section.slots.media && section.options.teamStoryTreatment !== "founder_card" ? <SlotBlockV3 role="team_story_media" kind="media">{renderMediaSlotV3(section.slots.media, teamStoryPresentationForOptions(section), teamStoryCropForOptions(section), "soft")}</SlotBlockV3> : null}
+          {section.slots.media && section.options.teamStoryTreatment !== "founder_card" ? <SlotBlockV3 role="team_story_media" kind="media">{renderMediaSlotV3(section.slots.media, teamStoryPresentationForOptions(section), teamStoryCropForOptions(section), "soft", assetAccessToken)}</SlotBlockV3> : null}
           {section.slots.facts ? <SlotBlockV3 role="team_story_facts" kind="facts">{renderFactsSlotV3(section.slots.facts, section.options.teamStoryTreatment === "team_strip" ? "trust_bar" : "inline_strip")}</SlotBlockV3> : null}
         </>
       );
@@ -714,7 +750,7 @@ function VisualTemplateSlotsRendererV3({
                   {primary.addressLine ? <span className="site-location-showcase-map-address-v3">{primary.addressLine}</span> : null}
                 </div>
               ) : primary?.addressLine ? (
-                <div className="site-location-showcase-map-fallback-v3" aria-hidden="true">
+                <div className="site-location-showcase-map-fallback-v3" role="img" aria-label={`Location map reference for ${fallbackAddress || primary.label}`}>
                   <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-a" />
                   <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-b" />
                   <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-c" />
@@ -757,6 +793,11 @@ function VisualTemplateSlotsRendererV3({
                     Get directions
                   </a>
                 ) : null}
+                {primary?.addressLine ? (
+                  <button className="site-button-v3 site-button-v3-secondary" type="button" data-copy-address={primary.addressLine}>
+                    Copy address
+                  </button>
+                ) : null}
                 {primary?.phone ? (
                   <a className="site-button-v3 site-button-v3-secondary" href={`tel:${phoneHrefValue(primary.phone)}`}>
                     Call {formatPhone(primary.phone)}
@@ -794,6 +835,7 @@ function VisualTemplateSlotsRendererV3({
     case "contact_split": {
       const contactFactsPresentation = contactFactsPresentationForOptions(section, effectiveSectionPresentation);
       const contactAction = section.slots.action ?? (business ? contactActionForMode(section.options.ctaMode ?? "phone", business) : undefined);
+      const rendersForm = Boolean(business && section.options.formComplexity !== "none");
       return (
         <>
           <SlotBlockV3 role="contact_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
@@ -803,7 +845,7 @@ function VisualTemplateSlotsRendererV3({
               <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} formComplexity={section.options.formComplexity ?? "short"} />
             </SlotBlockV3>
           ) : null}
-          {contactAction ? <SlotBlockV3 role="contact_action" kind="action_card">{renderActionSlotV3(contactAction)}</SlotBlockV3> : null}
+          {contactAction && !rendersForm ? <SlotBlockV3 role="contact_action" kind="action_card">{renderActionSlotV3(contactAction)}</SlotBlockV3> : null}
         </>
       );
     }
@@ -925,7 +967,7 @@ function teamStoryCropForOptions(section: TeamStoryRenderableSectionV3): "portra
 
 function contactFactsPresentationForOptions(section: ContactSplitRenderableSectionV3, presentation: SectionPresentationMapV3 | undefined): FactsPresentationIdV3 {
   if (section.options.proofSidebar === "hours" || section.options.proofSidebar === "location") return "stacked";
-  if (section.options.proofSidebar === "response_expectation") return "inline_strip";
+  if (section.options.proofSidebar === "response_expectation") return "stacked";
   return presentation?.contactFacts ?? "stacked";
 }
 
@@ -1247,13 +1289,19 @@ function renderActionsV3(actions: VisualCtaV3[], markHeroCta = false) {
   );
 }
 
-function renderMediaSlotV3(slot: MediaSlotV3, presentation: "single" | MediaPresentationIdV3, crop: "portrait" | "landscape" | "wide", radius: "none" | "soft") {
+function renderMediaSlotV3(
+  slot: MediaSlotV3,
+  presentation: "single" | MediaPresentationIdV3,
+  crop: "portrait" | "landscape" | "wide",
+  radius: "none" | "soft",
+  assetAccessToken?: string
+) {
   const captionMode = mediaCaptionMode(slot);
   return (
     <div className="site-visual-media-v3" data-presentation={presentation} data-crop={crop} data-tablet-crop="wide" data-mobile-crop="wide" data-radius={radius} data-caption={captionMode}>
       {slot.items.map((item, index) => (
         <figure key={`${item.url}:${item.label}`} data-crop-intent={item.cropIntent} data-media-index={index} data-media-label={item.label}>
-          <img src={item.url} alt="" style={mediaObjectPosition(slot.focalPoint)} data-crop-intent={item.cropIntent} data-media-index={index} />
+          <img src={previewAssetUrl(item.url, assetAccessToken)} alt="" style={mediaObjectPosition(slot.focalPoint)} data-crop-intent={item.cropIntent} data-media-index={index} />
           {captionMode !== "none" ? publicFigcaption(item.publicCaption) : null}
         </figure>
       ))}
@@ -1261,13 +1309,13 @@ function renderMediaSlotV3(slot: MediaSlotV3, presentation: "single" | MediaPres
   );
 }
 
-function renderProofPairSlotV3(slot: MediaSlotV3) {
+function renderProofPairSlotV3(slot: MediaSlotV3, assetAccessToken?: string) {
   const items = slot.items.slice(0, 2);
   return (
     <div className="site-proof-pair-v3">
       {items.map((item, index) => (
         <figure key={`${item.url}:${item.label}`} data-media-index={index} data-media-label={item.label}>
-          <img src={item.url} alt="" style={mediaObjectPosition(slot.focalPoint)} data-media-index={index} />
+          <img src={previewAssetUrl(item.url, assetAccessToken)} alt="" style={mediaObjectPosition(slot.focalPoint)} data-media-index={index} />
           {publicFigcaption(item.publicCaption ?? (index === 0 ? "Before" : "After"))}
         </figure>
       ))}
@@ -1292,7 +1340,35 @@ function renderActionSlotV3(content: ActionSlotV3) {
   );
 }
 
-function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: ListPresentationIdV3, linkBase?: string, options?: { showMeta?: boolean }) {
+function AutoBodyRepairSchematicV3() {
+  return (
+    <div className="site-auto-body-schematic-v3" aria-hidden="true">
+      <div className="site-auto-body-schematic-head-v3">
+        <span>Repair path</span>
+        <strong>Body + finish</strong>
+      </div>
+      <div className="site-auto-body-schematic-car-v3">
+        <i className="site-auto-body-schematic-wheel-v3 site-auto-body-schematic-wheel-v3-front" />
+        <i className="site-auto-body-schematic-wheel-v3 site-auto-body-schematic-wheel-v3-rear" />
+        <i className="site-auto-body-schematic-marker-v3 site-auto-body-schematic-marker-v3-a" />
+        <i className="site-auto-body-schematic-marker-v3 site-auto-body-schematic-marker-v3-b" />
+      </div>
+      <div className="site-auto-body-schematic-stages-v3">
+        <span>Inspect</span>
+        <span>Align</span>
+        <span>Refinish</span>
+        <span>Review</span>
+      </div>
+    </div>
+  );
+}
+
+function renderStandardItemsSlotV3(
+  items: StandardItemV3[],
+  presentation: ListPresentationIdV3,
+  linkBase?: string,
+  options?: { showMeta?: boolean; assetAccessToken?: string }
+) {
   const showMeta = options?.showMeta ?? presentation !== "card_grid";
   return (
     <div className="site-visual-list-v3" data-presentation={presentation}>
@@ -1300,7 +1376,7 @@ function renderStandardItemsSlotV3(items: StandardItemV3[], presentation: ListPr
         <article key={`${item.title}:${item.href ?? ""}:${index}`} data-item-index={index} data-item-title={item.title} data-item-has-media={item.mediaUrl ? "true" : undefined}>
           {item.mediaUrl ? (
             <figure style={itemMediaCropStyle(item, presentation)} data-item-index={index} data-media-index={index}>
-              <img src={item.mediaUrl} alt="" data-item-index={index} data-media-index={index} />
+              <img src={previewAssetUrl(item.mediaUrl, options?.assetAccessToken)} alt="" data-item-index={index} data-media-index={index} />
             </figure>
           ) : null}
           {showMeta && item.meta ? <span data-copy-part="item_meta">{item.meta}</span> : null}
@@ -1381,6 +1457,11 @@ function renderQuoteItemsSlotV3(items: QuoteItemV3[]) {
           <span>{item.context ?? "Detail"}</span>
           <h3>{item.quote}</h3>
           {item.attribution ? <p>{item.attribution}</p> : null}
+          {item.sourceHref ? (
+            <a className="site-review-source-v3" href={item.sourceHref} target="_blank" rel="noreferrer">
+              View source review
+            </a>
+          ) : null}
         </article>
       ))}
     </div>
@@ -2045,11 +2126,11 @@ function ContactFormV3({
       <input type="hidden" name="formId" value="form_contact" disabled={!formsEnabled} />
       <input type="hidden" name="pageId" value={pageId ?? "home"} disabled={!formsEnabled} />
       <label>Name<input name="name" autoComplete="name" placeholder="Your name" /></label>
-      <label>Phone<input name="phone" type="tel" autoComplete="tel" placeholder={business.phone ? formatPhone(business.phone) : "Best callback number"} /></label>
+      <label>Phone<input name="phone" type="tel" autoComplete="tel" placeholder="Your phone number" /></label>
       {detailed ? <label>Email<input name="email" type="email" autoComplete="email" placeholder="you@example.com" /></label> : null}
       {business.vertical === "auto_body" && detailed ? (
         <>
-          <label>Damage or service<input name="vehicle_issue" autoComplete="off" placeholder="Panel, paint, dent, glass..." /></label>
+          <label>Damage or service<input name="vehicle_issue" autoComplete="off" placeholder="Describe the damage" /></label>
           <label>
             Preferred contact
             <select name="preferred_contact" defaultValue="phone">
@@ -2140,7 +2221,7 @@ function sectionFrameClass(section: VisualSectionV3) {
     .join(" ");
 }
 
-function sectionBackgroundCssV3(background: SectionBackgroundOptionV3): string {
+function sectionBackgroundCssV3(background: SectionBackgroundOptionV3, assetAccessToken?: string): string {
   if (background.kind === "solid") {
     const values: Record<"page" | "surface" | "dark" | "brand", string> = {
       page: "var(--site-v3-bg)",
@@ -2156,8 +2237,18 @@ function sectionBackgroundCssV3(background: SectionBackgroundOptionV3): string {
     }
     return "linear-gradient(180deg, var(--site-v3-surface) 0%, color-mix(in srgb, var(--site-v3-bg) 84%, var(--site-v3-accent) 16%) 100%)";
   }
-  const image = `url("${cssUrlValueV3(background.url)}")`;
+  const image = `url("${cssUrlValueV3(previewAssetUrl(background.url, assetAccessToken))}")`;
   return `linear-gradient(0deg, rgba(12, 12, 10, 0.8), rgba(12, 12, 10, 0.26)), ${image}`;
+}
+
+function previewAssetUrl(value: string, assetAccessToken?: string) {
+  if (!assetAccessToken) return value;
+  const [pathAndQuery, hash = ""] = value.split("#", 2);
+  const [path, query = ""] = pathAndQuery.split("?", 2);
+  if (!/^\/api\/assets\/[^/?#]+\/scraped-[^/?#]+$/i.test(path)) return value;
+  const params = new URLSearchParams(query);
+  params.set("previewToken", assetAccessToken);
+  return `${path}?${params.toString()}${hash ? `#${hash}` : ""}`;
 }
 
 function cssUrlValueV3(value: string) {
@@ -2386,7 +2477,7 @@ const wordmarkVariantByPairing: Record<SiteArtDirectionFontPairingIdV3, Wordmark
   display_sans_humanist: "dot_lead",
   condensed_service_sans: "two_tone",
   warm_editorial_sans: "underline",
-  precision_grotesk: "monogram_chip",
+  precision_grotesk: "two_tone",
   friendly_rounded: "accent_period",
   magazine_grotesk: "underline",
   quiet_serif: "plain"

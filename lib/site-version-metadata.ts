@@ -109,6 +109,7 @@ export function summarizeRenderInspection(result: RenderInspectionResult): {
 
 export function makePendingGenerationQa(siteModelHash: string): GenerationQaMetadata {
   return {
+    schemaVersion: "generation-qa-v4",
     readiness: "pending",
     siteModelHash,
     blockers: [],
@@ -128,6 +129,8 @@ function renderUsedBusinessFields(profile: BusinessProfile) {
     geo: profile.geo,
     hours: profile.hours,
     services: profile.services,
+    credentials: profile.credentials,
+    offers: profile.offers,
     serviceAreas: profile.serviceAreas,
     socialLinks: profile.socialLinks,
     bookingLinks: profile.bookingLinks,

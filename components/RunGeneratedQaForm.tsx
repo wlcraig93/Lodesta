@@ -21,14 +21,14 @@ export function RunGeneratedQaForm({ siteId, versionId }: RunGeneratedQaFormProp
           const response = await fetch("/api/generated-qa/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ siteId, versionId, autoRepair: true })
+            body: JSON.stringify({ siteId, versionId })
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) {
             setMessage(payload.error ?? "Generated QA failed.");
             return;
           }
-          setMessage(payload.repaired ? "Generated QA ran and applied one repair pass." : "Generated QA ran.");
+          setMessage("Generated QA ran.");
           window.location.reload();
         });
       }}

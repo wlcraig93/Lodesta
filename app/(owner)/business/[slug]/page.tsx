@@ -48,6 +48,8 @@ export default async function BusinessProfilePage({ params }: { params: Promise<
           address: profile.address,
           hours: profile.hours,
           serviceAreas: profile.serviceAreas,
+          credentials: profile.credentials ?? [],
+          offers: profile.offers ?? [],
           bookingLinks: profile.bookingLinks,
           orderingLinks: profile.orderingLinks,
           socialLinks: profile.socialLinks,

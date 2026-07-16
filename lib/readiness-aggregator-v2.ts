@@ -3,7 +3,6 @@ import type {
   GenerationQaReadiness,
   GenerationQaWarning
 } from "./models";
-import { deriveGenerationQaReadinessV2 } from "./generated-site-v2";
 
 export type ReadinessAggregatorV2Input = {
   checked: boolean;
@@ -29,6 +28,16 @@ export function aggregateReadinessV2(input: ReadinessAggregatorV2Input): Readine
     blockers,
     warnings: input.warnings ?? []
   };
+}
+
+function deriveGenerationQaReadinessV2(input: {
+  blockers: GenerationQaBlocker[];
+  checked: boolean;
+  unavailable?: boolean;
+}): GenerationQaReadiness {
+  if (input.unavailable) return "unavailable";
+  if (!input.checked) return "pending";
+  return input.blockers.some((blocker) => blocker.severity !== "warning") ? "blocked" : "ready";
 }
 
 function dedupeBlockers(blockers: GenerationQaBlocker[]) {

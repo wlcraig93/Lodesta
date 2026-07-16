@@ -6,11 +6,11 @@ import { canonicalUrlForPage } from "./public-site-seo";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
 import { withBusinessBundleFields } from "./business-model";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
-import { assertSiteVersionV3, type PageV3 } from "./site-version-v3";
+import { assertPublicSiteVersionV3, type PageV3 } from "./site-version-v3";
 
 export function siteLlmsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
   if (!isIndexableSite(bundle, claims)) return null;
-  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published llms version");
+  const version = assertPublicSiteVersionV3(getPublishedVersion(bundle.siteModel), "published llms version");
   const lines = [
     `# ${markdownText(bundle.businessProfile.name)}`,
     "",

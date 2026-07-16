@@ -1670,11 +1670,22 @@ export function isAssetLibraryAssetAllowedForBusiness(
     return true;
   }
   if (business.vertical === "auto_body") {
-    if (asset.vertical === "auto_body") return family === "collision_body" || family === "paint_refinish" || family === "detail_texture" || family === "auto_glass";
-    if (asset.vertical === "auto_services") return family === "auto_glass";
+    if (asset.promptMetadata?.compositionTemplate === "wide_environment") return false;
+    if (asset.vertical === "auto_body") {
+      if (family === "detail_texture" || family === "collision_body" || family === "paint_refinish") return true;
+      return family === "auto_glass" && businessHasGlassFitV1(business);
+    }
+    if (asset.vertical === "auto_services") {
+      if (family === "detail_texture") return true;
+      return family === "auto_glass" && businessHasGlassFitV1(business);
+    }
     return false;
   }
   return asset.vertical === business.vertical;
+}
+
+function businessHasGlassFitV1(business: Pick<BusinessProfile, "name" | "categories" | "services">) {
+  return /\b(glass|windshield|window)\b/i.test([business.name, ...business.categories, ...business.services].join(" "));
 }
 
 function assetImageFamily(asset: ApprovedAssetLibraryAsset): string | undefined {

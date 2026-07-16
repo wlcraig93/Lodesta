@@ -104,15 +104,15 @@ function brandCueReportV2(bundle: SiteBundle): BrandCueReportV2 {
 }
 
 function brandDirectionReportV2(bundle: SiteBundle, cues: BrandCueReportV2, version: SiteVersion | undefined): BrandDirectionReportV2 {
-  const selected = bundle.presenceAssessment.designDirections?.find((direction) => direction.selected) ?? bundle.presenceAssessment.designDirections?.[0];
-  const strategy = selected?.strategy ?? defaultStrategyForVertical(bundle.businessProfile.vertical);
+  const strategy = defaultStrategyForVertical(bundle.businessProfile.vertical);
+  const designSystem = bundle.presenceAssessment.siteDirectorPlanV1?.designSystem;
   return {
     id: `brand_direction_${bundle.businessProfile.siteId}`,
     strategy,
-    label: selected?.label ?? labelForStrategy(strategy),
+    label: designSystem?.label ?? labelForStrategy(strategy),
     rationale:
-      selected?.rationale ??
-      "Use recognizable local-business cues while improving hierarchy, trust placement, responsive header behavior, and conversion clarity.",
+      designSystem?.rationale ??
+      "Use recognizable local-business cues through the assigned design system while improving hierarchy, trust placement, responsive header behavior, and conversion clarity.",
     designTokenHints: {
       typography: version?.rendererVersion === "layout-v2"
         ? [`Current heading stack: ${version.siteDesignSystem.typography.headingFamily}`, `Scale: ${version.siteDesignSystem.typography.scale}`]

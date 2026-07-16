@@ -129,7 +129,7 @@ async function main() {
   assert(Array.isArray(findings), "Audit did not return findings.");
   checks.push({ name: "audit", ok: true, detail: `Stored ${findings.length} finding(s).` });
 
-  const sourceVersionId = loaded.siteModel.versions[0]?.id;
+  const sourceVersionId = assetReload.siteModel.versions[0]?.id;
   assert(sourceVersionId, "No version is available to restore.");
   const restored = await supabaseRepository.restoreVersionToDraft({
     siteId: acceptedSiteId,
@@ -321,6 +321,10 @@ async function main() {
   const claim = await supabaseRepository.createClaim({
     siteId: acceptedSiteId,
     ownerEmail: `owner-${runId}@example.com`,
+    verificationLevel: "operator_verified",
+    verificationMethod: "operator_manual",
+    verifiedBy: "verify-supabase",
+    verifiedAt: new Date().toISOString(),
     verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
     acceptedTerms: true,
     acceptedManagement: true
@@ -429,6 +433,52 @@ async function main() {
     "Queued job did not complete and release its worker lock."
   );
   checks.push({ name: "job", ok: true, detail: `Processed monthly action-list job ${job.id}.` });
+
+  const heartbeatJobId = `verify_heartbeat_${runId}`;
+  const heartbeatWorkerId = `verify-heartbeat-${runId}`;
+  createdJobIds.add(heartbeatJobId);
+  const heartbeatStartedAt = new Date(Date.now() - 1000 * 60).toISOString();
+  await requireSupabase(
+    supabase.from("jobs").insert({
+      id: heartbeatJobId,
+      kind: "monthly_action_list",
+      status: "running",
+      payload: { siteId: acceptedSiteId, verifier: "heartbeat_job" },
+      attempts: 1,
+      max_attempts: 3,
+      run_after: heartbeatStartedAt,
+      locked_by: heartbeatWorkerId,
+      locked_at: heartbeatStartedAt,
+      started_at: heartbeatStartedAt,
+      created_at: heartbeatStartedAt,
+      updated_at: heartbeatStartedAt
+    }),
+    "Insert heartbeat job"
+  );
+  const heartbeatAt = new Date().toISOString();
+  const heartbeatRows = await requireSupabase<Array<{ id: string; locked_at: string }>>(
+    supabase
+      .from("jobs")
+      .update({ locked_at: heartbeatAt, updated_at: heartbeatAt })
+      .eq("id", heartbeatJobId)
+      .eq("locked_by", heartbeatWorkerId)
+      .eq("status", "running")
+      .select("id, locked_at"),
+    "Heartbeat running job"
+  );
+  assert(heartbeatRows.length === 1 && heartbeatRows[0]?.locked_at, "Heartbeat did not update a matching running job lock.");
+  const wrongWorkerRows = await requireSupabase<Array<{ id: string }>>(
+    supabase
+      .from("jobs")
+      .update({ locked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", heartbeatJobId)
+      .eq("locked_by", `${heartbeatWorkerId}-wrong`)
+      .eq("status", "running")
+      .select("id"),
+    "Heartbeat wrong worker"
+  );
+  assert(wrongWorkerRows.length === 0, "Heartbeat must not update a job locked by a different worker.");
+  checks.push({ name: "job_heartbeat", ok: true, detail: `Heartbeat updated and protected running job ${heartbeatJobId}.` });
 
   const staleJobId = `verify_stale_${runId}`;
   createdJobIds.add(staleJobId);

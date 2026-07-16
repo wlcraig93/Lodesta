@@ -23,7 +23,6 @@ type Counts = {
   invalidCta: number;
   missingPlatformAssets: number;
   missingHoursRows: number;
-  unresolvedRepairTargets: number;
   failedRows: number;
 };
 
@@ -44,7 +43,6 @@ async function main() {
     invalidCta: 0,
     missingPlatformAssets: 0,
     missingHoursRows: 0,
-    unresolvedRepairTargets: 0,
     failedRows: 0
   };
 
@@ -78,7 +76,6 @@ async function main() {
         if (findings.some((finding) => finding.id === "invalid_cta")) counts.invalidCta += 1;
         if (findings.some((finding) => finding.id === "missing_platform_asset")) counts.missingPlatformAssets += 1;
         if (findings.some((finding) => finding.id === "missing_hours_row")) counts.missingHoursRows += 1;
-        if (findings.some((finding) => finding.id === "unresolved_repair_target")) counts.unresolvedRepairTargets += 1;
         console.log(`${row.id} (${row.business_name})`);
         for (const finding of findings) {
           console.log(`  - ${finding.severity}: ${finding.id}: ${finding.detail}`);
@@ -105,7 +102,7 @@ async function main() {
       2
     )
   );
-  if (counts.failedRows || counts.invalidCta || counts.missingPlatformAssets || counts.missingHoursRows || counts.unresolvedRepairTargets) {
+  if (counts.failedRows || counts.invalidCta || counts.missingPlatformAssets || counts.missingHoursRows) {
     process.exitCode = 1;
   }
 }
@@ -151,14 +148,6 @@ function auditCandidate(bundle: SiteBundle, version: SiteVersionV3): CandidateFi
       id: "missing_hours_row",
       severity: "hard_block",
       detail: `Known source hours missing from location data: ${missingDays.join(", ")}.`
-    });
-  }
-  const unresolvedTargets = version.generationQa?.repair?.unresolvedTargetIds ?? [];
-  if (unresolvedTargets.length) {
-    findings.push({
-      id: "unresolved_repair_target",
-      severity: "hard_block",
-      detail: `${unresolvedTargets.length} live repair target(s) remained unresolved: ${unresolvedTargets.slice(0, 5).join(", ")}.`
     });
   }
   return findings;

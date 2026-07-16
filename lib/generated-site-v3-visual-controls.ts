@@ -109,6 +109,7 @@ export type QuoteItemV3 = {
   quote: string;
   attribution?: string;
   context?: string;
+  sourceHref?: string;
 };
 
 export type FaqItemV3 = {
@@ -192,7 +193,15 @@ export type NumberedStepsNumberStyleV3 = "none" | "small_badge" | "oversized" | 
 export type NumberedStepsMediaModeV3 = "none" | "one_feature_image" | "per_step_media";
 export type NumberedStepsDensityV3 = "compact" | "balanced" | "detailed";
 export type SplitMediaSideV3 = "left" | "right";
-export type HeroLayoutV3 = "classic_split" | "media_left" | "editorial_overlap" | "card_overlay" | "full_bleed_masthead" | "text_first";
+export type HeroLayoutV3 =
+  | "classic_split"
+  | "media_left"
+  | "editorial_overlap"
+  | "card_overlay"
+  | "full_bleed_masthead"
+  | "text_first"
+  | "no_media_editorial"
+  | "service_matrix";
 export type HeroProofPlacementV3 = "below_copy" | "side_panel" | "bottom_strip" | "none";
 export type HeroCtaLayoutV3 = "inline" | "stacked" | "button_plus_text_link" | "callout_card";
 export type HeroMediaTreatmentV3 = "flush" | "framed" | "rounded_panel" | "bleed" | "collage_pair";
@@ -811,7 +820,16 @@ const numberedStepsNumberStyleOptionsV3 = ["none", "small_badge", "oversized", "
 const numberedStepsMediaModeOptionsV3 = ["none", "one_feature_image", "per_step_media"] as const satisfies readonly NumberedStepsMediaModeV3[];
 const numberedStepsDensityOptionsV3 = ["compact", "balanced", "detailed"] as const satisfies readonly NumberedStepsDensityV3[];
 const splitMediaSideOptionsV3 = ["left", "right"] as const satisfies readonly SplitMediaSideV3[];
-const heroLayoutOptionsV3 = ["classic_split", "media_left", "editorial_overlap", "card_overlay", "full_bleed_masthead", "text_first"] as const satisfies readonly HeroLayoutV3[];
+const heroLayoutOptionsV3 = [
+  "classic_split",
+  "media_left",
+  "editorial_overlap",
+  "card_overlay",
+  "full_bleed_masthead",
+  "text_first",
+  "no_media_editorial",
+  "service_matrix"
+] as const satisfies readonly HeroLayoutV3[];
 const heroProofPlacementOptionsV3 = ["below_copy", "side_panel", "bottom_strip", "none"] as const satisfies readonly HeroProofPlacementV3[];
 const heroCtaLayoutOptionsV3 = ["inline", "stacked", "button_plus_text_link", "callout_card"] as const satisfies readonly HeroCtaLayoutV3[];
 const heroMediaTreatmentOptionsV3 = ["flush", "framed", "rounded_panel", "bleed", "collage_pair"] as const satisfies readonly HeroMediaTreatmentV3[];

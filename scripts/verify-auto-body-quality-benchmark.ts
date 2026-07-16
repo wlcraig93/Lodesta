@@ -5,8 +5,7 @@ import { createSiteV3FromInput } from "../lib/intake";
 import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
 import { inspectGeneratedSiteBundleRender, renderGeneratedSiteHtml } from "../lib/generated-site-render-inspection";
 import { buildGeneratedSiteQaMetadata } from "../lib/generated-site-qa";
-import { createDeterministicVisualQa, createOpenAiVisualQa } from "../lib/visual-qa";
-import { computeFingerprintV1, fingerprintDistanceThresholdV1, minPairwiseDistanceV1, type SiteFingerprintV1 } from "../lib/fingerprint-v1";
+import { createOpenAiVisualQa, createUnavailableVisualQa } from "../lib/visual-qa";
 import type { AssetReference, BusinessProfile, RenderInspectionResult, SiteBundle, VisualQaResult } from "../lib/models";
 
 const runId = new Date().toISOString().replace(/[:.]/g, "-");
@@ -70,12 +69,10 @@ const fixtures = [
 await mkdir(artifactRoot, { recursive: true });
 
 const results: AutoBodyBenchmarkResult[] = [];
-const fingerprints: SiteFingerprintV1[] = [];
 
 for (const fixture of fixtures) {
   const result = await inspectFixture(fixture);
   results.push(result);
-  fingerprints.push(result.fingerprint);
   process.stdout.write(
     `${JSON.stringify({
       id: result.id,
@@ -83,7 +80,8 @@ for (const fixture of fixtures) {
       renderFailures: result.renderFailures.length,
       sectionFailures: result.sectionFailures.length,
       copyIssues: result.copyIssues.length,
-      visualScore: result.visualQa.score,
+      visualVerdict: result.visualQa.verdict,
+      craftScore: result.visualQa.craftScore,
       adapter: result.adapter,
       unavailableReason: result.unavailableReason,
       blockers: result.blockers
@@ -91,33 +89,18 @@ for (const fixture of fixtures) {
   );
 }
 
-const minDistance = minPairwiseDistanceV1(fingerprints);
-const archetypeCoverage = new Set(fingerprints.map((fingerprint) => fingerprint.designArchetypeId).filter((id) => id !== "none")).size;
-const optionValues = fingerprints.flatMap((fingerprint) => fingerprint.sectionOptionSequence);
-const nonDefaultOptionValues = optionValues.filter((value) => !/heroLayout:classic_split|proofPlacement:below_copy|ctaLayout:inline|mediaTreatment:framed|headlineScale:standard|serviceIndexTreatment:featured_services_plus_all|contactLayout:call_first/.test(value));
 const report = {
   runId,
   runLiveModel,
   artifactRoot,
-  fingerprint: {
-    minPairwiseDistance: minDistance,
-    threshold: fingerprintDistanceThresholdV1,
-    observedOnly: true,
-    healthy: minDistance === undefined || minDistance >= fingerprintDistanceThresholdV1
-  },
-  diversity: {
-    sameVerticalVisualDistance: minDistance,
-    archetypeCoverage,
-    varietyRealized: optionValues.length ? Number((nonDefaultOptionValues.length / optionValues.length).toFixed(3)) : 0,
-    thresholdCalibration: {
-      basis: "post_archetype_observed_same_vertical_p10",
-      recommendation: minDistance === undefined ? fingerprintDistanceThresholdV1 : Math.max(25, Math.floor(minDistance - 2))
-    }
-  },
+  readinessCounts: results.reduce<Record<string, number>>((counts, result) => {
+    counts[result.readiness] = (counts[result.readiness] ?? 0) + 1;
+    return counts;
+  }, {}),
   results
 };
 await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
-process.stdout.write(`${JSON.stringify({ reportPath, fingerprint: report.fingerprint })}\n`);
+process.stdout.write(`${JSON.stringify({ reportPath, readinessCounts: report.readinessCounts })}\n`);
 
 const hardFailures = results.flatMap((result) => [
   ...result.blockers.map((issue) => `${result.id}: blocker ${issue}`),
@@ -127,7 +110,7 @@ const hardFailures = results.flatMap((result) => [
 ]);
 if (runLiveModel) {
   hardFailures.push(
-    ...results.flatMap((result) => visualScoreFailures(result).map((issue) => `${result.id}: visual ${issue}`))
+    ...results.flatMap((result) => visualJudgmentFailures(result).map((issue) => `${result.id}: visual ${issue}`))
   );
 }
 assert.equal(hardFailures.length, 0, `Auto-body quality benchmark failures:\n${hardFailures.join("\n")}`);
@@ -172,7 +155,7 @@ async function inspectFixture(fixture: AutoBodyFixture): Promise<AutoBodyBenchma
         renderInspection: inspection,
         modelReview: { allowed: true, reason: "Auto-body quality benchmark live visual QA run." }
       })
-    : createDeterministicVisualQa({ bundle, renderInspection: inspection });
+    : createUnavailableVisualQa({ bundle, renderInspection: inspection });
   const qa = buildGeneratedSiteQaMetadata({ bundle, version, inspection, qaRunId, visualQa });
   const html = await renderGeneratedSiteHtml(bundle, version);
   const copyIssues = copyIssuesForHtml(html);
@@ -189,7 +172,8 @@ async function inspectFixture(fixture: AutoBodyFixture): Promise<AutoBodyBenchma
     copyIssues,
     visualQa: {
       source: visualQa.source,
-      score: visualQa.score,
+      verdict: visualQa.verdict,
+      craftScore: visualQa.craftScore,
       findingCount: visualQa.findings.length
     },
     screenshotCounts: {
@@ -197,8 +181,7 @@ async function inspectFixture(fixture: AutoBodyFixture): Promise<AutoBodyBenchma
       section: inspection.sectionScreenshots?.length ?? 0
     },
     templates: version.pageComposition.pages[0]?.sections.map((section) => section.variant) ?? [],
-    servicePresentation: version.artDirection.sectionPresentation?.services,
-    fingerprint: computeFingerprintV1(version)
+    servicePresentation: version.artDirection.sectionPresentation?.services
   };
 }
 
@@ -337,14 +320,8 @@ function stripHtml(value: string) {
     .trim();
 }
 
-function visualScoreFailures(result: AutoBodyBenchmarkResult) {
-  const score = result.visualQa.score;
-  if (!score) return ["missing visual score"];
-  const failures: string[] = [];
-  for (const [key, value] of Object.entries(score)) {
-    if (typeof value === "number" && value < 90) failures.push(`${key} ${value} < 90`);
-  }
-  return failures;
+function visualJudgmentFailures(result: AutoBodyBenchmarkResult) {
+  return result.visualQa.verdict === "ship" ? [] : [`verdict was ${result.visualQa.verdict}`];
 }
 
 type AutoBodyFixture = {
@@ -375,11 +352,11 @@ type AutoBodyBenchmarkResult = {
   copyIssues: string[];
   visualQa: {
     source: VisualQaResult["source"];
-    score: VisualQaResult["score"];
+    verdict: VisualQaResult["verdict"];
+    craftScore?: number;
     findingCount: number;
   };
   screenshotCounts: { fullPage: number; section: number };
   templates: string[];
   servicePresentation?: string;
-  fingerprint: SiteFingerprintV1;
 };

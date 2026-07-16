@@ -6,8 +6,8 @@ import { getSupabaseAdminClient } from "./supabase/client";
 export const OPENAI_RUNTIME_SETTING_KEY = "openai_runtime";
 export const OPENAI_IMAGE_OUTPUT_FORMAT = "jpeg";
 export const OPENAI_RUNTIME_DEFAULTS = {
-  generationModel: "gpt-5.5",
-  visualQaModel: "gpt-5.5",
+  generationModel: "gpt-5.6-sol",
+  visualQaModel: "gpt-5.6-sol",
   imageModel: "gpt-image-2",
   imageSize: "1536x1024",
   imageQuality: "low",
@@ -334,6 +334,7 @@ async function upsertStoredOpenAiRuntimeSettings(input: {
 }
 
 function useSupabaseSettingsStore() {
+  if (globalCache.__lodestaOperatorSettingsLocalFileForTests) return false;
   if (process.env.LODESTA_REPOSITORY === "local") return false;
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }

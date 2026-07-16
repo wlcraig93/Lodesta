@@ -1,6 +1,6 @@
-import type { QACheck, SiteBundle } from "./models";
+import type { QACheck, SiteBundle, StandardCheckResult } from "./models";
 import { getPublishedVersion } from "./sample-data";
-import { evaluateSiteAgainstStandard } from "./standard-evaluation";
+import { siteStandardEvidenceChecks } from "./standard-evaluation";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { assertSiteVersionV3, type PageV3 } from "./site-version-v3";
 
@@ -213,15 +213,18 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
   }
 
   const referenceAssetUse = referenceOnlyAssetUrlsUsedInSiteModel(bundle, version);
+  const enforceReferenceAssetPublicGate = version.status === "published" || options.versionStatus === "published";
   addCheck(checks, {
     id: "preclaim_reference_asset_usage",
     siteId: bundle.businessProfile.siteId,
     category: "trust",
-    severity: referenceAssetUse.length === 0 ? "pass" : "fail",
-    title: "Reference-only assets stay out of rendered site",
+    severity: referenceAssetUse.length === 0 || !enforceReferenceAssetPublicGate ? "pass" : "fail",
+    title: enforceReferenceAssetPublicGate ? "Reference-only assets stay out of published site" : "Reference-only assets may render in protected previews",
     detail: referenceAssetUse.length === 0
       ? "Rendered sections use generated, licensed, placeholder, or owner-approved assets."
-      : `Reference-only website assets are used in rendered sections: ${referenceAssetUse.join(", ")}.`
+      : enforceReferenceAssetPublicGate
+        ? `Reference-only website assets are used in a published/customer-rendered version: ${referenceAssetUse.join(", ")}.`
+        : `Protected candidate/preview composition may use first-party reference assets before claim-flow attestation: ${referenceAssetUse.join(", ")}.`
   });
 
   addCheck(checks, contrastCheck(bundle, "theme_text_contrast", "Text contrast", activeTheme.colors.text, activeTheme.colors.background));
@@ -246,10 +249,10 @@ export function runSiteQa(bundle: SiteBundle, options: { versionId?: string; ver
     )
   );
 
-  for (const check of evaluateSiteAgainstStandard(bundle, {
+  for (const check of siteStandardEvidenceChecks(bundle, {
     versionId: options.versionId,
     versionStatus: options.versionStatus
-  }).checks) {
+  })) {
     addCheck(checks, {
       id: `standard_${slugId(check.criterionId)}`,
       siteId: bundle.businessProfile.siteId,
@@ -275,7 +278,7 @@ function addCheck(checks: QACheck[], check: QACheck) {
 
 function qaCategoryForStandard(
   criterionId: string,
-  layer: ReturnType<typeof evaluateSiteAgainstStandard>["checks"][number]["layer"]
+  layer: StandardCheckResult["layer"]
 ): QACheck["category"] {
   if (criterionId.startsWith("seo.")) return "seo";
   if (criterionId.startsWith("accessibility.")) return "accessibility";

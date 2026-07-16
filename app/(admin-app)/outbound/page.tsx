@@ -20,7 +20,7 @@ export default async function OutboundPage() {
       <AdminPageHeader
         eyebrow="Outbound wedge"
         title="Campaign measurement"
-        description="Track direct-mail and outbound preview tests from mailer sent through claim, publish, credibility feedback, and support burden."
+        description="Track outreach from claim-link open through picker interaction, checkout start, paid conversion, publish, credibility feedback, and support burden."
         actions={
           <AdminButtonRow>
             <AdminButtonAnchor variant="secondary" href="/api/outbound/export">
@@ -35,16 +35,23 @@ export default async function OutboundPage() {
 
       <section className="metric-row">
         <Metric label="Prospects" value={summary.prospects} />
-        <Metric label="Preview rate" value={`${Math.round(summary.mailerToPreviewRate * 100)}%`} />
-        <Metric label="Claim rate" value={`${Math.round(summary.mailerToClaimRate * 100)}%`} />
-        <Metric label="Publish rate" value={`${Math.round(summary.claimToPublishRate * 100)}%`} />
+        <Metric label="Claim opens" value={summary.claimLinkOpened} />
+        <Metric label="Checkout starts" value={summary.checkoutStarted} />
+        <Metric label="Paid" value={summary.paid} />
       </section>
 
       <section className="metric-row">
-        <Metric label="Published" value={summary.published} />
+        <Metric label="Open to checkout" value={`${Math.round(summary.claimLinkToCheckoutRate * 100)}%`} />
+        <Metric label="Checkout to paid" value={`${Math.round(summary.checkoutToPaidRate * 100)}%`} />
+        <Metric label="Paid to publish" value={`${Math.round(summary.claimToPublishRate * 100)}%`} />
+        <Metric label="Picker interactions" value={summary.pickerInteractions} />
+      </section>
+
+      <section className="metric-row">
         <Metric label="Support burden" value={`${Math.round(summary.supportBurdenRate * 100)}%`} />
         <Metric label="Credibility samples" value={summary.credibilityFeedbackCount} />
         <Metric label="Avg credibility" value={summary.avgCredibilityScore ?? "--"} />
+        <Metric label="Published" value={summary.published} />
       </section>
 
       <div className="admin-grid">
@@ -80,9 +87,9 @@ export default async function OutboundPage() {
             {summary.verticalBreakdown.map((item) => (
               <article key={item.vertical} className="finding-card">
                 <span className="badge">{item.vertical.replace("_", " ")}</span>
-                <h3>{Math.round(item.mailerToClaimRate * 100)}% mailer-to-claim</h3>
+                <h3>{Math.round(item.claimLinkToCheckoutRate * 100)}% open-to-checkout</h3>
                 <p>
-                  {item.prospects} prospects · {item.claimed} claimed · {item.published} published
+                  {item.prospects} prospects · {item.checkoutStarted} checkout · {item.paid} paid · {item.published} published
                 </p>
               </article>
             ))}

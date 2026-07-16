@@ -9,10 +9,8 @@ import { elapsedOpenAiCallMs, extractOpenAiResponseText, openAiErrorMessage } fr
 import { openAiRequestSignal } from "./openai-timeout";
 import { validatePublicHostname } from "./url-safety";
 import type {
-  AssetAnalysisCropIntentV1,
   AssetAnalysisFocalPointV1,
   AssetAnalysisImageKindV1,
-  AssetAnalysisUsableSlotV1,
   AssetAnalysisV1,
   AssetAnalysisWarningV1,
   AssetReference,
@@ -40,9 +38,7 @@ const imageKindValues = [
   "unknown"
 ] as const satisfies readonly AssetAnalysisImageKindV1[];
 
-const usableSlotValues = ["hero", "service", "proof", "gallery", "background", "logo"] as const satisfies readonly AssetAnalysisUsableSlotV1[];
 const focalPointValues = ["center", "top", "bottom", "left", "right"] as const satisfies readonly AssetAnalysisFocalPointV1[];
-const cropIntentValues = ["subject", "wide", "portrait", "center", "detail_zoom"] as const satisfies readonly AssetAnalysisCropIntentV1[];
 const warningValues = [
   "low_resolution",
   "blurry",
@@ -51,30 +47,13 @@ const warningValues = [
   "collage_or_composite",
   "awkward_empty_space",
   "poor_lighting",
-  "not_business_relevant",
-  "rights_review_required"
+  "not_business_relevant"
 ] as const satisfies readonly AssetAnalysisWarningV1[];
-
-const cropRecommendationSchema = z.object({
-  focalPoint: z.enum(focalPointValues),
-  cropIntent: z.enum(cropIntentValues),
-  suitability: z.number().min(0).max(100),
-  notes: z.string().max(160).optional()
-});
 
 const assetAnalysisResponseSchema = z.object({
   imageKind: z.enum(imageKindValues),
-  qualityScore: z.number().min(0).max(100),
-  usableSlots: z.array(z.enum(usableSlotValues)).min(0).max(6),
   focalPoint: z.enum(focalPointValues),
   subjectPlacement: z.enum(["centered", "left", "right", "top", "bottom", "full_frame", "unclear"]),
-  recommendedCropIntent: z.enum(cropIntentValues),
-  cropRecommendations: z.object({
-    wide: cropRecommendationSchema,
-    square: cropRecommendationSchema,
-    portrait: cropRecommendationSchema,
-    card: cropRecommendationSchema
-  }),
   warnings: z.array(z.enum(warningValues)).min(0).max(8),
   contentTags: z.array(z.string().min(1).max(32)).min(0).max(8),
   summary: z.string().min(8).max(240),
@@ -99,6 +78,7 @@ export async function analyzeBusinessAssetsV1(input: {
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
   strict?: boolean;
+  signal?: AbortSignal;
 }): Promise<AnalyzeBusinessAssetsResultV1> {
   const selection = assetAnalysisCandidatesV1(input.bundle);
   const candidates = selection.selected;
@@ -122,35 +102,49 @@ export async function analyzeBusinessAssetsV1(input: {
 
   const model = process.env.LODESTA_ASSET_ANALYSIS_MODEL ?? process.env.LODESTA_VISUAL_QA_MODEL ?? "gpt-5-mini";
 
-  for (const candidate of candidates) {
-    if (hasFreshAssetAnalysisV1(candidate.asset)) {
-      result.cached += 1;
-      continue;
-    }
-    const imageInput = await loadAssetImageInputV1(candidate.asset);
-    if (!imageInput) {
-      result.skippedUnreadable += 1;
-      if (input.strict && requiresReadableAnalysisV1(candidate.asset)) {
-        throw new Error(`AssetAnalysisV1 could not read source asset ${candidate.asset.id} (${candidate.asset.url}).`);
+  const concurrency = assetAnalysisConcurrencyV1();
+  for (let offset = 0; offset < candidates.length; offset += concurrency) {
+    const batch = candidates.slice(offset, offset + concurrency);
+    const outcomes = await Promise.all(batch.map(async (candidate) => {
+      if (hasFreshAssetAnalysisV1(candidate.asset)) return { kind: "cached" as const, candidate };
+      const imageInput = await loadAssetImageInputV1(candidate.asset);
+      if (!imageInput) return { kind: "unreadable" as const, candidate };
+      try {
+        const analysis = await createOpenAiAssetAnalysisV1({
+          apiKey,
+          model,
+          asset: candidate.asset,
+          imageInput,
+          telemetry: input.telemetry,
+          spanId: input.spanId,
+          signal: input.signal
+        });
+        return { kind: "analyzed" as const, candidate, analysis };
+      } catch (error) {
+        return { kind: "failed" as const, candidate, error };
       }
-      continue;
-    }
-    try {
-      const analysis = await createOpenAiAssetAnalysisV1({
-        apiKey,
-        model,
-        asset: candidate.asset,
-        imageInput,
-        telemetry: input.telemetry,
-        spanId: input.spanId
-      });
-      candidate.assign({ ...candidate.asset, analysisV1: analysis });
-      result.analyzed += 1;
-    } catch (error) {
+    }));
+    for (const outcome of outcomes) {
+      if (outcome.kind === "cached") {
+        result.cached += 1;
+        continue;
+      }
+      if (outcome.kind === "unreadable") {
+        result.skippedUnreadable += 1;
+        if (input.strict && requiresReadableAnalysisV1(outcome.candidate.asset)) {
+          throw new Error(`AssetAnalysisV1 could not read source asset ${outcome.candidate.asset.id} (${outcome.candidate.asset.url}).`);
+        }
+        continue;
+      }
+      if (outcome.kind === "analyzed") {
+        outcome.candidate.assign({ ...outcome.candidate.asset, analysisV1: outcome.analysis });
+        result.analyzed += 1;
+        continue;
+      }
       result.failed += 1;
-      if (input.strict) throw error;
+      if (input.strict) throw outcome.error;
       input.bundle.presenceAssessment.technicalNotes.push(
-        `Asset analysis skipped for ${candidate.asset.id}: ${error instanceof Error ? error.message : String(error)}`
+        `Asset analysis skipped for ${outcome.candidate.asset.id}: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`
       );
     }
   }
@@ -159,6 +153,15 @@ export async function analyzeBusinessAssetsV1(input: {
 
 export function hasFreshAssetAnalysisV1(asset: AssetReference): boolean {
   return asset.analysisV1?.version === assetAnalysisVersionV1 && asset.analysisV1.source === "openai";
+}
+
+export function assetAnalysisSelectionV1(bundle: SiteBundle) {
+  const selection = assetAnalysisCandidatesV1(bundle);
+  return {
+    eligible: selection.eligible,
+    selectedAssetIdentities: selection.selected.map(({ asset }) => asset.id || asset.url),
+    skippedOverBudget: selection.skippedOverBudget
+  };
 }
 
 function assetAnalysisCandidatesV1(bundle: SiteBundle) {
@@ -192,17 +195,23 @@ function assetAnalysisCandidatesV1(bundle: SiteBundle) {
 
 function isFirstPartyAnalysisCandidateV1(asset: AssetReference) {
   if (asset.source === "generated" || asset.source === "licensed" || asset.source === "placeholder") return false;
-  return asset.rightsStatus === "reference_only" || asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe";
+  return asset.source === "uploaded" || asset.source === "website_reference";
 }
 
 function requiresReadableAnalysisV1(asset: AssetReference) {
-  return asset.url.startsWith("/api/assets/") || asset.source === "uploaded" || asset.rightsStatus === "customer_granted";
+  return asset.url.startsWith("/api/assets/") || asset.source === "uploaded";
 }
 
 function assetAnalysisBudgetV1() {
   const configured = Number(process.env.LODESTA_ASSET_ANALYSIS_MAX_ASSETS);
-  if (Number.isFinite(configured) && configured >= 1 && configured <= 16) return Math.floor(configured);
-  return 6;
+  if (Number.isFinite(configured) && configured >= 1 && configured <= 64) return Math.floor(configured);
+  return 16;
+}
+
+function assetAnalysisConcurrencyV1() {
+  const configured = Number(process.env.LODESTA_ASSET_ANALYSIS_CONCURRENCY);
+  if (Number.isFinite(configured) && configured >= 1 && configured <= 8) return Math.floor(configured);
+  return 4;
 }
 
 function assetAnalysisPriorityV1(asset: AssetReference, index: number) {
@@ -219,8 +228,6 @@ function assetAnalysisPriorityV1(asset: AssetReference, index: number) {
   if (aspect >= 1.15 && aspect <= 2.4) score += 30;
   if (aspect >= 0.75 && aspect <= 1.35) score += 15;
   if (asset.source === "uploaded") score += 35;
-  if (asset.rightsStatus === "customer_granted") score += 30;
-  if (asset.rightsStatus === "reference_only") score += 10;
   return score;
 }
 
@@ -275,6 +282,7 @@ async function createOpenAiAssetAnalysisV1(input: {
   imageInput: LoadedImageInputV1;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
+  signal?: AbortSignal;
 }): Promise<AssetAnalysisV1> {
   const body = {
     model: input.model,
@@ -289,10 +297,10 @@ async function createOpenAiAssetAnalysisV1(input: {
             text: [
               "You analyze first-party small-business website images for a bounded website builder.",
               "Return only schema-valid JSON.",
-              "Your job is image suitability and cropping, not business fact extraction.",
+              "Report objective visual facts only; deterministic code decides suitability, placement, and cropping.",
               "Do not infer publishable services, credentials, guarantees, insurance facts, prices, or customer claims from the image.",
-              "Mark text-heavy graphics, logos, screenshots, low-quality photos, awkward empty space, and poor crops clearly.",
-              "Prefer practical slots: hero/background only for strong wide contextual photos; service/proof for detail shots; logo only for true brand marks."
+              "Mark text-heavy graphics, logos, screenshots, low-quality photos, awkward empty space, poor lighting, and blur clearly.",
+              "Classify the visible image kind, focal point, subject placement, warnings, and content tags without recommending a page slot."
             ].join(" ")
           }
         ]
@@ -307,14 +315,11 @@ async function createOpenAiAssetAnalysisV1(input: {
                 id: input.asset.id,
                 alt: input.asset.alt,
                 source: input.asset.source,
-                rightsStatus: input.asset.rightsStatus,
                 width: input.asset.width,
                 height: input.asset.height
               },
               requestedOutput: {
-                scoreScale: "0-100",
-                cropSuitabilityScale: "0-100",
-                note: "Crop recommendations should identify the best focal point for object-fit cover crops."
+                note: "Describe visible content and constraints. Do not score quality or choose hero, proof, gallery, service, background, or logo placement."
               }
             })
           },
@@ -343,7 +348,7 @@ async function createOpenAiAssetAnalysisV1(input: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body),
-      signal: openAiRequestSignal(90_000)
+      signal: openAiRequestSignal(90_000, input.signal)
     });
     const payload = (await response.json().catch(() => null)) as unknown;
     const endedAt = new Date().toISOString();
@@ -358,7 +363,6 @@ async function createOpenAiAssetAnalysisV1(input: {
         model: input.model,
         assetId: input.asset.id,
         assetSource: input.asset.source,
-        rightsStatus: input.asset.rightsStatus,
         width: input.asset.width,
         height: input.asset.height,
         mimeType: input.imageInput.mimeType,
@@ -412,17 +416,8 @@ function normalizeAssetAnalysisV1(parsed: AssetAnalysisResponseV1, model: string
     model,
     analyzedAt: new Date().toISOString(),
     imageKind: parsed.imageKind,
-    qualityScore: Math.round(parsed.qualityScore),
-    usableSlots: dedupeV1(parsed.usableSlots),
     focalPoint: parsed.focalPoint,
     subjectPlacement: parsed.subjectPlacement,
-    recommendedCropIntent: parsed.recommendedCropIntent,
-    cropRecommendations: {
-      wide: normalizeCropRecommendationV1(parsed.cropRecommendations.wide),
-      square: normalizeCropRecommendationV1(parsed.cropRecommendations.square),
-      portrait: normalizeCropRecommendationV1(parsed.cropRecommendations.portrait),
-      card: normalizeCropRecommendationV1(parsed.cropRecommendations.card)
-    },
     warnings: dedupeV1(parsed.warnings),
     contentTags: dedupeV1(parsed.contentTags.map((tag) => tag.trim()).filter(Boolean)).slice(0, 8),
     summary: parsed.summary,
@@ -430,42 +425,17 @@ function normalizeAssetAnalysisV1(parsed: AssetAnalysisResponseV1, model: string
   };
 }
 
-function normalizeCropRecommendationV1(recommendation: AssetAnalysisResponseV1["cropRecommendations"]["wide"]) {
-  return {
-    focalPoint: recommendation.focalPoint,
-    cropIntent: recommendation.cropIntent,
-    suitability: Math.round(recommendation.suitability),
-    ...(recommendation.notes ? { notes: recommendation.notes } : {})
-  };
-}
-
 function dedupeV1<T extends string>(values: T[]): T[] {
   return [...new Set(values)];
 }
-
-const cropRecommendationJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["focalPoint", "cropIntent", "suitability", "notes"],
-  properties: {
-    focalPoint: { type: "string", enum: focalPointValues },
-    cropIntent: { type: "string", enum: cropIntentValues },
-    suitability: { type: "number", minimum: 0, maximum: 100 },
-    notes: { type: "string", maxLength: 160 }
-  }
-};
 
 const assetAnalysisResponseJsonSchema = {
   type: "object",
   additionalProperties: false,
   required: [
     "imageKind",
-    "qualityScore",
-    "usableSlots",
     "focalPoint",
     "subjectPlacement",
-    "recommendedCropIntent",
-    "cropRecommendations",
     "warnings",
     "contentTags",
     "summary",
@@ -473,22 +443,8 @@ const assetAnalysisResponseJsonSchema = {
   ],
   properties: {
     imageKind: { type: "string", enum: imageKindValues },
-    qualityScore: { type: "number", minimum: 0, maximum: 100 },
-    usableSlots: { type: "array", items: { type: "string", enum: usableSlotValues }, minItems: 0, maxItems: 6 },
     focalPoint: { type: "string", enum: focalPointValues },
     subjectPlacement: { type: "string", enum: ["centered", "left", "right", "top", "bottom", "full_frame", "unclear"] },
-    recommendedCropIntent: { type: "string", enum: cropIntentValues },
-    cropRecommendations: {
-      type: "object",
-      additionalProperties: false,
-      required: ["wide", "square", "portrait", "card"],
-      properties: {
-        wide: cropRecommendationJsonSchema,
-        square: cropRecommendationJsonSchema,
-        portrait: cropRecommendationJsonSchema,
-        card: cropRecommendationJsonSchema
-      }
-    },
     warnings: { type: "array", items: { type: "string", enum: warningValues }, minItems: 0, maxItems: 8 },
     contentTags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, minItems: 0, maxItems: 8 },
     summary: { type: "string", minLength: 8, maxLength: 240 },

@@ -3,7 +3,6 @@ import { normalize, resolve } from "node:path";
 import type {
   GenerationQaBlocker,
   GenerationQaMetadata,
-  GenerationQaRepairLog,
   GenerationQaWarning,
   RenderInspectionFinding,
   RenderInspectionResult,
@@ -18,32 +17,7 @@ import { aggregateReadinessV2 } from "./readiness-aggregator-v2";
 import type { GeneratedSiteQualitySignalsV3 } from "./generated-site-v3-nav";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { templateOptionsForBlueprintV1, templateOptionsFromVisualSectionV1 } from "./generated-site-v3-blueprint";
-
-const blockedPlaceholderPatterns = [
-  { pattern: /\bLocal area\b/i, reason: "Generic local-area fallback is visible." },
-  { pattern: /\bCore service\b/i, reason: "Generic service fallback is visible." },
-  { pattern: /\bLocal support\b/i, reason: "Generic support fallback is visible." },
-  { pattern: /\bSample Local Business\b/i, reason: "Sample business fallback is visible." },
-  { pattern: /\bVisual proof slot ready\b/i, reason: "Internal proof placeholder is visible." },
-  { pattern: /\bCredential details can be verified\b/i, reason: "Internal credential placeholder is visible." },
-  { pattern: /\bowner-approved\b/i, reason: "Internal owner-review language is visible." },
-  { pattern: /\bowner-truth\b/i, reason: "Internal owner-truth language is visible." },
-  { pattern: /\bcan be verified\b/i, reason: "Internal verification language is visible." },
-  { pattern: /\b(claimed and published|after claim|owner verification needed)\b/i, reason: "Internal claim-state language is visible." },
-  { pattern: /\bnearby customers\?/i, reason: "Broken generic service-area copy is visible." },
-  { pattern: /\b(this page|service page|search engines?|local search intent)\b/i, reason: "Website-production planning language is visible." },
-  { pattern: /\b(primary action|conversion path|conversion actions?|ready visitors|proof sections?|trust proof)\b/i, reason: "Internal conversion-planning language is visible." },
-  { pattern: /\bhelp visitors\b/i, reason: "Generic visitor-planning copy is visible instead of customer-facing copy." },
-  { pattern: /\bEasy next step\b/i, reason: "Generic trust-bar filler is visible instead of a specific business signal." },
-  { pattern: /\b(Customer decision path|Conversion standard|Review summary detected)\b/i, reason: "Internal quality-calibration copy is visible." },
-  { pattern: /\b(general visuals?|visual context|source-backed next steps?|site source|extracted service list|profile details)\b/i, reason: "Internal source/template language is visible." },
-  // "starting point" removed: it appears in legitimate price copy ("starts at
-  // $25, so you know the starting point"). The remaining phrases are distinctly
-  // internal process-planning language.
-  { pattern: /\b(repair conversation|estimate conversation|repair paths?|estimate path|call-first path|agreed next step)\b/i, reason: "Generic process-planning copy is visible instead of customer-facing copy." },
-  { pattern: /\b(customers should describe|specific without assuming|not a photo of this specific shop)\b/i, reason: "Meta commentary about generated-site safety is visible." },
-  { pattern: /\b(Call-first|listed repair service available|listed service customers can ask)\b/i, reason: "Filler proof or service copy is visible." }
-];
+import { scanPlaceholderText } from "./content-safety-scanners";
 
 export function buildGeneratedSiteQaMetadata(input: {
   bundle: SiteBundle;
@@ -51,7 +25,6 @@ export function buildGeneratedSiteQaMetadata(input: {
   inspection: RenderInspectionResult;
   qaRunId: string;
   visualQa?: VisualQaResult;
-  repair?: GenerationQaRepairLog;
   qualitySignals?: GeneratedSiteQualitySignalsV3;
 }): GenerationQaMetadata {
   const siteModelHash = computeSiteModelHash(input.bundle, input.version);
@@ -64,7 +37,6 @@ export function buildGeneratedSiteQaMetadata(input: {
   const warnings = [
     ...warningsFromInspection(input.inspection),
     ...warningsFromSiteModel(input.version),
-    ...warningsFromVisualQa(input.visualQa),
     ...warningsFromQualitySignals(input.qualitySignals)
   ];
   const readiness = aggregateReadinessV2({
@@ -74,6 +46,7 @@ export function buildGeneratedSiteQaMetadata(input: {
     unavailable: Boolean(input.inspection.unavailableReason)
   });
   return {
+    schemaVersion: "generation-qa-v4",
     readiness: readiness.readiness,
     siteModelHash,
     qaRunId: input.qaRunId,
@@ -83,8 +56,7 @@ export function buildGeneratedSiteQaMetadata(input: {
     inspectionSummary,
     artifactRefs,
     visualQa: input.visualQa,
-    generationCostEstimate: input.bundle.presenceAssessment.generationCostEstimate,
-    repair: input.repair
+    generationCostEstimate: input.bundle.presenceAssessment.generationCostEstimate
   };
 }
 
@@ -201,7 +173,7 @@ function blockersFromSiteModelV3(bundle: SiteBundle, version: SiteVersionV3): Ge
     .flatMap((page) => page.sections)
     .map((section) => JSON.stringify(section.props))
     .join(" ");
-  for (const blocked of blockedPlaceholderPatterns) {
+  for (const blocked of scanPlaceholderText(text)) {
     const match = text.match(blocked.pattern);
     if (!match) continue;
     const matchIndex = typeof match.index === "number" ? match.index : 0;
@@ -272,17 +244,41 @@ function blockersFromSiteModelV3(bundle: SiteBundle, version: SiteVersionV3): Ge
 }
 
 function blockersFromQualitySignals(qualitySignals: GeneratedSiteQualitySignalsV3 | undefined): GenerationQaBlocker[] {
+  const blockers: GenerationQaBlocker[] = [];
   const nav = qualitySignals?.navReconciliation;
-  if (!nav) return [];
-  return nav.droppedTargets
-    .filter((target) => target.kind === "primary_cta")
-    .map((target) => ({
+  if (nav) {
+    blockers.push(...nav.droppedTargets
+      .filter((target) => target.kind === "primary_cta")
+      .map((target) => ({
       id: "v3_primary_cta_unresolved_after_reconciliation",
       title: "Primary CTA target could not be resolved",
       detail: `CTA "${target.label}" target "${target.target ?? "missing"}" could not be resolved after reconciliation: ${target.reason}.`,
       category: "quality_failed" as const,
       severity: "blocking" as const
-    }));
+      })));
+  }
+  for (const decision of qualitySignals?.compilerDecisions ?? []) {
+    if (decision.kind !== "composition_section_drop") continue;
+    if (decision.resolvedValue === "copy_quality_unresolved") {
+      blockers.push({
+        id: `v3_copy_quality_unresolved_${decision.id.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`,
+        title: "Required generated copy is unresolved",
+        detail: decision.reason,
+        category: "claim_unsupported",
+        severity: "blocking"
+      });
+    }
+    if (decision.resolvedValue === "media_selection_unavailable") {
+      blockers.push({
+        id: `v3_media_selection_unavailable_${decision.id.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`,
+        title: "Required media selection is unavailable",
+        detail: decision.reason,
+        category: "policy_review_required",
+        severity: "blocking"
+      });
+    }
+  }
+  return blockers;
 }
 
 function warningsFromSiteModel(version: SiteVersion): GenerationQaWarning[] {
@@ -391,6 +387,7 @@ function warningsFromQualitySignals(qualitySignals: GeneratedSiteQualitySignalsV
       });
     }
     if (decision.kind === "composition_section_drop") {
+      if (decision.resolvedValue === "copy_quality_unresolved" || decision.resolvedValue === "media_selection_unavailable") continue;
       warnings.push({
         id: `v3_composition_section_drop_${decision.id.replace(/[^a-z0-9]+/gi, "_").toLowerCase()}`,
         title: "Compiler dropped a duplicated section",
@@ -542,18 +539,6 @@ function warningsFromInspection(inspection: RenderInspectionResult): GenerationQ
     }));
 }
 
-function warningsFromVisualQa(visualQa: VisualQaResult | undefined): GenerationQaWarning[] {
-  return (
-    visualQa?.findings
-      .filter((finding) => finding.severity === "warning" || finding.severity === "fail")
-      .map((finding) => ({
-        id: `visual_${finding.id}`,
-        title: finding.title,
-        detail: finding.severity === "fail" ? `Model QA flagged this as a launch concern: ${finding.evidence}` : finding.evidence,
-        viewport: finding.viewport
-      })) ?? []
-  );
-}
 
 function blockerForRenderFinding(finding: RenderInspectionFinding): GenerationQaBlocker | undefined {
   const viewport = finding.viewport;

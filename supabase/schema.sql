@@ -287,7 +287,7 @@ create table outbound_events (
   campaign_id text references outbound_campaigns(id) on delete cascade,
   prospect_id text references outbound_prospects(id) on delete set null,
   site_id text references sites(id) on delete set null,
-  type text not null check (type in ('mailer_sent', 'preview_viewed', 'claim_started', 'claim_completed', 'published', 'support_contact', 'disqualified', 'credibility_feedback')),
+  type text not null check (type in ('mailer_sent', 'claim_link_opened', 'preview_viewed', 'picker_interaction', 'claim_started', 'checkout_started', 'claim_completed', 'paid', 'published', 'support_contact', 'disqualified', 'credibility_feedback')),
   occurred_at timestamptz not null default now(),
   value numeric,
   metadata jsonb not null default '{}'
@@ -352,6 +352,20 @@ create table jobs (
   started_at timestamptz,
   completed_at timestamptz
 );
+
+create table worker_heartbeats (
+  worker_id text primary key,
+  pid integer not null,
+  host text not null,
+  repository_mode text not null check (repository_mode in ('local', 'supabase')),
+  started_at timestamptz not null,
+  last_seen_at timestamptz not null,
+  current_job_id text references jobs(id) on delete set null,
+  current_job_kind text,
+  updated_at timestamptz not null default now()
+);
+
+create index worker_heartbeats_last_seen_at_idx on worker_heartbeats(last_seen_at desc);
 
 create table agent_runs (
   id text primary key,
@@ -1140,8 +1154,8 @@ alter table business_services enable row level security;
 alter table business_service_attributes enable row level security;
 
 -- Claims verification levels, audit, revisions (Phase 1.5)
-alter table claims add column if not exists verification_level text not null default 'contact_verified'
-  check (verification_level in ('contact_verified', 'owner_verified', 'operator_verified'));
+alter table claims add column if not exists verification_level text not null default 'unverified'
+  check (verification_level in ('unverified', 'contact_verified', 'owner_verified', 'operator_verified'));
 alter table claims add column if not exists verification_method text;
 alter table claims add column if not exists verified_by text;
 alter table claims add column if not exists verified_at timestamptz;

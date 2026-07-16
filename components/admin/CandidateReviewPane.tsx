@@ -9,6 +9,19 @@ type ReviewPanePage = {
   title: string;
 };
 
+export type CandidateDesignExample = {
+  artifactId: string;
+  exampleId: string;
+  title: string;
+  direction: string;
+  mediaMode: string;
+  status: string;
+  scores: {
+    visualQuality: number;
+    noMediaCompleteness: number;
+  };
+};
+
 const deviceWidths: Record<ReviewPaneDevice, number | null> = {
   desktop: null,
   tablet: 834,
@@ -18,11 +31,13 @@ const deviceWidths: Record<ReviewPaneDevice, number | null> = {
 const REPORT_TAB = "__report";
 const OWNER_UNCLAIMED_TAB = "__owner_unclaimed";
 const OWNER_CLAIMED_TAB = "__owner_claimed";
+const DESIGN_EXAMPLES_TAB = "__design_examples";
 
 export function CandidateReviewPane({
   candidateId,
   businessName,
   pages,
+  designExamples = [],
   previewAvailable,
   fallbackSlot,
   reportSlot
@@ -30,6 +45,7 @@ export function CandidateReviewPane({
   candidateId: string;
   businessName: string;
   pages: ReviewPanePage[];
+  designExamples?: CandidateDesignExample[];
   previewAvailable: boolean;
   fallbackSlot?: ReactNode;
   reportSlot: ReactNode;
@@ -38,17 +54,23 @@ export function CandidateReviewPane({
   const [tab, setTab] = useState<string>(previewAvailable ? firstSlug : REPORT_TAB);
   const [device, setDevice] = useState<ReviewPaneDevice>("desktop");
   const [rightsApproved, setRightsApproved] = useState(true);
+  const [activeDesignExampleId, setActiveDesignExampleId] = useState(designExamples[0]?.artifactId ?? "");
 
   const showingReport = tab === REPORT_TAB;
   const showingOwnerUnclaimed = tab === OWNER_UNCLAIMED_TAB;
   const showingOwnerClaimed = tab === OWNER_CLAIMED_TAB;
+  const showingDesignExamples = tab === DESIGN_EXAMPLES_TAB;
   const showingOwner = showingOwnerUnclaimed || showingOwnerClaimed;
-  const showingSite = !showingReport && !showingOwner;
+  const showingSite = !showingReport && !showingOwner && !showingDesignExamples;
   const activeSlug = showingSite ? tab : firstSlug;
   const previewPath = activeSlug ? `/${activeSlug}` : "";
   const sitePreviewSrc = `/site-candidate-previews/${candidateId}${previewPath}${rightsApproved ? "" : "?rights=declined"}`;
   const ownerPreviewSrc = `/site-candidate-owner-previews/${candidateId}${showingOwnerClaimed ? "?mode=claimed" : ""}`;
-  const activePreviewSrc = showingOwner ? ownerPreviewSrc : sitePreviewSrc;
+  const activeDesignExample = designExamples.find((example) => example.artifactId === activeDesignExampleId) ?? designExamples[0];
+  const designExamplePreviewSrc = activeDesignExample
+    ? `/admin/site-candidates/${candidateId}/design-examples/${activeDesignExample.artifactId}/preview`
+    : "";
+  const activePreviewSrc = showingDesignExamples ? designExamplePreviewSrc : showingOwner ? ownerPreviewSrc : sitePreviewSrc;
   const width = deviceWidths[device];
 
   return (
@@ -105,8 +127,16 @@ export function CandidateReviewPane({
           >
             Customer report
           </button>
+          <button
+            type="button"
+            aria-pressed={showingDesignExamples}
+            className={showingDesignExamples ? "is-active" : ""}
+            onClick={() => setTab(DESIGN_EXAMPLES_TAB)}
+          >
+            Design examples
+          </button>
         </div>
-        {!showingReport && previewAvailable ? (
+        {!showingReport && (previewAvailable || showingDesignExamples) ? (
           <div className="candidate-review-toolbar-right">
             {showingSite ? (
               <div className="candidate-review-devices" role="group" aria-label="Scraped media rights simulation">
@@ -143,15 +173,51 @@ export function CandidateReviewPane({
                 </button>
               ))}
             </div>
-            <a className="candidate-review-open" href={activePreviewSrc} target="_blank" rel="noopener noreferrer">
-              Open
-            </a>
+            {activePreviewSrc ? (
+              <a className="candidate-review-open" href={activePreviewSrc} target="_blank" rel="noopener noreferrer">
+                Open
+              </a>
+            ) : null}
           </div>
         ) : null}
       </div>
 
       {showingReport ? (
         <div className="candidate-review-report">{reportSlot}</div>
+      ) : showingDesignExamples ? (
+        <div className="candidate-design-examples">
+          {designExamples.length ? (
+            <>
+              <div className="candidate-design-example-list" role="list" aria-label="Design examples">
+                {designExamples.map((example) => (
+                  <button
+                    key={example.artifactId}
+                    type="button"
+                    className={example.artifactId === activeDesignExample?.artifactId ? "is-active" : ""}
+                    onClick={() => setActiveDesignExampleId(example.artifactId)}
+                  >
+                    <span>{example.title}</span>
+                    <small>{example.mediaMode.replaceAll("_", " ")} · visual {example.scores.visualQuality} · floor {example.scores.noMediaCompleteness}</small>
+                  </button>
+                ))}
+              </div>
+              <div className="candidate-review-frame-wrap" data-device={device}>
+                <iframe
+                  key={`${activePreviewSrc}:${device}`}
+                  className="candidate-review-frame"
+                  sandbox=""
+                  src={activePreviewSrc}
+                  title={`${businessName} design example ${activeDesignExample?.title ?? ""}`}
+                  style={width ? { width: `${width}px` } : undefined}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="candidate-review-fallback">
+              <p>No design examples have been generated for this candidate.</p>
+            </div>
+          )}
+        </div>
       ) : previewAvailable ? (
         <div className="candidate-review-frame-wrap" data-device={device}>
           <iframe

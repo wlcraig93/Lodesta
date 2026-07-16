@@ -4,7 +4,6 @@ import { OwnerPublishButton } from "@/components/OwnerPublishButton";
 import { OwnerSitePreviewClient } from "./preview-client";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
 import { assertSiteVersionV3 } from "@/lib/site-version-v3";
@@ -25,7 +24,15 @@ export default async function OwnerSiteReviewPage({ params }: { params: Promise<
   const blockerCount = draftVersion?.generationQa?.blockers.length ?? 0;
   const factCount = countConfirmedOwnerFacts(profile);
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const replacementEvaluation = evaluateSiteAgainstStandard(bundle);
+  const newSiteStatus = draftVersion
+    ? readiness === "ready"
+      ? "Ready"
+      : readiness === "pending"
+        ? "Checking"
+        : "In review"
+    : publishedVersion
+      ? "Live"
+      : "Unavailable";
 
   const publishDisabledReason = !draftVersion
     ? undefined
@@ -92,11 +99,11 @@ export default async function OwnerSiteReviewPage({ params }: { params: Promise<
               </div>
               <div className="candidate-score-cell is-generated">
                 <span>Your new site</span>
-                <strong>{replacementEvaluation.score.percent}</strong>
+                <strong>{newSiteStatus}</strong>
               </div>
             </div>
             <p className="candidate-rail-footnote">
-              Scored on the same checklist: search visibility, contact paths, trust signals, and mobile experience.
+              Current-site report score and final new-site QA status.
             </p>
           </section>
 

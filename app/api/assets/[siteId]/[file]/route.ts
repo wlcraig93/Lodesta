@@ -28,12 +28,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ site
   }
   const bundle = await repository.getSiteBundle(siteId);
   if (!bundle) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+  const publicLocalAsset = isPublicLocalAssetPath(bundle, storagePath);
   if (isScrapedAssetFile(file)) {
-    // Scraped reference media is private: owner/admin sessions only, never
-    // public visitors, until per-photo attestation converts it.
-    const unauthorized = await requireAdminOrSiteOwner(request, siteId);
-    if (unauthorized) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-  } else if (!isPublicLocalAssetPath(bundle, storagePath)) {
+    // Scraped reference media is private until it is either loaded through a
+    // scoped noindex preview token or converted into a public owner-attested
+    // asset. Authenticated owner/admin sessions can also inspect it.
+    const previewToken = new URL(request.url).searchParams.get("previewToken");
+    const preview = previewToken ? await repository.resolvePreviewToken(previewToken) : null;
+    const previewTokenMatchesSite = preview?.bundle.businessProfile.siteId === siteId;
+    if (!publicLocalAsset && !previewTokenMatchesSite) {
+      const unauthorized = await requireAdminOrSiteOwner(request, siteId);
+      if (unauthorized) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+  } else if (!publicLocalAsset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
   const asset = await readLocalAsset(storagePath);
@@ -41,7 +48,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ site
   return new Response(asset.bytes, {
     headers: {
       "Content-Type": asset.mimeType,
-      "Cache-Control": "public, max-age=31536000, immutable"
+      "Cache-Control": publicLocalAsset ? "public, max-age=31536000, immutable" : "private, max-age=3600"
     }
   });
 }

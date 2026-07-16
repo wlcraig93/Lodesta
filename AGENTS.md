@@ -24,10 +24,12 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 ## Stored Artifact Schema Changes
 
-- Stored JSON artifacts (`site_candidates.bundle_json`, `site_versions.version_model`, and any persisted `SiteBundle`/`SiteVersion` shape) are re-interpreted live by current renderer code. Any change to these shapes must, in the same change, either ship a one-time backfill script (`scripts/backfill-*.ts` with a `--check` dry-run mode and an npm script) or explicitly regenerate the stale rows. Run it and report counts.
-- Do not delete stored rows from migrations to satisfy a schema change; backfill or report them so an operator decides. Deleting test data is fine when an operator does it deliberately.
+- Stored artifact policy is two-tier. Strict stored-schema and per-change backfill obligations apply only to public `SiteVersionV3` (`site_versions.version_model` and the published/customer-rendered version inside candidate bundles) and the business fact graph. These are the two shapes that public rendering, owner truth, publish gates, and auditability depend on.
+- Regenerable intermediates are caches: `businessUnderstanding`, `siteDirectorPlanV1`, `generatedCopyDeck`, `brandCueReport`, design brief, composition plan, dossier, and similar prompt/debug artifacts may be added or reshaped without a historical backfill. Old candidate rows may simply lack them or show a stale/regenerate notice in admin surfaces.
+- Regenerable does not mean unaccountable. Intermediates that affect a generated or published candidate should carry provenance where practical: producer/prompt/config version, model id when model-backed, input hashes, timestamp, and a stale marker or equivalent regeneration signal. Evidence snapshots that fed a published version must remain answerable for as long as that version exists.
+- Do not delete stored rows from migrations to satisfy a strict schema change; backfill or report them so an operator decides. Deleting test data is fine when an operator does it deliberately.
 - Keep strict fail-loud assertions on boundary-sensitive surfaces (public `/sites/*`, owner editor, APIs). Admin/operator surfaces must degrade legibly instead: soft-check with `siteVersionV3Issue` and show a "stale schema — regenerate" notice, never a raw error page. Repository reads of internal candidate records stay unchecked so repair surfaces can load stale rows; writes assert.
-- When adding a new strict assertion over stored data, run the relevant backfill `--check` first to prove zero violations.
+- When adding a new strict assertion over `SiteVersionV3` or the fact graph, run the relevant backfill `--check` first to prove zero violations.
 
 ## Secrets And Data
 

@@ -93,8 +93,9 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
   const scrapedResult = applyScrapedAttestations(bundle, input);
   if (!scrapedResult.ok) return scrapedResult;
 
-  if (logo || input.logo?.url.trim()) {
-    bundle.businessProfile.logo = logo;
+  const resolvedLogo = logo ?? scrapedResult.attestedLogo;
+  if (resolvedLogo || input.logo?.url.trim()) {
+    bundle.businessProfile.logo = resolvedLogo;
     bundle.businessProfile.provenance.logo = ownerAssetProvenance();
   }
   if (photos.length || (input.photos ?? []).length) {
@@ -108,12 +109,12 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
   }
 
   const ownerAssets = [
-    ...(logo ? [siteAssetFromReference(bundle.businessProfile.siteId, "logo", logo, input.attestedBy)] : []),
+    ...(resolvedLogo ? [siteAssetFromReference(bundle.businessProfile.siteId, "logo", resolvedLogo, input.attestedBy)] : []),
     ...photos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo, input.attestedBy)),
     ...scrapedResult.attestedPhotos.map((photo) => siteAssetFromReference(bundle.businessProfile.siteId, "photo", photo, input.attestedBy))
   ];
   const ownerAssetIds = new Set(ownerAssets.map((asset) => asset.id));
-  const updatingLogo = Boolean(logo || input.logo?.url.trim());
+  const updatingLogo = Boolean(resolvedLogo || input.logo?.url.trim());
   const updatingPhotos = Boolean(photos.length || (input.photos ?? []).length || scrapedResult.attestedPhotos.length);
   bundle.presenceAssessment.assetInventory = [
     ...(bundle.presenceAssessment.assetInventory ?? []).filter(
@@ -132,7 +133,7 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
   return {
     ok: true,
     bundle,
-    logo,
+    logo: resolvedLogo,
     photos: [...photos, ...scrapedResult.attestedPhotos],
     assets: ownerAssets
   };
@@ -142,25 +143,37 @@ function applyScrapedAttestations(
   bundle: SiteBundle,
   input: UpdateOwnerAssetsInput
 ):
-  | { ok: true; attestedPhotos: AssetReference[]; attestedIds: Set<string> }
+  | { ok: true; attestedPhotos: AssetReference[]; attestedLogo?: AssetReference; attestedIds: Set<string> }
   | { ok: false; reason: string } {
   const attestedPhotos: AssetReference[] = [];
+  let attestedLogo: AssetReference | undefined;
   const attestedIds = new Set<string>();
   for (const attestation of input.scrapedAttestations ?? []) {
     if (!attestation.rightsConfirmed) continue;
     const scraped = bundle.businessProfile.photos.find(
       (photo) => photo.id === attestation.assetId && photo.rightsStatus === "reference_only"
     );
-    if (!scraped) {
+    if (scraped) {
+      attestedIds.add(scraped.id);
+      attestedPhotos.push({
+        ...scraped,
+        rightsStatus: "customer_granted"
+      });
+      continue;
+    }
+    if (bundle.businessProfile.logo?.id === attestation.assetId && bundle.businessProfile.logo.rightsStatus === "reference_only") {
+      attestedIds.add(bundle.businessProfile.logo.id);
+      attestedLogo = {
+        ...bundle.businessProfile.logo,
+        rightsStatus: "customer_granted"
+      };
+      continue;
+    }
+    {
       return { ok: false, reason: `Scraped asset ${attestation.assetId} was not found among attestable reference images.` };
     }
-    attestedIds.add(scraped.id);
-    attestedPhotos.push({
-      ...scraped,
-      rightsStatus: "customer_granted"
-    });
   }
-  return { ok: true, attestedPhotos, attestedIds };
+  return { ok: true, attestedPhotos, attestedLogo, attestedIds };
 }
 
 function ownerAssetReference(

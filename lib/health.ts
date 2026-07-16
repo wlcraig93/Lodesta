@@ -33,6 +33,7 @@ export async function getHealthReport(options: { deep?: boolean } = {}): Promise
     checkCloudflareConfig(),
     checkWorkflowEmailConfig(),
     checkHashSecretConfig(),
+    checkClaimChallengeSecretConfig(),
     checkGooglePlacesConfig(),
     checkLocationMapConfig(),
     assetStorageCheck,
@@ -152,6 +153,16 @@ function checkHashSecretConfig(): HealthCheck {
     return warning("hash_secret", "Hash secret", "Using the development hash secret; set LODESTA_HASH_SECRET for deployed environments.");
   }
   return warning("hash_secret", "Hash secret", "Hash secret is not configured.");
+}
+
+function checkClaimChallengeSecretConfig(): HealthCheck {
+  if (process.env.LODESTA_CLAIM_CHALLENGE_SECRET || process.env.NEXTAUTH_SECRET) {
+    return ok("claim_challenge_secret", "Claim challenge secret", "Signed claim verification challenges use a deployment secret.");
+  }
+  if (process.env.NODE_ENV === "production") {
+    return error("claim_challenge_secret", "Claim challenge secret", "Set LODESTA_CLAIM_CHALLENGE_SECRET before enabling public claim verification.");
+  }
+  return warning("claim_challenge_secret", "Claim challenge secret", "Using the local claim challenge secret; set LODESTA_CLAIM_CHALLENGE_SECRET for deployed environments.");
 }
 
 function checkGooglePlacesConfig(): HealthCheck {

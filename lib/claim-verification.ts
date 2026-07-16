@@ -1,5 +1,6 @@
 import { factsByKind } from "./business-fact-graph";
-import type { BusinessFactGraph, GenerationPlanV2, SiteVersion } from "./models";
+import { scanPlaceholderText, scanSensitiveClaimText, type SensitiveClaimEvidenceKind } from "./content-safety-scanners";
+import type { BusinessFactGraph, SiteVersion } from "./models";
 
 export type ClaimVerificationIssue = {
   id: string;
@@ -12,7 +13,8 @@ export type ClaimVerificationIssue = {
     | "reviews"
     | "guarantee"
     | "emergency"
-    | "regulated";
+    | "regulated"
+    | "marketing";
   text: string;
   reason: string;
   pageId?: string;
@@ -23,33 +25,6 @@ export type ClaimVerificationResult = {
   status: "passed" | "failed";
   issues: ClaimVerificationIssue[];
 };
-
-const placeholderPatterns = [
-  /\bvisual proof slot ready\b/i,
-  /\bcredential details can be verified\b/i,
-  /\bowner-approved\b/i,
-  /\bowner-truth\b/i,
-  /\bcan be verified\b/i,
-  /\bready to request more information\b/i,
-  /\bclaimed and published\b/i,
-  /\bafter claim\b/i,
-  /\bowner verification needed\b/i,
-  /\bdo you help customers in nearby customers\b/i
-];
-
-const sensitivePatterns: Array<{
-  category: ClaimVerificationIssue["category"];
-  pattern: RegExp;
-  requiredEvidence: "proof" | "reviews" | "insurance" | "pricing" | "emergency";
-}> = [
-  { category: "credential", pattern: /\b(certified|licensed|award[- ]winning|expert|specialist)\b/i, requiredEvidence: "proof" },
-  { category: "insurance", pattern: /\b(insurance accepted|insurance claims?|deductible|rental car)\b/i, requiredEvidence: "insurance" },
-  { category: "pricing", pattern: /\b(best prices?|free estimate|free quote|no out of pocket|affordable)\b/i, requiredEvidence: "pricing" },
-  { category: "warranty", pattern: /\b(warranty|guaranteed|guarantee)\b/i, requiredEvidence: "proof" },
-  { category: "reviews", pattern: /\b(5[- ]star|five[- ]star|top rated|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
-  { category: "emergency", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" },
-  { category: "regulated", pattern: /\b(treatment|diagnosis|legal advice|case results?)\b/i, requiredEvidence: "proof" }
-];
 
 export function verifyGenerationClaims(input: {
   version: SiteVersion;
@@ -64,25 +39,23 @@ export function verifyGenerationClaims(input: {
   );
   for (const { pageId, sectionId, texts } of sectionTexts) {
     for (const text of texts) {
-        for (const pattern of placeholderPatterns) {
-          if (!pattern.test(text)) continue;
+        for (const placeholder of scanPlaceholderText(text)) {
           issues.push({
             id: `placeholder_${issues.length + 1}`,
             category: "placeholder",
             text,
-            reason: "Generated placeholder or internal review language is visible.",
+            reason: placeholder.reason,
             pageId,
             sectionId
           });
         }
-        for (const sensitive of sensitivePatterns) {
-          if (!sensitive.pattern.test(text)) continue;
+        for (const sensitive of scanSensitiveClaimText(text)) {
           if (hasEvidence(input.factGraph, sensitive.requiredEvidence, text)) continue;
           issues.push({
             id: `${sensitive.category}_${issues.length + 1}`,
             category: sensitive.category,
             text,
-            reason: `The claim requires ${sensitive.requiredEvidence} evidence in the business fact graph.`,
+            reason: `${sensitive.label} requires ${sensitive.requiredEvidence} evidence in the business fact graph.`,
             pageId,
             sectionId
           });
@@ -95,17 +68,7 @@ export function verifyGenerationClaims(input: {
   };
 }
 
-export function applyClaimVerificationToPlan(plan: GenerationPlanV2, verification: ClaimVerificationResult): GenerationPlanV2 {
-  return {
-    ...plan,
-    verification: {
-      status: verification.status,
-      unsupportedClaimCount: verification.issues.length
-    }
-  };
-}
-
-function hasEvidence(graph: BusinessFactGraph, required: "proof" | "reviews" | "insurance" | "pricing" | "emergency", text: string) {
+function hasEvidence(graph: BusinessFactGraph, required: SensitiveClaimEvidenceKind, text: string) {
   if (required === "reviews") return factsByKind(graph, "review_summary").length > 0;
   const haystack = graph.facts
     .filter((fact) => fact.renderSafety === "render_safe" || fact.renderSafety === "review_required")

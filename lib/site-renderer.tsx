@@ -27,6 +27,8 @@ type SiteRendererProps = {
   proofMode?: "ui_kit" | "link_only" | "none";
   /** Allow scraped reference-rights branding (see SiteRendererV3); admin/editor previews only. */
   referenceBrandingEnabled?: boolean;
+  /** Token that lets noindex preview renders load private scraped reference media. */
+  assetAccessToken?: string;
 };
 
 export function SiteRenderer({
@@ -43,7 +45,8 @@ export function SiteRenderer({
   formsEnabled = true,
   basePath,
   proofMode,
-  referenceBrandingEnabled
+  referenceBrandingEnabled,
+  assetAccessToken
 }: SiteRendererProps) {
   const version = selectedVersion ?? getPublishedVersion(site);
   if (version.rendererVersion !== "layout-v3") {
@@ -63,6 +66,7 @@ export function SiteRenderer({
       basePath={basePath}
       proofMode={proofMode}
       referenceBrandingEnabled={referenceBrandingEnabled}
+      assetAccessToken={assetAccessToken}
     />
   );
 }

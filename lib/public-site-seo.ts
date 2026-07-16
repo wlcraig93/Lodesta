@@ -4,7 +4,7 @@ import { getPublishedVersion } from "./sample-data";
 import { isIndexableSite } from "./site-publication";
 import { isCustomDomainRequest, requestOrigin, type HeaderReader } from "./host-routing";
 import type { PageV3 } from "./site-version-v3";
-import { assertSiteVersionV3 } from "./site-version-v3";
+import { assertPublicSiteVersionV3 } from "./site-version-v3";
 
 export function canonicalUrlForPage(bundle: SiteBundle, page: PageV3, headers: HeaderReader) {
   const canonicalPath = normalizeCanonicalPath(page.seo.canonicalPath || page.slug);
@@ -23,7 +23,7 @@ export function siteRobotsTxt(bundle: SiteBundle, claims: ClaimRecord[], headers
 }
 
 export function siteSitemapXml(bundle: SiteBundle, claims: ClaimRecord[], headers: HeaderReader) {
-  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published site sitemap version");
+  const version = assertPublicSiteVersionV3(getPublishedVersion(bundle.siteModel), "published site sitemap version");
   const urls = isIndexableSite(bundle, claims)
     ? version.pageComposition.pages.map((page) => ({
         loc: canonicalUrlForPage(bundle, page, headers),

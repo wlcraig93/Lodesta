@@ -30,7 +30,7 @@ export function runAudit(business: BusinessProfile, site: SiteModel): Optimizati
   const homePage = pages.find((page) => page.slug === "") ?? pages[0];
   const homeHero = homePage?.sections[0];
   const homeHeroVisual = homeHero ? getVisualSectionV3(homeHero.props) : undefined;
-  const hasHeroCta = Boolean(homeHeroVisual && "copy" in homeHeroVisual.slots && homeHeroVisual.slots.copy.actions?.length);
+  const hasHeroCta = Boolean(homeHeroVisual && "copy" in homeHeroVisual.slots && homeHeroVisual.slots.copy?.actions?.length);
 
   if (!hasPhone) {
     findings.push(makeFinding(business.siteId, "missing_phone", "conversion", "critical", "Phone number is missing", "Mobile callers cannot call from the site.", "Add and verify the main phone number.", "manual_service", "calls", undefined, "conversion.mobile_click_to_call"));

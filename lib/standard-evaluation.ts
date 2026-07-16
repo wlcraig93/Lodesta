@@ -36,10 +36,10 @@ export function evaluateCrawlAgainstStandard(crawl: CrawlAssessment): StandardEv
   };
 }
 
-export function evaluateSiteAgainstStandard(
+export function siteStandardEvidenceChecks(
   bundle: SiteBundle,
   options: { versionId?: string; versionStatus?: "draft" | "published" } = {}
-): StandardEvaluation {
+): StandardCheckResult[] {
   const version = assertSiteVersionV3(
     options.versionId
       ? bundle.siteModel.versions.find((item) => item.id === options.versionId) ?? getPublishedVersion(bundle.siteModel)
@@ -52,7 +52,7 @@ export function evaluateSiteAgainstStandard(
   const homePage = pages.find((page) => page.slug === "") ?? pages[0];
   const homeHero = homePage?.sections[0] ? getVisualSectionV3(homePage.sections[0].props) : undefined;
   const criteria = getCriteriaForVertical(bundle.businessProfile.vertical);
-  const checks = criteria.map((criterion): StandardCheckResult => {
+  return criteria.map((criterion): StandardCheckResult => {
     const result = evaluateCriterion(criterion.id, bundle, pages, homeHero);
     return {
       criterionId: criterion.id,
@@ -66,21 +66,6 @@ export function evaluateSiteAgainstStandard(
       businessConsequence: criterion.businessConsequence
     };
   });
-  const max = checks.length * 10;
-  const overall = checks.reduce((total, check) => total + (check.passed ? 10 : check.severity === "warning" ? 5 : 0), 0);
-  const percent = max > 0 ? Math.round((overall / max) * 100) : 0;
-
-  return {
-    source: "site_model",
-    siteId: bundle.businessProfile.siteId,
-    score: {
-      overall,
-      max,
-      percent,
-      grade: percent >= 90 ? "excellent" : percent >= 75 ? "good" : percent >= 55 ? "needs_work" : "poor"
-    },
-    checks
-  };
 }
 
 export function isColdUrlCheckableMethod(checkMethod: StandardCriterion["checkMethod"]) {
@@ -167,6 +152,7 @@ function evaluateCriterion(
         Boolean(
           business.reviewsSummary?.rating ||
             business.reviewsSummary?.count ||
+            business.credentials?.length ||
             hasSection(pages, "trust_bar") ||
             hasSection(pages, "testimonials") ||
             hasSection(pages, "team") ||

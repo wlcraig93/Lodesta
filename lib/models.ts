@@ -1,3 +1,6 @@
+import type { BackgroundFocalPointV3 } from "./generated-site-v3-visual-controls";
+import type { ClaimVerificationLevel } from "./owner-access";
+
 export type Vertical =
   | "restaurant"
   | "auto_body"
@@ -38,6 +41,17 @@ export type FieldProvenance = {
   observedAt: string;
 };
 
+export type RegenerableArtifactProvenanceV1 = {
+  version: "regenerable-artifact-provenance-v1";
+  producerId: string;
+  producerVersion: string;
+  modelId: string;
+  createdAt: string;
+  inputHashes: Record<string, string>;
+  stale: boolean;
+  staleReason?: string;
+};
+
 export type AssetReference = {
   id: string;
   url: string;
@@ -69,9 +83,7 @@ export type AssetAnalysisImageKindV1 =
   | "low_quality"
   | "unknown";
 
-export type AssetAnalysisUsableSlotV1 = "hero" | "service" | "proof" | "gallery" | "background" | "logo";
 export type AssetAnalysisFocalPointV1 = "center" | "top" | "bottom" | "left" | "right";
-export type AssetAnalysisCropIntentV1 = "subject" | "wide" | "portrait" | "center" | "detail_zoom";
 export type AssetAnalysisWarningV1 =
   | "low_resolution"
   | "blurry"
@@ -83,37 +95,21 @@ export type AssetAnalysisWarningV1 =
   | "not_business_relevant"
   | "rights_review_required";
 
-export type AssetAnalysisCropRecommendationV1 = {
-  focalPoint: AssetAnalysisFocalPointV1;
-  cropIntent: AssetAnalysisCropIntentV1;
-  suitability: number;
-  notes?: string;
-};
-
 export type AssetAnalysisV1 = {
   version: "asset-analysis-v1";
   source: "openai";
   model: string;
   analyzedAt: string;
   imageKind: AssetAnalysisImageKindV1;
-  qualityScore: number;
-  usableSlots: AssetAnalysisUsableSlotV1[];
   focalPoint: AssetAnalysisFocalPointV1;
   subjectPlacement: "centered" | "left" | "right" | "top" | "bottom" | "full_frame" | "unclear";
-  recommendedCropIntent: AssetAnalysisCropIntentV1;
-  cropRecommendations: {
-    wide: AssetAnalysisCropRecommendationV1;
-    square: AssetAnalysisCropRecommendationV1;
-    portrait: AssetAnalysisCropRecommendationV1;
-    card: AssetAnalysisCropRecommendationV1;
-  };
   warnings: AssetAnalysisWarningV1[];
   contentTags: string[];
   summary: string;
   limitations: string[];
 };
 
-export type AssetKind = "photo" | "logo" | "mockup" | "screenshot" | "icon" | "document" | "other";
+export type AssetKind = "photo" | "logo" | "screenshot" | "icon" | "document" | "other";
 
 export type AssetUsageScope =
   | "preclaim_preview"
@@ -176,10 +172,17 @@ export type BusinessFactKind =
   | "hours"
   | "category"
   | "service"
+  | "credential"
+  | "offer"
   | "service_area"
   | "photo"
   | "logo"
   | "review_summary"
+  | "testimonial"
+  | "warranty"
+  | "insurance_support"
+  | "award"
+  | "years_in_business"
   | "team_member"
   | "social_link"
   | "booking_link"
@@ -229,7 +232,7 @@ export type SourceAwareFactSourceType =
   | "manual"
   | "system";
 
-export type SourceAwareFactPolicy = "durable_render" | "live_only" | "internal_only" | "blocked";
+export type SourceAwareFactPolicy = "durable_render" | "owner_review_required" | "live_only" | "internal_only" | "blocked";
 
 export type SourceAwareFactV2 = {
   id: string;
@@ -269,6 +272,8 @@ export type BusinessProfile = {
   hours?: Record<string, string>;
   services: string[];
   serviceHighlights?: string[];
+  credentials?: string[];
+  offers?: string[];
   serviceAreas: string[];
   socialLinks: string[];
   bookingLinks: string[];
@@ -663,10 +668,10 @@ export type SiteArtDirectionRecipeV3 = {
   id: string;
   version: "site-art-direction-recipe-v1";
   fontPairingId: SiteArtDirectionFontPairingIdV3;
-  colorSystem: "light_editorial" | "media_neutral" | "warm_neighborhood" | "high_contrast_neutral" | "quiet_boutique";
+  colorSystem: "light_editorial" | "media_neutral" | "warm_neighborhood" | "high_contrast_neutral" | "quiet_boutique" | "auto_body_premium_no_media";
   spacingRhythm: "compact" | "standard" | "spacious" | "cinematic";
   headerModes: SiteHeaderModeV3[];
-  mediaTreatment: "natural_crop" | "subject_crop" | "editorial_crop" | "full_bleed_story" | "text_first_fallback";
+  mediaTreatment: "natural_crop" | "subject_crop" | "editorial_crop" | "full_bleed_story" | "text_first_fallback" | "media_independent";
   buttonSystem: "solid_with_quiet_secondary" | "high_contrast_primary" | "rounded_primary" | "understated";
   cardTreatment: "borderless" | "minimal_surface" | "soft_surface" | "hairline_surface";
   density: "open" | "balanced" | "dense";
@@ -813,6 +818,18 @@ export type MediaAssetDecisionV3 = {
   artifactRef?: string;
   policyNotes: string[];
   mayImplyRealBusinessWork: boolean;
+  selectionSnapshot?: MediaSelectionSnapshotV1;
+};
+
+export type MediaSelectionSnapshotV1 = {
+  version: "media-selection-snapshot-v1";
+  id: string;
+  url?: string;
+  artifactRef?: string;
+  rightsStatus: MediaAssetDecisionV3["rightsStatus"];
+  source: MediaAssetDecisionV3["source"];
+  policyNotes: string[];
+  mayImplyRealBusinessWork: boolean;
 };
 
 export type VisualQaReportV3 = {
@@ -875,11 +892,20 @@ export type SiteVersionV3 = SiteVersionBase & {
   compilerDecisions?: GeneratedSiteCompilerDecisionV3[];
   sectionOptionSequence?: string[];
   mediaReuseDecisions?: GeneratedSiteMediaReuseDecisionV3[];
+  rightsDeclinedBackupGallerySnapshot?: SiteMediaItemSnapshotV3[];
   visualQa?: VisualQaReportV3;
   artifactRefs: SiteVersionArtifactRefV2[];
 };
 
 export type SiteVersion = SiteVersionV1 | SiteVersionV2 | SiteVersionV3;
+
+export type SiteMediaItemSnapshotV3 = {
+  url: string;
+  label: string;
+  publicCaption?: string;
+  focalPoint?: BackgroundFocalPointV3;
+  cropIntent?: "center" | "subject" | "wide" | "portrait";
+};
 
 export type GeneratedSiteCompilerDecisionV3 = {
   id: string;
@@ -953,74 +979,6 @@ export type GenerationQaWarning = {
   viewport?: RenderViewportName;
 };
 
-export type GenerationQaRepairLog = {
-  attempted: boolean;
-  applied: boolean;
-  attemptedAt?: string;
-  mutationSummaries: string[];
-  unresolvedBlockerIds: string[];
-  passCount?: number;
-  patches?: GenerationQaRepairPatch[];
-  unresolvedTargetIds?: string[];
-};
-
-export type GenerationQaRepairTarget = {
-  id: string;
-  target:
-    | "copy_slot"
-    | "asset_crop"
-    | "director_plan"
-    | "template_geometry"
-    | "source_evidence"
-    | "score_calibration";
-  activation: "live" | "telemetry_only" | "phase_2_pending";
-  priority: "high" | "medium" | "low";
-  source: "blocker" | "warning" | "scorecard" | "visual_qa" | "render_inspection";
-  findingId: string;
-  title: string;
-  detail: string;
-  sectionId?: string;
-  templateId?: string;
-  slotId?: string;
-  copyPart?: string;
-  itemIndex?: number;
-  viewport?: RenderViewportName;
-};
-
-export type GenerationQaRepairPatch = {
-  id: string;
-  version: "generation-repair-patch-v1";
-  pass: number;
-  targetId: string;
-  target: GenerationQaRepairTarget["target"];
-  kind: "director_plan" | "mechanical_cleanup" | "copy_slot" | "asset_crop" | "template_geometry";
-  status: "applied" | "rejected";
-  sourceFindingId: string;
-  sectionId?: string;
-  templateId?: string;
-  slotId?: string;
-  copyPart?: string;
-  itemIndex?: number;
-  viewport?: RenderViewportName;
-  beforeSummary?: string;
-  afterSummary?: string;
-  mutationSummary: string;
-  rejectionReason?: string;
-  clearedFindingIds?: string[];
-  introducedBlockerIds?: string[];
-};
-
-export type GenerationRepairStateV1 = {
-  version: "generation-repair-state-v1";
-  attemptedAt: string;
-  mode: "normal_generation" | "operator_premium_generation";
-  maxPasses: number;
-  passCount: number;
-  patches: GenerationQaRepairPatch[];
-  unresolvedTargetIds: string[];
-  unresolvedBlockerIds: string[];
-};
-
 export type GenerationQaPrimaryScreenshot = {
   storagePath: string;
   viewport: RenderViewportName;
@@ -1029,7 +987,33 @@ export type GenerationQaPrimaryScreenshot = {
   capturedAt: string;
 };
 
+export type LegacyGenerationQaV1 = {
+  version: "legacy-generation-qa-v1";
+  scorecard?: Record<string, unknown>;
+  repairTargets?: Record<string, unknown>[];
+  repairLog?: Record<string, unknown>;
+  qualityReport?: Record<string, unknown>;
+  craftLoop?: Record<string, unknown>;
+};
+
+export type GenerationQaRegenerationMetadataV1 = {
+  version: "generation-regeneration-v1";
+  role: "initial_failed" | "retry";
+  attempt: 0 | 1;
+  triggerVersionId?: string;
+  triggerVerdict?: "needs_regen" | "operator_review";
+  triggerFindings?: string[];
+  mode?: "copy_only" | "planner_and_copy";
+  createdAt: string;
+};
+
 export type GenerationQaMetadata = {
+  /**
+   * New writes use generation-qa-v4. Missing/older values identify stale
+   * pre-simplification rows that admin surfaces should soft-render with a
+   * regenerate notice instead of treating as current QA.
+   */
+  schemaVersion?: "generation-qa-v4";
   readiness: GenerationQaReadiness;
   siteModelHash?: string;
   qaRunId?: string;
@@ -1042,66 +1026,8 @@ export type GenerationQaMetadata = {
   primaryScreenshot?: GenerationQaPrimaryScreenshot;
   visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
-  repair?: GenerationQaRepairLog;
-  repairTargets?: GenerationQaRepairTarget[];
-  qualityReport?: GenerationQualityReport;
-  scorecard?: GenerationScorecard;
-  factCoverage?: import("./fact-coverage").FactCoverageReport;
-  craftLoop?: import("./craft-loop").CraftLoopReport;
-};
-
-/**
- * Unified scorecard (next-level plan, Part 1). Dimensions are the measurement
- * layer ABOVE the hard blockers — blocking findings stay authoritative and a
- * site with any blocker never publishes regardless of scores. Each dimension
- * carries an explicit gate state; `unscored` dimensions never pass, block, or
- * enter any average.
- */
-export type ScorecardDimensionId =
-  | "correctness_grounding"
-  | "visual_design"
-  | "mobile_experience"
-  | "conversion_readiness"
-  | "seo_structure"
-  | "content_quality"
-  | "brand_identity"
-  | "accessibility";
-
-export type ScorecardGateState = "unscored" | "shadow" | "enforcing" | "disabled";
-export type ScorecardDimensionRequirement = "required" | "tracked";
-export type GenerationQualityVerdict = "blocked" | "needs_review" | "ready" | "premium";
-
-export type ScorecardDimensionFinding = {
-  id: string;
-  severity: "blocking" | "major" | "warning";
-  title: string;
-  detail: string;
-  viewport?: RenderViewportName;
-};
-
-export type ScorecardDimension = {
-  id: ScorecardDimensionId;
-  /** 0-100; absent exactly when state is "unscored". */
-  score?: number;
-  state: ScorecardGateState;
-  requirement: ScorecardDimensionRequirement;
-  /** Readiness threshold this dimension is held to when required. */
-  gate: number;
-  /** Premium threshold this dimension is held to for premium verdicts. */
-  premiumTarget: number;
-  /** Which existing signals fed the projection (for operator debugging). */
-  signals: string[];
-  findings: ScorecardDimensionFinding[];
-  /** `passes` is readiness-only for required dimensions; `premiumPasses` is defined for every scored dimension. */
-  passes?: boolean;
-  premiumPasses?: boolean;
-};
-
-export type GenerationScorecard = {
-  version: "scorecard-v2";
-  dimensions: ScorecardDimension[];
-  verdict: GenerationQualityVerdict;
-  evaluatedAt: string;
+  regeneration?: GenerationQaRegenerationMetadataV1;
+  legacy?: LegacyGenerationQaV1;
 };
 
 /**
@@ -1130,9 +1056,27 @@ export type BusinessUnderstandingFactConfidenceV2 = {
   sourceBacked: boolean;
 };
 
+export type BrandExpressionMoodV1 = "clinical" | "warm" | "premium" | "technical" | "neighborhood" | "bold" | "quiet";
+export type BrandExpressionFontPostureV1 = "utility" | "editorial" | "condensed" | "rounded" | "premium";
+export type BrandExpressionVoiceRegisterV1 = "direct" | "warm" | "premium" | "technical" | "plainspoken";
+
+export type BusinessBrandExpressionV1 = {
+  version: "brand-expression-v1";
+  mood: BrandExpressionMoodV1;
+  fontPosture: BrandExpressionFontPostureV1;
+  voiceRegister: BrandExpressionVoiceRegisterV1;
+  paletteSeed: {
+    strategy: "logo_color" | "photo_color" | "category_default" | "neutral";
+    preferredHex?: string;
+    candidateRank?: number;
+  };
+  rationale: string;
+};
+
 export type BusinessUnderstandingV2 = {
   version: "business-understanding-v2";
   source: "openai" | "deterministic_fallback";
+  provenance?: RegenerableArtifactProvenanceV1;
   vertical: Vertical;
   verticalConfidence: number;
   detectedSubverticals: string[];
@@ -1142,6 +1086,7 @@ export type BusinessUnderstandingV2 = {
   urgentServiceSignals: string[];
   /** What makes this business memorable: founders, family, history, mascots. */
   businessStory?: { summary: string; distinctives: string[] };
+  brandExpression?: BusinessBrandExpressionV1;
   factConfidence: BusinessUnderstandingFactConfidenceV2[];
   notes: string[];
 };
@@ -1191,6 +1136,7 @@ export type GeneratedCopyPlanV2 = {
 export type GeneratedCopyDeckV2 = {
   version: "generated-copy-deck-v2";
   source: "openai";
+  provenance?: RegenerableArtifactProvenanceV1;
   /** Page-level copy strategy used before section slot writing. New model-backed decks include this; stale/internal fixtures may omit it. */
   copyPlan?: GeneratedCopyPlanV2;
   hero: { eyebrow?: string; heading: string; body: string };
@@ -1221,49 +1167,6 @@ export type GeneratedCopyVoiceProfileV2 = {
   pov: GeneratedCopyVoicePovV2;
   /** Energy register (next-level plan, C): aligned with the design profile's register. */
   register?: import("./generated-site-v3-art-direction-catalog").DesignRegisterV3;
-};
-
-export type GenerationQualityFindingCategory =
-  | "vertical_fit"
-  | "source_grounding"
-  | "service_clarity"
-  | "hero_specificity"
-  | "section_quality"
-  | "cta_fit"
-  | "media_completeness"
-  | "mobile_credibility";
-
-export type GenerationQualityFinding = {
-  id: string;
-  severity: "blocking" | "advisory";
-  category: GenerationQualityFindingCategory;
-  sectionId?: string;
-  detail: string;
-};
-
-export type GenerationQualityRubricScores = {
-  verticalFit: number;
-  sourceGrounding: number;
-  serviceClarity: number;
-  heroSpecificity: number;
-  sectionQuality: number;
-  ctaFit: number;
-  mediaCompleteness: number;
-  mobileCredibility: number;
-};
-
-export type GenerationQualityReport = {
-  version: "generation-quality-v2";
-  overallScore: number;
-  /**
-   * INTERNAL measurement instrument only: native 0-100 visual-craft score
-   * from model visual QA. Never surface this raw value to operators — read
-   * the scorecard.
-   */
-  craft?: number;
-  rubric: GenerationQualityRubricScores;
-  findings: GenerationQualityFinding[];
-  evaluatedAt: string;
 };
 
 export type ExtensionModel = {
@@ -1685,9 +1588,17 @@ export type ClaimRecord = {
   status: "preview" | "checkout_required" | "claimed";
   ownerUserId?: string;
   ownerEmail?: string;
+  verificationLevel?: ClaimVerificationLevel;
+  verificationMethod?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  outboundCampaignId?: string;
+  outboundProspectId?: string;
   verifiedFacts: string[];
   acceptedTermsAt?: string;
   acceptedManagementAt?: string;
+  assetRightsAcceptedAt?: string;
+  attestedAssetIds?: string[];
   claimedAt?: string;
   createdAt: string;
   stripeCustomerId?: string;
@@ -1751,9 +1662,13 @@ export type OutboundEvent = {
   siteId?: string;
   type:
     | "mailer_sent"
+    | "claim_link_opened"
     | "preview_viewed"
+    | "picker_interaction"
     | "claim_started"
+    | "checkout_started"
     | "claim_completed"
+    | "paid"
     | "published"
     | "support_contact"
     | "disqualified"
@@ -1768,9 +1683,13 @@ export type OutboundSummary = {
   campaigns: number;
   prospects: number;
   mailed: number;
+  claimLinkOpened: number;
   previewViewed: number;
+  pickerInteractions: number;
   claimsStarted: number;
+  checkoutStarted: number;
   claimed: number;
+  paid: number;
   published: number;
   disqualified: number;
   supportContacts: number;
@@ -1778,13 +1697,21 @@ export type OutboundSummary = {
   avgCredibilityScore?: number;
   mailerToPreviewRate: number;
   mailerToClaimRate: number;
+  claimLinkToCheckoutRate: number;
+  checkoutToPaidRate: number;
+  claimLinkToPaidRate: number;
   claimToPublishRate: number;
   supportBurdenRate: number;
   verticalBreakdown: Array<{
     vertical: Vertical | "unknown";
     prospects: number;
+    claimLinkOpened: number;
+    checkoutStarted: number;
     claimed: number;
+    paid: number;
     published: number;
+    claimLinkToCheckoutRate: number;
+    checkoutToPaidRate: number;
     mailerToClaimRate: number;
   }>;
 };
@@ -2190,13 +2117,14 @@ export type VisualQaDefectCategory =
   | "unreadable_text"
   | "broken_media"
   | "cramped_layout"
+  | "identity_coherence"
   | "repetition"
   | "none";
 
 export type VisualQaFinding = {
   id: string;
   category: "hierarchy" | "responsive" | "conversion" | "brand" | "trust" | "accessibility" | "content";
-  severity: "pass" | "warning" | "fail";
+  severity: "warning" | "fail";
   title: string;
   evidence: string;
   recommendation?: string;
@@ -2206,8 +2134,9 @@ export type VisualQaFinding = {
 };
 
 export type VisualQaResult = {
+  schemaVersion: "visual-judgment-v1";
   siteId: string;
-  source: "openai" | "deterministic_fallback";
+  source: "openai" | "unavailable";
   model?: string;
   target: "source_site" | "generated_site" | "generated_site_model";
   versionId?: string;
@@ -2215,21 +2144,10 @@ export type VisualQaResult = {
   qaRunId?: string;
   evaluatedAt: string;
   screenshotCount: number;
-  selectedDesignDirectionId?: string;
+  verdict: "ship" | "revise" | "not_evaluated";
   summary: string;
-  /** Native score scale marker. Missing means pre-score-scale migration. */
-  scoreScale?: "visual_qa_score_100_v1";
-  score?: {
-    /** 0-100 anchored "would an owner pay for this" craft grade; never inflated by floor metrics. */
-    craft?: number;
-    overall: number;
-    brand: number;
-    layout: number;
-    copy: number;
-    conversion: number;
-    media: number;
-    mobile: number;
-  };
+  /** Diagnostic only. The generation gate consumes verdict, never a score threshold. */
+  craftScore?: number;
   findings: VisualQaFinding[];
   limitations: string[];
 };
@@ -2258,156 +2176,43 @@ export type GenerationCostEstimate = {
   lineItems: GenerationCostLineItem[];
   gates: {
     generatedRenderQa: "required";
-    deterministicVisualQa: "required";
-    sourceModelVisualQa: GenerationCostGateState;
-    generatedModelVisualQa: GenerationCostGateState;
+    visualJudgment: "required";
     mockupImageGeneration: GenerationCostGateState;
   };
   minimums: {
     generatedRenderQa: "required_before_ready";
-    deterministicVisualQa: "required_for_every_generation";
-    modelVisualQa: "run_for_final_generated_site_when_budget_credentials_and_screenshots_allow";
+    visualJudgment: "required_before_ready";
   };
   reasons: string[];
-};
-
-export type SiteArtDirection =
-  | "precision_service"
-  | "warm_local"
-  | "clinical_trust"
-  | "premium_professional"
-  | "visual_craft";
-
-export type SiteDirectorClaimCategory =
-  | "business_identity"
-  | "service"
-  | "location"
-  | "contact"
-  | "hours"
-  | "reviews"
-  | "credentials"
-  | "insurance"
-  | "pricing"
-  | "warranty"
-  | "emergency"
-  | "regulated";
-
-export type SiteDirectorCopyPolicy = {
-  grounding: "fact_ids_only";
-  allowedClaimCategories: SiteDirectorClaimCategory[];
-  forbiddenClaimCategories: SiteDirectorClaimCategory[];
-  missingFactBehavior: "omit_section" | "render_without_claim" | "block_generation";
-};
-
-export type SiteDirectorSectionDecision = {
-  action: "keep" | "revise" | "omit";
-  priority: number;
-  rationale: string;
-  factIds: string[];
-  allowedClaimCategories: SiteDirectorClaimCategory[];
-  headlineBrief?: string;
-  bodyBrief?: string;
-  riskNotes: string[];
-};
-
-export type GenerationPlanV2Section = {
-  id: string;
-  kind: LayoutSectionKind;
-  catalogSection: string;
-  pageId: string;
-  intent: string;
-  supportStatus: "supported" | "missing_required_facts";
-  rejectionBehavior: SiteDirectorCopyPolicy["missingFactBehavior"];
-  missingFactKinds: BusinessFactKind[];
-  requiredFactIds: string[];
-  optionalFactIds: string[];
-  requiredFactKinds: BusinessFactKind[];
-  requiredAnyFactKinds: BusinessFactKind[];
-  optionalFactKinds: BusinessFactKind[];
-  copyPolicy: SiteDirectorCopyPolicy;
-  directorDecision?: SiteDirectorSectionDecision;
-  omittedReason?: string;
-};
-
-export type SiteDirectorStructuralRejection = {
-  id: string;
-  pageId: string;
-  sectionId: string;
-  catalogSection: string;
-  action: SiteDirectorCopyPolicy["missingFactBehavior"];
-  missingFactKinds: BusinessFactKind[];
-  reason: string;
-};
-
-export type GenerationPlanV2 = {
-  id: string;
-  siteId: string;
-  source: "deterministic_contract_seed" | "ai_site_director";
-  createdAt: string;
-  vertical: Vertical;
-  primaryGoal: ConversionGoal;
-  artDirection: SiteArtDirection;
-  director: {
-    contractVersion: "site-director-v1";
-    promptVersion: "site-director-prompt-v1";
-    planningMode: "deterministic_seed" | "model_backed";
-    model?: string;
-    structuralRules: string[];
-    repairContract: {
-      deterministicPasses: number;
-      aiRetries: number;
-    };
-    rejectionContract: {
-      unsupportedSection: "omit_or_block_before_ready";
-      unsupportedClaim: "block_ready_until_removed_or_verified";
-      structuralHallucination: "reject_section_not_backed_by_fact_contract";
-    };
-  };
-  directorRun?: {
-    status: "not_run" | "applied" | "rejected" | "failed";
-    source: "deterministic" | "openai";
-    model?: string;
-    summary?: string;
-    issues?: string[];
-    appliedAt?: string;
-  };
-  pages: Array<{
-    id: string;
-    slug: string;
-    title: string;
-    sections: GenerationPlanV2Section[];
-  }>;
-  omittedSections: Array<{
-    catalogSection: string;
-    reason: string;
-    missingFactKinds: BusinessFactKind[];
-  }>;
-  structuralRejections: SiteDirectorStructuralRejection[];
-  verification: {
-    status: "pending" | "passed" | "failed";
-    unsupportedClaimCount: number;
-  };
 };
 
 export type PresenceAssessment = {
   siteId: string;
   sourceUrl?: string;
   businessFactGraph?: BusinessFactGraph;
-  generationPlanV2?: GenerationPlanV2;
+  /** Regenerable, page-provenance-aware source evidence for proof and brand decisions. */
+  evidenceLedgerV1?: import("./evidence-ledger-v1").SiteEvidenceLedgerV1;
   normalizedBusinessFacts?: NormalizedBusinessFacts;
   standardEvaluation?: StandardEvaluation;
   renderInspection?: RenderInspectionResult;
-  visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
   assetInventory?: SiteAsset[];
   publicPresenceSignals?: PublicPresenceSignal[];
   brandAssessment?: BrandAssessment;
-  qualityScore?: PresenceQualityScore;
-  designDirections?: DesignDirection[];
-  selectedDesignDirectionId?: string;
-  mockupArtifacts?: CreativeMockupArtifact[];
-  generationPlanningSource?: "openai" | "deterministic_fallback";
+  generationPlanningSource?: "deterministic_design_system";
   businessUnderstanding?: BusinessUnderstandingV2;
+  /** Regenerable deterministic evidence cache for prompts and operator review; old candidates may lack it. */
+  siteDossierV1?: import("./site-dossier-v1").SiteDossierV1;
+  ownerDesignSystemEditsV1?: {
+    version: "owner-design-system-edits-v1";
+    fontPosture?: BrandExpressionFontPostureV1;
+    paletteMode?: "brand" | "neutral";
+    voiceRegister?: BrandExpressionVoiceRegisterV1;
+    hiddenSectionIds?: string[];
+    heroMediaAssetId?: string;
+    heroMediaFocalPoint?: AssetAnalysisFocalPointV1;
+    updatedAt: string;
+  };
   generatedCopyDeck?: GeneratedCopyDeckV2;
   v3CompilerOverrides?: {
     heroPrimaryCta?: {
@@ -2416,16 +2221,6 @@ export type PresenceAssessment = {
       style?: "primary" | "secondary" | "text";
     };
   };
-  /** Model design brief (profile + validated control overrides); compiler falls back to deterministic selection when absent. */
-  designBrief?: {
-    profile: import("./generated-site-v3-art-direction-catalog").DesignProfileV3;
-    overrides: Partial<import("./generated-site-v3-art-direction-catalog").DesignControlsV3>;
-    /** Grammar-bounded section-order proposal; the compiler validates it and keeps the deterministic order when invalid. */
-    compositionPlan?: import("./generated-site-v3-composition-plan").CompositionPlanV3;
-    /** Catalog-bounded model-selected section presentation map; omitted roles keep compiler defaults. */
-    presentationMap?: import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
-    source: "model";
-  };
   /**
    * Catalog-bounded AI site director runtime record. This is the staged
    * replacement for hidden seed-owned creative decisions; current compiler
@@ -2433,8 +2228,6 @@ export type PresenceAssessment = {
    * being split out.
    */
   siteDirectorPlanV1?: import("./site-director-plan-v1").SiteDirectorRuntimeV1;
-  /** Operator/debug metadata for bounded generation repair; public rendering reads the repaired site model, not this telemetry. */
-  generationRepairStateV1?: GenerationRepairStateV1;
   /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
   textFirstFallbackApproval?: {
     approvedBy: string;
@@ -2444,6 +2237,7 @@ export type PresenceAssessment = {
   /** Deterministic brand-derivation outcome for the compiled V3 theme. */
   brandCueReport?: {
     version: "brand-cue-report-v2";
+    provenance?: RegenerableArtifactProvenanceV1;
     cues: Array<{ hex: string; source: "render_sample" | "ai_signal"; saturation: number; lightness: number }>;
     selectedPrimary?: string;
     selectedAccent?: string;
@@ -2466,8 +2260,6 @@ export type PresenceAssessment = {
   visualNotes: string[];
   brandNotes: string[];
   publicPresenceNotes: string[];
-  creativeBrief?: CreativeBrief;
-  generationBrief?: GenerationBrief;
 };
 
 export type SiteArtifactScope =
@@ -2491,14 +2283,8 @@ export type SiteArtifactType =
   | "brand_direction_report"
   | "brand_mark_generation_report"
   | "asset_selection_report"
-  | "seo_metadata_report"
   | "performance_audit_report"
   | "social_proof_report"
-  | "conversion_insights_report"
-  | "local_seo_refresh_report"
-  | "page_gap_analysis_report"
-  | "experiment_recommendation_report"
-  | "design_section_audit_report"
   | "design_system"
   | "blueprint"
   | "compiled_section"
@@ -2534,14 +2320,6 @@ export type SiteArtifactRecord = {
   createdAt: string;
 };
 
-export type CreativeBrief = {
-  designIntent: string;
-  mockupPrompt: string;
-  visualInspectionChecklist: string[];
-  assetStrategy: string[];
-  brandCuesToPreserve: string[];
-};
-
 export type NormalizedBusinessFactSource = "crawl" | "schema" | "prompt" | "public_presence" | "system_default";
 
 export type RenderableFact = {
@@ -2573,24 +2351,6 @@ export type NormalizedBusinessFacts = {
   blockedPlaceholders: BlockedClaim[];
 };
 
-export type GenerationBrief = {
-  siteId: string;
-  businessName: string;
-  vertical: Vertical;
-  primaryGoal: ConversionGoal;
-  headline: string;
-  subheadline: string;
-  proofSignals: string[];
-  renderableFacts: RenderableFact[];
-  blockedClaims: BlockedClaim[];
-  imageStrategy: {
-    vertical: Vertical;
-    preferredAssetId?: string;
-    fallbackAssetId: string;
-    notes: string[];
-  };
-};
-
 export type BrandAssessment = {
   id: string;
   siteId: string;
@@ -2602,52 +2362,6 @@ export type BrandAssessment = {
   toneSignals: string[];
   preservationRules: string[];
   sourceNotes: string[];
-};
-
-export type DesignDirection = {
-  id: string;
-  siteId: string;
-  strategy: "modernized_brand" | "conversion_optimized" | "premium_redesign";
-  label: string;
-  rationale: string;
-  themePreset: "warm" | "premium" | "bold" | "clinical";
-  sectionEmphasis: SectionType[];
-  mockupPrompt: string;
-  generationRules: string[];
-  riskNotes: string[];
-  selected: boolean;
-};
-
-export type CreativeMockupArtifact = {
-  id: string;
-  siteId: string;
-  designDirectionId: string;
-  strategy: DesignDirection["strategy"];
-  status: "prompt_only" | "generated" | "failed";
-  provider: "openai" | "deterministic_fallback";
-  model?: string;
-  prompt: string;
-  revisedPrompt?: string;
-  image?: AssetReference;
-  assetId?: string;
-  storageProvider?: "local" | "supabase";
-  storagePath?: string;
-  size?: string;
-  quality?: "low" | "medium" | "high" | "auto";
-  outputFormat?: "png" | "jpeg" | "webp";
-  planningOnly: true;
-  generatedAt: string;
-  notes: string[];
-};
-
-export type PresenceQualityScore = {
-  siteId: string;
-  current?: StandardEvaluation["score"];
-  generated?: StandardEvaluation["score"];
-  measuredCriteria: number;
-  generatedCriteria: number;
-  coldUrlCheckableFailures: string[];
-  summary: string;
 };
 
 export type SiteBundle = {
@@ -2837,4 +2551,36 @@ export type JobRecord = {
   updatedAt: string;
   startedAt?: string;
   completedAt?: string;
+};
+
+export type RepositoryMode = "local" | "supabase";
+
+export type WorkerHeartbeatRecord = {
+  workerId: string;
+  pid: number;
+  host: string;
+  repositoryMode: RepositoryMode;
+  startedAt: string;
+  lastSeenAt: string;
+  currentJobId?: string;
+  currentJobKind?: JobKind;
+};
+
+export type WorkerQueueStatus = {
+  now: string;
+  repositoryMode: RepositoryMode;
+  staleAfterSeconds: number;
+  activeWorkerCount: number;
+  activeWorkers: WorkerHeartbeatRecord[];
+  staleWorkers: WorkerHeartbeatRecord[];
+  queueDepthByKindStatus: Record<string, Partial<Record<JobRecord["status"], number>>>;
+  oldestQueuedAgeSeconds?: number;
+  runningJobs: Array<{
+    id: string;
+    kind: JobKind;
+    lockedBy?: string;
+    lockedAt?: string;
+    currentSpan?: string;
+    elapsedSeconds?: number;
+  }>;
 };

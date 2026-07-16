@@ -1,0 +1,35 @@
+# Weekly benchmark vector corpus.
+#
+# Requirements:
+# - Real US local businesses, not template/showcase references.
+# - 12-18 targets across 4-6 verticals.
+# - At least 3 targets per measured vertical so same-vertical metrics can still
+#   score 2 when one target blocks or fails.
+# - Not an active outreach prospect list.
+#
+# Run before spend:
+#   npm run benchmark:vector:preflight -- --targets-file config/benchmark-targets/weekly-us-local.txt --report .data/benchmarks/vector-preflight.json
+
+# Restaurants
+https://www.eldoradocafeatx.com/
+https://www.oddduckaustin.com/
+https://www.jewboyburgers.com/
+https://www.texasfrenchbread.com/
+
+# Dental
+http://austincitydental.com/
+https://www.smileaustin.com/
+https://www.enameldentistry.com/
+https://www.moontowerdental.com/
+
+# Barber / Salon
+https://www.reunionbarbershop.com/
+https://www.methodhair.com/
+https://www.bellasalonaustin.com/
+https://www.loveandrootsatx.com/
+
+# Auto Services
+https://www.austintireman.com/
+https://www.yostauto.com/
+https://www.flamingoautomotive.com/
+https://www.lugnutsautomotive.com/

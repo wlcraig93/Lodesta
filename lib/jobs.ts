@@ -2,17 +2,20 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   AnalyticsSummary,
+  ClaimRecord,
   ExperimentAnalysis,
   ExperimentLearning,
   Inquiry,
   InquiryEvent,
   JobKind,
   JobRecord,
+  WorkerHeartbeatRecord,
   OptimizationFinding,
   ProspectReportRecord,
   SiteBundle,
   SiteVersion
 } from "./models";
+import { sendOwnerOperationalEmail } from "./owner-notifications";
 import { createSiteV3FromInput } from "./intake";
 import { runAudit } from "./audit";
 import { createPresenceIntakePlan } from "./presence-intake";
@@ -24,10 +27,28 @@ import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
 import type { GenerateSiteOptions, GenerateSiteResult } from "./site-candidate-service";
 import { assertSiteVersionV3, pageCountForVersionV3 } from "./site-version-v3";
+import { generateSiteTimeoutMs, generationTimeoutSignal } from "./generation-timeout";
+import {
+  generationFailureDetail,
+  isRetryableGenerationFailure,
+  serializeGenerationFailure
+} from "./generation-failure";
+import { setWorkerCurrentJob } from "./worker-runtime";
 
 const jobsFile = join(process.cwd(), ".data", "jobs.json");
+const workerHeartbeatsFile = join(process.cwd(), ".data", "worker-heartbeats.json");
 export const defaultJobMaxAttempts = 3;
 export const defaultJobStaleAfterMs = 1000 * 60 * 15;
+export const defaultJobHeartbeatMs = 60_000;
+
+export type JobHeartbeatResult = { status: "ok" | "lock_lost" };
+
+export class JobLockLostError extends Error {
+  constructor(jobId: string, workerId: string) {
+    super(`Job ${jobId} lock was lost for worker ${workerId}; aborting active work.`);
+    this.name = "JobLockLostError";
+  }
+}
 
 type JobsFile = {
   jobs: JobRecord[];
@@ -35,6 +56,8 @@ type JobsFile = {
 
 export type JobExecutionContext = {
   workerId?: string;
+  signal?: AbortSignal;
+  heartbeatJob?: (jobId: string, workerId: string) => Promise<JobHeartbeatResult>;
   generateSite?: (options: Omit<GenerateSiteOptions, "repository">) => Promise<GenerateSiteResult>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
   runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
@@ -42,6 +65,7 @@ export type JobExecutionContext = {
   analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
   listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
   listInquiries?: (siteId?: string) => Promise<Inquiry[]>;
+  listClaims?: (siteId?: string) => Promise<ClaimRecord[]>;
   listInquiryEvents?: (inquiryId: string) => Promise<InquiryEvent[]>;
   processInquiryNotification?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
   processInquiryAiEnrichment?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
@@ -91,6 +115,17 @@ export async function getJob(id: string) {
   return file.jobs.find((job) => job.id === id) ?? null;
 }
 
+export async function heartbeatLocalJob(jobId: string, workerId: string): Promise<JobHeartbeatResult> {
+  const file = await readJobsFile();
+  const job = file.jobs.find((candidate) => candidate.id === jobId);
+  if (!job || job.status !== "running" || job.lockedBy !== workerId) return { status: "lock_lost" };
+  const now = new Date().toISOString();
+  job.lockedAt = now;
+  job.updatedAt = now;
+  await writeJobsFile(file);
+  return { status: "ok" };
+}
+
 export async function processNextJob(context?: JobExecutionContext) {
   warnIfDeprecatedWorkerIdEnvSet();
   const file = await readJobsFile();
@@ -108,8 +143,10 @@ export async function processNextJob(context?: JobExecutionContext) {
   job.updatedAt = job.startedAt;
   await writeJobsFile(file);
 
+  const runtimeContext: JobExecutionContext = { ...context, workerId, heartbeatJob: context?.heartbeatJob ?? heartbeatLocalJob };
   try {
-    const result = await executeJob(job, context);
+    setWorkerCurrentJob(job);
+    const result = await executeJob(job, runtimeContext);
     await updateJob(job.id, {
       status: "completed",
       result,
@@ -119,6 +156,8 @@ export async function processNextJob(context?: JobExecutionContext) {
   } catch (error) {
     await failOrRetryLocalJob(job.id, error);
     return await getJob(job.id);
+  } finally {
+    setWorkerCurrentJob(undefined);
   }
 }
 
@@ -133,6 +172,23 @@ export async function processAllQueuedJobs(limit = 25, context?: JobExecutionCon
 }
 
 export async function executeJob(job: JobRecord, context?: JobExecutionContext): Promise<Record<string, unknown>> {
+  const workerId = context?.workerId ?? getProcessWorkerId();
+  const lockController = new AbortController();
+  const signal = context?.signal ? AbortSignal.any([context.signal, lockController.signal]) : lockController.signal;
+  const runtimeContext: JobExecutionContext = { ...context, workerId, signal };
+  const heartbeat = startJobHeartbeat(job.id, runtimeContext, lockController);
+  try {
+    return await executeJobBody(job, runtimeContext, lockController);
+  } finally {
+    heartbeat.stop();
+  }
+}
+
+async function executeJobBody(
+  job: JobRecord,
+  context: JobExecutionContext,
+  lockController: AbortController
+): Promise<Record<string, unknown>> {
   switch (job.kind) {
     case "presence_assessment": {
       const run = await runUrlPresenceAssessment({
@@ -195,13 +251,20 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
         url,
         prompt
       };
-      const generation = await context.generateSite({
-        input,
-        source: "job",
-        candidatePurpose,
-        modelFallbackPolicy,
-        metadata: jobGenerationMetadata(job, context)
-      });
+      const timeout = generationSignalForJob(job, context, lockController, url ?? prompt ?? "generate_site");
+      let generation: GenerateSiteResult;
+      try {
+        generation = await context.generateSite({
+          input,
+          source: "job",
+          candidatePurpose,
+          modelFallbackPolicy,
+          metadata: jobGenerationMetadata(job, context),
+          signal: timeout.signal
+        });
+      } finally {
+        timeout.clear();
+      }
       const bundle = generation.bundle;
       const version = bundle.siteModel.versions[0];
       return {
@@ -239,6 +302,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       const results = [];
 
       for (const url of urls) {
+        await heartbeatJobOrWarn(job.id, context, lockController);
+        const timeout = generationSignalForJob(job, context, lockController, url);
         try {
           const generation = await context.generateSite({
             input: { url, prompt },
@@ -249,8 +314,10 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             },
             preview: {
               create: createPreviews
-            }
+            },
+            signal: timeout.signal
           });
+          timeout.clear();
           const bundle = generation.bundle;
           results.push({
             ok: true,
@@ -263,6 +330,8 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             pages: pageCountForVersionV3(assertSiteVersionV3(bundle.siteModel.versions[0]))
           });
         } catch (error) {
+          timeout.clear();
+          if (error instanceof JobLockLostError) throw error;
           results.push({
             ok: false,
             url,
@@ -311,16 +380,65 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
       }
       const bundle = await context.getSiteBundle(siteId);
       if (!bundle) throw new Error(`Unknown site: ${siteId}`);
-      const [findings, analytics, experiments, learnings, inquiries] = await Promise.all([
+      const [findings, analytics, experiments, learnings, inquiries, claims] = await Promise.all([
         context.runAndStoreAudit(siteId),
         context.analyticsSummary(siteId),
         context.analyzeExperiments(siteId),
         context.listExperimentLearnings?.(siteId) ?? Promise.resolve([]),
-        context.listInquiries?.(siteId) ?? Promise.resolve([])
+        context.listInquiries?.(siteId) ?? Promise.resolve([]),
+        context.listClaims?.(siteId) ?? Promise.resolve([])
       ]);
       const qa = runSiteQa(bundle, { versionStatus: "draft" });
       const openFindings = (findings ?? []).filter((finding) => finding.status === "open");
       const autoApplicable = openFindings.filter((finding) => finding.applyMode !== "manual_service");
+      const proposalCount = openFindings.length;
+      const proposalNotification = proposalCount
+        ? await sendOwnerOperationalEmail({
+            bundle,
+            claims,
+            kind: "proposal_ready",
+            subject: `${bundle.businessProfile.name}: ${proposalCount} website improvement proposal${
+              proposalCount === 1 ? "" : "s"
+            } ready`,
+            summaryLines: [
+              ...(openFindings.length
+                ? [
+                    `${openFindings.length} open action-list proposal${
+                      openFindings.length === 1 ? "" : "s"
+                    } are waiting in the action list.`,
+                    `${autoApplicable.length} can be drafted with one-click or auto-fix controls.`
+                  ]
+                : []),
+              ...openFindings.slice(0, 3).map((finding) => `- ${finding.title}`)
+            ],
+            actionPath: `/optimization/${bundle.siteModel.slug}`
+          })
+        : {
+            kind: "proposal_ready" as const,
+            siteId,
+            status: "skipped" as const,
+            message: "No open proposals were generated."
+          };
+      const inquiryDigestNotification = inquiries.length
+        ? await sendOwnerOperationalEmail({
+            bundle,
+            claims,
+            kind: "inquiry_digest",
+            subject: `${bundle.businessProfile.name}: ${inquiries.length} recent site lead${inquiries.length === 1 ? "" : "s"}`,
+            summaryLines: [
+              `${inquiries.length} inquiry record${inquiries.length === 1 ? "" : "s"} are visible in Lodesta.`,
+              ...summarizeInquiries(inquiries).recent
+                .slice(0, 3)
+                .map((inquiry) => `- ${inquiry.contactEmail ?? inquiry.status ?? inquiry.id}`)
+            ],
+            actionPath: `/leads/${bundle.siteModel.slug}`
+          })
+        : {
+            kind: "inquiry_digest" as const,
+            siteId,
+            status: "skipped" as const,
+            message: "No inquiries are available for a digest."
+          };
       return {
         generatedAt: new Date().toISOString(),
         siteId,
@@ -346,6 +464,10 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
             applyMode: finding.applyMode,
             expectedOutcomeMetric: finding.expectedOutcomeMetric
           }))
+        },
+        notifications: {
+          proposalReady: proposalNotification,
+          inquiryDigest: inquiryDigestNotification
         },
         experiments: experiments.map((analysis) => ({
           experimentId: analysis.experimentId,
@@ -382,6 +504,46 @@ export async function executeJob(job: JobRecord, context?: JobExecutionContext):
   }
 }
 
+function startJobHeartbeat(jobId: string, context: JobExecutionContext, lockController: AbortController) {
+  if (!context.heartbeatJob || !context.workerId) return { stop: () => undefined };
+  const interval = setInterval(() => {
+    void heartbeatJobOrWarn(jobId, context, lockController).catch((error) => {
+      if (!(error instanceof JobLockLostError)) {
+        console.warn(`Job heartbeat failed for ${jobId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }, defaultJobHeartbeatMs);
+  interval.unref?.();
+  return {
+    stop: () => clearInterval(interval)
+  };
+}
+
+async function heartbeatJobOrWarn(jobId: string, context: JobExecutionContext, lockController: AbortController) {
+  if (!context.heartbeatJob || !context.workerId || lockController.signal.aborted) return;
+  try {
+    const result = await context.heartbeatJob(jobId, context.workerId);
+    if (result.status === "lock_lost") {
+      const error = new JobLockLostError(jobId, context.workerId);
+      lockController.abort(error);
+      throw error;
+    }
+  } catch (error) {
+    if (error instanceof JobLockLostError) throw error;
+    console.warn(`Job heartbeat failed for ${jobId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function generationSignalForJob(job: JobRecord, context: JobExecutionContext, lockController: AbortController, label: string) {
+  const timeoutMs = generateSiteTimeoutMs();
+  const timeout = generationTimeoutSignal(timeoutMs, `job ${job.id} ${label}`);
+  const signals = [timeout.signal, lockController.signal, context.signal].filter(Boolean) as AbortSignal[];
+  return {
+    signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
+    clear: timeout.clear
+  };
+}
+
 function versionPageCount(version: SiteVersion | undefined) {
   if (!version) return 0;
   return pageCountForVersionV3(assertSiteVersionV3(version, "job version"));
@@ -408,11 +570,21 @@ async function failOrRetryLocalJob(id: string, error: unknown) {
   const job = file.jobs.find((candidate) => candidate.id === id);
   if (!job) throw new Error(`Job not found: ${id}`);
   const message = error instanceof Error ? error.message : "Unknown job error";
+  const detail = generationFailureDetail(error, {
+    stage: "queued",
+    code: "unknown_generation_failure",
+    jobId: id
+  });
+  const retryable = isRetryableGenerationFailure(detail) && job.attempts < Math.min(job.maxAttempts, 2);
   const now = new Date().toISOString();
-  if (job.attempts < job.maxAttempts) {
+  if (retryable) {
     Object.assign(job, {
       status: "queued" as const,
       error: message,
+      result: {
+        ...job.result,
+        generationFailureDetail: serializeGenerationFailure(detail)
+      },
       runAfter: new Date(Date.now() + retryDelayMs(job.attempts)).toISOString(),
       lockedAt: undefined,
       lockedBy: undefined,
@@ -422,6 +594,10 @@ async function failOrRetryLocalJob(id: string, error: unknown) {
     Object.assign(job, {
       status: "failed" as const,
       error: message,
+      result: {
+        ...job.result,
+        generationFailureDetail: serializeGenerationFailure(detail)
+      },
       completedAt: now,
       lockedAt: undefined,
       lockedBy: undefined,
@@ -466,6 +642,53 @@ async function readJobsFile(): Promise<JobsFile> {
 async function writeJobsFile(file: JobsFile) {
   await mkdir(dirname(jobsFile), { recursive: true });
   await writeFile(jobsFile, `${JSON.stringify(file, null, 2)}\n`);
+}
+
+export async function recordLocalWorkerHeartbeat(heartbeat: WorkerHeartbeatRecord) {
+  const file = await readWorkerHeartbeatsFile();
+  const index = file.workers.findIndex((worker) => worker.workerId === heartbeat.workerId);
+  if (index >= 0) {
+    file.workers[index] = heartbeat;
+  } else {
+    file.workers.push(heartbeat);
+  }
+  await writeWorkerHeartbeatsFile(file);
+  return heartbeat;
+}
+
+export async function listLocalWorkerHeartbeats() {
+  return (await readWorkerHeartbeatsFile()).workers;
+}
+
+export async function requeueLocalJob(jobId: string) {
+  const file = await readJobsFile();
+  const job = file.jobs.find((candidate) => candidate.id === jobId);
+  if (!job) return { ok: false as const, reason: "Job not found." };
+  if (job.status !== "running") return { ok: false as const, reason: `Only running jobs can be requeued; current status is ${job.status}.` };
+  const now = new Date().toISOString();
+  job.status = "queued";
+  job.runAfter = now;
+  job.lockedAt = undefined;
+  job.lockedBy = undefined;
+  job.updatedAt = now;
+  job.error = job.error ?? "Job was manually requeued.";
+  await writeJobsFile(file);
+  return { ok: true as const, job: normalizeJobRecord(job) };
+}
+
+async function readWorkerHeartbeatsFile(): Promise<{ workers: WorkerHeartbeatRecord[] }> {
+  try {
+    const raw = await readFile(workerHeartbeatsFile, "utf8");
+    const parsed = JSON.parse(raw) as { workers?: WorkerHeartbeatRecord[] };
+    return { workers: Array.isArray(parsed.workers) ? parsed.workers : [] };
+  } catch {
+    return { workers: [] };
+  }
+}
+
+async function writeWorkerHeartbeatsFile(file: { workers: WorkerHeartbeatRecord[] }) {
+  await mkdir(dirname(workerHeartbeatsFile), { recursive: true });
+  await writeFile(workerHeartbeatsFile, `${JSON.stringify(file, null, 2)}\n`);
 }
 
 function assertString(value: unknown, label: string) {

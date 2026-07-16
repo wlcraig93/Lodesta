@@ -58,7 +58,9 @@ export default async function SiteCandidatePreviewPage({
         vertical === "auto_body" ? ["auto_body", "auto_services"] : ["auto_services"]
       ).catch(() => []);
     }
-    const backupGallery = backupGalleryForRightsFallbackV3(bundle.businessProfile, libraryAssets);
+    const backupGallery = selectedVersion.rightsDeclinedBackupGallerySnapshot?.length
+      ? selectedVersion.rightsDeclinedBackupGallerySnapshot
+      : backupGalleryForRightsFallbackV3(bundle.businessProfile, libraryAssets);
     selectedVersion = applyMediaRightsFallbackV3(selectedVersion, backupGallery);
   }
 

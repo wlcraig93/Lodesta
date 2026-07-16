@@ -1,7 +1,5 @@
 import type { BusinessProfile, ExtensionModel, SiteBundle, SiteModel, SiteVersion, Theme } from "./models";
 import { runAudit } from "./audit";
-import { createCreativeBrief } from "./creative-brief";
-import { verticalRecipes } from "./recipes";
 import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 
@@ -243,11 +241,7 @@ export const sampleSiteBundle: SiteBundle = {
     technicalNotes: ["Current site will be checked for metadata, schema, sitemap, and mobile performance."],
     visualNotes: ["Screenshots are used for brand and UX inspection, not copied into the live preview."],
     brandNotes: ["Warm food-led direction with stronger mobile order action."],
-    publicPresenceNotes: ["Ratings and review counts are treated as sourced facts requiring provenance."],
-    creativeBrief: createCreativeBrief({
-      business: sampleBusinessProfile,
-      recipe: verticalRecipes.restaurant
-    })
+    publicPresenceNotes: ["Ratings and review counts are treated as sourced facts requiring provenance."]
   }
 };
 

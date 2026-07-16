@@ -17,6 +17,7 @@ type IntakeJobStatus = {
     status: "queued" | "running" | "completed" | "failed";
     errorCode: string | null;
     failureReason: string | null;
+    effectiveStatus: "queued_waiting_for_worker" | "queued_worker_busy" | "running" | "blocked" | "ready" | "failed";
     runId: string | null;
     createdAt: string;
     updatedAt: string;
@@ -32,7 +33,10 @@ type IntakeJobStatus = {
     updatedAt?: string;
   };
   worker?: {
-    state: "active" | "not_processing";
+    state: "active" | "busy" | "not_processing";
+    activeCount?: number;
+    currentJob?: { id: string; kind: string; lockedBy?: string; elapsedSeconds?: number } | null;
+    warning?: string;
   };
   error?: string;
 };
@@ -107,19 +111,23 @@ export function AdminGenerateForm({ onJobCreated }: { onJobCreated?: (response: 
   const telemetryUrl = jobStatus?.job?.runId ? `/admin/runs/${jobStatus.job.runId}` : undefined;
   const jobState = jobStatus?.job?.status;
   const failureReason = jobStatus?.job?.failureReason;
-  const statusText = jobStatus?.worker?.state === "not_processing"
-    ? "Queued; no worker has picked this up yet."
-    : jobState === "queued"
-      ? "Queued for candidate."
-      : jobState === "running"
+  const effectiveStatus = jobStatus?.job?.effectiveStatus;
+  const currentJob = jobStatus?.worker?.currentJob;
+  const statusText = effectiveStatus === "queued_waiting_for_worker"
+    ? jobStatus?.worker?.warning ?? "Queued; worker is not running."
+    : effectiveStatus === "queued_worker_busy"
+      ? `Queued behind ${currentJob?.kind ?? "another job"}${currentJob?.id ? ` (${currentJob.id})` : ""}.`
+      : effectiveStatus === "running"
         ? "Candidate is running."
-        : jobState === "completed"
-          ? "Candidate completed."
-          : jobState === "failed"
-            ? failureReason ?? "Candidate failed."
-            : result?.jobId
-              ? "Candidate job created."
-              : undefined;
+        : effectiveStatus === "blocked"
+          ? "Candidate blocked with reviewable reasons."
+          : effectiveStatus === "ready"
+            ? "Candidate completed and is ready for review."
+            : effectiveStatus === "failed"
+              ? failureReason ?? "Candidate failed."
+              : result?.jobId
+                ? "Candidate job created."
+                : undefined;
 
   return (
     <form className="editor-form admin-generate-form" onSubmit={onSubmit} aria-busy={submitting}>

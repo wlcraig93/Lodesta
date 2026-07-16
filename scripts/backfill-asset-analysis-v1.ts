@@ -12,6 +12,7 @@
 import "./load-env";
 
 import type { AssetReference, SiteBundle } from "../lib/models";
+import { assetAnalysisSelectionV1 } from "../lib/asset-analysis-v1";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 
 const PAGE_SIZE = 100;
@@ -22,12 +23,14 @@ type Counts = {
   missingAnalysisRows: number;
   malformedAnalysisRows: number;
   missingAssetAnalyses: number;
+  overBudgetAssetRows: number;
+  skippedOverBudgetAssets: number;
   failedRows: number;
 };
 
 function isAnalysisCandidate(asset: AssetReference) {
   if (asset.source === "generated" || asset.source === "licensed" || asset.source === "placeholder") return false;
-  return asset.rightsStatus === "reference_only" || asset.rightsStatus === "customer_granted" || asset.rightsStatus === "preclaim_safe";
+  return asset.source === "uploaded" || asset.source === "website_reference";
 }
 
 function assetAnalysisIssue(asset: AssetReference): string | null {
@@ -37,21 +40,27 @@ function assetAnalysisIssue(asset: AssetReference): string | null {
   if (analysis.version !== "asset-analysis-v1") return `unsupported AssetAnalysisV1 version ${String(analysis.version)}`;
   if (analysis.source !== "openai") return `asset analysis source is ${String(analysis.source)}; expected openai`;
   if (!analysis.model || !analysis.analyzedAt) return "asset analysis is missing model/analyzedAt replay metadata";
-  if (!analysis.imageKind || !analysis.focalPoint || !analysis.recommendedCropIntent) return "asset analysis is missing image/crop classification";
+  if (!analysis.imageKind || !analysis.focalPoint || !analysis.subjectPlacement) return "asset analysis is missing objective visual classification";
+  if (!Array.isArray(analysis.warnings) || !Array.isArray(analysis.contentTags) || !Array.isArray(analysis.limitations)) {
+    return "asset analysis is missing objective warning/tag metadata";
+  }
   return null;
 }
 
 function candidateAssetIssues(bundle: SiteBundle) {
+  const selection = assetAnalysisSelectionV1(bundle);
+  const selectedIdentities = new Set(selection.selectedAssetIdentities);
   const assets = [
     ...(bundle.businessProfile.logo ? [{ label: "logo", asset: bundle.businessProfile.logo }] : []),
     ...bundle.businessProfile.photos.map((asset, index) => ({ label: `photo[${index}]`, asset }))
-  ];
-  return assets
+  ].filter(({ asset }) => selectedIdentities.has(asset.id || asset.url));
+  const issues = assets
     .map(({ label, asset }) => {
       const issue = assetAnalysisIssue(asset);
       return issue ? { label, assetId: asset.id, issue } : undefined;
     })
     .filter((issue): issue is { label: string; assetId: string; issue: string } => Boolean(issue));
+  return { issues, skippedOverBudget: selection.skippedOverBudget };
 }
 
 async function reportCandidates(): Promise<Counts> {
@@ -62,6 +71,8 @@ async function reportCandidates(): Promise<Counts> {
     missingAnalysisRows: 0,
     malformedAnalysisRows: 0,
     missingAssetAnalyses: 0,
+    overBudgetAssetRows: 0,
+    skippedOverBudgetAssets: 0,
     failedRows: 0
   };
 
@@ -77,7 +88,9 @@ async function reportCandidates(): Promise<Counts> {
     for (const row of data) {
       counts.candidateRows += 1;
       try {
-        const issues = candidateAssetIssues(row.bundle_json as SiteBundle);
+        const { issues, skippedOverBudget } = candidateAssetIssues(row.bundle_json as SiteBundle);
+        if (skippedOverBudget) counts.overBudgetAssetRows += 1;
+        counts.skippedOverBudgetAssets += skippedOverBudget;
         if (!issues.length) {
           counts.cleanRows += 1;
           continue;
@@ -111,6 +124,7 @@ async function main() {
       {
         mode: check ? "check" : "report",
         action: "regenerate_required_or_model_enrich_assets",
+        scope: "canonical_asset_analysis_budget",
         counts
       },
       null,

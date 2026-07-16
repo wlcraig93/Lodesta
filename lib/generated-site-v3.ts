@@ -79,5 +79,17 @@ export const initialSiteArtDirectionRecipesV3: SiteArtDirectionRecipeV3[] = [
     buttonSystem: "understated",
     cardTreatment: "borderless",
     density: "open"
+  },
+  {
+    id: "auto-body-premium-no-media-v1",
+    version: "site-art-direction-recipe-v1",
+    fontPairingId: "precision_grotesk",
+    colorSystem: "auto_body_premium_no_media",
+    spacingRhythm: "spacious",
+    headerModes: ["solid_editorial", "compact_sticky"],
+    mediaTreatment: "media_independent",
+    buttonSystem: "high_contrast_primary",
+    cardTreatment: "hairline_surface",
+    density: "balanced"
   }
 ];

@@ -80,8 +80,11 @@ export function outboundComplianceStatus(input: {
   const reviewed = hasLegalReview(input.metadata);
   const outreachChannel = input.channel === undefined || input.channel === "direct_mail" || input.channel === "email" || input.channel === "phone";
   const active = input.status === "running";
+  const missingEmailCompliance = active && input.channel === "email" && !hasEmailCompliance(input.metadata);
   const reason =
-    active && outreachChannel && highVolume && !reviewed
+    missingEmailCompliance
+      ? "Email outbound requires an identified sender, physical mailing address, working opt-out, and suppression-list review before launch."
+      : active && outreachChannel && highVolume && !reviewed
       ? "High-volume outbound requires IP/legal review before launch. Add legalReviewedAt and legalReviewer metadata, or keep the campaign in draft/paused."
       : undefined;
 
@@ -139,15 +142,15 @@ export function applyOutboundEventToProspect(prospect: OutboundProspect, event: 
     prospect.status = statusAfter(prospect.status, "mailed");
     prospect.mailedAt ??= occurredAt;
   }
-  if (event.type === "preview_viewed") {
+  if (event.type === "claim_link_opened" || event.type === "preview_viewed") {
     prospect.status = statusAfter(prospect.status, "preview_viewed");
     prospect.firstPreviewViewedAt ??= occurredAt;
   }
-  if (event.type === "claim_started") {
+  if (event.type === "claim_started" || event.type === "checkout_started") {
     prospect.status = statusAfter(prospect.status, "claim_started");
     prospect.claimStartedAt ??= occurredAt;
   }
-  if (event.type === "claim_completed") {
+  if (event.type === "claim_completed" || event.type === "paid") {
     prospect.status = statusAfter(prospect.status, "claimed");
     prospect.claimedAt ??= occurredAt;
   }
@@ -186,15 +189,26 @@ export function summarizeOutbound(
   const credibilityScores = scopedEvents
     .filter((event) => event.type === "credibility_feedback" && typeof event.value === "number")
     .map((event) => event.value as number);
+  const claimLinkOpened = Math.max(
+    previewViewed,
+    uniqueProspectEventCount(scopedEvents, scopedProspects, ["claim_link_opened", "preview_viewed"])
+  );
+  const pickerInteractions = uniqueProspectEventCount(scopedEvents, scopedProspects, ["picker_interaction"]);
+  const checkoutStarted = uniqueProspectEventCount(scopedEvents, scopedProspects, ["checkout_started"]);
+  const paid = Math.max(claimed, uniqueProspectEventCount(scopedEvents, scopedProspects, ["paid", "claim_completed"]));
 
   return {
     campaignId,
     campaigns: scopedCampaigns.length,
     prospects: scopedProspects.length,
     mailed,
+    claimLinkOpened,
     previewViewed,
+    pickerInteractions,
     claimsStarted,
+    checkoutStarted,
     claimed,
+    paid,
     published,
     disqualified,
     supportContacts,
@@ -204,9 +218,12 @@ export function summarizeOutbound(
       : undefined,
     mailerToPreviewRate: rate(previewViewed, mailed),
     mailerToClaimRate: rate(claimed, mailed),
+    claimLinkToCheckoutRate: rate(checkoutStarted, claimLinkOpened),
+    checkoutToPaidRate: rate(paid, checkoutStarted),
+    claimLinkToPaidRate: rate(paid, claimLinkOpened),
     claimToPublishRate: rate(published, claimed),
     supportBurdenRate: rate(supportContacts, Math.max(claimed, 1)),
-    verticalBreakdown: verticalBreakdown(scopedProspects)
+    verticalBreakdown: verticalBreakdown(scopedProspects, scopedEvents)
   };
 }
 
@@ -217,8 +234,10 @@ export function buildOutboundMailerManifest(
   previewBaseUrl: string
 ): OutboundMailerManifestRow[] {
   const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+  const suppressedKeys = outboundSuppressionKeys(prospects);
   return prospects
     .filter((prospect) => !campaignId || prospect.campaignId === campaignId)
+    .filter((prospect) => !isProspectSuppressed(prospect, suppressedKeys))
     .map((prospect) => {
       const campaign = campaignById.get(prospect.campaignId);
       const compliance = outboundComplianceStatus(campaign ?? {});
@@ -274,7 +293,7 @@ export function outboundMailerManifestCsv(rows: OutboundMailerManifestRow[]) {
   return `${lines.join("\n")}\n`;
 }
 
-function verticalBreakdown(prospects: OutboundProspect[]): OutboundSummary["verticalBreakdown"] {
+function verticalBreakdown(prospects: OutboundProspect[], events: OutboundEvent[]): OutboundSummary["verticalBreakdown"] {
   const groups = new Map<Vertical | "unknown", OutboundProspect[]>();
   for (const prospect of prospects) {
     const key = prospect.vertical ?? "unknown";
@@ -283,17 +302,53 @@ function verticalBreakdown(prospects: OutboundProspect[]): OutboundSummary["vert
   return Array.from(groups.entries())
     .map(([vertical, items]) => {
       const mailed = items.filter((prospect) => prospect.mailedAt || rankStatus(prospect.status) >= rankStatus("mailed")).length;
+      const itemEvents = eventsForProspects(events, items);
+      const claimLinkOpened = Math.max(
+        items.filter((prospect) => prospect.firstPreviewViewedAt || rankStatus(prospect.status) >= rankStatus("preview_viewed")).length,
+        uniqueProspectEventCount(itemEvents, items, ["claim_link_opened", "preview_viewed"])
+      );
+      const checkoutStarted = uniqueProspectEventCount(itemEvents, items, ["checkout_started"]);
       const claimed = items.filter((prospect) => prospect.claimedAt || rankStatus(prospect.status) >= rankStatus("claimed")).length;
+      const paid = Math.max(claimed, uniqueProspectEventCount(itemEvents, items, ["paid", "claim_completed"]));
       const published = items.filter((prospect) => prospect.publishedAt || rankStatus(prospect.status) >= rankStatus("published")).length;
       return {
         vertical,
         prospects: items.length,
+        claimLinkOpened,
+        checkoutStarted,
         claimed,
+        paid,
         published,
+        claimLinkToCheckoutRate: rate(checkoutStarted, claimLinkOpened),
+        checkoutToPaidRate: rate(paid, checkoutStarted),
         mailerToClaimRate: rate(claimed, mailed)
       };
     })
     .sort((left, right) => right.prospects - left.prospects);
+}
+
+function uniqueProspectEventCount(
+  events: OutboundEvent[],
+  prospects: OutboundProspect[],
+  types: OutboundEvent["type"][]
+) {
+  const targetTypes = new Set(types);
+  const prospectBySite = new Map(prospects.filter((prospect) => prospect.siteId).map((prospect) => [prospect.siteId as string, prospect.id]));
+  const keys = new Set<string>();
+  for (const event of events) {
+    if (!targetTypes.has(event.type)) continue;
+    const key = event.prospectId ?? (event.siteId ? prospectBySite.get(event.siteId) ?? `site:${event.siteId}` : `event:${event.id}`);
+    keys.add(key);
+  }
+  return keys.size;
+}
+
+function eventsForProspects(events: OutboundEvent[], prospects: OutboundProspect[]) {
+  const prospectIds = new Set(prospects.map((prospect) => prospect.id));
+  const siteIds = new Set(prospects.map((prospect) => prospect.siteId).filter(Boolean));
+  return events.filter(
+    (event) => (event.prospectId && prospectIds.has(event.prospectId)) || (event.siteId && siteIds.has(event.siteId))
+  );
 }
 
 function statusAfter(current: OutboundProspect["status"], next: OutboundProspect["status"]) {
@@ -330,6 +385,40 @@ function cleanMetadata(metadata?: Record<string, string | number | boolean>) {
   );
 }
 
+function outboundSuppressionKeys(prospects: OutboundProspect[]) {
+  const keys = new Set<string>();
+  for (const prospect of prospects) {
+    const key = suppressionKeyForProspect(prospect);
+    if (!key) continue;
+    if (prospect.status === "disqualified" || prospect.metadata?.suppressed === true || prospect.metadata?.optedOut === true) {
+      keys.add(key);
+    }
+  }
+  return keys;
+}
+
+function isProspectSuppressed(prospect: OutboundProspect, suppressedKeys: Set<string>) {
+  const key = suppressionKeyForProspect(prospect);
+  return Boolean(key && suppressedKeys.has(key));
+}
+
+function suppressionKeyForProspect(prospect: Pick<OutboundProspect, "sourceUrl" | "mailingCode" | "metadata">) {
+  const explicit = stringMetadata(prospect.metadata, "suppressionKey");
+  if (explicit) return `key:${explicit.toLowerCase()}`;
+  const email = stringMetadata(prospect.metadata, "contactEmail");
+  if (email && email.includes("@")) return `email:${email.trim().toLowerCase()}`;
+  const mailingCode = prospect.mailingCode?.trim().toLowerCase();
+  if (mailingCode) return `mail:${mailingCode}`;
+  if (prospect.sourceUrl) {
+    try {
+      return `host:${new URL(prospect.sourceUrl).hostname.toLowerCase()}`;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function outboundHighVolumeThreshold() {
   const configured = Number(process.env.LODESTA_OUTBOUND_HIGH_VOLUME_THRESHOLD);
   return Number.isFinite(configured) && configured > 0 ? configured : 100;
@@ -352,6 +441,20 @@ function hasLegalReview(metadata: Record<string, string | number | boolean> | un
   if (!metadata) return false;
   if (metadata.legalApproved === true) return true;
   return typeof metadata.legalReviewedAt === "string" && metadata.legalReviewedAt.trim().length > 0;
+}
+
+function hasEmailCompliance(metadata: Record<string, string | number | boolean> | undefined) {
+  if (!metadata) return false;
+  const hasSender = metadata.senderIdentified === true || Boolean(stringMetadata(metadata, "senderName"));
+  const hasPhysicalAddress = Boolean(stringMetadata(metadata, "physicalAddress"));
+  const hasOptOut = Boolean(stringMetadata(metadata, "optOutUrl") || stringMetadata(metadata, "optOutInstructions"));
+  const suppressionReviewed = Boolean(stringMetadata(metadata, "suppressionListReviewedAt") || metadata.suppressionListReviewed === true);
+  return hasSender && hasPhysicalAddress && hasOptOut && suppressionReviewed;
+}
+
+function stringMetadata(metadata: Record<string, string | number | boolean> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function previewUrl(baseUrl: string, token: string) {

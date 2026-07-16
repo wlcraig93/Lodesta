@@ -11,9 +11,13 @@ const eventSchema = z.object({
   siteId: z.string().min(1).optional(),
   type: z.enum([
     "mailer_sent",
+    "claim_link_opened",
     "preview_viewed",
+    "picker_interaction",
     "claim_started",
+    "checkout_started",
     "claim_completed",
+    "paid",
     "published",
     "support_contact",
     "disqualified",

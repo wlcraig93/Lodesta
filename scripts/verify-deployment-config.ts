@@ -25,7 +25,6 @@ const repositorySource = readFileSync("lib/repository.ts", "utf8");
 const supabaseRepositorySource = readFileSync("lib/supabase/repository.ts", "utf8");
 const agentTelemetrySource = readFileSync("lib/agent-telemetry.ts", "utf8");
 const siteCandidateServiceSource = readFileSync("lib/site-candidate-service.ts", "utf8");
-const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
 const assetLibrarySource = readFileSync("lib/asset-library.ts", "utf8");
 const assetLibraryCliSource = readFileSync("scripts/asset-library.ts", "utf8");
 const assetLibraryPublicRouteSource = readFileSync("app/api/asset-library/public/[assetId]/[variant]/route.ts", "utf8");
@@ -56,17 +55,65 @@ const workerSource = readFileSync("workers/runner.ts", "utf8");
 const devSource = readFileSync("scripts/dev.mjs", "utf8");
 const cliSource = readFileSync("scripts/lodesta.mjs", "utf8");
 const devCrawlVerifierSource = readFileSync("scripts/verify-dev-crawl.mjs", "utf8");
+const benchmarkVectorSource = readFileSync("scripts/run-benchmark-vector.ts", "utf8");
 
 assert(packageJson.dependencies?.playwright, "playwright must be a runtime dependency for deployed render inspection.");
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
 assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
 assert(packageJson.scripts?.["verify:dev-crawl"], "package.json must expose npm run verify:dev-crawl.");
 assert(packageJson.scripts?.["verify:worker-runtime"], "package.json must expose npm run verify:worker-runtime.");
+assert(packageJson.scripts?.["verify:job-heartbeat"], "package.json must expose npm run verify:job-heartbeat.");
 assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
 assert(packageJson.scripts?.["asset-library"], "package.json must expose npm run asset-library for internal generated image batches.");
+assert(packageJson.scripts?.["backfill:media-selection-snapshot"], "package.json must expose media selection snapshot stored-artifact backfill.");
+assertIncludes(
+  packageJson.scripts?.["benchmark:vector:weekly"] ?? "",
+  "--mixed --report .data/benchmarks/vector-weekly.ndjson",
+  "package.json must expose a cron-safe weekly mixed-vertical benchmark vector report."
+);
+assertIncludes(readFileSync("scripts/backfill-media-selection-snapshot.ts", "utf8"), "--check", "Media selection snapshot backfill must support --check.");
+assertIncludes(
+  benchmarkVectorSource,
+  "LODESTA_BENCHMARK_URLS",
+  "Benchmark vector cadence must support operator-managed mixed-vertical target URLs through environment configuration."
+);
+assertIncludes(
+  benchmarkVectorSource,
+  "LODESTA_BENCHMARK_TARGETS_FILE",
+  "Benchmark vector cadence must support a target file for scheduled mixed-vertical runs."
+);
+assertIncludes(
+  benchmarkVectorSource,
+  "Visual template benchmark references are not valid generation targets.",
+  "Benchmark vector cadence must reject unconfigured mixed runs instead of using visual template demos as business targets."
+);
+assertIncludes(
+  benchmarkVectorSource,
+  "LODESTA_BENCHMARK_MIN_SCORED_TARGETS",
+  "Benchmark vector cadence must require a minimum number of scored targets before a report is considered successful."
+);
+assertIncludes(
+  benchmarkVectorSource,
+  "Benchmark vector run produced fewer scored targets than required.",
+  "Benchmark vector cadence must fail loudly on all-empty score reports."
+);
+assertIncludes(
+  benchmarkVectorSource,
+  "appendReport(parsed.reportPath, reportRecords)",
+  "Benchmark vector cadence must write append-only report records for weekly review."
+);
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
+assertIncludes(envExample, "LODESTA_WORKER_IDLE_MS=1000", ".env.example must document the deployed worker polling interval.");
+assertIncludes(envExample, "OPENAI_REQUEST_TIMEOUT_MS=300000", ".env.example must document the universal OpenAI request timeout.");
+assertIncludes(envExample, "LODESTA_GENERATE_SITE_TIMEOUT_MS=1200000", ".env.example must document the whole-generation timeout.");
+assertIncludes(envExample, "LODESTA_ASSET_ANALYSIS_MAX_ASSETS=16", ".env.example must document the capped first-party image-analysis budget.");
+assertIncludes(envExample, "LODESTA_ASSET_ANALYSIS_CONCURRENCY=4", ".env.example must document bounded parallel first-party image analysis.");
+assertIncludes(envExample, "LODESTA_BENCHMARK_URLS=", ".env.example must document scheduled benchmark vector URL overrides.");
+assertIncludes(envExample, "LODESTA_BENCHMARK_TARGETS_FILE=", ".env.example must document scheduled benchmark vector target files.");
+assertIncludes(envExample, "LODESTA_BENCHMARK_MIN_SCORED_TARGETS=1", ".env.example must document the minimum scored-target guard for benchmark reports.");
 assertIncludes(envExample, "LODESTA_CRAWL_FIXTURE_TOKEN=", ".env.example must document the protected crawl fixture token.");
 assertIncludes(envExample, "LODESTA_HASH_SECRET=", ".env.example must document the canonical hash secret.");
+assertIncludes(envExample, "LODESTA_CLAIM_CHALLENGE_SECRET=", ".env.example must document the signed claim-verification challenge secret.");
 assertIncludes(envExample, "LODESTA_ASSET_LIBRARY_IMAGE_ESTIMATE_USD=0.08", ".env.example must document the generated asset cost estimate knob.");
 assertRemovedEnv(
   envExample,
@@ -74,6 +121,7 @@ assertRemovedEnv(
     "LODESTA_PLATFORM_HOSTS",
     "LODESTA_ANALYTICS_RETENTION_DAYS",
     "LODESTA_ALLOW_PRIVATE_CRAWL_URLS",
+    "LODESTA_DESIGN_DIRECTION_COUNT",
     "LODESTA_IP_HASH_SALT",
     "LODESTA_RATE_LIMIT_SALT"
   ],
@@ -226,6 +274,9 @@ assert(!intakeRoute.includes("repository.createAndStoreSite"), "Intake API must 
 assertIncludes(jobsSource, "context.generateSite", "Generation jobs must route persisted generation through the canonical generation service.");
 assertIncludes(jobsSource, "assertPublicFetchUrl(rawUrl)", "Generation jobs must repeat public URL safety validation in the worker.");
 assertIncludes(jobsSource, "assertLaunchMarket({ url, prompt })", "Generation jobs must repeat launch-market validation in the worker.");
+assertIncludes(jobsSource, "generationSignalForJob", "Generation jobs must pass whole-generation timeout signals into generation attempts.");
+assertIncludes(jobsSource, "heartbeatJobOrWarn", "Long-running jobs must heartbeat their queue lease while active.");
+assertIncludes(jobsSource, "JobLockLostError", "Long-running jobs must abort when a heartbeat proves the queue lock was lost.");
 assert(!jobsSource.includes("startSiteCandidateTelemetry"), "Jobs must not start generation telemetry directly.");
 assert(!jobsSource.includes("createAndStoreSite"), "Jobs must not persist generated sites directly.");
 assert(!jobsSource.includes("createPreviewToken"), "Jobs must not create generated-site preview tokens directly.");
@@ -233,6 +284,16 @@ assertIncludes(
   supabaseRepositorySource,
   "generateSite: supabaseJobGenerateSite",
   "Supabase worker context must receive the canonical generation service through an entrypoint hook."
+);
+assertIncludes(
+  supabaseRepositorySource,
+  "heartbeatJob: heartbeatSupabaseJob",
+  "Supabase worker context must provide a heartbeat implementation for multi-worker generation jobs."
+);
+assertIncludes(
+  supabaseRepositorySource,
+  ".eq(\"locked_by\", workerId)",
+  "Supabase job heartbeat must prove the running lock still belongs to the current worker."
 );
 assert(
   !supabaseRepositorySource.includes("../site-candidate-service"),
@@ -262,11 +323,6 @@ assertIncludes(
   schemaSql,
   "and attempts >= max_attempts",
   "Supabase job claim function must not leave max-attempt stale running jobs locked forever."
-);
-assertIncludes(
-  imageGenerationSource,
-  "publicUrl: false",
-  "Generated mockup planning artifacts must not expose public Supabase Storage URLs."
 );
 assertIncludes(
   supabaseVerifierSource,

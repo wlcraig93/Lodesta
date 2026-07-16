@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AdminButtonLink } from "@/components/admin/AdminButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import type { AgentRunRecord, PreviewToken, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { assertSiteVersionV3, firstPageTitleForVersionV3 } from "@/lib/site-version-v3";
 
 export type AdminSiteWorkspaceView = "overview" | "report" | "site" | "qa" | "versions" | "runs";
@@ -14,7 +15,6 @@ type AdminSiteWorkspaceShellProps = {
   previewToken?: PreviewToken;
   latestRun?: AgentRunRecord;
   sourceEvaluation?: StandardEvaluation;
-  generatedEvaluation?: StandardEvaluation;
   children: ReactNode;
 };
 
@@ -34,11 +34,11 @@ export function AdminSiteWorkspaceShell({
   previewToken,
   latestRun,
   sourceEvaluation,
-  generatedEvaluation,
   children
 }: AdminSiteWorkspaceShellProps) {
   const slug = bundle.siteModel.slug;
   const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open").length;
+  const previewReadiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
 
   return (
     <main className="admin-page admin-site-workspace">
@@ -64,7 +64,7 @@ export function AdminSiteWorkspaceShell({
 
           <section className="workspace-sidebar-section workspace-status-grid" aria-label="Site status">
             <StatusPill label="Source" value={scoreLabel(sourceEvaluation)} />
-            <StatusPill label="Preview" value={scoreLabel(generatedEvaluation)} />
+            <StatusPill label="Preview QA" value={readinessLabel(previewReadiness)} />
             <StatusPill label="Versions" value={String(bundle.siteModel.versions.length)} />
             <StatusPill label="Open findings" value={String(openFindings)} />
           </section>
@@ -169,6 +169,13 @@ function StatusPill({ label, value }: { label: string; value: string }) {
 
 function scoreLabel(evaluation?: StandardEvaluation) {
   return evaluation ? `${evaluation.score.percent}/100` : "--";
+}
+
+function readinessLabel(readiness: "ready" | "blocked" | "pending" | "unavailable") {
+  if (readiness === "ready") return "Ready";
+  if (readiness === "blocked") return "Revise";
+  if (readiness === "pending") return "Running";
+  return "--";
 }
 
 function activeViewLabel(view: AdminSiteWorkspaceView) {

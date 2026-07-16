@@ -154,15 +154,21 @@ Optional launch integrations:
 - `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
 - `LODESTA_CRAWL_FIXTURE_TOKEN` for the protected dev-deployment crawler fixture used by `npm run verify:dev-crawl`
 - `RESEND_API_KEY` for lead notifications
+- `LODESTA_CLAIM_CHALLENGE_SECRET` for signed business-contact claim verification challenges
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
+- `LODESTA_WORKER_IDLE_MS` for deployed worker polling idle interval; recommended `1000` ms for the two-replica worker rollout after heartbeat verification
 - `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
-- `OPENAI_API_KEY` for hosted model-backed brand assessment, design-direction planning, screenshot visual QA, and GPT Image planning mockups; model and image options are managed at `/settings`
+- `OPENAI_API_KEY` for business understanding, grounded copy, objective first-party image analysis, and the final screenshot visual judgment; model options are managed at `/settings`
+- `OPENAI_REQUEST_TIMEOUT_MS` for the universal model-call deadline; default is `300000` ms and valid range is `5000` to `600000`
+- `LODESTA_GENERATE_SITE_TIMEOUT_MS` for each `generate_site` attempt and each URL inside `import_batch`; default is `1200000` ms and valid range is `120000` to `1800000`
+- `LODESTA_ASSET_ANALYSIS_MAX_ASSETS` for the capped first-party image-analysis budget; default is `16` and valid range is `1` to `64`
+- `LODESTA_ASSET_ANALYSIS_CONCURRENCY` for bounded parallel image analysis; default is `4` and valid range is `1` to `8`
 - `LODESTA_ASSET_LIBRARY_IMAGE_ESTIMATE_USD` for the internal generated-asset CLI dry-run estimate; default is `0.08` per image if unset
 
 Recommended Railway services:
 
 - Web: use root [railway.toml](/Users/williamcraig/Documents/GitHub/Lodesta/railway.toml), which installs Chromium during build, starts `npm run start`, and health-checks `/api/health`.
-- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically. Worker idle interval precedence is positional CLI arg, then `LODESTA_WORKER_IDLE_MS`, then the 5000 ms default; the Railway worker TOML does not pass an interval, so deployed workers keep the 5000 ms default unless explicitly configured.
+- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically. Worker idle interval precedence is positional CLI arg, then `LODESTA_WORKER_IDLE_MS`, then the 5000 ms default; the Railway worker TOML does not pass an interval, so deployed workers keep the 5000 ms default unless explicitly configured. Before setting two worker replicas and `LODESTA_WORKER_IDLE_MS=1000`, size the Railway instances for two Chromium-capable processes and verify heartbeat/stale-lock behavior.
 - Cron: schedule a protected `POST /api/jobs/schedule` call with `{ "task": "launch_maintenance" }` for recurring maintenance, or call `npm run cli -- schedule-maintenance launch_maintenance` from a Railway cron command.
 - Run `npm run verify:deployment-config` before deploying after changing package scripts or Railway config.
 

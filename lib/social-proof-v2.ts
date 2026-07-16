@@ -101,8 +101,18 @@ export function runSocialProofAuditV2(input: {
 }
 
 function socialProofItems(bundle: SiteBundle, facts: SourceAwareFactV2[]): SocialProofItemV2[] {
+  const proofKinds = new Set<SourceAwareFactV2["kind"]>([
+    "review_summary",
+    "testimonial",
+    "credential",
+    "warranty",
+    "insurance_support",
+    "award",
+    "years_in_business",
+    "proof_signal"
+  ]);
   const factItems = facts
-    .filter((fact) => fact.kind === "review_summary" || fact.kind === "proof_signal")
+    .filter((fact) => proofKinds.has(fact.kind))
     .map((fact) => itemFromProofFact(fact));
   const socialItems = bundle.businessProfile.socialLinks.map((url, index) => ({
     id: `social_profile_${index + 1}`,

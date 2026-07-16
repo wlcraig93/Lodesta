@@ -9,7 +9,7 @@ import { SiteRenderer } from "@/lib/site-renderer";
 import { applyMediaRightsFallbackV3 } from "@/lib/media-rights-preview";
 import { backupGalleryForRightsFallbackV3 } from "@/lib/generated-site-v3-compiler";
 import { approvedAssetLibraryAssetsForVerticals, type ApprovedAssetLibraryAsset } from "@/lib/asset-library";
-import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { assertSiteVersionV3, findPageBySlugV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type { SiteCandidateRecord, SiteVersionV3 } from "@/lib/models";
 
@@ -51,7 +51,7 @@ export default async function SiteCandidateOwnerPreviewPage({
     return <StaleCandidateNotice candidate={candidate} schemaIssue={schemaIssue} />;
   }
 
-  const rightsDeclined = query.rights === "declined" || (mode === "unclaimed" && query.rights !== "approved");
+  const rightsDeclined = query.rights === "declined";
   const selectedVersion = await versionForOwnerMode(assertSiteVersionV3(rawVersion, "candidate owner preview version"), candidate, rightsDeclined);
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(selectedVersion, pageSlug);
@@ -117,7 +117,7 @@ export default async function SiteCandidateOwnerPreviewPage({
             referenceBrandingEnabled={!rightsDeclined}
           />
         ) : (
-          <PreviewWedge bundle={bundle} replacementEvaluation={evaluateSiteAgainstStandard(bundle)} />
+          <PreviewWedge bundle={bundle} />
         )}
       </section>
     </main>
@@ -200,8 +200,8 @@ function CandidateOwnerSiteReview({
   previewSrc: string;
 }) {
   const bundle = candidate.bundle;
-  const replacementEvaluation = evaluateSiteAgainstStandard(bundle);
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
+  const readiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
   const pages = selectedVersion.pageComposition.pages;
 
   return (
@@ -261,10 +261,10 @@ function CandidateOwnerSiteReview({
               </div>
               <div className="candidate-score-cell is-generated">
                 <span>New draft</span>
-                <strong>{replacementEvaluation.score.percent}</strong>
+                <strong>{ownerReadinessLabel(readiness)}</strong>
               </div>
             </div>
-            <p className="candidate-rail-footnote">The owner sees the business impact, not generation internals.</p>
+            <p className="candidate-rail-footnote">Current-site report score and final draft QA status.</p>
           </section>
 
           <section className="candidate-rail-section">
@@ -295,6 +295,13 @@ function CandidateOwnerSiteReview({
       </div>
     </main>
   );
+}
+
+function ownerReadinessLabel(readiness: "ready" | "blocked" | "pending" | "unavailable") {
+  if (readiness === "ready") return "Ready";
+  if (readiness === "blocked") return "In review";
+  if (readiness === "pending") return "Checking";
+  return "Unavailable";
 }
 
 function CandidateBusinessFactsView({ candidate }: { candidate: SiteCandidateRecord }) {
@@ -328,6 +335,8 @@ function CandidateBusinessFactsView({ candidate }: { candidate: SiteCandidateRec
           address: profile.address,
           hours: profile.hours,
           serviceAreas: profile.serviceAreas,
+          credentials: profile.credentials ?? [],
+          offers: profile.offers ?? [],
           bookingLinks: profile.bookingLinks,
           orderingLinks: profile.orderingLinks,
           socialLinks: profile.socialLinks,
@@ -414,7 +423,9 @@ async function versionForOwnerMode(version: SiteVersionV3, candidate: SiteCandid
       vertical === "auto_body" ? ["auto_body", "auto_services"] : ["auto_services"]
     ).catch(() => []);
   }
-  const backupGallery = backupGalleryForRightsFallbackV3(candidate.bundle.businessProfile, libraryAssets);
+  const backupGallery = version.rightsDeclinedBackupGallerySnapshot?.length
+    ? version.rightsDeclinedBackupGallerySnapshot
+    : backupGalleryForRightsFallbackV3(candidate.bundle.businessProfile, libraryAssets);
   return applyMediaRightsFallbackV3(version, backupGallery);
 }
 

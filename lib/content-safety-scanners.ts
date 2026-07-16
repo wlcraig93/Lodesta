@@ -1,0 +1,65 @@
+export type PlaceholderTextMatch = {
+  pattern: RegExp;
+  reason: string;
+};
+
+export type SensitiveClaimEvidenceKind = "proof" | "reviews" | "insurance" | "pricing" | "emergency";
+
+export type SensitiveClaimMatch = {
+  category: "credential" | "insurance" | "pricing" | "warranty" | "reviews" | "guarantee" | "emergency" | "regulated" | "marketing";
+  label: string;
+  severity: "block" | "warning";
+  requiredEvidence: SensitiveClaimEvidenceKind;
+};
+
+const placeholderPatterns: PlaceholderTextMatch[] = [
+  { pattern: /\bLocal area\b/i, reason: "Generic local-area fallback is visible." },
+  { pattern: /\bCore service\b/i, reason: "Generic service fallback is visible." },
+  { pattern: /\bLocal support\b/i, reason: "Generic support fallback is visible." },
+  { pattern: /\bSample Local Business\b/i, reason: "Sample business fallback is visible." },
+  { pattern: /\bVisual proof slot ready\b/i, reason: "Internal proof placeholder is visible." },
+  { pattern: /\bCredential details can be verified\b/i, reason: "Internal credential placeholder is visible." },
+  { pattern: /\bowner-approved\b/i, reason: "Internal owner-review language is visible." },
+  { pattern: /\bowner-truth\b/i, reason: "Internal owner-truth language is visible." },
+  { pattern: /\bcan be verified\b/i, reason: "Internal verification language is visible." },
+  { pattern: /\bready to request more information\b/i, reason: "Internal request placeholder is visible." },
+  { pattern: /\b(claimed and published|after claim|owner verification needed)\b/i, reason: "Internal claim-state language is visible." },
+  { pattern: /\b(nearby customers\?|do you help customers in nearby customers)\b/i, reason: "Broken generic service-area copy is visible." },
+  { pattern: /\b(this page|service page|search engines?|local search intent)\b/i, reason: "Website-production planning language is visible." },
+  { pattern: /\b(primary action|conversion path|conversion actions?|ready visitors|proof sections?|trust proof)\b/i, reason: "Internal conversion-planning language is visible." },
+  { pattern: /\bhelp visitors\b/i, reason: "Generic visitor-planning copy is visible instead of customer-facing copy." },
+  { pattern: /\bEasy next step\b/i, reason: "Generic trust-bar filler is visible instead of a specific business signal." },
+  { pattern: /\b(Customer decision path|Conversion standard|Review summary detected)\b/i, reason: "Internal quality-calibration copy is visible." },
+  { pattern: /\b(general visuals?|visual context|source-backed next steps?|site source|extracted service list|profile details)\b/i, reason: "Internal source/template language is visible." },
+  { pattern: /\b(?:according to )?(?:our|the|provided|available) source (?:information|data|material|details?)\b/i, reason: "Internal provenance language is visible." },
+  { pattern: /\b(repair conversation|estimate conversation|repair paths?|estimate path|call-first path|agreed next step)\b/i, reason: "Generic process-planning copy is visible instead of customer-facing copy." },
+  { pattern: /\b(customers should describe|specific without assuming|not a photo of this specific shop)\b/i, reason: "Meta commentary about generated-site safety is visible." },
+  { pattern: /\b(Call-first|listed repair service available|listed service customers can ask)\b/i, reason: "Filler proof or service copy is visible." }
+];
+
+const sensitiveClaimPatterns: Array<SensitiveClaimMatch & { pattern: RegExp }> = [
+  { category: "credential", label: "licensed/certified credential", severity: "block", pattern: /\b(licensed|certified|board[-\s]?certified|accredited)\b/i, requiredEvidence: "proof" },
+  { category: "insurance", label: "insurance or bonding claim", severity: "block", pattern: /\b(insured|bonded|insurance accepted|insurance claims?|deductible|rental car)\b/i, requiredEvidence: "insurance" },
+  { category: "guarantee", label: "guarantee", severity: "block", pattern: /\b(guaranteed|guarantee|risk[-\s]?free)\b/i, requiredEvidence: "proof" },
+  { category: "regulated", label: "regulated approval", severity: "block", pattern: /\b(fda[-\s]?approved|hipaa[-\s]?compliant|irs[-\s]?certified)\b/i, requiredEvidence: "proof" },
+  { category: "regulated", label: "regulated advice", severity: "block", pattern: /\b(medical advice|legal advice|financial advice|tax advice|case results?)\b/i, requiredEvidence: "proof" },
+  { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(cure|diagnos(?:e|is)|treats? disease|treatment|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
+  { category: "pricing", label: "pricing claim", severity: "warning", pattern: /\b(best prices?|free estimate|free quote|no out of pocket|affordable)\b/i, requiredEvidence: "pricing" },
+  { category: "reviews", label: "top-rated review claim", severity: "warning", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
+  { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /\b(best|#\s?1|number\s?one)\b/i, requiredEvidence: "proof" },
+  { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
+  { category: "marketing", label: "market leadership claim", severity: "warning", pattern: /\b(leading|most trusted|premier)\b/i, requiredEvidence: "proof" },
+  { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" }
+];
+
+export function scanPlaceholderText(text: string): PlaceholderTextMatch[] {
+  return placeholderPatterns.filter((entry) => entry.pattern.test(text));
+}
+
+export function scanSensitiveClaimText(text: string): SensitiveClaimMatch[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  return sensitiveClaimPatterns
+    .filter((entry) => entry.pattern.test(normalized))
+    .map(({ pattern: _pattern, ...entry }) => entry);
+}

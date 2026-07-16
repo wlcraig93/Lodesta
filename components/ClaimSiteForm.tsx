@@ -10,19 +10,81 @@ export type ClaimFact = {
   verified: boolean;
 };
 
+export type ClaimAssetRight = {
+  id: string;
+  kind: "logo" | "photo";
+  url: string;
+  alt: string;
+};
+
+export type ClaimVerificationTargetOption = {
+  channel: "email" | "phone";
+  label: string;
+};
+
 type ClaimSiteFormProps = {
   siteId: string;
   facts: ClaimFact[];
+  assetRights: ClaimAssetRight[];
+  verificationTargets: ClaimVerificationTargetOption[];
+  outboundContext?: {
+    campaignId: string;
+    prospectId: string;
+    previewToken?: string;
+  };
 };
 
-export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
+export function ClaimSiteForm({ siteId, facts, assetRights, verificationTargets, outboundContext }: ClaimSiteFormProps) {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [verifiedFacts, setVerifiedFacts] = useState<string[]>(facts.map((fact) => fact.id));
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [acceptedManagement, setAcceptedManagement] = useState(false);
+  const [acceptedAssetRights, setAcceptedAssetRights] = useState(assetRights.length === 0);
+  const [selectedChannel, setSelectedChannel] = useState<"email" | "phone">(verificationTargets[0]?.channel ?? "email");
+  const [challengeId, setChallengeId] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [contactVerified, setContactVerified] = useState(false);
   const [status, setStatus] = useState("");
   const missingRequiredFacts = facts.filter((fact) => fact.required && !verifiedFacts.includes(fact.id));
-  const canSubmit = acceptedTerms && acceptedManagement && missingRequiredFacts.length === 0;
+  const canSubmit = contactVerified && acceptedTerms && acceptedManagement && acceptedAssetRights && missingRequiredFacts.length === 0;
+
+  async function startVerification() {
+    setStatus("Sending verification code...");
+    setContactVerified(false);
+    const response = await fetch("/api/claim/verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start", siteId, channel: selectedChannel })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setStatus(result.error ?? "Unable to start contact verification.");
+      return;
+    }
+    setChallengeId(result.challengeId);
+    setStatus(
+      result.developmentCode
+        ? `Verification code generated for ${result.targetLabel}: ${result.developmentCode}`
+        : `Verification code sent to ${result.targetLabel}.`
+    );
+  }
+
+  async function verifyContactCode() {
+    setStatus("Checking verification code...");
+    const response = await fetch("/api/claim/verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "verify", siteId, challengeId, code: verificationCode })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      setContactVerified(false);
+      setStatus(result.error ?? "Verification code was not accepted.");
+      return;
+    }
+    setContactVerified(true);
+    setStatus(`Business contact verified via ${result.verification?.targetLabel ?? "contact record"}.`);
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -35,12 +97,22 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
         ownerEmail: ownerEmail || undefined,
         verifiedFacts,
         acceptedTerms,
-        acceptedManagement
+        acceptedManagement,
+        verificationChallenge: challengeId && verificationCode ? { challengeId, code: verificationCode } : undefined,
+        acceptedAssetRights,
+        attestedAssetIds: acceptedAssetRights ? assetRights.map((asset) => asset.id) : [],
+        outboundCampaignId: outboundContext?.campaignId,
+        outboundProspectId: outboundContext?.prospectId,
+        previewToken: outboundContext?.previewToken
       })
     });
     const result = await response.json();
     if (!response.ok) {
-      setStatus(result.error ?? "Unable to create claim.");
+      setStatus(
+        result.code === "claim_verification_required"
+          ? "Lodesta must verify this claim against the business contact record before checkout."
+          : result.error ?? "Unable to create claim."
+      );
       return;
     }
     if (result.checkout?.url) {
@@ -70,6 +142,46 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
       </label>
 
       <div className="checkbox-list">
+        <label>
+          <span>Business contact verification</span>
+          {verificationTargets.length ? (
+            <select
+              value={selectedChannel}
+              onChange={(event) => {
+                setSelectedChannel(event.target.value as "email" | "phone");
+                setChallengeId("");
+                setVerificationCode("");
+                setContactVerified(false);
+              }}
+            >
+              {verificationTargets.map((target) => (
+                <option key={target.channel} value={target.channel}>
+                  {target.channel === "email" ? "Email" : "Phone"} {target.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="form-status">No independent business contact is available. Operator verification is required.</span>
+          )}
+        </label>
+        {verificationTargets.length ? (
+          <div className="button-row">
+            <button className="button secondary" type="button" onClick={() => void startVerification()}>
+              Send code
+            </button>
+            <label>
+              <span>Code</span>
+              <input value={verificationCode} inputMode="numeric" onChange={(event) => setVerificationCode(event.target.value)} />
+            </label>
+            <button className="button secondary" type="button" disabled={!challengeId || !verificationCode} onClick={() => void verifyContactCode()}>
+              Verify code
+            </button>
+            {contactVerified ? <span className="badge status-ready">Contact verified</span> : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="checkbox-list">
         {facts.map((fact) => (
           <label key={fact.id} className="checkbox-row">
             <input
@@ -88,6 +200,35 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
           </label>
         ))}
       </div>
+
+      {assetRights.length ? (
+        <div className="checkbox-list">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={acceptedAssetRights}
+              onChange={(event) => setAcceptedAssetRights(event.target.checked)}
+              required
+            />
+            <span>
+              <strong>I own or hold rights to use the listed images and logos</strong>
+              <small>
+                Lodesta can publish these reference assets on the managed site after claim. Replace any asset you cannot
+                approve before launch.
+              </small>
+            </span>
+          </label>
+          {assetRights.map((asset) => (
+            <div key={asset.id} className="checkbox-row">
+              <img src={asset.url} alt="" width={56} height={56} />
+              <span>
+                <strong>{asset.kind === "logo" ? "Logo" : "Photo"}: {asset.alt}</strong>
+                <small>{asset.id}</small>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="checkbox-list">
         <label className="checkbox-row">
@@ -130,6 +271,10 @@ export function ClaimSiteForm({ siteId, facts }: ClaimSiteFormProps) {
           Verify required facts: {missingRequiredFacts.map((fact) => fact.label).join(", ")}.
         </p>
       ) : null}
+      {assetRights.length && !acceptedAssetRights ? (
+        <p className="form-status">Confirm photo and logo rights before checkout.</p>
+      ) : null}
+      {!contactVerified ? <p className="form-status">Verify the listed business contact before checkout.</p> : null}
       {status ? <p className="form-status">{status}</p> : null}
     </form>
   );

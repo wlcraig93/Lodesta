@@ -5,7 +5,6 @@ import type {
   CopyArtifactV2,
   SourceAwareFactPolicy
 } from "./models";
-import { claimIdV2, normalizeClaimTextV2 } from "./generated-site-v2";
 
 export const localBusinessCopyProducerV2 = {
   id: "copy.local-business-marketing",
@@ -56,4 +55,26 @@ export function createLocalBusinessCopyArtifactV2(input: {
 
 export function hashTextV2(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function normalizeClaimTextV2(value: string): string {
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.,;:!?'"()\[\]{}]+|[.,;:!?'"()\[\]{}]+$/g, "")
+    .toLowerCase();
+}
+
+function claimIdV2(input: {
+  sourceFactIds: string[];
+  category: ClaimCategoryV2;
+  normalizedClaimValue: string;
+}) {
+  const payload = JSON.stringify({
+    sourceFactIds: [...input.sourceFactIds].sort(),
+    category: input.category,
+    normalizedClaimValue: normalizeClaimTextV2(input.normalizedClaimValue)
+  });
+  return `claim_${createHash("sha256").update(payload).digest("hex").slice(0, 32)}`;
 }

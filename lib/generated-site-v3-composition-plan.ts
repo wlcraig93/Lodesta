@@ -42,7 +42,7 @@ export type CompositionPlanEntryV3 = {
 export type CompositionPlanV3 = {
   version: "composition-plan-v1";
   sections: CompositionPlanEntryV3[];
-  source: "model";
+  source: "deterministic_design_system";
 };
 
 export type PlannableSectionV3 = {

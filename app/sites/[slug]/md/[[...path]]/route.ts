@@ -5,7 +5,7 @@ import { getPublishedVersion } from "@/lib/sample-data";
 import { isIndexableSite } from "@/lib/site-publication";
 import { markdownCanonicalLinkHeader, markdownForPage } from "@/lib/public-site-markdown";
 import { recordAgentReadableRequest } from "@/lib/agent-readable-analytics";
-import { assertSiteVersionV3, findPageBySlugV3 } from "@/lib/site-version-v3";
+import { assertSiteVersionV3, findPageBySlugV3, publicSiteVersionV3Issue } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
 
   const pageSlug = path?.join("/") ?? "";
   const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published markdown version");
+  if (publicSiteVersionV3Issue(version)) return NextResponse.json({ error: "Version is not public-renderable" }, { status: 404 });
   const page = findPageBySlugV3(version, pageSlug);
   if (!page) return NextResponse.json({ error: "Unknown page" }, { status: 404 });
   await recordAgentReadableRequest({ bundle, request, resource: "markdown_alternate", pageId: page.id });

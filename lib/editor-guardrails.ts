@@ -3,6 +3,8 @@ import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./b
 import { runSiteQa } from "./qa";
 import { applyV3SectionUpdate } from "./v3-editor";
 import { assertSiteVersionV3 } from "./site-version-v3";
+import { scanSensitiveClaimText } from "./content-safety-scanners";
+import { generationObjectiveBlockersV3 } from "./generation-gate";
 
 type SectionUpdateInput = {
   siteId: string;
@@ -35,22 +37,6 @@ export type EditorGuardrailResult =
       issues: EditorGuardrailIssue[];
       qa?: ReturnType<typeof runSiteQa>;
     };
-
-const blockingClaimPatterns: Array<{ label: string; pattern: RegExp }> = [
-  { label: "licensed/certified credential", pattern: /\b(licensed|certified|board[-\s]?certified|accredited)\b/i },
-  { label: "insurance or bonding claim", pattern: /\b(insured|bonded)\b/i },
-  { label: "guarantee", pattern: /\b(guaranteed|guarantee|risk[-\s]?free)\b/i },
-  { label: "regulated approval", pattern: /\b(fda[-\s]?approved|hipaa[-\s]?compliant|irs[-\s]?certified)\b/i },
-  { label: "regulated advice", pattern: /\b(medical advice|legal advice|financial advice|tax advice)\b/i },
-  { label: "medical outcome", pattern: /\b(cure|diagnose|treats? disease|pain[-\s]?free)\b/i }
-];
-
-const warningClaimPatterns: Array<{ label: string; pattern: RegExp }> = [
-  { label: "best or #1 claim", pattern: /\b(best|#\s?1|number\s?one)\b/i },
-  { label: "top-rated claim", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star)\b/i },
-  { label: "award claim", pattern: /\b(award[-\s]?winning|voted)\b/i },
-  { label: "market leadership claim", pattern: /\b(leading|most trusted|premier)\b/i }
-];
 
 export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateInput): EditorGuardrailResult {
   const draftBundle = structuredClone(bundle);
@@ -205,31 +191,20 @@ function sensitiveClaimIssuesForText(
   if (!normalized) return [];
 
   const issues: EditorGuardrailIssue[] = [];
-  for (const claim of blockingClaimPatterns) {
-    if (!claim.pattern.test(normalized)) continue;
+  for (const claim of scanSensitiveClaimText(normalized)) {
+    const severity = claim.severity === "block" ? "block" : "warning";
     issues.push({
-      id: "unverified_sensitive_claim",
-      severity: "block",
-      title: "Unverified sensitive claim",
-      detail: `${context.path} includes a ${claim.label}. Add verified provenance before publishing this claim.`,
+      id: severity === "block" ? "unverified_sensitive_claim" : "unverified_marketing_claim",
+      severity,
+      title: severity === "block" ? "Unverified sensitive claim" : "Marketing claim needs proof",
+      detail:
+        severity === "block"
+          ? `${context.path} includes a ${claim.label}. Add verified provenance before publishing this claim.`
+          : `${context.path} includes a ${claim.label}. Keep it only if the owner can verify it.`,
       field: context.field,
       pageId: context.pageId,
       sectionId: context.sectionId,
-      key: `block:${context.pageId ?? "business"}:${context.sectionId ?? ""}:${context.field ?? context.path}:${claim.label}`
-    });
-  }
-
-  for (const claim of warningClaimPatterns) {
-    if (!claim.pattern.test(normalized)) continue;
-    issues.push({
-      id: "unverified_marketing_claim",
-      severity: "warning",
-      title: "Marketing claim needs proof",
-      detail: `${context.path} includes a ${claim.label}. Keep it only if the owner can verify it.`,
-      field: context.field,
-      pageId: context.pageId,
-      sectionId: context.sectionId,
-      key: `warning:${context.pageId ?? "business"}:${context.sectionId ?? ""}:${context.field ?? context.path}:${claim.label}`
+      key: `${severity}:${context.pageId ?? "business"}:${context.sectionId ?? ""}:${context.field ?? context.path}:${claim.label}`
     });
   }
 
@@ -240,9 +215,26 @@ function qaRegressionIssues(beforeBundle: SiteBundle, afterBundle: SiteBundle) {
   const beforeQa = runSiteQa(beforeBundle, { versionStatus: "draft" });
   const afterQa = runSiteQa(afterBundle, { versionStatus: "draft" });
   const beforeById = new Map(beforeQa.checks.map((check) => [check.id, check]));
-  return afterQa.checks
+  const standardRegressions = afterQa.checks
     .filter((check) => severityRank(check.severity) > severityRank(beforeById.get(check.id)?.severity ?? "pass"))
     .map((check) => issueFromQaCheck(check));
+  const beforeVersion = beforeBundle.siteModel.versions.find((version) => version.status === "draft") ?? beforeBundle.siteModel.versions[0];
+  const afterVersion = afterBundle.siteModel.versions.find((version) => version.status === "draft") ?? afterBundle.siteModel.versions[0];
+  if (!beforeVersion || !afterVersion || beforeVersion.rendererVersion !== "layout-v3" || afterVersion.rendererVersion !== "layout-v3") {
+    return standardRegressions;
+  }
+  const beforeGenerationBlockers = new Set(generationObjectiveBlockersV3(beforeBundle, beforeVersion).map((blocker) => blocker.id));
+  const generationRegressions: EditorGuardrailIssue[] = generationObjectiveBlockersV3(afterBundle, afterVersion)
+    .filter((blocker) => !beforeGenerationBlockers.has(blocker.id))
+    .map((blocker) => ({
+      id: "generation_gate_regression",
+      severity: "block",
+      title: blocker.title,
+      detail: blocker.detail,
+      checkId: blocker.id,
+      key: `generation-gate:${blocker.id}`
+    }));
+  return [...standardRegressions, ...generationRegressions];
 }
 
 function issueFromQaCheck(check: QACheck): EditorGuardrailIssue {

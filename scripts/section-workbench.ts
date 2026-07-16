@@ -5,11 +5,16 @@ import {
   createGeneratedSiteV3CanonicalVisualGrammarSites,
   type GeneratedSiteV3CanonicalVisualGrammarSite
 } from "../lib/generated-site-v3-canonical-visual-grammar";
-import { inspectGeneratedSiteBundleRender } from "../lib/generated-site-render-inspection";
+import { inspectGeneratedSiteBundleRender, renderGeneratedSiteHtml } from "../lib/generated-site-render-inspection";
 import type { ListPresentationIdV3 } from "../lib/generated-site-v3-art-direction-catalog";
 import {
   getVisualSectionV3,
+  type IntroGridCardActionV3,
   type IntroGridCardTreatmentV3,
+  type IntroGridCardToneV3,
+  type IntroGridMediaAspectV3,
+  type IntroGridMediaCropV3,
+  type IntroGridPatternV3,
   type NumberedStepsTreatmentV3,
   type StandardItemV3
 } from "../lib/generated-site-v3-visual-controls";
@@ -21,6 +26,11 @@ type Args = {
   site?: string;
   index?: number;
   cardTreatment?: IntroGridCardTreatmentV3;
+  cardAction?: IntroGridCardActionV3;
+  cardTone?: IntroGridCardToneV3;
+  gridPattern?: IntroGridPatternV3;
+  mediaAspect?: IntroGridMediaAspectV3;
+  mediaCrop?: IntroGridMediaCropV3;
   stepTreatment?: NumberedStepsTreatmentV3;
   listPresentation?: WorkbenchListPresentationId;
   fixtureCount?: number;
@@ -57,7 +67,14 @@ const version = cloneJson(selection.site.version);
 const homepage = version.pageComposition.pages[0];
 if (!homepage) throw new Error(`${selection.site.id} is missing a homepage.`);
 const workbenchSection = cloneJson(selection.section);
-applyCardTreatmentOverride(workbenchSection, args.cardTreatment);
+applyIntroGridOptionOverrides(workbenchSection, {
+  cardTreatment: args.cardTreatment,
+  cardAction: args.cardAction,
+  cardTone: args.cardTone,
+  gridPattern: args.gridPattern,
+  mediaAspect: args.mediaAspect,
+  mediaCrop: args.mediaCrop
+});
 applyStepTreatmentOverride(workbenchSection, args.stepTreatment);
 applyFixtureItemCount(workbenchSection, args.fixtureCount);
 applyFixtureMedia(workbenchSection, args.fixtureMedia);
@@ -72,6 +89,8 @@ homepage.sections = [workbenchSection];
 bundle.siteModel.versions = [version];
 
 await mkdir(args.artifactRoot, { recursive: true });
+const renderedHtml = await renderGeneratedSiteHtml(bundle, version);
+const renderedAttributes = renderedSectionAttributes(renderedHtml, workbenchSection.id);
 const inspection = await inspectGeneratedSiteBundleRender({
   bundle,
   version,
@@ -91,10 +110,16 @@ const report = {
   sectionId: selection.section.id,
   templateId: selection.templateId,
   cardTreatment: args.cardTreatment,
+  cardAction: args.cardAction,
+  cardTone: args.cardTone,
+  gridPattern: args.gridPattern,
+  mediaAspect: args.mediaAspect,
+  mediaCrop: args.mediaCrop,
   stepTreatment: args.stepTreatment,
   listPresentation: args.listPresentation,
   fixtureCount: args.fixtureCount,
   fixtureMedia: args.fixtureMedia,
+  renderedAttributes,
   screenshots: inspection.screenshots.map((screenshot) => ({
     viewport: screenshot.viewport,
     path: screenshot.path,
@@ -156,6 +181,11 @@ function parseArgs(raw: string[]): Args {
     else if (arg === "--site") parsed.site = valueAfter(raw, index, arg);
     else if (arg === "--index") parsed.index = Number(valueAfter(raw, index, arg));
     else if (arg === "--card-treatment") parsed.cardTreatment = parseCardTreatment(valueAfter(raw, index, arg));
+    else if (arg === "--card-action") parsed.cardAction = parseCardAction(valueAfter(raw, index, arg));
+    else if (arg === "--card-tone") parsed.cardTone = parseCardTone(valueAfter(raw, index, arg));
+    else if (arg === "--grid-pattern") parsed.gridPattern = parseGridPattern(valueAfter(raw, index, arg));
+    else if (arg === "--media-aspect") parsed.mediaAspect = parseMediaAspect(valueAfter(raw, index, arg));
+    else if (arg === "--media-crop") parsed.mediaCrop = parseMediaCrop(valueAfter(raw, index, arg));
     else if (arg === "--step-treatment") parsed.stepTreatment = parseStepTreatment(valueAfter(raw, index, arg));
     else if (arg === "--list-presentation") parsed.listPresentation = parseListPresentation(valueAfter(raw, index, arg));
     else if (arg === "--fixture-count") parsed.fixtureCount = Number(valueAfter(raw, index, arg));
@@ -165,6 +195,11 @@ function parseArgs(raw: string[]): Args {
       arg === "--site" ||
       arg === "--index" ||
       arg === "--card-treatment" ||
+      arg === "--card-action" ||
+      arg === "--card-tone" ||
+      arg === "--grid-pattern" ||
+      arg === "--media-aspect" ||
+      arg === "--media-crop" ||
       arg === "--step-treatment" ||
       arg === "--list-presentation" ||
       arg === "--fixture-count" ||
@@ -381,6 +416,46 @@ function parseCardTreatment(value: string): IntroGridCardTreatmentV3 {
   return value as IntroGridCardTreatmentV3;
 }
 
+function parseCardAction(value: string): IntroGridCardActionV3 {
+  const allowed = ["none", "text_link", "bottom_aligned_button", "full_width_button"] as const;
+  if (!allowed.includes(value as IntroGridCardActionV3)) {
+    throw new Error(`Unknown --card-action ${value}. Allowed: ${allowed.join(", ")}.`);
+  }
+  return value as IntroGridCardActionV3;
+}
+
+function parseCardTone(value: string): IntroGridCardToneV3 {
+  const allowed = ["uniform", "alternating_surface", "featured_first", "dark_feature"] as const;
+  if (!allowed.includes(value as IntroGridCardToneV3)) {
+    throw new Error(`Unknown --card-tone ${value}. Allowed: ${allowed.join(", ")}.`);
+  }
+  return value as IntroGridCardToneV3;
+}
+
+function parseGridPattern(value: string): IntroGridPatternV3 {
+  const allowed = ["equal_grid", "lead_card", "mixed_masonry", "two_by_two", "compact_rows"] as const;
+  if (!allowed.includes(value as IntroGridPatternV3)) {
+    throw new Error(`Unknown --grid-pattern ${value}. Allowed: ${allowed.join(", ")}.`);
+  }
+  return value as IntroGridPatternV3;
+}
+
+function parseMediaAspect(value: string): IntroGridMediaAspectV3 {
+  const allowed = ["none", "square", "4x3", "16x10", "portrait"] as const;
+  if (!allowed.includes(value as IntroGridMediaAspectV3)) {
+    throw new Error(`Unknown --media-aspect ${value}. Allowed: ${allowed.join(", ")}.`);
+  }
+  return value as IntroGridMediaAspectV3;
+}
+
+function parseMediaCrop(value: string): IntroGridMediaCropV3 {
+  const allowed = ["center", "subject", "wide", "detail_zoom"] as const;
+  if (!allowed.includes(value as IntroGridMediaCropV3)) {
+    throw new Error(`Unknown --media-crop ${value}. Allowed: ${allowed.join(", ")}.`);
+  }
+  return value as IntroGridMediaCropV3;
+}
+
 function parseListPresentation(value: string): WorkbenchListPresentationId {
   const allowed = ["card_grid", "action_tiles", "coaching_cards", "service_problem_rows", "menu_preview", "premium_showcase", "feature_list", "showcase_grid", "image_tiles", "media_grid"] as const;
   if (!allowed.includes(value as WorkbenchListPresentationId)) {
@@ -408,18 +483,29 @@ function applyListPresentationOverride(version: SiteVersionV3, listPresentation:
   };
 }
 
-function applyCardTreatmentOverride(section: SectionInstanceV3, cardTreatment: IntroGridCardTreatmentV3 | undefined) {
-  if (!cardTreatment) return;
+function applyIntroGridOptionOverrides(
+  section: SectionInstanceV3,
+  overrides: {
+    cardTreatment?: IntroGridCardTreatmentV3;
+    cardAction?: IntroGridCardActionV3;
+    cardTone?: IntroGridCardToneV3;
+    gridPattern?: IntroGridPatternV3;
+    mediaAspect?: IntroGridMediaAspectV3;
+    mediaCrop?: IntroGridMediaCropV3;
+  }
+) {
+  const definedOverrides = Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined));
+  if (!Object.keys(definedOverrides).length) return;
   const visualSection = getVisualSectionV3(section.props);
-  if (!visualSection) throw new Error("--card-treatment requires a visual-section-v3 section.");
-  if (visualSection.templateId !== "intro_grid") throw new Error(`--card-treatment only applies to intro_grid, got ${visualSection.templateId}.`);
+  if (!visualSection) throw new Error("IntroGrid option overrides require a visual-section-v3 section.");
+  if (visualSection.templateId !== "intro_grid") throw new Error(`IntroGrid option overrides only apply to intro_grid, got ${visualSection.templateId}.`);
   section.props = {
     ...section.props,
     visualSectionV3: {
       ...visualSection,
       options: {
         ...visualSection.options,
-        cardTreatment
+        ...definedOverrides
       }
     }
   };
@@ -503,6 +589,39 @@ function applyFixtureMedia(section: SectionInstanceV3, enabled: boolean) {
 function isWorkbenchBlockingFinding(finding: RenderInspectionFinding) {
   const sectionIrrelevantSiteFindings = ["render.above_fold_cta", "render.a11y_structure", "render.primary_hero_cta"];
   return !sectionIrrelevantSiteFindings.some((id) => finding.id.startsWith(id));
+}
+
+function renderedSectionAttributes(html: string, sectionId: string) {
+  const sectionTag =
+    findOpeningTag(html, "section", (tag) => tag.includes(`data-section-id="${sectionId}"`)) ??
+    findOpeningTag(html, "section", (tag) => tag.includes('data-section-template="intro_grid"'));
+  const listTag = findOpeningTag(html, "div", (tag) => tag.includes("site-visual-list-v3"));
+  return {
+    dataSectionTemplate: dataAttribute(sectionTag, "data-section-template"),
+    dataCardTreatment: dataAttribute(sectionTag, "data-card-treatment"),
+    dataCardAction: dataAttribute(sectionTag, "data-card-action"),
+    dataCardTone: dataAttribute(sectionTag, "data-card-tone"),
+    dataGridPattern: dataAttribute(sectionTag, "data-grid-pattern"),
+    dataMediaAspect: dataAttribute(sectionTag, "data-media-aspect"),
+    dataMediaCrop: dataAttribute(sectionTag, "data-media-crop"),
+    dataPresentation: dataAttribute(listTag, "data-presentation")
+  };
+}
+
+function findOpeningTag(html: string, tagName: string, predicate: (tag: string) => boolean) {
+  const pattern = new RegExp(`<${tagName}\\b[^>]*>`, "g");
+  for (const match of html.matchAll(pattern)) {
+    const tag = match[0];
+    if (predicate(tag)) return tag;
+  }
+  return undefined;
+}
+
+function dataAttribute(tag: string | undefined, name: string) {
+  if (!tag) return undefined;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = tag.match(new RegExp(`${escaped}="([^"]*)"`));
+  return match?.[1];
 }
 
 function cloneJson<T>(value: T): T {

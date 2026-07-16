@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
+import { runSiteQa } from "@/lib/qa";
 
 const optionalString = z.string().optional();
 
@@ -10,6 +11,8 @@ const businessProfileSchema = z.object({
   phone: optionalString,
   email: optionalString,
   services: z.array(z.string()).optional(),
+  credentials: z.array(z.string()).optional(),
+  offers: z.array(z.string()).optional(),
   serviceAreas: z.array(z.string()).optional(),
   bookingLinks: z.array(z.string()).optional(),
   orderingLinks: z.array(z.string()).optional(),
@@ -46,6 +49,7 @@ export async function POST(request: Request) {
     ok: true,
     businessProfile: result.bundle.businessProfile,
     findings: result.bundle.optimizationFindings,
+    qa: runSiteQa(result.bundle, { versionStatus: "draft" }),
     guardrailWarnings: result.guardrailWarnings
   });
 }

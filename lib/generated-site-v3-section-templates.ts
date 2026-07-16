@@ -294,8 +294,8 @@ export const sectionTemplateCatalogV3: readonly SectionTemplateDefinitionV3[] = 
     allowedBackgrounds: nonImageBackgroundsV3,
     visualDensity: "standard",
     visualWeight: "standard",
-    itemCount: { min: 3, max: 3 },
-    desktopRule: "Intro spans the top row; quote cards form a three-column grid below.",
+    itemCount: { min: 2, max: 3 },
+    desktopRule: "Intro spans the top row; two or three quote cards form a balanced grid below.",
     tabletRule: "Intro stays full width; quote cards use two columns.",
     mobileRule: "Intro and quote cards stack one by one."
   }),
@@ -535,15 +535,16 @@ function template(
   label: string,
   description: string,
   rhythmRole: SectionTemplateRhythmRoleV3,
-  options: Omit<SectionTemplateDefinitionV3, "id" | "label" | "status" | "description" | "rhythmRole">
+  options: Omit<SectionTemplateDefinitionV3, "id" | "label" | "status" | "description" | "rhythmRole"> & { status?: SectionTemplateDefinitionV3["status"] }
 ): SectionTemplateDefinitionV3 {
+  const { status = "active", ...rest } = options;
   return {
     id,
     label,
-    status: "active",
+    status,
     description,
     rhythmRole,
-    ...options
+    ...rest
   };
 }
 

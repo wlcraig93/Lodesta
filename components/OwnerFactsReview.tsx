@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { BusinessProfile, FieldProvenance } from "@/lib/models";
 
-type FactCardId = "phone" | "email" | "address" | "hours" | "serviceAreas" | "links";
+type FactCardId = "phone" | "email" | "address" | "hours" | "serviceAreas" | "proof" | "links";
 
 type ProfileSnapshot = {
   siteId: string;
@@ -13,6 +13,8 @@ type ProfileSnapshot = {
   address?: BusinessProfile["address"];
   hours?: Record<string, string>;
   serviceAreas: string[];
+  credentials: string[];
+  offers: string[];
   bookingLinks: string[];
   orderingLinks: string[];
   socialLinks: string[];
@@ -47,6 +49,8 @@ export function OwnerFactsReview({
     Object.fromEntries(days.map((day) => [day, profile.hours?.[day] ?? ""]))
   );
   const [serviceAreas, setServiceAreas] = useState(profile.serviceAreas.join(", "));
+  const [credentials, setCredentials] = useState(profile.credentials.join(", "));
+  const [offers, setOffers] = useState(profile.offers.join(", "));
   const [bookingLinks, setBookingLinks] = useState(profile.bookingLinks.join(", "));
   const [orderingLinks, setOrderingLinks] = useState(profile.orderingLinks.join(", "));
   const [socialLinks, setSocialLinks] = useState(profile.socialLinks.join(", "));
@@ -81,6 +85,7 @@ export function OwnerFactsReview({
     if (card === "address") return { address };
     if (card === "hours") return { hours };
     if (card === "serviceAreas") return { serviceAreas: splitList(serviceAreas) };
+    if (card === "proof") return { credentials: splitList(credentials), offers: splitList(offers) };
     return {
       bookingLinks: splitList(bookingLinks),
       orderingLinks: splitList(orderingLinks),
@@ -163,6 +168,30 @@ export function OwnerFactsReview({
             <span>Phone number</span>
             <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+15551234567" />
           </label>
+        )
+      })}
+      {factCard({
+        card: "proof",
+        label: "Proof and offers",
+        provenanceKey: profile.credentials.length ? "credentials" : "offers",
+        hasValue: profile.credentials.length + profile.offers.length > 0,
+        display: (
+          <ul className="owner-fact-links">
+            {profile.credentials.length ? <li>Credentials: {profile.credentials.join(", ")}</li> : null}
+            {profile.offers.length ? <li>Offers: {profile.offers.join(", ")}</li> : null}
+          </ul>
+        ),
+        editor: (
+          <>
+            <label>
+              <span>Credentials, licenses, or certifications</span>
+              <textarea value={credentials} onChange={(event) => setCredentials(event.target.value)} />
+            </label>
+            <label>
+              <span>Offers or specials</span>
+              <textarea value={offers} onChange={(event) => setOffers(event.target.value)} />
+            </label>
+          </>
         )
       })}
       {factCard({

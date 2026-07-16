@@ -8,7 +8,7 @@ import { isIndexableSite } from "@/lib/site-publication";
 import { canonicalUrlForPage } from "@/lib/public-site-seo";
 import { markdownUrlForPage } from "@/lib/public-site-markdown";
 import { isCustomDomainRequest } from "@/lib/host-routing";
-import { assertSiteVersionV3, findPageBySlugV3 } from "@/lib/site-version-v3";
+import { assertSiteVersionV3, findPageBySlugV3, publicSiteVersionV3Issue } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,7 @@ export async function generateMetadata({
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) return {};
   const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published public site version");
+  if (publicSiteVersionV3Issue(version)) return {};
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(version, pageSlug);
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
@@ -57,6 +58,7 @@ export default async function PublicSitePage({
   if (!bundle) notFound();
 
   const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published public site version");
+  if (publicSiteVersionV3Issue(version)) notFound();
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(version, pageSlug);
   if (!page) notFound();

@@ -17,7 +17,11 @@ type ChatMessage = {
 type AiEditResponse = {
   message?: string;
   error?: string;
-  operations?: Array<{ label: string; type: string }>;
+  operations?: Array<{
+    label: string;
+    type: string;
+    mutations?: Array<{ action: string; target: string; value: string; rationale: string }>;
+  }>;
   warnings?: string[];
   issues?: Array<{ title: string; detail: string }>;
   qa?: { passed: boolean; checks: Array<{ severity: string; title: string }> } | null;
@@ -28,8 +32,7 @@ type AiEditResponse = {
 const starterMessages: ChatMessage[] = [
   {
     role: "assistant",
-    content:
-      "Ask for structured site changes: rewrite the hero, add an FAQ, make CTAs call-first, add a service, change the theme, or run an audit."
+    content: "Ask for facts-first changes, hero copy updates, or an audit. Layout and visual-system requests route to concierge review."
   }
 ];
 
@@ -145,7 +148,7 @@ export function AiEditChat({ siteId, siteSlug, publishDisabled = false, publishD
           <span>Request</span>
           <textarea
             value={prompt}
-            placeholder="Add an FAQ, make the hero more urgent, and use call-first CTAs."
+            placeholder="Make the hero more direct, add a service called brake inspection, and run an audit."
             onChange={(event) => setPrompt(event.target.value)}
           />
         </label>

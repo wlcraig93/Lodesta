@@ -18,11 +18,26 @@ export function siteVersionV3Issue(version: SiteVersion | undefined | null): str
     return `rendererVersion is ${version.rendererVersion ?? "missing"}; expected layout-v3`;
   }
   if ("pages" in version) return "legacy SiteVersionV3.pages projection is still present";
+  if (version.generationQa && version.generationQa.schemaVersion !== "generation-qa-v4") {
+    return "stale generationQa schema — regenerate this candidate";
+  }
+  return null;
+}
+
+export function publicSiteVersionV3Issue(version: SiteVersion | undefined | null): string | null {
+  const issue = siteVersionV3Issue(version);
+  if (issue) return issue;
   return null;
 }
 
 export function assertSiteVersionV3(version: SiteVersion | undefined | null, context = "site version"): SiteVersionV3 {
   const issue = siteVersionV3Issue(version);
+  if (issue) throw new Error(`${context}: ${issue}.`);
+  return version as SiteVersionV3;
+}
+
+export function assertPublicSiteVersionV3(version: SiteVersion | undefined | null, context = "public site version"): SiteVersionV3 {
+  const issue = publicSiteVersionV3Issue(version);
   if (issue) throw new Error(`${context}: ${issue}.`);
   return version as SiteVersionV3;
 }

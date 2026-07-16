@@ -6,6 +6,7 @@ import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { siteVersionV3Issue } from "@/lib/site-version-v3";
 import { markAllVersionsOwnerTouched } from "@/lib/site-version-metadata";
+import { runSiteQa } from "@/lib/qa";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,8 @@ const candidateBusinessProfileSchema = z.object({
   phone: optionalString,
   email: optionalString,
   services: z.array(z.string()).optional(),
+  credentials: z.array(z.string()).optional(),
+  offers: z.array(z.string()).optional(),
   serviceAreas: z.array(z.string()).optional(),
   bookingLinks: z.array(z.string()).optional(),
   orderingLinks: z.array(z.string()).optional(),
@@ -82,6 +85,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
     ok: true,
     businessProfile: updated.bundle.businessProfile,
     findings: updated.bundle.optimizationFindings,
+    qa: runSiteQa(updated.bundle, { versionStatus: "draft" }),
     guardrailWarnings: guardrails.warnings
   });
 }

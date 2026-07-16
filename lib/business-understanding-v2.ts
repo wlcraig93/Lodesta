@@ -4,8 +4,14 @@ import type { CrawlAssessment } from "./crawler";
 import type { PublicPresenceEnrichment } from "./public-presence";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
-import { elapsedOpenAiCallMs, extractOpenAiResponseText, openAiErrorMessage } from "./openai-generation";
+import {
+  elapsedOpenAiCallMs,
+  extractOpenAiResponseText,
+  openAiErrorMessage,
+  openAiResponseIncompleteReason
+} from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
+import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
 
 export const understandingVerticalValues = [
   "restaurant",
@@ -26,6 +32,10 @@ export const understandingVerticalValues = [
 
 const conversionGoalValues = ["call_first", "form_first", "booking_first", "visit_first"] as const;
 const factFieldValues = ["name", "phone", "address", "hours", "services", "service_areas", "reviews"] as const;
+const brandExpressionMoodValues = ["clinical", "warm", "premium", "technical", "neighborhood", "bold", "quiet"] as const;
+const brandExpressionFontPostureValues = ["utility", "editorial", "condensed", "rounded", "premium"] as const;
+const brandExpressionVoiceRegisterValues = ["direct", "warm", "premium", "technical", "plainspoken"] as const;
+const brandExpressionPaletteSeedStrategyValues = ["logo_color", "photo_color", "category_default", "neutral"] as const;
 
 /** Minimum LLM vertical confidence treated as trustworthy over the keyword fallback. */
 export const understandingVerticalConfidenceFloor = 0.55;
@@ -60,6 +70,17 @@ const understandingSchema = z.object({
       distinctives: z.array(z.string().min(3).max(120)).max(5)
     })
     .nullable(),
+  brandExpression: z.object({
+    mood: z.enum(brandExpressionMoodValues),
+    fontPosture: z.enum(brandExpressionFontPostureValues),
+    voiceRegister: z.enum(brandExpressionVoiceRegisterValues),
+    paletteSeed: z.object({
+      strategy: z.enum(brandExpressionPaletteSeedStrategyValues),
+      preferredHex: z.string().regex(/^#[0-9a-f]{6}$/i).nullable(),
+      candidateRank: z.number().int().min(0).max(7).nullable()
+    }),
+    rationale: z.string().min(10).max(240)
+  }),
   factConfidence: z
     .array(
       z.object({
@@ -79,20 +100,29 @@ export type BusinessUnderstandingInput = {
   publicPresence?: PublicPresenceEnrichment;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
+  signal?: AbortSignal;
 };
 
 export async function createOpenAiBusinessUnderstanding(
   input: BusinessUnderstandingInput
 ): Promise<BusinessUnderstandingV2 | undefined> {
+  return createOpenAiBusinessUnderstandingAttempt(input, 0);
+}
+
+async function createOpenAiBusinessUnderstandingAttempt(
+  input: BusinessUnderstandingInput,
+  attempt: 0 | 1
+): Promise<BusinessUnderstandingV2 | undefined> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
   if (!input.crawl && !input.publicPresence && !input.prompt) return undefined;
   const runtimeSettings = await getOpenAiRuntimeSettings();
+  const context = understandingContext(input);
 
   const body = {
     model: runtimeSettings.settings.generationModel,
     reasoning: { effort: "low" },
-    max_output_tokens: 2400,
+    max_output_tokens: attempt === 0 ? 5200 : 6400,
     input: [
       {
         role: "system",
@@ -107,6 +137,7 @@ export async function createOpenAiBusinessUnderstanding(
               "hours must be a structured weekly schedule. Discard live status strings (for example 'currently closed', 'open again on ...'), specific dates, and anything that is not a recurring weekly schedule.",
               "factConfidence reflects how strongly each field is supported by the provided source material.",
               "businessStory: capture what makes this business THIS business when the source reveals it — founders, family ownership, history, mascots or personalities, neighborhood roots, anything a customer would remember. Quote-level fidelity to the source; null when the source has no story.",
+              "brandExpression: make bounded taste calls only. Choose mood, voice register, and font posture from the allowed values. Choose a palette seed strategy from source evidence; use preferredHex only when an explicit extracted candidate is provided, otherwise null. This is not layout design.",
               "Do not invent facts, prices, credentials, reviews, or offers."
             ].join(" ")
           }
@@ -117,7 +148,7 @@ export async function createOpenAiBusinessUnderstanding(
         content: [
           {
             type: "input_text",
-            text: JSON.stringify(understandingContext(input))
+            text: JSON.stringify(context)
           }
         ]
       }
@@ -143,21 +174,26 @@ export async function createOpenAiBusinessUnderstanding(
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body),
-      signal: openAiRequestSignal()
+      signal: openAiRequestSignal(undefined, input.signal)
     });
     const payload = (await response.json().catch(() => null)) as unknown;
     const endedAt = new Date().toISOString();
+    const incompleteReason = response.ok ? openAiResponseIncompleteReason(payload) : undefined;
     await input.telemetry?.recordModelCall({
       spanId: input.spanId,
       provider: "openai",
       model: body.model,
       endpoint: "/v1/responses",
       operation: "business_understanding",
-      status: response.ok ? "completed" : "failed",
+      status: response.ok && !incompleteReason ? "completed" : "failed",
       requestJson: sanitizeTelemetryPayload(body),
       responseJson: sanitizeTelemetryPayload(payload),
       ...extractOpenAiUsage(payload),
-      errorMessage: response.ok ? undefined : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+      errorMessage: response.ok
+        ? incompleteReason
+          ? `Incomplete response (${incompleteReason})`
+          : undefined
+        : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
       startedAt,
       endedAt,
       durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
@@ -166,12 +202,22 @@ export async function createOpenAiBusinessUnderstanding(
     if (!response.ok) {
       throw new Error(openAiErrorMessage(payload) ?? `OpenAI business understanding failed with status ${response.status}`);
     }
+    if (incompleteReason) {
+      throw new Error(`OpenAI business understanding response was incomplete (${incompleteReason}).`);
+    }
     const text = extractOpenAiResponseText(payload);
     if (!text) throw new Error("OpenAI business understanding response did not include output text.");
     const parsed = understandingSchema.parse(JSON.parse(text) as unknown);
     return {
       version: "business-understanding-v2",
       source: "openai",
+      provenance: createRegenerableArtifactProvenanceV1({
+        producerId: "business-understanding-v2",
+        producerVersion: "business-understanding-v2",
+        modelId: body.model,
+        createdAt: endedAt,
+        inputs: { context }
+      }),
       vertical: parsed.vertical,
       verticalConfidence: parsed.verticalConfidence,
       detectedSubverticals: parsed.detectedSubverticals,
@@ -189,6 +235,18 @@ export async function createOpenAiBusinessUnderstanding(
       urgentServiceSignals: parsed.urgentServiceSignals,
       factConfidence: parsed.factConfidence,
       businessStory: parsed.businessStory ?? undefined,
+      brandExpression: {
+        version: "brand-expression-v1",
+        mood: parsed.brandExpression.mood,
+        fontPosture: parsed.brandExpression.fontPosture,
+        voiceRegister: parsed.brandExpression.voiceRegister,
+        paletteSeed: {
+          strategy: parsed.brandExpression.paletteSeed.strategy,
+          preferredHex: parsed.brandExpression.paletteSeed.preferredHex ?? undefined,
+          candidateRank: parsed.brandExpression.paletteSeed.candidateRank ?? undefined
+        },
+        rationale: parsed.brandExpression.rationale
+      },
       notes: parsed.notes
     };
   } catch (error) {
@@ -208,6 +266,14 @@ export async function createOpenAiBusinessUnderstanding(
         durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
       });
     }
+    if (attempt === 0 && isRetryableBusinessUnderstandingError(error)) {
+      console.warn(
+        `OpenAI business understanding attempt was invalid; retrying once with a larger output budget. ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return createOpenAiBusinessUnderstandingAttempt(input, 1);
+    }
     console.warn(
       `OpenAI business understanding unavailable; using deterministic fallback. ${
         error instanceof Error ? error.message : String(error)
@@ -215,6 +281,13 @@ export async function createOpenAiBusinessUnderstanding(
     );
     return undefined;
   }
+}
+
+function isRetryableBusinessUnderstandingError(error: unknown) {
+  if (error instanceof SyntaxError || error instanceof z.ZodError) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (/status\s+4\d\d/.test(message) && !/status\s+(408|429)/.test(message)) return false;
+  return /incomplete|json|validation|output text|empty|timeout|timed out|abort|status\s+(408|429|5\d\d)/.test(message);
 }
 
 function understandingContext(input: BusinessUnderstandingInput) {
@@ -226,7 +299,15 @@ function understandingContext(input: BusinessUnderstandingInput) {
           title: input.crawl.title,
           metaDescription: input.crawl.metaDescription,
           extractedFacts: input.crawl.extractedFacts,
-          pageSummaries: input.crawl.pageSummaries.slice(0, 6)
+          pageSummaries: input.crawl.pageSummaries.slice(0, 12).map((page) => ({
+            url: page.url,
+            source: page.source,
+            purposeTags: page.purposeTags,
+            title: page.title,
+            metaDescription: page.metaDescription,
+            extractedFacts: page.extractedFacts,
+            mainText: page.mainText
+          }))
         }
       : undefined,
     publicPresence: input.publicPresence
@@ -238,6 +319,12 @@ function understandingContext(input: BusinessUnderstandingInput) {
     allowedValues: {
       verticals: understandingVerticalValues,
       conversionGoals: conversionGoalValues
+    },
+    brandExpressionAllowedValues: {
+      moods: brandExpressionMoodValues,
+      fontPostures: brandExpressionFontPostureValues,
+      voiceRegisters: brandExpressionVoiceRegisterValues,
+      paletteSeedStrategies: brandExpressionPaletteSeedStrategyValues
     }
   };
 }
@@ -426,6 +513,7 @@ const understandingResponseJsonSchema = {
     "primaryConversionGoal",
     "urgentServiceSignals",
     "businessStory",
+    "brandExpression",
     "factConfidence",
     "notes"
   ],
@@ -476,6 +564,27 @@ const understandingResponseJsonSchema = {
         },
         { type: "null" }
       ]
+    },
+    brandExpression: {
+      type: "object",
+      additionalProperties: false,
+      required: ["mood", "fontPosture", "voiceRegister", "paletteSeed", "rationale"],
+      properties: {
+        mood: { type: "string", enum: brandExpressionMoodValues },
+        fontPosture: { type: "string", enum: brandExpressionFontPostureValues },
+        voiceRegister: { type: "string", enum: brandExpressionVoiceRegisterValues },
+        paletteSeed: {
+          type: "object",
+          additionalProperties: false,
+          required: ["strategy", "preferredHex", "candidateRank"],
+          properties: {
+            strategy: { type: "string", enum: brandExpressionPaletteSeedStrategyValues },
+            preferredHex: { type: ["string", "null"], pattern: "^#[0-9a-fA-F]{6}$" },
+            candidateRank: { type: ["number", "null"], minimum: 0, maximum: 7 }
+          }
+        },
+        rationale: { type: "string", minLength: 10, maxLength: 240 }
+      }
     },
     factConfidence: {
       type: "array",

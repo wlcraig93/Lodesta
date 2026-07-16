@@ -266,7 +266,17 @@ assert_json "unclaimed form inactive gate" 'const data = JSON.parse(process.env.
 post_check "unclaimed experiment inactive gate" "/api/experiments/assign" '{"siteId":"site_joes_pizza","sessionId":"preclaim_session"}'
 assert_json "unclaimed experiment inactive gate" 'const data = JSON.parse(process.env.BODY); if (data.assigned !== false || !["claim_required","payment_required","verification_required"].includes(data.claimGate) || !String(data.reason || "").includes("claim")) process.exit(1);'
 
-request POST "/api/claim" '{"siteId":"site_joes_pizza","ownerEmail":"smoke-owner@example.com","verifiedFacts":["name"],"acceptedTerms":true,"acceptedManagement":true}'
+post_check "claim verification challenge API" "/api/claim/verification" '{"action":"start","siteId":"site_joes_pizza","channel":"phone"}'
+CLAIM_CHALLENGE_ID="$(BODY="$BODY" node -e 'process.stdout.write(JSON.parse(process.env.BODY).challengeId)')"
+CLAIM_CHALLENGE_CODE="$(BODY="$BODY" node -e 'process.stdout.write(JSON.parse(process.env.BODY).developmentCode || "")')"
+if [[ -z "$CLAIM_CHALLENGE_ID" || -z "$CLAIM_CHALLENGE_CODE" ]]; then
+  echo "Smoke check failed: claim verification challenge did not return a local code" >&2
+  echo "$BODY" >&2
+  exit 1
+fi
+
+INCOMPLETE_CLAIM_PAYLOAD="$(CLAIM_CHALLENGE_ID="$CLAIM_CHALLENGE_ID" CLAIM_CHALLENGE_CODE="$CLAIM_CHALLENGE_CODE" node -e 'process.stdout.write(JSON.stringify({siteId:"site_joes_pizza",ownerEmail:"smoke-owner@example.com",verifiedFacts:["name"],verificationChallenge:{challengeId:process.env.CLAIM_CHALLENGE_ID,code:process.env.CLAIM_CHALLENGE_CODE},acceptedTerms:true,acceptedManagement:true}))')"
+request POST "/api/claim" "$INCOMPLETE_CLAIM_PAYLOAD"
 if [[ "$STATUS" != "400" ]]; then
   echo "Smoke check failed: incomplete claim fact verification returned $STATUS" >&2
   echo "$BODY" >&2
@@ -275,7 +285,8 @@ fi
 assert_json "incomplete claim fact verification" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.missingRequiredFacts) || !data.missingRequiredFacts.includes("phone") || !data.missingRequiredFacts.includes("address") || !data.missingRequiredFacts.includes("services")) process.exit(1);'
 echo "ok - incomplete claim fact verification"
 
-post_check "claim flow API" "/api/claim" '{"siteId":"site_joes_pizza","ownerEmail":"smoke-owner@example.com","verifiedFacts":["name","phone","address","services"],"acceptedTerms":true,"acceptedManagement":true}'
+CLAIM_PAYLOAD="$(CLAIM_CHALLENGE_ID="$CLAIM_CHALLENGE_ID" CLAIM_CHALLENGE_CODE="$CLAIM_CHALLENGE_CODE" node -e 'process.stdout.write(JSON.stringify({siteId:"site_joes_pizza",ownerEmail:"smoke-owner@example.com",verifiedFacts:["name","phone","address","services"],verificationChallenge:{challengeId:process.env.CLAIM_CHALLENGE_ID,code:process.env.CLAIM_CHALLENGE_CODE},acceptedTerms:true,acceptedManagement:true}))')"
+post_check "claim flow API" "/api/claim" "$CLAIM_PAYLOAD"
 assert_json "claim flow API" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || data.ownerEmail !== "smoke-owner@example.com" || data.status !== "checkout_required" || !Array.isArray(data.verifiedFacts) || !data.checkout) process.exit(1);'
 CLAIM_ID="$(BODY="$BODY" node -e 'process.stdout.write(JSON.parse(process.env.BODY).id)')"
 export CLAIM_ID
@@ -422,11 +433,11 @@ fi
 assert_json "direct section template mutation" 'const data = JSON.parse(process.env.BODY); if (!String(data.error || "").includes("compiler overrides")) process.exit(1);'
 echo "ok - direct section template mutation rejected"
 
-post_check "design plan and section order API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"home","designPlan":{"stylePack":"premium_editorial","typographyPack":"editorial_serif"},"sectionOrder":["hero","services","facts","story","process","faq","cta_band","location","contact"]}'
+post_check "design plan and section order API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"home","designPlan":{"stylePack":"premium_editorial","typographyPack":"editorial_serif"},"sectionOrder":["hero","services","process","media","location","faq","contact"]}'
 assert_json "design plan and section order API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.designPlan?.stylePack !== "premium_editorial" || data.applied?.sectionOrder?.[1] !== "services") process.exit(1);'
 
-post_check "AI edit dock API" "/api/ai/edit" '{"siteId":"site_joes_pizza","message":"Make the hero more direct, use a call CTA, and run an audit."}'
-assert_json "AI edit dock API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.mutated || !data.operations?.some((operation) => operation.type === "rewrite_hero") || !data.operations?.some((operation) => operation.type === "update_cta") || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
+post_check "AI edit dock API" "/api/ai/edit" '{"siteId":"site_joes_pizza","message":"Make the hero more direct and run an audit."}'
+assert_json "AI edit dock API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.mutated || !data.operations?.some((operation) => operation.type === "owner_safe_mutation" && operation.mutations?.some((mutation) => mutation.action === "rewrite_section_copy")) || !data.operations?.some((operation) => operation.type === "run_audit") || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
 
 post_check "analytics ingest" "/api/analytics" '{"siteId":"site_joes_pizza","sessionId":"smoke_session","pageId":"home","eventType":"pageview","event":{"path":"/sites/joes-pizza","smoke":true}}'
 assert_json "analytics ingest" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true) process.exit(1);'
@@ -472,6 +483,13 @@ request GET "/analytics/joes-pizza"
 assert_success "owner dashboard summary"
 if [[ "$BODY" != *"Analytics"* || "$BODY" != *"Traffic Sources"* || "$BODY" != *"Click Map"* || "$BODY" != *"Agent-Readable Requests"* || "$BODY" != *"utm:mailer"* ]]; then
   echo "Smoke check failed: owner analytics did not render traffic, source, click-map, and agent-readable summaries" >&2
+  exit 1
+fi
+
+request GET "/dashboard/joes-pizza"
+assert_success "owner site dashboard"
+if [[ "$BODY" != *"Site dashboard"* || "$BODY" != *"Pending Proposals"* || "$BODY" != *"Domain And Billing"* ]]; then
+  echo "Smoke check failed: owner site dashboard did not render status, proposals, and billing panels" >&2
   exit 1
 fi
 
@@ -568,13 +586,16 @@ assert_json "outbound prospect API" 'const data = JSON.parse(process.env.BODY); 
 PROSPECT_ID="$(BODY="$BODY" node -e 'process.stdout.write(JSON.parse(process.env.BODY).id)')"
 
 post_check "outbound event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"mailer_sent\"}"
-post_check "outbound claim event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"claim_completed\"}"
+post_check "outbound claim-link event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"claim_link_opened\"}"
+post_check "outbound picker event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"picker_interaction\",\"metadata\":{\"designDirectionId\":\"primary\"}}"
+post_check "outbound checkout event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"checkout_started\"}"
+post_check "outbound paid event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"paid\"}"
 post_check "outbound publish event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"published\"}"
 post_check "outbound credibility event API" "/api/outbound/events" "{\"campaignId\":\"${CAMPAIGN_ID}\",\"prospectId\":\"${PROSPECT_ID}\",\"type\":\"credibility_feedback\",\"value\":4}"
 
 request GET "/api/outbound/summary?campaignId=${CAMPAIGN_ID}"
 assert_success "outbound summary API"
-assert_json "outbound summary API" 'const data = JSON.parse(process.env.BODY); if (data.mailerToClaimRate !== 1 || data.claimToPublishRate !== 1 || data.avgCredibilityScore !== 4) process.exit(1);'
+assert_json "outbound summary API" 'const data = JSON.parse(process.env.BODY); if (data.claimLinkOpened !== 1 || data.checkoutStarted !== 1 || data.paid !== 1 || data.claimLinkToCheckoutRate !== 1 || data.checkoutToPaidRate !== 1 || data.claimToPublishRate !== 1 || data.avgCredibilityScore !== 4) process.exit(1);'
 
 post_check "action-list apply all" "/api/action-list/apply-all" '{"siteId":"site_joes_pizza","mode":"qa"}'
 assert_json "action-list apply all" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.results) || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
@@ -605,8 +626,8 @@ fi
 assert_json "business phone guardrail" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.issues) || !data.issues.some((issue) => issue.checkId === "phone_path")) process.exit(1);'
 echo "ok - business phone guardrail"
 
-post_check "business press links update API" "/api/business-profile" '{"siteId":"site_joes_pizza","pressLinks":["https://www.youtube.com/watch?v=owner-approved","https://news.example/profile"]}'
-assert_json "business press links update API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.businessProfile?.pressLinks?.length !== 2 || data.businessProfile?.provenance?.pressLinks?.source !== "owner" || data.businessProfile?.provenance?.pressLinks?.verified !== true) process.exit(1);'
+post_check "business press links update API" "/api/business-profile" '{"siteId":"site_joes_pizza","pressLinks":["https://www.youtube.com/watch?v=owner-approved","https://news.example/profile"],"credentials":["Health permit current"],"offers":["Lunch special"]}'
+assert_json "business press links update API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.businessProfile?.pressLinks?.length !== 2 || data.businessProfile?.credentials?.length !== 1 || data.businessProfile?.offers?.length !== 1 || data.businessProfile?.provenance?.pressLinks?.source !== "owner" || data.businessProfile?.provenance?.credentials?.verified !== true || data.businessProfile?.provenance?.offers?.verified !== true) process.exit(1);'
 
 post_check "curated CTA update API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"home","sectionId":"hero","props":{"primaryCta":{"label":"Call Now","href":"tel:+15551234567","role":"tel"}}}'
 assert_json "curated CTA update API" 'const data = JSON.parse(process.env.BODY); const sections = data.bundle?.siteModel?.versions?.[0]?.pageComposition?.pages?.[0]?.sections ?? []; const section = sections.find((item) => item.id === "hero" || item.family?.startsWith("hero.")); if (!data.ok || !JSON.stringify(section?.props ?? {}).includes("tel:+15551234567")) process.exit(1);'
@@ -618,7 +639,7 @@ post_check "draft staging API" "/api/sites/update-section" '{"siteId":"site_joes
 assert_json "draft staging API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.bundle) process.exit(1);'
 DRAFT_VERSION_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); const version = data.bundle?.siteModel?.versions?.find((candidate) => candidate.status === "draft"); if (!version?.id) process.exit(1); process.stdout.write(version.id);')"
 
-post_check "generated preview QA gate" "/api/generated-qa/run" "{\"siteId\":\"site_joes_pizza\",\"versionId\":\"${DRAFT_VERSION_ID}\",\"autoRepair\":true}"
+post_check "generated preview QA gate" "/api/generated-qa/run" "{\"siteId\":\"site_joes_pizza\",\"versionId\":\"${DRAFT_VERSION_ID}\"}"
 assert_json "generated preview QA gate" 'const data = JSON.parse(process.env.BODY); if (data.qa?.readiness !== "ready" || !data.previewUrl) process.exit(1);'
 
 post_check "confirmed publish API" "/api/sites/publish" '{"siteId":"site_joes_pizza","confirmed":true}'

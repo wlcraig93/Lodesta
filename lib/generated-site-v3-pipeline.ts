@@ -2,6 +2,7 @@ import { compileGeneratedSiteV3Site } from "./generated-site-v3-compiler";
 import { approvedAssetLibraryAssetsForVerticals, type ApprovedAssetLibraryAsset } from "./asset-library";
 import { withBusinessBundleFields } from "./business-model";
 import { assertVisualSectionsForVersionV3 } from "./site-version-v3";
+import { createDeterministicSiteDirectorPlanV1 } from "./deterministic-site-director-plan-v1";
 import type { SiteBundle } from "./models";
 import type { GeneratedSiteQualitySignalsV3 } from "./generated-site-v3-nav";
 
@@ -17,6 +18,11 @@ export function applyGeneratedSiteV3(input: {
   assetLibraryAssets?: ApprovedAssetLibraryAsset[];
 }): GeneratedSiteV3Application {
   const hydratedBundle = withBusinessBundleFields(input.bundle);
+  hydratedBundle.presenceAssessment.siteDirectorPlanV1 = createDeterministicSiteDirectorPlanV1({
+    bundle: hydratedBundle,
+    assetLibraryAssets: input.assetLibraryAssets ?? [],
+    createdAt: input.now
+  });
   const result = compileGeneratedSiteV3Site({
     bundle: hydratedBundle,
     createdAt: input.now,
@@ -30,8 +36,7 @@ export function applyGeneratedSiteV3(input: {
   input.bundle.siteModel.theme = result.version.theme ?? input.bundle.siteModel.theme;
   input.bundle.presenceAssessment.brandCueReport = result.brandCueReport;
   input.bundle.presenceAssessment.technicalNotes.push(`Generated-site V3 compiled for ${input.bundle.businessProfile.vertical}.`);
-  input.bundle.presenceAssessment.generationPlanningSource ??=
-    input.bundle.presenceAssessment.siteDirectorPlanV1?.validation.status === "passed" ? "openai" : "deterministic_fallback";
+  input.bundle.presenceAssessment.generationPlanningSource = "deterministic_design_system";
   return {
     applied: true,
     reason: `layout-v3 compiled for ${input.bundle.businessProfile.vertical}.`,

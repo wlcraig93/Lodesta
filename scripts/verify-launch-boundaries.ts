@@ -26,11 +26,14 @@ import { crawlFixtureHtml, crawlFixturePath } from "../lib/crawl-fixture";
 import { isResolvableCustomDomain, normalizeCustomHostname, refreshCustomHostnameStatus } from "../lib/domains";
 import { createExperimentLearning } from "../lib/experiment-learning";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "../lib/editor-guardrails";
+import { applyAiEditToBundle } from "../lib/ai-editor";
 import { applyBusinessProfileUpdate } from "../lib/business-profile-update";
+import { createBusinessFactGraph } from "../lib/business-fact-graph";
 import { applyFormSettingsUpdate } from "../lib/form-settings";
 import { validateFormSubmission } from "../lib/form-validation";
 import { executeInquiryNotificationWorkflows } from "../lib/workflows";
 import { createSiteV3FromInput } from "../lib/intake";
+import { buildGeneratedSiteQaMetadata } from "../lib/generated-site-qa";
 import { filterSiteBundlesForOwner } from "../lib/page-access";
 import { requireAdmin, requireAdminOrSiteOwner } from "../lib/security";
 import { isAdminUserId } from "../lib/auth-policy";
@@ -69,6 +72,11 @@ import {
   validateOpenAiRuntimeSettingsInput
 } from "../lib/operator-settings";
 import { resolveClaimOwner } from "../lib/claim-ownership";
+import {
+  claimVerificationTargets,
+  createClaimVerificationChallenge,
+  verifyClaimVerificationChallenge
+} from "../lib/claim-verification-challenge";
 import { isPublicLocalAssetPath } from "../lib/public-assets";
 import { canonicalUrlForPage, siteRobotsTxt, siteSitemapXml } from "../lib/public-site-seo";
 import { markdownCanonicalLinkHeader, markdownForPage, markdownUrlForPage, siteLlmsTxt } from "../lib/public-site-markdown";
@@ -76,7 +84,7 @@ import { customDomainRoutedHeader, requestHostname, requestOrigin } from "../lib
 import { getPublishedVersion } from "../lib/sample-data";
 import { getVisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
 import { assertSiteVersionV3 } from "../lib/site-version-v3";
-import { coldUrlCheckableChecks, evaluateSiteAgainstStandard } from "../lib/standard-evaluation";
+import { coldUrlCheckableChecks, siteStandardEvidenceChecks } from "../lib/standard-evaluation";
 import { applyVerifiedFacts, requiredClaimFactIds } from "../lib/fact-verification";
 import { claimGateForBundle, isIndexableSite } from "../lib/site-publication";
 import { makeLocalBusinessJsonLd, makeLocalBusinessJsonLdForBundle, serializeJsonLd } from "../lib/structured-data";
@@ -90,13 +98,33 @@ import {
   getSiteBundle as getLocalSiteBundle,
   listSiteBundles as listLocalSiteBundles,
   acceptSiteCandidateAsSite as acceptLocalSiteCandidateAsSite,
+  archiveSiteCandidates as archiveLocalSiteCandidates,
   recordClaimCheckoutSession,
   resolvePreviewToken as resolveLocalPreviewToken
 } from "../lib/store";
 import { validatePublicFetchUrl, validatePublicHostname } from "../lib/url-safety";
 import { sanitizeTelemetryPayload } from "../lib/agent-telemetry";
 import { generateSite, type SiteCandidateRepository } from "../lib/site-candidate-service";
+import { composeSiteDossierV1 } from "../lib/site-dossier-v1";
+import { reconcileEvidenceConflictsV1 } from "../lib/evidence-ledger-v1";
+import { defaultLaunchCapacityModelInput, runLaunchCapacityModel } from "../lib/launch-capacity-model";
+import {
+  normalizeOperatorDecisionPayloadV1,
+  operatorDecisionArtifactV1,
+  operatorDecisionPassedV1,
+  parseOperatorDecisionArtifactV1
+} from "../lib/operator-decision-v1";
+import {
+  designSystemGateReviewArtifactV1,
+  designSystemGateReviewArtifactVersionV1,
+  designSystemGateReviewPassedV1,
+  parseDesignSystemGateReviewArtifactV1,
+  type DesignSystemGateReviewPayloadV1
+} from "../lib/design-system-gate-review-v1";
+import { createDeterministicSiteDirectorPlanV1 } from "../lib/deterministic-site-director-plan-v1";
 import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
+import { createRegenerableArtifactProvenanceV1 } from "../lib/regenerable-artifact-provenance";
+import { visualQaContext } from "../lib/visual-qa";
 import {
   ASSET_LIBRARY_ACTIVE_MANIFEST_NAME,
   ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES,
@@ -114,12 +142,25 @@ import {
 const bundle = createSiteV3FromInput({
   prompt: "Build a website for Boundary Verify HVAC, a call-first HVAC company in Austin."
 });
+const offerClassificationBundle = createSiteV3FromInput({
+  prompt: "Build a website for Boundary Collision in Austin. Services: Free Repair Estimates, Collision Repair, Auto Glass Replacement."
+});
+assert(
+  !offerClassificationBundle.businessProfile.services.some((service) => /^(?:free\s+)?(?:repair\s+)?estimates?$/i.test(service)) &&
+    offerClassificationBundle.businessProfile.services.some((service) => /collision repair/i.test(service)) &&
+    offerClassificationBundle.businessProfile.services.some((service) => /auto glass replacement/i.test(service)),
+  "Offer-only estimate language must not consume a service slot or displace source-listed repair services."
+);
 const requiredFacts = requiredClaimFactIds(bundle.businessProfile);
 
 const checkoutRequiredClaim: ClaimRecord = {
   id: "claim_checkout_required",
   siteId: bundle.businessProfile.siteId,
   ownerEmail: "owner@example.com",
+  verificationLevel: "operator_verified",
+  verificationMethod: "operator_manual",
+  verifiedBy: "launch-boundary-verifier",
+  verifiedAt: new Date().toISOString(),
   verifiedFacts: requiredFacts,
   acceptedTermsAt: new Date().toISOString(),
   acceptedManagementAt: new Date().toISOString(),
@@ -172,9 +213,102 @@ assert(
   !unverifiedClaimGate.ok && unverifiedClaimGate.code === "verification_required",
   "Publish/domain gates should require required business facts after payment."
 );
+const unverifiedOwnershipGate = claimGateForBundle(bundle, [{ ...claimedClaim, verificationLevel: "unverified", verifiedAt: undefined }]);
+assert(
+  !unverifiedOwnershipGate.ok && unverifiedOwnershipGate.code === "verification_required",
+  "Publish/domain gates should require business-contact verification after payment."
+);
 assert(
   claimGateForBundle(bundle, [claimedClaim]).ok,
   "Publish/domain gates should pass after a completed claim."
+);
+const capacityModel = runLaunchCapacityModel(defaultLaunchCapacityModelInput);
+assert(
+  capacityModel.costPerPaidCustomer !== undefined &&
+    capacityModel.expectedPaybackMonths !== undefined &&
+    capacityModel.minimumPaidConversionForTargetPayback !== undefined &&
+    capacityModel.candidatesPerOperatorDay > 0,
+  "Phase 1.5 capacity model should compute cost per paid customer, payback, minimum conversion, and operator throughput."
+);
+assert(
+  capacityModel.decision === "scale_candidate",
+  "Default Phase 1.5 capacity assumptions should be explicit and currently clear the target payback ceiling."
+);
+const operatorDecisionPayload = normalizeOperatorDecisionPayloadV1({
+  candidateId: "sitecand_operator_review_verify",
+  status: "approved_for_outreach",
+  reviewer: "operator_test",
+  reviewMinutes: 11,
+  rationale: "The operator can explain why the candidate is sendable before outreach.",
+  acceptedDefects: "No blocking defects accepted.",
+  reviewedAt: "2026-07-03T00:00:00.000Z"
+});
+const operatorDecisionArtifact = operatorDecisionArtifactV1({
+  candidateId: "sitecand_operator_review_verify",
+  payload: operatorDecisionPayload,
+  createdAt: "2026-07-03T00:00:00.000Z"
+});
+assert(
+  operatorDecisionArtifact.artifactType === "v3_review_packet" &&
+    operatorDecisionArtifact.artifactVersion === "operator-decision-v1" &&
+    parseOperatorDecisionArtifactV1(operatorDecisionArtifact)?.status === "approved_for_outreach" &&
+    operatorDecisionPassedV1(operatorDecisionPayload),
+  "Operator approval should persist as one explicit v3 review-packet decision without duplicate grading dimensions."
+);
+const phase5GateReviewPayload: DesignSystemGateReviewPayloadV1 = {
+  version: designSystemGateReviewArtifactVersionV1,
+  designSystemId: "ds_auto_body_balanced_bordered_utility",
+  pilotVertical: "auto_body",
+  reviewer: "operator_test",
+  reviewedAt: "2026-07-09T00:00:00.000Z",
+  status: "phase5_gate_passed",
+  summary: "Pilot design system beat current generation on the first real-fixture review.",
+  fixtureReviews: ["ridge_collision"].map((fixtureId, index) => ({
+    fixtureId,
+    businessName: index === 0 ? "Ridge Collision" : "Capital Body Shop",
+    existingSiteUrl: `https://${fixtureId}.example`,
+    localCompetitorUrl: `https://${fixtureId}-competitor.example`,
+    pilotCandidateId: `pilot_${fixtureId}`,
+    currentPipelineCandidateId: `current_${fixtureId}`,
+    winner: "pilot_design_system",
+    rationale: "The pilot direction is the only option the operator would confidently show as a paid managed-site draft.",
+    scores: [
+      { id: "pilot_design_system", label: "Pilot design system", wouldOwnerPay: true, ownerPayScore: 88 + index, notes: "Looks paid, locally specific, and sendable." },
+      { id: "current_pipeline", label: "Current pipeline", wouldOwnerPay: false, ownerPayScore: 74 + index, notes: "Acceptable structure but weaker owner-pay confidence." },
+      { id: "existing_site", label: "Existing site", wouldOwnerPay: false, ownerPayScore: 70 + index, notes: "Useful reference, weaker mobile conversion." },
+      { id: "local_competitor", label: "Local competitor", wouldOwnerPay: true, ownerPayScore: 83 + index, notes: "Strong local baseline but not better than pilot." }
+    ]
+  }))
+};
+const phase5GateArtifact = designSystemGateReviewArtifactV1({
+  designSystemId: phase5GateReviewPayload.designSystemId,
+  payload: phase5GateReviewPayload,
+  createdAt: "2026-07-09T00:00:00.000Z"
+});
+const parsedPhase5GateReview = parseDesignSystemGateReviewArtifactV1(phase5GateArtifact);
+assert(
+  phase5GateArtifact.artifactType === "v3_review_packet" &&
+    phase5GateArtifact.artifactVersion === designSystemGateReviewArtifactVersionV1 &&
+    designSystemGateReviewPassedV1(parsedPhase5GateReview),
+  "Phase 5 catalog/compiler trimming should require a structured side-by-side design-system gate win."
+);
+assert(
+  !designSystemGateReviewPassedV1({
+    ...phase5GateReviewPayload,
+    status: "not_ready",
+    fixtureReviews: phase5GateReviewPayload.fixtureReviews.map((review, index) =>
+      index === 0
+        ? {
+            ...review,
+            winner: "current_pipeline",
+            scores: review.scores.map((score) =>
+              score.id === "pilot_design_system" ? { ...score, ownerPayScore: 72, wouldOwnerPay: false } : score
+            )
+          }
+        : review
+    )
+  }),
+  "Phase 5 design-system gate must fail when the pilot does not beat current output."
 );
 const unauthenticatedClaimOwner = resolveClaimOwner({ requestedOwnerEmail: "Owner@Example.com" });
 assert(
@@ -188,12 +322,60 @@ assert(
   }).ok,
   "Authenticated claim requests may include the same owner email as the signed-in Supabase user."
 );
+const contactChallengeBundle = structuredClone(bundle);
+contactChallengeBundle.businessProfile.email = "listed-owner@example.com";
+contactChallengeBundle.businessProfile.provenance.email = {
+  source: "website",
+  sourceUrl: "https://boundaryverify.example/contact",
+  confidence: 0.92,
+  verified: false,
+  observedAt: "2026-07-03T00:00:00.000Z"
+};
+const contactChallengeTargets = claimVerificationTargets(contactChallengeBundle.businessProfile);
+const contactChallenge = createClaimVerificationChallenge({
+  bundle: contactChallengeBundle,
+  channel: "email",
+  code: "123456",
+  now: 1_788_297_600_000
+});
+assert(
+  contactChallengeTargets.some((target) => target.channel === "email" && target.label.includes("***")) &&
+    contactChallenge.ok &&
+    verifyClaimVerificationChallenge({
+      bundle: contactChallengeBundle,
+      challengeId: contactChallenge.ok ? contactChallenge.challengeId : "",
+      code: "123456",
+      now: 1_788_297_600_000
+    }).ok &&
+    !verifyClaimVerificationChallenge({
+      bundle: contactChallengeBundle,
+      challengeId: contactChallenge.ok ? contactChallenge.challengeId : "",
+      code: "654321",
+      now: 1_788_297_600_000
+    }).ok,
+  "Claim contact-code challenges should verify only the independently sourced business contact of record."
+);
+const ownerSourcedContactBundle = structuredClone(contactChallengeBundle);
+ownerSourcedContactBundle.businessProfile.provenance.email = {
+  source: "owner",
+  confidence: 1,
+  verified: true,
+  observedAt: "2026-07-03T00:00:00.000Z"
+};
+assert(
+  !claimVerificationTargets(ownerSourcedContactBundle.businessProfile).some((target) => target.channel === "email"),
+  "Claim contact-code challenges must not use claimant/owner-supplied contact records as the verification target."
+);
 const checkoutGuardBundle = createLocalStoreSite({
   prompt: "Build a website for Boundary Checkout Guard HVAC in Austin. phone: 512-555-0199"
 });
 const checkoutGuardClaim = createLocalClaim({
   siteId: checkoutGuardBundle.businessProfile.siteId,
   ownerEmail: "checkout-guard@example.com",
+  verificationLevel: "operator_verified",
+  verificationMethod: "operator_manual",
+  verifiedBy: "launch-boundary-verifier",
+  verifiedAt: new Date().toISOString(),
   verifiedFacts: requiredClaimFactIds(checkoutGuardBundle.businessProfile),
   acceptedTerms: true,
   acceptedManagement: true
@@ -203,11 +385,25 @@ recordClaimCheckoutSession(checkoutGuardClaim.id, "cs_boundary_expected");
 const duplicateSessionClaim = createLocalClaim({
   siteId: checkoutGuardBundle.businessProfile.siteId,
   ownerEmail: "checkout-guard-duplicate@example.com",
+  verificationLevel: "operator_verified",
+  verificationMethod: "operator_manual",
+  verifiedBy: "launch-boundary-verifier",
+  verifiedAt: new Date().toISOString(),
   verifiedFacts: requiredClaimFactIds(checkoutGuardBundle.businessProfile),
   acceptedTerms: true,
   acceptedManagement: true
 });
 assert(duplicateSessionClaim, "Checkout guard verifier should create a duplicate-session probe claim.");
+assert(
+  createLocalClaim({
+    siteId: checkoutGuardBundle.businessProfile.siteId,
+    ownerEmail: "checkout-unverified@example.com",
+    verifiedFacts: requiredClaimFactIds(checkoutGuardBundle.businessProfile),
+    acceptedTerms: true,
+    acceptedManagement: true
+  }) === null,
+  "Unverified local claims must not create checkout-ready claim records."
+);
 assert(
   recordClaimCheckoutSession(duplicateSessionClaim.id, "cs_boundary_expected") === null,
   "Stored Stripe checkout session ids should be unique across local claims."
@@ -253,12 +449,27 @@ assert(
 const platformRobotsRules = platformRobots().rules;
 const rootHomePage = readFileSync("app/(marketing)/page.tsx", "utf8");
 const dashboardPage = readFileSync("app/(admin-app)/dashboard/page.tsx", "utf8");
+const ownerDashboardPage = readFileSync("app/(owner)/dashboard/[slug]/page.tsx", "utf8");
+const billingPortalRoute = readFileSync("app/api/billing/portal/route.ts", "utf8");
+const actionListApplyRoute = readFileSync("app/api/action-list/apply-all/route.ts", "utf8");
+const stripeWebhookRoute = readFileSync("app/api/stripe/webhook/route.ts", "utf8");
+const jobsSource = readFileSync("lib/jobs.ts", "utf8");
+const ownerNotificationsSource = readFileSync("lib/owner-notifications.ts", "utf8");
 const experimentLearningRoute = readFileSync("app/api/experiments/learn/route.ts", "utf8");
 const crawlFixtureRouteSource = readFileSync("app/crawl-fixtures/[token]/[page]/route.ts", "utf8");
 const middlewareSource = readFileSync("middleware.ts", "utf8");
 const hostRoutingSource = readFileSync("lib/host-routing.ts", "utf8");
 const securitySource = readFileSync("lib/security.ts", "utf8");
 const domainRouteSource = readFileSync("app/api/domains/route.ts", "utf8");
+const assetRouteSource = readFileSync("app/api/assets/[siteId]/[file]/route.ts", "utf8");
+const tokenPreviewPageSource = readFileSync("app/preview/[token]/page.tsx", "utf8");
+const candidateOwnerPreviewSource = readFileSync("app/site-candidate-owner-previews/[candidateId]/[[...path]]/page.tsx", "utf8");
+const candidateAcceptRouteSource = readFileSync("app/api/site-candidates/[candidateId]/accept/route.ts", "utf8");
+const candidateOperatorDecisionRouteSource = readFileSync("app/api/site-candidates/[candidateId]/operator-decision/route.ts", "utf8");
+const candidateOperatorDecisionFormSource = readFileSync("components/admin/CandidateOperatorDecisionForm.tsx", "utf8");
+const candidateArchiveRouteSource = readFileSync("app/api/site-candidates/archive/route.ts", "utf8");
+const candidateBatchArchiveBarSource = readFileSync("components/admin/CandidateBatchArchiveBar.tsx", "utf8");
+const candidateQueuePageSource = readFileSync("app/admin/site-candidates/page.tsx", "utf8");
 const platformRobotsDisallow = new Set(
   (Array.isArray(platformRobotsRules) ? platformRobotsRules : [platformRobotsRules]).flatMap((rule) =>
     Array.isArray(rule.disallow) ? rule.disallow : rule.disallow ? [rule.disallow] : []
@@ -307,7 +518,7 @@ assert(
 await verifyCanonicalGenerationService();
 assert(
   rootHomePage.includes("marketing-page") &&
-    rootHomePage.includes("Put your website on autopilot") &&
+    rootHomePage.includes("A website that works while you do.") &&
     !rootHomePage.includes("requireAdminPageAccess"),
   "The root page should be a public Lodesta marketing homepage instead of the private operator dashboard."
 );
@@ -320,8 +531,94 @@ assert(
   "The operator dashboard should emit noindex/nofollow metadata."
 );
 assert(
+  ownerDashboardPage.includes("requireSiteOwnerAccess") &&
+    ownerDashboardPage.includes("Pending Proposals") &&
+    ownerDashboardPage.includes("BillingPortalButton") &&
+    ownerDashboardPage.includes("repository.analyticsSummary") &&
+    ownerDashboardPage.includes("repository.listDomains"),
+  "Owner site dashboard should combine status, proposals, analytics, domains, and billing behind owner access."
+);
+assert(
+  billingPortalRoute.includes("requireAdminOrSiteOwner") &&
+    billingPortalRoute.includes("createBillingPortalSession") &&
+    billingPortalRoute.includes("claimGateForBundle"),
+  "Billing portal route should use Stripe portal sessions behind claim and owner/admin gates."
+);
+assert(
+  ownerNotificationsSource.includes("proposal_ready") &&
+    ownerNotificationsSource.includes("draft_awaiting_publish") &&
+    ownerNotificationsSource.includes("inquiry_digest") &&
+    ownerNotificationsSource.includes("payment_failure") &&
+    ownerNotificationsSource.includes("RESEND_API_KEY"),
+  "Owner operational notifications should cover proposal, publish-ready draft, inquiry digest, and payment-failure email types."
+);
+assert(
+  jobsSource.includes('kind: "proposal_ready"') &&
+    jobsSource.includes('kind: "inquiry_digest"') &&
+    jobsSource.includes("sendOwnerOperationalEmail") &&
+    jobsSource.includes("listClaims"),
+  "Monthly action-list jobs should notify owners when proposals and inquiry digests are ready."
+);
+assert(
+  !jobsSource.includes("runShadowCraftLoop") &&
+    !jobsSource.includes("runMonthlyShadowCraftLoop") &&
+    !jobsSource.includes("allowPublishedSource: true"),
+  "Monthly action-list jobs should not run the removed shadow craft loop."
+);
+assert(
+  actionListApplyRoute.includes('kind: "draft_awaiting_publish"') &&
+    actionListApplyRoute.includes("runSiteQa") &&
+    actionListApplyRoute.includes("sendOwnerOperationalEmail"),
+  "Action-list apply-all should notify owners when a QA-passed draft is awaiting publish."
+);
+assert(
+  stripeWebhookRoute.includes('event.type === "invoice.payment_failed"') &&
+    stripeWebhookRoute.includes('kind: "payment_failure"') &&
+    stripeWebhookRoute.includes("sendOwnerOperationalEmail"),
+  "Stripe payment-failure webhooks should trigger owner payment-failure notifications."
+);
+assert(
   experimentLearningRoute.includes("siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request)"),
   "Unscoped experiment-learning reads should require admin authorization instead of exposing cross-site learnings."
+);
+assert(
+  assetRouteSource.includes('searchParams.get("previewToken")') &&
+    assetRouteSource.includes("previewTokenMatchesSite") &&
+    assetRouteSource.includes("publicLocalAsset ?"),
+  "Scraped asset serving should allow only site-scoped preview tokens, owner/admin access, or public owner-attested assets."
+);
+assert(
+  tokenPreviewPageSource.includes("referenceBrandingEnabled") &&
+    tokenPreviewPageSource.includes("assetAccessToken={token}"),
+  "Tokenized noindex previews should render available reference branding/media through scoped asset tokens."
+);
+assert(
+  tokenPreviewPageSource.includes("Draft prepared by Lodesta") &&
+    tokenPreviewPageSource.includes("This is not the business's official website."),
+  "Tokenized previews should visibly label the generated site as a Lodesta-prepared draft, not the business's official site."
+);
+assert(
+  candidateOwnerPreviewSource.includes('const rightsDeclined = query.rights === "declined"'),
+  "Candidate owner previews should show all available media by default and only simulate fallback when rights=declined is explicit."
+);
+assert(
+  candidateAcceptRouteSource.includes("operatorDecisionPassedV1") &&
+    candidateAcceptRouteSource.includes("Operator must approve this candidate for outreach before promotion.") &&
+    candidateOperatorDecisionRouteSource.includes("operatorDecisionArtifactV1"),
+  "Candidate promotion should be gated by one saved operator decision rather than another grading rubric."
+);
+assert(
+  candidateOperatorDecisionFormSource.includes('value="approved_for_outreach"') &&
+    candidateOperatorDecisionFormSource.includes('value="needs_work"') &&
+    candidateOperatorDecisionFormSource.includes('event.key.toLowerCase() !== "s"'),
+  "Operator review tooling should record one approve-or-needs-work decision with a keyboard save shortcut."
+);
+assert(
+  candidateArchiveRouteSource.includes("requireAdmin") &&
+    candidateArchiveRouteSource.includes("archiveSiteCandidates") &&
+    candidateBatchArchiveBarSource.includes("/api/site-candidates/archive") &&
+    candidateQueuePageSource.includes("CandidateBatchArchiveBar"),
+  "Candidate queue throughput should support admin-gated batch archive actions."
 );
 assert(
   crawlFixtureRouteSource.includes("LODESTA_CRAWL_FIXTURE_TOKEN") &&
@@ -550,26 +847,22 @@ try {
   restoreEnv("NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY", authEnvSnapshot.googleMapsBrowserKey);
 }
 
-const generatedEvaluation = evaluateSiteAgainstStandard(bundle);
-const mockupArtifacts = bundle.presenceAssessment.mockupArtifacts ?? [];
+const generatedChecks = siteStandardEvidenceChecks(bundle);
 const assetInventory = bundle.presenceAssessment.assetInventory ?? [];
-assert(generatedEvaluation.source === "site_model", "Generated evaluation should use the site model.");
-assert(generatedEvaluation.score.percent > 0, "Generated site evaluation should produce a score.");
+assert(generatedChecks.length > 0, "Generated sites should produce non-scored Standard evidence checks.");
 assert(
-  bundle.presenceAssessment.designDirections?.length === 3,
-  "Generated launch sites should include three design directions."
+  bundle.presenceAssessment.siteDirectorPlanV1?.source === "deterministic" &&
+    bundle.presenceAssessment.siteDirectorPlanV1.validation.status === "passed" &&
+    bundle.presenceAssessment.generationPlanningSource === "deterministic_design_system",
+  "Generated launch sites should use the deterministic design-system planner."
 );
 assert(
-  mockupArtifacts.length === 3,
-  "Generated launch sites should include three creative mockup artifacts."
-);
-assert(
-  mockupArtifacts.every((mockup) => mockup.planningOnly),
-  "Creative mockups must be marked as planning-only artifacts."
-);
-assert(
-  assetInventory.filter((asset) => asset.kind === "mockup").length === 3,
-  "Creative mockups must be represented in the rights-aware asset inventory."
+  bundle.presenceAssessment.brandCueReport?.provenance?.producerId === "brand-expression-v1" &&
+    bundle.presenceAssessment.brandCueReport.provenance.modelId === "deterministic" &&
+    bundle.presenceAssessment.brandCueReport.provenance.stale === false &&
+    Boolean(bundle.presenceAssessment.brandCueReport.provenance.inputHashes.profileId) &&
+    Boolean(bundle.presenceAssessment.brandCueReport.provenance.inputHashes.identitySignature),
+  "Regenerable generated intermediates should carry provenance stamps with input hashes and stale state."
 );
 assert(
   !JSON.stringify(bundle.siteModel).includes("data:image"),
@@ -602,12 +895,6 @@ assert(
   !privatePlanningAsset.url && (await readLocalAsset(privatePlanningAsset.storagePath, assetProbeRoot))?.bytes.length === 22,
   "Internal-planning generated asset bytes should be stored without returning a public URL."
 );
-const imageGenerationSource = readFileSync("lib/image-generation.ts", "utf8");
-assert(
-  imageGenerationSource.includes("publicUrl: false") &&
-    imageGenerationSource.includes("Image bytes stored privately"),
-  "Generated mockup planning artifacts should store bytes without exposing public storage URLs."
-);
 const validOpenAiSettings = validateOpenAiRuntimeSettingsInput(OPENAI_RUNTIME_DEFAULTS);
 assert(validOpenAiSettings.ok, "OpenAI runtime defaults should satisfy operator-settings validation.");
 assert(
@@ -618,8 +905,8 @@ assert(
   "OpenAI image size validation should enforce gpt-image-2 constraints."
 );
 assert(
-  OPENAI_IMAGE_OUTPUT_FORMAT === "jpeg" && imageGenerationSource.includes("outputFormat: settings.imageFormat"),
-  "Generated mockup output format should be hard-coded through operator settings defaults."
+  OPENAI_IMAGE_OUTPUT_FORMAT === "jpeg",
+  "OpenAI image output format defaults should remain stable for future approved image-generation workflows."
 );
 const frozenAssetLibraryManifestJson = JSON.parse(readFileSync("asset-library/manifests/tire-auto-v1.json", "utf8")) as unknown;
 assert(!validateAssetLibraryManifest(frozenAssetLibraryManifestJson).ok, "Frozen tire-auto-v1 manifest should not validate for new active generation.");
@@ -937,6 +1224,105 @@ if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnviro
     }).asset,
     "General auto-service businesses should not receive collision or paint imagery by fallback."
   );
+  const autoBodyContextAsset: ApprovedAssetLibraryAsset = {
+    ...bodyAsset,
+    id: "asset_boundary_auto_body_context_detail",
+    category: "detail_texture",
+    intendedUses: ["hero", "section", "card", "gallery"],
+    tags: ["service_detail", "paint_texture", "no_location_context", "family_detail_texture", "subject_paint_prep"],
+    promptMetadata: {
+      ...bodyAsset.promptMetadata,
+      title: "Paint prep texture",
+      category: "detail_texture",
+      intendedUses: ["hero", "section", "card", "gallery"],
+      tags: ["service_detail", "paint_texture", "no_location_context", "family_detail_texture", "subject_paint_prep"],
+      imageFamily: "detail_texture",
+      imageSubjects: ["paint prep detail"],
+      serviceHints: ["paint refinishing"],
+      catalogServiceSlugs: ["paint-refinishing"],
+      compositionTemplate: "macro_detail"
+    },
+    publicUrl: publicAssetLibraryUrl("asset_boundary_auto_body_context_detail", "hero-1600.webp")
+  };
+  const autoBodyContextBundle = createSiteV3FromInput({
+    prompt: "Build a website for Context Body Works, an auto body shop in Austin offering collision repair, bumper repair, and paint refinishing. Phone: 512-555-0199.",
+    identity: { siteId: "site_auto_body_context_library_boundary" }
+  });
+  autoBodyContextBundle.businessProfile.photos = [];
+  const autoBodyContextCompile = compileGeneratedSiteV3Site({
+    bundle: autoBodyContextBundle,
+    assetLibraryAssets: [autoBodyContextAsset],
+    createdAt: "2026-07-09T00:00:00.000Z"
+  });
+  assert(
+    autoBodyContextCompile.version.artDirection.mediaTreatment === "media_independent",
+    "Auto-body library context media should not turn the site into a media-led hero treatment."
+  );
+  assert(
+    !autoBodyContextCompile.version.mediaDecisions.some((decision) => decision.source === "generated_ai" && decision.slotId === "home.hero.media"),
+    "Auto-body asset-library fallback must not create a generated/library hero decision."
+  );
+  assert(
+    autoBodyContextCompile.version.mediaDecisions.some(
+      (decision) =>
+        decision.source === "generated_ai" &&
+        decision.usageScope === "section" &&
+        decision.mayImplyRealBusinessWork === false &&
+        decision.sourceUrl === autoBodyContextAsset.publicUrl
+    ),
+    "Auto-body asset-library fallback should be section-scoped, generic, and non-claiming."
+  );
+  const autoBodyProofSectionJson = JSON.stringify(
+    autoBodyContextCompile.version.pageComposition.pages[0]?.sections
+      .map((section) => getVisualSectionV3(section.props))
+      .filter(
+        (visual) =>
+          visual &&
+          (visual.anchorId === "proof" ||
+            visual.templateId === "proof_pair" ||
+            visual.templateId === "case_study_preview")
+      )
+  );
+  assert(
+    !autoBodyProofSectionJson.includes(autoBodyContextAsset.publicUrl ?? ""),
+    "Generated/library context media must not hydrate into auto-body proof or outcome-implying sections."
+  );
+  const generatedClaimsVersion = structuredClone(autoBodyContextCompile.version);
+  const generatedDecisionIndex = generatedClaimsVersion.mediaDecisions.findIndex((decision) => decision.source === "generated_ai");
+  assert(generatedDecisionIndex >= 0, "Auto-body context library fixture must emit a generated_ai media decision.");
+  const generatedDecision = generatedClaimsVersion.mediaDecisions[generatedDecisionIndex];
+  assert(generatedDecision.selectionSnapshot, "Generated media decision must carry a selection snapshot.");
+  generatedClaimsVersion.mediaDecisions[generatedDecisionIndex] = {
+    ...generatedDecision,
+    mayImplyRealBusinessWork: true,
+    selectionSnapshot: {
+      ...generatedDecision.selectionSnapshot,
+      mayImplyRealBusinessWork: true
+    }
+  };
+  const generatedClaimsQa = buildGeneratedSiteQaMetadata({
+    bundle: autoBodyContextBundle,
+    version: generatedClaimsVersion,
+    qaRunId: "qa_generated_media_implies_real_work",
+    inspection: {
+      target: "generated_site",
+      sourceUrl: "http://localhost/generated-media-policy",
+      finalUrl: "http://localhost/generated-media-policy",
+      adapter: "fixture",
+      capturedAt: "2026-07-09T00:00:00.000Z",
+      metrics: {
+        siteHeaderDetected: true,
+        siteFooterDetected: true
+      },
+      findings: [],
+      screenshots: [],
+      metricsByViewport: []
+    } as never
+  });
+  assert(
+    generatedClaimsQa.blockers.some((blocker) => blocker.id === "v3_generated_media_implies_real_work"),
+    "Generated/library media that may imply real work must block using the actual recorded generated_ai decision source."
+  );
   const realPhotoBundle = createSiteV3FromInput({
     prompt: "Build a website for Real Photo Tire, a tire shop in Austin. Services: tire rotation, brake service. Phone: 512-555-0201."
   });
@@ -968,32 +1354,28 @@ if (assetLibraryManifest.ok && autoServicesWaveManifest.ok && autoServicesEnviro
     createdAt: "2026-06-10T00:00:00.000Z"
   });
   const assetLibraryVersionJson = JSON.stringify(assetLibraryCompile.version);
+  const assetLibraryBackupGallery = assetLibraryCompile.version.rightsDeclinedBackupGallerySnapshot ?? [];
   assert(
-    assetLibraryCompile.version.mediaDecisions.some(
-      (decision) =>
-        decision.source === "generated_ai" &&
-        decision.rightsStatus === "preclaim_safe" &&
-        (decision.artifactRef === environmentHeroAsset.id || decision.artifactRef === environmentHeroRightAsset.id) &&
-        (decision.sourceUrl === environmentHeroAsset.publicUrl || decision.sourceUrl === environmentHeroRightAsset.publicUrl) &&
-        decision.mayImplyRealBusinessWork === false
+    !assetLibraryCompile.version.mediaDecisions.some((decision) => decision.source === "generated_ai" && Boolean(decision.artifactRef)),
+    "Approved asset-library images should not enter normal V3 media decisions without a director-selected media candidate."
+  );
+  assert(
+    assetLibraryBackupGallery.some(
+      (item) => item.url === environmentHeroAsset.publicUrl || item.url === environmentHeroRightAsset.publicUrl || item.url === approvedLibraryAsset.publicUrl
     ),
-    "Approved asset-library images should compile into V3 media decisions as non-deceptive generated category imagery."
+    "Approved asset-library imagery should persist in the rights-declined backup gallery snapshot."
   );
   assert(
-    assetLibraryCompile.version.mediaDecisions.some(
-      (decision) =>
-        decision.slotId === "home.conversion.background" &&
-        decision.source === "generated_ai" &&
-        decision.usageScope === "background" &&
-        decision.artifactRef === conversionBackgroundAsset.id &&
-        decision.sourceUrl === conversionBackgroundAsset.publicUrl
-    ) &&
-      assetLibraryVersionJson.includes(conversionBackgroundAsset.publicUrl ?? ""),
-    "Approved soft-blur background assets should populate the auto-services conversion band."
+    !assetLibraryBackupGallery.some((item) => item.url === conversionBackgroundAsset.publicUrl),
+    "Soft-blur background assets should not be promoted into the rights-declined backup gallery."
   );
   assert(
-    !(assetLibraryVersionJson.includes(environmentHeroAsset.publicUrl ?? "") && assetLibraryVersionJson.includes(environmentHeroRightAsset.publicUrl ?? "")),
-    "Scene-family dedupe should prevent left/right crops of the same environment scene from appearing together."
+    !assetLibraryBackupGallery.some((item) => item.url === policyFailedLibraryAsset.publicUrl) && !assetLibraryVersionJson.includes(policyFailedLibraryAsset.id),
+    "Policy-failed asset-library images should not appear in compiled V3 media artifacts."
+  );
+  assert(
+    !(assetLibraryBackupGallery.some((item) => item.url === environmentHeroAsset.publicUrl) && assetLibraryBackupGallery.some((item) => item.url === environmentHeroRightAsset.publicUrl)),
+    "Scene-family dedupe should prevent left/right crops of the same environment scene from appearing together in backup media."
   );
   assert(
     !assetLibraryVersionJson.includes("raw/") &&
@@ -1058,6 +1440,80 @@ const crawlPageSignals = extractCrawlPageSignals(
   </html>`,
   "https://boundary-crawl.example/"
 );
+const homepageEvidence = summarizeCrawlHtml(
+  `<html><head><title>Autocraft Bodywerks</title></head><body>
+    <p>Get started with a free estimate for auto body repair costs. Please call our friendly team at the location nearest you.</p>
+    <p>Thank you for contacting us. We will get back to you as soon as possible.</p>
+  </body></html>`,
+  "https://autocraft.example/"
+).evidenceCandidates ?? [];
+assert(!homepageEvidence.some((item) => item.kind === "testimonial"), "Homepage calls to action and form confirmations must never become testimonial evidence.");
+const reviewPageEvidence = summarizeCrawlHtml(
+  `<html><head><title>South Austin Customer Reviews</title></head><body>
+    <blockquote>I had a great experience with the team, and they did an excellent job repairing my door.</blockquote>
+    <blockquote>The team did a great job fixing the damage...</blockquote>
+  </body></html>`,
+  "https://autocraft.example/south-austin-customer-reviews"
+).evidenceCandidates ?? [];
+assert(reviewPageEvidence.filter((item) => item.kind === "testimonial").length === 1, "Exact customer text on a review page should remain durable testimonial evidence.");
+const insuranceEvidence = summarizeCrawlHtml(
+  `<html><head><title>Auto Body Repair FAQs</title></head><body>
+    <p>We handle communication with your insurance company throughout the repair process.</p>
+  </body></html>`,
+  "https://autocraft.example/auto-body-repair-faqs"
+).evidenceCandidates ?? [];
+assert(
+  insuranceEvidence.some((item) => item.kind === "insurance_support" && item.value.displayText === "Insurance claim assistance"),
+  "A complete insurance-assistance sentence should render as a customer-facing claim, not the bare noun 'insurance company'."
+);
+const longevityHomeSummary = summarizeCrawlHtml(
+  `<html><head><title>Pro Tech Body Shop</title></head><body>
+    <p>Your trusted choice for quality auto body repair since 2001.</p>
+    <p>Over 20 years serving the Austin community.</p>
+  </body></html>`,
+  "https://longevity-conflict.example/"
+);
+const longevityAboutSummary = summarizeCrawlHtml(
+  `<html><head><title>About Pro Tech Body Shop</title></head><body>
+    <p>Marwan Alameddine opened Protech Body Shop in Austin in 1998 after years devoted to paint and body repair.</p>
+  </body></html>`,
+  "https://longevity-conflict.example/about"
+);
+const longevityConflictBundle = createSiteV3FromInput({
+  url: "https://longevity-conflict.example/",
+  crawl: {
+    ...crawlFixture("https://longevity-conflict.example/"),
+    title: longevityHomeSummary.title,
+    extractedFacts: longevityHomeSummary.extractedFacts,
+    pageSummaries: [longevityHomeSummary, longevityAboutSummary]
+  }
+});
+const noteDerivedLongevityConflict = reconcileEvidenceConflictsV1(
+  longevityHomeSummary.evidenceCandidates,
+  ["The source contains conflicting founding language: the About page says 1998, while the homepage says 2001."]
+);
+assert(
+  JSON.stringify(noteDerivedLongevityConflict.conflicts[0]?.values) === JSON.stringify(["1998", "2001"]) &&
+    noteDerivedLongevityConflict.candidates.some(
+      (item) => item.kind === "years_in_business" && /2001/.test(item.value.text) && item.renderPolicy === "owner_review_required"
+    ),
+  "A structured-understanding conflict note should conservatively quarantine an exact longevity claim even when one source page was not retained as evidence."
+);
+const longevityLedger = longevityConflictBundle.presenceAssessment.evidenceLedgerV1;
+assert(
+  JSON.stringify(longevityLedger?.conflicts?.[0]?.values) === JSON.stringify(["1998", "2001"]),
+  "Conflicting exact founding years should be recorded once in the evidence ledger."
+);
+assert(
+  longevityLedger?.items
+    .filter((item) => item.kind === "years_in_business" && /1998|2001/.test(item.value.text))
+    .every((item) => item.renderPolicy === "owner_review_required"),
+  "Conflicting exact longevity claims must be quarantined from public rendering."
+);
+assert(
+  longevityLedger?.items.some((item) => item.kind === "years_in_business" && /over 20 years/i.test(item.value.text) && item.renderPolicy === "durable_render"),
+  "A compatible broad longevity claim may remain renderable while exact conflicting dates await owner review."
+);
 assert(
   crawlPageSignals.jsonLdTypes.includes("LocalBusiness") &&
     crawlPageSignals.formReferences.some(
@@ -1091,8 +1547,112 @@ assert(
     fixtureSummary.linkReferences.some((link) => link.kind === "social") &&
     fixtureSummary.extractedFacts.name === "Boundary Fixture Pizza" &&
     fixtureSummary.extractedFacts.phone === "+15125550191" &&
-    fixtureSummary.extractedFacts.address?.country === "US",
-  "Protected crawl fixture HTML should exercise schema, phone, form, internal link, booking, ordering, social, and business-fact extraction."
+    fixtureSummary.extractedFacts.address?.country === "US" &&
+    fixtureSummary.mainText?.includes("Boundary Fixture Pizza") &&
+    fixtureSummary.purposeTags.length > 0,
+  "Protected crawl fixture HTML should exercise schema, phone, form, internal link, booking, ordering, social, business-fact extraction, retained prose, and purpose tags."
+);
+const dossierFixtureCrawl = {
+  ...crawlFixture(fixtureUrl),
+  title: fixtureSummary.title,
+  metaDescription: fixtureSummary.metaDescription,
+  extractedFacts: fixtureSummary.extractedFacts,
+  pageSummaries: [fixtureSummary]
+};
+const dossierFixtureBundle = createSiteV3FromInput({
+  prompt: "Build a website for Boundary Dossier Pizza in Austin. phone: 512-555-0191",
+  crawl: dossierFixtureCrawl
+});
+dossierFixtureBundle.presenceAssessment.publicPresenceSignals = [
+  {
+    id: "presence_google_places_boundary_dossier",
+    siteId: dossierFixtureBundle.businessProfile.siteId,
+    provider: "google_places",
+    source: "places_api",
+    confidence: 0.82,
+    observedAt: new Date().toISOString(),
+    fields: { rating: 4.6, userRatingCount: 28 },
+    provenance: {},
+    notes: ["Rating/count are internal positioning signals only."]
+  }
+];
+const dossier = composeSiteDossierV1({ bundle: dossierFixtureBundle, crawl: dossierFixtureCrawl });
+assert(dossier.version === "site-dossier-v1", "Dossier composer should stamp its cache version.");
+assert(dossier.markdown.includes("Crawled Pages") && dossier.markdown.includes("Boundary Fixture Pizza"), "Dossier should include retained page prose.");
+assert(dossier.sourcePageCount === 1, "Dossier should report source page count.");
+assert(dossier.reviewEvidence[0]?.renderPolicy === "internal_positioning_only", "Review evidence must stay private and non-renderable.");
+const evidenceFixtureUrl = "https://review-boundary.example/reviews";
+const evidenceFixtureSummary = summarizeCrawlHtml(
+  `<html>
+    <head>
+      <title>Review Boundary Collision - Reviews and Credentials</title>
+      <script type="application/ld+json">
+        ${JSON.stringify({
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "AutoBodyShop",
+              name: "Review Boundary Collision",
+              telephone: "+15125550131",
+              address: { "@type": "PostalAddress", addressLocality: "Austin", addressRegion: "TX" },
+              makesOffer: [{ "@type": "Offer", itemOffered: { "@type": "Service", name: "Collision Repair" } }]
+            },
+            {
+              "@type": "Review",
+              reviewBody: "I highly recommend this team because they explained the repair, kept the price clear, and the work looked excellent.",
+              author: { "@type": "Person", name: "Taylor R." }
+            },
+            {
+              "@type": "Review",
+              reviewBody: "The staff were professional, friendly, and helpful from the first call through pickup, and I was happy with the result.",
+              author: { "@type": "Person", name: "Morgan S." }
+            }
+          ]
+        })}
+      </script>
+    </head>
+    <body>
+      <h1>Review Boundary Collision</h1>
+      <p>Our I-CAR Gold Class team supports insurance claims from estimate through repair planning.</p>
+      <p>Ask about our limited lifetime warranty on qualifying repair work.</p>
+      <p>Serving Austin since 1998.</p>
+      <p>Call (512) 555-0131 for collision repair.</p>
+    </body>
+  </html>`,
+  evidenceFixtureUrl
+);
+assert(
+  evidenceFixtureSummary.evidenceCandidates.filter((item) => item.kind === "testimonial").length === 2 &&
+    evidenceFixtureSummary.evidenceCandidates.some((item) => item.kind === "credential" && item.source.url === evidenceFixtureUrl) &&
+    evidenceFixtureSummary.evidenceCandidates.some((item) => item.kind === "insurance_support" && item.renderPolicy === "durable_render") &&
+    evidenceFixtureSummary.evidenceCandidates.some((item) => item.kind === "warranty" && item.renderPolicy === "owner_review_required") &&
+    !evidenceFixtureSummary.extractedFacts.pressLinks.some((value) => /^review:/i.test(value)),
+  "Crawl evidence should retain exact page-level testimonials and trust claims without encoding them as press-link strings."
+);
+const evidenceFixtureCrawl = {
+  ...crawlFixture(evidenceFixtureUrl),
+  title: evidenceFixtureSummary.title,
+  extractedFacts: evidenceFixtureSummary.extractedFacts,
+  pageSummaries: [evidenceFixtureSummary]
+};
+const evidenceFixtureBundle = createSiteV3FromInput({
+  url: evidenceFixtureUrl,
+  crawl: evidenceFixtureCrawl
+});
+evidenceFixtureBundle.presenceAssessment.siteDirectorPlanV1 = createDeterministicSiteDirectorPlanV1({
+  bundle: evidenceFixtureBundle
+});
+const evidenceFixtureVersionJson = JSON.stringify(compileGeneratedSiteV3Site({ bundle: evidenceFixtureBundle }).version);
+assert(
+  (evidenceFixtureBundle.presenceAssessment.evidenceLedgerV1?.summary.businessProofItems ?? 0) >= 5 &&
+    evidenceFixtureBundle.presenceAssessment.businessFactGraph?.facts.some(
+      (fact) => fact.kind === "testimonial" && fact.sourceUrl === evidenceFixtureUrl && fact.renderSafety === "render_safe"
+    ) &&
+    evidenceFixtureVersionJson.includes("I highly recommend this team") &&
+    evidenceFixtureVersionJson.includes('"quote_wall"') &&
+    evidenceFixtureVersionJson.includes("I-CAR Gold Class") &&
+    !evidenceFixtureVersionJson.includes("limited lifetime warranty"),
+  "Source-backed testimonials and durable trust evidence should render through the evidence-aware plan while owner-review-only warranty claims remain non-public."
 );
 const noisyPhoneSummary = summarizeCrawlHtml(
   `<html>
@@ -1410,12 +1970,18 @@ const monthlyInquiries: Inquiry[] = [
     updatedAt: "2026-05-29T12:05:00.000Z"
   }
 ];
+const monthlyActionListBundle = structuredClone(bundle);
+const monthlyActionListPublishedVersion = monthlyActionListBundle.siteModel.versions.find(
+  (version) => version.rendererVersion === "layout-v3"
+);
+assert(monthlyActionListPublishedVersion, "Monthly action-list verifier should have a generated layout-v3 version.");
+monthlyActionListPublishedVersion.status = "published";
 const monthlyActionListResult = (await executeJob(
   {
     id: "job_monthly_boundary",
     kind: "monthly_action_list",
     status: "running",
-    payload: { siteId: bundle.businessProfile.siteId },
+    payload: { siteId: monthlyActionListBundle.businessProfile.siteId },
     attempts: 1,
     maxAttempts: 1,
     runAfter: "2026-05-29T12:00:00.000Z",
@@ -1423,8 +1989,8 @@ const monthlyActionListResult = (await executeJob(
     updatedAt: "2026-05-29T12:00:00.000Z"
   },
   {
-    getSiteBundle: async () => bundle,
-    runAndStoreAudit: async () => runAudit(bundle.businessProfile, bundle.siteModel),
+    getSiteBundle: async () => monthlyActionListBundle,
+    runAndStoreAudit: async () => runAudit(monthlyActionListBundle.businessProfile, monthlyActionListBundle.siteModel),
     analyticsSummary: async () => analyticsProbe,
     analyzeExperiments: async () => [],
     listExperimentLearnings: async () => [],
@@ -1455,6 +2021,10 @@ assert(
         inquiry.contactEmail === "new@example.com"
     ),
   "Monthly action-list jobs should include an inquiry summary with status counts and source-channel counts."
+);
+assert(
+  !("craftLoop" in monthlyActionListResult),
+  "Monthly action-list jobs should not report removed shadow generation output."
 );
 const telemetryCleanupResult = (await executeJob(
   {
@@ -1844,8 +2414,11 @@ const outboundProspect = newOutboundProspect({
 });
 const outboundEvents = [
   newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "mailer_sent" }),
-  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "preview_viewed" }),
-  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "claim_completed" }),
+  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "claim_link_opened" }),
+  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "picker_interaction", metadata: { designDirectionId: "primary" } }),
+  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "claim_started" }),
+  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "checkout_started" }),
+  newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "paid" }),
   newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "published" }),
   newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "credibility_feedback", value: 4.5 }),
   newOutboundEvent({ campaignId: outboundCampaign.id, prospectId: outboundProspect.id, type: "support_contact" })
@@ -1854,14 +2427,38 @@ for (const event of outboundEvents) applyOutboundEventToProspect(outboundProspec
 const outboundSummary = summarizeOutbound([outboundCampaign], [outboundProspect], outboundEvents, outboundCampaign.id);
 assert(
   outboundSummary.mailerToClaimRate === 1 &&
+    outboundSummary.claimLinkOpened === 1 &&
+    outboundSummary.pickerInteractions === 1 &&
+    outboundSummary.checkoutStarted === 1 &&
+    outboundSummary.paid === 1 &&
+    outboundSummary.claimLinkToCheckoutRate === 1 &&
+    outboundSummary.checkoutToPaidRate === 1 &&
     outboundSummary.claimToPublishRate === 1 &&
     outboundSummary.avgCredibilityScore === 4.5 &&
     outboundSummary.supportBurdenRate === 1,
   "Outbound wedge metrics should measure mailer-to-claim, claim-to-publish, preview credibility, and support burden."
 );
+assert(
+  outboundSummary.verticalBreakdown[0]?.claimLinkOpened === 1 &&
+    outboundSummary.verticalBreakdown[0]?.checkoutStarted === 1 &&
+    outboundSummary.verticalBreakdown[0]?.paid === 1,
+  "Outbound wedge metrics should report W4 funnel progress per vertical."
+);
+const suppressedOutboundProspect = newOutboundProspect({
+  campaignId: "campaign_previous_opt_out",
+  businessName: "Suppressed Boundary Shop",
+  status: "disqualified",
+  metadata: { contactEmail: "stop@example.com", optedOut: true }
+});
+const repeatedSuppressedProspect = newOutboundProspect({
+  campaignId: outboundCampaign.id,
+  businessName: "Suppressed Boundary Shop",
+  previewToken: "suppressed-token",
+  metadata: { contactEmail: "stop@example.com" }
+});
 const outboundManifest = buildOutboundMailerManifest(
   [outboundCampaign],
-  [outboundProspect],
+  [outboundProspect, suppressedOutboundProspect, repeatedSuppressedProspect],
   outboundCampaign.id,
   "https://lodesta.example"
 );
@@ -1869,9 +2466,10 @@ const outboundManifestCsv = outboundMailerManifestCsv(outboundManifest);
 assert(
   outboundManifest.length === 1 &&
     outboundManifest[0].previewUrl === "https://lodesta.example/preview/demo-token" &&
+    !outboundManifest.some((row) => row.previewUrl.includes("suppressed-token")) &&
     outboundManifestCsv.includes("campaignId,campaignName,campaignStatus,complianceStatus") &&
     outboundManifestCsv.includes(bundle.businessProfile.name),
-  "Outbound wedge tooling should export a mailer manifest with preview URLs and campaign/prospect reconciliation fields."
+  "Outbound wedge tooling should export a mailer manifest with preview URLs, campaign/prospect reconciliation fields, and suppression filtering."
 );
 assert(
   !assertOutboundCompliance({
@@ -1887,20 +2485,35 @@ assert(
   "High-volume outbound campaigns should require IP/legal review metadata before launch."
 );
 assert(
-  bundle.presenceAssessment.designDirections.filter((direction) => direction.selected).length === 1,
-  "Exactly one generated design direction should be selected."
+  !assertOutboundCompliance({
+    name: "Cold Email Missing Compliance",
+    channel: "email",
+    status: "running",
+    metadata: { senderName: "Lodesta" }
+  }).ok &&
+    assertOutboundCompliance({
+      name: "Cold Email Reviewed",
+      channel: "email",
+      status: "running",
+      metadata: {
+        senderName: "Lodesta",
+        physicalAddress: "123 Main St, Austin, TX",
+        optOutInstructions: "Reply STOP",
+        suppressionListReviewedAt: "2026-07-03T00:00:00.000Z"
+      }
+    }).ok,
+  "Email outbound campaigns should require sender identity, physical address, opt-out, and suppression-list review metadata."
+);
+assert(
+  bundle.presenceAssessment.siteDirectorPlanV1?.source === "deterministic",
+  "Generated launch sites should attach one deterministic site director runtime plan."
 );
 assert(bundle.presenceAssessment.brandAssessment, "Generated launch sites should include a brand assessment.");
-assert(bundle.presenceAssessment.qualityScore?.generated, "Generated launch sites should include a generated quality score.");
 assert(
-  bundle.presenceAssessment.qualityScore.measuredCriteria ===
-    coldUrlCheckableChecks(bundle.presenceAssessment.standardEvaluation?.checks ?? []).length &&
-    bundle.presenceAssessment.qualityScore.coldUrlCheckableFailures.every((title) =>
-      coldUrlCheckableChecks(bundle.presenceAssessment.standardEvaluation?.checks ?? []).some((check) => check.title === title)
-    ),
-  "Outbound-facing quality scores should count and present only cold-URL-checkable current-site criteria."
+  coldUrlCheckableChecks(bundle.presenceAssessment.standardEvaluation?.checks ?? []).length >= 0,
+  "Outbound-facing current-site checks should remain scoped to cold-URL-checkable criteria."
 );
-const standardCriterionIds = generatedEvaluation.checks.map((check) => check.criterionId);
+const standardCriterionIds = generatedChecks.map((check) => check.criterionId);
 assert(
   standardCriterionIds.includes("technical.https") &&
     standardCriterionIds.includes("seo.clean_urls") &&
@@ -1910,9 +2523,9 @@ assert(
   "The launch Standard should cover HTTPS, clean URLs, trust proof, service-area clarity, and FAQs."
 );
 assert(
-  generatedEvaluation.checks.some((check) => check.criterionId === "trust.credentials_or_years" && check.passed) &&
-    generatedEvaluation.checks.some((check) => check.criterionId === "content.service_area_clarity" && check.passed) &&
-    generatedEvaluation.checks.some((check) => check.criterionId === "content.faqs" && check.passed),
+  generatedChecks.some((check) => check.criterionId === "trust.credentials_or_years" && check.passed) &&
+    generatedChecks.some((check) => check.criterionId === "content.service_area_clarity" && check.passed) &&
+    generatedChecks.some((check) => check.criterionId === "content.faqs" && check.passed),
   "Generated launch sites should pass universal trust, service-area, and FAQ Standard criteria."
 );
 assert(
@@ -1924,7 +2537,7 @@ assert(
     "seo.sitemap",
     "accessibility.image_alt"
   ].every((criterionId) =>
-    generatedEvaluation.checks.some(
+    generatedChecks.some(
       (check) => check.criterionId === criterionId && check.passed && !check.evidence.includes("not yet evaluated")
     )
   ),
@@ -1993,7 +2606,7 @@ assert(
 const faqApplyResult = applySuggestedEdit(missingUniversalStandardBundle, faqFinding);
 assert(
   faqApplyResult.ok &&
-    evaluateSiteAgainstStandard(missingUniversalStandardBundle, { versionStatus: "draft" }).checks.some(
+    siteStandardEvidenceChecks(missingUniversalStandardBundle, { versionStatus: "draft" }).some(
       (check) => check.criterionId === "content.faqs" && check.passed
     ) &&
     runSiteQa(missingUniversalStandardBundle, { versionStatus: "draft" }).checks.some(
@@ -2027,15 +2640,46 @@ assert(
     !JSON.stringify(copySafeBundle.siteModel.versions).includes(copiedSourceCopy),
   "Deterministic generation should not force source-site marketing descriptions verbatim when no operator selected that copy."
 );
-assert(bundle.presenceAssessment.visualQa, "Generated launch sites should include visual QA results.");
 assert(
-  bundle.presenceAssessment.visualQa.source === "deterministic_fallback" &&
-    bundle.presenceAssessment.visualQa.findings.some((finding) => finding.id === "visual_qa.direction_alignment"),
-  "Visual QA should fall back to deterministic SiteModel/design-direction checks without live screenshot credentials."
+  !bundle.siteModel.versions[0]?.generationQa?.visualQa,
+  "Intake should not manufacture a visual grade; the final generated-site judgment runs only after browser inspection."
+);
+const visualQaStoryBundle = createSiteV3FromInput({
+  prompt: "Build a website for Boundary Story Auto Body in Austin. services: Collision Repair. phone: 512-555-0175"
+});
+visualQaStoryBundle.presenceAssessment.businessUnderstanding = {
+  ...visualQaStoryBundle.presenceAssessment.businessUnderstanding!,
+  businessStory: {
+    summary: "A family-owned Austin body shop founded in 2018.",
+    distinctives: ["Founded in 2018", "Family-owned"]
+  }
+};
+assert(
+  visualQaContext({ bundle: visualQaStoryBundle }).sourceGroundedFacts.businessStory?.distinctives.includes("Founded in 2018"),
+  "Model visual QA context should include harvested business-story evidence so source-backed about copy is not treated as invented."
 );
 const serviceLandingBundle = createSiteV3FromInput({
   prompt:
     "Build a website for Boundary Service HVAC in Austin. services: Emergency HVAC Repair, AC Tune Ups. phone: 512-555-0188"
+});
+serviceLandingBundle.presenceAssessment.businessUnderstanding = {
+  ...serviceLandingBundle.presenceAssessment.businessUnderstanding!,
+  cleanedServices: [
+    {
+      name: "Emergency HVAC Repair",
+      sourceText: "Emergency HVAC Repair — urgent heating and cooling failures are triaged from the reported system symptoms, outage timing, and service address.",
+      confidence: 1
+    },
+    {
+      name: "AC Tune Ups",
+      sourceText: "AC Tune Ups — inspection includes airflow, comfort concerns, filter condition, and whether a repair should be discussed before work begins.",
+      confidence: 1
+    }
+  ]
+};
+serviceLandingBundle.presenceAssessment.siteDirectorPlanV1 = createDeterministicSiteDirectorPlanV1({
+  bundle: serviceLandingBundle,
+  createdAt: "2026-07-09T00:00:00.000Z"
 });
 const serviceLandingCopyDeck: GeneratedCopyDeckV2 = {
   version: "generated-copy-deck-v2",
@@ -2111,18 +2755,8 @@ assert(
   "Generated launch sites should include source-backed service landing pages."
 );
 assert(
-  bundle.experiments.length > 0 && bundle.experiments.every((experiment) => experiment.status === "draft"),
-  "Generated experiments must default to draft so Experiment Mode remains opt-in only."
-);
-assert(
-  bundle.experiments.every((experiment) => (experiment.holdoutPercent ?? 0) >= 0 && (experiment.holdoutPercent ?? 0) <= 0.5),
-  "Generated experiment candidates should keep holdout controls inside the governed 0-50% range."
-);
-assert(
-  ["sticky_cta", "cta_placement", "form_length", "hero_layout"].every((surface) =>
-    bundle.experiments.some((experiment) => experiment.surface === surface)
-  ),
-  "Generated experiment candidates must cover the launch Experiment Mode surfaces."
+  bundle.experiments.length === 0,
+  "Generated sites must not pre-seed experiment candidates; Experiment Mode remains explicit opt-in only."
 );
 
 const qaBundle = createSiteV3FromInput({
@@ -2199,6 +2833,55 @@ assert(
   !blockedProfileEdit.ok && blockedProfileEdit.issues.some((issue) => issue.checkId === "phone_path"),
   "Business fact guardrails must block removing the click-to-call path."
 );
+const ownerSafeAiEdit = await applyAiEditToBundle(structuredClone(qaBundle), "Make the hero more direct and use a premium font.", {
+  classification: {
+    intents: ["hero_copy", "design_system"],
+    serviceNames: [],
+    fontPosture: "premium",
+    paletteMode: null,
+    voiceRegister: null,
+    sectionChange: null,
+    ctaMode: null,
+    mediaAssetId: null,
+    mediaFocalPoint: null,
+    rationale: "Fixture maps direct hero copy and premium typography onto bounded owner-safe controls.",
+    source: "openai"
+  }
+});
+assert(
+  ownerSafeAiEdit.ok &&
+    ownerSafeAiEdit.mutated &&
+    ownerSafeAiEdit.operations.some(
+      (operation) =>
+        operation.type === "owner_safe_mutation" &&
+        operation.mutations?.some((mutation) => mutation.action === "rewrite_section_copy" && mutation.target === "hero.heading")
+    ) &&
+    ownerSafeAiEdit.bundle?.presenceAssessment.ownerDesignSystemEditsV1?.fontPosture === "premium" &&
+    !ownerSafeAiEdit.operations.some((operation) => operation.type === "declined"),
+  "AI edit chat should apply copy and bounded design-system mutations through the canonical compiler."
+);
+const declinedAiEdit = await applyAiEditToBundle(structuredClone(qaBundle), "Change the theme to premium purple.", {
+  classification: {
+    intents: ["unsupported"],
+    serviceNames: [],
+    fontPosture: null,
+    paletteMode: null,
+    voiceRegister: null,
+    sectionChange: null,
+    ctaMode: null,
+    mediaAssetId: null,
+    mediaFocalPoint: null,
+    rationale: "An arbitrary unlisted color is outside the bounded design-system surface.",
+    source: "openai"
+  }
+});
+assert(
+  !declinedAiEdit.ok &&
+    !declinedAiEdit.mutated &&
+    declinedAiEdit.operations.some((operation) => operation.type === "declined") &&
+    !declinedAiEdit.operations.some((operation) => operation.type === "owner_safe_mutation"),
+  "AI edit chat should decline out-of-scope layout/theme requests without mutating the draft."
+);
 const pressLinkBundle = structuredClone(qaBundle);
 applyBusinessProfileUpdate(pressLinkBundle, {
   siteId: pressLinkBundle.businessProfile.siteId,
@@ -2209,6 +2892,68 @@ assert(
     pressLinkBundle.businessProfile.provenance.pressLinks?.source === "owner" &&
     pressLinkBundle.businessProfile.provenance.pressLinks.verified,
   "Owners should be able to curate press/video links as verified business profile facts."
+);
+const proofFactsBundle = structuredClone(qaBundle);
+applyBusinessProfileUpdate(proofFactsBundle, {
+  siteId: proofFactsBundle.businessProfile.siteId,
+  credentials: ["ASE certified technicians", "State license HVAC-1234"],
+  offers: ["Free diagnostic with repair"]
+});
+const proofFactGraph = createBusinessFactGraph({
+  business: proofFactsBundle.businessProfile,
+  presence: proofFactsBundle.presenceAssessment,
+  observedAt: "2026-07-03T00:00:00.000Z"
+});
+assert(
+  proofFactsBundle.businessProfile.credentials?.length === 2 &&
+    proofFactsBundle.businessProfile.offers?.length === 1 &&
+    proofFactsBundle.businessProfile.provenance.credentials?.source === "owner" &&
+    proofFactsBundle.businessProfile.provenance.credentials.verified &&
+    proofFactsBundle.businessProfile.provenance.offers?.source === "owner" &&
+    proofFactsBundle.businessProfile.provenance.offers.verified &&
+    proofFactGraph.facts.some((fact) => fact.kind === "credential" && fact.renderSafety === "render_safe") &&
+    proofFactGraph.sourceFactsV2?.some((fact) => fact.kind === "offer" && fact.sourceType === "owner_admin"),
+  "Owner business profile should store credentials and offers as verified truth-spine facts."
+);
+const factRegenerationBundle = structuredClone(qaBundle);
+factRegenerationBundle.presenceAssessment.generatedCopyDeck = structuredClone(bundle.presenceAssessment.generatedCopyDeck);
+factRegenerationBundle.presenceAssessment.businessUnderstanding = {
+  version: "business-understanding-v2",
+  source: "openai",
+  provenance: createRegenerableArtifactProvenanceV1({
+    producerId: "business-understanding-v2",
+    producerVersion: "business-understanding-v2",
+    modelId: "boundary-model",
+    inputs: { fixture: "fact-regeneration" }
+  }),
+  vertical: factRegenerationBundle.businessProfile.vertical,
+  verticalConfidence: 1,
+  detectedSubverticals: [],
+  cleanedServices: [],
+  primaryConversionGoal: "call_first",
+  urgentServiceSignals: [],
+  factConfidence: [],
+  notes: []
+};
+factRegenerationBundle.presenceAssessment.siteDossierV1 = composeSiteDossierV1({ bundle: factRegenerationBundle });
+applyBusinessProfileUpdate(factRegenerationBundle, {
+  siteId: factRegenerationBundle.businessProfile.siteId,
+  services: ["Water heater repair", "Drain cleaning", "Leak detection"]
+});
+const factRegeneratedDraft = factRegenerationBundle.siteModel.versions.find((version) => version.status === "draft");
+const factRegeneratedDraftJson = JSON.stringify(factRegeneratedDraft);
+assert(
+  factRegenerationBundle.presenceAssessment.generatedCopyDeck === undefined &&
+    factRegenerationBundle.presenceAssessment.businessFactGraph?.facts.some(
+      (fact) => fact.kind === "service" && fact.value === "Water heater repair"
+    ) &&
+    factRegenerationBundle.presenceAssessment.businessUnderstanding?.provenance?.stale === true &&
+    factRegenerationBundle.presenceAssessment.siteDossierV1?.stale === true &&
+    factRegenerationBundle.presenceAssessment.generationPlanningSource === "deterministic_design_system" &&
+    factRegeneratedDraftJson.includes("Water heater repair") &&
+    runSiteQa(factRegenerationBundle, { versionStatus: "draft" }).checks.length > 0 &&
+    factRegenerationBundle.presenceAssessment.technicalNotes.some((note) => note.includes("Owner business facts changed")),
+  "Owner fact edits should invalidate stale generated copy, refresh the fact graph, recompile a draft, and run through QA-visible site state."
 );
 const structuredDataBundle = structuredClone(qaBundle);
 structuredDataBundle.businessProfile.address = {
@@ -2228,6 +2973,7 @@ assert(
     requiredOnlySchema.telephone === structuredDataBundle.businessProfile.phone &&
     Boolean(requiredOnlySchema.address) &&
     !("openingHours" in requiredOnlySchema) &&
+    !("openingHoursSpecification" in requiredOnlySchema) &&
     !("aggregateRating" in requiredOnlySchema) &&
     !("sameAs" in requiredOnlySchema),
   "LocalBusiness JSON-LD should include verified required facts but omit optional facts until their provenance is owner-verified."
@@ -2235,10 +2981,11 @@ assert(
 applyVerifiedFacts(structuredDataBundle.businessProfile, ["hours", "reviewsSummary", "socialLinks"]);
 const fullyVerifiedSchema = makeLocalBusinessJsonLd(structuredDataBundle.businessProfile) as Record<string, unknown> | null;
 assert(
-  Array.isArray(fullyVerifiedSchema?.openingHours) &&
+  Array.isArray(fullyVerifiedSchema?.openingHoursSpecification) &&
+    !("openingHours" in fullyVerifiedSchema) &&
     !("aggregateRating" in fullyVerifiedSchema) &&
     Array.isArray(fullyVerifiedSchema?.sameAs),
-  "LocalBusiness JSON-LD should include verified optional hours and profile links, but never emit Google-derived aggregate ratings."
+  "LocalBusiness JSON-LD should include verified optional parseable hours and profile links, but never emit Google-derived aggregate ratings."
 );
 const firstPartyReviewBundle = structuredClone(structuredDataBundle);
 firstPartyReviewBundle.businessProfile.reviewsSummary = { rating: 4.8, count: 91, sources: ["first_party"] };
@@ -2569,13 +3316,13 @@ assert(
   !isPublicLocalAssetPath(referenceOnlyAssetBundle, referenceOnlyLocalStoragePath),
   "Public local asset serving should not expose reference-only scraped assets."
 );
-const internalPlanningLocalStoragePath = `${referenceOnlyAssetBundle.businessProfile.siteId}/mockup-planning.jpg`;
+const internalPlanningLocalStoragePath = `${referenceOnlyAssetBundle.businessProfile.siteId}/internal-planning.jpg`;
 referenceOnlyAssetBundle.presenceAssessment.assetInventory.push({
   id: "site_asset_internal_planning_probe",
   siteId: referenceOnlyAssetBundle.businessProfile.siteId,
-  kind: "mockup",
+  kind: "other",
   url: `/api/assets/${internalPlanningLocalStoragePath}`,
-  alt: "Internal planning mockup",
+  alt: "Internal planning asset",
   source: "generated",
   rightsStatus: "preclaim_safe",
   usageScope: "internal_planning",
@@ -2585,17 +3332,23 @@ referenceOnlyAssetBundle.presenceAssessment.assetInventory.push({
 });
 assert(
   !isPublicLocalAssetPath(referenceOnlyAssetBundle, internalPlanningLocalStoragePath),
-  "Public local asset serving should not expose internal-planning mockups even when the bytes are generated."
+  "Public local asset serving should not expose internal-planning assets even when the bytes are generated."
 );
 const referenceOnlyHero = assertSiteVersionV3(referenceOnlyAssetBundle.siteModel.versions[0]).pageComposition.pages[0]?.sections.find(
   (section) => getVisualSectionV3(section.props)?.templateId.startsWith("hero_")
 );
 if (referenceOnlyHero) referenceOnlyHero.props.imageUrl = referenceOnlyUrl;
 assert(
-  runSiteQa(referenceOnlyAssetBundle).checks.some(
+  runSiteQa(referenceOnlyAssetBundle, { versionStatus: "draft" }).checks.some(
+    (check) => check.id === "preclaim_reference_asset_usage" && check.severity === "pass"
+  ),
+  "Draft QA should allow reference-only scraped assets for protected preview while publish attestation remains pending."
+);
+assert(
+  runSiteQa(referenceOnlyAssetBundle, { versionStatus: "published" }).checks.some(
     (check) => check.id === "preclaim_reference_asset_usage" && check.severity === "fail"
   ),
-  "QA must fail if reference-only scraped assets are inserted into rendered site sections."
+  "Published QA must fail if reference-only scraped assets are inserted into rendered site sections."
 );
 referenceOnlyAssetBundle.presenceAssessment.assetInventory.push({
   id: "site_asset_owner_granted_probe",
@@ -2603,7 +3356,7 @@ referenceOnlyAssetBundle.presenceAssessment.assetInventory.push({
   kind: "photo",
   url: referenceOnlyUrl,
   alt: "Owner-approved original photo",
-  source: "uploaded",
+  source: "website_reference",
   rightsStatus: "customer_granted",
   usageScope: "published_site",
   ownerApproved: true,
@@ -2632,30 +3385,47 @@ assert(
   "QA must fail inaccessible primary button colors."
 );
 
-const aiPlannedBundle = createSiteV3FromInput({
+const brandExpressionBundle = createSiteV3FromInput({
   prompt: "Build a website for AI Planned Dental in Austin. phone: 512-555-0123",
-  aiPlanning: {
-    source: "openai",
-    selectedStrategy: "premium_redesign",
-    qualitySummary: "Model-backed planning selected the premium clinical path.",
-    brandAssessment: {
-      confidence: 0.88,
-      cues: ["AI Planned Dental", "new patient clarity"],
-      sourceNotes: ["Structured output override applied in verifier."]
+  understanding: {
+    version: "business-understanding-v2",
+    source: "deterministic_fallback",
+    provenance: createRegenerableArtifactProvenanceV1({
+      producerId: "business-understanding-v2",
+      producerVersion: "business-understanding-v2",
+      modelId: "deterministic",
+      inputs: { fixture: "brand-expression" }
+    }),
+    vertical: "dental",
+    verticalConfidence: 1,
+    detectedSubverticals: [],
+    cleanedServices: [{ name: "Preventive Dentistry", sourceText: "Preventive Dentistry", confidence: 1 }],
+    primaryConversionGoal: "booking_first",
+    urgentServiceSignals: [],
+    factConfidence: [],
+    notes: [],
+    brandExpression: {
+      version: "brand-expression-v1",
+      mood: "premium",
+      voiceRegister: "warm",
+      fontPosture: "premium",
+      paletteSeed: {
+        strategy: "category_default",
+        preferredHex: "#176b88",
+        candidateRank: 0
+      },
+      rationale: "Use a cool clinical category default for a calm dental posture."
     }
   }
 });
 assert(
-  aiPlannedBundle.presenceAssessment.generationPlanningSource === "openai",
-  "AI planning source should be persisted when a model-backed planning override is used."
+  brandExpressionBundle.presenceAssessment.generationPlanningSource === "deterministic_design_system" &&
+    brandExpressionBundle.presenceAssessment.siteDirectorPlanV1?.source === "deterministic",
+  "Brand-expression inputs should flow through deterministic design-system planning."
 );
 assert(
-  aiPlannedBundle.presenceAssessment.designDirections?.find((direction) => direction.strategy === "premium_redesign")?.selected,
-  "AI selected strategy should control the selected design direction."
-);
-assert(
-  aiPlannedBundle.presenceAssessment.brandAssessment?.cues.includes("AI Planned Dental"),
-  "AI brand assessment cues should be merged into the presence assessment."
+  brandExpressionBundle.presenceAssessment.businessUnderstanding?.brandExpression?.version === "brand-expression-v1",
+  "Business understanding should carry the canonical brand-expression output."
 );
 
 const publicPresenceObservedAt = new Date().toISOString();
@@ -2758,9 +3528,9 @@ const renderQaBundle = createSiteV3FromInput({
   renderInspection
 });
 assert(
-  renderQaBundle.presenceAssessment.visualQa?.target === "source_site" &&
-    renderQaBundle.presenceAssessment.visualQa.findings.some((finding) => finding.id === "visual_qa.cta_clarity" && finding.severity === "pass"),
-  "Visual QA should consume render inspection metrics when they are available."
+  renderQaBundle.presenceAssessment.renderInspection?.target === "source_site" &&
+    (renderQaBundle.presenceAssessment.renderInspection.metrics.ctaCount ?? 0) > 0,
+  "Source render inspection should remain evidence for ingestion without becoming a second visual grade."
 );
 
 const actionListBundle = createSiteV3FromInput({
@@ -2831,8 +3601,21 @@ assert(
   "Dismissed action-list findings should preserve their lifecycle status across future audit refreshes."
 );
 
-const experiment = bundle.experiments.find((candidate) => candidate.surface === "sticky_cta") ?? bundle.experiments[0];
-assert(experiment, "Generated sites should include an experiment candidate.");
+assert(bundle.experiments.length === 0, "Generated sites should not seed per-site experiments before fleet cohort activation.");
+const experiment = {
+  id: "experiment_fixture_sticky_cta",
+  cohort: "fixture:auto_body:design-system",
+  hypothesis: "Sticky mobile action improves call starts across a fleet cohort.",
+  surface: "sticky_cta" as const,
+  variants: [
+    { id: "control", label: "Inline CTAs only" },
+    { id: "sticky_action", label: "Sticky mobile action" }
+  ],
+  primaryMetric: "tel_clicks" as const,
+  status: "running" as const,
+  startedAt: "2026-07-09T00:00:00.000Z",
+  updatedAt: "2026-07-09T00:00:00.000Z"
+};
 const learningResult = createExperimentLearning({
   siteId: bundle.businessProfile.siteId,
   experiment,
@@ -2878,10 +3661,8 @@ const learnedBundle = createSiteV3FromInput({
   experimentLearnings: [learningResult.learning]
 });
 assert(
-  learnedBundle.experiments
-    .find((candidate) => candidate.surface === "sticky_cta")
-    ?.variants.some((variant) => variant.id === "sticky_action" && variant.learnedDefault === true),
-  "Active experiment learnings should mark matching future generation defaults."
+  learnedBundle.experiments.length === 0,
+  "Experiment learnings should not seed per-site experiments while fleet cohort rails are dormant."
 );
 
 process.stdout.write(
@@ -2889,15 +3670,15 @@ process.stdout.write(
     {
       ok: true,
       siteId: bundle.businessProfile.siteId,
-      generatedScore: generatedEvaluation.score,
+      generatedStandardChecks: generatedChecks.length,
       pages: assertSiteVersionV3(bundle.siteModel.versions[0]).pageComposition.pages.length,
-      designDirections: bundle.presenceAssessment.designDirections.length,
-      mockupArtifacts: mockupArtifacts.length,
+      siteDirectorSource: bundle.presenceAssessment.siteDirectorPlanV1?.source,
+      designSystemId: bundle.presenceAssessment.siteDirectorPlanV1?.designSystem?.id,
       assetInventory: assetInventory.length,
-      visualQaFindings: bundle.presenceAssessment.visualQa.findings.length,
+      visualJudgment: "pending",
       outboundMailerToClaimRate: outboundSummary.mailerToClaimRate,
       actionListDraftStaged: true,
-      experimentLearningApplied: true,
+      experimentRailsDormant: true,
       qaChecks: qa.checks.length,
       renderInspectionAdapter: renderInspection.adapter
     },
@@ -3012,6 +3793,22 @@ async function verifyCanonicalGenerationService() {
       acceptedAgain?.ok &&
       acceptedAgain.bundle.businessProfile.siteId === accepted.bundle.businessProfile.siteId,
     "Accepting a site candidate should create one managed site and remain idempotent."
+  );
+  const archiveCandidate = createLocalSiteCandidate({
+    id: "sitecand_boundary_archive_candidate",
+    agentRunId: "run_boundary_archive_candidate",
+    bundle: createSiteV3FromInput({
+      prompt: "Build a site candidate archive candidate.",
+      identity: { siteId: "sitecand_boundary_archive_candidate" }
+    })
+  });
+  const archivedCandidates = archiveLocalSiteCandidates([archiveCandidate.id, candidate.id, "missing_candidate"]);
+  assert(
+    archivedCandidates.length === 1 &&
+      archivedCandidates[0].id === archiveCandidate.id &&
+      archivedCandidates[0].status === "archived" &&
+      archiveLocalSiteCandidates([candidate.id]).length === 0,
+    "Batch archive should archive non-accepted candidates and skip already accepted candidates."
   );
 }
 

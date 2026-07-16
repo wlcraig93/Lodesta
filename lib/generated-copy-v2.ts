@@ -1,10 +1,19 @@
 import { z } from "zod";
-import { registerForVertical } from "./generated-site-v3-art-direction-catalog";
-import type { BusinessProfile, BusinessUnderstandingV2, GeneratedCopyDeckV2, SiteBundle , GeneratedCopyVoiceProfileV2 } from "./models";
+import { refreshSiteDossierCopyBriefV1 } from "./site-dossier-v1";
+import type { BusinessProfile, BusinessUnderstandingV2, GeneratedCopyDeckV2, SiteBundle } from "./models";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import { extractOpenAiUsage, sanitizeTelemetryPayload, type AgentTelemetryRecorder } from "./agent-telemetry";
 import { elapsedOpenAiCallMs, extractOpenAiResponseText, openAiErrorMessage, openAiResponseIncompleteReason } from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
+import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
+import { generationFailure, type GenerationFailureCode } from "./generation-failure";
+import {
+  generatedSiteVerticalQualityProfileForBusinessV1,
+  serviceSemanticGroupForProfileV1
+} from "./generated-site-v3-quality-profiles";
+import { copyPhrasePolicyForBusinessV1, copyPhrasePolicyPromptV1, copyPhrasePolicyViolationsV1 } from "./copy-phrase-policy-v1";
+import { autoBodyServiceDescriptionV1 } from "./auto-body-service-copy-v1";
+import { trustEvidenceItemsV1, type SiteEvidenceLedgerV1 } from "./evidence-ledger-v1";
 
 const generatedCopyDeckRequestTimeoutMs = 180_000;
 
@@ -121,9 +130,9 @@ const bannedCopyPatterns: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bhours?[_\s]?\d\b/i, reason: "Raw scraped hours label is visible." },
   { pattern: /\b(currently closed|currently open|open again on|we'?re currently)\b/i, reason: "Live status string stored as permanent copy." },
   { pattern: /\bservices?\s*:\s*\d+\b/i, reason: "Filler service-count fact is visible." },
-  { pattern: /\b(this website|this site was|generated (site|preview)|placeholder|lorem ipsum)\b/i, reason: "Generation meta language is visible." },
-  { pattern: /\b(award[- ]winning|certified|guaranteed|#1|best in)\b/i, reason: "Unverifiable superlative or credential claim." }
+  { pattern: /\b(this website|this site was|generated (site|preview)|placeholder|lorem ipsum)\b/i, reason: "Generation meta language is visible." }
 ];
+const unverifiableClaimPattern = /\b(award[- ]winning|certified|guaranteed|#1|best in|(?:free|complimentary)\s+(?:repair\s+)?(?:estimate|quote|consultation))\b/i;
 
 const genericHeadingPatterns: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^our approach\.?$/i, reason: "Generic section heading." },
@@ -159,16 +168,15 @@ async function createServicePagesFallback(args: {
   const pageWorthy = (understanding?.cleanedServices ?? [])
     .filter((service) => !dedicatedDirectorServices.length || serviceMatchesDirectorDedicatedPage(service.name, dedicatedDirectorServices))
     .filter((service) => Boolean(service.sourceText?.trim()))
-    .slice(0, 2);
+    .slice(0, 4);
   if (!pageWorthy.length) return undefined;
 
   const body = {
     model: args.model,
     reasoning: { effort: "low" },
-    // Two full landing pages (hero + detail + 4 FAQs + SEO each) overran 2200
-    // and truncated; the fallback is non-fatal but a clipped page still wasted
-    // the call. Headroom keeps both pages whole.
-    max_output_tokens: 4000,
+    // Full landing pages (hero + detail + 4 FAQs + SEO each) need headroom
+    // or the fallback can truncate and waste the call.
+    max_output_tokens: 7000,
     input: [
       {
         role: "system",
@@ -220,7 +228,7 @@ async function createServicePagesFallback(args: {
           additionalProperties: false,
           required: ["servicePages"],
           properties: {
-            servicePages: { type: "array", minItems: 1, maxItems: 2, items: servicePageItemJsonSchema }
+            servicePages: { type: "array", minItems: 1, maxItems: 4, items: servicePageItemJsonSchema }
           }
         }
       }
@@ -236,7 +244,7 @@ async function createServicePagesFallback(args: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body),
-      signal: openAiRequestSignal(generatedCopyDeckRequestTimeoutMs)
+      signal: openAiRequestSignal(generatedCopyDeckRequestTimeoutMs, args.input.signal)
     });
     const payload = (await response.json().catch(() => null)) as unknown;
     const endedAt = new Date().toISOString();
@@ -266,9 +274,15 @@ async function createServicePagesFallback(args: {
     if (incompleteReason) return undefined;
     const text = extractOpenAiResponseText(payload);
     if (!text) return undefined;
-    const parsed = z.object({ servicePages: z.array(servicePageSchemaV2).min(1).max(2) }).parse(JSON.parse(text) as unknown);
+    const parsed = z.object({ servicePages: z.array(servicePageSchemaV2).min(1).max(4) }).parse(JSON.parse(text) as unknown);
     const candidate: GeneratedCopyDeckV2 = { ...args.deck, servicePages: parsed.servicePages };
-    return lintGeneratedCopyDeck(candidate).length ? undefined : parsed.servicePages;
+    return lintGeneratedCopyDeck(candidate, {
+      businessName: business.name,
+      business,
+      approvedClaimTexts: approvedClaimTextsForBundleV1(args.input.bundle)
+    }).length
+      ? undefined
+      : parsed.servicePages;
   } catch {
     return undefined;
   }
@@ -292,31 +306,6 @@ function serviceMatchesDirectorDedicatedPage(serviceName: string, dedicatedServi
     const dedicated = dedicatedService.toLowerCase();
     return normalized.includes(dedicated) || dedicated.includes(normalized);
   });
-}
-
-/** Default voice per vertical; owners can change the profile later. */
-export function voiceProfileForBusiness(business: Pick<BusinessProfile, "vertical">): GeneratedCopyVoiceProfileV2 {
-  const register = registerForVertical(business.vertical);
-  switch (business.vertical) {
-    case "beauty_salon":
-    case "med_spa":
-    case "creative_studio":
-      return { pov: "brand_direct", register };
-    default:
-      return { pov: "first_plural", register };
-  }
-}
-
-/** Register-specific tone guidance injected into the deck prompt. */
-export function registerGuidance(register: GeneratedCopyVoiceProfileV2["register"]): string {
-  switch (register) {
-    case "punchy_retail":
-      return "Voice register: punchy retail. Short declarative headlines with energy ('Low prices on tires, wheels & lift kits.'). Section heads may carry personality ('Five ways we get you rolling.'). Verbs over adjectives. Never invent claims to sound energetic — energy comes from rhythm, not superlatives.";
-    case "warm_boutique":
-      return "Voice register: warm boutique. Inviting, sensory, unhurried. Headlines read like a welcome, not a pitch.";
-    default:
-      return "Voice register: steady professional. Clear, calm, competence-forward. No hype.";
-  }
 }
 
 /**
@@ -354,9 +343,13 @@ export function detectMetaInstructionalCopy(text: string): string | undefined {
 const disallowedScriptPattern =
   /[�Ѐ-ӿ֐-׿؀-ۿऀ-ॿ฀-๿　-ヿ㐀-䶿一-鿿가-힯豈-﫿]/gu;
 
-export function lintGeneratedCopyDeck(deck: GeneratedCopyDeckV2, context?: { businessName?: string }): string[] {
+export function lintGeneratedCopyDeck(
+  deck: GeneratedCopyDeckV2,
+  context?: { businessName?: string; business?: BusinessProfile; approvedClaimTexts?: string[] }
+): string[] {
   const violations: string[] = [];
   const texts = collectDeckTexts(deck);
+  const approvedClaimTexts = approvedClaimTextsV1(context?.business, context?.approvedClaimTexts);
   for (const heading of collectDeckHeadings(deck)) {
     for (const generic of genericHeadingPatterns) {
       if (generic.pattern.test(heading.trim())) {
@@ -369,6 +362,9 @@ export function lintGeneratedCopyDeck(deck: GeneratedCopyDeckV2, context?: { bus
       if (banned.pattern.test(text)) {
         violations.push(`${banned.reason} Text: "${text.slice(0, 80)}"`);
       }
+    }
+    if (unverifiableClaimPattern.test(withProtectedApprovedClaimsV1(text, approvedClaimTexts).value)) {
+      violations.push(`Unverifiable superlative, credential, warranty, or offer claim. Text: "${text.slice(0, 80)}"`);
     }
     for (const meta of metaInstructionalPatterns) {
       if (meta.pattern.test(text)) {
@@ -405,7 +401,142 @@ export function lintGeneratedCopyDeck(deck: GeneratedCopyDeckV2, context?: { bus
   if (new Set(faqQuestions).size !== faqQuestions.length) violations.push("FAQs contain duplicate questions.");
   const serviceTitles = deck.serviceItems.map((item) => item.title.toLowerCase().trim());
   if (new Set(serviceTitles).size !== serviceTitles.length) violations.push("Service items contain duplicate titles.");
+  const groundedServiceMinimum = context?.business
+    ? Math.min(3, uniqueServiceTitlesBySemanticGroup(context.business.services, context.business).length)
+    : 3;
+  if (deck.serviceItems.length < groundedServiceMinimum) {
+    violations.push(`Fewer than ${groundedServiceMinimum} grounded service items remained after service-title validation.`);
+  }
+  if (context?.business) violations.push(...factConsistencyViolations(deck, context.business, approvedClaimTexts));
+  if (context?.business) violations.push(...copyPhrasePolicyViolationsV1(deck, context.business));
   return violations;
+}
+
+function factConsistencyViolations(deck: GeneratedCopyDeckV2, business: BusinessProfile, approvedClaimTexts: string[] = []): string[] {
+  const violations: string[] = [];
+  const hoursByDay = businessHoursByDay(business.hours);
+  const sourceText = normalizeFactText({
+    phone: business.phone,
+    email: business.email,
+    address: business.address,
+    hours: business.hours,
+    services: business.services,
+    serviceHighlights: business.serviceHighlights,
+    serviceAreas: business.serviceAreas,
+    credentials: business.credentials,
+    offers: business.offers,
+    approvedClaimTexts
+  });
+  const allowedServices = business.services.map(normalizeFactText).filter(Boolean);
+  const serviceClaims = [
+    ...deck.serviceItems.map((item) => item.title),
+    ...(deck.servicePages ?? []).map((page) => page.serviceName)
+  ];
+  for (const service of serviceClaims) {
+    const normalized = normalizeFactText(service);
+    if (normalized && allowedServices.length && !allowedServices.some((allowed) => serviceClaimBackedByFact(normalized, allowed))) {
+      violations.push(`Unsupported service claim: "${service}" is not in the business fact service list.`);
+    }
+  }
+
+  for (const text of collectDeckTexts(deck)) {
+    for (const phone of text.match(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) ?? []) {
+      if (normalizeDigits(phone) !== normalizeDigits(business.phone ?? "")) {
+        violations.push(`Unsupported phone claim: "${phone}" is not the business phone fact.`);
+      }
+    }
+    for (const email of text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []) {
+      if (email.toLowerCase() !== (business.email ?? "").toLowerCase()) {
+        violations.push(`Unsupported email claim: "${email}" is not the business email fact.`);
+      }
+    }
+    for (const amount of text.match(/\$\s*\d[\d,]*(?:\.\d{2})?/g) ?? []) {
+      if (!sourceText.includes(normalizeFactText(amount))) {
+        violations.push(`Unsupported price claim: "${amount}" is not present in business facts.`);
+      }
+    }
+    for (const offer of text.match(/\b(?:free|complimentary)\s+(?:repair\s+)?(?:estimate|quote|consultation)\b/gi) ?? []) {
+      if (!sourceText.includes(normalizeFactText(offer))) {
+        violations.push(`Unsupported offer claim: "${offer}" is not present in approved business facts.`);
+      }
+    }
+    const dayClaim = text.match(/\b(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i)?.[0];
+    const normalizedDay = dayClaim ? normalizeWeekday(dayClaim) : undefined;
+    const dayHours = normalizedDay ? hoursByDay.get(normalizedDay) : undefined;
+    if (normalizedDay && !dayHours) {
+      violations.push(`Unsupported hours/day claim: "${dayClaim}" is not present in business hours facts.`);
+    }
+    if (normalizedDay && dayHours && /\bclosed\b/i.test(dayHours) && /\b(open|available|pickup|walk-?in|appointment|service)\b/i.test(text)) {
+      violations.push(`Unsupported hours/day availability claim: "${dayClaim}" is closed in business hours facts.`);
+    }
+    for (const time of text.match(/\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi) ?? []) {
+      if (!sourceText.includes(normalizeFactText(time))) {
+        violations.push(`Unsupported time claim: "${time}" is not present in business hours facts.`);
+      }
+    }
+  }
+  return [...new Set(violations)];
+}
+
+function normalizeFactText(value: unknown): string {
+  return JSON.stringify(value ?? "")
+    .toLowerCase()
+    .replace(/\ba\.?m\.?\b/g, "am")
+    .replace(/\bp\.?m\.?\b/g, "pm")
+    .replace(/[^a-z0-9$]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDigits(value: string) {
+  return value.replace(/\D+/g, "").replace(/^1(?=\d{10}$)/, "");
+}
+
+function serviceClaimBackedByFact(claim: string, fact: string) {
+  if (claim === fact) return true;
+  if (claim.includes(fact) || fact.includes(claim)) return true;
+  const claimTokens = serviceTokens(claim);
+  if (!claimTokens.length) return false;
+  const factTokens = new Set(serviceTokens(fact));
+  const overlap = claimTokens.filter((token) => factTokens.has(token)).length;
+  return overlap >= Math.min(2, claimTokens.length) && overlap / claimTokens.length >= 0.5;
+}
+
+function serviceTokens(value: string) {
+  const stop = new Set(["and", "or", "the", "for", "with", "service", "services"]);
+  return value.split(" ").filter((token) => token.length >= 3 && !stop.has(token));
+}
+
+const weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+type Weekday = (typeof weekdays)[number];
+
+function businessHoursByDay(hours: Record<string, string> | undefined) {
+  const byDay = new Map<Weekday, string>();
+  for (const [label, value] of Object.entries(hours ?? {})) {
+    const days = weekdaysForHoursLabel(`${label} ${value}`);
+    for (const day of days) byDay.set(day, value);
+  }
+  return byDay;
+}
+
+function weekdaysForHoursLabel(label: string): Weekday[] {
+  const text = label.toLowerCase();
+  const direct = weekdays.filter((day) => text.includes(day) || text.includes(day.slice(0, 3)));
+  const range = text.match(/\b(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b\s*(?:[–—-]|to)\s*\b(mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/i);
+  if (!range) return direct;
+  const start = normalizeWeekday(range[1]);
+  const end = normalizeWeekday(range[2]);
+  if (!start || !end) return direct;
+  const startIndex = weekdays.indexOf(start);
+  const endIndex = weekdays.indexOf(end);
+  if (startIndex < 0 || endIndex < 0) return direct;
+  if (startIndex <= endIndex) return weekdays.slice(startIndex, endIndex + 1);
+  return [...weekdays.slice(startIndex), ...weekdays.slice(0, endIndex + 1)];
+}
+
+function normalizeWeekday(value: string): Weekday | undefined {
+  const key = value.toLowerCase().slice(0, 3);
+  return weekdays.find((day) => day.startsWith(key));
 }
 
 function collectDeckTexts(deck: GeneratedCopyDeckV2): string[] {
@@ -469,100 +600,42 @@ function collectDeckHeadings(deck: GeneratedCopyDeckV2): string[] {
   ].filter(Boolean);
 }
 
-/** Body-type fields (full sentences expected), used for completeness checks. */
-function collectDeckBodies(deck: GeneratedCopyDeckV2): string[] {
-  return [
-    deck.hero.body,
-    deck.servicesIntro.body,
-    ...deck.serviceItems.map((item) => item.body),
-    deck.processIntro.body,
-    ...deck.processSteps.map((step) => step.body),
-    ...deck.faqs.map((faq) => faq.answer),
-    deck.locationIntro?.body ?? "",
-    deck.contactIntro.body,
-    deck.splitMedia.body,
-    deck.about?.body ?? "",
-    deck.gallery.body,
-    ...(deck.servicePages ?? []).flatMap((page) => [page.hero.body, page.detail.body, ...page.faqs.map((faq) => faq.answer)])
-  ].filter(Boolean);
-}
-
-// Taste defects that are grammatical and factual — so they sail past the
-// correctness lint — but read as low-quality automated copy: hedging instead of
-// confidence, internal taxonomy leaking into prose, and clipped sentences.
-// These are *guidance* for the editor pass, not hard blockers: forcing a retry
-// would risk dropping to template copy, whereas the editor rewrites in place.
-const hedgePatterns: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\bwhen the\b[^.?!]{0,40}\bis a (good )?fit\b/i, reason: "Hedged service description ('when the … is a fit')." },
-  { pattern: /\bmay not need\b/i, reason: "Hedging ('may not need')." },
-  { pattern: /\bfocused option\b/i, reason: "Vague filler ('focused option')." },
-  { pattern: /\b(where|as) applicable\b/i, reason: "Hedging ('where/as applicable')." },
-  { pattern: /\bif (it|that|they) (is|are|fit|fits)\b/i, reason: "Conditional hedging ('if it fits')." },
-  { pattern: /\bcan (talk through|discuss|help with)\b/i, reason: "Tentative phrasing ('can talk through')." },
-  { pattern: /\bwith room for\b/i, reason: "Noncommittal phrasing ('with room for')." },
-  { pattern: /\bclear next steps\b/i, reason: "Generic process-speak ('clear next steps')." },
-  { pattern: /\bfocused help\b/i, reason: "Generic local-service phrasing ('focused help')." },
-  { pattern: /\bhelp after\b/i, reason: "Generic local-service phrasing ('help after')." },
-  { pattern: /\bpractical support\b/i, reason: "Generic local-service phrasing ('practical support')." },
-  { pattern: /\bneed a shop to look at\b/i, reason: "Directory-style phrasing ('need a shop to look at')." },
-  { pattern: /\bavailable from\b/i, reason: "Awkward generated phrasing ('available from')." }
-];
-const taxonomyPatterns: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\brepair categor(y|ies)\b/i, reason: "Internal taxonomy in prose ('repair category')." },
-  { pattern: /\brepair path\b/i, reason: "Internal taxonomy in prose ('repair path')." },
-  { pattern: /\brepair conversation\b/i, reason: "Internal process phrasing ('repair conversation')." },
-  { pattern: /\bestimate conversation\b/i, reason: "Internal process phrasing ('estimate conversation')." },
-  { pattern: /\bthe repair type\b/i, reason: "Internal taxonomy in prose ('the repair type')." },
-  { pattern: /\binto the right\b[^.?!]{0,24}\bpath\b/i, reason: "Process-speak ('into the right … path')." }
-];
-
-/**
- * Detect taste defects across the deck. Returns short human-readable issues used
- * to (a) decide whether the editor pass is worth running and (b) tell the editor
- * exactly what to fix. Deliberately high-precision: every pattern here matched a
- * real low-quality generation, not a hypothetical.
- */
-export function detectCopyTasteIssuesInTexts(texts: string[], bodies: string[] = texts): string[] {
-  const issues: string[] = [];
-  for (const text of texts) {
-    for (const hedge of hedgePatterns) {
-      if (hedge.pattern.test(text)) issues.push(`${hedge.reason} Text: "${text.slice(0, 70)}"`);
-    }
-    for (const taxonomy of taxonomyPatterns) {
-      if (taxonomy.pattern.test(text)) issues.push(`${taxonomy.reason} Text: "${text.slice(0, 70)}"`);
-    }
-  }
-  for (const body of bodies) {
-    if (!/[.!?…"')\]]\s*$/.test(body)) {
-      issues.push(`Body does not end in a complete sentence. Text: "${body.slice(-70)}"`);
-    }
-  }
-  return issues;
-}
-
-export function detectCopyTasteIssues(deck: GeneratedCopyDeckV2): string[] {
-  return detectCopyTasteIssuesInTexts(collectDeckTexts(deck), collectDeckBodies(deck));
-}
-
 export type GeneratedCopyDeckInput = {
   bundle: SiteBundle;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
+  signal?: AbortSignal;
+  failureMode?: "return_undefined" | "throw";
+  regenerationFeedback?: string[];
 };
 
 export async function createOpenAiGeneratedCopyDeck(
   input: GeneratedCopyDeckInput
 ): Promise<GeneratedCopyDeckV2 | undefined> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return undefined;
+  if (!apiKey) {
+    return handleCopyDeckFailure(input, new Error("OPENAI_API_KEY is not configured."), "copy_unavailable");
+  }
   const runtimeSettings = await getOpenAiRuntimeSettings();
   const business = input.bundle.businessProfile;
   const understanding = input.bundle.presenceAssessment.businessUnderstanding;
   const siteDirectorPlan = input.bundle.presenceAssessment.siteDirectorPlanV1;
-  const designBrief = input.bundle.presenceAssessment.designBrief;
+  const siteDossier = refreshSiteDossierCopyBriefV1(input.bundle);
+  input.bundle.presenceAssessment.siteDossierV1 = siteDossier;
+  const copyBrief = siteDossier.copyBrief;
+  const model = runtimeSettings.settings.generationModel;
+  const conflictedYears = claimConflictYearsForCopyV1(input.bundle.presenceAssessment.evidenceLedgerV1);
+  const approvedClaimTexts = approvedClaimTextsForBundleV1(input.bundle);
+  const baseCopyContext = {
+    ...copyDeckContext(business, understanding, siteDirectorPlan, siteDossier, input.bundle.presenceAssessment.evidenceLedgerV1),
+    copyBrief,
+    copyPhrasePolicy: copyPhrasePolicyPromptV1(copyPhrasePolicyForBusinessV1(business)),
+    voiceProfile: copyBrief.voiceProfile,
+    voiceRegisterGuidance: copyBrief.voiceGuidance
+  };
 
-  const buildBody = (maxOutputTokens: number) => ({
-    model: runtimeSettings.settings.generationModel,
+  const buildBody = (maxOutputTokens: number, copyContext: typeof baseCopyContext & { copyRegenerationFeedback?: string[] }) => ({
+    model,
     reasoning: { effort: "low" },
     max_output_tokens: maxOutputTokens,
     input: [
@@ -574,11 +647,15 @@ export async function createOpenAiGeneratedCopyDeck(
             text: [
               "You write customer-facing homepage copy for a US local small business website generated by Lodesta.",
               "Return only schema-valid JSON through Structured Outputs.",
-              "Ground every sentence in the provided verified facts. Never invent offers, prices, years in business, credentials, reviews, awards, or guarantees.",
+              "Ground every sentence in the provided verified facts. Never invent offers, prices, years in business, ownership structure, family-owned claims, values claims, credentials, reviews, awards, warranties, or guarantees.",
               "Start with copyPlan before writing slots: define the site argument, proof hierarchy, structured section jobs, CTA rhythm, and repetition risks. Every sectionJob must include point, proofToUse, customerQuestion, slotShape, avoid, genericRisk, and slotJobs for the rendered slots it owns.",
               "When a SiteDirectorPlanV1 is provided, write the copy deck to fit that exact planned page: section order, selected geometry, CTA roles, copy jobs, navigation, and service-page strategy. Do not invent a different structure.",
               "Write specific, concrete copy about what the business actually does, in plain confident language a local customer would trust.",
+              "Exact-claim rule: never include exact email addresses, phone numbers, dollar amounts, clock times, dates, days, guarantees, certifications, awards, or #1/best claims unless the exact value appears in allowedExactClaims or verifiedFacts. If the exact value is not listed, use general language such as published hours, current pricing, call, visit, or contact instead.",
+              "When rules.claimConflicts is present, every listed value is blocked from customer-facing copy until owner review. Preserve the conflict-free substance, but never choose a side or repeat a blocked value.",
               "Write to fit the planned rendered slots: concise headings, tight card bodies, and complete sentences. The schema allows headroom so strong copy is not rejected; do not use that headroom as permission to ramble.",
+              "serviceItems.title and servicePages.serviceName must be exact or near-exact services from verifiedFacts.services or rules.serviceTitleOptions. Do not use amenities, party size, dietary questions, payment questions, contact logistics, or generic customer concerns as service titles.",
+              "For each serviceItems.body, use only the scope explicitly stated by that service's verifiedFacts.services sourceText. If sourceText only names the service, describe the service at that same broad level. Never add parts, procedures, inspection steps, materials, eligibility conditions, or promised outcomes from general trade knowledge.",
               "Every major heading must sound like it belongs on this exact business's website. Never use generic headings like 'Our approach', 'What we do', 'How it works', 'Ready to get started', 'Services', or 'Choose the service'.",
               "Avoid generated local-service filler such as 'clear next steps', 'focused help', 'help after', 'practical support', or 'need a shop to look at the damage'. Say the concrete vehicle condition, repair work, visit detail, or source-backed claim/self-pay fact instead.",
               "Do not let every section become intake instructions. Service, proof, process, and media sections should mostly describe the work, standards, visible outcomes, and practical customer decisions; reserve 'send photos', 'share details', and call-prep language for contact or quote sections.",
@@ -586,13 +663,16 @@ export async function createOpenAiGeneratedCopyDeck(
               "Never write copy about how to contact a business or what to include in a message; write about the services, the work, and practical customer questions (pricing expectations only if a verified price exists, turnaround, what to bring, walk-ins).",
               "Voice: write in the requested voiceProfile point of view. first_plural speaks as the business ('we', 'our shop'); first_singular speaks as the individual ('I'); brand_direct uses the business name sparingly and confident declarative statements. Never write like a third-party directory describing the business.",
               "Never write meta copy about the website itself or instruct visitors how to use it (no 'use the photos', 'fill out the form', 'this site shows').",
-              "splitMedia: a short approach/working-with-us section shown beside a workshop photo — what working with this business is actually like, grounded in facts.",
+              "Never mention source information, provided facts, extracted data, the dossier, or any other provenance mechanism in customer-facing copy. State only the supported business fact itself.",
+              "When copyPhrasePolicy is present, treat its constrained phrases as banned same-vertical constructions. Do not paraphrase them closely; choose a different concrete angle supported by facts.",
+              "splitMedia: a short approach/working-with-us section shown beside an approved supporting business image. Do not assume the image is a workshop, employee, process, or completed job; keep the copy grounded in verified facts.",
               "gallery: a short intro for a photo gallery of the work — about the work in the photos, never about the photos as photos.",
               "splitMedia and gallery must have distinct headlines, distinct bodies, and distinct section jobs. Never reuse the same phrase, angle, or sentence across those two sections.",
               "about: when businessStory is provided, write the about section as the story's centerpiece — founders, family, history, personalities, told warmly and concretely in the business voice. Real names and details from the story verbatim. Null only when there is no story.",
               "Never include internal labels, vertical slugs, scraped key names, live open/closed status, or meta commentary about the website.",
               "FAQ answers must answer real customer questions about the trade, not questions about messaging the business.",
               "groundingNotes must list which provided facts each major claim relies on.",
+              "When siteDossier is provided, use it for source-specific emphasis and vocabulary. Treat review evidence as private positioning input only: never quote, attribute, or originate claims from third-party review text or ratings.",
               "Set servicePages to null in this homepage copy deck. Dedicated service pages are generated separately by a smaller service-page call."
             ].join(" ")
           }
@@ -603,11 +683,7 @@ export async function createOpenAiGeneratedCopyDeck(
         content: [
           {
             type: "input_text",
-            text: JSON.stringify({
-              ...copyDeckContext(business, understanding, siteDirectorPlan, designBrief),
-              voiceProfile: voiceProfileForBusiness(business),
-              voiceRegisterGuidance: registerGuidance(voiceProfileForBusiness(business).register)
-            })
+            text: JSON.stringify(copyContext)
           }
         ]
       }
@@ -628,70 +704,108 @@ export async function createOpenAiGeneratedCopyDeck(
   // more room; an incomplete (token-capped) response retries once with a larger
   // budget before we fall back to deterministic template copy.
   const tokenBudgets = [5000, 7000];
-  const model = runtimeSettings.settings.generationModel;
-  let text: string | undefined;
-  let lastError: unknown;
+  type CopyDeckGenerationResult = {
+    text: string;
+    generatedAt: string;
+    copyContext: typeof baseCopyContext & { copyRegenerationFeedback?: string[] };
+  };
+  const generateCopyDeckText = async (copyRegenerationFeedback?: string[]): Promise<CopyDeckGenerationResult> => {
+    const copyContext =
+      copyRegenerationFeedback?.length
+        ? { ...baseCopyContext, copyRegenerationFeedback: copyRegenerationFeedback.slice(0, 8) }
+        : baseCopyContext;
+    let text: string | undefined;
+    let lastError: unknown;
+    let generatedAt = new Date().toISOString();
 
-  for (let attempt = 0; attempt < tokenBudgets.length; attempt += 1) {
-    const body = buildBody(tokenBudgets[attempt]);
-    const startedAt = new Date().toISOString();
-    try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body),
-        signal: openAiRequestSignal(generatedCopyDeckRequestTimeoutMs)
-      });
-      const payload = (await response.json().catch(() => null)) as unknown;
-      const endedAt = new Date().toISOString();
-      const incompleteReason = response.ok ? openAiResponseIncompleteReason(payload) : undefined;
-      await input.telemetry?.recordModelCall({
-        spanId: input.spanId,
-        provider: "openai",
-        model: body.model,
-        endpoint: "/v1/responses",
-        operation: "generated_copy_deck",
-        status: response.ok && !incompleteReason ? "completed" : "failed",
-        requestJson: sanitizeTelemetryPayload(body),
-        responseJson: sanitizeTelemetryPayload(payload),
-        ...extractOpenAiUsage(payload),
-        errorMessage: response.ok
-          ? incompleteReason
-            ? `Incomplete response (${incompleteReason})`
-            : undefined
-          : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
-        startedAt,
-        endedAt,
-        durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
-      });
-      if (!response.ok) {
-        // HTTP/refusal errors are not budget-retryable.
-        throw new Error(openAiErrorMessage(payload) ?? `OpenAI copy deck generation failed with status ${response.status}`);
+    for (let attempt = 0; attempt < tokenBudgets.length; attempt += 1) {
+      const body = buildBody(tokenBudgets[attempt], copyContext);
+      const startedAt = new Date().toISOString();
+      try {
+        const response = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body),
+          signal: openAiRequestSignal(generatedCopyDeckRequestTimeoutMs, input.signal)
+        });
+        const payload = (await response.json().catch(() => null)) as unknown;
+        const endedAt = new Date().toISOString();
+        generatedAt = endedAt;
+        const incompleteReason = response.ok ? openAiResponseIncompleteReason(payload) : undefined;
+        await input.telemetry?.recordModelCall({
+          spanId: input.spanId,
+          provider: "openai",
+          model: body.model,
+          endpoint: "/v1/responses",
+          operation: "generated_copy_deck",
+          status: response.ok && !incompleteReason ? "completed" : "failed",
+          requestJson: sanitizeTelemetryPayload(body),
+          responseJson: sanitizeTelemetryPayload(payload),
+          ...extractOpenAiUsage(payload),
+          errorMessage: response.ok
+            ? incompleteReason
+              ? `Incomplete response (${incompleteReason})`
+              : undefined
+            : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+          startedAt,
+          endedAt,
+          durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
+        });
+        if (!response.ok) {
+          // HTTP/refusal errors are not budget-retryable.
+          throw copyDeckError(
+            openAiErrorMessage(payload) ?? `OpenAI copy deck generation failed with status ${response.status}`,
+            copyFailureCodeForHttpPayload(payload)
+          );
+        }
+        if (incompleteReason) {
+          lastError = copyDeckError(`OpenAI copy deck response was incomplete (${incompleteReason}).`, "copy_incomplete_response");
+          continue;
+        }
+        text = extractOpenAiResponseText(payload);
+        if (!text) throw copyDeckError("OpenAI copy deck response did not include output text.", "copy_empty_output");
+        break;
+      } catch (error) {
+        lastError = copyDeckTypedError(error);
+        break;
       }
-      if (incompleteReason) {
-        lastError = new Error(`OpenAI copy deck response was incomplete (${incompleteReason}).`);
-        continue;
-      }
-      text = extractOpenAiResponseText(payload);
-      if (!text) throw new Error("OpenAI copy deck response did not include output text.");
-      break;
-    } catch (error) {
-      lastError = error;
-      break;
     }
-  }
 
-  try {
     if (!text) {
-      throw lastError instanceof Error ? lastError : new Error("OpenAI copy deck generation failed.");
+      throw lastError instanceof Error ? lastError : copyDeckError("OpenAI copy deck generation failed.", "copy_unavailable");
     }
-    const parsed = copyDeckSchema.parse(JSON.parse(text) as unknown);
-    const deck: GeneratedCopyDeckV2 = {
+    return { text, generatedAt, copyContext };
+  };
+
+  const parseCopyDeckGeneration = (generation: CopyDeckGenerationResult): GeneratedCopyDeckV2 => {
+    let parsed: z.infer<typeof copyDeckSchema>;
+    try {
+      parsed = copyDeckSchema.parse(JSON.parse(generation.text) as unknown);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw copyDeckError(`OpenAI copy deck returned invalid JSON: ${error.message}`, "copy_invalid_json");
+      if (error instanceof z.ZodError) {
+        throw generationFailure(error, {
+          stage: "copy",
+          code: "copy_validation_failed",
+          message: `OpenAI copy deck failed schema validation: ${error.issues.map((issue) => issue.message).join("; ")}`,
+          validationIssues: error.issues
+        });
+      }
+      throw error;
+    }
+    return {
       version: "generated-copy-deck-v2",
       source: "openai",
+      provenance: createRegenerableArtifactProvenanceV1({
+        producerId: "generated-copy-deck-v2",
+        producerVersion: "generated-copy-deck-v2",
+        modelId: model,
+        createdAt: generation.generatedAt,
+        inputs: { copyContext: generation.copyContext }
+      }),
       copyPlan: parsed.copyPlan,
       hero: {
         eyebrow: parsed.hero.eyebrow ?? undefined,
@@ -710,39 +824,164 @@ export async function createOpenAiGeneratedCopyDeck(
       gallery: parsed.gallery,
       seo: parsed.seo,
       groundingNotes: parsed.groundingNotes,
-      voiceProfile: voiceProfileForBusiness(business),
+      voiceProfile: copyBrief.voiceProfile,
       servicePages: parsed.servicePages ?? undefined
     };
-    const deckForLint = withCompleteBodySentences(repairGeneratedCopyDeckForSlotFit(sanitizeCorruptGlyphs(deck), business));
-    const violations = lintGeneratedCopyDeck(deckForLint, { businessName: business.name });
-    if (violations.length) {
-      throw new Error(`Generated copy deck failed content lint: ${violations.join(" | ")}`);
+  };
+
+  try {
+    const retryFeedback = input.regenerationFeedback?.filter(Boolean).slice(0, 12);
+    let deckForLint = prepareGeneratedCopyDeckForLint(parseCopyDeckGeneration(await generateCopyDeckText(retryFeedback)), business, {
+      conflictedYears,
+      approvedClaimTexts
+    });
+    let violations = lintGeneratedCopyDeck(deckForLint, { businessName: business.name, business, approvedClaimTexts });
+    if (violations.some(isCopyPhrasePolicyViolation)) {
+      const phraseFeedback = copyRegenerationFeedbackForViolations(violations);
+      deckForLint = prepareGeneratedCopyDeckForLint(
+        parseCopyDeckGeneration(await generateCopyDeckText([...(retryFeedback ?? []), ...phraseFeedback])),
+        business,
+        { conflictedYears, approvedClaimTexts }
+      );
+      violations = lintGeneratedCopyDeck(deckForLint, { businessName: business.name, business, approvedClaimTexts });
     }
-    // Editor pass: the draft is correct and grounded but low-effort generation
-    // leaves hedging, taxonomy-speak, and repetition that the correctness lint
-    // can't see. Rewrite in place against an editorial rubric when taste issues
-    // are present, keeping the result only if it lints clean and is measurably
-    // tighter. Runs before servicePages so the pages derive from edited copy.
-    const editedDeck = await refineGeneratedCopyDeck({ input, apiKey, model, deck: deckForLint, business, understanding, siteDirectorPlan, designBrief });
-    const finalDeck = editedDeck ?? deckForLint;
+    if (violations.length) {
+      throw generationFailure(new Error(`Generated copy deck failed content lint: ${violations.join(" | ")}`), {
+        stage: "copy",
+        code: "copy_lint_rejected",
+        validationIssues: violations
+      });
+    }
+    const finalDeck = deckForLint;
     if (!finalDeck.servicePages?.length) {
       // The combined call omits servicePages often enough to make multi-page
       // output unreliable; a dedicated follow-up call is cheap and targeted.
       finalDeck.servicePages = await createServicePagesFallback({ input, apiKey, model, deck: finalDeck });
     }
-    return withCompleteBodySentences(repairGeneratedCopyDeckForSlotFit(finalDeck, business));
+    return prepareGeneratedCopyDeckForLint(finalDeck, business, { conflictedYears, approvedClaimTexts });
   } catch (error) {
-    console.warn(
-      `OpenAI copy deck unavailable; canonical generation will fail unless the caller explicitly enabled development fallback. ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    return undefined;
+    return handleCopyDeckFailure(input, error, copyFailureCodeForError(error));
   }
+}
+
+function isCopyPhrasePolicyViolation(violation: string) {
+  return /^Copy phrase policy\b/.test(violation);
+}
+
+function copyRegenerationFeedbackForViolations(violations: string[]): string[] {
+  const phrasePolicyViolations = violations.filter(isCopyPhrasePolicyViolation);
+  if (!phrasePolicyViolations.length) return [];
+  return [
+    "The previous copy deck failed the versioned same-vertical phrase policy. Rewrite the full deck with different sentence structures and more business-specific service detail.",
+    ...phrasePolicyViolations
+  ];
+}
+
+function handleCopyDeckFailure(input: GeneratedCopyDeckInput, error: unknown, code: GenerationFailureCode) {
+  const failure = generationFailure(error, {
+    stage: "copy",
+    code
+  });
+  if (input.failureMode === "throw") throw failure;
+  console.warn(
+    `OpenAI copy deck unavailable; canonical generation will fail unless the caller explicitly enabled development fallback. ${failure.detail.message}`
+  );
+  return undefined;
+}
+
+function copyDeckError(message: string, code: GenerationFailureCode) {
+  const error = new Error(message) as Error & { generationFailureCode?: GenerationFailureCode };
+  error.generationFailureCode = code;
+  return error;
+}
+
+function copyDeckTypedError(error: unknown) {
+  if (error instanceof Error && error.name === "AbortError") return copyDeckError(error.message || "OpenAI copy deck request timed out.", "copy_timeout");
+  return error;
+}
+
+function copyFailureCodeForError(error: unknown): GenerationFailureCode {
+  if (error && typeof error === "object" && "detail" in error) {
+    const detail = (error as { detail?: { code?: string } }).detail;
+    if (typeof detail?.code === "string") return detail.code as GenerationFailureCode;
+  }
+  if (error instanceof Error && "generationFailureCode" in error) {
+    const code = (error as Error & { generationFailureCode?: GenerationFailureCode }).generationFailureCode;
+    if (code) return code;
+  }
+  if (error instanceof SyntaxError) return "copy_invalid_json";
+  if (error instanceof z.ZodError) return "copy_validation_failed";
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes("abort") || message.includes("timed out") || message.includes("timeout")) return "copy_timeout";
+  if (message.includes("refusal") || message.includes("refused")) return "copy_refusal";
+  if (message.includes("lint")) return "copy_lint_rejected";
+  if (message.includes("json")) return "copy_invalid_json";
+  if (message.includes("validation")) return "copy_validation_failed";
+  if (message.includes("output text") || message.includes("empty")) return "copy_empty_output";
+  return "copy_unavailable";
+}
+
+function copyFailureCodeForHttpPayload(payload: unknown): GenerationFailureCode {
+  const message = openAiErrorMessage(payload)?.toLowerCase() ?? "";
+  if (message.includes("refusal") || message.includes("refused") || message.includes("safety")) return "copy_refusal";
+  return "copy_http_error";
 }
 
 function sanitizeCorruptGlyphs(deck: GeneratedCopyDeckV2): GeneratedCopyDeckV2 {
   return sanitizeValue(structuredClone(deck)) as GeneratedCopyDeckV2;
+}
+
+export function prepareGeneratedCopyDeckForLint(
+  deck: GeneratedCopyDeckV2,
+  business: BusinessProfile,
+  options: { conflictedYears?: string[]; approvedClaimTexts?: string[] } = {}
+): GeneratedCopyDeckV2 {
+  const conflictSafe = stripConflictedYearsFromCopyV1(deck, options.conflictedYears ?? []);
+  const canonicalName = canonicalizeBusinessNameReferencesV1(conflictSafe, business.name);
+  return withCompleteBodySentences(
+    repairUnsupportedFactClaims(
+      repairGeneratedCopyDeckForSlotFit(sanitizeCorruptGlyphs(canonicalName), business),
+      business,
+      options.approvedClaimTexts
+    )
+  );
+}
+
+function canonicalizeBusinessNameReferencesV1<T>(value: T, businessName: string): T {
+  const tokens = businessName.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return value;
+  const pattern = new RegExp(`\\b${tokens.map(escapeRegexV1).join("[\\s-]*")}\\b`, "gi");
+  return mapCopyStringsV1(value, (text) => text.replace(pattern, businessName));
+}
+
+function stripConflictedYearsFromCopyV1<T>(value: T, years: string[]): T {
+  if (!years.length) return value;
+  const yearPattern = years.map(escapeRegexV1).join("|");
+  const precededYear = new RegExp(`\\s+\\b(?:in|since)\\s+(?:${yearPattern})\\b`, "gi");
+  const remainingYear = new RegExp(`\\b(?:${yearPattern})\\b`, "g");
+  return mapCopyStringsV1(value, (text) =>
+    text
+      .replace(precededYear, "")
+      .replace(remainingYear, "")
+      .replace(/\s+([,.;:!?])/g, "$1")
+      .replace(/\s{2,}/g, " ")
+      .trim()
+  );
+}
+
+function mapCopyStringsV1<T>(value: T, map: (text: string) => string): T {
+  if (typeof value === "string") return map(value) as T;
+  if (Array.isArray(value)) return value.map((item) => mapCopyStringsV1(item, map)) as T;
+  if (value && typeof value === "object") {
+    const copy: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) copy[key] = mapCopyStringsV1(item, map);
+    return copy as T;
+  }
+  return value;
+}
+
+function escapeRegexV1(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function withCompleteBodySentences(deck: GeneratedCopyDeckV2): GeneratedCopyDeckV2 {
@@ -800,6 +1039,15 @@ function polishAutoBodyGeneratedCopy<T>(value: T): T {
       .replace(/\brepair path\b/gi, "repair plan")
       .replace(/\brepair conversation\b/gi, "repair estimate")
       .replace(/\bestimate conversation\b/gi, "estimate")
+      .replace(/\breview the estimate route\b/gi, "review the repair estimate")
+      .replace(
+        /\ba detailed repair estimate supports the decision between an insurance claim and self-pay work\b/gi,
+        "Review the proposed repair work and decide whether to use insurance or pay directly"
+      )
+      .replace(
+        /\bthe estimate provides the basis for reviewing the repair work\b/gi,
+        "Use the estimate to review the proposed repair work"
+      )
       .replace(/\bthe repair type\b/gi, "the repair") as T;
   }
   if (Array.isArray(value)) {
@@ -839,172 +1087,191 @@ function sanitizeValue(value: unknown): unknown {
   return value;
 }
 
-/**
- * Editorial second pass. Takes the lint-clean draft and rewrites weak copy
- * against a strict rubric — kill hedging, drop internal taxonomy, de-repeat,
- * finish every sentence — while preserving facts and voice. Returns the refined
- * deck only when it lints clean and has strictly fewer taste issues than the
- * draft; otherwise returns undefined so the caller keeps the draft. One call,
- * skipped entirely when the draft already reads clean.
- */
-async function refineGeneratedCopyDeck(args: {
-  input: GeneratedCopyDeckInput;
-  apiKey: string;
-  model: string;
-  deck: GeneratedCopyDeckV2;
-  business: BusinessProfile;
-  understanding: BusinessUnderstandingV2 | undefined;
-  siteDirectorPlan?: SiteDirectorRuntime;
-  designBrief?: DesignBrief;
-}): Promise<GeneratedCopyDeckV2 | undefined> {
-  const { input, apiKey, model, deck, business, understanding, siteDirectorPlan, designBrief } = args;
-  const issues = detectCopyTasteIssues(deck);
-  if (!issues.length) return undefined;
-
-  const draftForEditing = { ...deck, servicePages: undefined };
-  const body = {
-    model,
-    reasoning: { effort: "medium" },
-    max_output_tokens: 6000,
-    input: [
-      {
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: [
-              "You are a senior conversion copywriter editing a draft homepage copy deck for a US local small business website.",
-              "Return only schema-valid JSON through Structured Outputs: the full improved deck in the same shape as the draft.",
-              "Rewrite weak copy to be specific, confident, and benefit-led. Cut hedging entirely — no 'when the … is a fit', 'may not need', 'can talk through', 'with room for', 'where applicable'. State what the business does and what the customer gets.",
-              "Replace generic headings ('Our approach', 'What we do', 'How it works', 'Ready to get started', 'Services') with concrete headings tied to this business, vertical, and customer situation.",
-              "Preserve the SiteDirectorPlanV1 structure when it is provided. Improve the words inside the planned section jobs; do not redirect the page to a different section strategy.",
-              "Preserve and sharpen copyPlan first: every rewritten slot must follow the siteArgument, proofHierarchy, sectionJobs, CTA rhythm, and repetitionRisks.",
-              "Never narrate internal process or category taxonomy ('repair category', 'repair path', 'repair conversation', 'estimate conversation', 'the repair type'). Name the real customer outcome instead.",
-              "Eliminate repeated phrasing across sections; each section must earn its place with distinct, concrete language. Vary sentence openings.",
-              "Every sentence must end complete — never clip mid-thought.",
-              "Preserve the voiceProfile point of view exactly. Preserve every fact; invent nothing — no offers, prices, years in business, credentials, reviews, awards, or guarantees. Do not add claims not supported by the draft.",
-              "Keep copy concise enough for the same rendered slot shape. If a block is already strong, keep it unchanged.",
-              "Set servicePages to null — service landing pages are generated separately."
-            ].join(" ")
-          }
-        ]
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: JSON.stringify({
-              facts: copyDeckContext(business, understanding, siteDirectorPlan, designBrief),
-              voiceProfile: deck.voiceProfile,
-              voiceRegisterGuidance: registerGuidance(deck.voiceProfile.register),
-              issuesToFix: issues.slice(0, 20),
-              draft: draftForEditing
-            })
-          }
-        ]
-      }
-    ],
-    text: {
-      verbosity: "low",
-      format: {
-        type: "json_schema",
-        name: "lodesta_generated_copy_deck_v2",
-        strict: true,
-        schema: copyDeckResponseJsonSchema
-      }
-    }
-  };
-
-  const startedAt = new Date().toISOString();
-  try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body),
-      signal: openAiRequestSignal(generatedCopyDeckRequestTimeoutMs)
-    });
-    const payload = (await response.json().catch(() => null)) as unknown;
-    const endedAt = new Date().toISOString();
-    const incompleteReason = response.ok ? openAiResponseIncompleteReason(payload) : undefined;
-    await input.telemetry?.recordModelCall({
-      spanId: input.spanId,
-      provider: "openai",
-      model: body.model,
-      endpoint: "/v1/responses",
-      operation: "generated_copy_deck_editor",
-      status: response.ok && !incompleteReason ? "completed" : "failed",
-      requestJson: sanitizeTelemetryPayload(body),
-      responseJson: sanitizeTelemetryPayload(payload),
-      ...extractOpenAiUsage(payload),
-      errorMessage: response.ok
-        ? incompleteReason
-          ? `Incomplete response (${incompleteReason})`
-          : undefined
-        : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
-      startedAt,
-      endedAt,
-      durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
-    });
-    if (!response.ok || incompleteReason) return undefined;
-    const text = extractOpenAiResponseText(payload);
-    if (!text) return undefined;
-    const parsed = copyDeckSchema.parse(JSON.parse(text) as unknown);
-    const refined: GeneratedCopyDeckV2 = withCompleteBodySentences(sanitizeCorruptGlyphs({
-      version: "generated-copy-deck-v2",
-      source: "openai",
-      copyPlan: parsed.copyPlan,
-      hero: {
-        eyebrow: parsed.hero.eyebrow ?? undefined,
-        heading: parsed.hero.heading,
-        body: parsed.hero.body
-      },
-      servicesIntro: parsed.servicesIntro,
-      serviceItems: parsed.serviceItems,
-      processIntro: parsed.processIntro,
-      processSteps: parsed.processSteps,
-      faqs: parsed.faqs,
-      locationIntro: parsed.locationIntro ?? undefined,
-      contactIntro: parsed.contactIntro,
-      splitMedia: parsed.splitMedia,
-      about: parsed.about ?? undefined,
-      gallery: parsed.gallery,
-      seo: parsed.seo,
-      groundingNotes: parsed.groundingNotes,
-      voiceProfile: deck.voiceProfile,
-      servicePages: undefined
-    }));
-    // Keep the edit only if it is clean and measurably tighter than the draft.
-    if (lintGeneratedCopyDeck(refined, { businessName: business.name }).length) return undefined;
-    if (detectCopyTasteIssues(refined).length >= issues.length) return undefined;
-    return refined;
-  } catch {
-    return undefined;
-  }
+function repairUnsupportedFactClaims(deck: GeneratedCopyDeckV2, business: BusinessProfile, approvedClaimTexts: string[] = []): GeneratedCopyDeckV2 {
+  const context = factClaimRepairContext(business, approvedClaimTexts);
+  const repaired = repairUnsupportedServiceTitles(structuredClone(deck), business);
+  return repairUnsupportedFactClaimsInValue(repaired, context) as GeneratedCopyDeckV2;
 }
 
-type DesignBrief = SiteBundle["presenceAssessment"]["designBrief"];
+type FactClaimRepairContext = {
+  sourceText: string;
+  approvedClaimTexts: string[];
+  allowedWeekdays: Set<Weekday>;
+  allowedEmail?: string;
+  allowedEmailLower?: string;
+  allowedPhone?: string;
+  allowedPhoneDigits?: string;
+};
+
+function factClaimRepairContext(business: BusinessProfile, approvedClaimTexts: string[] = []): FactClaimRepairContext {
+  const email = business.email?.trim();
+  const phone = business.phone?.trim();
+  const hoursByDay = businessHoursByDay(business.hours);
+  const approvedClaims = approvedClaimTextsV1(business, approvedClaimTexts);
+  return {
+    sourceText: normalizeFactText({
+      phone: business.phone,
+      email: business.email,
+      address: business.address,
+      hours: business.hours,
+      services: business.services,
+      serviceHighlights: business.serviceHighlights,
+      serviceAreas: business.serviceAreas,
+      credentials: business.credentials,
+      offers: business.offers,
+      approvedClaimTexts: approvedClaims
+    }),
+    approvedClaimTexts: approvedClaims,
+    allowedWeekdays: new Set([...hoursByDay.entries()].filter(([, hours]) => !/\bclosed\b/i.test(hours)).map(([day]) => day)),
+    allowedEmail: email || undefined,
+    allowedEmailLower: email?.toLowerCase(),
+    allowedPhone: phone || undefined,
+    allowedPhoneDigits: phone ? normalizeDigits(phone) : undefined
+  };
+}
+
+function repairUnsupportedServiceTitles(deck: GeneratedCopyDeckV2, business: BusinessProfile): GeneratedCopyDeckV2 {
+  const allowedServices = uniqueServiceTitlesBySemanticGroup(business.services, business);
+  if (!allowedServices.length) return deck;
+  const repairServiceItems = (items: GeneratedCopyDeckV2["serviceItems"]): GeneratedCopyDeckV2["serviceItems"] => {
+    const used = new Set<string>();
+    const repaired = items.flatMap((item) => {
+      const title = repairTitle(item.title, used, allowedServices, business);
+      return title ? [{ ...item, title }] : [];
+    });
+    if (business.vertical !== "auto_body") return repaired;
+    return allowedServices.slice(0, 6).map((service) => {
+      const semanticKey = serviceTitleSemanticKey(service, business);
+      const modelItem = repaired.find((item) => serviceTitleSemanticKey(item.title, business) === semanticKey);
+      return {
+        title: service,
+        body: modelItem?.body ?? autoBodyServiceDescriptionV1(service)
+      };
+    });
+  };
+  const repairServicePages = <T extends { serviceName: string }>(items: T[] | undefined): T[] | undefined => {
+    if (!items) return undefined;
+    const used = new Set<string>();
+    return items.flatMap((item) => {
+      const serviceName = repairTitle(item.serviceName, used, allowedServices, business);
+      return serviceName ? [{ ...item, serviceName }] : [];
+    });
+  };
+
+  deck.serviceItems = repairServiceItems(deck.serviceItems);
+  deck.servicePages = repairServicePages(deck.servicePages);
+  return deck;
+}
+
+function repairTitle(
+  title: string,
+  used: Set<string>,
+  allowedServices: string[],
+  business: BusinessProfile
+): string | undefined {
+  const normalized = normalizeFactText(title);
+  const semanticKey = serviceTitleSemanticKey(title, business);
+  if (normalized && allowedServices.some((service) => serviceClaimBackedByFact(normalized, normalizeFactText(service)))) {
+    if (!used.has(semanticKey)) {
+      used.add(semanticKey);
+      return title;
+    }
+  }
+  // Reassigning an invalid or duplicate title to another service also reassigns
+  // its body, creating a grounded-looking but semantically false pairing. Drop
+  // the item and let the minimum-count lint reject a sparse deck instead.
+  return undefined;
+}
+
+function uniqueServiceTitlesBySemanticGroup(services: string[], business: BusinessProfile): string[] {
+  const seen = new Set<string>();
+  return services
+    .map((service) => service.trim())
+    .filter(Boolean)
+    .filter((service) => {
+      const key = serviceTitleSemanticKey(service, business);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function serviceTitleSemanticKey(title: string, business: BusinessProfile): string {
+  const profile = generatedSiteVerticalQualityProfileForBusinessV1(business);
+  return serviceSemanticGroupForProfileV1(profile, title)?.id ?? normalizeFactText(title);
+}
+
+function repairUnsupportedFactClaimsInValue(value: unknown, context: FactClaimRepairContext): unknown {
+  if (typeof value === "string") return repairUnsupportedFactClaimsInText(value, context);
+  if (Array.isArray(value)) return value.map((item) => repairUnsupportedFactClaimsInValue(item, context));
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      (value as Record<string, unknown>)[key] = repairUnsupportedFactClaimsInValue((value as Record<string, unknown>)[key], context);
+    }
+  }
+  return value;
+}
+
+function repairUnsupportedFactClaimsInText(value: string, context: FactClaimRepairContext): string {
+  const protectedClaims = withProtectedApprovedClaimsV1(value, context.approvedClaimTexts);
+  let repaired = protectedClaims.value
+    .replace(/\baward[- ]winning\b/gi, "local")
+    .replace(/\bcertified\b/gi, "experienced")
+    .replace(/\bguaranteed\b/gi, "confirmed")
+    .replace(/#\s*1\b/gi, "local")
+    .replace(/\bbest in\b/gi, "serving")
+    .replace(/\b(?:free|complimentary)\s+(?:repair\s+)?(estimate|quote|consultation)\b/gi, "$1");
+  repaired = protectedClaims.restore(repaired);
+
+  repaired = repaired.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (email) => {
+    if (context.allowedEmailLower && email.toLowerCase() === context.allowedEmailLower) return email;
+    return context.allowedEmail ?? "the team";
+  });
+
+  repaired = repaired.replace(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g, (phone) => {
+    if (context.allowedPhoneDigits && normalizeDigits(phone) === context.allowedPhoneDigits) return phone;
+    return context.allowedPhone ?? "the business";
+  });
+
+  repaired = repaired.replace(/\$\s*\d[\d,]*(?:\.\d{2})?/g, (amount) => {
+    return context.sourceText.includes(normalizeFactText(amount)) ? amount : "current pricing";
+  });
+
+  repaired = repaired.replace(/\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi, (time) => {
+    return context.sourceText.includes(normalizeFactText(time)) ? time : "published hours";
+  });
+
+  repaired = repaired.replace(/\b(?:mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b/gi, (day) => {
+    const normalized = normalizeWeekday(day);
+    return normalized && context.allowedWeekdays.has(normalized) ? day : "published service days";
+  });
+
+  return repaired
+    .replace(/\bcurrent pricing\s*,\s*current pricing\b/gi, "current pricing")
+    .replace(/\bpublished hours\s*,\s*published hours\b/gi, "published hours")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/([,;:])\s*([,;:])+/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 type SiteDirectorRuntime = SiteBundle["presenceAssessment"]["siteDirectorPlanV1"];
 
 function copyDeckContext(
   business: BusinessProfile,
   understanding: BusinessUnderstandingV2 | undefined,
   siteDirectorPlan?: SiteDirectorRuntime,
-  designBrief?: DesignBrief
+  siteDossier?: SiteBundle["presenceAssessment"]["siteDossierV1"],
+  evidenceLedger?: SiteEvidenceLedgerV1
 ) {
   // The plan→copy brief: in canonical generation SiteDirectorPlanV1 owns the
   // rendered structure, so copy is written to the exact section sequence and
-  // copy jobs that will hydrate. DesignBriefV1 is kept as legacy/dev context
-  // only when a director plan is absent.
+  // copy jobs that will hydrate.
   const acceptedDirectorPlan = siteDirectorPlan?.validation.status === "passed" ? siteDirectorPlan.plan : undefined;
   const plan = acceptedDirectorPlan
     ? {
         source: "site_director_v1",
         rationale: acceptedDirectorPlan.strategy.rationale,
-        creativeDiversityDirective: acceptedDirectorPlan.strategy.creativeDiversityDirective,
         globalControls: acceptedDirectorPlan.globalControls,
         nav: acceptedDirectorPlan.nav,
         sectionOrder: acceptedDirectorPlan.home.sections.map((section) => ({
@@ -1018,15 +1285,7 @@ function copyDeckContext(
           assetRefs: section.assetRefs
         }))
       }
-    : designBrief
-      ? {
-          source: "legacy_design_brief",
-          register: designBrief.profile.register,
-          directionRationale: designBrief.profile.rationale,
-          sectionOrder: designBrief.compositionPlan?.sections.map((section) => section.intent),
-          presentationMap: designBrief.presentationMap
-        }
-      : undefined;
+    : undefined;
   return {
     plan,
     verifiedFacts: {
@@ -1035,24 +1294,45 @@ function copyDeckContext(
       city: business.address?.city,
       region: business.address?.region,
       street: business.address?.street,
+      phone: business.phone,
+      email: business.email,
       phoneAvailable: Boolean(business.phone),
       services: understanding?.cleanedServices.length
-        ? understanding.cleanedServices.map((service) => ({ name: service.name, price: service.price }))
+        ? understanding.cleanedServices.map((service) => ({
+            name: service.name,
+            price: service.price,
+            sourceText: service.sourceText
+          }))
         : business.services.map((service) => ({ name: service })),
       serviceHighlights: business.serviceHighlights ?? [],
       hours: business.hours,
       serviceAreas: business.serviceAreas,
       reviewsSummary: business.reviewsSummary,
-      description: business.description
+      description: business.description,
+      trustClaims: trustEvidenceItemsV1(evidenceLedger).map((item) => ({
+        kind: item.kind,
+        text: item.value.text,
+        displayText: item.value.displayText,
+        sourceUrl: item.source.url
+      }))
     },
     understanding: understanding
       ? {
           vertical: understanding.vertical,
           detectedSubverticals: understanding.detectedSubverticals,
-          businessStory: understanding.businessStory,
+          businessStory: conflictSafeBusinessStoryForCopyV1(understanding.businessStory, claimConflictYearsForCopyV1(evidenceLedger)),
           primaryConversionGoal: understanding.primaryConversionGoal,
           urgentServiceSignals: understanding.urgentServiceSignals,
           notes: understanding.notes
+        }
+      : undefined,
+    siteDossier: siteDossier
+      ? {
+          version: siteDossier.version,
+          contentHash: siteDossier.contentHash,
+          sourcePageCount: siteDossier.sourcePageCount,
+          proseCharCount: siteDossier.proseCharCount,
+          reviewEvidenceCount: siteDossier.reviewEvidence.length
         }
       : undefined,
     rules: {
@@ -1060,8 +1340,68 @@ function copyDeckContext(
       serviceItemRange: [3, 6],
       processStepRange: [3, 4],
       conversionStyle: conversionStyleForBusiness(business),
-      verticalPlaybook: verticalCopyPlaybook(business)
+      verticalPlaybook: verticalCopyPlaybook(business),
+      allowedExactClaims: allowedExactClaimsForCopy(business, understanding),
+      serviceTitleOptions: business.services,
+      claimConflicts: evidenceLedger?.conflicts ?? []
     }
+  };
+}
+
+function claimConflictYearsForCopyV1(evidenceLedger: SiteEvidenceLedgerV1 | undefined) {
+  return [...new Set((evidenceLedger?.conflicts ?? []).filter((conflict) => conflict.kind === "years_in_business").flatMap((conflict) => conflict.values))];
+}
+
+function approvedClaimTextsForBundleV1(bundle: SiteBundle) {
+  return approvedClaimTextsV1(
+    bundle.businessProfile,
+    trustEvidenceItemsV1(bundle.presenceAssessment.evidenceLedgerV1)
+      .flatMap((item) => [item.value.text, item.value.displayText])
+      .filter((value): value is string => Boolean(value))
+  );
+}
+
+function approvedClaimTextsV1(business: BusinessProfile | undefined, claims: string[] = []) {
+  return [...new Set([...(business?.credentials ?? []), ...(business?.offers ?? []), ...claims].map((claim) => claim.trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
+}
+
+function withProtectedApprovedClaimsV1(value: string, approvedClaimTexts: string[]) {
+  let protectedValue = value;
+  const replacements: Array<{ token: string; value: string }> = [];
+  for (const claim of approvedClaimTexts) {
+    if (!unverifiableClaimPattern.test(claim)) continue;
+    const pattern = new RegExp(claim.trim().split(/\s+/).map(escapeRegexV1).join("\\s+"), "gi");
+    protectedValue = protectedValue.replace(pattern, (matched) => {
+      const token = `__LODESTA_APPROVED_CLAIM_${replacements.length}__`;
+      replacements.push({ token, value: matched });
+      return token;
+    });
+  }
+  return {
+    value: protectedValue,
+    restore: (text: string) => replacements.reduce((result, replacement) => result.replaceAll(replacement.token, replacement.value), text)
+  };
+}
+
+function conflictSafeBusinessStoryForCopyV1(
+  story: BusinessUnderstandingV2["businessStory"],
+  conflictedYears: string[]
+) {
+  if (!story || !conflictedYears.length) return story;
+  return stripConflictedYearsFromCopyV1(story, conflictedYears);
+}
+
+function allowedExactClaimsForCopy(business: BusinessProfile, understanding: BusinessUnderstandingV2 | undefined) {
+  return {
+    phone: business.phone,
+    email: business.email,
+    hours: business.hours,
+    prices: [
+      ...(understanding?.cleanedServices ?? []).map((service) => service.price).filter(Boolean),
+      ...(business.serviceHighlights ?? []).filter((highlight) => /\$\s*\d/.test(highlight)),
+      ...(business.offers ?? []).filter((offer) => /\$\s*\d/.test(offer))
+    ]
   };
 }
 

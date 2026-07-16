@@ -41,45 +41,9 @@ export function applySiteIdentity(bundle: SiteBundle, slug: string) {
   if (bundle.presenceAssessment.renderInspection) {
     bundle.presenceAssessment.renderInspection.siteId = siteId;
   }
-  if (bundle.presenceAssessment.visualQa) {
-    bundle.presenceAssessment.visualQa.siteId = siteId;
-    bundle.presenceAssessment.visualQa.selectedDesignDirectionId = rewriteOptionalSiteToken(
-      bundle.presenceAssessment.visualQa.selectedDesignDirectionId,
-      previousSiteId,
-      siteId
-    );
-  }
-  if (bundle.presenceAssessment.qualityScore) {
-    bundle.presenceAssessment.qualityScore.siteId = siteId;
-  }
   bundle.presenceAssessment.publicPresenceSignals = bundle.presenceAssessment.publicPresenceSignals?.map((signal) => ({
     ...signal,
     siteId
-  }));
-  bundle.presenceAssessment.designDirections = bundle.presenceAssessment.designDirections?.map((direction) => ({
-    ...direction,
-    id: generatedScopedId(direction.id, previousSiteId, siteId, `direction_${direction.strategy}`),
-    siteId
-  }));
-  bundle.presenceAssessment.selectedDesignDirectionId = rewriteOptionalSiteToken(
-    bundle.presenceAssessment.selectedDesignDirectionId,
-    previousSiteId,
-    siteId
-  );
-  bundle.presenceAssessment.mockupArtifacts = bundle.presenceAssessment.mockupArtifacts?.map((artifact) => ({
-    ...artifact,
-    id: generatedScopedId(artifact.id, previousSiteId, siteId, `mockup_${artifact.strategy}`),
-    siteId,
-    designDirectionId: generatedScopedId(artifact.designDirectionId, previousSiteId, siteId, "direction"),
-    assetId: artifact.assetId
-      ? generatedScopedId(artifact.assetId, previousSiteId, siteId, `asset_${artifact.strategy}`)
-      : undefined,
-    image: artifact.image
-      ? {
-          ...artifact.image,
-          id: generatedScopedId(artifact.image.id, previousSiteId, siteId, `asset_${artifact.strategy}`)
-        }
-      : undefined
   }));
   bundle.presenceAssessment.assetInventory = bundle.presenceAssessment.assetInventory?.map((asset, index) => ({
     ...asset,
@@ -127,16 +91,6 @@ function scopedId(siteId: string, id: string | undefined, fallbackSuffix: string
   return `${siteId}_${suffix}`;
 }
 
-function generatedScopedId(value: string, previousSiteId: string, nextSiteId: string, fallbackPrefix: string) {
-  if (value.includes(previousSiteId)) return value.replaceAll(previousSiteId, nextSiteId);
-  if (value.includes(nextSiteId)) return value;
-  return `${normalizeIdentifier(fallbackPrefix) || "item"}_${nextSiteId}`;
-}
-
-function rewriteOptionalSiteToken(value: string | undefined, previousSiteId: string, nextSiteId: string) {
-  return value ? rewriteSiteToken(value, previousSiteId, nextSiteId) : undefined;
-}
-
 function rewriteSiteToken(value: string, previousSiteId: string, nextSiteId: string) {
   return value.includes(previousSiteId) ? value.replaceAll(previousSiteId, nextSiteId) : value;
 }
@@ -151,10 +105,7 @@ function rewriteAssetMetadata(
     ...metadata,
     referenceAssetId: typeof metadata.referenceAssetId === "string"
       ? rewriteSiteToken(metadata.referenceAssetId, previousSiteId, nextSiteId)
-      : metadata.referenceAssetId,
-    designDirectionId: typeof metadata.designDirectionId === "string"
-      ? rewriteSiteToken(metadata.designDirectionId, previousSiteId, nextSiteId)
-      : metadata.designDirectionId
+      : metadata.referenceAssetId
   };
 }
 

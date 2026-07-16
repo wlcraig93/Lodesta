@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { repository } from "../lib/repository";
 import { requiredClaimFactIds } from "../lib/fact-verification";
 import {
+  asStripeInvoice,
   asStripeCheckoutSession,
   parseStripeWebhookEvent,
   stripeStringId,
@@ -17,6 +18,10 @@ async function main() {
   const claim = await repository.createClaim({
     siteId: "site_joes_pizza",
     ownerEmail,
+    verificationLevel: "operator_verified",
+    verificationMethod: "operator_manual",
+    verifiedBy: "stripe-webhook-verifier",
+    verifiedAt: new Date().toISOString(),
     verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
     acceptedTerms: true,
     acceptedManagement: true
@@ -55,6 +60,27 @@ async function main() {
   if (event.type !== "checkout.session.completed") throw new Error("Unexpected event type.");
 
   const session = asStripeCheckoutSession(event.data?.object);
+  const invoiceEvent = parseStripeWebhookEvent(
+    JSON.stringify({
+      id: "evt_invoice_failed_local_verification",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_local_verification",
+          customer: "cus_local_verification",
+          subscription: "sub_local_verification",
+          amount_due: 9900,
+          currency: "usd",
+          attempt_count: 2,
+          metadata: { claim_id: claim.id, site_id: claim.siteId }
+        }
+      }
+    })
+  );
+  const invoice = asStripeInvoice(invoiceEvent.data?.object);
+  if (invoice.amount_due !== 9900 || invoice.metadata?.claim_id !== claim.id) {
+    throw new Error("Stripe invoice payment-failure payload did not parse.");
+  }
   const mismatchedSite = await repository.completeClaimCheckout({
     claimId: session.metadata?.claim_id ?? session.client_reference_id,
     siteId: "site_wrong_local_verification",

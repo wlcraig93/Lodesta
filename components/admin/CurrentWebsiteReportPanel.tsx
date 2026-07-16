@@ -4,15 +4,15 @@ import { coldUrlCheckableChecks } from "@/lib/standard-evaluation";
 
 type CurrentWebsiteReportPanelProps = {
   bundle: SiteBundle;
-  generatedEvaluation: StandardEvaluation;
+  generatedChecks: StandardCheckResult[];
 };
 
-export function CurrentWebsiteReportPanel({ bundle, generatedEvaluation }: CurrentWebsiteReportPanelProps) {
+export function CurrentWebsiteReportPanel({ bundle, generatedChecks }: CurrentWebsiteReportPanelProps) {
   const assessment = bundle.presenceAssessment;
   const sourceEvaluation = assessment.standardEvaluation;
   const sourceUrl = assessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
-  const passedGeneratedChecks = generatedEvaluation.checks.filter((check) => check.passed).slice(0, 5);
+  const passedGeneratedChecks = generatedChecks.filter((check) => check.passed).slice(0, 5);
   const renderInspection = assessment.renderInspection;
   const referenceAssets = (assessment.assetInventory ?? []).filter((asset) => asset.rightsStatus === "reference_only");
   const notes = [
@@ -39,8 +39,7 @@ export function CurrentWebsiteReportPanel({ bundle, generatedEvaluation }: Curre
         </div>
 
         <div className="score-compare workspace-score-compare">
-          <ScoreCard label="Current site" evaluation={sourceEvaluation} emptyLabel="Not scored" />
-          <ScoreCard label="Preview" evaluation={generatedEvaluation} />
+          <ScoreCard label="Current-site report" evaluation={sourceEvaluation} emptyLabel="Not scored" />
         </div>
       </section>
 

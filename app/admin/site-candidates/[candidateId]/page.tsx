@@ -5,17 +5,23 @@ import { PreviewWedge } from "@/components/PreviewWedge";
 import { AcceptSiteCandidateButton } from "@/components/admin/AcceptSiteCandidateButton";
 import { AdminButtonLink } from "@/components/admin/AdminButton";
 import { CandidateReviewPane } from "@/components/admin/CandidateReviewPane";
+import { CandidateOperatorDecisionForm } from "@/components/admin/CandidateOperatorDecisionForm";
 import { CopyIdTag } from "@/components/admin/CopyIdTag";
 import { RegenerateCandidateButton } from "@/components/admin/RegenerateCandidateButton";
+import { parseAdHocDesignExampleArtifactV1 } from "@/lib/ad-hoc-design-examples";
+import { designSystemGateReviewFixtureByCandidateIdV1 } from "@/lib/design-system-gate-review-fixtures-v1";
+import {
+  latestOperatorDecisionArtifactV1,
+  operatorDecisionPassedV1,
+  parseOperatorDecisionArtifactV1
+} from "@/lib/operator-decision-v1";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository, type SiteCandidateSummary } from "@/lib/repository";
-import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { assertSiteVersionV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type {
   AgentRunSpanRecord,
   GenerationQaReadiness,
-  ScorecardDimensionId,
   SiteCandidateRecord,
   SiteVersion
 } from "@/lib/models";
@@ -58,11 +64,17 @@ export default async function AdminSiteCandidateDetailPage({
   ]);
 
   const queueNav = buildQueueNav(queue.summaries, candidate.id);
+  const designSystemGateFixture = designSystemGateReviewFixtureByCandidateIdV1(candidate.id);
+  const operatorDecisionArtifact = latestOperatorDecisionArtifactV1(candidateArtifacts);
+  const operatorDecision = operatorDecisionArtifact ? parseOperatorDecisionArtifactV1(operatorDecisionArtifact) : undefined;
+  const operatorApproved = operatorDecisionPassedV1(operatorDecision);
   const acceptDisabledReason =
     candidate.status !== "accepted" && schemaIssue
       ? `Stored version schema is stale (${schemaIssue}); run the backfill or regenerate before promotion.`
-      : candidate.status !== "accepted" && (candidate.status === "blocked" || readiness !== "ready")
+    : candidate.status !== "accepted" && (candidate.status === "blocked" || readiness !== "ready")
       ? `Candidate QA is ${readiness}; fix blockers before promotion.`
+      : candidate.status !== "accepted" && !operatorApproved
+      ? "Operator must approve this candidate for outreach before promotion."
       : undefined;
 
   const qa = selectedVersion?.generationQa;
@@ -72,10 +84,28 @@ export default async function AdminSiteCandidateDetailPage({
         ...qa.warnings.map((warning) => ({ id: warning.id, severity: "warning" as const, title: warning.title, detail: warning.detail }))
       ]
     : [];
-  const visualQa = qa?.visualQa ?? bundle.presenceAssessment.visualQa;
+  const visualQa = qa?.visualQa;
+  const siteDossier = bundle.presenceAssessment.siteDossierV1;
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const replacementEvaluation = previewAvailable ? evaluateSiteAgainstStandard(bundle) : null;
   const timelineSpans = runDetail ? topLevelSpans(runDetail.spans) : [];
+  const designExamples = candidateArtifacts
+    .map((artifact) => {
+      const payload = parseAdHocDesignExampleArtifactV1(artifact);
+      if (!payload) return undefined;
+      return {
+        artifactId: artifact.id,
+        exampleId: payload.exampleId,
+        title: payload.title,
+        direction: payload.direction,
+        mediaMode: payload.mediaMode,
+        status: payload.status,
+        scores: {
+          visualQuality: payload.rubric.visualQuality,
+          noMediaCompleteness: payload.rubric.noMediaCompleteness
+        }
+      };
+    })
+    .filter((example): example is NonNullable<typeof example> => Boolean(example));
 
   return (
     <main className="admin-page admin-candidate-detail-page">
@@ -97,6 +127,15 @@ export default async function AdminSiteCandidateDetailPage({
           )}
         </div>
         <div className="candidate-review-header-right">
+          {designSystemGateFixture ? (
+            <AdminButtonLink
+              variant="secondary"
+              size="sm"
+              href={`/admin/site-candidates/${candidate.id}/design-system-review`}
+            >
+              Compare four ways
+            </AdminButtonLink>
+          ) : null}
           {queueNav ? (
             <nav className="candidate-review-queue-nav" aria-label="Review queue position">
               {queueNav.previousId ? (
@@ -132,11 +171,12 @@ export default async function AdminSiteCandidateDetailPage({
             candidateId={candidate.id}
             businessName={candidate.businessName}
             pages={previewAvailable && selectedVersion ? assertSiteVersionV3(selectedVersion, "candidate review version").pageComposition.pages.map((page) => ({ slug: page.slug, title: page.title })) : []}
+            designExamples={designExamples}
             previewAvailable={previewAvailable}
             fallbackSlot={<PreviewFallback candidate={candidate} version={selectedVersion} schemaIssue={schemaIssue} />}
             reportSlot={
-              replacementEvaluation ? (
-                <PreviewWedge bundle={bundle} replacementEvaluation={replacementEvaluation} />
+              previewAvailable ? (
+                <PreviewWedge bundle={bundle} />
               ) : (
                 <p className="candidate-rail-footnote">Report unavailable until this candidate is regenerated.</p>
               )
@@ -149,28 +189,11 @@ export default async function AdminSiteCandidateDetailPage({
             <p className="candidate-rail-label">QA verdict</p>
             <span className={`badge ${readinessBadgeClass(readiness)}`}>{readinessLabel(readiness)}</span>
             <div className="candidate-rail-checks">
-              {qa?.scorecard ? (
-                <div className="candidate-quality-vector">
-                  <div className="candidate-quality-vector-head">
-                    <span>Quality verdict</span>
-                    <strong>{qa.scorecard.verdict.replace("_", " ")}</strong>
-                  </div>
-                  {qa.scorecard.dimensions.map((dimension) => (
-                    <div key={dimension.id} className="candidate-quality-dimension">
-                      <span>{dimensionLabel(dimension.id)}{dimension.requirement === "tracked" ? " (tracked)" : ""}</span>
-                      <strong>{typeof dimension.score === "number" ? dimension.score : "—"}</strong>
-                      <div className="candidate-quality-bar" aria-hidden="true">
-                        <i style={{ width: `${Math.max(0, Math.min(100, dimension.score ?? 0))}%` }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <ScoreCompareRow sourcePercent={sourceEvaluation?.score.percent} generatedPercent={replacementEvaluation?.score.percent} />
-              {visualQa?.score ? (
+              <SourceReportScoreRow sourcePercent={sourceEvaluation?.score.percent} />
+              {visualQa ? (
                 <p className="candidate-rail-check">
-                  <span className="candidate-rail-check-dot is-pass" aria-hidden="true" />
-                  Visual QA captured · {visualQa.screenshotCount} screenshots
+                  <span className={`candidate-rail-check-dot ${visualQa.verdict === "ship" ? "is-pass" : visualQa.verdict === "revise" ? "is-fail" : "is-warning"}`} aria-hidden="true" />
+                  Visual judgment: {visualQa.verdict.replace("_", " ")} · {visualQa.screenshotCount} screenshots
                 </p>
               ) : null}
               {verdictItems.slice(0, MAX_VERDICT_ITEMS).map((item) => (
@@ -213,6 +236,23 @@ export default async function AdminSiteCandidateDetailPage({
                 Open full run →
               </Link>
             ) : null}
+          </section>
+
+          <section className="candidate-rail-section">
+            <p className="candidate-rail-label">Site dossier</p>
+            {siteDossier ? (
+              <DossierSummary dossier={siteDossier} />
+            ) : (
+              <p className="candidate-rail-footnote">No dossier cache recorded for this candidate; regenerate to populate it.</p>
+            )}
+          </section>
+
+          <section className="candidate-rail-section">
+            <p className="candidate-rail-label">Operator decision</p>
+            <CandidateOperatorDecisionForm
+              candidateId={candidate.id}
+              initialDecision={operatorDecision}
+            />
           </section>
 
           <section className="candidate-rail-section candidate-rail-meta">
@@ -301,26 +341,42 @@ function PreviewFallback({
   );
 }
 
-function ScoreCompareRow({ sourcePercent, generatedPercent }: { sourcePercent?: number; generatedPercent?: number }) {
+function DossierSummary({
+  dossier
+}: {
+  dossier: NonNullable<SiteCandidateRecord["bundle"]["presenceAssessment"]["siteDossierV1"]>;
+}) {
+  const highlights = dossier.sections
+    .filter((section) => ["identity", "source-pages", "understanding", "brand-assets"].includes(section.id))
+    .slice(0, 4);
   return (
-    <div className="candidate-score-compare">
-      <div className="candidate-score-cell is-source">
-        <span>Current site</span>
-        <strong>{typeof sourcePercent === "number" ? sourcePercent : "—"}</strong>
-      </div>
-      <div className="candidate-score-cell is-generated">
-        <span>Generated draft</span>
-        <strong>{typeof generatedPercent === "number" ? generatedPercent : "—"}</strong>
-      </div>
+    <div className="candidate-dossier-summary">
+      <p className="candidate-rail-footnote">
+        {dossier.sourcePageCount} pages · {dossier.proseCharCount.toLocaleString()} prose chars · {dossier.reviewEvidence.length} private review evidence signal{dossier.reviewEvidence.length === 1 ? "" : "s"}
+      </p>
+      {highlights.map((section) => (
+        <details key={section.id} className="candidate-dossier-section">
+          <summary>{section.title}</summary>
+          <pre>{section.body.slice(0, 1200)}</pre>
+        </details>
+      ))}
     </div>
   );
 }
 
-function dimensionLabel(id: ScorecardDimensionId) {
-  return id
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+function SourceReportScoreRow({ sourcePercent }: { sourcePercent?: number }) {
+  return (
+    <div className="candidate-score-compare">
+      <div className="candidate-score-cell is-source">
+        <span>Current-site report</span>
+        <strong>{typeof sourcePercent === "number" ? sourcePercent : "—"}</strong>
+      </div>
+      <div className="candidate-score-cell is-generated">
+        <span>Generated draft</span>
+        <strong>QA above</strong>
+      </div>
+    </div>
+  );
 }
 
 function buildQueueNav(readyCandidates: SiteCandidateSummary[], candidateId: string) {

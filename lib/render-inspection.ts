@@ -797,6 +797,12 @@ function collectBrowserMetricsScript() {
       const factCard = element.closest(".site-visual-facts-v3 div");
       const factList = factCard?.closest(".site-visual-facts-v3");
       if (factCard && factList) {
+        let factSurface = factCard;
+        while (factSurface && !factSurface.classList?.contains("site-visual-section-v3")) {
+          const surfaceBackground = parseRgb(getComputedStyle(factSurface).backgroundColor);
+          if (surfaceBackground && surfaceBackground.a > 0.5) return surfaceBackground;
+          factSurface = factSurface.parentElement;
+        }
         const presentation = factList.getAttribute("data-presentation");
         if (presentation === "proof_cards" || presentation === "trust_bar" || presentation === "utility_rail" || presentation === "inline_strip") {
           const siblingIndex = factCard.parentElement ? Array.from(factCard.parentElement.children).indexOf(factCard) + 1 : 0;
@@ -2119,6 +2125,7 @@ function isActionableRenderConsoleMessage(type: string, text: string) {
   if (/Encountered two children with the same key/i.test(text)) return true;
   if (type !== "error") return false;
   if (/Cross-Origin-Opener-Policy|CORS|ERR_BLOCKED_BY_CLIENT|Failed to load resource/i.test(text)) return false;
+  if (/ReferenceError: google is not defined[\s\S]*maps\.gstatic\.com\/maps-api-v3\/embed/i.test(text)) return false;
   return /Hydration failed|Minified React error|React error|ReferenceError|TypeError|Cannot read properties|is not defined|Script error/i.test(text);
 }
 

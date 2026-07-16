@@ -1,17 +1,15 @@
 import type {
   BusinessProfile,
   BusinessUnderstandingV2,
+  BrandAssessment,
   CleanedServiceV2,
   ConversionGoal,
-  Experiment,
   ExperimentLearning,
   ExtensionModel,
   FieldProvenance,
-  GenerationBrief,
   GenerationCostEstimate,
   NormalizedBusinessFacts,
   PresenceAssessment,
-  CreativeMockupArtifact,
   RenderableFact,
   RenderInspectionResult,
   SiteAsset,
@@ -19,33 +17,20 @@ import type {
   SiteModel,
   Theme,
   Vertical,
-  VisualQaResult
 } from "./models";
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
 import { sampleExtensionModel } from "./sample-data";
 import { runAudit } from "./audit";
 import { defaultServicesForVertical, verticalRecipes, type VerticalRecipe } from "./recipes";
-import { evaluateCrawlAgainstStandard, evaluateSiteAgainstStandard } from "./standard-evaluation";
-import { createCreativeBrief } from "./creative-brief";
-import {
-  createBrandAssessment,
-  createDesignDirections,
-  createPresenceQualityScore,
-  selectedDesignDirection,
-  type GenerationPlanningOverride
-} from "./generation-planning";
-import { createMockupAssets, createPromptOnlyMockupArtifacts } from "./image-generation";
+import { evaluateCrawlAgainstStandard } from "./standard-evaluation";
 import type { PublicPresenceEnrichment } from "./public-presence";
-import { themeForPreset } from "./theme-presets";
-import { createDeterministicVisualQa } from "./visual-qa";
-import { applyExperimentLearningsToVariants, activeLearningFor } from "./experiment-learning";
-import { heroImageAssetForBusiness } from "./image-registry";
 import { computeSiteModelHash, makePendingGenerationQa } from "./site-version-metadata";
 import { createBusinessFactGraph } from "./business-fact-graph";
 import { withBusinessBundleFields } from "./business-model";
 import { planGenerationCost } from "./generation-cost";
 import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
 import { activeSiteVersionV3 } from "./site-version-v3";
+import { composeSiteDossierV1 } from "./site-dossier-v1";
 import {
   hoursRecordFromEntries,
   normalizeBusinessHours,
@@ -53,6 +38,11 @@ import {
   understandingVerticalConfidenceFloor
 } from "./business-understanding-v2";
 import { slugify } from "./slug";
+import { composeSiteEvidenceLedgerV1 } from "./evidence-ledger-v1";
+import {
+  generatedSiteVerticalQualityProfileForBusinessV1,
+  serviceSemanticGroupForProfileV1
+} from "./generated-site-v3-quality-profiles";
 
 export type IntakeInput = {
   url?: string;
@@ -64,11 +54,8 @@ export type IntakeInput = {
   };
   crawl?: CrawlAssessment;
   renderInspection?: RenderInspectionResult;
-  aiPlanning?: GenerationPlanningOverride;
   understanding?: BusinessUnderstandingV2;
-  mockupArtifacts?: CreativeMockupArtifact[];
   publicPresence?: PublicPresenceEnrichment;
-  visualQa?: VisualQaResult;
   generationCostEstimate?: GenerationCostEstimate;
   experimentLearnings?: ExperimentLearning[];
 };
@@ -118,16 +105,31 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
   const siteId = input.identity?.siteId?.trim() || `site_${siteSlug}`;
   const identityKey = slugify(siteId) || siteSlug;
   const now = new Date().toISOString();
+  const evidenceLedgerV1 = composeSiteEvidenceLedgerV1({
+    siteId,
+    crawl: input.crawl,
+    renderInspection: input.renderInspection,
+    publicPresenceSignals: input.publicPresence?.signals.map((signal) => ({ ...signal, siteId })),
+    conflictNotes: understanding?.notes,
+    createdAt: now
+  });
   const promptFacts = extractPromptFacts(input.prompt);
+  const sourceCleanedServices = normalizeServiceList(
+    coalesceList(facts?.services, serviceNamesFromSourceHighlightsV1(facts?.serviceHighlights, vertical), promptFacts.services)
+  );
   const cleanedServices = understanding?.cleanedServices.length
-    ? understanding.cleanedServices
-    : normalizeServiceList(coalesceList(facts?.services, promptFacts.services));
+    ? mergeModelAndSourceServicesV1(understanding.cleanedServices, sourceCleanedServices, vertical)
+    : sourceCleanedServices;
   const serviceCandidates = removeBusinessNameServiceCandidates(
     filterServicesForVertical(
       vertical,
       dedupeServiceNames(
-        removeBlockedPlaceholders(
-          cleanedServices.length ? cleanedServices.map((service) => service.name) : defaultServicesForVertical(vertical)
+        removeOfferOnlyServiceCandidates(
+          removeNonServiceProofCandidatesV1(
+            removeBlockedPlaceholders(
+              cleanedServices.length ? cleanedServices.map((service) => service.name) : defaultServicesForVertical(vertical)
+            )
+          )
         )
       )
     ),
@@ -214,24 +216,13 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
     cleanedServices
   });
   const currentEvaluation = input.crawl ? evaluateCrawlAgainstStandard(input.crawl) : undefined;
-  const brandAssessment = createBrandAssessment({
+  const brandAssessment = createIntakeBrandAssessment({
     business: businessProfile,
     recipe,
     crawl: input.crawl,
-    renderInspection: input.renderInspection,
-    currentEvaluation,
-    aiPlanning: input.aiPlanning
+    renderInspection: input.renderInspection
   });
-  const designDirections = createDesignDirections({
-    business: businessProfile,
-    recipe,
-    crawl: input.crawl,
-    renderInspection: input.renderInspection,
-    currentEvaluation,
-    aiPlanning: input.aiPlanning
-  });
-  const selectedDirection = selectedDesignDirection(designDirections);
-  const selectedTheme = themeForPreset(vertical, selectedDirection.themePreset, themeForVertical(vertical, recipe.mood));
+  const selectedTheme = themeForVertical(vertical, recipe.mood);
   const siteModel: SiteModel = {
     id: siteId,
     slug: siteSlug,
@@ -243,6 +234,7 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
   const presenceAssessment: PresenceAssessment = {
     siteId,
     sourceUrl: input.url,
+    evidenceLedgerV1,
     normalizedBusinessFacts,
     standardEvaluation: currentEvaluation,
     renderInspection: input.renderInspection,
@@ -254,28 +246,16 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
         crawl: input.crawl,
         sourceRenderInspection: input.renderInspection,
         publicPresence: input.publicPresence,
-        plannedMockupImageCount: Math.max(1, Math.min(designDirections.length, 3)),
-        sourceModelVisualQaRequested: Boolean(input.renderInspection?.screenshots.length),
-        generatedModelVisualQaRequested: true,
         includeGeneratedRenderQa: true
       }),
     brandAssessment,
-    designDirections,
-    selectedDesignDirectionId: selectedDirection.id,
-    generationPlanningSource: input.aiPlanning?.source ?? "deterministic_fallback",
+    generationPlanningSource: "deterministic_design_system",
     businessUnderstanding: input.understanding,
     technicalNotes: buildTechnicalNotes(input.crawl),
     visualNotes: buildVisualNotes(input.renderInspection),
     brandNotes: buildBrandNotes(input.crawl),
-    publicPresenceNotes: buildPublicPresenceNotes(input.crawl, input.publicPresence),
-    generationBrief: createGenerationBrief({ siteId, business: businessProfile, recipe, normalizedBusinessFacts })
+    publicPresenceNotes: buildPublicPresenceNotes(input.crawl, input.publicPresence)
   };
-  presenceAssessment.creativeBrief = createCreativeBrief({
-    business: businessProfile,
-    recipe,
-    crawl: input.crawl,
-    generationBrief: presenceAssessment.generationBrief
-  });
 
   const bundle: SiteBundle = withBusinessBundleFields({
     businessProfile,
@@ -291,9 +271,10 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
       }))
     },
     optimizationFindings: [],
-    experiments: defaultExperimentsForBusiness(businessProfile, recipe, input.experimentLearnings),
+    experiments: [],
     presenceAssessment
   });
+  bundle.presenceAssessment.siteDossierV1 = composeSiteDossierV1({ bundle, crawl: input.crawl });
   applyGeneratedSiteV3({ bundle, now });
   const activeInitialVersion = activeSiteVersionV3(bundle.siteModel, "generated intake bundle");
   presenceAssessment.businessFactGraph = createBusinessFactGraph({
@@ -303,149 +284,12 @@ export function createSiteV3FromInput(input: IntakeInput): SiteBundle {
   });
   activeInitialVersion.generationQa = makePendingGenerationQa(computeSiteModelHash(bundle, activeInitialVersion));
   bundle.optimizationFindings = runAudit(businessProfile, siteModel);
-  presenceAssessment.qualityScore = createPresenceQualityScore({
-    business: businessProfile,
-    recipe,
-    crawl: input.crawl,
-    renderInspection: input.renderInspection,
-    currentEvaluation,
-    generatedEvaluation: evaluateSiteAgainstStandard(bundle),
-    aiPlanning: input.aiPlanning
-  });
-  presenceAssessment.mockupArtifacts =
-    input.mockupArtifacts ?? createPromptOnlyMockupArtifacts({ bundle, directions: designDirections });
   presenceAssessment.assetInventory = buildAssetInventory({
     business: businessProfile,
     input,
-    mockups: presenceAssessment.mockupArtifacts,
     now
   });
-  presenceAssessment.visualQa =
-    input.visualQa ?? createDeterministicVisualQa({ bundle, renderInspection: input.renderInspection });
-
   return bundle;
-}
-
-function defaultExperimentsForBusiness(
-  business: BusinessProfile,
-  recipe: VerticalRecipe,
-  learnings: ExperimentLearning[] = []
-): Experiment[] {
-  const primaryMetric = experimentMetricForGoal(recipe.primaryGoal);
-  const actionLabel = actionLabelForMetric(primaryMetric);
-  return [
-    makeExperimentCandidate({
-      business,
-      learnings,
-      surface: "sticky_cta",
-      primaryMetric,
-      hypothesis: `A persistent mobile ${actionLabel} action increases ${actionLabel} conversions.`,
-      variants: [
-        { id: "control", label: "Inline CTAs only" },
-        { id: "sticky_action", label: "Sticky mobile action" }
-      ]
-    }),
-    makeExperimentCandidate({
-      business,
-      learnings,
-      surface: "cta_placement",
-      primaryMetric,
-      hypothesis: "More prominent conversion actions above and after proof sections increase primary actions.",
-      variants: [
-        { id: "control", label: "Standard CTA prominence" },
-        { id: "hero_cta_prominent", label: "Hero CTA emphasis" },
-        { id: "cta_section_prominent", label: "Mid-page CTA emphasis" }
-      ]
-    }),
-    makeExperimentCandidate({
-      business,
-      learnings,
-      surface: "form_length",
-      primaryMetric: "form_submits",
-      hypothesis: "Shorter or contact-first forms reduce lead friction and increase form submissions.",
-      variants: [
-        { id: "control", label: "Standard form" },
-        { id: "required_only", label: "Required fields only" },
-        { id: "phone_first", label: "Phone-first field order" }
-      ]
-    }),
-    makeExperimentCandidate({
-      business,
-      learnings,
-      surface: "hero_layout",
-      primaryMetric,
-      hypothesis: "A more compact or proof-forward hero layout increases primary actions without changing claims.",
-      variants: [
-        { id: "control", label: "Standard hero layout" },
-        { id: "compact_hero", label: "Compact above-fold hero" },
-        { id: "media_first", label: "Visual proof first" }
-      ]
-    })
-  ];
-}
-
-function makeExperimentCandidate(input: {
-  business: BusinessProfile;
-  learnings: ExperimentLearning[];
-  surface: Experiment["surface"];
-  primaryMetric: Experiment["primaryMetric"];
-  hypothesis: string;
-  variants: Array<Record<string, unknown>>;
-}): Experiment {
-  const variants = applyExperimentLearningsToVariants({
-    cohort: input.business.vertical,
-    surface: input.surface,
-    primaryMetric: input.primaryMetric,
-    learnings: input.learnings,
-    variants: input.variants
-  });
-  const learning = activeLearningFor(input.learnings, {
-    cohort: input.business.vertical,
-    surface: input.surface,
-    primaryMetric: input.primaryMetric
-  });
-
-  return {
-    id: `exp_${input.surface}_${input.business.siteId}`,
-    cohort: input.business.vertical,
-    hypothesis: learning
-      ? `${learning.winnerLabel} is the learned default for ${input.surface.replaceAll("_", " ")} with holdout validation available.`
-      : input.hypothesis,
-    surface: input.surface,
-    variants,
-    holdoutPercent: 0.1,
-    primaryMetric: input.primaryMetric,
-    status: "draft"
-  };
-}
-
-function actionLabelForMetric(metric: Experiment["primaryMetric"]) {
-  switch (metric) {
-    case "tel_clicks":
-      return "call";
-    case "order_clicks":
-      return "order";
-    case "booking_clicks":
-      return "booking";
-    case "form_submits":
-      return "form";
-  }
-}
-
-function experimentMetricForGoal(goal: ConversionGoal): Experiment["primaryMetric"] {
-  switch (goal) {
-    case "calls":
-    case "directions":
-    case "store_visits":
-      return "tel_clicks";
-    case "booking_clicks":
-      return "booking_clicks";
-    case "order_clicks":
-      return "order_clicks";
-    case "forms":
-    default:
-      return "form_submits";
-  }
 }
 
 function inferBusinessName(input: IntakeInput, facts?: ExtractedBusinessFacts, hostname?: string) {
@@ -557,6 +401,10 @@ function removeBlockedPlaceholders(values: string[]) {
   return values.filter((value) => !blocked.has(value.trim().toLowerCase()));
 }
 
+function removeOfferOnlyServiceCandidates(values: string[]) {
+  return values.filter((value) => !/^(?:free|complimentary)?\s*(?:repair\s+)?(?:quotes?|estimates?|consultations?)$/i.test(value.trim()));
+}
+
 function filterServicesForVertical(vertical: Vertical, values: string[]) {
   const allowPattern = serviceAllowPatternForVertical(vertical);
   if (!allowPattern) return values;
@@ -566,7 +414,7 @@ function filterServicesForVertical(vertical: Vertical, values: string[]) {
 function serviceAllowPatternForVertical(vertical: Vertical) {
   switch (vertical) {
     case "auto_body":
-      return /\b(auto\s*body|body|collision|paint|refinish|dent|hail|glass|windshield|bumper|fender|panel|scratch|frame|pdr|repair)\b/i;
+      return /\b(auto\s*body|body|collision|paint(?:ing)?|refinish|dent|hail|glass|windshield|bumper|fender|panel|scratch|frame|pdr|repair)\b/i;
     case "auto_services":
       return /\b(auto|tire|wheel|alignment|oil|brake|mechanic|muffler|transmission|battery|inspection|smog|repair|service)\b/i;
     default:
@@ -604,6 +452,19 @@ function dedupeServiceNames(values: string[]) {
 
 function removeBusinessNameServiceCandidates(values: string[], businessName: string) {
   return values.filter((service) => !serviceLooksLikeBusinessName(service, businessName));
+}
+
+function removeNonServiceProofCandidatesV1(values: string[]) {
+  return values.filter((value) => !/\b(?:certified repair facility|I-CAR(?: Gold Class)?|OEM[-\s]?certified|factory[-\s]?authorized|BBB Accredited|licensed and insured)\b/i.test(value));
+}
+
+function serviceNamesFromSourceHighlightsV1(values: string[] | undefined, vertical: Vertical) {
+  if (vertical !== "auto_body") return [];
+  const text = (values ?? []).join(" ");
+  return [
+    /\b(?:automotive|auto) glass|windshields?|windows?\b/i.test(text) ? "Automotive Glass Services" : undefined,
+    /\bpaintless dent|\bPDR\b/i.test(text) ? "Paintless Dent Repair" : undefined
+  ].filter((value): value is string => Boolean(value));
 }
 
 function serviceLooksLikeBusinessName(service: string, businessName: string) {
@@ -685,58 +546,6 @@ function createNormalizedBusinessFacts(input: {
   };
 }
 
-function createGenerationBrief(input: {
-  siteId: string;
-  business: BusinessProfile;
-  recipe: VerticalRecipe;
-  normalizedBusinessFacts: NormalizedBusinessFacts;
-}): GenerationBrief {
-  const heroAsset = heroImageAssetForBusiness(input.business);
-  const renderableFacts = [
-    input.normalizedBusinessFacts.name,
-    input.normalizedBusinessFacts.vertical,
-    ...input.normalizedBusinessFacts.categories,
-    ...(input.normalizedBusinessFacts.description ? [input.normalizedBusinessFacts.description] : []),
-    ...(input.normalizedBusinessFacts.phone ? [input.normalizedBusinessFacts.phone] : []),
-    ...(input.normalizedBusinessFacts.email ? [input.normalizedBusinessFacts.email] : []),
-    ...(input.normalizedBusinessFacts.address ? [input.normalizedBusinessFacts.address] : []),
-    ...(input.normalizedBusinessFacts.hours ? [input.normalizedBusinessFacts.hours] : []),
-    ...input.normalizedBusinessFacts.services,
-    ...input.normalizedBusinessFacts.serviceAreas,
-    ...input.normalizedBusinessFacts.proofSignals
-  ];
-
-  return {
-    siteId: input.siteId,
-    businessName: input.business.name,
-    vertical: input.business.vertical,
-    primaryGoal: input.recipe.primaryGoal,
-    headline: generationBriefHeadline(input.business),
-    subheadline: generationBriefSubheadline(input.business, input.recipe),
-    proofSignals: input.normalizedBusinessFacts.proofSignals.map((proof) => String(proof.value)),
-    renderableFacts,
-    blockedClaims: input.normalizedBusinessFacts.blockedPlaceholders,
-    imageStrategy: {
-      vertical: input.business.vertical,
-      preferredAssetId: heroAsset.id,
-      fallbackAssetId: heroAsset.id,
-      notes: ["Use curated preclaim-safe registry imagery until customer-owned photos are approved."]
-    }
-  };
-}
-
-function generationBriefHeadline(business: BusinessProfile) {
-  const service = business.services[0] ?? business.categories[0] ?? "local service";
-  const place = business.address?.city ?? business.serviceAreas[0];
-  return `${business.name} for ${service}${place ? ` in ${place}` : ""}`;
-}
-
-function generationBriefSubheadline(business: BusinessProfile, recipe: VerticalRecipe) {
-  const action = recipe.primaryGoal === "calls" ? "Call" : recipe.primaryGoal === "booking_clicks" ? "Book" : recipe.primaryGoal === "order_clicks" ? "Order" : "Request service";
-  const services = business.services.slice(0, 3).join(", ") || business.categories.slice(0, 2).join(", ") || "local services";
-  return `${action} with clear next steps for ${services.toLowerCase()}.`;
-}
-
 function fact(
   field: string,
   value: string | string[],
@@ -797,6 +606,99 @@ function fallbackFormCtaLabel(vertical: Vertical) {
     home_services: "Request Service"
   };
   return labels[vertical] ?? "Request a Quote";
+}
+
+function createIntakeBrandAssessment({
+  business,
+  recipe,
+  crawl,
+  renderInspection
+}: {
+  business: BusinessProfile;
+  recipe: VerticalRecipe;
+  crawl?: CrawlAssessment;
+  renderInspection?: RenderInspectionResult;
+}): BrandAssessment {
+  const sourceNotes = [
+    crawl?.title ? `Title observed: ${crawl.title}` : undefined,
+    crawl?.metaDescription ? "Meta description was available as positioning reference." : undefined,
+    crawl?.assetReferences.some((asset) => asset.kind === "logo") ? "Logo detected as public source material for brand-token extraction." : undefined,
+    crawl?.assetReferences.some((asset) => asset.kind === "image") ? "Website imagery detected as public source material for deterministic media selection." : undefined,
+    renderInspection ? `Render inspection adapter: ${renderInspection.adapter}.` : undefined
+  ].filter((item): item is string => Boolean(item));
+  const confidenceSignals = [
+    crawl?.extractedFacts.name,
+    crawl?.extractedFacts.phone,
+    crawl?.extractedFacts.address?.city,
+    crawl?.assetReferences.length ? "assets" : undefined,
+    renderInspection?.metrics.bodyTextChars && renderInspection.metrics.bodyTextChars > 250 ? "rendered text" : undefined
+  ].filter(Boolean).length;
+
+  return {
+    id: `brand_${business.siteId}`,
+    siteId: business.siteId,
+    confidence: Math.min(0.92, 0.45 + confidenceSignals * 0.1),
+    cues: unique([
+      business.name,
+      business.categories[0],
+      business.address?.city,
+      business.serviceAreas[0],
+      business.reviewsSummary?.rating ? `${business.reviewsSummary.rating} rating signal` : undefined,
+      recipe.label
+    ].filter((item): item is string => Boolean(item))).slice(0, 10),
+    colorSignals: colorSignalsForIntakeMood(recipe.mood),
+    typographySignals: typographySignalsForIntakeVertical(business.vertical),
+    imageStyleSignals: imageSignalsForIntakeVertical(business.vertical),
+    toneSignals: toneSignalsForIntakeVertical(business.vertical),
+    preservationRules: [
+      "Preserve business name, category, and owner-verified facts exactly.",
+      "Use existing website visuals only as brand-token and media-selection references before claim.",
+      "Rewrite marketing language from structured facts instead of copying current-site prose.",
+      "Keep claims, credentials, prices, offers, and owner story approval-gated."
+    ],
+    sourceNotes: sourceNotes.length ? sourceNotes.slice(0, 8) : ["Prompt-only brand assessment; owner verification required."]
+  };
+}
+
+function colorSignalsForIntakeMood(mood: Theme["mood"]) {
+  switch (mood) {
+    case "warm":
+      return ["warm neutrals", "accessible earthy accent", "high-contrast CTA"];
+    case "premium":
+      return ["quiet surface palette", "deep primary", "restrained metallic accent"];
+    case "bold":
+      return ["strong primary color", "crisp neutral base", "high-energy accent"];
+    case "clinical":
+      return ["clean cool base", "trust-forward primary", "soft support color"];
+    case "utilitarian":
+      return ["practical neutral base", "service-forward primary", "clear CTA contrast"];
+    case "editorial":
+      return ["quiet editorial base", "ink-forward primary", "restrained accent"];
+  }
+}
+
+function typographySignalsForIntakeVertical(vertical: Vertical) {
+  const premium = new Set<Vertical>(["law_firm", "real_estate", "med_spa", "creative_studio"]);
+  const functional = new Set<Vertical>(["auto_body", "auto_services", "home_services", "fitness"]);
+  if (premium.has(vertical)) return ["refined display posture", "high-legibility body", "measured hierarchy"];
+  if (functional.has(vertical)) return ["confident sans posture", "compact service labels", "clear CTA hierarchy"];
+  return ["friendly display posture", "readable body", "local-service hierarchy"];
+}
+
+function imageSignalsForIntakeVertical(vertical: Vertical) {
+  const serviceWork = new Set<Vertical>(["auto_body", "auto_services", "home_services", "landscaping"]);
+  if (serviceWork.has(vertical)) return ["real work photos when approved", "process and results emphasis", "avoid generic stock mood"];
+  if (vertical === "restaurant") return ["food and storefront imagery", "warm service moments", "avoid unsupported atmosphere"];
+  if (vertical === "beauty_salon" || vertical === "med_spa") return ["clean interior or result imagery", "texture detail", "calm human scale"];
+  return ["source-backed local imagery", "recognizable exterior or service cues", "trust-first composition"];
+}
+
+function toneSignalsForIntakeVertical(vertical: Vertical) {
+  const urgent = new Set<Vertical>(["auto_body", "auto_services", "home_services"]);
+  const consultative = new Set<Vertical>(["law_firm", "real_estate", "med_spa", "dental", "veterinary"]);
+  if (urgent.has(vertical)) return ["direct", "practical", "reassuring"];
+  if (consultative.has(vertical)) return ["confident", "measured", "trust-building"];
+  return ["plainspoken", "welcoming", "specific"];
 }
 
 function themeForVertical(vertical: Vertical, mood: Theme["mood"]): Theme {
@@ -1064,7 +966,7 @@ function profileDescriptionForBusiness(input: {
   const category = input.vertical.replace(/_/g, " ");
   const servicePhrase = services || category;
   const areaPhrase = area && area !== "Local area" ? ` in ${area}` : "";
-  return `${input.name} handles ${servicePhrase}${areaPhrase} with practical details gathered from its public business presence.`;
+  return `${input.name} is a local ${category} provider for ${servicePhrase}${areaPhrase}, with practical details gathered from its public business presence.`;
 }
 
 function buildTechnicalNotes(crawl?: CrawlAssessment) {
@@ -1085,10 +987,10 @@ function buildTechnicalNotes(crawl?: CrawlAssessment) {
 }
 
 function buildBrandNotes(crawl?: CrawlAssessment) {
-  if (!crawl) return ["Generated mockups should guide creative direction, then compile into structured sections."];
+  if (!crawl) return ["Brand expression is derived from structured facts and validated design-system token menus."];
   return [
     `${crawl.assetReferences.length} website asset references were captured as public source inputs for internal preview context.`,
-    "Generated mockups should preserve recognizable brand cues while retaining provenance for source material."
+    "Source visuals may inform brand-token extraction and media selection while retaining provenance for source material."
   ];
 }
 
@@ -1126,12 +1028,10 @@ function buildPublicPresenceNotes(crawl?: CrawlAssessment, publicPresence?: Publ
 function buildAssetInventory({
   business,
   input,
-  mockups,
   now
 }: {
   business: BusinessProfile;
   input: IntakeInput;
-  mockups: CreativeMockupArtifact[];
   now: string;
 }): SiteAsset[] {
   const websiteProvenance = input.url
@@ -1197,7 +1097,7 @@ function buildAssetInventory({
       createdAt: now
     })) ?? [];
 
-  return [...referencedPhotos, ...logo, ...screenshots, ...createMockupAssets(mockups)];
+  return [...referencedPhotos, ...logo, ...screenshots];
 }
 
 /**
@@ -1248,10 +1148,27 @@ function unique(items: string[]) {
 
 function rankCategoriesBySpecificity(values: string[] | undefined, vertical?: Vertical) {
   return unique(values ?? [])
-    .filter((value) => !/^(local business|business|point of interest|establishment|food|web page|webpage|website)$/i.test(value.trim()))
+    .filter((value) => !/^(local business|business|point of interest|establishment|food|web\s*page|web\s*site)$/i.test(value.trim()))
     .map((value, index) => ({ value, index, score: categorySpecificityScore(value) + verticalCategoryAffinity(value, vertical) }))
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .map((item) => item.value);
+}
+
+function mergeModelAndSourceServicesV1(
+  modelServices: CleanedServiceV2[],
+  sourceServices: CleanedServiceV2[],
+  vertical: Vertical
+) {
+  const profile = generatedSiteVerticalQualityProfileForBusinessV1({ vertical });
+  const merged = [...modelServices];
+  const seen = new Set(modelServices.map((service) => serviceSemanticGroupForProfileV1(profile, service.name)?.id ?? normalizeServiceForDedupe(service.name)));
+  for (const service of sourceServices) {
+    const key = serviceSemanticGroupForProfileV1(profile, service.name)?.id ?? normalizeServiceForDedupe(service.name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(service);
+  }
+  return merged.slice(0, 12);
 }
 
 /**

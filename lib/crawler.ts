@@ -1,5 +1,6 @@
 import { getStandardCriterion } from "./standard";
 import { validatePublicFetchUrl } from "./url-safety";
+import type { SiteEvidenceCandidateV1, SiteEvidenceKindV1 } from "./evidence-ledger-v1";
 
 export type CrawlAssessment = {
   url: string;
@@ -34,9 +35,12 @@ export type CrawlAssessment = {
 export type CrawlPageSummary = {
   url: string;
   source: "primary" | "sampled_internal";
+  purposeTags: CrawlPagePurposeTag[];
   title?: string;
   metaDescription?: string;
   canonical?: string;
+  /** Cleaned visible prose retained for evidence/dossier generation, capped per page. */
+  mainText?: string;
   hasViewportMeta: boolean;
   hasLocalBusinessSchema: boolean;
   hasTelLink: boolean;
@@ -50,11 +54,31 @@ export type CrawlPageSummary = {
   formReferences: CrawlFormReference[];
   linkReferences: CrawlLinkReference[];
   assetReferences: CrawlAssetReference[];
+  evidenceCandidates: SiteEvidenceCandidateV1[];
 };
 
 export type CrawlUrlOptions = {
   maxInternalPages?: number;
 };
+
+export type CrawlPagePurposeTag =
+  | "home"
+  | "services"
+  | "service_detail"
+  | "about"
+  | "location"
+  | "contact"
+  | "gallery"
+  | "reviews"
+  | "offers"
+  | "faq"
+  | "blog"
+  | "legal"
+  | "other";
+
+const defaultMaxInternalPages = 12;
+const hardMaxInternalPages = 16;
+const maxMainTextCharsPerPage = 2800;
 
 export type ExtractedBusinessFacts = {
   name?: string;
@@ -169,7 +193,7 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
   }
 
   const safeUrl = urlSafety.url;
-  const maxInternalPages = clampInteger(options.maxInternalPages ?? 6, 0, 8);
+  const maxInternalPages = clampInteger(options.maxInternalPages ?? defaultMaxInternalPages, 0, hardMaxInternalPages);
 
   try {
     const crawlBase = new URL(safeUrl);
@@ -268,9 +292,11 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
   const summary: CrawlPageSummary = {
     url: sourcePage.href,
     source,
+    purposeTags: classifyCrawlPagePurpose(sourcePage, title, html),
     title,
     metaDescription,
     canonical: extractLinkHref(html, "canonical"),
+    mainText: extractMainText(html, maxMainTextCharsPerPage),
     hasViewportMeta: /<meta[^>]+name=["']viewport["'][^>]*>/i.test(html),
     hasLocalBusinessSchema: /LocalBusiness|Restaurant|Dentist|LegalService|HomeAndConstructionBusiness/i.test(html),
     hasTelLink: /href=["']tel:/i.test(html),
@@ -283,11 +309,13 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
     extractedFacts: emptyExtractedFacts(),
     formReferences: [],
     linkReferences: [],
-    assetReferences: []
+    assetReferences: [],
+    evidenceCandidates: []
   };
   const signals = extractCrawlPageSignals(html, sourcePage.href);
   summary.jsonLdTypes = signals.jsonLdTypes;
   summary.extractedFacts = extractBusinessFacts(html, { url: sourcePage.href, finalUrl: sourcePage.href, title }, sourcePage);
+  summary.evidenceCandidates = extractSiteEvidenceCandidates(html, { url: sourcePage.href, title }, sourcePage);
   summary.formReferences = signals.formReferences.slice(0, 12);
   summary.linkReferences = signals.linkReferences.slice(0, 40);
   summary.assetReferences = capAssetReferences(signals.assetReferences);
@@ -306,6 +334,44 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
     }
   }
   return summary;
+}
+
+function extractMainText(html: string, maxChars: number) {
+  const stripped = html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<(?:header|nav|footer)\b[\s\S]*?<\/(?:header|nav|footer)>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|li|h[1-6]|div|section|article)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+  const cleaned = decodeHtml(stripped)
+    ?.replace(/[ \t\r\f\v]+/g, " ")
+    .replace(/\n\s+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > maxChars ? `${cleaned.slice(0, maxChars).trimEnd()}...` : cleaned;
+}
+
+function classifyCrawlPagePurpose(sourcePage: URL, title: string | undefined, html: string): CrawlPagePurposeTag[] {
+  const path = sourcePage.pathname.toLowerCase();
+  const text = `${path} ${title ?? ""} ${extractMetaContent(html, "description") ?? ""}`.toLowerCase();
+  const tags: CrawlPagePurposeTag[] = [];
+  if (path === "/" || /\/(?:home|index)(?:\/|$)/.test(path)) tags.push("home");
+  if (/\bservices?\b|\/services?\//.test(text)) tags.push(path.split("/").filter(Boolean).length > 1 ? "service_detail" : "services");
+  if (/\babout|story|team|who-we-are\b/.test(text)) tags.push("about");
+  if (/\blocations?|areas?|directions?|visit\b/.test(text)) tags.push("location");
+  if (/\bcontact|get-in-touch|quote|estimate|appointment|booking\b/.test(text)) tags.push("contact");
+  if (/\bgallery|photos?|portfolio|work\b/.test(text)) tags.push("gallery");
+  if (/\breviews?|testimonials?\b/.test(text)) tags.push("reviews");
+  if (/\boffers?|specials?|coupons?|financ/i.test(text)) tags.push("offers");
+  if (/\bfaq|questions?\b/.test(text)) tags.push("faq");
+  if (/\bblog|news|articles?\b/.test(text)) tags.push("blog");
+  if (/\bprivacy|terms|accessibility|legal\b/.test(text)) tags.push("legal");
+  return tags.length ? unique(tags) : ["other"];
 }
 
 async function fetchInternalPageSummary(url: string) {
@@ -813,8 +879,6 @@ function extractBusinessFacts(
     facts.serviceAreas = unique([...facts.serviceAreas, ...extractAreas(localNode)]);
     facts.reviewsSummary = extractRating(localNode);
   }
-  facts.pressLinks.push(...extractJsonLdReviewTestimonials(jsonLdNodes));
-
   facts.name = normalizeBusinessNameCandidate(facts.name, base.hostname);
   facts.name ||= normalizeBusinessNameCandidate(cleanText(extractMetaContent(html, "og:site_name")), base.hostname);
   facts.name ||= inferNameFromTitle(page.title, base.hostname);
@@ -826,7 +890,6 @@ function extractBusinessFacts(
     ...extractServiceMentionsFromText(html)
   ]).slice(0, 12);
   facts.serviceHighlights = unique([...(facts.serviceHighlights ?? []), ...extractServiceHighlightsFromText(html)]).slice(0, 8);
-  facts.pressLinks.push(...extractVisibleTestimonials(html, page));
   facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
@@ -1265,54 +1328,56 @@ function extractServiceHighlightsFromText(html: string) {
   if (/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i.test(text)) {
     highlights.push("Automotive glass for windshields and windows");
   }
-  if (/\bdeductible\b/i.test(text) && /\brental car\b/i.test(text)) {
-    highlights.push("Ask about deductible and rental-car options");
-  } else if (/\bdeductible\b/i.test(text)) {
-    highlights.push("Ask about deductible questions");
-  } else if (/\brental car\b/i.test(text)) {
-    highlights.push("Ask about rental-car options");
-  }
-  if (/\binsurance claims?\b/i.test(text) && /\bself[-\s]?pay\b|\bout of pocket\b|\bpayment options?\b/i.test(text)) {
-    highlights.push("Insurance claims and self-pay options");
-  } else if (/\binsurance claims?\b/i.test(text)) {
-    highlights.push("Insurance claim support");
-  }
-  if (/\bfree\s+(?:repair\s+)?(?:quote|estimate)\b/i.test(text)) {
-    highlights.push("Free repair quote");
-  } else if (/\b(?:repair\s+)?(?:quote|estimate)\s+(?:request|form|online)\b|\brequest\s+(?:a\s+)?(?:quote|estimate)\b/i.test(text)) {
-    highlights.push("Repair quote request");
-  }
   return unique(highlights).slice(0, 6);
 }
 
-function extractJsonLdReviewTestimonials(nodes: Array<Record<string, unknown>>) {
+function extractJsonLdReviewEvidence(
+  nodes: Array<Record<string, unknown>>,
+  page: { url: string; title?: string }
+): SiteEvidenceCandidateV1[] {
   return nodes
     .filter((node) => hasType(node, ["Review"]))
     .map((node) => {
       const quote = normalizeTestimonialQuote(normalizeFact(node.reviewBody) ?? normalizeFact(node.description));
       if (!quote) return undefined;
       const author = node.author && typeof node.author === "object" ? normalizeFact((node.author as Record<string, unknown>).name) : normalizeFact(node.author);
-      return testimonialProofString(quote, author);
+      return testimonialEvidenceCandidate({
+        quote,
+        attribution: author,
+        page,
+        sourceType: "website_json_ld",
+        extractionMethod: "json_ld_review",
+        confidence: 0.95
+      });
     })
-    .filter((value): value is string => Boolean(value))
+    .filter((value): value is SiteEvidenceCandidateV1 => Boolean(value))
     .slice(0, 4);
 }
 
-function extractVisibleTestimonials(html: string, page: { url: string; finalUrl?: string; title?: string }) {
-  const urlText = `${page.finalUrl ?? page.url} ${page.title ?? ""}`.toLowerCase();
+function extractVisibleTestimonialEvidence(html: string, page: { url: string; title?: string }): SiteEvidenceCandidateV1[] {
+  const urlText = `${page.url} ${page.title ?? ""}`.toLowerCase();
   const reviewPage = /\b(reviews?|testimonials?|customers?|feedback)\b/.test(urlText);
+  if (!reviewPage) return [];
   const lines = htmlToTextLines(html);
   const candidates = lines
     .map((line) => normalizeTestimonialQuote(line))
     .filter((line): line is string => Boolean(line))
     .filter((line) => (reviewPage || testimonialTextSignal(line)) && visibleCustomerTestimonialSignal(line))
-    .map((line) => testimonialProofString(line))
-    .filter((line): line is string => Boolean(line));
+    .map((quote) => testimonialEvidenceCandidate({
+      quote,
+      page,
+      sourceType: "website_visible_text",
+      extractionMethod: "visible_testimonial_text",
+      confidence: reviewPage ? 0.86 : 0.74
+    }))
+    .filter((candidate): candidate is SiteEvidenceCandidateV1 => Boolean(candidate));
   return unique(candidates).slice(0, 4);
 }
 
 function normalizeTestimonialQuote(value: string | undefined) {
-  const cleaned = cleanText(value)
+  const cleaned = cleanText(decodeHtml(value)
+    ?.replace(/&ldquo;|&rdquo;/gi, '"')
+    .replace(/&lsquo;|&rsquo;/gi, "'"))
     ?.replace(/^[“"']+|[”"']+$/g, "")
     .replace(/^\s*(?:★|⭐|\*)+\s*/g, "")
     .replace(/\s+/g, " ")
@@ -1322,7 +1387,10 @@ function normalizeTestimonialQuote(value: string | undefined) {
   if (/@/.test(cleaned)) return undefined;
   if (/©|all rights reserved/i.test(cleaned)) return undefined;
   if (/\b(write|leave|read|see|view|submit)\s+(?:a\s+)?reviews?\b/i.test(cleaned)) return undefined;
-  if (/\b(contact|call|text|email|copyright|privacy|terms|login|home|services?|gallery)\b/i.test(cleaned)) return undefined;
+  if (/\b(copyright|privacy policy|terms of (?:use|service)|login|view gallery)\b/i.test(cleaned)) return undefined;
+  if (/\b(get started with a (?:free )?estimate|please call our|location nearest you|thank you for contacting us|we will get back to you|form (?:was )?submitted)\b/i.test(cleaned)) return undefined;
+  if (/&(?:[a-z]+|#\d+|#x[0-9a-f]+);/i.test(cleaned)) return undefined;
+  if (/(?:\.{3}|…)[\s"']*$/.test(cleaned) || /^[\s"']*(?:\.{3}|…)/.test(cleaned)) return undefined;
   const words = cleaned.split(/\s+/);
   if (words.length < 7 || words.length > 42) return undefined;
   if (!testimonialTextSignal(cleaned)) return undefined;
@@ -1344,9 +1412,163 @@ function visibleCustomerTestimonialSignal(value: string) {
   return /\b(i|me|my|we|our|they|their|them|mencia|shop|team|staff|owner|service|job|work|repair)\b/i.test(value);
 }
 
-function testimonialProofString(quote: string, author?: string) {
-  const safeAuthor = author && !/@/.test(author) && author.length <= 60 ? author : "Customer review";
-  return `review: ${quote} -- ${safeAuthor}`;
+function testimonialEvidenceCandidate(input: {
+  quote: string;
+  attribution?: string;
+  page: { url: string; title?: string };
+  sourceType: "website_json_ld" | "website_visible_text";
+  extractionMethod: string;
+  confidence: number;
+}): SiteEvidenceCandidateV1 | undefined {
+  const quote = normalizeTestimonialQuote(input.quote);
+  if (!quote || !visibleCustomerTestimonialSignal(quote)) return undefined;
+  const attribution = input.attribution && !/@/.test(input.attribution) && input.attribution.length <= 60
+    ? input.attribution
+    : "Customer review";
+  return {
+    domain: "business_proof",
+    kind: "testimonial",
+    label: "First-party customer testimonial",
+    value: { text: quote, quote, attribution },
+    source: {
+      type: input.sourceType,
+      url: input.page.url,
+      pageTitle: input.page.title,
+      extractionMethod: input.extractionMethod,
+      snippet: quote
+    },
+    confidence: input.confidence,
+    renderPolicy: "durable_render",
+    verification: "source_backed",
+    notes: ["Exact quote retained from the business's own website with page-level provenance."]
+  };
+}
+
+function extractSiteEvidenceCandidates(
+  html: string,
+  page: { url: string; title?: string },
+  base: URL
+): SiteEvidenceCandidateV1[] {
+  const jsonLdNodes = flattenJsonLd(extractJsonLd(html));
+  const testimonialEvidence = [
+    ...extractJsonLdReviewEvidence(jsonLdNodes, page),
+    ...extractVisibleTestimonialEvidence(html, page)
+  ];
+  const visibleClaims = extractVisibleClaimEvidence(html, page);
+  return uniqueBy([...testimonialEvidence, ...visibleClaims], (candidate) =>
+    `${candidate.kind}:${normalizeEvidenceKey(candidate.value.text)}:${base.hostname}`
+  ).slice(0, 18);
+}
+
+function extractVisibleClaimEvidence(html: string, page: { url: string; title?: string }): SiteEvidenceCandidateV1[] {
+  const lines = htmlToTextLines(html)
+    .map((line) => cleanText(line))
+    .filter((line): line is string => Boolean(line))
+    .filter(isEvidenceClaimLine);
+  const definitions: Array<{
+    kind: SiteEvidenceKindV1;
+    label: string;
+    pattern: RegExp;
+    renderPolicy: SiteEvidenceCandidateV1["renderPolicy"];
+    confidence: number;
+  }> = [
+    {
+      kind: "credential",
+      label: "Source credential",
+      pattern: /\b(?:I-CAR(?:\s+Gold Class)?|ASE(?:\s+Certified)?|OEM[-\s]?certified|factory[-\s]?certified|manufacturer[-\s]?certified|certified collision repair|BBB Accredited|licensed and insured)\b/i,
+      renderPolicy: "durable_render",
+      confidence: 0.9
+    },
+    {
+      kind: "warranty",
+      label: "Source warranty claim",
+      pattern: /\b(?:(?:lifetime|limited|written|nationwide|manufacturer(?:'s)?)\s+)?warrant(?:y|ies)\b|\bguarantee(?:d|s)?\b/i,
+      renderPolicy: "owner_review_required",
+      confidence: 0.84
+    },
+    {
+      kind: "insurance_support",
+      label: "Source insurance-support claim",
+      pattern: /\b(?:(?:handle|manage) communication with (?:all |your )?insurance compan(?:y|ies)|insurance claims?|claim assistance|work(?:ing)? with (?:all |your )?insurance(?: compan(?:y|ies))?|direct repair program)\b/i,
+      renderPolicy: "durable_render",
+      confidence: 0.88
+    },
+    {
+      kind: "award",
+      label: "Source award claim",
+      pattern: /\b(?:award(?:ed|s)?|winner|best of|recognized by|top[-\s]?rated)\b/i,
+      renderPolicy: "owner_review_required",
+      confidence: 0.76
+    },
+    {
+      kind: "years_in_business",
+      label: "Source longevity claim",
+      pattern: /\b(?:established(?:\s+in)?\s+(?:19|20)\d{2}|(?:founded|opened|started)\b[^.]{0,80}?\b(?:19|20)\d{2}|serving[^.]{0,40}since|since\s+(?:19|20)\d{2}|(?:over|more than)\s+\d{1,3}\s+years?|\d{1,3}\+\s+years?)\b/i,
+      renderPolicy: "durable_render",
+      confidence: 0.84
+    },
+    {
+      kind: "offer",
+      label: "Source offer",
+      pattern: /\b(?:free\s+(?:repair\s+)?(?:quote|estimate)|complimentary\s+(?:quote|estimate|consultation))\b/i,
+      renderPolicy: "owner_review_required",
+      confidence: 0.86
+    }
+  ];
+  const candidates: SiteEvidenceCandidateV1[] = [];
+  for (const definition of definitions) {
+    for (const line of lines.filter((candidate) => definition.pattern.test(candidate)).slice(0, 3)) {
+      const matchedClaim = line.match(definition.pattern)?.[0]?.trim();
+      candidates.push({
+        domain: "business_proof",
+        kind: definition.kind,
+        label: definition.label,
+        value: {
+          text: line,
+          displayText: evidenceClaimDisplayText(definition.kind, matchedClaim || line)
+        },
+        source: {
+          type: "website_visible_text",
+          url: page.url,
+          pageTitle: page.title,
+          extractionMethod: `visible_${definition.kind}_claim`,
+          snippet: line
+        },
+        confidence: definition.confidence,
+        renderPolicy: definition.renderPolicy,
+        verification: "source_backed"
+      });
+    }
+  }
+  return candidates;
+}
+
+function evidenceClaimDisplayText(kind: SiteEvidenceKindV1, value: string) {
+  const clean = value.trim().replace(/[.]+$/, "");
+  if (kind !== "insurance_support") return clean;
+  if (/^work(?:ing)? with all insurance(?: compan(?:y|ies))?$/i.test(clean)) {
+    return "Works with all insurance companies";
+  }
+  if (/^work(?:ing)? with your insurance(?: compan(?:y|ies))?$/i.test(clean)) {
+    return "Works with your insurance company";
+  }
+  if (/^insurance claims?$/i.test(clean)) return "Insurance claim support";
+  if (/^claim assistance$/i.test(clean)) return "Insurance claim assistance";
+  if (/^(?:handle|manage) communication with (?:all |your )?insurance compan(?:y|ies)$/i.test(clean)) return "Insurance claim assistance";
+  return clean;
+}
+
+function isEvidenceClaimLine(value: string) {
+  if (value.length < 12 || value.length > 260) return false;
+  const wordCount = value.split(/\s+/).length;
+  if (wordCount < 3 || wordCount > 48) return false;
+  if (/\b(?:privacy|terms|copyright|all rights reserved|read more|learn more|click here|navigation|menu)\b/i.test(value)) return false;
+  if (/\?$/.test(value)) return false;
+  return true;
+}
+
+function normalizeEvidenceKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function isServicePath(pathname: string) {

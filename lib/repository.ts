@@ -22,6 +22,7 @@ import type {
   SiteArtifactRecord,
   JobKind,
   JobRecord,
+  WorkerHeartbeatRecord,
   OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
@@ -60,6 +61,7 @@ import {
   createSiteCandidate as createSiteCandidateStore,
   listSiteArtifacts as listSiteArtifactsStore,
   createOutboundCampaign,
+  findOutboundProspectByPreviewToken as findOutboundProspectByPreviewTokenStore,
   createProspectReport as createProspectReportStore,
   createProspectReportLead as createProspectReportLeadStore,
   getForms,
@@ -70,6 +72,7 @@ import {
   getSiteBundleBySlug,
   getSiteCandidate as getSiteCandidateStore,
   updateSiteCandidateBundle as updateSiteCandidateBundleStore,
+  archiveSiteCandidates as archiveSiteCandidatesStore,
   listAnalyticsEvents,
   listClaims,
   listDomains,
@@ -125,13 +128,18 @@ import {
 import {
   enqueueJob,
   getJob,
+  heartbeatLocalJob,
   listJobs,
   processAllQueuedJobs as processAllQueuedJobsStore,
   processNextJob as processNextJobStore,
+  listLocalWorkerHeartbeats,
+  recordLocalWorkerHeartbeat,
+  requeueLocalJob,
   type JobExecutionContext
 } from "./jobs";
 import { supabaseRepository } from "./supabase/repository";
 import { createCheckoutSession, type CheckoutSessionResult } from "./billing";
+import { claimVerificationSatisfies, type ClaimVerificationLevel } from "./owner-access";
 import { refreshCustomHostnameStatus, registerCustomHostname, type DomainVerification } from "./domains";
 import { prepareIntakeInput } from "./intake-pipeline";
 import { getProcessWorkerId } from "./worker-identity";
@@ -343,6 +351,7 @@ export type RecordAgentModelCallInput = {
 export type ListAgentRunsFilter = {
   search?: string;
   status?: AgentRunStatus;
+  metadataJobId?: string;
   runType?: string;
   agentType?: string;
   source?: AgentRunSource;
@@ -375,9 +384,17 @@ export type CreateClaimInput = {
   siteId: string;
   ownerUserId?: string;
   ownerEmail?: string;
+  verificationLevel?: ClaimVerificationLevel;
+  verificationMethod?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  outboundCampaignId?: string;
+  outboundProspectId?: string;
   verifiedFacts?: string[];
   acceptedTerms: boolean;
   acceptedManagement: boolean;
+  acceptedAssetRights?: boolean;
+  attestedAssetIds?: string[];
 };
 
 export type RegisterDomainInput = {
@@ -506,6 +523,7 @@ export type LodestaRepository = {
   listSiteCandidateSummaries(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidateSummariesResult>;
   getSiteCandidate(candidateId: string): Promise<SiteCandidateRecord | null>;
   updateSiteCandidateBundle(candidateId: string, bundle: SiteBundle): Promise<SiteCandidateRecord | null>;
+  archiveSiteCandidates(candidateIds: string[]): Promise<SiteCandidateRecord[]>;
   acceptSiteCandidateAsSite(candidateId: string): Promise<AcceptSiteCandidateResult | null>;
   acceptSiteCandidateAsVersion(input: AcceptSiteCandidateAsVersionInput): Promise<AcceptSiteCandidateResult | null>;
   mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }): Promise<BusinessMergeResult>;
@@ -577,6 +595,7 @@ export type LodestaRepository = {
   listOutboundCampaigns(): Promise<OutboundCampaign[]>;
   upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
   listOutboundProspects(campaignId?: string): Promise<OutboundProspect[]>;
+  findOutboundProspectByPreviewToken(previewToken: string): Promise<OutboundProspect | null>;
   recordOutboundEvent(input: RecordOutboundEventInput): Promise<OutboundEvent>;
   listOutboundEvents(campaignId?: string): Promise<OutboundEvent[]>;
   outboundSummary(campaignId?: string): Promise<OutboundSummary>;
@@ -591,6 +610,9 @@ export type LodestaRepository = {
   getJob(id: string): Promise<JobRecord | null>;
   processNextJob(): Promise<JobRecord | null>;
   processAllQueuedJobs(limit?: number): Promise<JobRecord[]>;
+  recordWorkerHeartbeat(heartbeat: WorkerHeartbeatRecord): Promise<WorkerHeartbeatRecord>;
+  listWorkerHeartbeats(): Promise<WorkerHeartbeatRecord[]>;
+  requeueJob(jobId: string): Promise<{ ok: true; job: JobRecord } | { ok: false; reason: string }>;
   createAgentRun(input: CreateAgentRunInput): Promise<AgentRunRecord | null>;
   updateAgentRun(input: UpdateAgentRunInput): Promise<AgentRunRecord | null>;
   createAgentRunSpan(input: CreateAgentRunSpanInput): Promise<AgentRunSpanRecord | null>;
@@ -649,6 +671,9 @@ export const localRepository: LodestaRepository = {
   },
   async updateSiteCandidateBundle(candidateId, bundle) {
     return updateSiteCandidateBundleStore(candidateId, bundle);
+  },
+  async archiveSiteCandidates(candidateIds) {
+    return archiveSiteCandidatesStore(candidateIds);
   },
   async acceptSiteCandidateAsSite(candidateId) {
     return acceptSiteCandidateAsSiteStore(candidateId);
@@ -802,6 +827,7 @@ export const localRepository: LodestaRepository = {
     return applyAiEditToSite(input);
   },
   async createClaim(input) {
+    if (!claimVerificationSatisfies(input.verificationLevel)) return null;
     const claim = createClaim(input);
     const bundle = claim ? getSiteBundle(input.siteId) : null;
     if (!claim || !bundle) return null;
@@ -884,6 +910,9 @@ export const localRepository: LodestaRepository = {
   async listOutboundProspects(campaignId) {
     return listOutboundProspects(campaignId);
   },
+  async findOutboundProspectByPreviewToken(previewToken) {
+    return findOutboundProspectByPreviewTokenStore(previewToken);
+  },
   async recordOutboundEvent(input) {
     return recordOutboundEvent(input);
   },
@@ -920,6 +949,9 @@ export const localRepository: LodestaRepository = {
   async processAllQueuedJobs(limit) {
     return processAllQueuedJobsStore(limit, createLocalJobContext());
   },
+  recordWorkerHeartbeat: recordLocalWorkerHeartbeat,
+  listWorkerHeartbeats: listLocalWorkerHeartbeats,
+  requeueJob: requeueLocalJob,
   async createAgentRun(input) {
     const timestamp = new Date().toISOString();
     const run: AgentRunRecord = {
@@ -1039,6 +1071,7 @@ export const localRepository: LodestaRepository = {
     const search = filter.search?.toLowerCase();
     const runs = Array.from(localAgentRuns.values())
       .filter((run) => !filter.status || run.status === filter.status)
+      .filter((run) => !filter.metadataJobId || run.metadata?.jobId === filter.metadataJobId)
       .filter((run) => !filter.runType || run.runType === filter.runType)
       .filter((run) => !filter.agentType || run.agentType === filter.agentType)
       .filter((run) => !filter.source || run.source === filter.source)
@@ -1087,6 +1120,7 @@ export const localRepository: LodestaRepository = {
 function createLocalJobContext(): JobExecutionContext {
   return {
     workerId: getProcessWorkerId(),
+    heartbeatJob: heartbeatLocalJob,
     generateSite: async (options) => {
       const { generateSite } = await import("./site-candidate-service");
       return generateSite({ ...options, repository: localRepository });
@@ -1097,6 +1131,7 @@ function createLocalJobContext(): JobExecutionContext {
     analyzeExperiments: localRepository.analyzeExperiments,
     listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
     listInquiries: localRepository.listInquiries,
+    listClaims: localRepository.listClaims,
     listInquiryEvents: localRepository.listInquiryEvents,
     processInquiryNotification: (input) => localRepository.processInquiryNotification(input),
     processInquiryAiEnrichment: (input) => localRepository.processInquiryAiEnrichment(input),

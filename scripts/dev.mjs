@@ -5,6 +5,7 @@ import { childExitDecision } from "./dev-supervisor.mjs";
 
 const host = process.env.HOST || "127.0.0.1";
 const port = process.env.PORT || "4330";
+const repositoryMode = process.env.LODESTA_REPOSITORY === "local" ? "local" : "supabase";
 const children = new Map();
 let shuttingDown = false;
 let shutdownExitCode = 0;
@@ -13,7 +14,8 @@ let consecutiveWorkerFailures = 0;
 let totalWorkerRestarts = 0;
 let workerRestartTimer;
 
-console.log("[dev] starting Next.js and the Lodesta job worker");
+console.log(`[dev] starting Next.js at http://${host}:${port} and the Lodesta job worker`);
+console.log(`[dev] repository=${repositoryMode} workerCommand="npm run dev:worker" poll=750ms`);
 
 startWeb();
 startWorker();

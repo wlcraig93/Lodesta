@@ -16,22 +16,19 @@ import { RunAssetSelectionButton } from "@/components/admin/RunAssetSelectionBut
 import { RunBrandDirectionButton } from "@/components/admin/RunBrandDirectionButton";
 import { RunBrandMarkGenerationButton } from "@/components/admin/RunBrandMarkGenerationButton";
 import { RunClaimsPolicyButton } from "@/components/admin/RunClaimsPolicyButton";
-import { RunDesignSectionAuditsButton } from "@/components/admin/RunDesignSectionAuditsButton";
 import { RunPageOpportunitiesButton } from "@/components/admin/RunPageOpportunitiesButton";
 import { RunPerformanceAuditButton } from "@/components/admin/RunPerformanceAuditButton";
-import { RunOptimizationReportsButton } from "@/components/admin/RunOptimizationReportsButton";
-import { RunSeoMetadataButton } from "@/components/admin/RunSeoMetadataButton";
 import { RunSocialProofButton } from "@/components/admin/RunSocialProofButton";
 import { RunStrategyPlanningButton } from "@/components/admin/RunStrategyPlanningButton";
-import { RunVisualQualityButton } from "@/components/admin/RunVisualQualityButton";
 import { SiteVersionsPanel } from "@/components/SiteVersionsPanel";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
 import { runSiteQa } from "@/lib/qa";
 import { getEditingVersion } from "@/lib/sample-data";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { claimGateForBundle } from "@/lib/site-publication";
-import { evaluateSiteAgainstStandard } from "@/lib/standard-evaluation";
-import type { AgentRunRecord, SiteArtifactRecord, SiteBundle, SiteVersion, StandardEvaluation } from "@/lib/models";
+import { siteStandardEvidenceChecks } from "@/lib/standard-evaluation";
+import type { AgentRunRecord, SiteArtifactRecord, SiteBundle, SiteVersion, StandardCheckResult } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -86,7 +83,7 @@ export default async function AdminSiteWorkspacePage({
   const previewToken = previewTokens[0];
   const latestRun = runsResult.runs[0];
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const generatedEvaluation = evaluateSiteAgainstStandard(bundle, {
+  const generatedChecks = siteStandardEvidenceChecks(bundle, {
     versionId: selectedVersion.id
   });
 
@@ -98,13 +95,12 @@ export default async function AdminSiteWorkspacePage({
       previewToken={previewToken}
       latestRun={latestRun}
       sourceEvaluation={sourceEvaluation}
-      generatedEvaluation={generatedEvaluation}
     >
       {await renderWorkspaceView({
         bundle,
         view,
         selectedVersion,
-        generatedEvaluation,
+        generatedChecks,
         runs: runsResult.runs,
         managedSiteArtifacts
       })}
@@ -116,13 +112,13 @@ async function renderWorkspaceView(input: {
   bundle: SiteBundle;
   view: AdminSiteWorkspaceView;
   selectedVersion: SiteVersion;
-  generatedEvaluation: StandardEvaluation;
+  generatedChecks: StandardCheckResult[];
   runs: AgentRunRecord[];
   managedSiteArtifacts: SiteArtifactRecord[];
 }) {
   switch (input.view) {
     case "report":
-      return <CurrentWebsiteReportPanel bundle={input.bundle} generatedEvaluation={input.generatedEvaluation} />;
+      return <CurrentWebsiteReportPanel bundle={input.bundle} generatedChecks={input.generatedChecks} />;
     case "site":
       return <AdminArtifactFrame bundle={input.bundle} version={input.selectedVersion} />;
     case "qa":
@@ -156,7 +152,6 @@ async function renderWorkspaceView(input: {
         <OverviewPanel
           bundle={input.bundle}
           selectedVersion={input.selectedVersion}
-          generatedEvaluation={input.generatedEvaluation}
           latestRun={input.runs[0]}
           managedSiteArtifacts={input.managedSiteArtifacts}
         />
@@ -167,13 +162,11 @@ async function renderWorkspaceView(input: {
 function OverviewPanel({
   bundle,
   selectedVersion,
-  generatedEvaluation,
   latestRun,
   managedSiteArtifacts
 }: {
   bundle: SiteBundle;
   selectedVersion: SiteVersion;
-  generatedEvaluation: StandardEvaluation;
   latestRun?: AgentRunRecord;
   managedSiteArtifacts: SiteArtifactRecord[];
 }) {
@@ -181,13 +174,13 @@ function OverviewPanel({
   const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open");
   const draftVersion = getEditingVersion(bundle.siteModel);
   const sourceScore = sourceEvaluation ? `${sourceEvaluation.score.percent}/100` : "Not scored";
-  const generatedScore = `${generatedEvaluation.score.percent}/100`;
+  const previewReadiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
 
   return (
     <div className="workspace-view-stack">
       <section className="metric-row">
         <Metric label="Current site" value={sourceScore} />
-        <Metric label="Preview" value={generatedScore} />
+        <Metric label="Preview QA" value={readinessLabel(previewReadiness)} />
         <Metric label="Open findings" value={openFindings.length} />
         <Metric label="Versions" value={bundle.siteModel.versions.length} />
       </section>
@@ -227,28 +220,10 @@ function OverviewPanel({
               </AdminButtonLink>
             </article>
             <article className="finding-card">
-              <span className="badge">design</span>
-              <h3>Audit visual quality</h3>
-              <p>Persist visual QA findings as a V2 benchmark artifact for review and regression checks.</p>
-              <RunVisualQualityButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
-            </article>
-            <article className="finding-card">
-              <span className="badge">design</span>
-              <h3>Audit design and sections</h3>
-              <p>Check site tokens, header behavior, section depth, services, proof, and contact/hours handling.</p>
-              <RunDesignSectionAuditsButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
-            </article>
-            <article className="finding-card">
               <span className="badge">performance</span>
               <h3>Audit performance</h3>
               <p>Record render-inspection performance proxies and field Web Vitals thresholds for post-publish monitoring.</p>
               <RunPerformanceAuditButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
-            </article>
-            <article className="finding-card">
-              <span className="badge">optimization</span>
-              <h3>Run optimization reports</h3>
-              <p>Generate conversion, local SEO, page gap, and experiment recommendation reports without changing the site.</p>
-              <RunOptimizationReportsButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
             </article>
             <article className="finding-card">
               <span className="badge">strategy</span>
@@ -273,12 +248,6 @@ function OverviewPanel({
               <h3>Audit social proof</h3>
               <p>Classify reviews, public profiles, and trust signals into durable, live-only, reference-only, or blocked proof.</p>
               <RunSocialProofButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
-            </article>
-            <article className="finding-card">
-              <span className="badge">seo</span>
-              <h3>Audit SEO metadata</h3>
-              <p>Check titles, descriptions, canonical paths, local context, and Google-proof policy safety.</p>
-              <RunSeoMetadataButton siteId={bundle.businessProfile.siteId} versionId={selectedVersion.id} />
             </article>
             <article className="finding-card">
               <span className="badge">assets</span>
@@ -435,23 +404,6 @@ function OverviewPanel({
             ) : null}
           </div>
 
-          <h2>SEO metadata</h2>
-          <div className="finding-list">
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "seo_metadata_report").slice(0, 2).map((artifact) => {
-              const scorecard = artifact.payload.scorecard as { pagesChecked?: number; blockingIssues?: number; warnings?: number } | undefined;
-              return (
-                <article key={artifact.id} className="finding-card compact-card">
-                  <span className="badge">seo</span>
-                  <h3>{scorecard?.pagesChecked ?? 0} pages checked</h3>
-                  <p>{scorecard?.blockingIssues ?? 0} blockers, {scorecard?.warnings ?? 0} warnings.</p>
-                </article>
-              );
-            })}
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "seo_metadata_report").length === 0 ? (
-              <p className="muted">No SEO metadata report yet.</p>
-            ) : null}
-          </div>
-
           <h2>Claims and policy</h2>
           <div className="finding-list">
             {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "claim_report" || artifact.artifactType === "policy_report").slice(0, 4).map((artifact) => {
@@ -470,50 +422,6 @@ function OverviewPanel({
             ) : null}
           </div>
 
-          <h2>Design and sections</h2>
-          <div className="finding-list">
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "design_section_audit_report").slice(0, 6).map((artifact) => {
-              const report = artifact.payload.report as { skillId?: string; status?: string; scorecard?: { blockers?: number; watchItems?: number; passes?: number } } | undefined;
-              return (
-                <article key={artifact.id} className="finding-card compact-card">
-                  <span className={`badge status-${report?.status ?? "pending"}`}>design</span>
-                  <h3>{report?.skillId ?? artifact.producerId}</h3>
-                  <p>{report?.scorecard?.blockers ?? 0} blockers, {report?.scorecard?.watchItems ?? 0} watch items, {report?.scorecard?.passes ?? 0} passes.</p>
-                </article>
-              );
-            })}
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "design_section_audit_report").length === 0 ? (
-              <p className="muted">No design or section audits yet.</p>
-            ) : null}
-          </div>
-
-          <h2>Optimization reports</h2>
-          <div className="finding-list">
-            {managedSiteArtifacts.filter((artifact) =>
-              artifact.artifactType === "conversion_insights_report" ||
-              artifact.artifactType === "local_seo_refresh_report" ||
-              artifact.artifactType === "page_gap_analysis_report" ||
-              artifact.artifactType === "experiment_recommendation_report"
-            ).slice(0, 4).map((artifact) => {
-              const report = artifact.payload.report as { status?: string; scorecard?: { actionItems?: number; watchItems?: number; passes?: number } } | undefined;
-              return (
-                <article key={artifact.id} className="finding-card compact-card">
-                  <span className={`badge status-${report?.status ?? "pending"}`}>optimization</span>
-                  <h3>{artifact.artifactType.replace(/_/g, " ")}</h3>
-                  <p>{report?.scorecard?.actionItems ?? 0} actions, {report?.scorecard?.watchItems ?? 0} watch items, {report?.scorecard?.passes ?? 0} passes.</p>
-                </article>
-              );
-            })}
-            {managedSiteArtifacts.filter((artifact) =>
-              artifact.artifactType === "conversion_insights_report" ||
-              artifact.artifactType === "local_seo_refresh_report" ||
-              artifact.artifactType === "page_gap_analysis_report" ||
-              artifact.artifactType === "experiment_recommendation_report"
-            ).length === 0 ? (
-              <p className="muted">No optimization reports yet.</p>
-            ) : null}
-          </div>
-
           <h2>Performance</h2>
           <div className="finding-list">
             {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "performance_audit_report").slice(0, 2).map((artifact) => {
@@ -528,23 +436,6 @@ function OverviewPanel({
             })}
             {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "performance_audit_report").length === 0 ? (
               <p className="muted">No performance audit report yet.</p>
-            ) : null}
-          </div>
-
-          <h2>Visual quality</h2>
-          <div className="finding-list">
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "visual_benchmark").slice(0, 2).map((artifact) => {
-              const visualQa = artifact.payload.visualQa as { findings?: Array<{ severity?: string }> } | undefined;
-              return (
-                <article key={artifact.id} className="finding-card compact-card">
-                  <span className="badge">design</span>
-                  <h3>{visualQa?.findings?.length ?? 0} findings</h3>
-                  <p>{visualQa?.findings?.filter((item) => item.severity === "fail").length ?? 0} failures, {visualQa?.findings?.filter((item) => item.severity === "warning").length ?? 0} warnings.</p>
-                </article>
-              );
-            })}
-            {managedSiteArtifacts.filter((artifact) => artifact.artifactType === "visual_benchmark").length === 0 ? (
-              <p className="muted">No visual quality benchmark yet.</p>
             ) : null}
           </div>
 
@@ -653,6 +544,13 @@ function selectedVersionForView(bundle: SiteBundle, view: AdminSiteWorkspaceView
 
 function formatDate(input: string) {
   return new Date(input).toLocaleString();
+}
+
+function readinessLabel(readiness: "ready" | "blocked" | "pending" | "unavailable") {
+  if (readiness === "ready") return "Ready";
+  if (readiness === "blocked") return "Revise";
+  if (readiness === "pending") return "Running";
+  return "Unavailable";
 }
 
 function formatDuration(startedAt: string, endedAt?: string) {

@@ -1,9 +1,18 @@
-export function openAiRequestSignal(defaultTimeoutMs = 45_000) {
-  return AbortSignal.timeout(openAiRequestTimeoutMs(defaultTimeoutMs));
+import { parseBoundedEnvMs } from "./timeout-config";
+
+export const defaultOpenAiRequestTimeoutMs = 300_000;
+export const minOpenAiRequestTimeoutMs = 5_000;
+export const maxOpenAiRequestTimeoutMs = 600_000;
+
+export function openAiRequestSignal(defaultTimeoutMs = defaultOpenAiRequestTimeoutMs, externalSignal?: AbortSignal) {
+  const timeoutSignal = AbortSignal.timeout(openAiRequestTimeoutMs(defaultTimeoutMs));
+  return externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal;
 }
 
-export function openAiRequestTimeoutMs(defaultTimeoutMs = 45_000) {
-  const configured = Number(process.env.OPENAI_REQUEST_TIMEOUT_MS);
-  if (Number.isFinite(configured) && configured >= 5_000 && configured <= 180_000) return configured;
-  return defaultTimeoutMs;
+export function openAiRequestTimeoutMs(defaultTimeoutMs = defaultOpenAiRequestTimeoutMs) {
+  return parseBoundedEnvMs("OPENAI_REQUEST_TIMEOUT_MS", {
+    defaultMs: defaultTimeoutMs,
+    minMs: minOpenAiRequestTimeoutMs,
+    maxMs: maxOpenAiRequestTimeoutMs
+  }).value;
 }

@@ -16,24 +16,34 @@ export type OwnerSiteReport = {
 
 export function buildOwnerSiteReport(version: SiteVersion): OwnerSiteReport {
   const v3 = version as SiteVersion & {
-    generationQa?: { qualityReport?: { overallScore: number; rubric: Record<string, number> } };
+    generationQa?: {
+      readiness?: string;
+      blockers?: Array<{ id: string }>;
+      warnings?: Array<{ id: string }>;
+      inspectionSummary?: { metricsByViewport?: Record<string, unknown> };
+    };
     pageComposition?: { pages: Array<{ slug?: string; seo?: { title?: string; description?: string } }> };
   };
-  const rubric = v3.generationQa?.qualityReport?.rubric;
   const pages = v3.pageComposition?.pages ?? [];
   const slugs = pages.map((page) => page.slug || "home");
+  const qa = v3.generationQa;
+  const isReady = qa?.readiness === "ready";
+  const mobileChecked = Boolean(qa?.inspectionSummary?.metricsByViewport && Object.keys(qa.inspectionSummary.metricsByViewport).length > 0);
+  const sourceGrounded = !(qa?.blockers ?? []).some((blocker) =>
+    blocker.id.includes("ground") || blocker.id.includes("source") || blocker.id.includes("claim")
+  );
   const seoChecklist = [
     { label: "Page titles and descriptions on every page", done: pages.every((page) => Boolean(page.seo?.title && page.seo?.description)) },
-    { label: "Mobile rendering verified across phone, tablet, and desktop", done: (rubric?.mobileCredibility ?? 0) >= 60 },
-    { label: "Readable text and accessible contrast verified", done: (rubric?.sectionQuality ?? 0) >= 60 },
+    { label: "Mobile rendering verified across phone, tablet, and desktop", done: mobileChecked },
+    { label: "Readable text and accessible contrast verified", done: isReady },
     { label: "Dedicated service pages where your services support them", done: pages.length > 1 }
   ];
   return {
-    overallScore: v3.generationQa?.qualityReport?.overallScore,
+    overallScore: undefined,
     mobile: {
-      score: rubric?.mobileCredibility,
+      score: undefined,
       statement:
-        (rubric?.mobileCredibility ?? 0) >= 60
+        mobileChecked
           ? "Your site was rendered and checked on phone, tablet, and desktop before it was approved."
           : "Mobile rendering is still being reviewed."
     },
@@ -50,9 +60,9 @@ export function buildOwnerSiteReport(version: SiteVersion): OwnerSiteReport {
           : "Your site is a focused single page; service pages are added as your confirmed services support them."
     },
     grounding: {
-      score: rubric?.sourceGrounding,
+      score: undefined,
       statement:
-        (rubric?.sourceGrounding ?? 0) >= 90
+        sourceGrounded
           ? "Every claim on your site traces to a verified fact about your business — nothing is invented."
           : "Some content is awaiting fact confirmation."
     }

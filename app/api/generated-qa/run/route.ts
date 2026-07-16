@@ -4,14 +4,12 @@ import { appOriginFromRequest } from "@/lib/app-origin";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { inspectUrlRender } from "@/lib/render-inspection";
-import { buildGeneratedSiteQaMetadata } from "@/lib/generated-site-qa";
-import { applyDeterministicGeneratedSiteRepair } from "@/lib/generated-site-repair";
+import { evaluateGeneratedSiteInspection } from "@/lib/generated-site-readiness";
 import { computeSiteModelHash } from "@/lib/site-version-metadata";
 
 const generatedQaSchema = z.object({
   siteId: z.string().min(1),
-  versionId: z.string().min(1),
-  autoRepair: z.boolean().default(true)
+  versionId: z.string().min(1)
 });
 
 export async function POST(request: Request) {
@@ -36,44 +34,8 @@ export async function POST(request: Request) {
     qaRunId: `generated_qa_${crypto.randomUUID().replace(/-/g, "")}`
   });
 
-  if (
-    parsed.data.autoRepair &&
-    firstRun.version.generationQa?.blockers.length &&
-    firstRun.version.status === "draft" &&
-    !firstRun.version.ownerTouched &&
-    !firstRun.version.ownerApprovedAt &&
-    firstRun.version.generationQa.siteModelHash === computeSiteModelHash(bundle, firstRun.version)
-  ) {
-    const repairedVersion = structuredClone(firstRun.version);
-    const repair = applyDeterministicGeneratedSiteRepair({
-      bundle,
-      version: repairedVersion,
-      blockers: firstRun.version.generationQa.blockers
-    });
-    if (repair.applied) {
-      await repository.saveSiteVersion({ siteId: parsed.data.siteId, version: repairedVersion });
-      const refreshedBundle = await repository.getSiteBundle(parsed.data.siteId);
-      const refreshedVersion = refreshedBundle?.siteModel.versions.find((candidate) => candidate.id === parsed.data.versionId);
-      if (refreshedBundle && refreshedVersion) {
-        const secondRun = await inspectAndPersist({
-          request,
-          bundle: refreshedBundle,
-          version: refreshedVersion,
-          qaRunId: `generated_qa_${crypto.randomUUID().replace(/-/g, "")}`,
-          repair
-        });
-        return NextResponse.json({
-          qa: secondRun.version.generationQa,
-          repaired: true,
-          previewUrl: secondRun.previewUrl
-        });
-      }
-    }
-  }
-
   return NextResponse.json({
     qa: firstRun.version.generationQa,
-    repaired: false,
     previewUrl: firstRun.previewUrl
   });
 }
@@ -83,7 +45,6 @@ async function inspectAndPersist(input: {
   bundle: NonNullable<Awaited<ReturnType<typeof repository.getSiteBundle>>>;
   version: NonNullable<Awaited<ReturnType<typeof repository.getSiteBundle>>>["siteModel"]["versions"][number];
   qaRunId: string;
-  repair?: NonNullable<NonNullable<NonNullable<Awaited<ReturnType<typeof repository.getSiteBundle>>>["siteModel"]["versions"][number]["generationQa"]>["repair"]>;
 }) {
   const previewToken = await findOrCreatePreviewToken(input.bundle.businessProfile.siteId, input.version.id);
   if (!previewToken) throw new Error("Unable to create version-bound preview token.");
@@ -99,12 +60,11 @@ async function inspectAndPersist(input: {
     captureScreenshots: true
   });
   const nextVersion = structuredClone(input.version);
-  nextVersion.generationQa = buildGeneratedSiteQaMetadata({
+  await evaluateGeneratedSiteInspection({
     bundle: input.bundle,
     version: nextVersion,
     inspection,
-    qaRunId: input.qaRunId,
-    repair: input.repair
+    qaRunId: input.qaRunId
   });
   await repository.saveSiteVersion({ siteId: input.bundle.businessProfile.siteId, version: nextVersion });
   return { version: nextVersion, previewUrl };

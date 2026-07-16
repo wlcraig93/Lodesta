@@ -12,7 +12,7 @@ import type { CrawlAssessment } from "./crawler";
 
 export async function prepareIntakeInput(
   input: { url?: string; prompt?: string },
-  options: { telemetry?: AgentTelemetryRecorder; identity?: IntakeInput["identity"] } = {}
+  options: { telemetry?: AgentTelemetryRecorder; identity?: IntakeInput["identity"]; signal?: AbortSignal } = {}
 ): Promise<IntakeInput> {
   const telemetry = options.telemetry;
   const safeUrl = await runSpan(
@@ -118,7 +118,8 @@ export async function prepareIntakeInput(
         crawl,
         publicPresence,
         telemetry,
-        spanId: span.id
+        spanId: span.id,
+        signal: options.signal
       }),
     (result) => ({
       outputJson: {
@@ -136,10 +137,6 @@ export async function prepareIntakeInput(
     crawl,
     sourceRenderInspection: renderInspection,
     publicPresence,
-    aiPlanningAttempted: false,
-    plannedMockupImageCount: 0,
-    sourceModelVisualQaRequested: false,
-    generatedModelVisualQaRequested: true,
     includeGeneratedRenderQa: true
   });
 
@@ -212,7 +209,15 @@ function summarizeCrawl(crawl: CrawlAssessment) {
     },
     findings: crawl.findings,
     sampledInternalPages: crawl.sampledInternalPages,
-    pageSummaries: crawl.pageSummaries.slice(0, 8)
+    pageSummaries: crawl.pageSummaries.slice(0, 8).map((page) => ({
+      url: page.url,
+      source: page.source,
+      purposeTags: page.purposeTags,
+      title: page.title,
+      metaDescription: page.metaDescription,
+      mainTextChars: page.mainText?.length ?? 0,
+      facts: page.extractedFacts
+    }))
   };
 }
 

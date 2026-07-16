@@ -10,6 +10,13 @@ export type CheckoutSessionResult = {
   url?: string;
 };
 
+export type BillingPortalSessionResult = {
+  provider: "stripe";
+  configured: boolean;
+  message: string;
+  url?: string;
+};
+
 type CreateCheckoutSessionInput = {
   claimId: string;
   siteId: string;
@@ -73,5 +80,56 @@ export async function createCheckoutSession(input: CreateCheckoutSessionInput): 
     sessionId: payload.id,
     url: payload.url,
     message: "Stripe checkout session created."
+  };
+}
+
+export async function createBillingPortalSession(input: {
+  stripeCustomerId?: string;
+  returnPath: string;
+}): Promise<BillingPortalSessionResult> {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    return {
+      provider: "stripe",
+      configured: false,
+      message: "Stripe customer portal is not configured. Set STRIPE_SECRET_KEY to create portal sessions."
+    };
+  }
+  if (!input.stripeCustomerId) {
+    return {
+      provider: "stripe",
+      configured: true,
+      message: "This site does not have a Stripe customer id yet."
+    };
+  }
+
+  const appUrl = configuredAppOriginOrDefault();
+  const body = new URLSearchParams({
+    customer: input.stripeCustomerId,
+    return_url: `${appUrl}${input.returnPath}`
+  });
+
+  const response = await fetch("https://api.stripe.com/v1/billing_portal/sessions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  const payload = (await response.json().catch(() => null)) as { url?: string; error?: { message?: string } } | null;
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? `Stripe customer portal failed with status ${response.status}`);
+  }
+  if (!payload?.url) {
+    throw new Error("Stripe customer portal response did not include a URL.");
+  }
+
+  return {
+    provider: "stripe",
+    configured: true,
+    url: payload.url,
+    message: "Stripe customer portal session created."
   };
 }

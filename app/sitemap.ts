@@ -3,7 +3,7 @@ import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 import { repository } from "@/lib/repository";
 import { getPublishedVersion } from "@/lib/sample-data";
 import { isIndexableSite } from "@/lib/site-publication";
-import { assertSiteVersionV3 } from "@/lib/site-version-v3";
+import { assertSiteVersionV3, publicSiteVersionV3Issue } from "@/lib/site-version-v3";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +23,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const sitePages = bundles.filter((bundle) => isIndexableSite(bundle, claims)).flatMap((bundle) => {
     const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "sitemap published version");
+    if (publicSiteVersionV3Issue(version)) return [];
     return version.pageComposition.pages.map((page) => ({
       url: `${baseUrl}/sites/${bundle.siteModel.slug}${page.slug ? `/${page.slug}` : ""}`,
       lastModified: version.createdAt ? new Date(version.createdAt) : now,

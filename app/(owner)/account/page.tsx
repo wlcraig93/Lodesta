@@ -85,6 +85,9 @@ export default async function AccountPage() {
                 <span className="badge">{bundle.businessProfile.vertical.replace("_", " ")}</span>
                 <h3>{bundle.businessProfile.name}</h3>
                 <div className="button-row">
+                  <Link className="button primary" href={`/dashboard/${bundle.siteModel.slug}`}>
+                    Dashboard
+                  </Link>
                   <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
                     Editor
                   </Link>

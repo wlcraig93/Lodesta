@@ -416,6 +416,7 @@ function compactValue(value: unknown): string {
 
 function weakestPolicy(policies: SourceAwareFactPolicy[]): SourceAwareFactPolicy {
   if (policies.includes("blocked")) return "blocked";
+  if (policies.includes("owner_review_required")) return "owner_review_required";
   if (policies.includes("live_only")) return "live_only";
   if (policies.includes("internal_only")) return "internal_only";
   return "durable_render";

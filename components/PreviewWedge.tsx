@@ -1,18 +1,16 @@
 import type { SiteBundle, StandardCheckResult, StandardEvaluation } from "@/lib/models";
-import { coldUrlCheckableChecks } from "@/lib/standard-evaluation";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
+import { coldUrlCheckableChecks, siteStandardEvidenceChecks } from "@/lib/standard-evaluation";
 
-type PreviewWedgeProps = {
-  bundle: SiteBundle;
-  replacementEvaluation: StandardEvaluation;
-};
-
-export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProps) {
+export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
+  const replacementChecks = siteStandardEvidenceChecks(bundle);
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
   const sourceUrl = bundle.presenceAssessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
-  const selectedDirection = bundle.presenceAssessment.designDirections?.find((direction) => direction.selected);
-  const mockupArtifacts = bundle.presenceAssessment.mockupArtifacts ?? [];
-  const visualQa = bundle.presenceAssessment.visualQa;
+  const reviewVersion = bundle.siteModel.versions.find((version) => version.status === "draft")
+    ?? bundle.siteModel.versions[0];
+  const readiness = reviewVersion ? getEffectiveGenerationQaReadiness(bundle, reviewVersion) : "unavailable";
+  const visualQa = reviewVersion?.generationQa?.visualQa;
   const presenceNotes = [
     ...bundle.presenceAssessment.technicalNotes,
     ...bundle.presenceAssessment.brandNotes,
@@ -26,7 +24,7 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
         <h1>{bundle.businessProfile.name} has a new draft site ready to review.</h1>
         <p>
           This preview pairs the replacement site with the concrete issues found in the current online presence. The
-          score is generated from checkable SEO, conversion, accessibility, and trust signals.
+          current-site score is generated from checkable SEO, conversion, accessibility, and trust signals.
         </p>
         {sourceUrl ? (
           <a href={sourceUrl} className="source-link">
@@ -38,8 +36,8 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
       </div>
 
       <div className="score-compare">
-        <ScoreCard label="Current site" evaluation={sourceEvaluation} emptyLabel="Not scored" />
-        <ScoreCard label="Generated draft" evaluation={replacementEvaluation} />
+        <ScoreCard label="Current-site report" evaluation={sourceEvaluation} emptyLabel="Not scored" />
+        <QaCard readiness={readiness} visualVerdict={visualQa?.verdict} />
       </div>
 
       <div className="preview-issue-grid">
@@ -65,7 +63,7 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
 
         <div className="preview-issue-list">
           <h2>What this draft improves</h2>
-          {replacementEvaluation.checks
+          {replacementChecks
             .filter((check) => check.passed)
             .slice(0, 4)
             .map((check) => (
@@ -87,22 +85,8 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
         </div>
       ) : null}
 
-      {bundle.presenceAssessment.designDirections?.length ? (
+      {bundle.presenceAssessment.brandAssessment || visualQa ? (
         <div className="preview-issue-grid">
-          <div className="preview-issue-list">
-            <h2>Design directions</h2>
-            {bundle.presenceAssessment.designDirections.map((direction) => (
-              <article key={direction.id} className="preview-issue-card">
-                <span className="badge">{direction.selected ? "selected" : direction.strategy.replace("_", " ")}</span>
-                <h3>{direction.label}</h3>
-                <p>{direction.rationale}</p>
-                <small>
-                  {direction.themePreset} theme · {direction.sectionEmphasis.slice(0, 4).join(", ")}
-                </small>
-              </article>
-            ))}
-          </div>
-
           <div className="preview-issue-list">
             <h2>Brand assessment</h2>
             {bundle.presenceAssessment.brandAssessment ? (
@@ -110,24 +94,18 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
                 <span className="badge">
                   {Math.round(bundle.presenceAssessment.brandAssessment.confidence * 100)}% confidence
                 </span>
-                <h3>{selectedDirection?.label ?? "Selected direction"}</h3>
+                <h3>Design-system expression cues</h3>
                 <p>{bundle.presenceAssessment.brandAssessment.cues.slice(0, 5).join(" · ")}</p>
                 <small>{bundle.presenceAssessment.brandAssessment.preservationRules[0]}</small>
               </article>
             ) : null}
-            {bundle.presenceAssessment.qualityScore ? (
-              <article className="preview-issue-card">
-                <span className="badge">quality score</span>
-                <h3>{bundle.presenceAssessment.qualityScore.summary}</h3>
-                <p>
-                  {bundle.presenceAssessment.qualityScore.measuredCriteria} cold-URL checks ·{" "}
-                  {bundle.presenceAssessment.qualityScore.generatedCriteria} generated checks
-                </p>
-              </article>
-            ) : null}
+          </div>
+
+          <div className="preview-issue-list">
+            <h2>Visual QA</h2>
             {visualQa ? (
               <article className="preview-issue-card">
-                <span className="badge">{visualQa.source === "openai" ? "visual QA" : "visual QA fallback"}</span>
+                <span className="badge">visual judgment: {visualQa.verdict.replace("_", " ")}</span>
                 <h3>{visualQa.summary}</h3>
                 <p>
                   {visualQa.findings.filter((finding) => finding.severity === "fail").length} failures ·{" "}
@@ -141,59 +119,37 @@ export function PreviewWedge({ bundle, replacementEvaluation }: PreviewWedgeProp
         </div>
       ) : null}
 
-      {mockupArtifacts.length ? (
-        <div className="mockup-artifact-strip">
-          <div className="mockup-artifact-header">
-            <div>
-              <span className="badge">Planning mockups</span>
-              <h2>Generated visuals stay separate from the live renderer.</h2>
-            </div>
-            <small>
-              {bundle.presenceAssessment.assetInventory?.filter((asset) => asset.rightsStatus === "reference_only")
-                .length ?? 0}{" "}
-              reference-only assets tracked
-            </small>
-          </div>
-          <div className="mockup-artifact-grid">
-            {mockupArtifacts.map((mockup) => (
-              <article key={mockup.id} className="mockup-artifact-card">
-                {mockup.image?.url ? (
-                  <img src={mockup.image.url} alt={mockup.image.alt} />
-                ) : (
-                  <div className="mockup-artifact-placeholder">
-                    <span>{mockup.status.replace("_", " ")}</span>
-                  </div>
-                )}
-                <div>
-                  <span className="badge">{mockup.strategy.replace("_", " ")}</span>
-                  <h3>{mockup.status === "generated" ? "Image artifact ready" : "Prompt artifact ready"}</h3>
-                  <p>{(mockup.revisedPrompt ?? mockup.prompt).slice(0, 220)}</p>
-                  <small>
-                    {mockup.model ?? "mockup provider"} · {mockup.image?.rightsStatus ?? "preclaim_safe"} · planning
-                    only
-                  </small>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {bundle.presenceAssessment.creativeBrief ? (
-        <div className="creative-brief-strip">
+      {bundle.presenceAssessment.siteDossierV1 ? (
+        <div className="dossier-strip">
           <div>
-            <span className="badge">Creative plan</span>
-            <h2>{bundle.presenceAssessment.creativeBrief.designIntent}</h2>
-            <p>{bundle.presenceAssessment.creativeBrief.mockupPrompt}</p>
+            <span className="badge">Business dossier</span>
+            <h2>{bundle.presenceAssessment.siteDossierV1.sections[0]?.title ?? "Evidence cache"}</h2>
+            <p>{bundle.presenceAssessment.siteDossierV1.sections[0]?.body ?? bundle.presenceAssessment.siteDossierV1.markdown.slice(0, 240)}</p>
           </div>
           <ul>
-            {bundle.presenceAssessment.creativeBrief.visualInspectionChecklist.slice(0, 4).map((item) => (
-              <li key={item}>{item}</li>
+            {bundle.presenceAssessment.siteDossierV1.sections.slice(1, 5).map((section) => (
+              <li key={section.id}>{section.title}</li>
             ))}
           </ul>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function QaCard({
+  readiness,
+  visualVerdict
+}: {
+  readiness: "ready" | "blocked" | "pending" | "unavailable";
+  visualVerdict?: "ship" | "revise" | "not_evaluated";
+}) {
+  return (
+    <article className="score-card">
+      <span>Generated-draft QA</span>
+      <strong>{readinessLabel(readiness)}</strong>
+      <small>{visualVerdict ? `visual judgment: ${visualVerdict.replace("_", " ")}` : "visual judgment unavailable"}</small>
+    </article>
   );
 }
 
@@ -227,4 +183,11 @@ function severityRank(severity: StandardCheckResult["severity"]) {
   if (severity === "fail") return 3;
   if (severity === "warning") return 2;
   return 1;
+}
+
+function readinessLabel(readiness: "ready" | "blocked" | "pending" | "unavailable") {
+  if (readiness === "ready") return "Ready";
+  if (readiness === "blocked") return "Revise";
+  if (readiness === "pending") return "Running";
+  return "Unavailable";
 }

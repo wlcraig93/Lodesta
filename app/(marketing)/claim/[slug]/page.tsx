@@ -1,19 +1,46 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClaimSiteForm, type ClaimFact } from "@/components/ClaimSiteForm";
+import { ClaimSiteForm, type ClaimAssetRight, type ClaimFact } from "@/components/ClaimSiteForm";
 import { repository } from "@/lib/repository";
 import type { BusinessProfile } from "@/lib/models";
+import { requiredAssetRightsForBundle } from "@/lib/asset-rights";
 import { requiredClaimFactIds } from "@/lib/fact-verification";
+import { claimVerificationTargets } from "@/lib/claim-verification-challenge";
 
 export const dynamic = "force-dynamic";
 
-export default async function ClaimPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function ClaimPage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ previewToken?: string }>;
+}) {
   const { slug } = await params;
+  const { previewToken: previewTokenParam } = await searchParams;
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) notFound();
 
   const facts = claimFacts(bundle.businessProfile);
-  const previewToken = (await repository.listPreviewTokens(bundle.businessProfile.siteId))[0];
+  const previewTokens = await repository.listPreviewTokens(bundle.businessProfile.siteId);
+  const linkedPreviewToken = previewTokens.find((token) => token.token === previewTokenParam);
+  const linkedPreviewTokenValue = linkedPreviewToken?.token;
+  const previewToken = linkedPreviewToken ?? previewTokens[0];
+  const outboundProspect = linkedPreviewTokenValue ? await repository.findOutboundProspectByPreviewToken(linkedPreviewTokenValue) : null;
+  if (outboundProspect && linkedPreviewTokenValue) {
+    await repository.recordOutboundEvent({
+      campaignId: outboundProspect.campaignId,
+      prospectId: outboundProspect.id,
+      siteId: outboundProspect.siteId ?? bundle.businessProfile.siteId,
+      type: "claim_started",
+      metadata: { source: "claim_page", previewToken: linkedPreviewTokenValue }
+    });
+  }
+  const assetRights = claimAssetRights(requiredAssetRightsForBundle(bundle), previewToken?.token);
+  const verificationTargets = claimVerificationTargets(bundle.businessProfile).map((target) => ({
+    channel: target.channel,
+    label: target.label
+  }));
 
   return (
     <main className="admin-page">
@@ -44,7 +71,21 @@ export default async function ClaimPage({ params }: { params: Promise<{ slug: st
       <div className="admin-grid">
         <section className="panel">
           <h2>Verify facts</h2>
-          <ClaimSiteForm siteId={bundle.businessProfile.siteId} facts={facts} />
+          <ClaimSiteForm
+            siteId={bundle.businessProfile.siteId}
+            facts={facts}
+            assetRights={assetRights}
+            verificationTargets={verificationTargets}
+            outboundContext={
+              outboundProspect
+                ? {
+                    campaignId: outboundProspect.campaignId,
+                    prospectId: outboundProspect.id,
+                    previewToken: linkedPreviewTokenValue
+                  }
+                : undefined
+            }
+          />
         </section>
 
         <aside className="panel">
@@ -62,6 +103,22 @@ export default async function ClaimPage({ params }: { params: Promise<{ slug: st
       </div>
     </main>
   );
+}
+
+function claimAssetRights(assets: ClaimAssetRight[], previewToken: string | undefined): ClaimAssetRight[] {
+  return assets.map((asset) => ({
+    ...asset,
+    url: previewToken ? previewAssetUrl(asset.url, previewToken) : asset.url
+  }));
+}
+
+function previewAssetUrl(value: string, previewToken: string) {
+  const [pathAndQuery, hash = ""] = value.split("#", 2);
+  const [path, query = ""] = pathAndQuery.split("?", 2);
+  if (!/^\/api\/assets\/[^/?#]+\/scraped-[^/?#]+$/i.test(path)) return value;
+  const params = new URLSearchParams(query);
+  params.set("previewToken", previewToken);
+  return `${path}?${params.toString()}${hash ? `#${hash}` : ""}`;
 }
 
 function claimFacts(profile: BusinessProfile): ClaimFact[] {

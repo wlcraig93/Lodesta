@@ -38,6 +38,7 @@ import { validateBusinessProfileUpdate, validateSectionUpdate } from "./editor-g
 import { updateSiteDesignBundle, type UpdateSiteDesignInput } from "./design";
 import { applySiteIdentity, makeUniqueSlug } from "./site-identity";
 import { applyVerifiedFacts } from "./fact-verification";
+import { claimVerificationSatisfies, type ClaimVerificationLevel } from "./owner-access";
 import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
 import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-settings";
 import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
@@ -314,6 +315,21 @@ export function updateSiteCandidateBundle(candidateId: string, bundle: SiteBundl
   if (!candidate) return null;
   candidate.bundle = structuredClone(assertBundleVersionsV3(bundle, "store update candidate bundle"));
   return structuredClone(candidate);
+}
+
+export function archiveSiteCandidates(candidateIds: string[]) {
+  const store = state();
+  const now = new Date().toISOString();
+  const uniqueIds = Array.from(new Set(candidateIds.map((id) => id.trim()).filter(Boolean))).slice(0, 100);
+  const archived: SiteCandidateRecord[] = [];
+  for (const candidateId of uniqueIds) {
+    const candidate = store.siteCandidates.get(candidateId);
+    if (!candidate || candidate.status === "accepted") continue;
+    candidate.status = "archived";
+    candidate.updatedAt = now;
+    archived.push(structuredClone(candidate));
+  }
+  return archived;
 }
 
 export function mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }) {
@@ -1141,10 +1157,10 @@ export function dismissFinding(input: { siteId: string; findingId: string }) {
   return { ok: true as const, finding };
 }
 
-export function applyAiEditToSite(input: { siteId: string; message: string }) {
+export async function applyAiEditToSite(input: { siteId: string; message: string }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  const result = applyAiEditToBundle(bundle, input.message);
+  const result = await applyAiEditToBundle(bundle, input.message);
   if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
     if (result.mutated && result.draftVersionId) {
       const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
@@ -1165,12 +1181,21 @@ export function createClaim(input: {
   siteId: string;
   ownerUserId?: string;
   ownerEmail?: string;
+  verificationLevel?: ClaimVerificationLevel;
+  verificationMethod?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+  outboundCampaignId?: string;
+  outboundProspectId?: string;
   verifiedFacts?: string[];
   acceptedTerms: boolean;
   acceptedManagement: boolean;
+  acceptedAssetRights?: boolean;
+  attestedAssetIds?: string[];
 }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
+  if (!claimVerificationSatisfies(input.verificationLevel)) return null;
   const acceptedAt = new Date().toISOString();
   applyVerifiedFacts(bundle.businessProfile, input.verifiedFacts ?? []);
   const claim: ClaimRecord = {
@@ -1178,9 +1203,17 @@ export function createClaim(input: {
     siteId: input.siteId,
     ownerUserId: input.ownerUserId,
     ownerEmail: input.ownerEmail?.toLowerCase(),
+    verificationLevel: input.verificationLevel ?? "unverified",
+    verificationMethod: input.verificationMethod,
+    verifiedBy: input.verifiedBy,
+    verifiedAt: input.verifiedAt,
+    outboundCampaignId: input.outboundCampaignId,
+    outboundProspectId: input.outboundProspectId,
     verifiedFacts: input.verifiedFacts ?? [],
     acceptedTermsAt: input.acceptedTerms ? acceptedAt : undefined,
     acceptedManagementAt: input.acceptedManagement ? acceptedAt : undefined,
+    assetRightsAcceptedAt: input.acceptedAssetRights ? acceptedAt : undefined,
+    attestedAssetIds: input.attestedAssetIds ?? [],
     status: "checkout_required" as const,
     createdAt: new Date().toISOString()
   };
@@ -1331,6 +1364,10 @@ export function listOutboundProspects(campaignId?: string) {
   return state()
     .outboundProspects.filter((prospect) => !campaignId || prospect.campaignId === campaignId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export function findOutboundProspectByPreviewToken(previewToken: string) {
+  return state().outboundProspects.find((prospect) => prospect.previewToken === previewToken) ?? null;
 }
 
 export function recordOutboundEvent(input: RecordOutboundEventInput) {

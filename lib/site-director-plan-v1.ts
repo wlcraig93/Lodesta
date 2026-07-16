@@ -5,7 +5,8 @@ import {
   type SectionBlueprintV1,
   type SectionBlueprintValidationIssueV1
 } from "./generated-site-v3-blueprint";
-import type { CatalogManifestV1, DirectorInputManifestV1 } from "./generated-site-v3-director-manifest";
+import type { DesignSystemCatalogManifestV1, DesignSystemPlannerInputManifestV1 } from "./design-system-planner-manifest-v1";
+import type { DesignSystemPlannerConstraintManifestClassIdV1, DesignSystemPlannerConstraintManifestV1 } from "./design-system-planner-constraints-v1";
 import {
   compositionIntentMenuV3,
   type CompositionIntentV3,
@@ -17,9 +18,22 @@ import {
   type DesignControlsV3,
   type SectionPresentationMapV3
 } from "./generated-site-v3-art-direction-catalog";
-import type { SiteArtDirectionFontPairingIdV3, SiteArtDirectionNavPlanV3, SiteArtDirectionRecipeV3, SiteHeaderModeV3 } from "./models";
+import type {
+  RegenerableArtifactProvenanceV1,
+  SiteArtDirectionFontPairingIdV3,
+  SiteArtDirectionNavPlanV3,
+  SiteArtDirectionRecipeV3,
+  SiteHeaderModeV3
+} from "./models";
 
 export const siteDirectorPlanVersionV1 = "site-director-plan-v1" as const;
+export const noAssetsAvailableSentinelV1 = "no_assets_available" as const;
+export const siteDirectorPlanValidatorConstraintClassIdsV1: DesignSystemPlannerConstraintManifestClassIdV1[] = [
+  "nav_targets",
+  "media_asset_ids",
+  "media_proof_eligibility",
+  "media_allowed_uses"
+];
 
 export type SiteDirectorGlobalControlsV1 = {
   fontPosture: "editorial" | "utility" | "expressive";
@@ -59,8 +73,6 @@ export type SiteDirectorPlanV1 = {
   version: typeof siteDirectorPlanVersionV1;
   strategy: {
     rationale: string;
-    creativeDiversityDirective: "differentiate_sequence" | "differentiate_presentations" | "differentiate_controls" | "stay_conservative";
-    geometryDiversityDirective?: "use_archetype_geometry" | "differentiate_hero_services_contact" | "stay_conservative_with_archetype_floor";
   };
   globalControls: SiteDirectorGlobalControlsV1;
   nav: SiteDirectorNavPlanV1;
@@ -98,15 +110,25 @@ export type SiteDirectorPlanValidationResultV1 = {
   acceptedSectionBlueprints: SectionBlueprintV1[];
 };
 
+export type SiteDirectorDesignSystemV1 = {
+  id: string;
+  label: string;
+  rationale: string;
+  controls: SiteDirectorGlobalControlsV1;
+};
+
 export type SiteDirectorRuntimeV1 = {
   version: "site-director-runtime-v1";
-  source: "model";
-  model: string;
+  source: "deterministic";
+  model: "deterministic-site-director-plan-v1";
+  designSystem?: SiteDirectorDesignSystemV1;
+  provenance?: RegenerableArtifactProvenanceV1;
   catalogSchemaHash: string;
-  businessDirectorInputHash: string;
+  businessPlannerInputHash: string;
   planInputHash: string;
-  catalogManifest: CatalogManifestV1;
-  directorInputManifest: DirectorInputManifestV1;
+  catalogManifest: DesignSystemCatalogManifestV1;
+  plannerInputManifest: DesignSystemPlannerInputManifestV1;
+  constraintManifest?: DesignSystemPlannerConstraintManifestV1;
   plan: SiteDirectorPlanV1;
   validation: {
     status: "passed" | "failed";
@@ -118,13 +140,21 @@ export type SiteDirectorRuntimeV1 = {
 
 export function validateSiteDirectorPlanV1(input: {
   plan: SiteDirectorPlanV1;
-  catalogManifest: CatalogManifestV1;
-  directorInputManifest: DirectorInputManifestV1;
+  catalogManifest: DesignSystemCatalogManifestV1;
+  plannerInputManifest: DesignSystemPlannerInputManifestV1;
+  constraintManifest?: DesignSystemPlannerConstraintManifestV1;
 }): SiteDirectorPlanValidationResultV1 {
   const issues: SiteDirectorPlanValidationIssueV1[] = [];
   const acceptedSectionBlueprints: SectionBlueprintV1[] = [];
-  const assetIds = input.directorInputManifest.assets.map((asset) => asset.id);
-  const serviceIds = new Set(input.directorInputManifest.services.map((service) => service.id));
+  const inputAssetIds = [
+    ...input.plannerInputManifest.assets.map((asset) => asset.id),
+    ...(input.plannerInputManifest.mediaCandidates ?? []).map((asset) => asset.id)
+  ];
+  const assetIds = input.constraintManifest?.mediaUseRules.assetIds.length
+    ? input.constraintManifest.mediaUseRules.assetIds
+    : inputAssetIds;
+  const mediaCandidateById = new Map((input.plannerInputManifest.mediaCandidates ?? []).map((candidate) => [candidate.id, candidate]));
+  const serviceIds = new Set(input.plannerInputManifest.services.map((service) => service.id));
 
   if (input.plan.version !== siteDirectorPlanVersionV1) {
     issues.push(issue("site_director.version_invalid", `Expected ${siteDirectorPlanVersionV1}.`, "version"));
@@ -155,13 +185,13 @@ export function validateSiteDirectorPlanV1(input: {
   if (!acceptedSectionBlueprints.some((blueprint) => blueprint.role === "hero")) {
     issues.push(issue("site_director.missing_required_section", "Home page must include one hero section blueprint.", "home.sections"));
   }
-  if (input.directorInputManifest.services.length && !acceptedSectionBlueprints.some((blueprint) => blueprint.role === "services")) {
+  if (input.plannerInputManifest.services.length && !acceptedSectionBlueprints.some((blueprint) => blueprint.role === "services")) {
     issues.push(issue("site_director.missing_required_section", "Home page must include a services section when services are present.", "home.sections"));
   }
   if (!acceptedSectionBlueprints.some((blueprint) => blueprint.role === "faq")) {
     issues.push(issue("site_director.missing_required_section", "Home page must include an FAQ section blueprint.", "home.sections"));
   }
-  const hasLocationEvidence = input.directorInputManifest.locations.some((location) => location.hasAddress || location.serviceAreaCount > 0);
+  const hasLocationEvidence = input.plannerInputManifest.locations.some((location) => location.hasAddress || location.serviceAreaCount > 0);
   if (hasLocationEvidence && !acceptedSectionBlueprints.some((blueprint) => blueprint.role === "local")) {
     issues.push(issue("site_director.missing_required_section", "Home page must include a local/location section when location evidence is present.", "home.sections"));
   }
@@ -169,17 +199,18 @@ export function validateSiteDirectorPlanV1(input: {
     issues.push(issue("site_director.missing_required_section", "Home page must include a contact or conversion section blueprint.", "home.sections"));
   }
 
-  validateNavV1(input.plan.nav, issues);
+  validateNavV1(input.plan.nav, issues, input.constraintManifest);
   validateServicePagesV1(input.plan.servicePages, serviceIds, issues);
-  validateAssetAssignmentsV1(input.plan.assets, new Set(assetIds), issues);
+  validateAssetAssignmentsV1(input.plan.assets, new Set(assetIds), mediaCandidateById, input.constraintManifest, issues);
 
   return { ok: issues.length === 0, issues, acceptedSectionBlueprints };
 }
 
 export function assertValidSiteDirectorPlanV1(input: {
   plan: SiteDirectorPlanV1;
-  catalogManifest: CatalogManifestV1;
-  directorInputManifest: DirectorInputManifestV1;
+  catalogManifest: DesignSystemCatalogManifestV1;
+  plannerInputManifest: DesignSystemPlannerInputManifestV1;
+  constraintManifest?: DesignSystemPlannerConstraintManifestV1;
 }): SiteDirectorPlanV1 {
   const validation = validateSiteDirectorPlanV1(input);
   if (!validation.ok) {
@@ -205,7 +236,7 @@ export function compositionPlanFromSiteDirectorPlanV1(plan: SiteDirectorPlanV1):
     });
   }
 
-  return sections.length >= 4 ? { version: "composition-plan-v1", source: "model", sections } : undefined;
+  return sections.length >= 4 ? { version: "composition-plan-v1", source: "deterministic_design_system", sections } : undefined;
 }
 
 function copyJobSummaryV1(blueprint: SectionBlueprintV1) {
@@ -359,8 +390,7 @@ export function createMinimalSiteDirectorPlanFixtureV1(input: {
   return {
     version: siteDirectorPlanVersionV1,
     strategy: {
-      rationale: "Fixture plan for validating the catalog-bounded site director contract.",
-      creativeDiversityDirective: "stay_conservative"
+      rationale: "Fixture plan for validating the catalog-bounded deterministic design-system contract."
     },
     globalControls: {
       fontPosture: "editorial",
@@ -393,7 +423,12 @@ export function siteDirectorSectionBlueprint(input: Omit<SectionBlueprintV1, "ve
   return assertValidSectionBlueprintV1({ ...input, version: sectionBlueprintVersionV1, source: "site_director" });
 }
 
-function validateNavV1(nav: SiteDirectorNavPlanV1, issues: SiteDirectorPlanValidationIssueV1[]) {
+function validateNavV1(
+  nav: SiteDirectorNavPlanV1,
+  issues: SiteDirectorPlanValidationIssueV1[],
+  constraintManifest?: DesignSystemPlannerConstraintManifestV1
+) {
+  const navTargets = constraintManifest ? new Set(constraintManifest.navTargets) : undefined;
   const labels = new Set<string>();
   for (const [index, item] of nav.items.entries()) {
     const normalized = item.label.trim().toLowerCase();
@@ -411,7 +446,22 @@ function validateNavV1(nav: SiteDirectorNavPlanV1, issues: SiteDirectorPlanValid
     if (item.kind !== "dropdown" && !item.target) {
       issues.push(issue("site_director.nav_invalid", `Nav item "${item.label}" must include a target.`, `nav.items.${index}.target`));
     }
+    if (item.kind !== "dropdown" && item.target && navTargets && !isDirectorSelectableNavTargetV1(item.target, navTargets)) {
+      issues.push(issue("site_director.nav_invalid", `Nav item "${item.label}" target "${item.target}" is not director-selectable.`, `nav.items.${index}.target`));
+    }
+    for (const [childIndex, child] of (item.children ?? []).entries()) {
+      if (child.target && navTargets && !isDirectorSelectableNavTargetV1(child.target, navTargets)) {
+        issues.push(issue("site_director.nav_invalid", `Dropdown nav item "${child.label}" target "${child.target}" is not director-selectable.`, `nav.items.${index}.children.${childIndex}.target`));
+      }
+    }
   }
+  if (nav.primaryCta.target && navTargets && !isDirectorSelectableNavTargetV1(nav.primaryCta.target, navTargets)) {
+    issues.push(issue("site_director.nav_invalid", `Primary CTA target "${nav.primaryCta.target}" is not director-selectable.`, "nav.primaryCta.target"));
+  }
+}
+
+function isDirectorSelectableNavTargetV1(target: string, navTargets: Set<string>) {
+  return navTargets.has(target) || /^(?:tel:|mailto:|https?:)/i.test(target);
 }
 
 function validateServicePagesV1(
@@ -435,21 +485,45 @@ function validateServicePagesV1(
 function validateAssetAssignmentsV1(
   assets: SiteDirectorAssetAssignmentV1[],
   assetIds: Set<string>,
+  mediaCandidateById: Map<string, NonNullable<DesignSystemPlannerInputManifestV1["mediaCandidates"]>[number]>,
+  constraintManifest: DesignSystemPlannerConstraintManifestV1 | undefined,
   issues: SiteDirectorPlanValidationIssueV1[]
 ) {
+  const proofEligibleAssetIds = constraintManifest ? new Set(constraintManifest.mediaUseRules.proofEligibleAssetIds) : undefined;
+  const allowedUsesByAssetId = constraintManifest?.mediaUseRules.allowedUsesByAssetId ?? {};
   for (const [index, asset] of assets.entries()) {
+    if (asset.assetId === noAssetsAvailableSentinelV1) continue;
     if (!assetIds.has(asset.assetId)) {
       issues.push(issue("site_director.asset_unknown", `Unknown asset id "${asset.assetId}".`, `assets.${index}.assetId`));
     }
     if (asset.rationale.trim().length < 10) {
       issues.push(issue("site_director.asset_invalid", "Asset assignment rationale is required.", `assets.${index}.rationale`));
     }
+    const mediaCandidate = mediaCandidateById.get(asset.assetId);
+    if (asset.use === "proof" && mediaCandidate && !mediaCandidate.proofEligible) {
+      issues.push(issue("site_director.asset_invalid", `Asset "${asset.assetId}" is not eligible for proof slots.`, `assets.${index}.use`));
+    }
+    if (asset.use === "proof" && proofEligibleAssetIds?.has(asset.assetId) === false && mediaCandidate) {
+      issues.push(issue("site_director.asset_invalid", `Asset "${asset.assetId}" is blocked from proof by the director constraint manifest.`, `assets.${index}.use`));
+    }
+    const allowedUses = allowedUsesByAssetId[asset.assetId];
+    if (allowedUses && !assetAssignmentUseAllowedV1(asset.use, allowedUses)) {
+      issues.push(issue("site_director.asset_invalid", `Asset "${asset.assetId}" cannot be used as ${asset.use} by the director constraint manifest.`, `assets.${index}.use`));
+    }
   }
+}
+
+function assetAssignmentUseAllowedV1(
+  use: SiteDirectorAssetAssignmentV1["use"],
+  allowedUses: NonNullable<DesignSystemPlannerInputManifestV1["mediaCandidates"]>[number]["allowedUses"]
+) {
+  if (allowedUses.includes(use)) return true;
+  return use === "service" && allowedUses.includes("context");
 }
 
 function validateBlueprintManifestSelectionV1(
   blueprint: SectionBlueprintV1,
-  catalogManifest: CatalogManifestV1,
+  catalogManifest: DesignSystemCatalogManifestV1,
   index: number,
   issues: SiteDirectorPlanValidationIssueV1[]
 ) {

@@ -6,7 +6,7 @@
  * repoint a domain or export/delete data.
  */
 
-export type ClaimVerificationLevel = "contact_verified" | "owner_verified" | "operator_verified";
+export type ClaimVerificationLevel = "unverified" | "contact_verified" | "owner_verified" | "operator_verified";
 
 export type OwnerActionKey =
   | "confirm_fact"
@@ -21,10 +21,20 @@ export type OwnerActionKey =
   | "delete_account";
 
 const levelRank: Record<ClaimVerificationLevel, number> = {
+  unverified: 0,
   contact_verified: 1,
   owner_verified: 2,
   operator_verified: 3
 };
+
+export const minimumCheckoutClaimVerificationLevel: ClaimVerificationLevel = "contact_verified";
+
+export function claimVerificationSatisfies(
+  level: ClaimVerificationLevel | undefined,
+  minimum: ClaimVerificationLevel = minimumCheckoutClaimVerificationLevel
+): boolean {
+  return levelRank[level ?? "unverified"] >= levelRank[minimum];
+}
 
 /** Minimum verification level per owner action. */
 export const requiredLevelForAction: Record<OwnerActionKey, ClaimVerificationLevel> = {

@@ -1,0 +1,578 @@
+[
+  {
+    "id": "auto_body_source_media",
+    "business": {
+      "vertical": "auto_body",
+      "services": [
+        "Collision repair"
+      ]
+    },
+    "runtime": {
+      "source": "deterministic",
+      "model": "deterministic-site-director-plan-v1",
+      "validation": "passed",
+      "designSystem": {
+        "id": "auto_body_premium_no_media",
+        "label": "Auto Body Premium No Media",
+        "controls": {
+          "fontPosture": "utility",
+          "colorPosture": "high_contrast",
+          "buttonSystem": "square",
+          "cardChrome": "bordered",
+          "figureTreatment": "flush",
+          "headingTreatment": "compact",
+          "sectionRhythm": "spacious"
+        }
+      },
+      "globalControls": {
+        "fontPosture": "utility",
+        "colorPosture": "high_contrast",
+        "buttonSystem": "square",
+        "cardChrome": "bordered",
+        "figureTreatment": "flush",
+        "headingTreatment": "compact",
+        "sectionRhythm": "spacious"
+      },
+      "nav": {
+        "items": [
+          {
+            "label": "Services",
+            "kind": "anchor",
+            "target": "#services"
+          },
+          {
+            "label": "Location",
+            "kind": "anchor",
+            "target": "#location"
+          },
+          {
+            "label": "FAQ",
+            "kind": "anchor",
+            "target": "#faq"
+          }
+        ],
+        "primaryCta": {
+          "label": "Request an estimate",
+          "target": "#contact"
+        }
+      },
+      "homeSections": [
+        {
+          "id": "hero",
+          "role": "hero",
+          "templateId": "hero_statement",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "heroLayout": "no_media_editorial",
+            "proofPlacement": "none",
+            "ctaLayout": "button_plus_text_link",
+            "mediaTreatment": "flush",
+            "headlineScale": "standard"
+          }
+        },
+        {
+          "id": "services",
+          "role": "services",
+          "templateId": "side_intro_rows",
+          "ctaRole": "contextual",
+          "slotCounts": {
+            "items": 3
+          }
+        },
+        {
+          "id": "process",
+          "role": "process",
+          "templateId": "numbered_steps",
+          "ctaRole": "contextual",
+          "templateOptions": {
+            "stepTreatment": "stepper_vertical",
+            "orientation": "vertical",
+            "numberStyle": "small_badge",
+            "stepDensity": "balanced"
+          }
+        },
+        {
+          "id": "about",
+          "role": "story",
+          "templateId": "editorial_statement",
+          "ctaRole": "secondary"
+        },
+        {
+          "id": "location",
+          "role": "local",
+          "templateId": "location_showcase",
+          "ctaRole": "secondary",
+          "templateOptions": {
+            "locationLayout": "map_left_hours_right",
+            "statusBadge": "open_now",
+            "hoursDisplay": "full_week",
+            "actionCluster": "directions_call"
+          }
+        },
+        {
+          "id": "faq",
+          "role": "faq",
+          "templateId": "faq_list",
+          "ctaRole": "none"
+        },
+        {
+          "id": "contact",
+          "role": "contact",
+          "templateId": "contact_split",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "contactLayout": "quote_card",
+            "formComplexity": "short",
+            "proofSidebar": "location",
+            "ctaMode": "estimate"
+          }
+        }
+      ],
+      "servicePages": [
+        {
+          "serviceId": "service_1",
+          "slug": "collision-repair",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Collision repair\" does not have enough distinct source detail for a useful standalone page."
+        }
+      ]
+    }
+  },
+  {
+    "id": "dental_brand_expression",
+    "business": {
+      "vertical": "dental",
+      "services": [
+        "Preventive Dentistry"
+      ]
+    },
+    "runtime": {
+      "source": "deterministic",
+      "model": "deterministic-site-director-plan-v1",
+      "validation": "passed",
+      "designSystem": {
+        "id": "direct_service_ledger",
+        "label": "Direct Service Ledger",
+        "controls": {
+          "fontPosture": "editorial",
+          "colorPosture": "neutral",
+          "buttonSystem": "text_link",
+          "cardChrome": "editorial",
+          "figureTreatment": "flush",
+          "headingTreatment": "standard",
+          "sectionRhythm": "compact"
+        }
+      },
+      "globalControls": {
+        "fontPosture": "editorial",
+        "colorPosture": "neutral",
+        "buttonSystem": "text_link",
+        "cardChrome": "editorial",
+        "figureTreatment": "flush",
+        "headingTreatment": "standard",
+        "sectionRhythm": "compact"
+      },
+      "nav": {
+        "items": [
+          {
+            "label": "Services",
+            "kind": "anchor",
+            "target": "#services"
+          },
+          {
+            "label": "Location",
+            "kind": "anchor",
+            "target": "#location"
+          },
+          {
+            "label": "FAQ",
+            "kind": "anchor",
+            "target": "#faq"
+          }
+        ],
+        "primaryCta": {
+          "label": "Call now",
+          "target": "tel:+15125550190"
+        }
+      },
+      "homeSections": [
+        {
+          "id": "hero",
+          "role": "hero",
+          "templateId": "hero_statement",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "heroLayout": "text_first",
+            "proofPlacement": "none",
+            "ctaLayout": "button_plus_text_link",
+            "mediaTreatment": "flush",
+            "headlineScale": "compact"
+          }
+        },
+        {
+          "id": "services",
+          "role": "services",
+          "templateId": "side_intro_rows",
+          "ctaRole": "contextual",
+          "slotCounts": {
+            "items": 3
+          }
+        },
+        {
+          "id": "process",
+          "role": "process",
+          "templateId": "numbered_steps",
+          "ctaRole": "contextual",
+          "templateOptions": {
+            "stepTreatment": "stepper_vertical",
+            "orientation": "vertical",
+            "numberStyle": "small_badge",
+            "stepDensity": "balanced"
+          }
+        },
+        {
+          "id": "location",
+          "role": "local",
+          "templateId": "location_showcase",
+          "ctaRole": "secondary",
+          "templateOptions": {
+            "locationLayout": "map_left_hours_right",
+            "statusBadge": "open_now",
+            "hoursDisplay": "full_week",
+            "actionCluster": "directions_call"
+          }
+        },
+        {
+          "id": "faq",
+          "role": "faq",
+          "templateId": "faq_list",
+          "ctaRole": "none"
+        },
+        {
+          "id": "contact",
+          "role": "contact",
+          "templateId": "contact_split",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "contactLayout": "call_first",
+            "formComplexity": "none",
+            "proofSidebar": "location",
+            "ctaMode": "booking"
+          }
+        }
+      ],
+      "servicePages": [
+        {
+          "serviceId": "service_1",
+          "slug": "preventive-dentistry",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Preventive Dentistry\" does not have enough distinct source detail for a useful standalone page."
+        }
+      ]
+    }
+  },
+  {
+    "id": "restaurant_ordering",
+    "business": {
+      "vertical": "restaurant",
+      "services": [
+        "Menu",
+        "Online ordering",
+        "Catering"
+      ]
+    },
+    "runtime": {
+      "source": "deterministic",
+      "model": "deterministic-site-director-plan-v1",
+      "validation": "passed",
+      "designSystem": {
+        "id": "warm_local_counter",
+        "label": "Warm Local Counter",
+        "controls": {
+          "fontPosture": "utility",
+          "colorPosture": "warm",
+          "buttonSystem": "mixed",
+          "cardChrome": "elevated",
+          "figureTreatment": "framed",
+          "headingTreatment": "standard",
+          "sectionRhythm": "spacious"
+        }
+      },
+      "globalControls": {
+        "fontPosture": "utility",
+        "colorPosture": "warm",
+        "buttonSystem": "mixed",
+        "cardChrome": "elevated",
+        "figureTreatment": "framed",
+        "headingTreatment": "standard",
+        "sectionRhythm": "spacious"
+      },
+      "nav": {
+        "items": [
+          {
+            "label": "Services",
+            "kind": "anchor",
+            "target": "#services"
+          },
+          {
+            "label": "Location",
+            "kind": "anchor",
+            "target": "#location"
+          },
+          {
+            "label": "FAQ",
+            "kind": "anchor",
+            "target": "#faq"
+          }
+        ],
+        "primaryCta": {
+          "label": "Call now",
+          "target": "tel:+15035550128"
+        }
+      },
+      "homeSections": [
+        {
+          "id": "hero",
+          "role": "hero",
+          "templateId": "hero_statement",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "heroLayout": "text_first",
+            "proofPlacement": "none",
+            "ctaLayout": "inline",
+            "mediaTreatment": "rounded_panel",
+            "headlineScale": "standard"
+          }
+        },
+        {
+          "id": "services",
+          "role": "services",
+          "templateId": "intro_grid",
+          "ctaRole": "contextual",
+          "slotCounts": {
+            "items": 3
+          },
+          "templateOptions": {
+            "cardTreatment": "service_cards",
+            "headingLayout": "split_header",
+            "cardAction": "text_link"
+          }
+        },
+        {
+          "id": "process",
+          "role": "process",
+          "templateId": "numbered_steps",
+          "ctaRole": "contextual",
+          "templateOptions": {
+            "stepTreatment": "stepper_vertical",
+            "orientation": "vertical",
+            "numberStyle": "small_badge",
+            "stepDensity": "balanced"
+          }
+        },
+        {
+          "id": "location",
+          "role": "local",
+          "templateId": "location_showcase",
+          "ctaRole": "secondary",
+          "templateOptions": {
+            "locationLayout": "map_left_hours_right",
+            "statusBadge": "open_now",
+            "hoursDisplay": "full_week",
+            "actionCluster": "directions_call"
+          }
+        },
+        {
+          "id": "faq",
+          "role": "faq",
+          "templateId": "faq_list",
+          "ctaRole": "none"
+        },
+        {
+          "id": "contact",
+          "role": "contact",
+          "templateId": "contact_split",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "contactLayout": "visit_first",
+            "formComplexity": "none",
+            "proofSidebar": "location",
+            "ctaMode": "phone"
+          }
+        }
+      ],
+      "servicePages": [
+        {
+          "serviceId": "service_1",
+          "slug": "menu",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Menu\" does not have enough distinct source detail for a useful standalone page."
+        },
+        {
+          "serviceId": "service_2",
+          "slug": "online-ordering",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Online ordering\" does not have enough distinct source detail for a useful standalone page."
+        },
+        {
+          "serviceId": "service_3",
+          "slug": "catering",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Catering\" does not have enough distinct source detail for a useful standalone page."
+        }
+      ]
+    }
+  },
+  {
+    "id": "home_services_many_services",
+    "business": {
+      "vertical": "home_services",
+      "services": [
+        "Emergency service",
+        "Repairs",
+        "Maintenance"
+      ]
+    },
+    "runtime": {
+      "source": "deterministic",
+      "model": "deterministic-site-director-plan-v1",
+      "validation": "passed",
+      "designSystem": {
+        "id": "warm_local_counter",
+        "label": "Warm Local Counter",
+        "controls": {
+          "fontPosture": "utility",
+          "colorPosture": "warm",
+          "buttonSystem": "mixed",
+          "cardChrome": "elevated",
+          "figureTreatment": "framed",
+          "headingTreatment": "standard",
+          "sectionRhythm": "spacious"
+        }
+      },
+      "globalControls": {
+        "fontPosture": "utility",
+        "colorPosture": "warm",
+        "buttonSystem": "mixed",
+        "cardChrome": "elevated",
+        "figureTreatment": "framed",
+        "headingTreatment": "standard",
+        "sectionRhythm": "spacious"
+      },
+      "nav": {
+        "items": [
+          {
+            "label": "Services",
+            "kind": "anchor",
+            "target": "#services"
+          },
+          {
+            "label": "Location",
+            "kind": "anchor",
+            "target": "#location"
+          },
+          {
+            "label": "FAQ",
+            "kind": "anchor",
+            "target": "#faq"
+          }
+        ],
+        "primaryCta": {
+          "label": "Call now",
+          "target": "tel:+15125550104"
+        }
+      },
+      "homeSections": [
+        {
+          "id": "hero",
+          "role": "hero",
+          "templateId": "hero_statement",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "heroLayout": "text_first",
+            "proofPlacement": "none",
+            "ctaLayout": "inline",
+            "mediaTreatment": "rounded_panel",
+            "headlineScale": "standard"
+          }
+        },
+        {
+          "id": "services",
+          "role": "services",
+          "templateId": "intro_grid",
+          "ctaRole": "contextual",
+          "slotCounts": {
+            "items": 3
+          },
+          "templateOptions": {
+            "cardTreatment": "service_cards",
+            "headingLayout": "split_header",
+            "cardAction": "text_link"
+          }
+        },
+        {
+          "id": "process",
+          "role": "process",
+          "templateId": "numbered_steps",
+          "ctaRole": "contextual",
+          "templateOptions": {
+            "stepTreatment": "stepper_vertical",
+            "orientation": "vertical",
+            "numberStyle": "small_badge",
+            "stepDensity": "balanced"
+          }
+        },
+        {
+          "id": "location",
+          "role": "local",
+          "templateId": "location_showcase",
+          "ctaRole": "secondary",
+          "templateOptions": {
+            "locationLayout": "map_left_hours_right",
+            "statusBadge": "open_now",
+            "hoursDisplay": "full_week",
+            "actionCluster": "directions_call"
+          }
+        },
+        {
+          "id": "faq",
+          "role": "faq",
+          "templateId": "faq_list",
+          "ctaRole": "none"
+        },
+        {
+          "id": "contact",
+          "role": "contact",
+          "templateId": "contact_split",
+          "ctaRole": "primary",
+          "templateOptions": {
+            "contactLayout": "visit_first",
+            "formComplexity": "none",
+            "proofSidebar": "location",
+            "ctaMode": "phone"
+          }
+        }
+      ],
+      "servicePages": [
+        {
+          "serviceId": "service_1",
+          "slug": "emergency-service",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Emergency service\" does not have enough distinct source detail for a useful standalone page."
+        },
+        {
+          "serviceId": "service_2",
+          "slug": "repairs",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Repairs\" does not have enough distinct source detail for a useful standalone page."
+        },
+        {
+          "serviceId": "service_3",
+          "slug": "maintenance",
+          "strategy": "homepage_only",
+          "antiDoorwayRationale": "Homepage-only because \"Maintenance\" does not have enough distinct source detail for a useful standalone page."
+        }
+      ]
+    }
+  }
+]

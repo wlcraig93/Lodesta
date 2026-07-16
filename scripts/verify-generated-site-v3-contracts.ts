@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { compileGeneratedSiteV3Site } from "../lib/generated-site-v3-compiler";
+import { compileGeneratedSiteV3Site, sourceBackedReviewSummaryFactV1 } from "../lib/generated-site-v3-compiler";
 import {
   generatedSiteV3ArtifactTypes,
   generatedSiteV3FontPairings,
@@ -11,10 +11,9 @@ import { applyGeneratedSiteV3 } from "../lib/generated-site-v3-pipeline";
 import { compileVisualSectionV3, getVisualSectionV3, type VisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
 import { reconcileNavPlanV3 } from "../lib/generated-site-v3-nav";
 import { buildGeneratedSiteQaMetadata } from "../lib/generated-site-qa";
-import { buildGenerationRepairTargets } from "../lib/generated-site-repair-targets";
-import { applyUnresolvedRepairTargetReadinessGate } from "../lib/generated-site-readiness";
+import { generationObjectiveBlockersV3 } from "../lib/generation-gate";
 import { applyCompositionPlanV3, validateCompositionPlanV3 } from "../lib/generated-site-v3-composition-plan";
-import { generatedSiteDesignArchetypesV1 } from "../lib/generated-site-v3-archetypes";
+import { generatedSiteDesignSystemsV1 } from "../lib/generated-site-design-systems-v1";
 import {
   assertValidSectionBlueprintV1,
   sectionBlueprintVersionV1,
@@ -22,16 +21,19 @@ import {
 } from "../lib/generated-site-v3-blueprint";
 import { modelSelectableSectionTemplatesV3, renderableSectionTemplatesV3 } from "../lib/generated-site-v3-section-templates";
 import { withBusinessBundleFields } from "../lib/business-model";
-import { buildFactCoverageReport } from "../lib/fact-coverage";
 import { localRepository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { SiteRendererV3 } from "../lib/site-renderer-v3";
-import type { BusinessProfile, ExtensionModel, GeneratedCopyDeckV2, GenerationQaMetadata, RenderInspectionResult, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
+import type { AssetReference, BusinessProfile, ExtensionModel, GeneratedCopyDeckV2, RenderInspectionResult, SiteBundle, SiteModel, SiteVersionV3, Theme } from "../lib/models";
+import { siteEvidenceLedgerVersionV1, type SiteEvidenceLedgerV1 } from "../lib/evidence-ledger-v1";
+import { normalizeVisualQaVerdict } from "../lib/visual-qa";
+import { lintGeneratedCopyDeck, prepareGeneratedCopyDeckForLint } from "../lib/generated-copy-v2";
 
 const forbiddenPublicV3Copy = [
   "template",
   "source fact",
   "source-backed",
+  "source information",
   "generic contact form",
   "visual context",
   "business media context",
@@ -49,6 +51,9 @@ const forbiddenPublicV3Copy = [
   "context"
 ];
 const removedLocationPanelTemplateId = ["location", "panel"].join("_");
+
+assert.equal(normalizeVisualQaVerdict("revise", [{ severity: "warning" }]), "ship", "Warnings alone cannot require revision.");
+assert.equal(normalizeVisualQaVerdict("ship", [{ severity: "fail" }]), "revise", "A material fail finding must require revision.");
 
 assert.deepEqual(generatedSiteV3ArtifactTypes, [
   "art_direction_decision",
@@ -74,16 +79,18 @@ assert.ok(
   "Every model-selectable template must remain renderable for stored-plan replay."
 );
 assert.ok(
-  generatedSiteDesignArchetypesV1.length >= 5 && generatedSiteDesignArchetypesV1.length <= 6,
-  "Launch archetype catalog should keep 5-6 enabled, human-approved design directions."
+  generatedSiteDesignSystemsV1.length >= 5 && generatedSiteDesignSystemsV1.length <= 7,
+  "Launch design-system catalog should keep 5-7 enabled, human-approved systems."
 );
-for (const archetype of generatedSiteDesignArchetypesV1) {
-  assert.equal(archetype.version, "generated-site-design-archetype-v1", `${archetype.id} should use the archetype contract version.`);
-  assert.equal(archetype.manuallyApproved, true, `${archetype.id} cannot be enabled without manual design approval.`);
-  assert.equal(archetype.approval.status, "approved", `${archetype.id} approval status should be approved.`);
-  assert.ok(archetype.approval.desktopReview.length >= 48, `${archetype.id} should record desktop review evidence.`);
-  assert.ok(archetype.approval.mobileReview.length >= 48, `${archetype.id} should record mobile review evidence.`);
-  assert.ok(archetype.approval.distinctiveness.length >= 36, `${archetype.id} should record what makes it visually distinct.`);
+for (const designSystem of generatedSiteDesignSystemsV1) {
+  assert.equal(designSystem.version, "generated-site-design-system-v1", `${designSystem.id} should use the design-system contract version.`);
+  assert.equal(designSystem.manuallyApproved, true, `${designSystem.id} cannot be enabled without manual design approval.`);
+  assert.equal(designSystem.approval.status, "approved", `${designSystem.id} approval status should be approved.`);
+  assert.ok(designSystem.approval.desktopReview.length >= 48, `${designSystem.id} should record desktop review evidence.`);
+  assert.ok(designSystem.approval.mobileReview.length >= 48, `${designSystem.id} should record mobile review evidence.`);
+  assert.ok(designSystem.approval.distinctiveness.length >= 36, `${designSystem.id} should record what makes it visually distinct.`);
+  assert.ok(designSystem.chassis.fontPairingMenu.length >= 3 && designSystem.chassis.fontPairingMenu.length <= 5, `${designSystem.id} should expose a tuned 3-5 pairing expression menu.`);
+  assert.equal(new Set(designSystem.sectionPolicy.orderedSectionIds).size, designSystem.sectionPolicy.orderedSectionIds.length, `${designSystem.id} section order must not contain duplicates.`);
 }
 assertValidSectionBlueprintV1({
   version: sectionBlueprintVersionV1,
@@ -155,14 +162,13 @@ const testBusiness: BusinessProfile = {
 const testCompile = compileGeneratedSiteV3Site({ siteId: testBusiness.siteId, business: testBusiness, createdAt: "2026-06-02T00:00:00.000Z" });
 const testVersion = testCompile.version;
 assert.equal(testVersion.rendererVersion, "layout-v3", "V3 compiler should emit layout-v3.");
-// Hero family rotation: with safe media the seed selects hero_split or the
-// full-bleed image hero_statement; both are valid leads.
 const heroSection = testVersion.pageComposition.pages[0]?.sections[0];
-assert.ok(
-  heroSection?.variant === "hero_split" ||
-    (heroSection?.variant === "hero_statement" && (heroSection.props?.visualSectionV3 as { options?: { background?: { kind?: string } } })?.options?.background?.kind === "image"),
-  `Auto-body V3 compiler should lead with a media hero (split or full-bleed image); got ${heroSection?.variant}.`
-);
+const firstVisualSection = getVisualSectionV3(testVersion.pageComposition.pages[0]?.sections[0]?.props ?? {});
+assert.equal(heroSection?.variant, "hero_statement", `Auto-body no-media floor should lead with hero_statement; got ${heroSection?.variant}.`);
+assert.equal(firstVisualSection?.templateId, "hero_statement", `Auto-body no-media floor should compile a hero_statement; got ${firstVisualSection?.templateId}.`);
+assert.equal(firstVisualSection?.options.heroLayout, "no_media_editorial", "Auto-body no-media floor should use the media-independent editorial hero.");
+assert.equal("media" in (firstVisualSection?.slots ?? {}), false, "Auto-body no-media floor hero should not render a media slot.");
+assert.equal(testVersion.artDirection.mediaTreatment, "media_independent", "Auto-body no-media floor should record media-independent art direction.");
 assert.equal(testCompile.compositionReport.selectedRecipe, "auto_body_v1", "V3 compiler should expose the selected auto-body recipe in the internal composition report.");
 assert.equal(testCompile.compositionReport.evidence.hasRealPricingEvidence, false, "Baseline auto-body fixture should not infer pricing evidence.");
 assert.equal(testCompile.compositionReport.evidence.hasQuoteProof, false, "Baseline auto-body fixture should not infer testimonial evidence.");
@@ -172,18 +178,12 @@ assert.ok(
   "Composition report should record skipped pricing without pricing evidence."
 );
 assert.ok(
-  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_gallery" && decision.status === "included"),
-  "Curated auto-body fallback media should select media_mosaic."
+  testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_gallery" && decision.status === "skipped"),
+  "Auto-body no-media floor should skip media_mosaic when no real media clears the floor."
 );
 assert.ok(
   testCompile.compositionReport.decisions.some((decision) => decision.sectionRole === "media_feature" && decision.status === "skipped"),
-  "Curated auto-body fallback media should not select media_feature when four or more safe media items are available."
-);
-const firstVisualSection = getVisualSectionV3(testVersion.pageComposition.pages[0]?.sections[0]?.props ?? {});
-assert.ok(
-  firstVisualSection?.templateId === "hero_split" ||
-    (firstVisualSection?.templateId === "hero_statement" && (firstVisualSection.options?.background as { kind?: string } | undefined)?.kind === "image"),
-  `Auto-body V3 compiler should emit a media-led hero (split or full-bleed image) when curated safe media is available; got ${firstVisualSection?.templateId}.`
+  "Auto-body no-media floor should not select media_feature without floor-clearing real media."
 );
 assert.equal("sectionPurposeId" in (firstVisualSection ?? {}), false, "Rendered visual sections should not carry purpose metadata.");
 assert.equal("evidence" in (firstVisualSection ?? {}), false, "Rendered visual sections should not carry evidence metadata.");
@@ -208,13 +208,13 @@ assert.deepEqual(
   "V3 compiler should expose validated section blueprints matching the rendered homepage sequence."
 );
 assert.equal(testCompile.compositionReport.sectionBlueprintValidation?.status, "passed", "V3 section blueprint validation should pass before hydration authority is split.");
-assert.ok(testVersion.designArchetypeId, "Compiled V3 versions should record the assigned design archetype.");
-assert.equal(testVersion.artDirection.designArchetypeId, testVersion.designArchetypeId, "Art direction should expose the same design archetype id as version metadata.");
+assert.ok(testVersion.designArchetypeId, "Compiled V3 versions should record the assigned design system in the stable V3 metadata field.");
+assert.equal(testVersion.artDirection.designArchetypeId, testVersion.designArchetypeId, "Art direction should expose the same design-system id as version metadata.");
 assert.ok(testVersion.geometryDiversityDirective, "Compiled V3 versions should record a geometry diversity directive.");
 assert.ok(testVersion.sectionOptionSequence?.length, "Compiled V3 versions should expose section option fingerprints for offline diversity audits.");
 assert.ok(
   testVersion.compilerDecisions?.some((decision) => decision.kind === "archetype_assignment" && decision.id.includes(testVersion.designArchetypeId ?? "")),
-  "Compiler decisions should include the archetype assignment."
+  "Compiler decisions should include the design-system assignment."
 );
 assert.ok(
   testVersion.compilerDecisions?.some((decision) => decision.kind === "quality_profile_assignment" && decision.resolvedValue === "auto_body"),
@@ -235,8 +235,8 @@ const defaultProfileCompile = compileGeneratedSiteV3Site({
   createdAt: "2026-06-02T00:00:00.000Z"
 });
 assert.ok(
-  defaultProfileCompile.version.compilerDecisions?.some((decision) => decision.kind === "quality_profile_assignment" && decision.resolvedValue === "default_local_service"),
-  "Untuned verticals should record the default local-service quality profile assignment."
+  defaultProfileCompile.version.compilerDecisions?.some((decision) => decision.kind === "quality_profile_assignment" && decision.resolvedValue === "home_services"),
+  "Locked verticals should record their profile assignment without falling back to a shared default path."
 );
 const contactIndex = templateOrder.indexOf("contact_split");
 const locationIndex = templateOrder.indexOf("location_showcase");
@@ -259,6 +259,9 @@ assert.equal(JSON.stringify(testVersion).includes(removedLocationPanelTemplateId
 const contactPanel = visualSectionsFor(testVersion).find((section) => section.templateId === "contact_split");
 assert.ok(contactPanel?.templateId === "contact_split", "Compiled V3 page should include a contact_split.");
 assert.equal(contactPanel.slots.contact.facts.some((fact) => fact.label === "Address" || fact.label === "Hours"), false, "contact_split should slim address/hours facts when a location section is present.");
+assert.equal(contactPanel.options.contactLayout, "visit_first", "location-backed contact_split should use the merged visit-first contact variant.");
+assert.equal(contactPanel.options.proofSidebar, "location", "location-backed contact_split should present the location-aware proof sidebar.");
+assert.equal(contactPanel.options.ctaMode, "directions", "location-backed contact_split should make directions the secondary contact action.");
 assert.equal(JSON.stringify(testVersion).includes("googleMapsUri"), false, "SiteVersion must not persist Google Maps URI fields.");
 assert.equal(JSON.stringify(testVersion).includes("NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY"), false, "SiteVersion must not persist public map key names.");
 assert.equal(JSON.stringify(testVersion).includes("ratingValue"), false, "SiteVersion must not persist Google rating data.");
@@ -281,9 +284,21 @@ const exactlyThreeServices = compileGeneratedSiteV3Site({
   },
   createdAt: "2026-06-02T00:00:00.000Z"
 });
-assert.ok(
-  visualSectionsFor(exactlyThreeServices.version).some((section) => section.templateId === "intro_grid" && section.options.cardTreatment === "media_top_cards"),
-  "Exactly three auto-body service cards should render the bounded media-top intro_grid treatment when service media is available."
+const exactlyThreeServiceSection = visualSectionsFor(exactlyThreeServices.version).find((section) => section.anchorId === "services");
+assert.equal(
+  exactlyThreeServiceSection?.templateId,
+  "intro_grid",
+  "Exactly three auto-body services should still render a bounded intro_grid service section."
+);
+assert.equal(
+  exactlyThreeServiceSection?.options.cardTreatment,
+  "editorial_cards",
+  "Exactly three no-media auto-body services should render editorial cards instead of media-top cards."
+);
+assert.equal(
+  exactlyThreeServices.version.artDirection.sectionPresentation?.services,
+  "feature_list",
+  "Exactly three no-media auto-body services should use the feature-list service presentation."
 );
 
 const fourAutoBodyServices = compileGeneratedSiteV3Site({
@@ -365,42 +380,19 @@ assert.ok(
   "Pricing evidence should render intro_grid with comparison card treatment."
 );
 
-const testimonialEvidence = compileGeneratedSiteV3Site({
-  siteId: "site_v3_testimonials",
-  business: {
-    ...testBusiness,
-    id: "business_v3_testimonials",
-    siteId: "site_v3_testimonials",
-    pressLinks: [
-      "testimonial: They explained the dent repair clearly - Customer review",
-      "testimonial: The paint match looked clean - Customer review",
-      "testimonial: Communication stayed simple - Customer review"
-    ]
-  },
-  createdAt: "2026-06-02T00:00:00.000Z"
-});
-assert.equal(testimonialEvidence.compositionReport.evidence.hasQuoteProof, true, "Three testimonial strings should classify as quote proof.");
-assert.equal(visualTemplatesFor(testimonialEvidence.version).includes("quote_wall"), true, "Testimonial evidence should render quote_wall.");
-
 const fourMediaEvidence = compileGeneratedSiteV3Site({
   siteId: "site_v3_four_media",
   business: {
     ...testBusiness,
     id: "business_v3_four_media",
     siteId: "site_v3_four_media",
-    photos: [0, 1, 2, 3].map((index) => ({
-      id: `photo_${index}`,
-      url: `/generated-site-assets/auto-body/lift-bay-overview-v1.png?fixture=${index}`,
-      alt: `Safe shop photo ${index + 1}`,
-      source: "uploaded" as const,
-      rightsStatus: "preclaim_safe" as const
-    }))
+    photos: [0, 1, 2, 3].map((index) => analyzedUploadedAutoBodyPhoto(`photo_${index}`, `Safe real shop photo ${index + 1}`))
   },
   createdAt: "2026-06-02T00:00:00.000Z"
 });
-assert.equal(fourMediaEvidence.compositionReport.evidence.safeMediaCount, 4, "Four safe media items should be counted before compilation.");
-assert.equal(visualTemplatesFor(fourMediaEvidence.version).includes("media_mosaic"), true, "Four safe media items should select media_mosaic.");
-assert.equal(visualTemplatesFor(fourMediaEvidence.version).includes("media_feature"), false, "Four safe media items should skip media_feature.");
+assert.equal(fourMediaEvidence.compositionReport.evidence.safeMediaCount, 4, "Four analyzed real media items should be counted before compilation.");
+assert.equal(visualTemplatesFor(fourMediaEvidence.version).includes("media_mosaic"), true, "Four analyzed real media items should select media_mosaic.");
+assert.equal(visualTemplatesFor(fourMediaEvidence.version).includes("media_feature"), false, "Four analyzed real media items should skip media_feature.");
 
 const sparseMosaicViolations = compileVisualSectionV3({
   version: "visual-section-v3",
@@ -494,6 +486,44 @@ const testSite: SiteModel = {
 };
 const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks: [] };
 
+const testimonialBundle = createTestBundle();
+testimonialBundle.businessProfile = {
+  ...testBusiness,
+  id: "business_v3_testimonials",
+  siteId: "site_v3_testimonials"
+};
+testimonialBundle.presenceAssessment.siteId = "site_v3_testimonials";
+testimonialBundle.presenceAssessment.evidenceLedgerV1 = testimonialEvidenceLedger();
+const testimonialEvidence = compileGeneratedSiteV3Site({ bundle: testimonialBundle, createdAt: "2026-06-02T00:00:00.000Z" });
+assert.equal(testimonialEvidence.compositionReport.evidence.hasQuoteProof, true, "Two source-backed testimonial evidence items should classify as quote proof.");
+assert.equal(visualTemplatesFor(testimonialEvidence.version).includes("quote_wall"), true, "Testimonial evidence should render quote_wall.");
+assert.equal(
+  JSON.stringify(testimonialEvidence.version).includes('"sourceHref":"https://contract.example/reviews"'),
+  true,
+  "Rendered testimonial evidence should retain a visitor-verifiable source link."
+);
+
+const reviewSummaryBundle = createTestBundle();
+reviewSummaryBundle.businessProfile = {
+  ...reviewSummaryBundle.businessProfile,
+  reviewsSummary: { rating: 4.8, count: 127, sources: ["website_schema"] },
+  provenance: {
+    ...reviewSummaryBundle.businessProfile.provenance,
+    reviewsSummary: {
+      source: "website",
+      sourceUrl: "https://contract.example/",
+      confidence: 0.65,
+      verified: false,
+      observedAt: "2026-06-02T00:00:00.000Z"
+    }
+  }
+};
+assert.deepEqual(
+  sourceBackedReviewSummaryFactV1(reviewSummaryBundle.businessProfile),
+  { label: "Customer rating", value: "4.8/5 · 127 reviews", href: "https://contract.example/" },
+  "A website-schema aggregate rating should compile to an honestly labeled, source-linked proof fact."
+);
+
 {
   const navPlanVersion = structuredClone(testVersion);
   navPlanVersion.artDirection = {
@@ -561,19 +591,17 @@ const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks:
       publicPresenceNotes: [],
       siteDirectorPlanV1: {
         version: "site-director-runtime-v1",
-        source: "model",
-        model: "fixture",
+        source: "deterministic",
+        model: "deterministic-site-director-plan-v1",
         catalogSchemaHash: "fixture",
-        businessDirectorInputHash: "fixture",
+        businessPlannerInputHash: "fixture",
         planInputHash: "fixture",
         catalogManifest: {} as never,
-        directorInputManifest: {} as never,
+        plannerInputManifest: {} as never,
         plan: {
           version: "site-director-plan-v1",
           strategy: {
-            rationale: "Fixture director plan requests risky large-service and hero treatments so the compiler can prove it clamps geometry safely.",
-            creativeDiversityDirective: "differentiate_presentations",
-            geometryDiversityDirective: "differentiate_hero_services_contact"
+            rationale: "Fixture design-system plan requests risky large-service and hero treatments so the compiler can prove it clamps geometry safely."
           },
           globalControls: {
             fontPosture: "utility",
@@ -606,7 +634,7 @@ const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks:
     false,
     "Large service pages should not render an intro_grid service-card list and a full service_index with the same titles."
   );
-  const hero = visualSectionsForPage(largeServiceCompile.version, "").find((section) => section.templateId === "hero_split");
+  const hero = visualSectionsForPage(largeServiceCompile.version, "").find((section) => section.templateId === "hero_split" || section.templateId === "hero_statement");
   assert.equal(hero?.options.headlineScale, "standard", "Unsafe long display hero headings should clamp to standard scale.");
   assert.equal(hero?.options.ctaLayout, "button_plus_text_link", "Unsafe stacked hero CTAs should clamp to an above-fold-friendly layout.");
   assert.ok(
@@ -674,22 +702,6 @@ const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks:
 }
 
 {
-  const geometryTargets = buildGenerationRepairTargets({
-    blockers: [],
-    warnings: [
-      {
-        id: "desktop_section_quality_failure",
-        title: "One or more sections failed deterministic layout QA",
-        detail: "service_index produced 8 cramped text samples in service card titles.",
-        viewport: "desktop"
-      }
-    ]
-  });
-  assert.ok(
-    geometryTargets.some((target) => target.target === "template_geometry" && target.activation === "live"),
-    "Cramped section-quality findings should become live template_geometry repair targets before copy-slot repair."
-  );
-
   const brokenAssetVersion = structuredClone(testVersion);
   (brokenAssetVersion as unknown as { missingAssetProbe: string }).missingAssetProbe = "/generated-site-assets/auto-body/asset-does-not-exist.png";
   const qaWithMissingAsset = buildGeneratedSiteQaMetadata({
@@ -702,33 +714,6 @@ const testExtensions: ExtensionModel = { forms: [], workflows: [], customBlocks:
     qaWithMissingAsset.blockers.some((blocker) => blocker.id === "v3_platform_asset_missing"),
     "Missing platform asset URLs should create a hard blocker."
   );
-
-  const gatedRepairQa = applyUnresolvedRepairTargetReadinessGate({
-    readiness: "ready",
-    blockers: [],
-    warnings: [],
-    repair: {
-      attempted: true,
-      applied: false,
-      mutationSummaries: [],
-      unresolvedBlockerIds: [],
-      unresolvedTargetIds: ["repair_scorecard_visual-design-page-repeated-media-home_asset_crop"]
-    },
-    repairTargets: [
-      {
-        id: "repair_scorecard_visual-design-page-repeated-media-home_asset_crop",
-        target: "asset_crop",
-        activation: "live",
-        priority: "high",
-        source: "scorecard",
-        findingId: "visual_design:page_repeated_media_home",
-        title: "Repeated media",
-        detail: "Hero media repeats in a service/proof slot."
-      }
-    ]
-  } satisfies GenerationQaMetadata);
-  assert.equal(gatedRepairQa.readiness, "blocked", "Unresolved high-priority live repair targets should block readiness.");
-  assert.ok(gatedRepairQa.blockers.some((blocker) => blocker.id === "repair_unresolved_live_targets"), "Repair fail-open gate should add a blocker.");
 }
 
 const placeIdOnlyBundle = withBusinessBundleFields({
@@ -831,6 +816,122 @@ const generatedCopyDeckFixture: GeneratedCopyDeckV2 = {
   ]
 };
 
+const conflictSafeCopyDeck = prepareGeneratedCopyDeckForLint(
+  {
+    ...structuredClone(generatedCopyDeckFixture),
+    about: {
+      heading: "Protech Body Shop since 1998.",
+      body: "Marwan opened Protech Body Shop in 1998. The shop's show-car paint experience still shapes its attention to finish quality."
+    }
+  },
+  { ...testBusiness, name: "Pro Tech Body Shop" },
+  { conflictedYears: ["1998", "2001"] }
+);
+assert.equal(JSON.stringify(conflictSafeCopyDeck).includes("1998"), false, "Conflicted chronology must be removed from every generated copy slot.");
+assert.equal(JSON.stringify(conflictSafeCopyDeck).includes("Protech Body Shop"), false, "Generated copy should not retain a spacing variant of the canonical business name.");
+assert.equal(JSON.stringify(conflictSafeCopyDeck).includes("Pro Tech Body Shop"), true, "Generated copy should use the canonical business name consistently.");
+const unapprovedOfferCopyDeck = prepareGeneratedCopyDeckForLint(
+  {
+    ...structuredClone(generatedCopyDeckFixture),
+    hero: {
+      ...generatedCopyDeckFixture.hero,
+      heading: "Request a free estimate for the visible damage."
+    }
+  },
+  { ...testBusiness, offers: undefined }
+);
+assert.equal(JSON.stringify(unapprovedOfferCopyDeck).toLowerCase().includes("free estimate"), false, "Owner-review-only offers must not leak into generated public copy.");
+const approvedOfferCopyDeck = prepareGeneratedCopyDeckForLint(
+  {
+    ...structuredClone(generatedCopyDeckFixture),
+    hero: {
+      ...generatedCopyDeckFixture.hero,
+      heading: "Request a free estimate for the visible damage."
+    }
+  },
+  { ...testBusiness, offers: ["Free estimate"] }
+);
+assert.equal(JSON.stringify(approvedOfferCopyDeck).toLowerCase().includes("free estimate"), true, "Owner-approved offers should remain available to generated public copy.");
+const approvedCredentialCopyDeck = prepareGeneratedCopyDeckForLint(
+  {
+    ...structuredClone(generatedCopyDeckFixture),
+    hero: {
+      ...generatedCopyDeckFixture.hero,
+      eyebrow: "I-CAR Gold Class Certified"
+    }
+  },
+  testBusiness,
+  { approvedClaimTexts: ["I-CAR Gold Class Certified"] }
+);
+assert.equal(JSON.stringify(approvedCredentialCopyDeck).includes("I-CAR Gold Class Certified"), true, "Exact durable credentials must survive deterministic copy repair.");
+assert.equal(
+  lintGeneratedCopyDeck(approvedCredentialCopyDeck, {
+    businessName: testBusiness.name,
+    business: testBusiness,
+    approvedClaimTexts: ["I-CAR Gold Class Certified"]
+  }).some((violation) => violation.includes("credential")),
+  false,
+  "The copy linter must accept an exact durable credential."
+);
+const mixedCredentialCopyDeck = {
+  ...structuredClone(approvedCredentialCopyDeck),
+  contactIntro: {
+    ...approvedCredentialCopyDeck.contactIntro,
+    body: "Certified experience with claim support."
+  }
+};
+assert.equal(
+  lintGeneratedCopyDeck(mixedCredentialCopyDeck, {
+    businessName: testBusiness.name,
+    business: testBusiness,
+    approvedClaimTexts: ["I-CAR Gold Class Certified"]
+  }).some((violation) => violation.includes("credential")),
+  true,
+  "An approved exact credential must not authorize unrelated certified wording."
+);
+const approvedAwardCopyDeck = prepareGeneratedCopyDeckForLint(
+  {
+    ...structuredClone(generatedCopyDeckFixture),
+    hero: {
+      ...generatedCopyDeckFixture.hero,
+      eyebrow: "Award-winning collision repair"
+    }
+  },
+  testBusiness,
+  { approvedClaimTexts: ["Award-winning collision repair"] }
+);
+assert.equal(JSON.stringify(approvedAwardCopyDeck).includes("Award-winning collision repair"), true, "Exact durable awards must survive deterministic copy repair.");
+
+const fullServiceCatalogBundle = createTestBundle();
+fullServiceCatalogBundle.businessProfile.services = [
+  "Frame alignment",
+  "Scratch repainting",
+  "Bumper welding",
+  "Fleet body repair",
+  "Collision repair",
+  "Paintless dent repair",
+  "Hail damage repair",
+  "Auto glass replacement"
+];
+fullServiceCatalogBundle.presenceAssessment.generatedCopyDeck = {
+  ...generatedCopyDeckFixture,
+  serviceItems: generatedCopyDeckFixture.serviceItems.slice(0, 4)
+};
+applyGeneratedSiteV3({ bundle: fullServiceCatalogBundle, now: "2026-06-02T00:00:00.000Z" });
+const fullServiceCatalogVersion = fullServiceCatalogBundle.siteModel.versions[0] as SiteVersionV3;
+const fullServiceCatalogCorpus = visualSectionsForPage(fullServiceCatalogVersion, "")
+  .filter((section) => section.anchorId === "services")
+  .flatMap((section) => collectStrings(section.slots))
+  .join("\n")
+  .toLowerCase();
+for (const service of fullServiceCatalogBundle.businessProfile.services) {
+  assert.equal(
+    fullServiceCatalogCorpus.includes(service.toLowerCase()),
+    true,
+    `Model copy may enrich but cannot remove the verified service: ${service}. Rendered service copy: ${fullServiceCatalogCorpus}`
+  );
+}
+
 const multiLocationBundle = withBusinessBundleFields({
   businessProfile: {
     ...testBusiness,
@@ -908,6 +1009,31 @@ assert.ok(generatedLocationPages.every((page) => page.slug.startsWith("locations
 const generatedServicePages = multiLocation.version.pageComposition.pages.filter((page) => page.purpose === "service_landing");
 assert.ok(generatedServicePages.length >= 1, "Source-backed service copy should generate service landing pages.");
 assert.ok(generatedServicePages.every((page) => page.slug.startsWith("services/") && page.seo.canonicalPath === `/${page.slug}`), "Service pages should use typed services/* slugs and canonical paths.");
+assert.ok(
+  generatedServicePages.every((page) => page.sections.every((section) => !section.id.endsWith("_process"))),
+  "Service landing pages should not repeat the homepage's generic process module."
+);
+const scopedObjectiveBlockers = generationObjectiveBlockersV3(multiLocationBundle, multiLocation.version);
+assert.equal(
+  scopedObjectiveBlockers.some((blocker) => blocker.id === "gate_duplicate_service_titles"),
+  false,
+  "Service titles repeated in related-service navigation should not count as duplicates within the authored service list."
+);
+assert.equal(
+  scopedObjectiveBlockers.some((blocker) => blocker.id.startsWith("gate_doorway_overlap_")),
+  false,
+  "Shared local, related-service, and contact modules should not make distinct service pages fail the doorway gate."
+);
+if (generatedServicePages.length >= 2) {
+  const duplicateServiceVersion = structuredClone(multiLocation.version);
+  const duplicateServicePages = duplicateServiceVersion.pageComposition.pages.filter((page) => page.purpose === "service_landing");
+  duplicateServicePages[1].sections = structuredClone(duplicateServicePages[0].sections);
+  assert.equal(
+    generationObjectiveBlockersV3(multiLocationBundle, duplicateServiceVersion).some((blocker) => blocker.id.startsWith("gate_doorway_overlap_")),
+    true,
+    "Truly duplicated service-specific hero, detail, and FAQ copy must fail the doorway gate."
+  );
+}
 const generatedSlugs = multiLocation.version.pageComposition.pages.map((page) => page.slug);
 assert.equal(new Set(generatedSlugs).size, generatedSlugs.length, "Generated page slugs should be unique site-wide.");
 assert.equal(generatedSlugs.filter((slug) => !slug.includes("/")).length, 1, "Homepage should be the only unprefixed generated page.");
@@ -1015,9 +1141,6 @@ try {
   else process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY = originalGoogleMapsEmbedKey;
 }
 
-const coverageReport = buildFactCoverageReport({ bundle: multiLocationBundle, version: multiLocation.version });
-assert.ok(coverageReport.facts.some((fact) => fact.category === "address" && fact.note.includes("location_showcase")), "Fact coverage should resolve address to the new location templates.");
-assert.ok(coverageReport.facts.some((fact) => fact.category === "service_areas" && fact.note.includes("service_area_showcase")), "Fact coverage should resolve service areas to the new service-area template.");
 assert.equal(JSON.stringify(multiLocation.version).includes(removedLocationPanelTemplateId), false, "Multi-location compiled output must not contain the removed location panel template.");
 
 function createTestBundle(): SiteBundle {
@@ -1034,6 +1157,50 @@ function createTestBundle(): SiteBundle {
       visualNotes: [],
       brandNotes: [],
       publicPresenceNotes: []
+    }
+  };
+}
+
+function testimonialEvidenceLedger(): SiteEvidenceLedgerV1 {
+  const createdAt = "2026-06-02T00:00:00.000Z";
+  const quotes = [
+    { quote: "They explained the dent repair clearly and kept me updated through the work.", attribution: "Customer A" },
+    { quote: "The paint match looked clean, and the staff made pickup simple and professional.", attribution: "Customer B" }
+  ];
+  return {
+    version: siteEvidenceLedgerVersionV1,
+    producerId: "compose-site-evidence-ledger-v1",
+    producerVersion: siteEvidenceLedgerVersionV1,
+    modelId: "deterministic",
+    siteId: "site_v3_testimonials",
+    createdAt,
+    stale: false,
+    inputHashes: { crawl: "testimonial-contract-fixture" },
+    items: quotes.map((entry, index) => ({
+      id: `evidence_testimonial_contract_${index + 1}`,
+      domain: "business_proof",
+      kind: "testimonial",
+      label: "First-party customer testimonial",
+      value: { text: entry.quote, quote: entry.quote, attribution: entry.attribution },
+      source: {
+        type: "website_visible_text",
+        url: "https://contract.example/reviews",
+        pageTitle: "Customer reviews",
+        extractionMethod: "contract_fixture",
+        snippet: entry.quote
+      },
+      confidence: 0.9,
+      renderPolicy: "durable_render",
+      verification: "source_backed",
+      observedAt: createdAt,
+      sourceHash: `testimonial-contract-${index + 1}`
+    })),
+    summary: {
+      businessProofItems: quotes.length,
+      brandItems: 0,
+      durableRenderItems: quotes.length,
+      liveOnlyItems: 0,
+      ownerReviewItems: 0
     }
   };
 }
@@ -1059,9 +1226,17 @@ assert.equal(defaultBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", 
   const generatedVersion = generated.bundle.siteModel.versions[0];
   assert.equal(generatedVersion?.rendererVersion, "layout-v3", "Canonical generateSite path should emit layout-v3.");
   assert.equal(
-    generatedVersion?.generationQa?.blockers.filter((blocker) => blocker.id !== "render_browser_unavailable" && !blocker.id.startsWith("scorecard_")).length,
+    generatedVersion?.generationQa?.blockers.filter(
+      (blocker) => blocker.id !== "render_browser_unavailable" && blocker.id !== "visual_judge_unavailable"
+    ).length,
     0,
     JSON.stringify(generatedVersion?.generationQa?.blockers ?? [], null, 2)
+  );
+  assert.equal(
+    generatedVersion?.generationQa?.blockers.some((blocker) => blocker.id === "visual_judge_unavailable") &&
+      generatedVersion.generationQa.visualQa?.verdict === "not_evaluated",
+    true,
+    "Offline generation must stop for operator review when the required visual judgment cannot run; it must not manufacture a fallback grade."
   );
   const generatedCopyCorpus =
     generatedVersion?.rendererVersion === "layout-v3"
@@ -1086,7 +1261,7 @@ assert.equal(defaultBundle.siteModel.versions[0]?.rendererVersion, "layout-v3", 
   ];
   const goodPlan = {
     version: "composition-plan-v1" as const,
-    source: "model" as const,
+    source: "deterministic_design_system" as const,
     sections: ["gallery", "story", "services", "process", "faq", "cta_band", "location"].map((intent) => ({
       intent: intent as never,
       why: "test"
@@ -1170,6 +1345,31 @@ function qaBundleForVersion(business: BusinessProfile, site: SiteModel, version:
       publicPresenceNotes: []
     }
   });
+}
+
+function analyzedUploadedAutoBodyPhoto(id: string, alt: string): AssetReference {
+  return {
+    id,
+    url: `/fixture-assets/${id}.jpg`,
+    alt,
+    source: "uploaded",
+    rightsStatus: "preclaim_safe",
+    width: 1600,
+    height: 1000,
+    analysisV1: {
+      version: "asset-analysis-v1",
+      source: "openai",
+      model: "fixture",
+      analyzedAt: "2026-06-22T00:00:00.000Z",
+      imageKind: "storefront",
+      focalPoint: "center",
+      subjectPlacement: "centered",
+      warnings: [],
+      contentTags: ["auto-body", "storefront", "shop"],
+      summary: `${alt} is a clear first-party auto-body shop photo suitable for hero or gallery use.`,
+      limitations: []
+    }
+  };
 }
 
 function cleanGeneratedInspection(version: SiteVersionV3, qaRunId: string): RenderInspectionResult {

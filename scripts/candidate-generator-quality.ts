@@ -3,14 +3,18 @@ import "./load-env";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { computeFingerprintV1, fingerprintDistanceThresholdV1, minPairwiseDistanceV1, type SiteFingerprintV1 } from "../lib/fingerprint-v1";
 import { repository } from "../lib/repository";
 import { runInitialGeneratedSiteReadiness } from "../lib/generated-site-readiness";
 import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
-import type { GenerationQaRepairTarget, GenerationScorecard, SiteBundle, SiteCandidateRecord, SiteVersion } from "../lib/models";
+import type { GenerationQaMetadata, GenerationQaReadiness, SiteBundle, SiteCandidateRecord, SiteVersion } from "../lib/models";
 import type { ModelFallbackPolicy } from "../lib/site-candidate-service";
 import { getVisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
+import {
+  defaultOpenAiRuntimeEditableSettings,
+  seedOpenAiRuntimeSettings,
+  setOperatorSettingsLocalFileForTests
+} from "../lib/operator-settings";
 
 type CandidateGrade = {
   candidateId: string;
@@ -19,15 +23,7 @@ type CandidateGrade = {
   candidatePurpose: SiteCandidateRecord["candidatePurpose"];
   sourceUrl?: string;
   sourceHost?: string;
-  verdict?: GenerationScorecard["verdict"];
-  dimensions: Array<{
-    id: string;
-    score?: number;
-    required: boolean;
-    passes?: boolean;
-    premiumPasses?: boolean;
-    findings: Array<{ id: string; severity: string; title: string; detail: string; viewport?: string }>;
-  }>;
+  readiness: GenerationQaReadiness;
   blockers: string[];
   warnings: string[];
   screenshots: {
@@ -36,15 +32,22 @@ type CandidateGrade = {
   };
   visualQa?: {
     source: string;
-    score?: Record<string, number>;
+    verdict: string;
+    craftScore?: number;
+    summary: string;
+    findings: Array<{
+      id: string;
+      category: string;
+      severity: string;
+      title: string;
+      evidence: string;
+      recommendation?: string;
+      viewport?: string;
+      defectCategory?: string;
+      confidence?: number;
+    }>;
     limitations: string[];
   };
-  repairTargets: Array<
-    Pick<
-      GenerationQaRepairTarget,
-      "target" | "activation" | "priority" | "findingId" | "title" | "sectionId" | "templateId" | "slotId" | "copyPart" | "itemIndex" | "viewport"
-    >
-  >;
   generationCost?: {
     mode: string;
     status: string;
@@ -52,13 +55,11 @@ type CandidateGrade = {
     budgetUnits: number;
     lineItems: Array<{ id: string; quantity: number; units: number }>;
   };
-  fingerprint?: ReturnType<typeof computeFingerprintV1>;
   debug?: {
-    designBrief?: {
-      register: string;
-      brandPosture: string;
-      presentationMap?: unknown;
-      compositionPlan?: string[];
+    designSystem?: {
+      id: string;
+      label: string;
+      source: string;
     };
     renderedHomeSections: Array<{ id: string; templateId?: string; background?: string }>;
     siteDirector?: {
@@ -73,6 +74,7 @@ type CandidateGrade = {
 const command = process.argv[2] ?? "help";
 const args = process.argv.slice(3);
 const modelFallbackPolicy: ModelFallbackPolicy = hasFlag("--allow-deterministic-fallback") ? "allow" : "fail";
+const modelOverride = await configureModelOverride();
 
 setSupabaseJobGenerateSite((options) => generateSite({ ...options, repository }));
 
@@ -105,12 +107,12 @@ async function baselineCommand() {
 
   logProgress("baseline_generating_primary", { url });
   const generated = await generateDirect(url, { reason: "phase-0 baseline primary" });
-  generatedGrades.push(await gradeCandidate(generated.siteCandidateId, artifactRoot));
+  generatedGrades.push(await storedCandidateGrade(generated.siteCandidateId));
 
   for (const holdout of holdouts) {
     logProgress("baseline_generating_holdout", { url: holdout });
     const holdoutGenerated = await generateDirect(holdout, { reason: "phase-0 baseline holdout" });
-    generatedGrades.push(await gradeCandidate(holdoutGenerated.siteCandidateId, artifactRoot));
+    generatedGrades.push(await storedCandidateGrade(holdoutGenerated.siteCandidateId));
   }
 
   for (const candidateId of [...knownBadIds, ...premiumFixtureIds]) {
@@ -122,22 +124,21 @@ async function baselineCommand() {
       const grade = calibrationGrades.find((item) => item.candidateId === candidateId);
       return {
         candidateId,
-        verdict: grade?.verdict,
+        readiness: grade?.readiness,
         passesAsPremium: grade ? premiumFailures(grade).length === 0 : false,
-        topRepairTargets: grade?.repairTargets.slice(0, 5) ?? []
+        blockers: grade?.blockers.slice(0, 5) ?? []
       };
     }),
     manualPremium: premiumFixtureIds.map((candidateId) => {
       const grade = calibrationGrades.find((item) => item.candidateId === candidateId);
       return {
         candidateId,
-        verdict: grade?.verdict,
-        reaches90RequiredDimensions: grade ? requiredDimensionFailures(grade).length === 0 : false,
-        dimensionFailures: grade ? requiredDimensionFailures(grade) : [`${candidateId}: not graded`]
+        readiness: grade?.readiness,
+        ready: grade?.readiness === "ready",
+        blockers: grade?.blockers ?? [`${candidateId}: not graded`]
       };
     })
   };
-  const fingerprints = generatedGrades.flatMap((grade) => (grade.fingerprint ? [grade.fingerprint] : []));
   const report = {
     generatedAt: new Date().toISOString(),
     artifactRoot,
@@ -146,11 +147,6 @@ async function baselineCommand() {
     generatedGrades,
     calibrationGrades,
     calibration,
-    fingerprint: {
-      minPairwiseDistance: minPairwiseDistanceV1(fingerprints),
-      threshold: fingerprintDistanceThresholdV1,
-      observedOnly: true
-    },
     costObservation: generatedGrades.map((grade) => ({
       candidateId: grade.candidateId,
       generationCost: grade.generationCost
@@ -164,11 +160,11 @@ async function baselineCommand() {
 async function generateCommand() {
   const url = requiredValue("--url");
   const viaJob = hasFlag("--via-job");
-  const artifactRoot = await runArtifactRoot("generate");
   const result = viaJob ? await generateViaJob(url) : await generateDirect(url);
-  const grade = await gradeCandidate(result.siteCandidateId, artifactRoot);
+  const grade = await storedCandidateGrade(result.siteCandidateId);
   const output = {
     mode: viaJob ? "via_job" : "direct",
+    modelOverride,
     runId: result.runId,
     siteCandidateId: result.siteCandidateId,
     adminUrl: `/admin/site-candidates/${result.siteCandidateId}`,
@@ -176,6 +172,22 @@ async function generateCommand() {
     grade
   };
   console.log(JSON.stringify(output, null, 2));
+}
+
+async function configureModelOverride() {
+  const generationModel = valueAfter("--generation-model");
+  const visualQaModel = valueAfter("--visual-qa-model") ?? generationModel;
+  if (!generationModel && !visualQaModel) return undefined;
+
+  const settings = {
+    ...defaultOpenAiRuntimeEditableSettings(),
+    generationModel: generationModel ?? defaultOpenAiRuntimeEditableSettings().generationModel,
+    visualQaModel: visualQaModel ?? defaultOpenAiRuntimeEditableSettings().visualQaModel
+  };
+  const fileName = `${settings.generationModel}--${settings.visualQaModel}`.replace(/[^a-z0-9._-]+/gi, "_");
+  setOperatorSettingsLocalFileForTests(join(process.cwd(), ".data", "model-bakeoff", `${fileName}.json`));
+  await seedOpenAiRuntimeSettings({ settings, changedBy: "candidate-quality:model-bakeoff" });
+  return { generationModel: settings.generationModel, visualQaModel: settings.visualQaModel };
 }
 
 async function gradeCommand() {
@@ -193,35 +205,31 @@ async function verifyCommand() {
   const holdouts = valuesAfter("--holdout");
   const artifactRoot = await runArtifactRoot("verify");
   const grades: CandidateGrade[] = [];
-  const fingerprints: SiteFingerprintV1[] = [];
 
   for (let index = 0; index < runs; index += 1) {
     logProgress("generating_primary", { index: index + 1, url });
     const generated = await generateDirect(url, { reason: "candidate generator quality verifier", runIndex: index + 1 });
     logProgress("generated_primary", { index: index + 1, candidateId: generated.siteCandidateId });
-    const grade = await gradeCandidate(generated.siteCandidateId, artifactRoot);
+    const grade = await storedCandidateGrade(generated.siteCandidateId);
     grades.push(grade);
-    if (grade.fingerprint) fingerprints.push(grade.fingerprint);
-    console.log(JSON.stringify({ event: "graded_primary", index: index + 1, candidateId: grade.candidateId, verdict: grade.verdict }));
+    console.log(JSON.stringify({ event: "read_stored_candidate_qa", index: index + 1, candidateId: grade.candidateId, readiness: grade.readiness }));
   }
 
   for (const holdout of holdouts) {
     logProgress("generating_holdout", { url: holdout });
     const generated = await generateDirect(holdout, { reason: "candidate generator quality holdout" });
     logProgress("generated_holdout", { url: holdout, candidateId: generated.siteCandidateId });
-    const grade = await gradeCandidate(generated.siteCandidateId, artifactRoot);
+    const grade = await storedCandidateGrade(generated.siteCandidateId);
     grades.push(grade);
-    if (grade.fingerprint) fingerprints.push(grade.fingerprint);
-    console.log(JSON.stringify({ event: "graded_holdout", url: holdout, candidateId: grade.candidateId, verdict: grade.verdict }));
+    console.log(JSON.stringify({ event: "read_stored_candidate_qa", url: holdout, candidateId: grade.candidateId, readiness: grade.readiness }));
   }
 
   let viaJobEquivalence: Awaited<ReturnType<typeof compareViaJobInputs>> | undefined;
   if (hasFlag("--via-job")) {
     logProgress("checking_via_job_equivalence", { url });
-    viaJobEquivalence = await compareViaJobInputs(url, artifactRoot);
+    viaJobEquivalence = await compareViaJobInputs(url);
   }
 
-  const minDistance = minPairwiseDistanceV1(fingerprints);
   const report = {
     generatedAt: new Date().toISOString(),
     artifactRoot,
@@ -229,17 +237,11 @@ async function verifyCommand() {
     runs,
     holdouts,
     grades,
-    viaJobEquivalence,
-    fingerprint: {
-      minPairwiseDistance: minDistance,
-      threshold: fingerprintDistanceThresholdV1,
-      observedOnly: true,
-      healthy: minDistance === undefined || minDistance >= fingerprintDistanceThresholdV1
-    }
+    viaJobEquivalence
   };
   const reportPath = join(artifactRoot, "report.json");
   await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
-  console.log(JSON.stringify({ reportPath, fingerprint: report.fingerprint }, null, 2));
+  console.log(JSON.stringify({ reportPath, ready: grades.filter((grade) => grade.readiness === "ready").length, total: grades.length }, null, 2));
 
   if (hasFlag("--expect-premium")) {
     const failures = grades.flatMap((grade) => premiumFailures(grade));
@@ -299,37 +301,51 @@ async function gradeCandidate(candidateId: string, artifactRoot: string): Promis
     modelFallbackPolicy
   });
   const qa = readiness.qa;
-  const scorecard = qa.scorecard;
   logProgress("graded_candidate", {
-    candidateId,
-    verdict: scorecard?.verdict,
+    candidateId: candidate.id,
+    readiness: qa.readiness,
     visualQaSource: qa.visualQa?.source,
     blockers: qa.blockers.length,
     sectionScreenshots: qa.inspectionSummary?.sectionScreenshotCount ?? 0
   });
-  return {
+  return candidateGradeFromQa(candidate, bundle, version, qa);
+}
+
+async function storedCandidateGrade(candidateId: string): Promise<CandidateGrade> {
+  logProgress("reading_stored_candidate_qa", { candidateId });
+  const candidate = await repository.getSiteCandidate(candidateId);
+  if (!candidate) throw new Error(`Unknown candidate: ${candidateId}`);
+  const bundle = structuredClone(candidate.bundle);
+  const version = draftVersion(bundle);
+  if (!version) throw new Error(`Candidate ${candidateId} has no renderable version.`);
+  const qa = version.generationQa;
+  if (!qa || qa.schemaVersion !== "generation-qa-v4") {
+    throw new Error(`Candidate ${candidateId} has no canonical stored generation-qa-v4 result.`);
+  }
+  logProgress("read_stored_candidate_qa", {
     candidateId,
+    readiness: qa.readiness,
+    visualQaSource: qa.visualQa?.source,
+    blockers: qa.blockers.length,
+    sectionScreenshots: qa.inspectionSummary?.sectionScreenshotCount ?? 0
+  });
+  return candidateGradeFromQa(candidate, bundle, version, qa);
+}
+
+function candidateGradeFromQa(
+  candidate: SiteCandidateRecord,
+  bundle: SiteBundle,
+  version: SiteVersion,
+  qa: GenerationQaMetadata
+): CandidateGrade {
+  return {
+    candidateId: candidate.id,
     businessName: candidate.businessName,
     status: candidate.status,
     candidatePurpose: candidate.candidatePurpose,
     sourceUrl: candidate.sourceUrl,
     sourceHost: candidate.sourceHost,
-    verdict: scorecard?.verdict,
-    dimensions:
-      scorecard?.dimensions.map((dimension) => ({
-        id: dimension.id,
-        score: dimension.score,
-        required: dimension.requirement === "required",
-        passes: dimension.passes,
-        premiumPasses: dimension.premiumPasses,
-        findings: dimension.findings.map((finding) => ({
-          id: finding.id,
-          severity: finding.severity,
-          title: finding.title,
-          detail: finding.detail,
-          viewport: finding.viewport
-        }))
-      })) ?? [],
+    readiness: qa.readiness,
     blockers: qa.blockers.map((blocker) => blocker.id),
     warnings: qa.warnings.map((warning) => warning.id),
     screenshots: {
@@ -339,24 +355,13 @@ async function gradeCandidate(candidateId: string, artifactRoot: string): Promis
     visualQa: qa.visualQa
       ? {
           source: qa.visualQa.source,
-          score: qa.visualQa.score,
+          verdict: qa.visualQa.verdict,
+          craftScore: qa.visualQa.craftScore,
+          summary: qa.visualQa.summary,
+          findings: qa.visualQa.findings,
           limitations: qa.visualQa.limitations
         }
       : undefined,
-    repairTargets:
-      qa.repairTargets?.slice(0, 12).map((target) => ({
-        target: target.target,
-        activation: target.activation,
-        priority: target.priority,
-        findingId: target.findingId,
-        title: target.title,
-        sectionId: target.sectionId,
-        templateId: target.templateId,
-        slotId: target.slotId,
-        copyPart: target.copyPart,
-        itemIndex: target.itemIndex,
-        viewport: target.viewport
-      })) ?? [],
     generationCost: qa.generationCostEstimate
       ? {
           mode: qa.generationCostEstimate.mode,
@@ -370,22 +375,19 @@ async function gradeCandidate(candidateId: string, artifactRoot: string): Promis
           }))
         }
       : undefined,
-    fingerprint: computeFingerprintV1(version),
     debug: candidateDebug(bundle, version)
   };
 }
 
 function candidateDebug(bundle: SiteBundle, version: SiteVersion): CandidateGrade["debug"] {
-  const designBrief = bundle.presenceAssessment.designBrief;
   const siteDirector = bundle.presenceAssessment.siteDirectorPlanV1;
   const homePage = "pageComposition" in version ? version.pageComposition.pages.find((page) => page.id === "home") ?? version.pageComposition.pages[0] : undefined;
   return {
-    designBrief: designBrief
+    designSystem: siteDirector?.designSystem
       ? {
-          register: designBrief.profile.register,
-          brandPosture: designBrief.profile.brandPosture,
-          presentationMap: designBrief.presentationMap,
-          compositionPlan: designBrief.compositionPlan?.sections.map((section) => section.intent)
+          id: siteDirector.designSystem.id,
+          label: siteDirector.designSystem.label,
+          source: siteDirector.source
         }
       : undefined,
     renderedHomeSections:
@@ -408,11 +410,11 @@ function candidateDebug(bundle: SiteBundle, version: SiteVersion): CandidateGrad
   };
 }
 
-async function compareViaJobInputs(url: string, artifactRoot: string) {
+async function compareViaJobInputs(url: string) {
   const direct = await generateDirect(url, { reason: "via-job input equivalence direct" });
   const viaJob = await generateViaJob(url);
-  await gradeCandidate(direct.siteCandidateId, artifactRoot);
-  await gradeCandidate(viaJob.siteCandidateId, artifactRoot);
+  await storedCandidateGrade(direct.siteCandidateId);
+  await storedCandidateGrade(viaJob.siteCandidateId);
   const directCandidate = await repository.getSiteCandidate(direct.siteCandidateId);
   const jobCandidate = await repository.getSiteCandidate(viaJob.siteCandidateId);
   if (!directCandidate || !jobCandidate) throw new Error("Missing generated candidates for input equivalence check.");
@@ -485,20 +487,9 @@ function draftVersion(bundle: SiteBundle): SiteVersion | undefined {
 
 function premiumFailures(grade: CandidateGrade) {
   const failures: string[] = [];
-  if (grade.verdict !== "premium") failures.push(`${grade.candidateId}: verdict ${grade.verdict ?? "missing"}`);
-  for (const dimension of grade.dimensions) {
-    if ((dimension.score ?? -1) < 90) failures.push(`${grade.candidateId}: ${dimension.id} ${dimension.score ?? "unscored"} < 90`);
-    if (dimension.passes === false) failures.push(`${grade.candidateId}: ${dimension.id} failed readiness gate`);
-    if (dimension.premiumPasses === false) failures.push(`${grade.candidateId}: ${dimension.id} failed premium gate`);
-  }
+  if (grade.readiness !== "ready") failures.push(`${grade.candidateId}: readiness ${grade.readiness}`);
   if (grade.blockers.length) failures.push(`${grade.candidateId}: blockers ${grade.blockers.join(", ")}`);
   return failures;
-}
-
-function requiredDimensionFailures(grade: CandidateGrade) {
-  return grade.dimensions
-    .filter((dimension) => dimension.required && (dimension.score ?? -1) < 90)
-    .map((dimension) => `${grade.candidateId}: ${dimension.id} ${dimension.score ?? "unscored"} < 90`);
 }
 
 async function runArtifactRoot(label: string) {
@@ -545,7 +536,7 @@ function logProgress(event: string, payload: Record<string, unknown>) {
 
 function usage() {
   console.log(`Usage:
-  npm run generate:candidate -- --url https://www.menciaautoshop.com/ [--via-job] [--allow-deterministic-fallback]
+  npm run generate:candidate -- --url https://www.menciaautoshop.com/ [--generation-model MODEL] [--visual-qa-model MODEL] [--via-job] [--allow-deterministic-fallback]
   npm run grade:candidate -- --id sitecand_... [--allow-deterministic-fallback]
   npm run baseline:candidate-generator-quality -- --url https://www.menciaautoshop.com/ [--holdout URL] [--known-bad-id sitecand_...] [--manual-premium-id sitecand_...]
   npm run verify:candidate-generator-quality -- --url https://www.menciaautoshop.com/ --runs 3 [--holdout URL] [--via-job] [--expect-premium] [--allow-deterministic-fallback]

@@ -1,5 +1,7 @@
 import type { ClaimRecord, SiteBundle } from "./models";
+import { missingAssetRightIds, requiredAssetRightsForBundle } from "./asset-rights";
 import { missingRequiredClaimFacts } from "./fact-verification";
+import { claimVerificationSatisfies, minimumCheckoutClaimVerificationLevel } from "./owner-access";
 
 export type ClaimGateResult =
   | { ok: true; claim: ClaimRecord }
@@ -9,6 +11,13 @@ export function claimGateForSite(siteId: string, claims: ClaimRecord[], required
   const siteClaims = claims.filter((claim) => claim.siteId === siteId);
   const completed = siteClaims.find((claim) => claim.status === "claimed");
   if (completed) {
+    if (!claimVerificationSatisfies(completed.verificationLevel, minimumCheckoutClaimVerificationLevel)) {
+      return {
+        ok: false,
+        code: "verification_required",
+        reason: "Verify ownership through a listed business contact before publishing or connecting a custom domain."
+      };
+    }
     const verified = new Set(completed.verifiedFacts);
     const missingFacts = requiredFacts.filter((fact) => !verified.has(fact));
     if (missingFacts.length) {
@@ -52,6 +61,16 @@ export function claimGateForBundle(bundle: SiteBundle, claims: ClaimRecord[]) {
       code: "verification_required" as const,
       reason: "Verify required business facts before publishing or connecting a custom domain.",
       missingFacts
+    };
+  }
+  const requiredAssets = requiredAssetRightsForBundle(bundle);
+  const missingAssets = missingAssetRightIds(requiredAssets, claimGate.claim.attestedAssetIds ?? []);
+  if (missingAssets.length || (requiredAssets.length && !claimGate.claim.assetRightsAcceptedAt)) {
+    return {
+      ok: false,
+      code: "verification_required" as const,
+      reason: "Confirm rights for every referenced photo and logo before publishing or connecting a custom domain.",
+      missingFacts: missingAssets
     };
   }
   return claimGate;

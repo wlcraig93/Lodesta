@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { CandidateQueueViews, type QueueView } from "@/components/admin/CandidateQueueViews";
+import { CandidateBatchArchiveBar } from "@/components/admin/CandidateBatchArchiveBar";
 import { CopyIdTag } from "@/components/admin/CopyIdTag";
 import { QueueAutoRefresh } from "@/components/admin/QueueAutoRefresh";
 import { SiteCandidateCreateDialog } from "@/components/admin/SiteCandidateCreateDialog";
@@ -101,14 +102,23 @@ function QueueGrid({
     return <p className="candidate-queue-empty muted">{empty}</p>;
   }
   return (
-    <div className="candidate-grid">
-      {generating.map((card) => (
-        <GeneratingCandidateCard key={card.job.id} card={card} />
-      ))}
-      {candidates.map((candidate) => (
-        <CandidateCard key={candidate.id} candidate={candidate} />
-      ))}
-    </div>
+    <>
+      <CandidateBatchArchiveBar
+        candidates={candidates.map((candidate) => ({
+          id: candidate.id,
+          businessName: candidate.businessName,
+          status: candidate.status
+        }))}
+      />
+      <div className="candidate-grid">
+        {generating.map((card) => (
+          <GeneratingCandidateCard key={card.job.id} card={card} />
+        ))}
+        {candidates.map((candidate) => (
+          <CandidateCard key={candidate.id} candidate={candidate} />
+        ))}
+      </div>
+    </>
   );
 }
 

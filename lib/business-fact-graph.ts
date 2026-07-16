@@ -9,10 +9,11 @@ import type {
   PresenceAssessment,
   PublicPresenceSignal
 } from "./models";
+import type { SiteEvidenceItemV1 } from "./evidence-ledger-v1";
 
 type CreateBusinessFactGraphInput = {
   business: BusinessProfile;
-  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "normalizedBusinessFacts">;
+  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "normalizedBusinessFacts" | "evidenceLedgerV1">;
   observedAt?: string;
 };
 
@@ -46,6 +47,8 @@ export function createBusinessFactGraph(input: CreateBusinessFactGraphInput): Bu
   addFact("hours", "Hours", pruneRecord(input.business.hours));
   for (const category of input.business.categories) addFact("category", "Category", category);
   for (const service of input.business.services) addFact("service", "Service", service);
+  for (const credential of input.business.credentials ?? []) addFact("credential", "Credential", credential);
+  for (const offer of input.business.offers ?? []) addFact("offer", "Offer", offer);
   for (const area of input.business.serviceAreas) addFact("service_area", "Service area", area);
   for (const link of input.business.socialLinks) addFact("social_link", "Social link", link, { renderSafety: "review_required" });
   for (const link of input.business.bookingLinks) addFact("booking_link", "Booking link", link);
@@ -71,6 +74,31 @@ export function createBusinessFactGraph(input: CreateBusinessFactGraphInput): Bu
   if (input.business.reviewsSummary?.rating || input.business.reviewsSummary?.count) {
     addFact("review_summary", "Review summary", input.business.reviewsSummary, {
       renderSafety: input.business.reviewsSummary.sources.includes("google_places") ? "internal_only" : "review_required"
+    });
+  }
+
+  const existingProfileEvidence = new Set(
+    [...(input.business.credentials ?? []), ...(input.business.offers ?? [])].map(normalizeEvidenceValue)
+  );
+  for (const evidence of input.presence.evidenceLedgerV1?.items ?? []) {
+    const kind = businessFactKindForEvidence(evidence);
+    if (!kind || evidence.domain !== "business_proof") continue;
+    if ((kind === "credential" || kind === "offer") && existingProfileEvidence.has(normalizeEvidenceValue(evidence.value.text))) continue;
+    const provenance = evidenceProvenance(evidence, observedAt);
+    facts.push({
+      id: `fact_${safeId(evidence.id)}`,
+      kind,
+      label: evidence.label,
+      value: evidence.value,
+      provenance,
+      confidence: confidenceFor(provenance),
+      renderSafety: renderSafetyForEvidence(evidence),
+      sourceUrl: evidence.source.url,
+      notes: [
+        ...(evidence.notes ?? []),
+        `Evidence source hash: ${evidence.sourceHash}`,
+        `Extraction method: ${evidence.source.extractionMethod}`
+      ]
     });
   }
 
@@ -143,17 +171,18 @@ function sourceAwareFactFor(fact: BusinessFact) {
   const placesFact = fact.provenance.source === "places_api";
   const blocked = fact.renderSafety === "blocked";
   const internalOnly = fact.renderSafety === "internal_only";
+  const reviewRequired = fact.renderSafety === "review_required";
   return {
     id: fact.id,
     kind: fact.kind,
     label: fact.label,
     value: fact.value,
-    sourceType: placesFact ? "places_identity" : fact.provenance.source === "owner" ? "owner_admin" : "crawl",
+    sourceType: placesFact ? "places_identity" : fact.provenance.source === "owner" ? "owner_admin" : fact.provenance.source === "website" ? "first_party" : "crawl",
     sourceUrl: placesFact ? undefined : fact.sourceUrl,
     observedAt: fact.provenance.observedAt,
     confidence: fact.provenance.confidence,
-    renderPolicy: blocked ? "blocked" : internalOnly || placesFact ? "internal_only" : "durable_render",
-    sourcePolicy: placesFact ? "live_only" : blocked ? "blocked" : internalOnly ? "internal_only" : "durable_render",
+    renderPolicy: blocked ? "blocked" : reviewRequired ? "owner_review_required" : internalOnly || placesFact ? "internal_only" : "durable_render",
+    sourcePolicy: placesFact ? "live_only" : blocked ? "blocked" : reviewRequired ? "owner_review_required" : internalOnly ? "internal_only" : "durable_render",
     notes: placesFact
       ? [...(fact.notes ?? []), "Google Places facts are match/validation/live-display evidence only; do not serialize as durable generated-site copy."]
       : fact.notes
@@ -161,7 +190,7 @@ function sourceAwareFactFor(fact: BusinessFact) {
 }
 
 function sourceSummaries(
-  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals">,
+  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "evidenceLedgerV1">,
   observedAt: string
 ): BusinessFactGraph["sources"] {
   const sources: BusinessFactGraph["sources"] = [];
@@ -183,10 +212,63 @@ function sourceSummaries(
       observedAt: signal.observedAt
     });
   }
+  const sourceUrls = new Set(sources.map((source) => source.url).filter(Boolean));
+  for (const evidence of presence.evidenceLedgerV1?.items ?? []) {
+    const url = evidence.source.url;
+    if (!url || sourceUrls.has(url)) continue;
+    sourceUrls.add(url);
+    sources.push({
+      id: `source_${safeId(evidence.sourceHash)}`,
+      type: evidence.source.type === "places_identity" ? "places_api" : "website",
+      url,
+      confidence: evidence.confidence,
+      observedAt: evidence.observedAt
+    });
+  }
   if (!sources.length) {
     sources.push({ id: "source_system", type: "system", confidence: 0.25, observedAt });
   }
   return sources;
+}
+
+function businessFactKindForEvidence(evidence: SiteEvidenceItemV1): BusinessFactKind | undefined {
+  const kinds: Partial<Record<SiteEvidenceItemV1["kind"], BusinessFactKind>> = {
+    testimonial: "testimonial",
+    credential: "credential",
+    warranty: "warranty",
+    insurance_support: "insurance_support",
+    award: "award",
+    years_in_business: "years_in_business",
+    offer: "offer",
+    review_presence: "proof_signal"
+  };
+  return kinds[evidence.kind];
+}
+
+function evidenceProvenance(evidence: SiteEvidenceItemV1, fallbackObservedAt: string): FieldProvenance {
+  return {
+    source:
+      evidence.source.type === "places_identity"
+        ? "places_api"
+        : evidence.source.type === "owner"
+          ? "owner"
+          : "website",
+    sourceUrl: evidence.source.url,
+    confidence: evidence.confidence,
+    verified: evidence.verification === "owner_verified",
+    observedAt: evidence.observedAt || fallbackObservedAt
+  };
+}
+
+function renderSafetyForEvidence(evidence: SiteEvidenceItemV1): BusinessFactRenderSafety {
+  if (evidence.renderPolicy === "durable_render") return "render_safe";
+  if (evidence.renderPolicy === "owner_review_required") return "review_required";
+  if (evidence.renderPolicy === "blocked") return "blocked";
+  return "internal_only";
+}
+
+function normalizeEvidenceValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function profileFieldForFactKind(kind: BusinessFactKind) {
@@ -199,6 +281,8 @@ function profileFieldForFactKind(kind: BusinessFactKind) {
     geo: "geo",
     hours: "hours",
     service: "services",
+    credential: "credentials",
+    offer: "offers",
     service_area: "serviceAreas",
     review_summary: "reviewsSummary"
   };

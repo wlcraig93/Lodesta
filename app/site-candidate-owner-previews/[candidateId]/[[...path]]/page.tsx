@@ -7,8 +7,6 @@ import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { applyMediaRightsFallbackV3 } from "@/lib/media-rights-preview";
-import { backupGalleryForRightsFallbackV3 } from "@/lib/generated-site-v3-compiler";
-import { approvedAssetLibraryAssetsForVerticals, type ApprovedAssetLibraryAsset } from "@/lib/asset-library";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { assertSiteVersionV3, findPageBySlugV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type { SiteCandidateRecord, SiteVersionV3 } from "@/lib/models";
@@ -52,7 +50,7 @@ export default async function SiteCandidateOwnerPreviewPage({
   }
 
   const rightsDeclined = query.rights === "declined";
-  const selectedVersion = await versionForOwnerMode(assertSiteVersionV3(rawVersion, "candidate owner preview version"), candidate, rightsDeclined);
+  const selectedVersion = await versionForOwnerMode(assertSiteVersionV3(rawVersion, "candidate owner preview version"), rightsDeclined);
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(selectedVersion, pageSlug);
   if (!page && artifact === "site") notFound();
@@ -413,20 +411,10 @@ function StaleCandidateNotice({
   );
 }
 
-async function versionForOwnerMode(version: SiteVersionV3, candidate: SiteCandidateRecord, rightsDeclined: boolean) {
+async function versionForOwnerMode(version: SiteVersionV3, rightsDeclined: boolean) {
   if (!rightsDeclined) return version;
 
-  const vertical = candidate.bundle.businessProfile.vertical;
-  let libraryAssets: ApprovedAssetLibraryAsset[] = [];
-  if (vertical === "auto_services" || vertical === "auto_body") {
-    libraryAssets = await approvedAssetLibraryAssetsForVerticals(
-      vertical === "auto_body" ? ["auto_body", "auto_services"] : ["auto_services"]
-    ).catch(() => []);
-  }
-  const backupGallery = version.rightsDeclinedBackupGallerySnapshot?.length
-    ? version.rightsDeclinedBackupGallerySnapshot
-    : backupGalleryForRightsFallbackV3(candidate.bundle.businessProfile, libraryAssets);
-  return applyMediaRightsFallbackV3(version, backupGallery);
+  return applyMediaRightsFallbackV3(version, []);
 }
 
 function ownerPreviewHref(

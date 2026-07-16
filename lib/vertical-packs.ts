@@ -1,5 +1,5 @@
 import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
-import type { BusinessProfile, SiteAsset, Theme, Vertical } from "./models";
+import type { BrandAssessment, BusinessBrandExpressionV1, BusinessProfile, SiteAsset, Theme, Vertical } from "./models";
 import type { EvidenceLedger } from "./evidence-ledger";
 import {
   generationPlanSchemaVersion,
@@ -9,6 +9,7 @@ import {
   type ShippingDesignSystemId
 } from "./generation-contracts";
 import { slugify } from "./slug";
+import { containsGatedSensitiveClaim } from "./content-safety-scanners";
 
 export type VerticalPack = {
   id: "auto_body";
@@ -40,6 +41,8 @@ export function buildGenerationPlan(input: {
   business: BusinessProfile;
   evidence: EvidenceLedger;
   assets: SiteAsset[];
+  brandExpression?: BusinessBrandExpressionV1;
+  brandAssessment?: BrandAssessment;
   createdAt?: string;
   designSystemOverride?: ShippingDesignSystemId;
 }): GenerationPlan {
@@ -56,7 +59,7 @@ export function buildGenerationPlan(input: {
     .filter((item) => item.kind === "testimonial" && item.renderPolicy === "durable_render")
     .map((item) => item.id)
     .slice(0, 3);
-  const services = input.business.services.slice(0, 8);
+  const services = publicGenerationServices(input.business.services).slice(0, 8);
   const homeSections: GenerationPlanSection[] = [
     section("home.hero", heroAsset ? "hero_split" : "hero_statement", [
       slot("home.hero.eyebrow", "eyebrow", 48),
@@ -156,7 +159,7 @@ export function buildGenerationPlan(input: {
       inputs: { business: input.business, evidence: input.evidence, assets: input.assets, designSystem }
     }),
     designSystem,
-    brandTokens: themeForDesignSystem(designSystem),
+    brandTokens: themeForDesignSystem(designSystem, input.brandExpression, input.brandAssessment),
     navigation: {
       items: [
         ...(services.length >= 3 ? [{ label: "Services", target: "#services", kind: "anchor" as const }] : []),
@@ -167,6 +170,10 @@ export function buildGenerationPlan(input: {
     pages,
     formId: `form_${input.business.siteId}_estimate`
   };
+}
+
+export function publicGenerationServices(services: readonly string[]) {
+  return services.filter((service) => !containsGatedSensitiveClaim(service));
 }
 
 export function compatibleDesignSystems(assets: SiteAsset[]): ShippingDesignSystemId[] {
@@ -186,9 +193,11 @@ export function alternateDesignSystem(
 function firstPartyHeroAsset(assets: SiteAsset[]) {
   return assets.find((asset) => {
     if (asset.kind !== "photo" || !asset.url) return false;
-    if (!asset.ownerApproved && asset.rightsStatus !== "customer_granted" && asset.rightsStatus !== "preclaim_safe") return false;
+    const protectedFirstPartyPreview = asset.rightsStatus === "reference_only" && asset.usageScope === "preclaim_preview";
+    if (!asset.ownerApproved && asset.rightsStatus !== "customer_granted" && asset.rightsStatus !== "preclaim_safe" && !protectedFirstPartyPreview) return false;
     if (asset.usageScope !== "published_site" && asset.usageScope !== "preclaim_preview") return false;
     const analysis = asset.metadata?.analysisV1 as { warnings?: string[]; imageKind?: string } | undefined;
+    if (!analysis?.imageKind) return false;
     if (analysis?.warnings?.some((warning) => ["low_resolution", "blurry", "text_overlay", "logo_like", "not_business_relevant"].includes(warning))) return false;
     return analysis?.imageKind !== "logo" && analysis?.imageKind !== "generic_graphic" && analysis?.imageKind !== "text_heavy_graphic";
   });
@@ -208,23 +217,92 @@ function slot(slotId: string, role: CopySlotSpec["role"], maxCharacters: number,
   return { slotId, role, maxCharacters, allowedEvidence };
 }
 
-function themeForDesignSystem(id: ShippingDesignSystemId): Theme {
+function themeForDesignSystem(
+  id: ShippingDesignSystemId,
+  expression?: BusinessBrandExpressionV1,
+  assessment?: BrandAssessment
+): Theme {
+  const sourceHex = [expression?.paletteSeed.preferredHex, ...(assessment?.colorSignals ?? [])]
+    .find((value): value is string => Boolean(value && /^#[0-9a-f]{6}$/i.test(value)));
+  const background = id === "precision_shop_editorial" ? "#f4f5f2" : "#f7f7f4";
+  const surface = "#ffffff";
+  const defaultPrimary = id === "precision_shop_editorial" ? "#1d3f4f" : "#174c3c";
+  const primary = accessiblePrimary(sourceHex ?? defaultPrimary, [background, surface]);
+  const accent = contrastingAccent(primary);
+  const typography = typographyFor(expression?.fontPosture, id);
+  const mood = themeMood(expression?.mood, id);
   if (id === "precision_shop_editorial") {
     return {
-      paletteName: "precision-shop",
-      colors: { background: "#f4f5f2", surface: "#ffffff", text: "#171a1d", muted: "#5d6468", primary: "#1d3f4f", primaryText: "#ffffff", accent: "#c84a2f", border: "#cfd4d3" },
-      typography: { heading: "Arial, sans-serif", body: "Arial, sans-serif" },
+      paletteName: sourceHex ? "precision-shop-source-brand" : "precision-shop",
+      colors: { background, surface, text: "#171a1d", muted: "#5d6468", primary, primaryText: "#ffffff", accent, border: "#cfd4d3" },
+      typography,
       radius: "sm",
       density: "standard",
-      mood: "editorial"
+      mood
     };
   }
   return {
-    paletteName: "trusted-local",
-    colors: { background: "#f7f7f4", surface: "#ffffff", text: "#1c1c1a", muted: "#62625d", primary: "#174c3c", primaryText: "#ffffff", accent: "#d3a82f", border: "#d8d8d1" },
-    typography: { heading: "Arial, sans-serif", body: "Arial, sans-serif" },
+    paletteName: sourceHex ? "trusted-local-source-brand" : "trusted-local",
+    colors: { background, surface, text: "#1c1c1a", muted: "#62625d", primary, primaryText: "#ffffff", accent, border: "#d8d8d1" },
+    typography,
     radius: "sm",
     density: "standard",
-    mood: "utilitarian"
+    mood
   };
+}
+
+function typographyFor(posture: BusinessBrandExpressionV1["fontPosture"] | undefined, system: ShippingDesignSystemId) {
+  if (posture === "editorial" || posture === "premium") return { heading: "Georgia, serif", body: "Arial, sans-serif" };
+  if (posture === "rounded") return { heading: "Trebuchet MS, sans-serif", body: "Arial, sans-serif" };
+  if (posture === "condensed") return { heading: "Arial Narrow, Arial, sans-serif", body: "Arial, sans-serif" };
+  return system === "precision_shop_editorial"
+    ? { heading: "Georgia, serif", body: "Arial, sans-serif" }
+    : { heading: "Arial, sans-serif", body: "Arial, sans-serif" };
+}
+
+function themeMood(mood: BusinessBrandExpressionV1["mood"] | undefined, system: ShippingDesignSystemId): Theme["mood"] {
+  if (mood === "premium") return "premium";
+  if (mood === "warm" || mood === "neighborhood") return "warm";
+  if (mood === "bold") return "bold";
+  if (mood === "clinical") return "clinical";
+  return system === "precision_shop_editorial" ? "editorial" : "utilitarian";
+}
+
+function accessiblePrimary(hex: string, lightBackgrounds: string[]) {
+  let [red, green, blue] = hexChannels(hex);
+  while (Math.min(...lightBackgrounds.map((background) => contrastRatio([red, green, blue], hexChannels(background)))) < 4.75) {
+    red = Math.max(0, Math.round(red * 0.86));
+    green = Math.max(0, Math.round(green * 0.86));
+    blue = Math.max(0, Math.round(blue * 0.86));
+  }
+  return channelsHex(red, green, blue);
+}
+
+function contrastingAccent(primary: string) {
+  const [red, green, blue] = hexChannels(primary);
+  const accent = [
+    Math.min(230, Math.round(210 - red * 0.2)),
+    Math.min(190, Math.round(150 + (255 - green) * 0.1)),
+    Math.min(170, Math.round(75 + (255 - blue) * 0.12))
+  ];
+  return channelsHex(accent[0], accent[1], accent[2]);
+}
+
+function hexChannels(hex: string): [number, number, number] {
+  return [Number.parseInt(hex.slice(1, 3), 16), Number.parseInt(hex.slice(3, 5), 16), Number.parseInt(hex.slice(5, 7), 16)];
+}
+
+function channelsHex(red: number, green: number, blue: number) {
+  return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function contrastRatio(foreground: [number, number, number], background: [number, number, number]) {
+  const channel = (value: number) => {
+    const normalized = value / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = ([red, green, blue]: [number, number, number]) => 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }

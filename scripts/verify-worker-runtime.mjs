@@ -274,11 +274,10 @@ function fakeGenerateSiteResult() {
             rendererVersion: "layout-v3",
             designSchemaVersion: "design-v3",
             pageComposition: { pages: [] },
-            generationQa: { readiness: "ready" }
+            generationQa: { schemaVersion: "canonical-generation-qa-v1", readiness: "ready" }
           }
         ]
-      },
-      optimizationFindings: []
+      }
     }
   };
 }

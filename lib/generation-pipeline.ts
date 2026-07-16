@@ -86,7 +86,9 @@ export async function runCanonicalGenerationPipeline(input: {
   const artifactRoot = input.artifactRoot ?? join(process.cwd(), ".data", "canonical-generation", business.siteId);
   const traceCounts = { plans: 1 as 1 | 2, copies: 0, copyModelAttempts: 0, compiles: 0, gates: 0, judges: 0 };
   const traceAttempts: GenerationPipelineTrace["attempts"] = [];
-  let plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets });
+  const brandExpression = input.bundle.presenceAssessment.businessUnderstanding?.brandExpression;
+  const brandAssessment = input.bundle.presenceAssessment.brandAssessment;
+  let plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets, brandExpression, brandAssessment });
   let revisionAction: GenerationJudgeRevisionAction | undefined;
   let revisionFindings: string[] = [];
   let lastResult: Omit<CanonicalGenerationResult, "status" | "reason" | "trace"> | undefined;
@@ -98,7 +100,7 @@ export async function runCanonicalGenerationPipeline(input: {
         if (!lastResult) throw new Error("Alternate-system resolution requires an initial generation result.");
         return finish("operator_review", "alternate_system_unavailable", lastResult, traceCounts, traceAttempts);
       }
-      plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets, designSystemOverride: alternate });
+      plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets, brandExpression, brandAssessment, designSystemOverride: alternate });
       traceCounts.plans = 2;
     }
     const generated = await dependencies.copy({
@@ -208,7 +210,67 @@ function finish(
     counts: traceCounts,
     attempts
   };
+  validateGenerationPipelineTrace(trace);
   return { status, ...(reason ? { reason } : {}), ...result, trace };
+}
+
+export function validateGenerationPipelineTrace(trace: GenerationPipelineTrace): void {
+  const attempts = trace.attempts;
+  if (attempts.length !== 1 && attempts.length !== 2) {
+    throw new Error(`Canonical generation trace has invalid attempt count ${attempts.length}.`);
+  }
+  attempts.forEach((attempt, index) => {
+    if (attempt.attempt !== index) {
+      throw new Error(`Canonical generation trace expected attempt ${index}, received ${attempt.attempt}.`);
+    }
+    if (attempt.copyModelAttempts !== 1 && attempt.copyModelAttempts !== 2) {
+      throw new Error(`Canonical generation attempt ${index} has invalid copy model attempt count ${attempt.copyModelAttempts}.`);
+    }
+    const judged = attempt.judgeVerdict !== undefined || attempt.judgeAction !== undefined;
+    if (attempt.gateStatus === "pass" && !judged) {
+      throw new Error(`Canonical generation attempt ${index} passed the objective gate without a judge result.`);
+    }
+    if (attempt.gateStatus !== "pass" && judged) {
+      throw new Error(`Canonical generation attempt ${index} reached the judge after an objective gate failure.`);
+    }
+    if ((attempt.judgeVerdict === undefined) !== (attempt.judgeAction === undefined)) {
+      throw new Error(`Canonical generation attempt ${index} has an incomplete judge result.`);
+    }
+  });
+
+  const executionCount = attempts.length;
+  if (trace.counts.copies !== executionCount || trace.counts.compiles !== executionCount || trace.counts.gates !== executionCount) {
+    throw new Error("Canonical generation trace execution counts do not match its attempts.");
+  }
+  const copyModelAttempts = attempts.reduce((total, attempt) => total + attempt.copyModelAttempts, 0);
+  if (trace.counts.copyModelAttempts !== copyModelAttempts) {
+    throw new Error("Canonical generation trace copy model attempt count does not match its attempts.");
+  }
+  const judges = attempts.filter((attempt) => attempt.judgeVerdict !== undefined).length;
+  if (trace.counts.judges !== judges) {
+    throw new Error("Canonical generation trace judge count does not match its attempts.");
+  }
+
+  if (attempts.length === 1) {
+    if (trace.counts.plans !== 1) throw new Error("A one-pass canonical generation trace must contain one plan.");
+    return;
+  }
+
+  const first = attempts[0];
+  const second = attempts[1];
+  if (first.gateStatus !== "pass" || first.judgeVerdict !== "revise") {
+    throw new Error("A second canonical generation pass requires a first-pass judge revision.");
+  }
+  if (first.judgeAction !== "copy" && first.judgeAction !== "alternate_system") {
+    throw new Error(`A second canonical generation pass cannot follow judge action ${first.judgeAction ?? "missing"}.`);
+  }
+  const changedSystem = first.designSystem !== second.designSystem;
+  if (first.judgeAction === "alternate_system" && (!changedSystem || trace.counts.plans !== 2)) {
+    throw new Error("Alternate-system regeneration must change systems and record exactly two plans.");
+  }
+  if (first.judgeAction === "copy" && (changedSystem || trace.counts.plans !== 1)) {
+    throw new Error("Copy regeneration must preserve the design system and reuse the original plan.");
+  }
 }
 
 function incrementOneOrTwo(value: number): 1 | 2 {

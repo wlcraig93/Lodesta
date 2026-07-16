@@ -9,11 +9,11 @@ import type {
   PresenceAssessment,
   PublicPresenceSignal
 } from "./models";
-import type { SiteEvidenceItemV1 } from "./evidence-ledger-v1";
+import type { VerifiedEvidence } from "./evidence-ledger";
 
 type CreateBusinessFactGraphInput = {
   business: BusinessProfile;
-  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "normalizedBusinessFacts" | "evidenceLedgerV1">;
+  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "normalizedBusinessFacts" | "evidenceLedger">;
   observedAt?: string;
 };
 
@@ -80,24 +80,23 @@ export function createBusinessFactGraph(input: CreateBusinessFactGraphInput): Bu
   const existingProfileEvidence = new Set(
     [...(input.business.credentials ?? []), ...(input.business.offers ?? [])].map(normalizeEvidenceValue)
   );
-  for (const evidence of input.presence.evidenceLedgerV1?.items ?? []) {
+  for (const evidence of input.presence.evidenceLedger?.items ?? []) {
     const kind = businessFactKindForEvidence(evidence);
-    if (!kind || evidence.domain !== "business_proof") continue;
-    if ((kind === "credential" || kind === "offer") && existingProfileEvidence.has(normalizeEvidenceValue(evidence.value.text))) continue;
+    const evidenceValue = evidence.publicText ?? evidence.sourceExcerpt;
+    if ((kind === "credential" || kind === "offer") && existingProfileEvidence.has(normalizeEvidenceValue(evidenceValue))) continue;
     const provenance = evidenceProvenance(evidence, observedAt);
     facts.push({
       id: `fact_${safeId(evidence.id)}`,
       kind,
-      label: evidence.label,
-      value: evidence.value,
+      label: evidenceLabel(evidence.kind),
+      value: evidenceValue,
       provenance,
       confidence: confidenceFor(provenance),
       renderSafety: renderSafetyForEvidence(evidence),
       sourceUrl: evidence.source.url,
       notes: [
-        ...(evidence.notes ?? []),
-        `Evidence source hash: ${evidence.sourceHash}`,
-        `Extraction method: ${evidence.source.extractionMethod}`
+        `Verified source block: ${evidence.source.blockId}`,
+        `Verified token span: ${evidence.source.startToken}-${evidence.source.endToken}`
       ]
     });
   }
@@ -190,7 +189,7 @@ function sourceAwareFactFor(fact: BusinessFact) {
 }
 
 function sourceSummaries(
-  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "evidenceLedgerV1">,
+  presence: Pick<PresenceAssessment, "sourceUrl" | "publicPresenceSignals" | "evidenceLedger">,
   observedAt: string
 ): BusinessFactGraph["sources"] {
   const sources: BusinessFactGraph["sources"] = [];
@@ -213,16 +212,16 @@ function sourceSummaries(
     });
   }
   const sourceUrls = new Set(sources.map((source) => source.url).filter(Boolean));
-  for (const evidence of presence.evidenceLedgerV1?.items ?? []) {
+  for (const evidence of presence.evidenceLedger?.items ?? []) {
     const url = evidence.source.url;
     if (!url || sourceUrls.has(url)) continue;
     sourceUrls.add(url);
     sources.push({
-      id: `source_${safeId(evidence.sourceHash)}`,
-      type: evidence.source.type === "places_identity" ? "places_api" : "website",
+      id: `source_${safeId(evidence.source.pageHash)}`,
+      type: "website",
       url,
-      confidence: evidence.confidence,
-      observedAt: evidence.observedAt
+      confidence: 0.9,
+      observedAt
     });
   }
   if (!sources.length) {
@@ -231,40 +230,44 @@ function sourceSummaries(
   return sources;
 }
 
-function businessFactKindForEvidence(evidence: SiteEvidenceItemV1): BusinessFactKind | undefined {
-  const kinds: Partial<Record<SiteEvidenceItemV1["kind"], BusinessFactKind>> = {
+function businessFactKindForEvidence(evidence: VerifiedEvidence): BusinessFactKind {
+  const kinds: Record<VerifiedEvidence["kind"], BusinessFactKind> = {
     testimonial: "testimonial",
     credential: "credential",
     warranty: "warranty",
     insurance_support: "insurance_support",
     award: "award",
     years_in_business: "years_in_business",
-    offer: "offer",
-    review_presence: "proof_signal"
+    offer: "offer"
   };
   return kinds[evidence.kind];
 }
 
-function evidenceProvenance(evidence: SiteEvidenceItemV1, fallbackObservedAt: string): FieldProvenance {
+function evidenceProvenance(evidence: VerifiedEvidence, fallbackObservedAt: string): FieldProvenance {
   return {
-    source:
-      evidence.source.type === "places_identity"
-        ? "places_api"
-        : evidence.source.type === "owner"
-          ? "owner"
-          : "website",
+    source: evidence.confirmation?.status === "confirmed" ? "owner" : "website",
     sourceUrl: evidence.source.url,
-    confidence: evidence.confidence,
-    verified: evidence.verification === "owner_verified",
-    observedAt: evidence.observedAt || fallbackObservedAt
+    confidence: evidence.confirmation?.status === "confirmed" ? 1 : 0.9,
+    verified: evidence.confirmation?.status === "confirmed",
+    observedAt: evidence.confirmation?.decidedAt ?? fallbackObservedAt
   };
 }
 
-function renderSafetyForEvidence(evidence: SiteEvidenceItemV1): BusinessFactRenderSafety {
-  if (evidence.renderPolicy === "durable_render") return "render_safe";
-  if (evidence.renderPolicy === "owner_review_required") return "review_required";
-  if (evidence.renderPolicy === "blocked") return "blocked";
-  return "internal_only";
+function renderSafetyForEvidence(evidence: VerifiedEvidence): BusinessFactRenderSafety {
+  return evidence.renderPolicy === "durable_render" ? "render_safe" : "review_required";
+}
+
+function evidenceLabel(kind: VerifiedEvidence["kind"]) {
+  const labels: Record<VerifiedEvidence["kind"], string> = {
+    testimonial: "Customer testimonial",
+    credential: "Credential",
+    warranty: "Warranty",
+    insurance_support: "Insurance support",
+    award: "Award",
+    years_in_business: "Years in business",
+    offer: "Offer"
+  };
+  return labels[kind];
 }
 
 function normalizeEvidenceValue(value: string) {

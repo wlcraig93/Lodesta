@@ -9,7 +9,6 @@ import { AdminNav, type AdminNavItem } from "@/components/admin/AdminNav";
 const primaryNavItems: AdminNavItem[] = [
   { href: "/admin/site-candidates", label: "Site Candidates" },
   { href: "/admin/sites", label: "Managed Sites" },
-  { href: "/admin/assets", label: "Assets" },
   { href: "/admin/benchmark-sites", label: "Evaluations" }
 ];
 

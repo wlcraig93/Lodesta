@@ -35,8 +35,8 @@ export default async function ExperimentsPage({ params }: { params: Promise<{ sl
           <Link className="button secondary" href={`/analytics/${bundle.siteModel.slug}`}>
             Analytics
           </Link>
-          <Link className="button secondary" href={`/optimization/${bundle.siteModel.slug}`}>
-            Optimization
+          <Link className="button secondary" href={`/status/${bundle.siteModel.slug}`}>
+            Status
           </Link>
           <Link className="button primary" href={`/sites/${bundle.siteModel.slug}`}>
             View site

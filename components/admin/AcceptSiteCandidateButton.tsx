@@ -14,11 +14,13 @@ type AcceptResponse = {
 export function AcceptSiteCandidateButton({
   candidateId,
   accepted,
-  disabledReason
+  disabledReason,
+  intendedSiteId
 }: {
   candidateId: string;
   accepted: boolean;
   disabledReason?: string;
+  intendedSiteId?: string;
 }) {
   const router = useRouter();
   const reasonId = useId();
@@ -34,7 +36,7 @@ export function AcceptSiteCandidateButton({
       const response = await fetch(`/api/site-candidates/${candidateId}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "new_site" })
+        body: JSON.stringify(intendedSiteId ? { mode: "site_version", siteId: intendedSiteId } : { mode: "new_site" })
       });
       const payload = (await response.json().catch(() => ({}))) as AcceptResponse;
       if (!response.ok) {
@@ -60,7 +62,7 @@ export function AcceptSiteCandidateButton({
         aria-describedby={disabledReasonId}
         title={disabledReason}
       >
-        {accepted ? "Open managed site" : submitting ? "Promoting..." : "Promote to managed site"}
+        {accepted ? "Open managed site" : submitting ? "Promoting..." : intendedSiteId ? "Promote as new version" : "Promote to managed site"}
       </AdminButton>
       {disabledReason ? (
         <span id={disabledReasonId} className="visually-hidden">

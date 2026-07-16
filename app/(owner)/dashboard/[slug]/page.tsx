@@ -4,8 +4,8 @@ import { BillingPortalButton } from "@/components/BillingPortalButton";
 import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
-import { runSiteQa } from "@/lib/qa";
 import { claimGateForBundle } from "@/lib/site-publication";
+import { managedSiteStatus } from "@/lib/managed-site-status";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +23,7 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
     repository.listClaims(siteId)
   ]);
   const claimGate = claimGateForBundle(bundle, claims);
-  const qa = runSiteQa(bundle, { versionStatus: "draft" });
-  const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open");
+  const managedStatus = managedSiteStatus(bundle);
   const activeDomains = domains.filter((domain) => domain.status === "active");
   const pendingDomains = domains.filter((domain) => domain.status !== "active");
   const recentInquiries = inquiries.slice(0, 3);
@@ -38,7 +37,7 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
           <p className="owner-page-eyebrow">Site dashboard</p>
           <h1>{bundle.businessProfile.name}</h1>
           <p className="owner-page-lede">
-            Site status, pending improvements, customer activity, domain setup, and billing for this managed site.
+            Generation status, verified source evidence, customer activity, domain setup, and billing for this managed site.
           </p>
         </div>
         <div className="button-row">
@@ -53,7 +52,7 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
 
       <section className="metric-row">
         <Metric label="Publish gate" value={claimGate.ok ? "Ready" : "Needs review"} />
-        <Metric label="Pending proposals" value={openFindings.length} />
+        <Metric label="Evidence confirmations" value={managedStatus.evidence.pendingConfirmation} />
         <Metric label="Recent leads" value={inquiries.length} />
         <Metric label="Active domains" value={activeDomains.length} />
       </section>
@@ -70,13 +69,11 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
               action="Review claim"
             />
             <DashboardCard
-              badge={qa.passed ? "passed" : "review"}
-              title={qa.passed ? "Draft QA passed" : "Draft QA needs review"}
-              body={`${qa.checks.filter((check) => check.severity === "fail").length} blocking QA check${
-                qa.checks.filter((check) => check.severity === "fail").length === 1 ? "" : "s"
-              } on the current draft.`}
-              href={`/versions/${bundle.siteModel.slug}`}
-              action="Versions"
+              badge={managedStatus.generation.replace("_", " ")}
+              title={managedStatus.generation === "ready" ? "Managed site is ready" : "Managed site needs review"}
+              body={managedStatus.blockers[0] ?? "The canonical objective gate is current for this site."}
+              href={`/status/${bundle.siteModel.slug}`}
+              action="Status"
             />
             <DashboardCard
               badge={confirmedFacts.confirmed ? "confirmed" : "pending"}
@@ -89,21 +86,15 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
         </section>
 
         <section className="panel">
-          <h2>Pending Proposals</h2>
+          <h2>Managed Site</h2>
           <div className="finding-list">
-            {openFindings.slice(0, 4).map((finding) => (
-              <DashboardCard
-                key={finding.id}
-                badge={finding.severity}
-                title={finding.title}
-                body={finding.recommendedAction}
-                href={`/optimization/${bundle.siteModel.slug}`}
-                action="Review"
-              />
-            ))}
-            {openFindings.length === 0 ? (
-              <p className="muted">No optimization proposals are waiting for review.</p>
-            ) : null}
+            <DashboardCard
+              badge={managedStatus.generation.replace("_", " ")}
+              title="Generation and evidence status"
+              body={managedStatus.blockers[0] ?? "The canonical site is ready and no evidence confirmations are pending."}
+              href={`/status/${bundle.siteModel.slug}`}
+              action="Status"
+            />
           </div>
         </section>
 

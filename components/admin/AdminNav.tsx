@@ -27,7 +27,6 @@ export function AdminNav({ items, ariaLabel = "Admin" }: { items: AdminNavItem[]
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/admin/sites") return pathname === href || pathname.startsWith("/admin/sites/");
-  if (href === "/admin/assets") return pathname === href || pathname.startsWith("/admin/assets/");
   if (href === "/admin/site-candidates") return pathname === href || pathname.startsWith("/admin/site-candidates/");
   if (href === "/admin/benchmark-sites") return pathname === href || pathname.startsWith("/admin/benchmark-sites/");
   if (href === "/admin/runs") return pathname === href || pathname.startsWith("/admin/runs/");

@@ -18,6 +18,8 @@ import {
 } from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
 import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
+import { containsGatedSensitiveClaim } from "./content-safety-scanners";
+import { publicGenerationServices } from "./vertical-packs";
 
 export type SiteCopyGenerationResult = {
   copy: SiteCopy;
@@ -93,6 +95,7 @@ async function runCopyCall(input: {
             "Return exactly one value for every slotId and no unrequested slots.",
             "Use concrete, business-specific language. Avoid generic headings, repeated sentences, clipped phrases, and meta-instructions.",
             "Do not invent services, prices, credentials, warranties, awards, offers, reviews, turnaround times, insurance relationships, or years in business.",
+            "Omit pricing, free offers, insurance, rental-car, credential, warranty, award, review-rating, superlative, and longevity claims from model-written copy. Those facts render only through deterministic evidence components, even when they appear in the supplied source profile.",
             "Only cite evidence IDs allowed by that slot. Evidence is optional unless the wording directly relies on it.",
             "Testimonials and protected claims are rendered deterministically outside this call; never rewrite or summarize them.",
             "Service landing pages must each have distinct service-specific detail and questions."
@@ -173,11 +176,13 @@ function copyContext(input: {
   return {
     business: {
       name: input.business.name,
-      description: input.business.description,
+      description: input.business.description && !containsGatedSensitiveClaim(input.business.description)
+        ? input.business.description
+        : undefined,
       phone: input.business.phone,
       address: input.business.address,
       hours: input.business.hours,
-      services: input.business.services,
+      services: publicGenerationServices(input.business.services),
       serviceAreas: input.business.serviceAreas
     },
     designSystem: input.plan.designSystem,
@@ -220,25 +225,25 @@ function fixtureValue(slotId: string, role: string, business: BusinessProfile, s
   }
   if (slotId.endsWith("hero.body")) return pageService ? `Understand the damage, repair approach, and next step for ${pageService.toLowerCase()} at ${business.name}.` : `${business.name} handles ${services.slice(0, 3).join(", ").toLowerCase()} with a clear estimate and repair plan.`;
   if (slotId.includes("services") && slotId.endsWith("heading")) return "Repairs matched to the damage";
-  if (slotId.includes("services") && slotId.endsWith(".body")) return "Start with the visible damage and the shop can identify the repair work it needs.";
   if (slotId.includes("services") && slotId.endsWith(".title")) return service;
-  if (slotId.includes("services") && /\.\d+\.body$/.test(slotId)) return `Ask about ${service.toLowerCase()}, the estimate, and what the repair will involve.`;
+  if (slotId.includes("services") && /\.\d+\.body$/.test(slotId)) return `Discuss the affected panels, repair options, and estimate details for ${service.toLowerCase()}.`;
+  if (slotId.endsWith("services.body")) return "Start with the visible damage so the shop can identify the repair work it needs.";
   if (slotId.includes("process") && slotId.endsWith("heading")) return "From damage review to pickup";
-  if (slotId.includes("process") && slotId.endsWith(".body")) return "Each step keeps the estimate, repair decision, and pickup expectations visible.";
   if (slotId.includes("process") && slotId.endsWith(".title")) return ["Share the damage", "Review the estimate", "Approve the plan", "Inspect and pick up"][index] ?? "Confirm the next step";
   if (slotId.includes("process") && /\.\d+\.body$/.test(slotId)) return ["Send photos or arrange an in-person inspection.", "Review the documented damage and proposed work.", "Confirm the repair scope before work begins.", "Review the finished repair and pickup details."][index] ?? "Confirm details with the shop.";
+  if (slotId.endsWith("process.body")) return "A documented sequence keeps the estimate, repair decision, and pickup expectations visible.";
   if (slotId.includes("testimonials") && slotId.endsWith("heading")) return "What customers said";
   if (slotId.includes("testimonials")) return "Exact comments retained from the business website.";
   if (slotId.includes("location") && slotId.endsWith("heading")) return location ? `Visit the shop in ${location}` : `Visit ${business.name}`;
   if (slotId.includes("location")) return "Check the address, hours, and best way to reach the shop before you go.";
   if (slotId.includes("faq") && slotId.endsWith("heading")) return pageService ? `${pageService} questions` : "Before you request an estimate";
-  if (slotId.includes("faq") && slotId.endsWith(".body")) return "Direct answers about estimates, repair scope, timing, and insurance paperwork.";
-  if (slotId.includes("faq") && slotId.endsWith("question")) return [`How does the estimate start?`, `Can you help document insurance repairs?`, `What determines repair timing?`, `How will I know the repair is ready?`][index] ?? `What should I know about ${service.toLowerCase()}?`;
-  if (slotId.includes("faq") && slotId.endsWith("answer")) return [`Call or send the available damage details so the shop can recommend an inspection path.`, `The shop can explain what documentation it provides; confirm insurer requirements directly.`, `Timing depends on damage, parts, approvals, and the final repair plan.`, `Confirm the quality-check and pickup process with the shop before work begins.`][index] ?? `The repair approach depends on the damage found during inspection.`;
+  if (slotId.includes("faq") && slotId.endsWith(".body")) return "Direct answers about estimates, repair scope, timing, and pickup.";
+  if (slotId.includes("faq") && slotId.endsWith("question")) return [`How does the estimate start?`, `What helps define the repair scope?`, `What determines repair timing?`, `How will I know the repair is ready?`][index] ?? `What should I know about ${service.toLowerCase()}?`;
+  if (slotId.includes("faq") && slotId.endsWith("answer")) return [`Call or send the available damage details so the shop can recommend an inspection path.`, `The shop can explain the damage documentation it provides and what information is needed before work begins.`, `Timing depends on damage, parts, approvals, and the final repair plan.`, `Confirm the quality-check and pickup process with the shop before work begins.`][index] ?? `The repair approach depends on the damage found during inspection.`;
   if (slotId.includes("detail") && slotId.endsWith("heading")) return `What ${service.toLowerCase()} may involve`;
-  if (slotId.includes("detail") && slotId.endsWith(".body")) return `The shop inspects the affected area before confirming the work needed for ${service.toLowerCase()}.`;
   if (slotId.includes("detail") && slotId.endsWith(".title")) return ["Inspect the damage", "Confirm the repair scope", "Review the finished work"][index] ?? "Plan the repair";
-  if (slotId.includes("detail") && /\.\d+\.body$/.test(slotId)) return `The exact ${service.toLowerCase()} process follows the condition found during inspection.`;
+  if (slotId.includes("detail") && /\.\d+\.body$/.test(slotId)) return ["The inspection documents the affected area and any connected damage.", "The estimate identifies the proposed work, parts, and approval path.", "The finished repair is checked before pickup details are confirmed.", "Questions about the repair can be resolved before work begins."][index] ?? `The exact ${service.toLowerCase()} process follows the condition found during inspection.`;
+  if (slotId.endsWith("detail.body")) return `The shop inspects the affected area before confirming the work needed for ${service.toLowerCase()}.`;
   if (slotId.includes("contact") && slotId.endsWith("heading")) return pageService ? `Ask about ${pageService.toLowerCase()}` : "Start with an estimate request";
   if (slotId.includes("contact")) return business.phone ? `Call ${business.phone} or send the damage details to discuss the next step.` : "Send the damage details to discuss the next step.";
   return role === "heading" ? business.name : `Contact ${business.name} for source-backed service details.`;

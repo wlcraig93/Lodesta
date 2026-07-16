@@ -1,27 +1,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
-  AnalyticsSummary,
-  ClaimRecord,
-  ExperimentAnalysis,
-  ExperimentLearning,
-  Inquiry,
   InquiryEvent,
   JobKind,
   JobRecord,
   WorkerHeartbeatRecord,
-  OptimizationFinding,
   ProspectReportRecord,
   SiteBundle,
   SiteVersion
 } from "./models";
-import { sendOwnerOperationalEmail } from "./owner-notifications";
-import { createSiteV3FromInput } from "./intake";
-import { runAudit } from "./audit";
 import { createPresenceIntakePlan } from "./presence-intake";
 import { runProspectPresenceReport } from "./prospect-reports";
 import { runUrlPresenceAssessment } from "./presence-assessment-runner";
-import { runSiteQa } from "./qa";
 import { assertPublicFetchUrl } from "./url-safety";
 import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
@@ -60,12 +50,6 @@ export type JobExecutionContext = {
   heartbeatJob?: (jobId: string, workerId: string) => Promise<JobHeartbeatResult>;
   generateSite?: (options: Omit<GenerateSiteOptions, "repository">) => Promise<GenerateSiteResult>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
-  runAndStoreAudit?: (siteId: string) => Promise<OptimizationFinding[] | null>;
-  analyticsSummary?: (siteId: string) => Promise<AnalyticsSummary>;
-  analyzeExperiments?: (siteId: string) => Promise<ExperimentAnalysis[]>;
-  listExperimentLearnings?: (siteId?: string) => Promise<ExperimentLearning[]>;
-  listInquiries?: (siteId?: string) => Promise<Inquiry[]>;
-  listClaims?: (siteId?: string) => Promise<ClaimRecord[]>;
   listInquiryEvents?: (inquiryId: string) => Promise<InquiryEvent[]>;
   processInquiryNotification?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
   processInquiryAiEnrichment?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
@@ -245,6 +229,11 @@ async function executeJobBody(
       const prompt = typeof job.payload.prompt === "string" ? job.payload.prompt : undefined;
       const candidatePurpose = job.payload.candidatePurpose === "test_generation" ? "test_generation" : undefined;
       const modelFallbackPolicy = job.payload.modelFallbackPolicy === "allow" ? "allow" : undefined;
+      const intendedSiteId = typeof job.payload.intendedSiteId === "string" ? job.payload.intendedSiteId : undefined;
+      const intendedSite = intendedSiteId && context.getSiteBundle
+        ? await context.getSiteBundle(intendedSiteId)
+        : undefined;
+      if (intendedSiteId && !intendedSite) throw new Error(`Unknown intended managed site ${intendedSiteId}.`);
       const url = rawUrl ? await assertPublicFetchUrl(rawUrl) : undefined;
       assertLaunchMarket({ url, prompt });
       const input = {
@@ -259,6 +248,7 @@ async function executeJobBody(
           source: "job",
           candidatePurpose,
           modelFallbackPolicy,
+          intendedSite: intendedSite ?? undefined,
           metadata: jobGenerationMetadata(job, context),
           signal: timeout.signal
         });
@@ -276,8 +266,7 @@ async function executeJobBody(
         vertical: bundle.businessProfile.vertical,
         rendererVersion: version?.rendererVersion,
         readiness: version?.generationQa?.readiness,
-        pages: versionPageCount(version),
-        findings: bundle.optimizationFindings.length
+        pages: versionPageCount(version)
       };
     }
     case "agent_telemetry_cleanup": {
@@ -346,140 +335,6 @@ async function executeJobBody(
         created: results.filter((result) => result.ok).length,
         failed: results.filter((result) => !result.ok).length,
         results
-      };
-    }
-    case "audit_site": {
-      const siteId = typeof job.payload.siteId === "string" ? job.payload.siteId : undefined;
-      if (siteId && context?.runAndStoreAudit && context?.getSiteBundle) {
-        const findings = await context.runAndStoreAudit(siteId);
-        const bundle = await context.getSiteBundle(siteId);
-        if (!findings || !bundle) throw new Error(`Unknown site: ${siteId}`);
-        const qa = runSiteQa(bundle, { versionStatus: "draft" });
-        return {
-          siteId,
-          slug: bundle.siteModel.slug,
-          findings,
-          qa: qaSummary(qa)
-        };
-      }
-      const inputUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
-      const bundle = createSiteV3FromInput({
-        url: inputUrl,
-        prompt: assertString(job.payload.prompt ?? "Build a website for Sample Local Business", "prompt")
-      });
-      const findings = runAudit(bundle.businessProfile, bundle.siteModel);
-      return {
-        siteId: bundle.businessProfile.siteId,
-        findings
-      };
-    }
-    case "monthly_action_list": {
-      const siteId = assertString(job.payload.siteId, "siteId");
-      if (!context?.getSiteBundle || !context.runAndStoreAudit || !context.analyticsSummary || !context.analyzeExperiments) {
-        throw new Error("monthly_action_list requires repository-backed job context");
-      }
-      const bundle = await context.getSiteBundle(siteId);
-      if (!bundle) throw new Error(`Unknown site: ${siteId}`);
-      const [findings, analytics, experiments, learnings, inquiries, claims] = await Promise.all([
-        context.runAndStoreAudit(siteId),
-        context.analyticsSummary(siteId),
-        context.analyzeExperiments(siteId),
-        context.listExperimentLearnings?.(siteId) ?? Promise.resolve([]),
-        context.listInquiries?.(siteId) ?? Promise.resolve([]),
-        context.listClaims?.(siteId) ?? Promise.resolve([])
-      ]);
-      const qa = runSiteQa(bundle, { versionStatus: "draft" });
-      const openFindings = (findings ?? []).filter((finding) => finding.status === "open");
-      const autoApplicable = openFindings.filter((finding) => finding.applyMode !== "manual_service");
-      const proposalCount = openFindings.length;
-      const proposalNotification = proposalCount
-        ? await sendOwnerOperationalEmail({
-            bundle,
-            claims,
-            kind: "proposal_ready",
-            subject: `${bundle.businessProfile.name}: ${proposalCount} website improvement proposal${
-              proposalCount === 1 ? "" : "s"
-            } ready`,
-            summaryLines: [
-              ...(openFindings.length
-                ? [
-                    `${openFindings.length} open action-list proposal${
-                      openFindings.length === 1 ? "" : "s"
-                    } are waiting in the action list.`,
-                    `${autoApplicable.length} can be drafted with one-click or auto-fix controls.`
-                  ]
-                : []),
-              ...openFindings.slice(0, 3).map((finding) => `- ${finding.title}`)
-            ],
-            actionPath: `/optimization/${bundle.siteModel.slug}`
-          })
-        : {
-            kind: "proposal_ready" as const,
-            siteId,
-            status: "skipped" as const,
-            message: "No open proposals were generated."
-          };
-      const inquiryDigestNotification = inquiries.length
-        ? await sendOwnerOperationalEmail({
-            bundle,
-            claims,
-            kind: "inquiry_digest",
-            subject: `${bundle.businessProfile.name}: ${inquiries.length} recent site lead${inquiries.length === 1 ? "" : "s"}`,
-            summaryLines: [
-              `${inquiries.length} inquiry record${inquiries.length === 1 ? "" : "s"} are visible in Lodesta.`,
-              ...summarizeInquiries(inquiries).recent
-                .slice(0, 3)
-                .map((inquiry) => `- ${inquiry.contactEmail ?? inquiry.status ?? inquiry.id}`)
-            ],
-            actionPath: `/leads/${bundle.siteModel.slug}`
-          })
-        : {
-            kind: "inquiry_digest" as const,
-            siteId,
-            status: "skipped" as const,
-            message: "No inquiries are available for a digest."
-          };
-      return {
-        generatedAt: new Date().toISOString(),
-        siteId,
-        slug: bundle.siteModel.slug,
-        analytics: {
-          sessions: analytics.sessions,
-          primaryActions: analytics.primaryActions,
-          actionRate: analytics.actionRate,
-          avgScrollDepth: analytics.avgScrollDepth,
-          medianTimeToActionMs: analytics.medianTimeToActionMs
-        },
-        leads: inquiries.length,
-        leadSummary: summarizeInquiries(inquiries),
-        qa: qaSummary(qa),
-        findings: {
-          total: findings?.length ?? 0,
-          open: openFindings.length,
-          autoApplicable: autoApplicable.length,
-          critical: openFindings.filter((finding) => finding.severity === "critical").length,
-          top: openFindings.slice(0, 5).map((finding) => ({
-            id: finding.id,
-            title: finding.title,
-            applyMode: finding.applyMode,
-            expectedOutcomeMetric: finding.expectedOutcomeMetric
-          }))
-        },
-        notifications: {
-          proposalReady: proposalNotification,
-          inquiryDigest: inquiryDigestNotification
-        },
-        experiments: experiments.map((analysis) => ({
-          experimentId: analysis.experimentId,
-          status: analysis.status,
-          confidence: analysis.confidence,
-          leaderLabel: analysis.leaderLabel,
-          totalAssignments: analysis.totalAssignments
-        })),
-        learnings: {
-          active: learnings.filter((learning) => learning.status === "active").length,
-          rolledBack: learnings.filter((learning) => learning.status === "rolled_back").length
-        }
       };
     }
     case "inquiry_notification": {
@@ -743,49 +598,4 @@ function parseBatchUrls(input: unknown) {
         .filter((url) => /^https?:\/\//i.test(url))
     )
   );
-}
-
-function summarizeInquiries(inquiries: Inquiry[]) {
-  const byStatus: Record<Inquiry["status"], number> = {
-    new: 0,
-    needs_reply: 0,
-    replied: 0,
-    booked: 0,
-    won: 0,
-    lost: 0,
-    spam: 0,
-    archived: 0
-  };
-  const channels = new Map<string, number>();
-  for (const inquiry of inquiries) {
-    byStatus[inquiry.status] += 1;
-    channels.set(inquiry.sourceChannel, (channels.get(inquiry.sourceChannel) ?? 0) + 1);
-  }
-
-  return {
-    total: inquiries.length,
-    ...byStatus,
-    byChannel: Array.from(channels.entries())
-      .map(([channel, total]) => ({ channel, total }))
-      .sort((left, right) => right.total - left.total || left.channel.localeCompare(right.channel)),
-    recent: [...inquiries]
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .slice(0, 5)
-      .map((inquiry) => ({
-        id: inquiry.id,
-        sourceChannel: inquiry.sourceChannel,
-        status: inquiry.status,
-        createdAt: inquiry.createdAt,
-        contactEmail: inquiry.contactEmailNormalized
-      }))
-  };
-}
-
-function qaSummary(qa: ReturnType<typeof runSiteQa>) {
-  return {
-    passed: qa.passed,
-    checks: qa.checks.length,
-    failures: qa.checks.filter((check) => check.severity === "fail").length,
-    warnings: qa.checks.filter((check) => check.severity === "warning").length
-  };
 }

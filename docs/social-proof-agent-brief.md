@@ -1,6 +1,6 @@
 # Social Proof Agent Brief
 
-Last updated: May 30, 2026
+Last updated: July 15, 2026
 
 ## Purpose
 
@@ -126,6 +126,7 @@ Custom social proof should be placed near the decision it supports:
 - If the current environment only has `GOOGLE_PLACES_API_KEY`, add a separate browser-safe public key before client-side implementation.
 - Lazy-load the UI Kit module.
 - Provide a link-only fallback when API key, Place ID, billing, or component loading is unavailable.
+- Record UI Kit load, failure, link fallback, and estimated query cost without storing review content.
 
 Sources:
 
@@ -137,7 +138,10 @@ Sources:
 Track:
 
 - Google proof module impression.
+- Google proof module load success.
 - Google proof module load failure.
+- Link-only fallback and fallback rate.
+- Estimated Places UI Kit query cost.
 - Google Maps profile clicks.
 - Directions clicks.
 - Review CTA clicks.

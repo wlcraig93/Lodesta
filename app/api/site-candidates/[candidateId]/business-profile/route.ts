@@ -6,7 +6,7 @@ import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { siteVersionV3Issue } from "@/lib/site-version-v3";
 import { markAllVersionsOwnerTouched } from "@/lib/site-version-metadata";
-import { runSiteQa } from "@/lib/qa";
+import { managedSiteStatus } from "@/lib/managed-site-status";
 
 export const runtime = "nodejs";
 
@@ -73,7 +73,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   };
   const guardrails = validateBusinessProfileUpdate(candidate.bundle, input);
   if (!guardrails.ok) {
-    return NextResponse.json({ error: guardrails.reason, issues: guardrails.issues, qa: guardrails.qa }, { status: 400 });
+    return NextResponse.json({ error: guardrails.reason, issues: guardrails.issues }, { status: 400 });
   }
 
   const nextBundle = applyBusinessProfileUpdate(structuredClone(candidate.bundle), input);
@@ -84,8 +84,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   return NextResponse.json({
     ok: true,
     businessProfile: updated.bundle.businessProfile,
-    findings: updated.bundle.optimizationFindings,
-    qa: runSiteQa(updated.bundle, { versionStatus: "draft" }),
+    regenerationRequired: Boolean(updated.bundle.presenceAssessment.generationPlan?.provenance.stale),
+    managedStatus: managedSiteStatus(updated.bundle),
     guardrailWarnings: guardrails.warnings
   });
 }

@@ -1,7 +1,7 @@
 import type { PresenceAssessment, RenderInspectionResult, Vertical } from "./models";
 import type { CrawlAssessment } from "./crawler";
 import type { PublicPresenceEnrichment } from "./public-presence";
-import { inferVertical } from "./intake";
+import { inferVertical } from "./vertical-classification";
 import { slugify } from "./slug";
 import { evaluateCrawlAgainstStandard } from "./standard-evaluation";
 

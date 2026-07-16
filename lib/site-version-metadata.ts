@@ -19,9 +19,6 @@ export type SiteVersionPageSummary = {
 };
 
 export function sitePagesForVersion(version: SiteVersion): SiteVersionPageSummary[] {
-  if (version.rendererVersion !== "layout-v3") {
-    throw new Error(`Site page summaries require layout-v3; received ${version.rendererVersion}.`);
-  }
   return version.pageComposition.pages;
 }
 
@@ -41,14 +38,9 @@ export function computeSiteModelHash(bundle: SiteBundle, version: SiteVersion) {
     version: {
       rendererVersion: version.rendererVersion,
       designSchemaVersion: version.designSchemaVersion,
-      designPlan: version.designPlan,
-      ...(version.rendererVersion === "layout-v3"
-        ? {
-            pageComposition: version.pageComposition,
-            mediaDecisions: version.mediaDecisions,
-            artDirection: version.artDirection
-          }
-        : {}),
+      pageComposition: version.pageComposition,
+      mediaDecisions: version.mediaDecisions,
+      artDirection: version.artDirection,
       theme: version.theme ?? bundle.siteModel.theme,
       presentation: version.presentation
     }
@@ -109,7 +101,7 @@ export function summarizeRenderInspection(result: RenderInspectionResult): {
 
 export function makePendingGenerationQa(siteModelHash: string): GenerationQaMetadata {
   return {
-    schemaVersion: "generation-qa-v4",
+    schemaVersion: "canonical-generation-qa-v1",
     readiness: "pending",
     siteModelHash,
     blockers: [],

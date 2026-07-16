@@ -25,8 +25,8 @@ export default async function VersionsPage({ params }: { params: Promise<{ slug:
           <p>Review generated drafts and rollback safely by making any previous version live again.</p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href={`/optimization/${bundle.siteModel.slug}`}>
-            Optimization
+          <Link className="button secondary" href={`/status/${bundle.siteModel.slug}`}>
+            Status
           </Link>
           <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
             Editor

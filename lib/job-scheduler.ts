@@ -1,6 +1,6 @@
 import type { JobKind, JobRecord, SiteBundle } from "./models";
 
-export type ScheduleTask = "monthly_action_lists" | "launch_maintenance";
+export type ScheduleTask = "launch_maintenance";
 
 export type ScheduleLaunchJobsInput = {
   task?: ScheduleTask;
@@ -45,7 +45,7 @@ export async function scheduleLaunchJobs(
   const existing = await repository.listJobs();
   const queued: JobRecord[] = [];
   const skipped: ScheduleLaunchJobsResult["skipped"] = unknownSiteIds.map((siteId) => ({
-    kind: "monthly_action_list",
+    kind: "agent_telemetry_cleanup",
     siteId,
     reason: "unknown_site" as const
   }));
@@ -84,17 +84,6 @@ async function buildJobSpecs(
     unknownSiteIds.push(...input.siteIds.filter((siteId) => !knownSiteIds.has(siteId)));
   }
 
-  if (task === "monthly_action_lists" || task === "launch_maintenance") {
-    for (const siteId of siteIds) {
-      if (!knownSiteIds.has(siteId)) {
-        continue;
-      }
-      specs.push({
-        kind: "monthly_action_list",
-        payload: basePayload({ siteId, scheduleKey, scheduledAt, runAfter: input.runAfter })
-      });
-    }
-  }
   if (task === "launch_maintenance") {
     specs.push({
       kind: "agent_telemetry_cleanup",
@@ -135,7 +124,6 @@ function isDuplicateScheduledJob(job: JobRecord, spec: ScheduledJobSpec) {
 
 function defaultScheduleKey(task: ScheduleTask, now: Date) {
   const date = now.toISOString();
-  if (task === "monthly_action_lists") return `monthly-action-list:${date.slice(0, 7)}`;
   return `launch-maintenance:${date.slice(0, 10)}`;
 }
 

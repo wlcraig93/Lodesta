@@ -94,9 +94,9 @@ async function main() {
     console.log(`    · slot=${m.slotId ?? m.slot ?? "?"} source=${m.source ?? "?"} rights=${m.rightsStatus ?? "?"} ${m.assetId ?? m.url ?? ""}`);
   }
 
-  console.log("\n==================== COPY (first page deck) ====================");
-  // Dump raw copy artifacts if present on the version or bundle.
-  const copy = (bundle as Record<string, unknown>).generatedCopy ?? (version as Record<string, unknown>).copy;
+  console.log("\n==================== CANONICAL SITE COPY ====================");
+  const presence = (bundle as Record<string, unknown>).presenceAssessment as Record<string, unknown> | undefined;
+  const copy = presence?.siteCopy;
   if (copy) {
     console.log(JSON.stringify(copy, null, 2).slice(0, 6000));
   } else {

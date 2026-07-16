@@ -30,21 +30,20 @@ const placeholderPatterns: PlaceholderTextMatch[] = [
   { pattern: /\bhelp visitors\b/i, reason: "Generic visitor-planning copy is visible instead of customer-facing copy." },
   { pattern: /\bEasy next step\b/i, reason: "Generic trust-bar filler is visible instead of a specific business signal." },
   { pattern: /\b(Customer decision path|Conversion standard|Review summary detected)\b/i, reason: "Internal quality-calibration copy is visible." },
-  { pattern: /\b(general visuals?|visual context|source-backed next steps?|site source|extracted service list|profile details)\b/i, reason: "Internal source/template language is visible." },
+  { pattern: /\b(visual context|source-backed next steps?|site source|extracted service list|profile details)\b/i, reason: "Internal source/template language is visible." },
   { pattern: /\b(?:according to )?(?:our|the|provided|available) source (?:information|data|material|details?)\b/i, reason: "Internal provenance language is visible." },
-  { pattern: /\b(repair conversation|estimate conversation|repair paths?|estimate path|call-first path|agreed next step)\b/i, reason: "Generic process-planning copy is visible instead of customer-facing copy." },
   { pattern: /\b(customers should describe|specific without assuming|not a photo of this specific shop)\b/i, reason: "Meta commentary about generated-site safety is visible." },
   { pattern: /\b(Call-first|listed repair service available|listed service customers can ask)\b/i, reason: "Filler proof or service copy is visible." }
 ];
 
 const sensitiveClaimPatterns: Array<SensitiveClaimMatch & { pattern: RegExp }> = [
   { category: "credential", label: "licensed/certified credential", severity: "block", pattern: /\b(licensed|certified|board[-\s]?certified|accredited)\b/i, requiredEvidence: "proof" },
-  { category: "insurance", label: "insurance or bonding claim", severity: "block", pattern: /\b(insured|bonded|insurance accepted|insurance claims?|deductible|rental car)\b/i, requiredEvidence: "insurance" },
+  { category: "insurance", label: "insurance or bonding claim", severity: "block", pattern: /\b(insured|bonded|insurance|insurer|deductible|rental cars?)\b/i, requiredEvidence: "insurance" },
   { category: "guarantee", label: "guarantee", severity: "block", pattern: /\b(guaranteed|guarantee|risk[-\s]?free)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated approval", severity: "block", pattern: /\b(fda[-\s]?approved|hipaa[-\s]?compliant|irs[-\s]?certified)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated advice", severity: "block", pattern: /\b(medical advice|legal advice|financial advice|tax advice|case results?)\b/i, requiredEvidence: "proof" },
-  { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(cure|diagnos(?:e|is)|treats? disease|treatment|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
-  { category: "pricing", label: "pricing claim", severity: "warning", pattern: /\b(best prices?|free estimate|free quote|no out of pocket|affordable)\b/i, requiredEvidence: "pricing" },
+  { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(diagnos(?:e|is)|medical treatment|(?:cures?|treats?) (?:a |the )?(?:disease|condition|symptoms?|illness|pain)|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
+  { category: "pricing", label: "pricing claim", severity: "warning", pattern: /(?:\bbest prices?\b|\bfree\b.{0,24}\b(?:estimates?|quotes?)\b|\bno out of pocket\b|\baffordable\b)/i, requiredEvidence: "pricing" },
   { category: "reviews", label: "top-rated review claim", severity: "warning", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
   { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bbest\b(?!\s+(?:way|time|place)\b)|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
   { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
@@ -62,4 +61,14 @@ export function scanSensitiveClaimText(text: string): SensitiveClaimMatch[] {
   return sensitiveClaimPatterns
     .filter((entry) => entry.pattern.test(normalized))
     .map(({ pattern: _pattern, ...entry }) => entry);
+}
+
+export function gatedSensitiveClaims(text: string) {
+  return scanSensitiveClaimText(text).filter(
+    (claim) => claim.severity === "block" || claim.category === "pricing" || claim.category === "reviews" || claim.category === "marketing"
+  );
+}
+
+export function containsGatedSensitiveClaim(text: string) {
+  return gatedSensitiveClaims(text).length > 0;
 }

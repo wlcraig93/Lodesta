@@ -12,6 +12,7 @@ import {
 } from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
 import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
+import type { EvidenceKind, EvidenceProposal } from "./evidence-ledger";
 
 export const understandingVerticalValues = [
   "restaurant",
@@ -36,6 +37,15 @@ const brandExpressionMoodValues = ["clinical", "warm", "premium", "technical", "
 const brandExpressionFontPostureValues = ["utility", "editorial", "condensed", "rounded", "premium"] as const;
 const brandExpressionVoiceRegisterValues = ["direct", "warm", "premium", "technical", "plainspoken"] as const;
 const brandExpressionPaletteSeedStrategyValues = ["logo_color", "photo_color", "category_default", "neutral"] as const;
+const evidenceKindValues = [
+  "testimonial",
+  "credential",
+  "warranty",
+  "insurance_support",
+  "award",
+  "years_in_business",
+  "offer"
+] as const satisfies readonly EvidenceKind[];
 
 /** Minimum LLM vertical confidence treated as trustworthy over the keyword fallback. */
 export const understandingVerticalConfidenceFloor = 0.55;
@@ -81,6 +91,13 @@ const understandingSchema = z.object({
     }),
     rationale: z.string().min(10).max(240)
   }),
+  evidenceProposals: z.array(z.object({
+    kind: z.enum(evidenceKindValues),
+    proposedText: z.string().min(1).max(320),
+    sourceUrl: z.string().url(),
+    sourceBlockId: z.string().min(1).max(160),
+    attribution: z.string().min(1).max(120).nullable()
+  })).max(24),
   factConfidence: z
     .array(
       z.object({
@@ -138,6 +155,7 @@ async function createOpenAiBusinessUnderstandingAttempt(
               "factConfidence reflects how strongly each field is supported by the provided source material.",
               "businessStory: capture what makes this business THIS business when the source reveals it — founders, family ownership, history, mascots or personalities, neighborhood roots, anything a customer would remember. Quote-level fidelity to the source; null when the source has no story.",
               "brandExpression: make bounded taste calls only. Choose mood, voice register, and font posture from the allowed values. Choose a palette seed strategy from source evidence; use preferredHex only when an explicit extracted candidate is provided, otherwise null. This is not layout design.",
+              "evidenceProposals: identify only testimonials, credentials, warranties, insurance support, awards, years-in-business statements, and offers that are explicitly present in a supplied sourceTextBlock. proposedText must copy one exact contiguous span from displayText without paraphrasing. sourceUrl and sourceBlockId must exactly match that block. A testimonial must be one block, 40 to 240 characters, and at least 7 words. attribution is null unless the exact name or attribution is in the same or immediately adjacent supplied block. Omit doubtful evidence rather than repairing or summarizing it.",
               "Do not invent facts, prices, credentials, reviews, or offers."
             ].join(" ")
           }
@@ -247,6 +265,13 @@ async function createOpenAiBusinessUnderstandingAttempt(
         },
         rationale: parsed.brandExpression.rationale
       },
+      evidenceProposals: parsed.evidenceProposals.map((proposal): EvidenceProposal => ({
+        kind: proposal.kind,
+        proposedText: proposal.proposedText,
+        sourceUrl: proposal.sourceUrl,
+        sourceBlockId: proposal.sourceBlockId,
+        ...(proposal.attribution ? { attribution: proposal.attribution } : {})
+      })),
       notes: parsed.notes
     };
   } catch (error) {
@@ -306,7 +331,7 @@ function understandingContext(input: BusinessUnderstandingInput) {
             title: page.title,
             metaDescription: page.metaDescription,
             extractedFacts: page.extractedFacts,
-            mainText: page.mainText
+            sourceTextBlocks: boundedUnderstandingSourceBlocks(page.sourceTextBlocks ?? [])
           }))
         }
       : undefined,
@@ -327,6 +352,18 @@ function understandingContext(input: BusinessUnderstandingInput) {
       paletteSeedStrategies: brandExpressionPaletteSeedStrategyValues
     }
   };
+}
+
+function boundedUnderstandingSourceBlocks(
+  blocks: NonNullable<CrawlAssessment["pageSummaries"][number]["sourceTextBlocks"]>
+) {
+  let remainingCharacters = 30_000;
+  return blocks.slice(0, 100).flatMap((block) => {
+    if (remainingCharacters <= 0) return [];
+    const displayText = block.displayText.slice(0, remainingCharacters);
+    remainingCharacters -= displayText.length;
+    return [{ id: block.id, sourceUrl: block.sourceUrl, displayText }];
+  });
 }
 
 /**
@@ -391,12 +428,15 @@ const dayRangeScanPattern = new RegExp(`(${dayPattern}(?:\\s*(?:[–—-]|to)\\s
 
 /** Detects live status strings that must never be stored as recurring hours. */
 export function isDynamicHoursStatus(value: string) {
-  if (/\b(currently|right now|at the moment)\b/i.test(value)) return true;
+  if (
+    /\b(?:currently|right now|at the moment)\b.{0,24}\b(?:open|closed|closing)\b/i.test(value) ||
+    /\b(?:open|closed|closing)\b.{0,24}\b(?:currently|right now|at the moment)\b/i.test(value)
+  ) return true;
   // "open again"/"opens at 8" are live status; "open on Saturdays" is
   // legitimate recurring-hours copy and must not match.
   if (/\b(open again|opens? at|closing soon|closed now|back open)\b/i.test(value)) return true;
   if (/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,?\s+\d{4})?\b/i.test(value)) return true;
-  if (/\b\d{4}\b/.test(value) && /\b(open|closed)\b/i.test(value)) return true;
+  if (/\b(?:19|20)\d{2}\b/.test(value) && /\b(open|closed)\b/i.test(value)) return true;
   return false;
 }
 
@@ -514,6 +554,7 @@ const understandingResponseJsonSchema = {
     "urgentServiceSignals",
     "businessStory",
     "brandExpression",
+    "evidenceProposals",
     "factConfidence",
     "notes"
   ],
@@ -584,6 +625,22 @@ const understandingResponseJsonSchema = {
           }
         },
         rationale: { type: "string", minLength: 10, maxLength: 240 }
+      }
+    },
+    evidenceProposals: {
+      type: "array",
+      maxItems: 24,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "proposedText", "sourceUrl", "sourceBlockId", "attribution"],
+        properties: {
+          kind: { type: "string", enum: evidenceKindValues },
+          proposedText: { type: "string", minLength: 1, maxLength: 320 },
+          sourceUrl: { type: "string" },
+          sourceBlockId: { type: "string", minLength: 1, maxLength: 160 },
+          attribution: { type: ["string", "null"], minLength: 1, maxLength: 120 }
+        }
       }
     },
     factConfidence: {

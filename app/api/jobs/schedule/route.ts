@@ -7,7 +7,7 @@ import { requireAdmin } from "@/lib/security";
 export const runtime = "nodejs";
 
 const scheduleSchema = z.object({
-  task: z.enum(["monthly_action_lists", "launch_maintenance"]).default("launch_maintenance"),
+  task: z.literal("launch_maintenance").default("launch_maintenance"),
   siteIds: z.array(z.string().min(1)).optional(),
   scheduleKey: z.string().min(1).optional(),
   runAfter: z.string().datetime().optional()

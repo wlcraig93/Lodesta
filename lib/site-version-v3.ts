@@ -15,10 +15,9 @@ export function isSiteVersionV3(version: SiteVersion | undefined | null): versio
 export function siteVersionV3Issue(version: SiteVersion | undefined | null): string | null {
   if (!version) return "version is missing";
   if (!isSiteVersionV3(version)) {
-    return `rendererVersion is ${version.rendererVersion ?? "missing"}; expected layout-v3`;
+    return "version is not canonical layout-v3";
   }
-  if ("pages" in version) return "legacy SiteVersionV3.pages projection is still present";
-  if (version.generationQa && version.generationQa.schemaVersion !== "generation-qa-v4") {
+  if (version.generationQa && version.generationQa.schemaVersion !== "canonical-generation-qa-v1") {
     return "stale generationQa schema — regenerate this candidate";
   }
   return null;

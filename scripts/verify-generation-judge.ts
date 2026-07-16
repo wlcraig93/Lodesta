@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { availableJudgeActions, parseGenerationJudgeResult } from "../lib/generation-judge";
+import { availableJudgeActions, generationJudgeContext, parseGenerationJudgeResult } from "../lib/generation-judge";
 import { buildCanonicalFixture, loadCanonicalFixtureDefinitions } from "./canonical-generation-fixtures";
 
 const definitions = await loadCanonicalFixtureDefinitions();
@@ -13,6 +13,18 @@ assert.deepEqual(
 assert.deepEqual(
   availableJudgeActions(noMediaFixture.plan, noMediaFixture.assets),
   ["copy", "operator_review"]
+);
+assert.deepEqual(
+  generationJudgeContext({
+    business: {
+      ...mediaFixture.bundle.businessProfile,
+      services: ["Collision Repair", "Free Repair Estimates", "Insurance Repair Assistance"]
+    },
+    plan: mediaFixture.plan,
+    packet: { availableActions: ["copy", "operator_review"], images: [], textManifest: [] }
+  }).business.services,
+  ["Collision Repair"],
+  "The judge must not request confirmation-gated facts omitted from public copy."
 );
 
 assert.deepEqual(

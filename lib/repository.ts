@@ -23,7 +23,6 @@ import type {
   JobKind,
   JobRecord,
   WorkerHeartbeatRecord,
-  OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
   OutboundProspect,
@@ -39,24 +38,18 @@ import type {
   SiteVersion,
 } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
-import type { AiEditResult } from "./ai-editor";
 import type { BusinessProfileUpdateInput } from "./business-profile-update";
-import type { UpdateSiteDesignInput, UpdateSiteDesignResult } from "./design";
 import type { EditorGuardrailIssue } from "./editor-guardrails";
 import type { UpdateFormSettingsInput, UpdateFormSettingsResult } from "./form-settings";
 import type { UpdateOwnerAssetsInput, UpdateOwnerAssetsResult } from "./owner-assets";
-import type { OptimizationChangeSummary } from "./optimization";
 import {
   updateBusinessProfile,
+  confirmSiteEvidence,
   analyticsSummary,
-  applyAiEditToSite,
-  applyFindingToDraft,
   assignExperiment,
   concludeExperimentWithLearning,
-  createAndStoreSite,
   createClaim,
   completeClaimCheckout,
-  dismissFinding,
   createPreviewToken,
   createSiteCandidate as createSiteCandidateStore,
   listSiteArtifacts as listSiteArtifactsStore,
@@ -103,7 +96,6 @@ import {
   registerDomain,
   restoreVersionToDraft,
   resolvePreviewToken,
-  runAndStoreAudit,
   saveSiteVersion,
   updateExperiment,
   updateFormSettings,
@@ -115,7 +107,6 @@ import {
   updateDomain,
   updateOwnerAssets,
   updateProspectReport as updateProspectReportStore,
-  updateSiteDesign as updateSiteDesignStore,
   updateSectionProps,
   upsertSiteArtifact as upsertSiteArtifactStore,
   replaceFactCandidates as replaceFactCandidatesStore,
@@ -452,13 +443,12 @@ export type CreateProspectReportLeadInput = {
 };
 
 type SectionUpdateResult =
-  | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
+  | { ok: false; reason: string; issues?: EditorGuardrailIssue[] }
   | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
   | null;
-type DesignUpdateResult = UpdateSiteDesignResult | null;
 type PublishResult = { ok: false; reason: string } | { ok: true; bundle: SiteBundle } | null;
 type BusinessProfileUpdateResult =
-  | { ok: false; reason: string; issues?: EditorGuardrailIssue[]; qa?: unknown }
+  | { ok: false; reason: string; issues?: EditorGuardrailIssue[] }
   | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
   | null;
 type ExperimentAssignment =
@@ -471,25 +461,10 @@ type ExperimentAssignment =
       primaryMetric: Experiment["primaryMetric"];
       holdout: boolean;
     };
-type ApplyFindingResult =
-  | { ok: false; reason: string }
-  | {
-      ok: true;
-      draftCreated: boolean;
-      qaRequired: boolean;
-      finding: OptimizationFinding;
-      changeSummary: OptimizationChangeSummary;
-    }
-  | null;
 type RestoreVersionResult =
   | { ok: false; reason: string }
   | { ok: true; bundle: SiteBundle; draftVersionId: string; restoredFromVersionId: string }
   | null;
-type DismissFindingResult =
-  | { ok: false; reason: string }
-  | { ok: true; finding: OptimizationFinding }
-  | null;
-type AiEditRepositoryResult = AiEditResult | null;
 type PreviewResolveResult = { token: PreviewToken; bundle: SiteBundle } | null;
 type ExperimentUpdateResult = { ok: false; reason: string } | { ok: true; experiment: Experiment } | null;
 type ExperimentLearningResult =
@@ -517,7 +492,6 @@ export type LodestaRepository = {
   listSiteBundles(): Promise<SiteBundle[]>;
   getSiteBundle(siteId: string): Promise<SiteBundle | null>;
   getSiteBundleBySlug(slug: string): Promise<SiteBundle | null>;
-  createAndStoreSite(input: CreateSiteInput, options?: CreateSiteOptions): Promise<SiteBundle>;
   createSiteCandidate(input: CreateSiteCandidateInput): Promise<SiteCandidateRecord>;
   listSiteCandidates(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidatesResult>;
   listSiteCandidateSummaries(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidateSummariesResult>;
@@ -538,13 +512,17 @@ export type LodestaRepository = {
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
   listPreviewTokens(siteId?: string): Promise<PreviewToken[]>;
   saveSiteVersion(input: { siteId: string; version: SiteVersion }): Promise<SiteBundle | null>;
-  runAndStoreAudit(siteId: string): Promise<OptimizationFinding[] | null>;
   updateSectionProps(input: UpdateSectionInput): Promise<SectionUpdateResult>;
-  updateSiteDesign(input: UpdateSiteDesignInput): Promise<DesignUpdateResult>;
   publishDraft(siteId: string): Promise<PublishResult>;
   publishVersion(input: { siteId: string; versionId: string }): Promise<PublishResult>;
   restoreVersionToDraft(input: { siteId: string; versionId: string }): Promise<RestoreVersionResult>;
   updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<BusinessProfileUpdateResult>;
+  confirmSiteEvidence(input: {
+    siteId: string;
+    evidenceId: string;
+    decision: "confirmed" | "rejected";
+    decidedBy: string;
+  }): Promise<{ ok: true; bundle: SiteBundle; item: import("./evidence-ledger").VerifiedEvidence } | { ok: false; reason: string } | null>;
   updateOwnerAssets(input: UpdateOwnerAssetsInput): Promise<UpdateOwnerAssetsResult | null>;
   createInquiryFromForm(input: CreateInquiryFromFormInput): Promise<CreateInquiryFromFormResult>;
   listInquiries(siteId?: string): Promise<Inquiry[]>;
@@ -580,9 +558,6 @@ export type LodestaRepository = {
   listExperimentLearnings(filter?: { siteId?: string; status?: ExperimentLearning["status"] }): Promise<ExperimentLearning[]>;
   getForms(siteId: string): Promise<FormDefinition[]>;
   updateFormSettings(input: UpdateFormSettingsInput): Promise<UpdateFormSettingsResult | null>;
-  applyFindingToDraft(input: { siteId: string; findingId: string }): Promise<ApplyFindingResult>;
-  dismissFinding(input: { siteId: string; findingId: string }): Promise<DismissFindingResult>;
-  applyAiEdit(input: { siteId: string; message: string }): Promise<AiEditRepositoryResult>;
   createClaim(input: CreateClaimInput): Promise<ClaimResult>;
   completeClaimCheckout(input: CompleteClaimCheckoutInput): Promise<ClaimRecord | null>;
   listClaims(siteId?: string): Promise<ClaimRecord[]>;
@@ -633,28 +608,6 @@ export const localRepository: LodestaRepository = {
   },
   async getSiteBundleBySlug(slug) {
     return getSiteBundleBySlug(slug);
-  },
-  async createAndStoreSite(input, options) {
-    const bundle = createAndStoreSite(await prepareIntakeInput(input, { telemetry: options?.telemetry }));
-    const persistenceSpan = await options?.telemetry?.startSpan({
-      spanType: "persistence",
-      name: "Persist generated site",
-      inputJson: {
-        siteId: bundle.businessProfile.siteId,
-        slug: bundle.siteModel.slug,
-        businessName: bundle.businessProfile.name
-      }
-    });
-    await persistenceSpan?.end({
-      outputJson: {
-        siteId: bundle.businessProfile.siteId,
-        slug: bundle.siteModel.slug,
-        versions: bundle.siteModel.versions.length,
-        forms: bundle.extensionModel.forms.length,
-        findings: bundle.optimizationFindings.length
-      }
-    });
-    return bundle;
   },
   async createSiteCandidate(input) {
     return createSiteCandidateStore(input);
@@ -717,14 +670,8 @@ export const localRepository: LodestaRepository = {
   async saveSiteVersion(input) {
     return saveSiteVersion(input);
   },
-  async runAndStoreAudit(siteId) {
-    return runAndStoreAudit(siteId);
-  },
   async updateSectionProps(input) {
     return updateSectionProps(input);
-  },
-  async updateSiteDesign(input) {
-    return updateSiteDesignStore(input);
   },
   async publishDraft(siteId) {
     return publishDraft(siteId);
@@ -737,6 +684,9 @@ export const localRepository: LodestaRepository = {
   },
   async updateBusinessProfile(input) {
     return updateBusinessProfile(input);
+  },
+  async confirmSiteEvidence(input) {
+    return confirmSiteEvidence(input);
   },
   async updateOwnerAssets(input) {
     return updateOwnerAssets(input);
@@ -816,15 +766,6 @@ export const localRepository: LodestaRepository = {
   },
   async updateFormSettings(input) {
     return updateFormSettings(input);
-  },
-  async applyFindingToDraft(input) {
-    return applyFindingToDraft(input);
-  },
-  async dismissFinding(input) {
-    return dismissFinding(input);
-  },
-  async applyAiEdit(input) {
-    return applyAiEditToSite(input);
   },
   async createClaim(input) {
     if (!claimVerificationSatisfies(input.verificationLevel)) return null;
@@ -1126,12 +1067,6 @@ function createLocalJobContext(): JobExecutionContext {
       return generateSite({ ...options, repository: localRepository });
     },
     getSiteBundle: localRepository.getSiteBundle,
-    runAndStoreAudit: localRepository.runAndStoreAudit,
-    analyticsSummary: localRepository.analyticsSummary,
-    analyzeExperiments: localRepository.analyzeExperiments,
-    listExperimentLearnings: (siteId) => localRepository.listExperimentLearnings({ siteId }),
-    listInquiries: localRepository.listInquiries,
-    listClaims: localRepository.listClaims,
     listInquiryEvents: localRepository.listInquiryEvents,
     processInquiryNotification: (input) => localRepository.processInquiryNotification(input),
     processInquiryAiEnrichment: (input) => localRepository.processInquiryAiEnrichment(input),

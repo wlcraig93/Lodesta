@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
-import { runSiteQa } from "@/lib/qa";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { assertSiteVersionV3, firstPageTitleForVersionV3, pageCountForVersionV3 } from "@/lib/site-version-v3";
+import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 
 const versionActionSchema = z.object({
   siteId: z.string().min(1),
@@ -48,8 +48,8 @@ export async function POST(request: Request) {
     const result = await repository.restoreVersionToDraft(parsed.data);
     if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
     if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 400 });
-    const qa = runSiteQa(result.bundle, { versionId: result.draftVersionId });
-    return NextResponse.json({ ...result, qa });
+    const draft = result.bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
+    return NextResponse.json({ ...result, objectiveQa: draft?.generationQa });
   }
 
   if (!parsed.data.confirmed) {
@@ -75,13 +75,19 @@ export async function POST(request: Request) {
       { status: verificationRequired ? 409 : 402 }
     );
   }
-  const qa = runSiteQa(bundle, { versionId: parsed.data.versionId });
-  if (!qa.passed) {
-    return NextResponse.json({ error: "Version QA failed. Fix blocking checks before publishing.", qa }, { status: 400 });
+  const version = bundle.siteModel.versions.find((candidate) => candidate.id === parsed.data.versionId);
+  if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
+  const publishReadiness = getEffectiveGenerationQaReadiness(bundle, version);
+  if (publishReadiness !== "ready") {
+    return NextResponse.json({
+      error: "Objective QA must pass for this exact version before publishing.",
+      publishReadiness,
+      blockers: version.generationQa?.blockers ?? []
+    }, { status: 400 });
   }
 
   const result = await repository.publishVersion(parsed.data);
   if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
   if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 400 });
-  return NextResponse.json({ ...result, qa, confirmed: true });
+  return NextResponse.json({ ...result, objectiveQa: version.generationQa, confirmed: true });
 }

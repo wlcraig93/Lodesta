@@ -1,10 +1,8 @@
-import type { QACheck, SiteBundle } from "./models";
+import type { SiteBundle } from "./models";
 import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
-import { runSiteQa } from "./qa";
 import { applyV3SectionUpdate } from "./v3-editor";
 import { assertSiteVersionV3 } from "./site-version-v3";
 import { scanSensitiveClaimText } from "./content-safety-scanners";
-import { generationObjectiveBlockersV3 } from "./generation-gate";
 
 type SectionUpdateInput = {
   siteId: string;
@@ -29,13 +27,11 @@ export type EditorGuardrailResult =
   | {
       ok: true;
       warnings: EditorGuardrailIssue[];
-      qa?: ReturnType<typeof runSiteQa>;
     }
   | {
       ok: false;
       reason: string;
       issues: EditorGuardrailIssue[];
-      qa?: ReturnType<typeof runSiteQa>;
     };
 
 export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateInput): EditorGuardrailResult {
@@ -95,8 +91,7 @@ export function validateSectionUpdate(bundle: SiteBundle, input: SectionUpdateIn
     ]);
   }
 
-  issues.push(...qaRegressionIssues(bundle, draftBundle));
-  return resultFromIssues(issues, runSiteQa(draftBundle, { versionStatus: "draft" }));
+  return resultFromIssues(issues);
 }
 
 export function validateBusinessProfileUpdate(bundle: SiteBundle, input: BusinessProfileUpdateInput): EditorGuardrailResult {
@@ -113,17 +108,7 @@ export function validateBusinessProfileUpdate(bundle: SiteBundle, input: Busines
   }
 
   applyBusinessProfileUpdate(draftBundle, input);
-  issues.push(...qaRegressionIssues(bundle, draftBundle));
-  return resultFromIssues(issues, runSiteQa(draftBundle, { versionStatus: "draft" }));
-}
-
-export function validateAiEditOutcome(beforeBundle: SiteBundle, afterBundle: SiteBundle): EditorGuardrailResult {
-  const beforeSensitiveKeys = new Set(sensitiveClaimsFromBundle(beforeBundle).map((issue) => issue.key ?? issue.detail));
-  const newSensitiveIssues = sensitiveClaimsFromBundle(afterBundle).filter(
-    (issue) => !beforeSensitiveKeys.has(issue.key ?? issue.detail)
-  );
-  const issues = [...newSensitiveIssues, ...qaRegressionIssues(beforeBundle, afterBundle)];
-  return resultFromIssues(issues, runSiteQa(afterBundle, { versionStatus: "draft" }));
+  return resultFromIssues(issues);
 }
 
 export function guardrailIssueMessages(issues: EditorGuardrailIssue[]) {
@@ -156,33 +141,6 @@ export function scanSensitiveClaims(
   return [];
 }
 
-function sensitiveClaimsFromBundle(bundle: SiteBundle) {
-  const issues: EditorGuardrailIssue[] = [];
-  issues.push(
-    ...scanSensitiveClaims(bundle.businessProfile.services, {
-      field: "services",
-      path: "Services"
-    })
-  );
-
-  for (const version of bundle.siteModel.versions) {
-    const v3 = assertSiteVersionV3(version, "guardrail sensitive scan version");
-    for (const page of v3.pageComposition.pages) {
-      for (const section of page.sections) {
-        issues.push(
-          ...scanSensitiveClaims(section.props, {
-            path: page.title,
-            pageId: page.id,
-            sectionId: section.id
-          })
-        );
-      }
-    }
-  }
-
-  return issues;
-}
-
 function sensitiveClaimIssuesForText(
   text: string,
   context: { field?: string; path: string; pageId?: string; sectionId?: string }
@@ -211,71 +169,24 @@ function sensitiveClaimIssuesForText(
   return issues;
 }
 
-function qaRegressionIssues(beforeBundle: SiteBundle, afterBundle: SiteBundle) {
-  const beforeQa = runSiteQa(beforeBundle, { versionStatus: "draft" });
-  const afterQa = runSiteQa(afterBundle, { versionStatus: "draft" });
-  const beforeById = new Map(beforeQa.checks.map((check) => [check.id, check]));
-  const standardRegressions = afterQa.checks
-    .filter((check) => severityRank(check.severity) > severityRank(beforeById.get(check.id)?.severity ?? "pass"))
-    .map((check) => issueFromQaCheck(check));
-  const beforeVersion = beforeBundle.siteModel.versions.find((version) => version.status === "draft") ?? beforeBundle.siteModel.versions[0];
-  const afterVersion = afterBundle.siteModel.versions.find((version) => version.status === "draft") ?? afterBundle.siteModel.versions[0];
-  if (!beforeVersion || !afterVersion || beforeVersion.rendererVersion !== "layout-v3" || afterVersion.rendererVersion !== "layout-v3") {
-    return standardRegressions;
-  }
-  const beforeGenerationBlockers = new Set(generationObjectiveBlockersV3(beforeBundle, beforeVersion).map((blocker) => blocker.id));
-  const generationRegressions: EditorGuardrailIssue[] = generationObjectiveBlockersV3(afterBundle, afterVersion)
-    .filter((blocker) => !beforeGenerationBlockers.has(blocker.id))
-    .map((blocker) => ({
-      id: "generation_gate_regression",
-      severity: "block",
-      title: blocker.title,
-      detail: blocker.detail,
-      checkId: blocker.id,
-      key: `generation-gate:${blocker.id}`
-    }));
-  return [...standardRegressions, ...generationRegressions];
-}
-
-function issueFromQaCheck(check: QACheck): EditorGuardrailIssue {
-  return {
-    id: check.severity === "fail" ? "qa_blocking_regression" : "qa_warning_regression",
-    severity: check.severity === "fail" ? "block" : "warning",
-    title: check.title,
-    detail: check.detail,
-    pageId: check.pageId,
-    sectionId: check.sectionId,
-    checkId: check.id,
-    key: `qa:${check.id}:${check.severity}`
-  };
-}
-
-function severityRank(severity: QACheck["severity"] | undefined) {
-  if (severity === "fail") return 2;
-  if (severity === "warning") return 1;
-  return 0;
-}
-
 function isUsablePrimaryCta(value: unknown) {
   if (!value || typeof value !== "object") return false;
   const cta = value as { label?: unknown; href?: unknown };
   return typeof cta.label === "string" && Boolean(cta.label.trim()) && typeof cta.href === "string" && Boolean(cta.href.trim());
 }
 
-function resultFromIssues(issues: EditorGuardrailIssue[], qa?: ReturnType<typeof runSiteQa>): EditorGuardrailResult {
+function resultFromIssues(issues: EditorGuardrailIssue[]): EditorGuardrailResult {
   const blocking = dedupeIssues(issues.filter((issue) => issue.severity === "block"));
   if (blocking.length) {
     return {
       ok: false,
       reason: blocking[0].detail,
-      issues: blocking,
-      qa
+      issues: blocking
     };
   }
   return {
     ok: true,
-    warnings: dedupeIssues(issues.filter((issue) => issue.severity === "warning")),
-    qa
+    warnings: dedupeIssues(issues.filter((issue) => issue.severity === "warning"))
   };
 }
 

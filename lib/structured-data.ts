@@ -1,4 +1,5 @@
 import type { BusinessLocationRecord, BusinessProfile, SiteLocationBinding, SiteModel } from "./models";
+import { localBusinessSchemaTypeForVertical } from "./vertical-classification";
 
 type LocalBusinessJsonLdOptions = {
   url?: string;
@@ -9,7 +10,7 @@ export function makeLocalBusinessJsonLd(business: BusinessProfile, options: Loca
 
   return compactJsonLd({
     "@context": "https://schema.org",
-    "@type": schemaTypeForBusiness(business),
+    "@type": localBusinessSchemaTypeForVertical(business.vertical),
     name: business.name,
     url: options.url,
     telephone: schemaEligible(business, "phone") ? business.phone : undefined,
@@ -122,7 +123,7 @@ function verifiedLocation(location: BusinessLocationRecord, field: string) {
 function locationJsonLd(business: BusinessProfile, location: BusinessLocationRecord, index: number) {
   if (!verifiedLocation(location, "address") || !location.address) return undefined;
   return compactJsonLd({
-    "@type": schemaTypeForBusiness(business),
+    "@type": localBusinessSchemaTypeForVertical(business.vertical),
     "@id": `#location-${index + 1}`,
     name: [business.name, location.label].filter(Boolean).join(" - "),
     parentOrganization: { "@id": "#business" },
@@ -260,28 +261,6 @@ function schemaSafeReviewSummary(
       business.reviewsSummary.sources.length > 0 &&
       !business.reviewsSummary.sources.includes("google_places")
   );
-}
-
-function schemaTypeForBusiness(business: BusinessProfile) {
-  switch (business.vertical) {
-    case "restaurant":
-      return "Restaurant";
-    case "dental":
-      return "Dentist";
-    case "law_firm":
-      return "LegalService";
-    case "home_services":
-    case "landscaping":
-      return "HomeAndConstructionBusiness";
-    case "auto_body":
-      return "AutoBodyShop";
-    case "beauty_salon":
-      return "BeautySalon";
-    case "veterinary":
-      return "VeterinaryCare";
-    default:
-      return "LocalBusiness";
-  }
 }
 
 function compactJsonLd(value: unknown): unknown {

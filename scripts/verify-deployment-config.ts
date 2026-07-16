@@ -25,31 +25,6 @@ const repositorySource = readFileSync("lib/repository.ts", "utf8");
 const supabaseRepositorySource = readFileSync("lib/supabase/repository.ts", "utf8");
 const agentTelemetrySource = readFileSync("lib/agent-telemetry.ts", "utf8");
 const siteCandidateServiceSource = readFileSync("lib/site-candidate-service.ts", "utf8");
-const assetLibrarySource = readFileSync("lib/asset-library.ts", "utf8");
-const assetLibraryCliSource = readFileSync("scripts/asset-library.ts", "utf8");
-const assetLibraryPublicRouteSource = readFileSync("app/api/asset-library/public/[assetId]/[variant]/route.ts", "utf8");
-const assetLibraryTagsRouteSource = readFileSync("app/api/admin/asset-library/[assetId]/tags/route.ts", "utf8");
-const assetLibraryManifest = JSON.parse(readFileSync("asset-library/manifests/tire-auto-v2.json", "utf8")) as {
-  prompts?: unknown[];
-  name?: string;
-};
-const assetLibraryAutoServicesWaveManifest = JSON.parse(readFileSync("asset-library/manifests/auto-services-wave-1-v1.json", "utf8")) as {
-  prompts?: unknown[];
-  name?: string;
-};
-const assetLibraryAutoServicesEnvironmentManifest = JSON.parse(readFileSync("asset-library/manifests/auto-services-environment-wave-1-v1.json", "utf8")) as {
-  prompts?: unknown[];
-  name?: string;
-  defaultSize?: string;
-};
-const assetLibraryAutoGlassWaveManifest = JSON.parse(readFileSync("asset-library/manifests/auto-glass-wave-1-v1.json", "utf8")) as {
-  prompts?: unknown[];
-  name?: string;
-};
-const assetLibraryAutoBodyWaveManifest = JSON.parse(readFileSync("asset-library/manifests/auto-body-wave-1-v1.json", "utf8")) as {
-  prompts?: unknown[];
-  name?: string;
-};
 const supabaseVerifierSource = readFileSync("scripts/verify-supabase.ts", "utf8");
 const workerSource = readFileSync("workers/runner.ts", "utf8");
 const devSource = readFileSync("scripts/dev.mjs", "utf8");
@@ -59,48 +34,33 @@ const benchmarkVectorSource = readFileSync("scripts/run-benchmark-vector.ts", "u
 
 assert(packageJson.dependencies?.playwright, "playwright must be a runtime dependency for deployed render inspection.");
 assert(packageJson.scripts?.["install:browsers"], "package.json must expose npm run install:browsers.");
-assert(packageJson.scripts?.["verify:render-browser"], "package.json must expose npm run verify:render-browser.");
+assert(packageJson.scripts?.["verify:canonical-render-browser"], "package.json must expose the canonical browser gate verifier.");
+assert(packageJson.scripts?.["verify:generation-architecture"], "package.json must expose the canonical architecture ratchet.");
+assert(packageJson.scripts?.["verify:generation-pipeline"], "package.json must expose bounded pipeline verification.");
+assert(packageJson.scripts?.["pilot:auto-body"], "package.json must expose the fixed 20-URL auto-body pilot.");
 assert(packageJson.scripts?.["verify:dev-crawl"], "package.json must expose npm run verify:dev-crawl.");
 assert(packageJson.scripts?.["verify:worker-runtime"], "package.json must expose npm run verify:worker-runtime.");
 assert(packageJson.scripts?.["verify:job-heartbeat"], "package.json must expose npm run verify:job-heartbeat.");
 assert(packageJson.scripts?.["seed:openai-settings"], "package.json must expose npm run seed:openai-settings.");
-assert(packageJson.scripts?.["asset-library"], "package.json must expose npm run asset-library for internal generated image batches.");
-assert(packageJson.scripts?.["backfill:media-selection-snapshot"], "package.json must expose media selection snapshot stored-artifact backfill.");
-assertIncludes(
-  packageJson.scripts?.["benchmark:vector:weekly"] ?? "",
-  "--mixed --report .data/benchmarks/vector-weekly.ndjson",
-  "package.json must expose a cron-safe weekly mixed-vertical benchmark vector report."
-);
-assertIncludes(readFileSync("scripts/backfill-media-selection-snapshot.ts", "utf8"), "--check", "Media selection snapshot backfill must support --check.");
-assertIncludes(
-  benchmarkVectorSource,
-  "LODESTA_BENCHMARK_URLS",
-  "Benchmark vector cadence must support operator-managed mixed-vertical target URLs through environment configuration."
-);
 assertIncludes(
   benchmarkVectorSource,
   "LODESTA_BENCHMARK_TARGETS_FILE",
-  "Benchmark vector cadence must support a target file for scheduled mixed-vertical runs."
+  "The auto-body pilot must support an explicit targets file."
 );
 assertIncludes(
   benchmarkVectorSource,
-  "Visual template benchmark references are not valid generation targets.",
-  "Benchmark vector cadence must reject unconfigured mixed runs instead of using visual template demos as business targets."
+  "requiredTargetCount = 20",
+  "The launch pilot must require exactly twenty targets."
 );
 assertIncludes(
   benchmarkVectorSource,
-  "LODESTA_BENCHMARK_MIN_SCORED_TARGETS",
-  "Benchmark vector cadence must require a minimum number of scored targets before a report is considered successful."
+  "metrics.firstObjectivePasses === 20",
+  "The launch pilot must require 20/20 first-compile objective passes."
 );
 assertIncludes(
   benchmarkVectorSource,
-  "Benchmark vector run produced fewer scored targets than required.",
-  "Benchmark vector cadence must fail loudly on all-empty score reports."
-);
-assertIncludes(
-  benchmarkVectorSource,
-  "appendReport(parsed.reportPath, reportRecords)",
-  "Benchmark vector cadence must write append-only report records for weekly review."
+  "metrics.finalShips >= 18",
+  "The launch pilot must require at least eighteen final ships."
 );
 assertIncludes(envExample, "LODESTA_WORKFLOW_TIMEOUT_MS=5000", ".env.example must document the workflow delivery timeout.");
 assertIncludes(envExample, "LODESTA_WORKER_IDLE_MS=1000", ".env.example must document the deployed worker polling interval.");
@@ -108,13 +68,10 @@ assertIncludes(envExample, "OPENAI_REQUEST_TIMEOUT_MS=300000", ".env.example mus
 assertIncludes(envExample, "LODESTA_GENERATE_SITE_TIMEOUT_MS=1200000", ".env.example must document the whole-generation timeout.");
 assertIncludes(envExample, "LODESTA_ASSET_ANALYSIS_MAX_ASSETS=16", ".env.example must document the capped first-party image-analysis budget.");
 assertIncludes(envExample, "LODESTA_ASSET_ANALYSIS_CONCURRENCY=4", ".env.example must document bounded parallel first-party image analysis.");
-assertIncludes(envExample, "LODESTA_BENCHMARK_URLS=", ".env.example must document scheduled benchmark vector URL overrides.");
 assertIncludes(envExample, "LODESTA_BENCHMARK_TARGETS_FILE=", ".env.example must document scheduled benchmark vector target files.");
-assertIncludes(envExample, "LODESTA_BENCHMARK_MIN_SCORED_TARGETS=1", ".env.example must document the minimum scored-target guard for benchmark reports.");
 assertIncludes(envExample, "LODESTA_CRAWL_FIXTURE_TOKEN=", ".env.example must document the protected crawl fixture token.");
 assertIncludes(envExample, "LODESTA_HASH_SECRET=", ".env.example must document the canonical hash secret.");
 assertIncludes(envExample, "LODESTA_CLAIM_CHALLENGE_SECRET=", ".env.example must document the signed claim-verification challenge secret.");
-assertIncludes(envExample, "LODESTA_ASSET_LIBRARY_IMAGE_ESTIMATE_USD=0.08", ".env.example must document the generated asset cost estimate knob.");
 assertRemovedEnv(
   envExample,
   [
@@ -214,42 +171,7 @@ assertIncludes(schemaSql, "create table operator_setting_audits", "Supabase sche
 assertIncludes(schemaSql, "create table agent_runs", "Supabase schema must include agent run telemetry.");
 assertIncludes(schemaSql, "create table agent_run_spans", "Supabase schema must include agent run spans.");
 assertIncludes(schemaSql, "create table agent_model_calls", "Supabase schema must include agent model calls.");
-assertIncludes(schemaSql, "lodesta-asset-library", "Supabase schema must seed the private generated asset-library bucket.");
-assertIncludes(schemaSql, "public = false", "Generated asset-library storage bucket must remain private.");
-assertIncludes(schemaSql, "create table asset_library_batches", "Supabase schema must include asset library batch records.");
-assertIncludes(schemaSql, "create table asset_library_assets", "Supabase schema must include reusable asset library records.");
-assertIncludes(schemaSql, "create table asset_library_reviews", "Supabase schema must include human review audit records.");
-assertIncludes(schemaSql, "alter table asset_library_assets enable row level security;", "Asset library tables must have RLS enabled.");
-assert(assetLibraryManifest.name === "tire-auto-v2", "Tire/auto v2 asset manifest must be the canonical generated image manifest.");
-assert(assetLibraryManifest.prompts?.length === 100, "Tire/auto v2 asset manifest must contain the planned 100 prompt records.");
-assert(assetLibraryAutoServicesWaveManifest.name === "auto-services-wave-1-v1", "Auto services wave 1 asset manifest must exist.");
-assert(assetLibraryAutoServicesWaveManifest.prompts?.length === 96, "Auto services wave 1 asset manifest must contain the planned 96 prompt records.");
-assert(assetLibraryAutoServicesEnvironmentManifest.name === "auto-services-environment-wave-1-v1", "Auto services environment wave 1 asset manifest must exist.");
-assert(assetLibraryAutoServicesEnvironmentManifest.prompts?.length === 24, "Auto services environment wave 1 asset manifest must contain the planned 24 prompt records.");
-assert(assetLibraryAutoServicesEnvironmentManifest.defaultSize === "2560x1280", "Auto services environment wave must use the planned 2:1 hero-scale default size.");
-assert(assetLibraryAutoGlassWaveManifest.name === "auto-glass-wave-1-v1", "Auto glass wave 1 asset manifest must exist.");
-assert(assetLibraryAutoGlassWaveManifest.prompts?.length === 48, "Auto glass wave 1 asset manifest must contain the planned 48 prompt records.");
-assert(assetLibraryAutoBodyWaveManifest.name === "auto-body-wave-1-v1", "Auto body wave 1 asset manifest must exist.");
-assert(assetLibraryAutoBodyWaveManifest.prompts?.length === 72, "Auto body wave 1 asset manifest must contain the planned 72 prompt records.");
-assertIncludes(assetLibraryCliSource, "--confirm-cost", "Asset library generation CLI must require explicit cost confirmation.");
-assertIncludes(assetLibraryCliSource, "Generation requires explicit --limit", "Asset library generation CLI must require explicit limits.");
-assertIncludes(assetLibraryCliSource, "--offset", "Asset library generation CLI must support offset wave selection.");
-assertIncludes(assetLibraryCliSource, "--prompt-ids", "Asset library generation CLI must support explicit prompt-id wave selection.");
-assertIncludes(assetLibraryCliSource, "backfill-taxonomy", "Asset library CLI must expose taxonomy backfill for existing approved tire assets.");
-assertIncludes(assetLibraryCliSource, "retag-closeup-heroes", "Asset library CLI must expose close-up hero retagging after environment approval.");
-assertIncludes(assetLibrarySource, "ASSET_LIBRARY_ACTIVE_MANIFEST_NAMES", "Asset library validation must treat the automotive wave manifests as active generation manifests.");
-assertIncludes(assetLibrarySource, "auto-services-environment-wave-1-v1", "Asset library validation must treat the auto services environment manifest as active.");
-assertIncludes(assetLibrarySource, "assessAssetLibraryPolicy", "Asset library must default-deny generated assets without explicit safe policy classification.");
-assertIncludes(assetLibrarySource, "shop_environment", "Asset library policy must support people-less generated shop environment assets.");
-assertIncludes(assetLibrarySource, "sceneFamily", "Asset library prompt metadata must support scene-family dedupe for environment crops.");
-assertIncludes(assetLibrarySource, "ASSET_LIBRARY_HERO_DERIVATIVE_MIN_WIDTH", "Asset library derivative generation must enforce a true hero-width floor.");
-assertIncludes(assetLibrarySource, "derivedAssetLibraryTaxonomyTags", "Asset library must derive searchable taxonomy mirror tags from prompt metadata.");
-assertIncludes(assetLibrarySource, "Asset library policy and derived taxonomy tags can only be changed through review or taxonomy backfill actions", "Asset library tag editing must not bypass policy fail, classification, or generated taxonomy tags.");
-assertIncludes(assetLibraryTagsRouteSource, "updateAssetLibraryAssetTags", "Asset library admin tag route must use protected tag updates.");
-assertIncludes(assetLibrarySource, "Only approved asset-library assets can receive public derivatives", "Approved derivatives must be gated on human approval.");
-assertIncludes(assetLibraryPublicRouteSource, "asset.status !== \"approved\"", "Public asset route must serve only approved asset-library assets.");
-assertIncludes(assetLibraryPublicRouteSource, "assessAssetLibraryPolicy(asset).siteSelectable", "Public asset route must reject approved assets that fail generated-image policy.");
-assertIncludes(assetLibraryPublicRouteSource, "path.startsWith(\"raw/\")", "Public asset route must reject raw asset-library paths.");
+assert(!schemaSql.includes("asset_library"), "Supabase schema must not recreate the retired generated asset library.");
 assertIncludes(schemaSql, "create index agent_runs_target_idx on agent_runs(target_type, target_id);", "Agent telemetry target lookup must be indexed.");
 assertIncludes(schemaSql, "alter table agent_runs enable row level security;", "Agent run telemetry must have RLS enabled.");
 assertIncludes(schemaSql, "create table site_candidates", "Site candidates must be stored separately from managed sites.");

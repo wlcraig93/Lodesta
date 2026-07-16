@@ -1,11 +1,9 @@
 import "../scripts/load-env";
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { createSiteV3FromInput } from "../lib/intake";
 import { repository } from "../lib/repository";
 import { generateSite } from "../lib/site-candidate-service";
 import { setSupabaseJobGenerateSite } from "../lib/supabase/repository";
-import { runAudit } from "../lib/audit";
 import { getProcessWorkerId } from "../lib/worker-identity";
 import {
   buildProcessWorkerHeartbeat,
@@ -30,18 +28,12 @@ async function main() {
   const command = process.argv[2] ?? "demo";
 
   if (command === "demo") {
-    const bundle = createSiteV3FromInput({
-      prompt: "Build a website for Sample Local Business, a home services company focused on calls."
-    });
-    const findings = runAudit(bundle.businessProfile, bundle.siteModel);
     console.log(
       JSON.stringify(
         {
           command,
-          siteId: bundle.businessProfile.siteId,
-          slug: bundle.siteModel.slug,
-          findings: findings.length,
-          workerRole: "Railway job runner scaffold"
+          workerRole: "Lodesta canonical generation job runner",
+          supportedGenerationVertical: "auto_body"
         },
         null,
         2

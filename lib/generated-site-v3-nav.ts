@@ -1,9 +1,4 @@
-import type {
-  GeneratedSiteCompilerDecisionV3,
-  GeneratedSiteMediaReuseDecisionV3,
-  SectionInstanceV3,
-  SiteArtDirectionNavPlanV3
-} from "./models";
+import type { SectionInstanceV3, SiteArtDirectionNavPlanV3 } from "./models";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 
 export type ReconciledNavTargetRecordV3 = {
@@ -26,12 +21,6 @@ export type NavReconciliationResultV3 = {
   droppedTargets: ReconciledNavTargetRecordV3[];
   rewrittenTargets: RewrittenNavTargetRecordV3[];
   ctaRewrite?: RewrittenNavTargetRecordV3;
-};
-
-export type GeneratedSiteQualitySignalsV3 = {
-  navReconciliation?: NavReconciliationResultV3;
-  compilerDecisions?: GeneratedSiteCompilerDecisionV3[];
-  mediaReuseDecisions?: GeneratedSiteMediaReuseDecisionV3[];
 };
 
 export type NavReconciliationPageV3 = {

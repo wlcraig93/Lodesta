@@ -17,7 +17,7 @@ export default function robots(): MetadataRoute.Robots {
           "/preview/",
           "/editor/",
           "/analytics/",
-          "/optimization/",
+          "/status/",
           "/experiments/",
           "/business/",
           "/leads/",

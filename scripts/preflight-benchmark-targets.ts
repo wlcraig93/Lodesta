@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { crawlUrl, type CrawlAssessment } from "../lib/crawler";
-import { inferVertical } from "../lib/intake";
+import { inferVertical } from "../lib/vertical-classification";
 import { validateLaunchMarket } from "../lib/launch-market";
 import { assertPublicFetchUrl } from "../lib/url-safety";
 import type { Vertical } from "../lib/models";
@@ -179,7 +179,14 @@ async function preflightTarget(target: BenchmarkTarget, options: { allowMultiLoc
   }
 
   const facts = crawl.extractedFacts;
-  const inferredVertical = inferVertical({ url: safeUrl ?? url, crawl });
+  const inferredVertical = inferVertical({
+    url: safeUrl ?? url,
+    title: crawl.title,
+    description: crawl.metaDescription,
+    name: facts.name,
+    categories: facts.categories,
+    services: facts.services
+  });
   if (target.expectedVertical && inferredVertical !== target.expectedVertical) {
     reasons.push({
       code: "vertical_mismatch",
@@ -244,11 +251,21 @@ function looksLikeDemoOrTemplate(crawl: CrawlAssessment) {
 }
 
 function multiLocationRisk(crawl: CrawlAssessment) {
-  const locationPages = crawl.pageSummaries.filter((page) =>
-    page.purposeTags.includes("location") || /\/locations?\//i.test(page.url)
+  const explicitLocationPaths = new Set(
+    [...crawl.pageSummaries.map((page) => page.url), ...crawl.linkReferences.map((link) => link.href)]
+      .map(pathnameForUrl)
+      .map((path) => path?.match(/^\/locations?\/([^/]+)\/?$/i)?.[1].toLowerCase())
+      .filter((slug): slug is string => Boolean(slug))
   );
-  const locationLinks = crawl.linkReferences.filter((link) => /\/locations?\//i.test(link.href));
-  return locationPages.length > 1 || locationLinks.length > 4;
+  return explicitLocationPaths.size > 1;
+}
+
+function pathnameForUrl(value: string) {
+  try {
+    return new URL(value).pathname.replace(/\/{2,}/g, "/");
+  } catch {
+    return undefined;
+  }
 }
 
 function emptyCrawl(url: string): CrawlAssessment {

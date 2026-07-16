@@ -1,16 +1,15 @@
 import type { SiteBundle, StandardCheckResult, StandardEvaluation } from "@/lib/models";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
-import { coldUrlCheckableChecks, siteStandardEvidenceChecks } from "@/lib/standard-evaluation";
+import { coldUrlCheckableChecks } from "@/lib/standard-evaluation";
 
 export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const replacementChecks = siteStandardEvidenceChecks(bundle);
+  const evidence = bundle.presenceAssessment.evidenceLedger;
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
   const sourceUrl = bundle.presenceAssessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
   const reviewVersion = bundle.siteModel.versions.find((version) => version.status === "draft")
     ?? bundle.siteModel.versions[0];
   const readiness = reviewVersion ? getEffectiveGenerationQaReadiness(bundle, reviewVersion) : "unavailable";
-  const visualQa = reviewVersion?.generationQa?.visualQa;
   const presenceNotes = [
     ...bundle.presenceAssessment.technicalNotes,
     ...bundle.presenceAssessment.brandNotes,
@@ -37,7 +36,7 @@ export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
 
       <div className="score-compare">
         <ScoreCard label="Current-site report" evaluation={sourceEvaluation} emptyLabel="Not scored" />
-        <QaCard readiness={readiness} visualVerdict={visualQa?.verdict} />
+        <QaCard readiness={readiness} />
       </div>
 
       <div className="preview-issue-grid">
@@ -62,18 +61,22 @@ export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
         </div>
 
         <div className="preview-issue-list">
-          <h2>What this draft improves</h2>
-          {replacementChecks
-            .filter((check) => check.passed)
-            .slice(0, 4)
-            .map((check) => (
-              <article key={check.criterionId} className="preview-issue-card">
-                <span className="badge severity-pass">pass</span>
-                <h3>{check.title}</h3>
-                <p>{check.businessConsequence}</p>
-                <small>{check.evidence}</small>
+          <h2>Verified source evidence</h2>
+          {evidence?.items.length ? (
+            evidence.items.slice(0, 4).map((item) => (
+              <article key={item.id} className="preview-issue-card">
+                <span className="badge severity-pass">{item.kind.replaceAll("_", " ")}</span>
+                <h3>{item.publicText ?? item.sourceExcerpt}</h3>
+                <small>{item.source.url}</small>
               </article>
-            ))}
+            ))
+          ) : (
+            <article className="preview-issue-card">
+              <span className="badge">source sparse</span>
+              <h3>No verified proof was retained from the source</h3>
+              <p>The draft avoids unsupported reviews, credentials, warranties, and offers.</p>
+            </article>
+          )}
         </div>
       </div>
 
@@ -85,7 +88,7 @@ export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
         </div>
       ) : null}
 
-      {bundle.presenceAssessment.brandAssessment || visualQa ? (
+      {bundle.presenceAssessment.brandAssessment ? (
         <div className="preview-issue-grid">
           <div className="preview-issue-list">
             <h2>Brand assessment</h2>
@@ -101,54 +104,19 @@ export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
             ) : null}
           </div>
 
-          <div className="preview-issue-list">
-            <h2>Visual QA</h2>
-            {visualQa ? (
-              <article className="preview-issue-card">
-                <span className="badge">visual judgment: {visualQa.verdict.replace("_", " ")}</span>
-                <h3>{visualQa.summary}</h3>
-                <p>
-                  {visualQa.findings.filter((finding) => finding.severity === "fail").length} failures ·{" "}
-                  {visualQa.findings.filter((finding) => finding.severity === "warning").length} warnings ·{" "}
-                  {visualQa.screenshotCount} screenshots
-                </p>
-                <small>{visualQa.findings[0]?.title}</small>
-              </article>
-            ) : null}
-          </div>
         </div>
       ) : null}
 
-      {bundle.presenceAssessment.siteDossierV1 ? (
-        <div className="dossier-strip">
-          <div>
-            <span className="badge">Business dossier</span>
-            <h2>{bundle.presenceAssessment.siteDossierV1.sections[0]?.title ?? "Evidence cache"}</h2>
-            <p>{bundle.presenceAssessment.siteDossierV1.sections[0]?.body ?? bundle.presenceAssessment.siteDossierV1.markdown.slice(0, 240)}</p>
-          </div>
-          <ul>
-            {bundle.presenceAssessment.siteDossierV1.sections.slice(1, 5).map((section) => (
-              <li key={section.id}>{section.title}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </section>
   );
 }
 
-function QaCard({
-  readiness,
-  visualVerdict
-}: {
-  readiness: "ready" | "blocked" | "pending" | "unavailable";
-  visualVerdict?: "ship" | "revise" | "not_evaluated";
-}) {
+function QaCard({ readiness }: { readiness: "ready" | "blocked" | "pending" | "unavailable" }) {
   return (
     <article className="score-card">
       <span>Generated-draft QA</span>
       <strong>{readinessLabel(readiness)}</strong>
-      <small>{visualVerdict ? `visual judgment: ${visualVerdict.replace("_", " ")}` : "visual judgment unavailable"}</small>
+      <small>Canonical objective gate</small>
     </article>
   );
 }

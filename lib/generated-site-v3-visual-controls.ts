@@ -223,7 +223,25 @@ export type CaseStudyTreatmentV3 = "before_after_pair" | "story_card" | "media_p
 export type ComparisonTreatmentV3 = "feature_compare" | "table_rows" | "pros_cons_cards";
 export type TeamStoryTreatmentV3 = "portrait_split" | "founder_card" | "team_strip";
 export type OfferBandTreatmentV3 = "coupon_panel" | "financing_strip" | "urgent_banner" | "quiet_offer";
-export type VisualSectionPresentationV3 = import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
+export type ListPresentationIdV3 =
+  | "action_tiles"
+  | "program_rows"
+  | "stepper_vertical"
+  | "checklist_cards"
+  | "service_problem_rows"
+  | "menu_preview"
+  | "premium_showcase"
+  | "feature_list"
+  | "showcase_grid"
+  | "image_tiles"
+  | "media_grid"
+  | "coaching_cards"
+  | "portfolio_index"
+  | "card_grid"
+  | "numbered_ledger";
+
+export type FactsPresentationIdV3 = "trust_bar" | "utility_rail" | "inline_strip" | "stacked" | "hero_chips" | "marquee" | "proof_cards";
+export type MediaPresentationIdV3 = "single" | "mosaic" | "collage" | "editorial_strip" | "object_stage";
 
 export type HeroSplitSectionV3 = {
   version: "visual-section-v3";
@@ -394,7 +412,7 @@ export type VisualSectionV3 = (
   | ServiceAreaShowcaseSectionV3
   | LocationShowcaseSectionV3
   | ContactSplitSectionV3
-) & { presentation?: VisualSectionPresentationV3 };
+);
 
 export type VisualSectionDraftV3 = VisualSectionV3;
 

@@ -10,7 +10,7 @@ This document applies to Lodesta product, marketing, admin, editor, account, set
 
 Design around the actual operating objects in the product:
 
-- Agent runs: generation, crawl, visual QA, publication, maintenance, and telemetry steps.
+- Agent runs: generation, crawl, objective QA, final visual judgment, publication, maintenance, and telemetry steps.
 - Evidence: source facts, crawl notes, rendered screenshots, scores, checks, leads, and analytics signals.
 - Approvals: owner-confirmed facts, QA gates, publish confirmation, billing/claim gates, and safe apply actions.
 - Next actions: the smallest useful operator or owner action available from the current state.

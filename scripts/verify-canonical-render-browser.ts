@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { getRenderInspectionRuntimeStatus } from "../lib/render-inspection";
 import { runObjectiveGenerationGate } from "../lib/generation-objective-gate";
 import { buildGenerationJudgePacket } from "../lib/generation-judge";
@@ -11,11 +10,13 @@ const runtime = await getRenderInspectionRuntimeStatus({ launch: true });
 assert.equal(runtime.packageInstalled, true, runtime.message);
 assert.equal(runtime.browserLaunchable, true, `${runtime.message} Run npm run install:browsers.`);
 
-const artifactRoot = await mkdtemp(join(tmpdir(), "lodesta-canonical-render-"));
+const captureSetVersion = "canonical-generation-review-v1";
+const artifactRoot = join(process.cwd(), ".design", "generation-review", captureSetVersion);
+await rm(artifactRoot, { recursive: true, force: true });
+await mkdir(artifactRoot, { recursive: true });
 const results = [];
 
-try {
-  for (const definition of await loadCanonicalFixtureDefinitions()) {
+for (const definition of await loadCanonicalFixtureDefinitions()) {
     const fixture = await buildCanonicalFixture(definition);
     const gate = await runObjectiveGenerationGate({
       bundle: fixture.bundle,
@@ -47,16 +48,27 @@ try {
     assert(judgePacket.images.every((image) => image.bytes > 0 && image.imageUrl.startsWith("data:image/")));
     results.push({
       id: definition.id,
+      businessName: fixture.business.name,
       designSystem: fixture.plan.designSystem,
       routes: gate.routes.length,
       screenshots: gate.routes.reduce((sum, route) => sum + route.inspection.screenshots.length, 0),
       judgePacketImages: judgePacket.images.length,
       warnings: gate.warnings.length,
-      trace: { plans: 1, copies: 1, compiles: 1, gates: 1, judges: 0 }
+      trace: { plans: 1, copies: 1, compiles: 1, gates: 1, judges: 0 },
+      images: judgePacket.images.map((image) => ({
+        id: image.id,
+        label: image.label,
+        path: relative(artifactRoot, image.path),
+        bytes: image.bytes
+      }))
     });
-  }
-} finally {
-  await rm(artifactRoot, { recursive: true, force: true });
 }
 
-console.log(JSON.stringify({ ok: true, fixtures: results }, null, 2));
+const manifest = {
+  schemaVersion: captureSetVersion,
+  generatedAt: new Date().toISOString(),
+  fixtureCount: results.length,
+  fixtures: results
+};
+await writeFile(join(artifactRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(JSON.stringify({ ok: true, captureRoot: artifactRoot, fixtures: results }, null, 2));

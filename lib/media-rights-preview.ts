@@ -12,7 +12,6 @@ export function applyMediaRightsFallbackV3(
   version: SiteVersionV3,
   backupGallery: Array<{ url: string; label: string }>
 ): SiteVersionV3 {
-  if (backupGallery.length === 0) return version;
   const clone = structuredClone(version);
   const replacementByUrl = new Map<string, string>();
   let cursor = 0;
@@ -20,7 +19,7 @@ export function applyMediaRightsFallbackV3(
   const replacementFor = (url: string) => {
     const existing = replacementByUrl.get(url);
     if (existing) return existing;
-    const replacement = backupGallery[cursor % backupGallery.length].url;
+    const replacement = backupGallery.length ? backupGallery[cursor % backupGallery.length].url : "";
     cursor += 1;
     replacementByUrl.set(url, replacement);
     return replacement;

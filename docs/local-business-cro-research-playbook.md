@@ -688,7 +688,7 @@ Lodesta default:
 - Keep hours and holiday hours consistent.
 - Use the same primary service/category language across site, GBP, and structured data where true.
 - Link to booking/order/menu/profile destinations consistently.
-- Track mismatches as action-list findings.
+- Track mismatches as operator telemetry until a managed maintenance workflow is explicitly designed.
 
 ## UX From Tech Applied To Local Businesses
 
@@ -726,7 +726,7 @@ Beyond building better websites, Lodesta can give business owners intelligence t
 - Core Web Vitals monitoring.
 - Broken form/phone/booking detection.
 - CTA and lead attribution.
-- Monthly action list with one-click fixes.
+- Operator-managed monthly improvements backed by telemetry and explicit QA.
 - Vertical playbooks learned across the Lodesta fleet.
 
 ## Default Page Patterns

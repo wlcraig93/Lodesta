@@ -6,7 +6,7 @@ import { AdminButton, AdminButtonRow } from "@/components/admin/AdminButton";
 
 type OpenAiSettings = {
   generationModel: string;
-  visualQaModel: string;
+  generationJudgeModel: string;
   imageModel: string;
   imageSize: string;
   imageQuality: "low" | "medium" | "high" | "auto";
@@ -25,7 +25,7 @@ type SettingsSnapshot = {
 
 type FormState = {
   generationModel: string;
-  visualQaModel: string;
+  generationJudgeModel: string;
   imageModel: string;
   imageSize: string;
   imageQuality: OpenAiSettings["imageQuality"];
@@ -50,7 +50,7 @@ export function OpenAiSettingsForm({ initialSnapshot }: { initialSnapshot: Setti
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         generationModel: form.generationModel,
-        visualQaModel: form.visualQaModel,
+        generationJudgeModel: form.generationJudgeModel,
         imageModel: form.imageModel,
         imageSize: form.imageSize,
         imageQuality: form.imageQuality,
@@ -83,8 +83,8 @@ export function OpenAiSettingsForm({ initialSnapshot }: { initialSnapshot: Setti
       </label>
 
       <label>
-        Visual QA model
-        <input value={form.visualQaModel} onChange={(event) => setForm({ ...form, visualQaModel: event.target.value })} />
+        Final generation judge model
+        <input value={form.generationJudgeModel} onChange={(event) => setForm({ ...form, generationJudgeModel: event.target.value })} />
       </label>
 
       <label>
@@ -139,7 +139,7 @@ export function OpenAiSettingsForm({ initialSnapshot }: { initialSnapshot: Setti
 function fromSnapshot(snapshot: SettingsSnapshot): FormState {
   return {
     generationModel: snapshot.settings.generationModel,
-    visualQaModel: snapshot.settings.visualQaModel,
+    generationJudgeModel: snapshot.settings.generationJudgeModel,
     imageModel: snapshot.settings.imageModel,
     imageSize: snapshot.settings.imageSize,
     imageQuality: snapshot.settings.imageQuality,

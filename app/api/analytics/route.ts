@@ -22,7 +22,8 @@ const analyticsEventSchema = z.object({
     "scroll_depth",
     "web_vital",
     "experiment_assignment",
-    "agent_readable_request"
+    "agent_readable_request",
+    "places_ui"
   ]),
   timestamp: z.string().datetime().optional(),
   sectionId: z.string().optional(),

@@ -23,7 +23,7 @@ Explicit launch stance:
 - Custom domains: Cloudflare for SaaS for scaled customer domains, SSL, and CDN; Railway's Cloudflare integration is not a replacement for multi-tenant custom hostname management.
 - Assets: pre-claim previews use generated/licensed imagery and extracted facts. Scraped photos, logos, and marketing copy are reference-only until owner grant.
 - Workers: use the same repository/API contracts as the web app. Railway workers are acceptable for launch; crawler-heavy or browser-heavy jobs can move to dedicated worker infrastructure later if volume or anti-bot behavior requires it.
-- Cron orchestration: `/api/jobs/schedule` queues recurring maintenance jobs, including monthly action lists, while workers process the queue through the repository boundary.
+- Cron orchestration: `/api/jobs/schedule` queues telemetry retention and other explicitly implemented maintenance jobs through the repository boundary.
 - Deployment readiness: `/api/health` is the Railway liveness endpoint, `/api/health?deep=1` is the admin readiness endpoint, and `npm run verify:supabase` proves the Supabase repository contract against a live project after `supabase/schema.sql` is applied.
 - Data lifecycle: analytics events are retained for longitudinal site performance history while the site/account is active; future retention, anonymization, or rollup work should be designed deliberately.
 
@@ -80,12 +80,12 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
    - Inquiry event metadata: source URL, session id, landing path, referrer host, UTM fields.
    - Summaries by page, CTA role, section, experiment variant, and baseline window.
 
-8. Review-Mode Optimization
-   - Monthly action-list job runs audit, QA, analytics summary, inquiry summary, and experiment analysis.
-   - Findings have apply modes: `auto_fix`, `one_click`, `manual_service`.
-   - Individual apply and apply-all safe recommendations.
-   - QA gate before publish.
-   - Version history and rollback for safety.
+8. Managed Site Status
+   - Owners see publish state, canonical objective-QA state, and pending evidence confirmations.
+   - Judge findings remain internal and do not become owner work items.
+   - Owner copy edits recompile the stored generation plan and require the same objective browser gate before publish.
+   - Structural changes queue explicit regeneration for operator review.
+   - Monthly improvements remain operator-managed until a telemetry-backed workflow is designed separately.
 
 9. Experiments
    - Launch with narrow content-neutral experiments only.
@@ -103,7 +103,7 @@ Every AI, UI, CLI, and worker action should mutate through the same repository b
 
 11. CLI and Workers
    - CLI calls the same HTTP APIs as the app.
-   - Required launch commands: create from URL, batch import, run presence, run audit, run QA, create preview, publish, apply safe findings, inspect leads, connect domain, monthly action list, process jobs.
+   - Required launch commands: create from URL, batch import, run presence, run objective QA, regenerate a site, create preview, publish, inspect leads, connect domain, and process jobs.
    - Worker runner processes durable queued jobs through the repository context.
 
 ## Later Surfaces

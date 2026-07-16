@@ -234,7 +234,7 @@ assert_json "non-US presence market gate" 'const data = JSON.parse(process.env.B
 echo "ok - non-US presence market gate"
 
 post_check "maintenance scheduler API" "/api/jobs/schedule" "{\"task\":\"launch_maintenance\",\"siteIds\":[\"site_joes_pizza\"],\"scheduleKey\":\"${SCHEDULE_KEY}\"}"
-assert_json "maintenance scheduler API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.scheduleKey !== process.env.SCHEDULE_KEY || !Array.isArray(data.queued) || !data.queued.some((job) => job.kind === "monthly_action_list") || data.queued.some((job) => job.kind === "analytics_retention")) process.exit(1);'
+assert_json "maintenance scheduler API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.scheduleKey !== process.env.SCHEDULE_KEY || !Array.isArray(data.queued) || !data.queued.some((job) => job.kind === "agent_telemetry_cleanup")) process.exit(1);'
 
 post_check "worker process jobs API" "/api/jobs/process" '{"limit":200}'
 assert_json "worker process jobs API" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.jobs) || !data.jobs.some((job) => job.status === "completed" && job.payload?.scheduleKey === process.env.SCHEDULE_KEY)) process.exit(1);'
@@ -418,27 +418,6 @@ request GET "/api/sites"
 assert_success "site API"
 assert_json "site API" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.sites) || data.sites.length === 0) process.exit(1);'
 
-post_check "audit API" "/api/audits/run" '{"siteId":"site_joes_pizza"}'
-assert_json "audit API" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || !Array.isArray(data.findings)) process.exit(1);'
-
-post_check "QA API" "/api/qa/run" '{"siteId":"site_joes_pizza","versionStatus":"published"}'
-assert_json "QA API" 'const data = JSON.parse(process.env.BODY); if (data.siteId !== "site_joes_pizza" || typeof data.passed !== "boolean") process.exit(1);'
-
-request POST "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"home","sectionTemplates":{"hero":"hero_statement"}}'
-if [[ "$STATUS" != "400" ]]; then
-  echo "Smoke check failed: direct section template mutation returned $STATUS" >&2
-  echo "$BODY" >&2
-  exit 1
-fi
-assert_json "direct section template mutation" 'const data = JSON.parse(process.env.BODY); if (!String(data.error || "").includes("compiler overrides")) process.exit(1);'
-echo "ok - direct section template mutation rejected"
-
-post_check "design plan and section order API" "/api/sites/design" '{"siteId":"site_joes_pizza","pageId":"home","designPlan":{"stylePack":"premium_editorial","typographyPack":"editorial_serif"},"sectionOrder":["hero","services","process","media","location","faq","contact"]}'
-assert_json "design plan and section order API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.applied?.designPlan?.stylePack !== "premium_editorial" || data.applied?.sectionOrder?.[1] !== "services") process.exit(1);'
-
-post_check "AI edit dock API" "/api/ai/edit" '{"siteId":"site_joes_pizza","message":"Make the hero more direct and run an audit."}'
-assert_json "AI edit dock API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.mutated || !data.operations?.some((operation) => operation.type === "owner_safe_mutation" && operation.mutations?.some((mutation) => mutation.action === "rewrite_section_copy")) || !data.operations?.some((operation) => operation.type === "run_audit") || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
-
 post_check "analytics ingest" "/api/analytics" '{"siteId":"site_joes_pizza","sessionId":"smoke_session","pageId":"home","eventType":"pageview","event":{"path":"/sites/joes-pizza","smoke":true}}'
 assert_json "analytics ingest" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true) process.exit(1);'
 
@@ -453,15 +432,6 @@ assert_json "analytics LCP web vital ingest" 'const data = JSON.parse(process.en
 
 post_check "analytics CLS web vital ingest" "/api/analytics" '{"siteId":"site_joes_pizza","sessionId":"privacy_session","pageId":"home","eventType":"web_vital","timestamp":"2026-05-29T12:09:59.500Z","value":0.18,"deviceType":"mobile","metadata":{"metric":"CLS"}}'
 assert_json "analytics CLS web vital ingest" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true || data.event?.value !== 0.18) process.exit(1);'
-
-post_check "audit API with analytics finding" "/api/audits/run" '{"siteId":"site_joes_pizza"}'
-assert_json "audit API with analytics finding" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.findings) || !data.findings.some((finding) => finding.id === "analytics_engaged_no_action") || !data.findings.some((finding) => finding.id === "analytics_mobile_performance" && finding.standardCriterionId === "technical.mobile_performance")) process.exit(1);'
-
-post_check "action-list dismiss API" "/api/action-list/dismiss" '{"siteId":"site_joes_pizza","findingId":"analytics_engaged_no_action"}'
-assert_json "action-list dismiss API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.finding.status !== "dismissed") process.exit(1);'
-
-post_check "audit preserves dismissed finding" "/api/audits/run" '{"siteId":"site_joes_pizza"}'
-assert_json "audit preserves dismissed finding" 'const data = JSON.parse(process.env.BODY); const finding = data.findings?.find((item) => item.id === "analytics_engaged_no_action"); if (!finding || finding.status !== "dismissed") process.exit(1);'
 
 post_check "analytics form start ingest" "/api/analytics" '{"siteId":"site_joes_pizza","sessionId":"smoke_session","pageId":"home","sectionId":"contact","eventType":"form_start","timestamp":"2026-05-29T12:10:01.000Z","deviceType":"mobile"}'
 assert_json "analytics form start ingest" 'const data = JSON.parse(process.env.BODY); if (data.accepted !== true || data.event?.eventType !== "form_start") process.exit(1);'
@@ -597,9 +567,6 @@ request GET "/api/outbound/summary?campaignId=${CAMPAIGN_ID}"
 assert_success "outbound summary API"
 assert_json "outbound summary API" 'const data = JSON.parse(process.env.BODY); if (data.claimLinkOpened !== 1 || data.checkoutStarted !== 1 || data.paid !== 1 || data.claimLinkToCheckoutRate !== 1 || data.checkoutToPaidRate !== 1 || data.claimToPublishRate !== 1 || data.avgCredibilityScore !== 4) process.exit(1);'
 
-post_check "action-list apply all" "/api/action-list/apply-all" '{"siteId":"site_joes_pizza","mode":"qa"}'
-assert_json "action-list apply all" 'const data = JSON.parse(process.env.BODY); if (!Array.isArray(data.results) || !data.qa || data.published !== false || data.nextAction !== "review_and_confirm_publish") process.exit(1);'
-
 request POST "/api/sites/publish" '{"siteId":"site_joes_pizza"}'
 if [[ "$STATUS" != "409" ]]; then
   echo "Smoke check failed: publish confirmation guard returned $STATUS" >&2
@@ -638,14 +605,15 @@ assert_json "structured hero copy update API" 'const data = JSON.parse(process.e
 post_check "draft staging API" "/api/sites/update-section" '{"siteId":"site_joes_pizza","pageId":"home","sectionId":"hero","props":{"heading":"Pizza night should still be easy."}}'
 assert_json "draft staging API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.bundle) process.exit(1);'
 DRAFT_VERSION_ID="$(BODY="$BODY" node -e 'const data = JSON.parse(process.env.BODY); const version = data.bundle?.siteModel?.versions?.find((candidate) => candidate.status === "draft"); if (!version?.id) process.exit(1); process.stdout.write(version.id);')"
+export DRAFT_VERSION_ID
 
-post_check "generated preview QA gate" "/api/generated-qa/run" "{\"siteId\":\"site_joes_pizza\",\"versionId\":\"${DRAFT_VERSION_ID}\"}"
-assert_json "generated preview QA gate" 'const data = JSON.parse(process.env.BODY); if (data.qa?.readiness !== "ready" || !data.previewUrl) process.exit(1);'
+post_check "objective QA gate" "/api/sites/qa" "{\"siteId\":\"site_joes_pizza\",\"versionId\":\"${DRAFT_VERSION_ID}\"}"
+assert_json "objective QA gate" 'const data = JSON.parse(process.env.BODY); if (!data.ok || data.qa?.readiness !== "ready" || data.versionId !== process.env.DRAFT_VERSION_ID) process.exit(1);'
 
 post_check "confirmed publish API" "/api/sites/publish" '{"siteId":"site_joes_pizza","confirmed":true}'
-assert_json "confirmed publish API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.confirmed || !data.qa?.passed) process.exit(1);'
+assert_json "confirmed publish API" 'const data = JSON.parse(process.env.BODY); if (!data.ok || !data.confirmed || data.objectiveQa?.readiness !== "ready") process.exit(1);'
 
 post_check "version restore draft API" "/api/sites/versions" '{"siteId":"site_joes_pizza","versionId":"version_joes_pizza_published","action":"restore_draft"}'
-assert_json "version restore draft API" 'const data = JSON.parse(process.env.BODY); const live = data.bundle?.siteModel?.versions?.find((version) => version.status === "published"); const restored = data.bundle?.siteModel?.versions?.find((version) => version.id === data.draftVersionId); if (!data.ok || !data.draftVersionId || restored?.status !== "draft" || live?.id === data.draftVersionId || !data.qa?.checks?.length) process.exit(1);'
+assert_json "version restore draft API" 'const data = JSON.parse(process.env.BODY); const live = data.bundle?.siteModel?.versions?.find((version) => version.status === "published"); const restored = data.bundle?.siteModel?.versions?.find((version) => version.id === data.draftVersionId); if (!data.ok || !data.draftVersionId || restored?.status !== "draft" || live?.id === data.draftVersionId || data.objectiveQa?.readiness !== "pending") process.exit(1);'
 
 echo "Smoke checks passed for $BASE_URL"

@@ -1,18 +1,21 @@
 import type {
   BusinessProfile,
+  GenerationQaMetadata,
   GenerationQaBlockerCategory,
   RenderInspectionFinding,
   RenderInspectionResult,
   SiteBundle,
   SiteVersionV3
 } from "./models";
-import type { EvidenceKind, EvidenceLedger, VerifiedEvidence } from "./evidence-ledger";
+import type { EvidenceLedger } from "./evidence-ledger";
 import type { GenerationPlan, SiteCopy } from "./generation-contracts";
 import { validateSiteCopyForPlan } from "./generation-contracts";
 import { inspectGeneratedSiteBundleRender } from "./generated-site-render-inspection";
-import { scanPlaceholderText, scanSensitiveClaimText, type SensitiveClaimEvidenceKind } from "./content-safety-scanners";
+import { gatedSensitiveClaims, scanPlaceholderText } from "./content-safety-scanners";
 import { detectInternalStateCopy } from "./generation-objective-signals";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
+import { computeSiteModelHash } from "./site-version-metadata";
+import { publicGenerationServices } from "./vertical-packs";
 
 export const objectiveGenerationGateSchemaVersion = "objective-generation-gate-v1" as const;
 
@@ -38,6 +41,36 @@ export type ObjectiveGenerationGateResult = {
     inspection: RenderInspectionResult;
   }>;
 };
+
+export function generationQaFromObjectiveGate(
+  bundle: SiteBundle,
+  version: SiteVersionV3,
+  gate: ObjectiveGenerationGateResult,
+  readiness: GenerationQaMetadata["readiness"] = gate.status === "pass" ? "ready" : "blocked"
+): GenerationQaMetadata {
+  return {
+    schemaVersion: "canonical-generation-qa-v1",
+    readiness,
+    siteModelHash: computeSiteModelHash(bundle, version),
+    qaRunId: gate.qaRunId,
+    checkedAt: gate.evaluatedAt,
+    blockers: gate.blockers.map((issue) => ({
+      id: issue.id,
+      title: issue.title,
+      detail: issue.detail,
+      category: issue.category,
+      severity: "blocking",
+      viewport: issue.viewport
+    })),
+    warnings: gate.warnings.map((issue) => ({
+      id: issue.id,
+      title: issue.title,
+      detail: issue.detail,
+      viewport: issue.viewport
+    })),
+    artifactRefs: gate.routes.flatMap((route) => route.inspection.screenshots)
+  };
+}
 
 export async function runObjectiveGenerationGate(input: {
   bundle: SiteBundle;
@@ -77,7 +110,7 @@ export function evaluateObjectiveGenerationGate(input: {
   const blockers: ObjectiveGateIssue[] = [];
   const warnings: ObjectiveGateIssue[] = [];
   blockers.push(...contractBlockers(input));
-  blockers.push(...contentBlockers(input.bundle.businessProfile, input.version, input.copy, input.evidence));
+  blockers.push(...contentBlockers(input.bundle.businessProfile, input.version, input.copy));
   for (const route of input.routes) {
     const pageSlug = route.slug || "/";
     const inspection = route.inspection;
@@ -185,8 +218,7 @@ function contractBlockers(input: {
 function contentBlockers(
   business: BusinessProfile,
   version: SiteVersionV3,
-  copy: SiteCopy,
-  evidence: EvidenceLedger
+  copy: SiteCopy
 ) {
   const blockers: ObjectiveGateIssue[] = [];
   const manifest = renderedTextManifest(version);
@@ -201,39 +233,22 @@ function contentBlockers(
   if (business.phone && !normalizedDigits(allText).includes(normalizedDigits(business.phone).slice(-7))) {
     blockers.push(issue("phone_grounding", "Known phone number is not rendered", "The source-backed phone number must appear on the generated site.", "data_incomplete"));
   }
-  if (business.services.length && !business.services.some((service) => normalizedText(allText).includes(normalizedText(service)))) {
+  const publicServices = publicGenerationServices(business.services);
+  if (publicServices.length && !publicServices.some((service) => normalizedText(allText).includes(normalizedText(service)))) {
     blockers.push(issue("service_grounding", "Known services are not rendered", "At least one source-backed service name must appear on the generated site.", "data_incomplete"));
   }
   for (const slot of copy.slots) {
-    const claims = scanSensitiveClaimText(slot.value).filter((claim) => claim.severity === "block" || claim.category === "pricing" || claim.category === "reviews" || claim.category === "marketing");
+    const claims = gatedSensitiveClaims(slot.value);
     for (const claim of claims) {
-      const support = slot.evidenceIds
-        .map((id) => evidence.items.find((candidate) => candidate.id === id))
-        .filter((item): item is VerifiedEvidence => Boolean(item))
-        .some((item) => supportsClaimKind(item, claim.requiredEvidence));
-      if (!support) {
-        blockers.push(issue(
-          `sensitive_claim_${slot.slotId}_${claim.category}`,
-          "Sensitive copy claim lacks verified support",
-          `${slot.slotId} contains a ${claim.label} without compatible durable evidence.`,
-          "claim_unsupported"
-        ));
-      }
+      blockers.push(issue(
+        `sensitive_claim_${slot.slotId}_${claim.category}`,
+        "Protected claim appears in model-written copy",
+        `${slot.slotId} contains a ${claim.label}; protected facts must render through deterministic evidence components.`,
+        "claim_unsupported"
+      ));
     }
   }
   return blockers;
-}
-
-function supportsClaimKind(item: VerifiedEvidence, required: SensitiveClaimEvidenceKind) {
-  if (item.renderPolicy !== "durable_render" || !item.publicText) return false;
-  const compatible: Record<SensitiveClaimEvidenceKind, EvidenceKind[]> = {
-    proof: ["credential", "years_in_business", "award", "warranty"],
-    reviews: ["testimonial"],
-    insurance: ["insurance_support"],
-    pricing: ["offer"],
-    emergency: []
-  };
-  return compatible[required].includes(item.kind);
 }
 
 function textValues(value: unknown): string[] {

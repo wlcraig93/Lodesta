@@ -35,7 +35,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   if (schemaIssue) {
     return NextResponse.json(
       {
-        error: `Site candidate stored version schema is stale: ${schemaIssue}. Run npm run backfill:strip-pages-projection or regenerate the candidate.`,
+        error: `Site candidate stored version schema is stale: ${schemaIssue}. Regenerate the candidate.`,
         candidateStatus: candidate.status
       },
       { status: 409 }
@@ -53,7 +53,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
       { status: 409 }
     );
   }
-  const reviewArtifacts = await repository.listSiteArtifacts({ siteCandidateId: candidateId, artifactType: "v3_review_packet" });
+  const reviewArtifacts = await repository.listSiteArtifacts({ siteCandidateId: candidateId, artifactType: "operator_decision" });
   const latestDecisionArtifact = latestOperatorDecisionArtifactV1(reviewArtifacts);
   const decisionPayload = latestDecisionArtifact ? parseOperatorDecisionArtifactV1(latestDecisionArtifact) : undefined;
   if (!operatorDecisionPassedV1(decisionPayload)) {

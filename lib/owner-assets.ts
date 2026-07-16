@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AssetAttestationV2, AssetReference, SiteAsset, SiteBundle } from "./models";
 import { validatePublicHostname } from "./url-safety";
-import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
+import { markRegenerableArtifactProvenanceStaleV1 } from "./regenerable-artifact-provenance";
 
 export type OwnerAssetInput = {
   url: string;
@@ -126,8 +126,14 @@ export function applyOwnerAssetsUpdate(bundle: SiteBundle, input: UpdateOwnerAss
   ];
 
   if (ownerAssets.length) {
-    const recompile = applyGeneratedSiteV3({ bundle });
-    bundle.presenceAssessment.technicalNotes.push(`Owner assets were recorded and ${recompile.reason}`);
+    const staleReason = "Owner media changed; design-system and media selection must be regenerated.";
+    bundle.presenceAssessment.generationPlan = bundle.presenceAssessment.generationPlan
+      ? {
+          ...bundle.presenceAssessment.generationPlan,
+          provenance: markRegenerableArtifactProvenanceStaleV1(bundle.presenceAssessment.generationPlan.provenance, staleReason)!
+        }
+      : undefined;
+    bundle.presenceAssessment.technicalNotes.push(`${staleReason} Explicit regeneration is required.`);
   }
 
   return {

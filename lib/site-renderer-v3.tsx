@@ -5,9 +5,12 @@ import type {
   BackgroundFocalPointV3,
   CopySlotV3,
   FaqItemV3,
+  FactsPresentationIdV3,
   FactsSlotV3,
+  ListPresentationIdV3,
   MapEmbedIntentV3,
   MediaSlotV3,
+  MediaPresentationIdV3,
   QuoteItemV3,
   RenderableLocationV3,
   SectionBackgroundOptionV3,
@@ -18,13 +21,7 @@ import type {
 } from "./generated-site-v3-visual-controls";
 import { compileVisualSectionV3, foregroundForBackgroundV3, getVisualSectionV3, visualSectionRenderStateV3, contrastRatioV3 } from "./generated-site-v3-visual-controls";
 import { PlacesTrustModule } from "@/components/PlacesTrustModule";
-import { hoursEntriesForHours } from "./generated-site-v3-compiler";
-import type {
-  FactsPresentationIdV3,
-  ListPresentationIdV3,
-  MediaPresentationIdV3,
-  SectionPresentationMapV3
-} from "./generated-site-v3-art-direction-catalog";
+import { canonicalBusinessHours as hoursEntriesForHours } from "./business-fact-normalization";
 import { makeLocalBusinessJsonLdForBundle, serializeJsonLd } from "./structured-data";
 
 import { faqPageJsonLd } from "./public-site-schema";
@@ -111,15 +108,6 @@ export function SiteRendererV3({
       data-card-treatment={version.artDirection.cardTreatment}
       data-button-system={version.artDirection.buttonSystem}
       data-spacing-rhythm={version.artDirection.spacingRhythm}
-      data-eyebrow-treatment={version.artDirection.controls?.eyebrowTreatment}
-      data-card-chrome={version.artDirection.controls?.cardChrome}
-      data-figure-treatment={version.artDirection.controls?.figureTreatment}
-      data-heading-case={version.artDirection.controls?.headingCase}
-      data-badge-style={version.artDirection.controls?.badgeStyle}
-      data-fact-highlight={version.artDirection.controls?.factHighlight}
-      data-header-surface={version.artDirection.controls?.headerSurface}
-      data-number-style={version.artDirection.controls?.numberStyle}
-      data-cta-band-tone={version.artDirection.controls?.ctaBandTone}
       style={artDirectionStyle(version)}
     >
       {tracking ? <AnalyticsTracker siteId={business.siteId} pageId={page.id} /> : null}
@@ -138,6 +126,8 @@ export function SiteRendererV3({
       <GoogleProofV3
         mode={proofMode}
         placeId={rendererLocations.locations.find((location) => location.googlePlaceId)?.googlePlaceId}
+        siteId={business.siteId}
+        telemetryEnabled={tracking}
       />
       {page.sections.map((section) => (
         <SectionV3
@@ -149,7 +139,6 @@ export function SiteRendererV3({
           business={business}
           formsEnabled={formsEnabled}
           pageId={page.id}
-          sectionPresentation={version.artDirection.sectionPresentation}
           linkBase={linkBase}
           assetAccessToken={assetAccessToken}
         />
@@ -348,7 +337,6 @@ function SectionV3({
   business,
   formsEnabled,
   pageId,
-  sectionPresentation,
   linkBase,
   assetAccessToken
 }: {
@@ -359,7 +347,6 @@ function SectionV3({
   business: BusinessProfile;
   formsEnabled: boolean;
   pageId?: string;
-  sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
   assetAccessToken?: string;
 }) {
@@ -374,7 +361,6 @@ function SectionV3({
         business={business}
         formsEnabled={formsEnabled}
         pageId={pageId}
-        sectionPresentation={sectionPresentation}
         linkBase={linkBase}
         assetAccessToken={assetAccessToken}
       />
@@ -390,7 +376,6 @@ export function VisualSectionRendererV3({
   business,
   formsEnabled = true,
   pageId,
-  sectionPresentation,
   linkBase,
   assetAccessToken
 }: {
@@ -400,7 +385,6 @@ export function VisualSectionRendererV3({
   business?: BusinessProfile;
   formsEnabled?: boolean;
   pageId?: string;
-  sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
   assetAccessToken?: string;
 }) {
@@ -485,7 +469,7 @@ export function VisualSectionRendererV3({
         } as React.CSSProperties
       }
     >
-      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} sectionPresentation={sectionPresentation} linkBase={linkBase} assetAccessToken={assetAccessToken} />
+      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} linkBase={linkBase} assetAccessToken={assetAccessToken} />
     </section>
   );
 }
@@ -495,7 +479,6 @@ function VisualTemplateSlotsRendererV3({
   business,
   formsEnabled,
   pageId,
-  sectionPresentation,
   linkBase,
   assetAccessToken
 }: {
@@ -503,15 +486,13 @@ function VisualTemplateSlotsRendererV3({
   business?: BusinessProfile;
   formsEnabled: boolean;
   pageId?: string;
-  sectionPresentation?: SectionPresentationMapV3;
   linkBase?: string;
   assetAccessToken?: string;
 }) {
-  const effectiveSectionPresentation = section.presentation ?? sectionPresentation;
   switch (section.templateId) {
     case "hero_split": {
       const mediaPresentation = heroMediaPresentationForOptions(section);
-      const factsPresentation = heroFactsPresentationForOptions(section, effectiveSectionPresentation);
+      const factsPresentation = heroFactsPresentationForOptions(section);
       return (
         <>
           <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
@@ -523,7 +504,7 @@ function VisualTemplateSlotsRendererV3({
       );
     }
     case "hero_statement": {
-      const factsPresentation = heroFactsPresentationForOptions(section, effectiveSectionPresentation);
+      const factsPresentation = heroFactsPresentationForOptions(section);
       return (
         <>
           <SlotBlockV3 role="hero_copy" kind="text">{renderCopySlotV3(section.slots.copy, "h1", true)}</SlotBlockV3>
@@ -541,7 +522,7 @@ function VisualTemplateSlotsRendererV3({
         </>
       );
     case "intro_grid":
-      const introGridServicesPresentation = introGridPresentationForOptions(section, effectiveSectionPresentation);
+      const introGridServicesPresentation = introGridPresentationForOptions(section);
       return (
         <>
           <SlotBlockV3 role="intro_grid_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
@@ -604,7 +585,7 @@ function VisualTemplateSlotsRendererV3({
         </>
       );
     case "media_mosaic":
-      const galleryPresentation = mediaMosaicPresentationForOptions(section, effectiveSectionPresentation);
+      const galleryPresentation = mediaMosaicPresentationForOptions(section);
       const gallerySlot = mediaSlotWithCaptionMode(section.slots.media, section.options.captionMode ?? "below");
       return (
         <>
@@ -627,7 +608,7 @@ function VisualTemplateSlotsRendererV3({
         </>
       );
     case "facts_strip":
-      return <SlotBlockV3 role="facts_strip" kind="facts">{renderFactsSlotV3(section.slots.facts, effectiveSectionPresentation?.factsStrip ?? "trust_bar")}</SlotBlockV3>;
+      return <SlotBlockV3 role="facts_strip" kind="facts">{renderFactsSlotV3(section.slots.facts, "trust_bar")}</SlotBlockV3>;
     case "facts_cta":
       return (
         <>
@@ -647,11 +628,9 @@ function VisualTemplateSlotsRendererV3({
       return (
         <>
           <SlotBlockV3 role="service_index_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
-          {business?.vertical === "auto_body" ? (
-            <SlotBlockV3 role="auto_body_schematic" kind="facts">
-              <AutoBodyRepairSchematicV3 />
-            </SlotBlockV3>
-          ) : null}
+          <SlotBlockV3 role="auto_body_schematic" kind="facts">
+            <AutoBodyRepairSchematicV3 />
+          </SlotBlockV3>
           <SlotBlockV3 role="service_index_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, serviceIndexPresentationForOptions(section), linkBase, { showMeta: false, assetAccessToken })}</SlotBlockV3>
           {section.slots.action ? <SlotBlockV3 role="service_index_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
@@ -737,7 +716,7 @@ function VisualTemplateSlotsRendererV3({
         <>
           <SlotBlockV3 role="showcase_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
           <SlotBlockV3 role="showcase_visit" kind="facts">
-            <div className="site-location-showcase-v3" data-has-map={hasEmbeddedMap ? "true" : undefined} data-has-map-fallback={!mapSrc && primary?.addressLine ? "true" : undefined}>
+            <div className="site-location-showcase-v3" data-has-map={hasEmbeddedMap ? "true" : undefined}>
               {mapSrc ? (
                 <div className="site-location-showcase-map-embed-v3">
                   <iframe
@@ -746,15 +725,6 @@ function VisualTemplateSlotsRendererV3({
                     loading="eager"
                     referrerPolicy="no-referrer-when-downgrade"
                   />
-                  {primary.localityLine ? <span className="site-location-showcase-map-city-v3">{primary.localityLine}</span> : null}
-                  {primary.addressLine ? <span className="site-location-showcase-map-address-v3">{primary.addressLine}</span> : null}
-                </div>
-              ) : primary?.addressLine ? (
-                <div className="site-location-showcase-map-fallback-v3" role="img" aria-label={`Location map reference for ${fallbackAddress || primary.label}`}>
-                  <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-a" />
-                  <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-b" />
-                  <span className="site-location-showcase-map-road-v3 site-location-showcase-map-road-v3-c" />
-                  <span className="site-location-showcase-map-pin-v3" />
                   {primary.localityLine ? <span className="site-location-showcase-map-city-v3">{primary.localityLine}</span> : null}
                   {primary.addressLine ? <span className="site-location-showcase-map-address-v3">{primary.addressLine}</span> : null}
                 </div>
@@ -833,7 +803,7 @@ function VisualTemplateSlotsRendererV3({
       );
     }
     case "contact_split": {
-      const contactFactsPresentation = contactFactsPresentationForOptions(section, effectiveSectionPresentation);
+      const contactFactsPresentation = contactFactsPresentationForOptions(section);
       const contactAction = section.slots.action ?? (business ? contactActionForMode(section.options.ctaMode ?? "phone", business) : undefined);
       const rendersForm = Boolean(business && section.options.formComplexity !== "none");
       return (
@@ -863,10 +833,10 @@ type ComparisonRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "com
 type TeamStoryRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "team_story" }>;
 type ContactSplitRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "contact_split" }>;
 
-function heroFactsPresentationForOptions(section: HeroRenderableSectionV3, presentation: SectionPresentationMapV3 | undefined): FactsPresentationIdV3 {
+function heroFactsPresentationForOptions(section: HeroRenderableSectionV3): FactsPresentationIdV3 {
   if (section.options.proofPlacement === "side_panel") return "hero_chips";
   if (section.options.proofPlacement === "bottom_strip") return "trust_bar";
-  return presentation?.heroFacts ?? "inline_strip";
+  return "inline_strip";
 }
 
 function heroMediaPresentationForOptions(section: HeroSplitRenderableSectionV3): "single" | MediaPresentationIdV3 {
@@ -885,12 +855,12 @@ function heroMediaRadiusForOptions(section: HeroSplitRenderableSectionV3): "none
   return section.options.mediaTreatment === "flush" || section.options.mediaTreatment === "bleed" || section.options.heroLayout === "full_bleed_masthead" ? "none" : "soft";
 }
 
-function mediaMosaicPresentationForOptions(section: MediaMosaicRenderableSectionV3, presentation: SectionPresentationMapV3 | undefined): "single" | MediaPresentationIdV3 {
+function mediaMosaicPresentationForOptions(section: MediaMosaicRenderableSectionV3): "single" | MediaPresentationIdV3 {
   if (section.options.mediaPattern === "strip") return "editorial_strip";
   if (section.options.mediaPattern === "wall") return "collage";
   if (section.options.mediaPattern === "alternating_rows") return "editorial_strip";
   if (section.anchorId === "proof") return "editorial_strip";
-  return presentation?.gallery ?? "mosaic";
+  return "mosaic";
 }
 
 function mediaMosaicCropForOptions(section: MediaMosaicRenderableSectionV3): "portrait" | "landscape" | "wide" {
@@ -921,13 +891,13 @@ function eligibilityFactsPresentationForOptions(section: EligibilityBandRenderab
   return "trust_bar";
 }
 
-function introGridPresentationForOptions(section: IntroGridRenderableSectionV3, presentation: SectionPresentationMapV3 | undefined): ListPresentationIdV3 {
+function introGridPresentationForOptions(section: IntroGridRenderableSectionV3): ListPresentationIdV3 {
   if (section.options.cardTreatment === "comparison") return "action_tiles";
   if (section.options.cardTreatment === "feature_cards") return "card_grid";
   if (section.options.cardTreatment === "service_cards") return "service_problem_rows";
   if (section.options.cardTreatment === "media_top_cards") return "card_grid";
   if (section.options.cardTreatment === "editorial_cards") return "card_grid";
-  return presentation?.services ?? "action_tiles";
+  return "action_tiles";
 }
 
 function serviceIndexPresentationForOptions(section: ServiceIndexRenderableSectionV3): ListPresentationIdV3 {
@@ -965,10 +935,10 @@ function teamStoryCropForOptions(section: TeamStoryRenderableSectionV3): "portra
   return "portrait";
 }
 
-function contactFactsPresentationForOptions(section: ContactSplitRenderableSectionV3, presentation: SectionPresentationMapV3 | undefined): FactsPresentationIdV3 {
+function contactFactsPresentationForOptions(section: ContactSplitRenderableSectionV3): FactsPresentationIdV3 {
   if (section.options.proofSidebar === "hours" || section.options.proofSidebar === "location") return "stacked";
   if (section.options.proofSidebar === "response_expectation") return "stacked";
-  return presentation?.contactFacts ?? "stacked";
+  return "stacked";
 }
 
 function contactActionForMode(mode: NonNullable<ContactSplitRenderableSectionV3["options"]["ctaMode"]>, business: BusinessProfile): ActionSlotV3 {
@@ -990,9 +960,9 @@ function contactActionForMode(mode: NonNullable<ContactSplitRenderableSectionV3[
   }
   if (mode === "estimate") {
     return {
-      title: business.vertical === "auto_body" ? "Start the repair estimate." : "Request an estimate.",
-      body: business.vertical === "auto_body" ? "Include the vehicle, damage area, and whether it still drives." : "Send the service details and best callback number.",
-      cta: { label: business.vertical === "auto_body" ? "Send repair details" : "Request estimate", href: "#contact", style: "primary" }
+      title: "Start the repair estimate.",
+      body: "Include the vehicle, damage area, and whether it still drives.",
+      cta: { label: "Send repair details", href: "#contact", style: "primary" }
     };
   }
   return {
@@ -1218,28 +1188,30 @@ function formatHourForBadge(minutes: number) {
  * previews get the Places UI Kit compact module; anonymous unclaimed sites get
  * a link-only CTA; QA/internal renders get nothing.
  */
-function GoogleProofV3({ mode, placeId }: { mode: "ui_kit" | "link_only" | "none"; placeId?: string }) {
+function GoogleProofV3({
+  mode,
+  placeId,
+  siteId,
+  telemetryEnabled
+}: {
+  mode: "ui_kit" | "link_only" | "none";
+  placeId?: string;
+  siteId: string;
+  telemetryEnabled: boolean;
+}) {
   if (mode === "none" || !placeId) return null;
-  if (mode === "ui_kit") {
-    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY?.trim() || process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY?.trim();
-    if (apiKey) {
-      return (
-        <div className="site-google-proof-v3" data-proof-mode="ui_kit">
-          <PlacesTrustModule placeId={placeId} apiKey={apiKey} />
-        </div>
-      );
-    }
-    // No browser key configured: degrade to the link-only CTA.
-  }
+  const apiKey = mode === "ui_kit"
+    ? process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY?.trim() || process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY?.trim()
+    : undefined;
   return (
-    <div className="site-google-proof-v3" data-proof-mode="link_only">
-      <a
-        href={`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(placeId)}`}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
-        Read our reviews on Google Maps
-      </a>
+    <div className="site-google-proof-v3" data-proof-mode={mode}>
+      <PlacesTrustModule
+        placeId={placeId}
+        siteId={siteId}
+        mode={mode}
+        apiKey={apiKey}
+        telemetryEnabled={telemetryEnabled}
+      />
     </div>
   );
 }
@@ -2090,7 +2062,7 @@ function ContactV3({ variant, props, business, formsEnabled, pageId }: { variant
             </div>
           ))}
           <a className="site-button-v3 site-button-v3-primary" href={business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact"}>
-            {business.phone ? (business.vertical === "auto_body" ? "Call the shop" : "Call now") : "Send details"}
+            {business.phone ? "Call the shop" : "Send details"}
           </a>
           <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
         </aside>
@@ -2128,7 +2100,7 @@ function ContactFormV3({
       <label>Name<input name="name" autoComplete="name" placeholder="Your name" /></label>
       <label>Phone<input name="phone" type="tel" autoComplete="tel" placeholder="Your phone number" /></label>
       {detailed ? <label>Email<input name="email" type="email" autoComplete="email" placeholder="you@example.com" /></label> : null}
-      {business.vertical === "auto_body" && detailed ? (
+      {detailed ? (
         <>
           <label>Damage or service<input name="vehicle_issue" autoComplete="off" placeholder="Describe the damage" /></label>
           <label>
@@ -2141,9 +2113,9 @@ function ContactFormV3({
           </label>
         </>
       ) : null}
-      <label>{detailed ? "Message" : "Brief note"}<textarea name="message" placeholder={business.vertical === "auto_body" ? "Vehicle, damage area, timing, and whether it still drives" : "What do you need help with?"} /></label>
+      <label>{detailed ? "Message" : "Brief note"}<textarea name="message" placeholder="Vehicle, damage area, timing, and whether it still drives" /></label>
       <button className="site-button-v3 site-button-v3-primary" type={formsEnabled ? "submit" : "button"} aria-disabled={formsEnabled ? undefined : true}>
-        {business.vertical === "auto_body" ? "Send repair details" : "Send message"}
+        Send repair details
       </button>
     </form>
   );
@@ -2350,9 +2322,12 @@ function googleMapsEmbedKey() {
   );
 }
 
-function locationMapMode(hasEmbedKey = false): "auto" | "classic_embed" | "embed" | "link_only" | "off" {
-  const mode = process.env.LODESTA_LOCATION_MAP_MODE?.trim();
-  if (!mode) return hasEmbedKey ? "embed" : "classic_embed";
+export function locationMapMode(
+  hasEmbedKey = false,
+  configuredMode = process.env.LODESTA_LOCATION_MAP_MODE?.trim()
+): "auto" | "classic_embed" | "embed" | "link_only" | "off" {
+  const mode = configuredMode;
+  if (!mode) return hasEmbedKey ? "embed" : "link_only";
   if (mode === "auto" || mode === "classic_embed" || mode === "embed" || mode === "link_only" || mode === "off") return mode;
   return "auto";
 }
@@ -2435,24 +2410,10 @@ function relativeLuminance(rgb: { r: number; g: number; b: number }) {
  */
 function fontStacks(fontPairingId: SiteArtDirectionFontPairingIdV3) {
   switch (fontPairingId) {
-    case "editorial_serif_clean_sans":
-      return { heading: "Fraunces, Georgia, serif", body: '"DM Sans", "Segoe UI", system-ui, sans-serif' };
-    case "condensed_service_sans":
-      return { heading: "Archivo, 'Helvetica Neue', system-ui, sans-serif", body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
-    case "warm_editorial_sans":
-      return { heading: "Fraunces, Georgia, serif", body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
     case "precision_grotesk":
       return { heading: '"Libre Franklin", "Helvetica Neue", Arial, sans-serif', body: '"Libre Franklin", "Segoe UI", system-ui, sans-serif' };
-    case "friendly_rounded":
-      return { heading: 'Figtree, "Segoe UI", system-ui, sans-serif', body: '"DM Sans", "Segoe UI", system-ui, sans-serif' };
-    case "magazine_grotesk":
-      return { heading: '"Space Grotesk", "Avenir Next", system-ui, sans-serif', body: 'Manrope, "Segoe UI", system-ui, sans-serif' };
-    case "quiet_serif":
-      return { heading: '"Cormorant Garamond", Georgia, serif', body: 'Manrope, "Segoe UI", system-ui, sans-serif' };
     case "display_sans_humanist":
       return { heading: 'Sora, "Avenir Next", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
-    default:
-      return { heading: 'Sora, "Avenir Next", "Segoe UI", system-ui, sans-serif', body: 'Figtree, "Segoe UI", system-ui, sans-serif' };
   }
 }
 
@@ -2473,14 +2434,8 @@ function arrayProp<T>(value: unknown): T[] {
 type WordmarkVariantV3 = "plain" | "accent_period" | "two_tone" | "underline" | "monogram_chip" | "dot_lead";
 
 const wordmarkVariantByPairing: Record<SiteArtDirectionFontPairingIdV3, WordmarkVariantV3> = {
-  editorial_serif_clean_sans: "plain",
   display_sans_humanist: "dot_lead",
-  condensed_service_sans: "two_tone",
-  warm_editorial_sans: "underline",
-  precision_grotesk: "two_tone",
-  friendly_rounded: "accent_period",
-  magazine_grotesk: "underline",
-  quiet_serif: "plain"
+  precision_grotesk: "two_tone"
 };
 
 function BrandLockupV3({ name, artDirection }: { name: string; artDirection: SiteVersionV3["artDirection"] }) {
@@ -2564,45 +2519,12 @@ function headerLogoForBusiness(logo: BusinessProfile["logo"] | undefined, refere
 
 function brandDescriptorForBusiness(business: BusinessProfile) {
   const category = business.categories?.find((item) => item.trim())?.trim();
-  const trade = category || verticalLabelForBusiness(business.vertical);
+  const trade = category || "Auto Body & Collision";
   const city = business.address?.city?.trim();
   const region = business.address?.region?.trim();
   const place = [city, region].filter(Boolean).join(", ");
   if (trade && place) return `${trade} • ${place}`;
   return trade || place || undefined;
-}
-
-function verticalLabelForBusiness(vertical: BusinessProfile["vertical"]) {
-  switch (vertical) {
-    case "auto_body":
-      return "Auto Body & Collision";
-    case "auto_services":
-      return "Auto Service";
-    case "beauty_salon":
-      return "Salon";
-    case "creative_studio":
-      return "Creative Studio";
-    case "dental":
-      return "Dental";
-    case "fitness":
-      return "Fitness";
-    case "home_services":
-      return "Home Services";
-    case "landscaping":
-      return "Landscaping";
-    case "law_firm":
-      return "Law Firm";
-    case "med_spa":
-      return "Med Spa";
-    case "real_estate":
-      return "Real Estate";
-    case "restaurant":
-      return "Restaurant";
-    case "veterinary":
-      return "Veterinary";
-    default:
-      return undefined;
-  }
 }
 
 function formatAddress(address: NonNullable<BusinessProfile["address"]>) {

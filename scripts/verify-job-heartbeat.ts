@@ -15,7 +15,7 @@ async function main() {
     await requireSupabase(
       supabase.from("jobs").insert({
         id: heartbeatJobId,
-        kind: "monthly_action_list",
+        kind: "agent_telemetry_cleanup",
         status: "running",
         payload: { verifier: "job_heartbeat" },
         attempts: 1,
@@ -57,7 +57,7 @@ async function main() {
     await requireSupabase(
       supabase.from("jobs").insert({
         id: staleJobId,
-        kind: "monthly_action_list",
+        kind: "agent_telemetry_cleanup",
         status: "running",
         payload: { verifier: "stale_reclaim" },
         attempts: 1,

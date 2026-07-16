@@ -7,7 +7,7 @@ export const OPENAI_RUNTIME_SETTING_KEY = "openai_runtime";
 export const OPENAI_IMAGE_OUTPUT_FORMAT = "jpeg";
 export const OPENAI_RUNTIME_DEFAULTS = {
   generationModel: "gpt-5.6-sol",
-  visualQaModel: "gpt-5.6-sol",
+  generationJudgeModel: "gpt-5.6-sol",
   imageModel: "gpt-image-2",
   imageSize: "1536x1024",
   imageQuality: "low",
@@ -23,7 +23,7 @@ const IMAGE_SIZE_ERROR =
 export type OpenAiImageQuality = "low" | "medium" | "high" | "auto";
 export type OpenAiRuntimeEditableSettings = {
   generationModel: string;
-  visualQaModel: string;
+  generationJudgeModel: string;
   imageModel: string;
   imageSize: string;
   imageQuality: OpenAiImageQuality;
@@ -97,7 +97,7 @@ const imageSizeSchema = z.string().trim().refine((value) => validateOpenAiImageS
 
 const openAiRuntimeSettingsSchema = z.object({
   generationModel: modelSlugSchema,
-  visualQaModel: modelSlugSchema,
+  generationJudgeModel: modelSlugSchema,
   imageModel: modelSlugSchema,
   imageSize: imageSizeSchema,
   imageQuality: imageQualitySchema,
@@ -542,7 +542,7 @@ function localSettingsFile() {
 function settingsEqual(left: OpenAiRuntimeEditableSettings, right: OpenAiRuntimeEditableSettings) {
   return (
     left.generationModel === right.generationModel &&
-    left.visualQaModel === right.visualQaModel &&
+    left.generationJudgeModel === right.generationJudgeModel &&
     left.imageModel === right.imageModel &&
     left.imageSize === right.imageSize &&
     left.imageQuality === right.imageQuality &&

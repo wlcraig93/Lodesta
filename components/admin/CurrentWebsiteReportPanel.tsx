@@ -2,17 +2,12 @@ import { AdminButtonAnchor } from "@/components/admin/AdminButton";
 import type { SiteBundle, StandardCheckResult, StandardEvaluation } from "@/lib/models";
 import { coldUrlCheckableChecks } from "@/lib/standard-evaluation";
 
-type CurrentWebsiteReportPanelProps = {
-  bundle: SiteBundle;
-  generatedChecks: StandardCheckResult[];
-};
-
-export function CurrentWebsiteReportPanel({ bundle, generatedChecks }: CurrentWebsiteReportPanelProps) {
+export function CurrentWebsiteReportPanel({ bundle }: { bundle: SiteBundle }) {
   const assessment = bundle.presenceAssessment;
   const sourceEvaluation = assessment.standardEvaluation;
   const sourceUrl = assessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
-  const passedGeneratedChecks = generatedChecks.filter((check) => check.passed).slice(0, 5);
+  const evidence = assessment.evidenceLedger;
   const renderInspection = assessment.renderInspection;
   const referenceAssets = (assessment.assetInventory ?? []).filter((asset) => asset.rightsStatus === "reference_only");
   const notes = [
@@ -60,15 +55,21 @@ export function CurrentWebsiteReportPanel({ bundle, generatedChecks }: CurrentWe
         </section>
 
         <section className="panel">
-          <h2>Preview improvements</h2>
+          <h2>Evidence retained</h2>
           <div className="finding-list">
-            {passedGeneratedChecks.length ? (
-              passedGeneratedChecks.map((check) => <StandardCheckCard key={check.criterionId} check={check} />)
+            {evidence?.items.length ? (
+              evidence.items.slice(0, 6).map((item) => (
+                <article key={item.id} className="finding-card compact-card">
+                  <span className="badge">{item.kind.replaceAll("_", " ")}</span>
+                  <h3>{item.publicText ?? item.sourceExcerpt}</h3>
+                  <p>{item.source.url}</p>
+                </article>
+              ))
             ) : (
               <article className="finding-card compact-card">
-                <span className="badge">pending</span>
-                <h3>No preview improvements are attached</h3>
-                <p>Preview scoring will populate here after a site version is available.</p>
+                <span className="badge">source sparse</span>
+                <h3>No verified public evidence was retained</h3>
+                <p>The verifier rejected proposed proof or the source did not expose usable evidence.</p>
               </article>
             )}
           </div>

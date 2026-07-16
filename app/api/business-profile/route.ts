@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
-import { runSiteQa } from "@/lib/qa";
+import { managedSiteStatus } from "@/lib/managed-site-status";
 
 const optionalString = z.string().optional();
 
@@ -43,13 +43,13 @@ export async function POST(request: Request) {
   const result = await repository.updateBusinessProfile(parsed.data);
   if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
   if (!result.ok) {
-    return NextResponse.json({ error: result.reason, issues: result.issues, qa: result.qa }, { status: 400 });
+    return NextResponse.json({ error: result.reason, issues: result.issues }, { status: 400 });
   }
   return NextResponse.json({
     ok: true,
     businessProfile: result.bundle.businessProfile,
-    findings: result.bundle.optimizationFindings,
-    qa: runSiteQa(result.bundle, { versionStatus: "draft" }),
+    regenerationRequired: Boolean(result.bundle.presenceAssessment.generationPlan?.provenance.stale),
+    managedStatus: managedSiteStatus(result.bundle),
     guardrailWarnings: result.guardrailWarnings
   });
 }

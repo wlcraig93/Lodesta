@@ -10,7 +10,7 @@ const flags = parseFlags(process.argv.slice(2));
 const candidate = {
   ...defaultOpenAiRuntimeEditableSettings(),
   generationModel: flags["generation-model"] ?? defaultOpenAiRuntimeEditableSettings().generationModel,
-  visualQaModel: flags["visual-qa-model"] ?? defaultOpenAiRuntimeEditableSettings().visualQaModel,
+  generationJudgeModel: flags["judge-model"] ?? defaultOpenAiRuntimeEditableSettings().generationJudgeModel,
   imageModel: flags["image-model"] ?? defaultOpenAiRuntimeEditableSettings().imageModel,
   imageSize: flags["image-size"] ?? defaultOpenAiRuntimeEditableSettings().imageSize,
   imageQuality: flags["image-quality"] ?? defaultOpenAiRuntimeEditableSettings().imageQuality,

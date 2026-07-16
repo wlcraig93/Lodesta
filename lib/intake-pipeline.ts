@@ -5,7 +5,6 @@ import { gatherPublicPresenceSignals } from "./public-presence";
 import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 import { assertLaunchMarket } from "./launch-market";
-import { planGenerationCost } from "./generation-cost";
 import type { AgentTelemetryRecorder, AgentTelemetrySpan } from "./agent-telemetry";
 import type { RenderInspectionResult } from "./models";
 import type { CrawlAssessment } from "./crawler";
@@ -132,14 +131,6 @@ export async function prepareIntakeInput(
       }
     })
   );
-  const generationCostEstimate = planGenerationCost({
-    sourceUrl: safeUrl,
-    crawl,
-    sourceRenderInspection: renderInspection,
-    publicPresence,
-    includeGeneratedRenderQa: true
-  });
-
   return {
     ...input,
     identity: options.identity,
@@ -147,8 +138,7 @@ export async function prepareIntakeInput(
     crawl,
     renderInspection,
     publicPresence,
-    understanding,
-    generationCostEstimate
+    understanding
   };
 }
 

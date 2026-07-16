@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { repository } from "@/lib/repository";
-import { runSiteQa } from "@/lib/qa";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
@@ -42,17 +41,13 @@ export async function POST(request: Request) {
       { status: verificationRequired ? 409 : 402 }
     );
   }
-  const qa = runSiteQa(bundle, { versionStatus: "draft" });
-  if (!qa.passed) {
-    return NextResponse.json({ error: "Draft QA failed. Fix blocking checks before publishing.", qa }, { status: 400 });
-  }
   const draftVersion = bundle.siteModel.versions.find((version) => version.status === "draft");
   if (!draftVersion) return NextResponse.json({ error: "No draft version exists." }, { status: 400 });
   const publishReadiness = getEffectiveGenerationQaReadiness(bundle, draftVersion);
   if (publishReadiness !== "ready") {
     return NextResponse.json(
       {
-        error: "Generated preview QA must pass before publishing.",
+        error: "Canonical objective QA must pass before publishing.",
         publishReadiness,
         blockers: draftVersion.generationQa?.blockers ?? []
       },
@@ -62,5 +57,5 @@ export async function POST(request: Request) {
   const result = await repository.publishDraft(parsed.data.siteId);
   if (!result) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
   if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 400 });
-  return NextResponse.json({ ...result, qa, confirmed: true });
+  return NextResponse.json({ ...result, objectiveQa: draftVersion.generationQa, confirmed: true });
 }

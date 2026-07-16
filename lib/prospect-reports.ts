@@ -1,5 +1,5 @@
 import type { CrawlAssessment } from "./crawler";
-import { inferVertical } from "./intake";
+import { inferVertical } from "./vertical-classification";
 import type {
   ProspectPresenceReportResult,
   ProspectReportBucket,

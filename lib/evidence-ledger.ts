@@ -36,6 +36,11 @@ export type VerifiedEvidence = {
   publicText?: string;
   attribution?: string;
   renderPolicy: EvidenceRenderPolicy;
+  confirmation?: {
+    status: "confirmed" | "rejected";
+    decidedBy: string;
+    decidedAt: string;
+  };
   source: {
     url: string;
     pageHash: string;
@@ -45,6 +50,30 @@ export type VerifiedEvidence = {
     endToken: number;
   };
 };
+
+export function applyEvidenceConfirmation(input: {
+  ledger: EvidenceLedger;
+  evidenceId: string;
+  decision: "confirmed" | "rejected";
+  decidedBy: string;
+  decidedAt?: string;
+}) {
+  const item = input.ledger.items.find((candidate) => candidate.id === input.evidenceId);
+  if (!item) return { ok: false as const, reason: "Evidence item was not found." };
+  if (item.renderPolicy === "durable_render") {
+    return { ok: false as const, reason: "This evidence is already deterministically renderable and does not require confirmation." };
+  }
+  item.confirmation = {
+    status: input.decision,
+    decidedBy: input.decidedBy,
+    decidedAt: input.decidedAt ?? new Date().toISOString()
+  };
+  if (input.decision === "confirmed") {
+    item.renderPolicy = "durable_render";
+    item.publicText = item.sourceExcerpt;
+  }
+  return { ok: true as const, item };
+}
 
 export type EvidenceRejectionReason =
   | "empty_proposal"
@@ -82,7 +111,7 @@ export function composeEvidenceLedger(input: {
   createdAt?: string;
 }): EvidenceLedger {
   const blocks = input.crawl?.pageSummaries.flatMap((page) => page.sourceTextBlocks ?? []) ?? [];
-  const proposals = input.proposals ?? evidenceProposalsFromCrawl(input.crawl);
+  const proposals = input.proposals ?? [];
   const items: VerifiedEvidence[] = [];
   const rejected: EvidenceRejection[] = [];
 
@@ -123,23 +152,6 @@ export function composeEvidenceLedger(input: {
       sourceSparse: blocks.length < 3 || blocks.reduce((sum, block) => sum + block.canonicalTokens.length, 0) < 40
     }
   };
-}
-
-export function evidenceProposalsFromCrawl(crawl: CrawlAssessment | undefined): EvidenceProposal[] {
-  return (crawl?.pageSummaries ?? []).flatMap((page) =>
-    (page.evidenceCandidates ?? []).flatMap((candidate) => {
-      if (!isEvidenceKind(candidate.kind)) return [];
-      return [{
-        kind: candidate.kind,
-        proposedText:
-          candidate.kind === "testimonial"
-            ? candidate.value.quote ?? candidate.value.text
-            : candidate.value.displayText ?? candidate.value.text,
-        sourceUrl: candidate.source.url ?? page.url,
-        attribution: candidate.value.attribution
-      }];
-    })
-  );
 }
 
 export function verifyEvidenceProposal(
@@ -255,10 +267,6 @@ function contiguousTokenIndex(source: string[], candidate: string[]) {
     if (candidate.every((token, offset) => source[index + offset] === token)) return index;
   }
   return -1;
-}
-
-function isEvidenceKind(value: string): value is EvidenceKind {
-  return ["testimonial", "credential", "warranty", "insurance_support", "award", "years_in_business", "offer"].includes(value);
 }
 
 function normalizedUrl(value: string) {

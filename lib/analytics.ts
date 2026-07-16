@@ -41,6 +41,7 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
       .map((event) => ({ metric: event.metadata?.metric, value: event.value, timestamp: event.timestamp })),
     agentReadableRequests: siteEvents.filter((event) => event.eventType === "agent_readable_request").length,
     agentReadableByResource: summarizeAgentReadableResources(siteEvents),
+    placesUi: summarizePlacesUi(siteEvents),
     outcomesByPage: summarizeBy(siteEvents, (event) => event.pageId ?? "unknown", (key) => key),
     outcomesByCtaRole: summarizeBy(
       siteEvents.filter((event) => event.eventType === "click" || primaryActionEvents.has(event.eventType)),
@@ -59,6 +60,20 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
     clickMap: summarizeClickMap(siteEvents),
     standardCorrelations: summarizeStandardCorrelations(siteEvents, totals),
     baselineComparison: baselineComparison(siteEvents)
+  };
+}
+
+function summarizePlacesUi(events: AnalyticsEvent[]): AnalyticsSummary["placesUi"] {
+  const places = events.filter((event) => event.eventType === "places_ui");
+  const loads = places.filter((event) => stringMetadata(event, "event") === "load").length;
+  const failures = places.filter((event) => stringMetadata(event, "event") === "failure").length;
+  const fallbacks = places.filter((event) => stringMetadata(event, "event") === "fallback").length;
+  return {
+    loads,
+    failures,
+    fallbacks,
+    fallbackRate: rate(fallbacks, loads + fallbacks),
+    estimatedCostUsd: Math.round(places.reduce((sum, event) => sum + (numericMetadata(event, "estimatedCostUsd") ?? 0), 0) * 1000) / 1000
   };
 }
 

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AdminButton } from "@/components/admin/AdminButton";
 
-export function RegenerateCandidateButton({ sourceUrl }: { sourceUrl: string }) {
+export function RegenerateCandidateButton({ sourceUrl, intendedSiteId }: { sourceUrl: string; intendedSiteId?: string }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,10 +15,10 @@ export function RegenerateCandidateButton({ sourceUrl }: { sourceUrl: string }) 
     setSubmitting(true);
     setError(null);
     try {
-      const response = await fetch("/api/intake", {
+      const response = await fetch(intendedSiteId ? "/api/sites/regenerate" : "/api/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: sourceUrl, telemetrySource: "admin_console" })
+        body: JSON.stringify(intendedSiteId ? { siteId: intendedSiteId } : { url: sourceUrl, telemetrySource: "admin_console" })
       });
       const payload = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {

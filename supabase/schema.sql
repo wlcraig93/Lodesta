@@ -1,19 +1,5 @@
 create extension if not exists pgcrypto;
 
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-  'lodesta-asset-library',
-  'lodesta-asset-library',
-  false,
-  20971520,
-  array['image/jpeg', 'image/png', 'image/webp']
-)
-on conflict (id) do update
-set
-  public = false,
-  file_size_limit = excluded.file_size_limit,
-  allowed_mime_types = excluded.allowed_mime_types;
-
 create table workspaces (
   id text primary key,
   name text not null,
@@ -172,23 +158,6 @@ create table analytics_events (
   event_type text not null,
   event jsonb not null,
   occurred_at timestamptz not null default now()
-);
-
-create table optimization_findings (
-  id text not null,
-  site_id text references sites(id) on delete cascade,
-  standard_criterion_id text,
-  category text not null,
-  severity text not null,
-  title text not null,
-  rationale text not null,
-  recommended_action text not null,
-  status text not null default 'open',
-  apply_mode text not null,
-  suggested_edit_payload jsonb,
-  expected_outcome_metric text,
-  created_at timestamptz not null default now(),
-  primary key (site_id, id)
 );
 
 create table experiments (
@@ -418,79 +387,14 @@ create table site_artifacts (
   id text primary key,
   site_candidate_id text references site_candidates(id) on delete cascade,
   site_id text references sites(id) on delete cascade,
-  scope text not null check (scope in ('candidate_selected', 'candidate_alternative', 'site_selected', 'site_alternative', 'evaluation_candidate', 'qa_evidence')),
-  artifact_type text not null check (artifact_type in ('copy_artifact', 'business_context_report', 'change_impact_report', 'identity_reconcile_report', 'service_catalog_report', 'vertical_classification_report', 'conversion_path_report', 'information_architecture_report', 'brand_cue_report', 'brand_direction_report', 'brand_mark_generation_report', 'asset_selection_report', 'seo_metadata_report', 'performance_audit_report', 'social_proof_report', 'conversion_insights_report', 'local_seo_refresh_report', 'page_gap_analysis_report', 'experiment_recommendation_report', 'design_section_audit_report', 'design_system', 'blueprint', 'compiled_section', 'compiled_page', 'claim_report', 'policy_report', 'page_opportunity_report', 'visual_benchmark', 'art_direction_decision', 'media_asset_decision', 'copy_evaluation_report', 'v3_review_packet', 'generation_cost_report')),
+  scope text not null check (scope in ('candidate_selected', 'site_selected', 'qa_evidence')),
+  artifact_type text not null check (artifact_type in ('evidence_ledger', 'generation_plan', 'site_copy', 'generation_review', 'generation_failure', 'operator_decision')),
   artifact_version text not null,
-  producer_id text not null,
-  producer_version text not null,
-  vertical_playbook_version text,
-  section_contract_version text,
-  site_design_system_version text,
-  source_fact_ids text[] not null default '{}',
-  affected_page_id text,
-  affected_section_id text,
-  affected_slot_id text,
+  provenance_json jsonb not null,
   content_hash text not null,
   payload_json jsonb not null,
   created_at timestamptz not null default now(),
   check (site_candidate_id is not null or site_id is not null)
-);
-
-create table asset_library_batches (
-  id text primary key,
-  manifest_name text not null,
-  vertical text not null,
-  model text not null,
-  candidates_per_prompt int not null check (candidates_per_prompt >= 1 and candidates_per_prompt <= 12),
-  prompt_count int not null check (prompt_count >= 1),
-  estimated_images int not null check (estimated_images >= 1),
-  estimated_cost_usd numeric not null default 0,
-  status text not null default 'running' check (status in ('estimated', 'running', 'completed', 'failed')),
-  metadata jsonb not null default '{}',
-  created_at timestamptz not null default now(),
-  completed_at timestamptz
-);
-
-create table asset_library_assets (
-  id text primary key,
-  batch_id text references asset_library_batches(id) on delete set null,
-  parent_asset_id text references asset_library_assets(id) on delete set null,
-  prompt_id text not null,
-  prompt_metadata jsonb not null,
-  vertical text not null,
-  category text not null,
-  intended_uses text[] not null default '{}',
-  tags text[] not null default '{}',
-  status text not null default 'candidate' check (status in ('candidate', 'needs_edit', 'approved', 'rejected', 'archived')),
-  raw_storage_path text not null,
-  approved_storage_paths jsonb not null default '{}',
-  public_url text,
-  checksum text not null,
-  width int,
-  height int,
-  mime_type text not null check (mime_type in ('image/jpeg', 'image/png', 'image/webp')),
-  model text not null,
-  quality text not null,
-  size text not null,
-  generation_index int not null default 1 check (generation_index >= 1),
-  qc_json jsonb not null default '{"ok":false,"checks":[]}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  approved_at timestamptz,
-  check (
-    (status = 'approved' and approved_at is not null)
-    or status <> 'approved'
-  )
-);
-
-create table asset_library_reviews (
-  id text primary key,
-  asset_id text not null references asset_library_assets(id) on delete cascade,
-  decision text not null check (decision in ('approved', 'rejected', 'needs_edit', 'archived')),
-  notes text,
-  rejection_reasons text[] not null default '{}',
-  reviewer text not null,
-  created_at timestamptz not null default now()
 );
 
 create table agent_run_spans (
@@ -578,7 +482,6 @@ create index forms_site_idx on forms(site_id);
 create index site_versions_site_status_idx on site_versions(site_id, status);
 create index inquiry_deliveries_site_time_idx on inquiry_deliveries(site_id, created_at desc);
 create index inquiry_deliveries_inquiry_time_idx on inquiry_deliveries(inquiry_id, created_at desc);
-create index optimization_findings_site_status_idx on optimization_findings(site_id, status);
 create index experiments_site_status_idx on experiments(site_id, status);
 create index experiment_learnings_status_cohort_idx on experiment_learnings(status, cohort, surface, primary_metric);
 create index experiment_learnings_site_status_idx on experiment_learnings(site_id, status);
@@ -622,13 +525,6 @@ create index site_candidates_accepted_site_idx on site_candidates(accepted_site_
 create index site_artifacts_candidate_idx on site_artifacts(site_candidate_id, scope, artifact_type);
 create index site_artifacts_site_idx on site_artifacts(site_id, scope, artifact_type);
 create index site_artifacts_content_hash_idx on site_artifacts(content_hash);
-create index asset_library_batches_vertical_status_idx on asset_library_batches(vertical, status, created_at desc);
-create index asset_library_assets_vertical_status_idx on asset_library_assets(vertical, status, created_at desc);
-create index asset_library_assets_batch_idx on asset_library_assets(batch_id, created_at desc);
-create index asset_library_assets_checksum_idx on asset_library_assets(checksum);
-create index asset_library_assets_tags_idx on asset_library_assets using gin(tags);
-create index asset_library_assets_intended_uses_idx on asset_library_assets using gin(intended_uses);
-create index asset_library_reviews_asset_idx on asset_library_reviews(asset_id, created_at desc);
 create index agent_run_spans_run_started_idx on agent_run_spans(run_id, started_at);
 create index agent_model_calls_run_idx on agent_model_calls(run_id);
 create index agent_model_calls_span_idx on agent_model_calls(span_id);
@@ -969,7 +865,6 @@ alter table inquiries enable row level security;
 alter table inquiry_events enable row level security;
 alter table inquiry_deliveries enable row level security;
 alter table analytics_events enable row level security;
-alter table optimization_findings enable row level security;
 alter table experiments enable row level security;
 alter table experiment_learnings enable row level security;
 alter table preview_tokens enable row level security;
@@ -987,9 +882,6 @@ alter table business_locations enable row level security;
 alter table site_locations enable row level security;
 alter table site_candidates enable row level security;
 alter table site_artifacts enable row level security;
-alter table asset_library_batches enable row level security;
-alter table asset_library_assets enable row level security;
-alter table asset_library_reviews enable row level security;
 alter table agent_run_spans enable row level security;
 alter table agent_model_calls enable row level security;
 alter table operator_settings enable row level security;
@@ -1034,10 +926,6 @@ using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed analytics events"
 on analytics_events for select
-using (public.is_claimed_site_owner(site_id));
-
-create policy "site owners can read claimed optimization findings"
-on optimization_findings for select
 using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed experiments"

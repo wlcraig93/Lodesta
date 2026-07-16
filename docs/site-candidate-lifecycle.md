@@ -23,6 +23,8 @@ Failed generations remain visible through `agent_runs`; they do not need failed 
 
 Candidate identity is intentionally not stable by source URL. Generating the same source one hundred times should create one hundred separate `sitecand_...` candidates with distinct asset ids and storage paths.
 
-Acceptance is the only place that assigns managed-site identity. During acceptance, Lodesta rewrites bundle ids, nested site references, version ids, form ids, finding ids, experiment ids, asset ids, mockup references, and presence assessment references to the managed `site_...` identity.
+Acceptance is the only place that assigns managed-site identity. During acceptance, Lodesta rewrites the business and site ids, version ids, form ownership, experiment ids, asset ids, public-presence signal ids, and presence-assessment references to the managed `site_...` identity. Canonical generation artifacts retain their own provenance and input hashes.
+
+Regeneration for an existing managed site creates a new candidate linked by `intendedSiteId`. Accepting that candidate replaces the managed site's canonical version, plan, copy, evidence ledger, trace, judge result, theme, and objective QA state while preserving owner-truth business fields and durable managed-site identity.
 
 Acceptance is idempotent: once a candidate has `status = 'accepted'` and `accepted_site_id`, repeated acceptance returns the existing managed site.

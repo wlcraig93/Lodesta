@@ -8,9 +8,8 @@
 
 **Baseline:** `b4f0946`
 
-This document supersedes `docs/generation-simplification-plan.md`. The product is pre-launch. The
-cutover keeps no generator compatibility layer, migration shim, dual read/write path, or legacy
-fallback.
+This is the only generation-pipeline plan. The product is pre-launch. The cutover keeps no generator
+compatibility layer, migration shim, dual read/write path, or legacy fallback.
 
 ## Product Contract
 

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { SiteArtifactRecord } from "./models";
+import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
 
 export const operatorDecisionArtifactVersionV1 = "operator-decision-v1" as const;
 
@@ -42,27 +43,30 @@ export function normalizeOperatorDecisionPayloadV1(input: {
 export function operatorDecisionArtifactV1(input: {
   candidateId: string;
   payload: OperatorDecisionPayloadV1;
-  sourceFactIds?: string[];
   createdAt?: string;
 }): SiteArtifactRecord {
   const contentHash = hashPayload(input.payload);
+  const createdAt = input.createdAt ?? input.payload.reviewedAt;
   return {
     id: `artifact_${input.candidateId}_operator_decision_v1`,
     siteCandidateId: input.candidateId,
     scope: "qa_evidence",
-    artifactType: "v3_review_packet",
+    artifactType: "operator_decision",
     artifactVersion: operatorDecisionArtifactVersionV1,
-    producerId: "operator-decision",
-    producerVersion: operatorDecisionArtifactVersionV1,
-    sourceFactIds: input.sourceFactIds ?? [],
+    provenance: createRegenerableArtifactProvenanceV1({
+      producerId: "operator-decision",
+      producerVersion: operatorDecisionArtifactVersionV1,
+      createdAt,
+      inputs: { candidateId: input.candidateId, payload: input.payload }
+    }),
     contentHash,
     payload: input.payload,
-    createdAt: input.createdAt ?? input.payload.reviewedAt
+    createdAt
   };
 }
 
 export function parseOperatorDecisionArtifactV1(artifact: SiteArtifactRecord): OperatorDecisionPayloadV1 | undefined {
-  if (artifact.artifactType !== "v3_review_packet" || artifact.artifactVersion !== operatorDecisionArtifactVersionV1) return undefined;
+  if (artifact.artifactType !== "operator_decision" || artifact.artifactVersion !== operatorDecisionArtifactVersionV1) return undefined;
   const parsed = operatorDecisionPayloadSchemaV1.safeParse(artifact.payload);
   return parsed.success ? parsed.data : undefined;
 }

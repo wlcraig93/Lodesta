@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import type { ObjectiveGenerationGateResult } from "../lib/generation-objective-gate";
 import type { GenerationJudgePacket, GenerationJudgeResult } from "../lib/generation-judge";
 import { createFixtureSiteCopy } from "../lib/site-copy";
-import { runCanonicalGenerationPipeline } from "../lib/generation-pipeline";
+import {
+  runCanonicalGenerationPipeline,
+  validateGenerationPipelineTrace,
+  type GenerationPipelineTrace
+} from "../lib/generation-pipeline";
 import { createRegenerableArtifactProvenanceV1 } from "../lib/regenerable-artifact-provenance";
 import { buildCanonicalFixture, loadCanonicalFixtureDefinitions } from "./canonical-generation-fixtures";
 
@@ -34,7 +38,24 @@ assert.equal(bounded.status, "operator_review");
 assert.equal(bounded.reason, "regeneration_did_not_ship");
 assert.equal(bounded.trace.counts.copies, 2);
 
-console.log(JSON.stringify({ ok: true, scenarios: 5, boundedRegenerations: 1 }, null, 2));
+assert.throws(
+  () => validateGenerationPipelineTrace({
+    ...copyRevision.trace,
+    counts: { ...copyRevision.trace.counts, plans: 2 }
+  }),
+  /Copy regeneration must preserve/
+);
+assert.throws(
+  () => validateGenerationPipelineTrace({
+    ...systemRevision.trace,
+    attempts: systemRevision.trace.attempts.map((attempt, index) => index === 1
+      ? { ...attempt, designSystem: systemRevision.trace.attempts[0].designSystem }
+      : attempt) as GenerationPipelineTrace["attempts"]
+  }),
+  /Alternate-system regeneration must change/
+);
+
+console.log(JSON.stringify({ ok: true, scenarios: 5, boundedRegenerations: 1, invalidTracesRejected: 2 }, null, 2));
 
 async function runScenario(
   fixture: Awaited<ReturnType<typeof buildCanonicalFixture>>,

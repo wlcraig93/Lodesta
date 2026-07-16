@@ -1,27 +1,20 @@
 "use client";
 
 import { createElement, useEffect, useRef, useState } from "react";
-
-/**
- * Google Places UI Kit trust module (compact Place Details).
- *
- * Policy (docs/social-proof-agent-brief.md): claimed sites render this module;
- * anonymous unclaimed sites get link-only CTAs; tokenized previews render it
- * behind a server-side COGS cap. Bills per component load (~$1/1,000 after the
- * monthly free tier), so it lazy-mounts only when scrolled into view.
- *
- * Uses a browser-scoped, HTTP-referrer-restricted public key — never the
- * server Places key.
- */
+import { getSessionId, getVisitorId } from "./client-identity";
 
 let mapsBootstrapPromise: Promise<void> | undefined;
 
 function loadMapsBootstrap(apiKey: string): Promise<void> {
   if (mapsBootstrapPromise) return mapsBootstrapPromise;
   mapsBootstrapPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector("script[data-lodesta-maps-bootstrap]");
+    const existing = document.querySelector<HTMLScriptElement>("script[data-lodesta-maps-bootstrap]");
     if (existing) {
-      resolve();
+      if ((window as unknown as { google?: unknown }).google) resolve();
+      else {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error("Maps bootstrap failed to load")), { once: true });
+      }
       return;
     }
     const script = document.createElement("script");
@@ -35,14 +28,29 @@ function loadMapsBootstrap(apiKey: string): Promise<void> {
   return mapsBootstrapPromise;
 }
 
-export function PlacesTrustModule({ placeId, apiKey }: { placeId: string; apiKey: string }) {
+type PlacesTrustModuleProps = {
+  placeId: string;
+  siteId: string;
+  mode: "ui_kit" | "link_only";
+  apiKey?: string;
+  telemetryEnabled: boolean;
+};
+
+export function PlacesTrustModule({ placeId, siteId, mode, apiKey, telemetryEnabled }: PlacesTrustModuleProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const reported = useRef(new Set<string>());
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const fallbackReason = mode === "link_only" ? "link_only_policy" : !apiKey ? "missing_browser_key" : failed ? "ui_kit_load_failed" : undefined;
+
+  useEffect(() => {
+    if (!fallbackReason) return;
+    report("fallback", fallbackReason);
+  }, [fallbackReason]);
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || mounted) return;
+    if (!container || loaded || failed || mode !== "ui_kit" || !apiKey) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
@@ -51,31 +59,66 @@ export function PlacesTrustModule({ placeId, apiKey }: { placeId: string; apiKey
           .then(async () => {
             const maps = (window as unknown as { google?: { maps?: { importLibrary?: (name: string) => Promise<unknown> } } }).google?.maps;
             if (maps?.importLibrary) await maps.importLibrary("places");
-            setMounted(true);
+            setLoaded(true);
+            report("load", "ui_kit_loaded", 0.001);
           })
-          .catch(() => setFailed(true));
+          .catch(() => {
+            setFailed(true);
+            report("failure", "ui_kit_load_failed");
+          });
       },
       { rootMargin: "200px" }
     );
     observer.observe(container);
     return () => observer.disconnect();
-  }, [apiKey, mounted]);
+  }, [apiKey, failed, loaded, mode]);
 
-  // Silent omission on failure: the section renders without the module.
-  if (failed) return null;
+  function report(event: "load" | "failure" | "fallback", reason: string, estimatedCostUsd = 0) {
+    const key = `${event}:${reason}`;
+    if (!telemetryEnabled || reported.current.has(key)) return;
+    reported.current.add(key);
+    const payload = JSON.stringify({
+      siteId,
+      sessionId: getSessionId(),
+      visitorId: getVisitorId(),
+      eventType: "places_ui",
+      timestamp: new Date().toISOString(),
+      elementRole: "places_trust_module",
+      metadata: { event, reason, estimatedCostUsd }
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/analytics", new Blob([payload], { type: "application/json" }));
+    } else {
+      void fetch("/api/analytics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true
+      });
+    }
+  }
 
-  // Custom elements via createElement: React 19 passes unknown tags through as
-  // web components without JSX intrinsic-element typing.
   return (
-    <div ref={containerRef} className="site-places-trust-v3" data-place-id={placeId}>
-      {mounted
+    <div
+      ref={containerRef}
+      className="site-places-trust-v3"
+      data-place-id={placeId}
+      data-places-state={loaded ? "loaded" : fallbackReason ? "fallback" : "pending"}
+    >
+      {loaded
         ? createElement(
             "gmp-place-details-compact",
             { orientation: "horizontal" },
             createElement("gmp-place-details-place-request", { place: placeId }),
             createElement("gmp-place-all-content", null)
           )
-        : null}
+        : fallbackReason
+          ? (
+              <a href={`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(placeId)}`} rel="noopener noreferrer" target="_blank">
+                Read our reviews on Google Maps
+              </a>
+            )
+          : null}
     </div>
   );
 }

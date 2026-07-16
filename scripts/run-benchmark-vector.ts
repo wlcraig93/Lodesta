@@ -1,394 +1,218 @@
 /**
- * Benchmark vector cadence (next-level plan, measurement loop).
+ * Canonical 20-URL auto-body launch pilot.
  *
- * Regenerates the benchmark shop set through the live pipeline and reports
- * candidate readiness, blocker categories, visual QA source/score, and cost.
- * Run after every generation-system batch; the trajectory of this output is
- * the product's honest progress meter.
- *
- *   npm run benchmark:vector                  # default Austin auto set
- *   npm run benchmark:vector -- <url..>       # explicit targets
- *   npm run benchmark:vector:weekly           # mixed-vertical report from configured targets
- *   npm run benchmark:vector -- --mixed       # mixed-vertical target set
- *   npm run benchmark:vector -- --targets-file ./targets.txt --report .data/benchmarks/vector.ndjson
- *
- * Requires .env.local (OpenAI + Supabase + Places). Costs real LLM calls.
+ * This is a product gate, not another grader. It records the canonical
+ * pipeline's objective gate, final judge, retry, evidence, and claim-safety
+ * outputs and exits nonzero when an approved launch threshold is missed.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { generateSite } from "../lib/site-candidate-service";
-import { repository } from "../lib/repository";
 import { generationFailureDetail } from "../lib/generation-failure";
 import { generateSiteTimeoutMs, generationTimeoutSignal } from "../lib/generation-timeout";
-import type { GenerationCostEstimate, GenerationQaBlocker, GenerationQaReadiness, SiteArtifactRecord, VisualQaResult } from "../lib/models";
+import type { EvidenceLedger } from "../lib/evidence-ledger";
+import type { GenerationPipelineTrace } from "../lib/generation-pipeline";
+import type { GenerationQaBlocker } from "../lib/models";
+import { repository } from "../lib/repository";
+import { generateSite } from "../lib/site-candidate-service";
 
-const defaultTargets = [
-  "http://www.texastires30.com/",
-  "https://www.lambstire.com/locations/tx/austin/auto-repair-5405-n-lamar"
-];
+const defaultTargetsFile = "config/benchmark-targets/auto-body-pilot.txt";
+const defaultReportPath = ".data/benchmarks/canonical-auto-body-pilot.ndjson";
+const requiredTargetCount = 20;
 
 type ParsedArgs = {
-  mixed: boolean;
-  reportPath?: string;
-  targetArgs: string[];
-  targetsFile?: string;
+  reportPath: string;
+  targetsFile: string;
 };
 
-type BenchmarkTarget = {
+type PilotTargetResult = {
+  kind: "canonical_auto_body_pilot_target";
+  runId: string;
   url: string;
-  expectedVertical?: string;
-};
-
-type BenchmarkTargets = {
-  label: string;
-  targets: BenchmarkTarget[];
-  urls: string[];
-};
-
-type TargetCostSample = {
-  url: string;
-  status: string;
-  costEstimate?: GenerationCostEstimate;
+  candidateId?: string;
+  adminReviewUrl?: string;
+  businessName?: string;
+  vertical?: string;
+  generationStatus: "ready" | "operator_review" | "failed";
+  firstObjectivePass: boolean;
+  firstJudgeShip: boolean;
+  finalShip: boolean;
+  copySchemaRetries: number;
+  unsupportedPublicClaims: number;
+  trace?: GenerationPipelineTrace["counts"];
+  evidenceYield?: EvidenceLedger["yield"];
+  blockers: Array<Pick<GenerationQaBlocker, "id" | "title" | "detail" | "category">>;
+  failure?: ReturnType<typeof generationFailureDetail>;
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = { mixed: false, targetArgs: [] };
+  const parsed: ParsedArgs = {
+    targetsFile: process.env.LODESTA_BENCHMARK_TARGETS_FILE ?? defaultTargetsFile,
+    reportPath: process.env.LODESTA_BENCHMARK_REPORT_PATH ?? defaultReportPath
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--mixed") {
-      parsed.mixed = true;
-      continue;
-    }
-    if (arg === "--report") {
-      const reportPath = argv[index + 1];
-      if (!reportPath) throw new Error("--report requires an output path.");
-      parsed.reportPath = reportPath;
-      index += 1;
-      continue;
-    }
     if (arg === "--targets-file") {
-      const targetsFile = argv[index + 1];
-      if (!targetsFile) throw new Error("--targets-file requires a path.");
-      parsed.targetsFile = targetsFile;
-      index += 1;
-      continue;
+      parsed.targetsFile = requiredValue(argv, ++index, arg);
+    } else if (arg === "--report") {
+      parsed.reportPath = requiredValue(argv, ++index, arg);
+    } else {
+      throw new Error(`Unknown pilot argument: ${arg}`);
     }
-    if (arg.startsWith("http")) {
-      parsed.targetArgs.push(arg);
-      continue;
-    }
-    throw new Error(`Unknown benchmark argument: ${arg}`);
   }
   return parsed;
 }
 
-function parseUrlList(raw: string): string[] {
-  return (raw.match(/https?:\/\/[^\s"',)]+/g) ?? []).map((url) => url.replace(/[.;]+$/, ""));
+function requiredValue(argv: string[], index: number, flag: string) {
+  const value = argv[index];
+  if (!value) throw new Error(`${flag} requires a value.`);
+  return value;
 }
 
-function uniqueUrls(urls: string[]): string[] {
-  return [...new Set(urls)];
-}
-
-function benchmarkTargetsFromUrls(label: string, urls: string[]): BenchmarkTargets {
-  const unique = uniqueUrls(urls);
-  return { label, urls: unique, targets: unique.map((url) => ({ url })) };
-}
-
-function parseTargetFile(raw: string): BenchmarkTarget[] {
-  const targets: BenchmarkTarget[] = [];
-  let expectedVertical: string | undefined;
-  for (const line of raw.split(/\r?\n/)) {
-    const comment = line.match(/^\s*#\s*(.+?)\s*$/)?.[1];
-    if (comment) {
-      expectedVertical = expectedVerticalFromComment(comment) ?? expectedVertical;
-      continue;
-    }
-    for (const url of parseUrlList(line)) targets.push({ url, expectedVertical });
+function readTargets(path: string) {
+  const urls = readFileSync(path, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*$/, "").trim())
+    .filter((line) => line.startsWith("http"));
+  const unique = [...new Set(urls)];
+  if (unique.length !== requiredTargetCount) {
+    throw new Error(`Canonical auto-body pilot requires exactly ${requiredTargetCount} unique URLs; found ${unique.length} in ${path}.`);
   }
-  const seen = new Set<string>();
-  return targets.filter((target) => {
-    if (seen.has(target.url)) return false;
-    seen.add(target.url);
-    return true;
-  });
+  return unique;
 }
 
-function expectedVerticalFromComment(comment: string): string | undefined {
-  const normalized = comment.toLowerCase();
-  if (/\brestaurant|cafe|dining\b/.test(normalized)) return "restaurant";
-  if (/\bdental|dentist\b/.test(normalized)) return "dental";
-  if (/\bbarber|salon|hair|beauty\b/.test(normalized)) return "beauty_salon";
-  if (/\bauto[_\s-]?services|automotive|tire|mechanic\b/.test(normalized)) return "auto_services";
-  if (/\bauto[_\s-]?body|collision\b/.test(normalized)) return "auto_body";
-  if (/\bhome services\b/.test(normalized)) return "home_services";
-  return undefined;
-}
-
-function benchmarkTargets(parsed: ParsedArgs): BenchmarkTargets {
-  if (parsed.targetArgs.length) return benchmarkTargetsFromUrls("explicit_args", parsed.targetArgs);
-
-  const targetsFile = parsed.targetsFile ?? process.env.LODESTA_BENCHMARK_TARGETS_FILE;
-  if (targetsFile) {
-    const targets = parseTargetFile(readFileSync(targetsFile, "utf8"));
-    if (!targets.length) throw new Error(`Benchmark targets file has no http(s) URLs: ${targetsFile}`);
-    return { label: "targets_file", targets, urls: targets.map((target) => target.url) };
+async function runTarget(runId: string, url: string): Promise<PilotTargetResult> {
+  const timeout = generationTimeoutSignal(generateSiteTimeoutMs(), `canonical auto-body pilot target ${url}`);
+  console.error(JSON.stringify({ kind: "canonical_auto_body_pilot_progress", runId, event: "target_start", url }));
+  try {
+    const result = await generateSite({
+      repository,
+      input: { url },
+      source: "api",
+      actorType: "operator",
+      candidatePurpose: "test_generation",
+      metadata: { reason: "canonical 20-url auto-body launch pilot", pilotRunId: runId },
+      signal: timeout.signal
+    });
+    const assessment = result.bundle.presenceAssessment;
+    const trace = assessment.generationTrace;
+    const firstAttempt = trace?.attempts[0];
+    const finalAttempt = trace?.attempts.at(-1);
+    const version = result.bundle.siteModel.versions[0];
+    const blockers = normalizedBlockers(version?.generationQa?.blockers);
+    const unsupportedPublicClaims = blockers.filter((blocker) => blocker.id.startsWith("sensitive_claim_")).length;
+    const record: PilotTargetResult = {
+      kind: "canonical_auto_body_pilot_target",
+      runId,
+      url,
+      candidateId: result.siteCandidateId,
+      adminReviewUrl: `/admin/site-candidates/${result.siteCandidateId}`,
+      businessName: result.bundle.businessProfile.name,
+      vertical: result.bundle.businessProfile.vertical,
+      generationStatus: result.generation.status === "ready" ? "ready" : "operator_review",
+      firstObjectivePass: firstAttempt?.gateStatus === "pass",
+      firstJudgeShip: firstAttempt?.judgeVerdict === "ship",
+      finalShip: result.generation.status === "ready" && finalAttempt?.judgeVerdict === "ship",
+      copySchemaRetries: trace ? Math.max(0, trace.counts.copyModelAttempts - trace.counts.copies) : 0,
+      unsupportedPublicClaims,
+      trace: trace?.counts,
+      evidenceYield: assessment.evidenceLedger?.yield,
+      blockers
+    };
+    console.error(JSON.stringify({ kind: "canonical_auto_body_pilot_progress", runId, event: "target_done", url, generationStatus: record.generationStatus }));
+    return record;
+  } catch (error) {
+    const failure = generationFailureDetail(error, { stage: "compile", code: "unknown_generation_failure" });
+    console.error(JSON.stringify({ kind: "canonical_auto_body_pilot_progress", runId, event: "target_failed", url, failure }));
+    return {
+      kind: "canonical_auto_body_pilot_target",
+      runId,
+      url,
+      generationStatus: "failed",
+      firstObjectivePass: false,
+      firstJudgeShip: false,
+      finalShip: false,
+      copySchemaRetries: 0,
+      unsupportedPublicClaims: 0,
+      blockers: [],
+      failure
+    };
+  } finally {
+    timeout.clear();
   }
-
-  const envTargets = process.env.LODESTA_BENCHMARK_URLS ? uniqueUrls(parseUrlList(process.env.LODESTA_BENCHMARK_URLS)) : [];
-  if (envTargets.length) return benchmarkTargetsFromUrls("env_urls", envTargets);
-
-  if (parsed.mixed) {
-    throw new Error(
-      "Mixed-vertical benchmark runs require LODESTA_BENCHMARK_URLS or LODESTA_BENCHMARK_TARGETS_FILE with real US business URLs. Visual template benchmark references are not valid generation targets."
-    );
-  }
-  return benchmarkTargetsFromUrls("default_austin_auto", defaultTargets);
 }
 
-function minimumScoredTargets() {
-  const raw = process.env.LODESTA_BENCHMARK_MIN_SCORED_TARGETS;
-  if (!raw) return 1;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
+function normalizedBlockers(blockers: readonly GenerationQaBlocker[] | undefined) {
+  return (blockers ?? []).map((blocker) => ({
+    id: blocker.id,
+    title: blocker.title,
+    detail: blocker.detail,
+    category: blocker.category
+  }));
 }
 
-function minimumScoredTargetsPerMeasuredVertical(targets: BenchmarkTargets) {
-  const raw = process.env.LODESTA_BENCHMARK_MIN_SCORED_PER_VERTICAL;
-  if (raw) {
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
-  }
-  return targets.label === "targets_file" || targets.label === "env_urls" ? 2 : 1;
+function count(results: PilotTargetResult[], predicate: (result: PilotTargetResult) => boolean) {
+  return results.filter(predicate).length;
 }
 
-function appendReport(reportPath: string, records: unknown[]) {
-  mkdirSync(dirname(reportPath), { recursive: true });
-  writeFileSync(reportPath, records.map((record) => JSON.stringify(record)).join("\n") + "\n", { flag: "a" });
+function appendReport(path: string, records: unknown[]) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n", { flag: "a" });
 }
 
 async function main() {
   const parsed = parseArgs(process.argv.slice(2));
-  const targets = benchmarkTargets(parsed);
-  const minScoredTargets = minimumScoredTargets();
-  const minScoredPerMeasuredVertical = minimumScoredTargetsPerMeasuredVertical(targets);
+  const urls = readTargets(parsed.targetsFile);
   const runId = new Date().toISOString();
-  const targetTimeoutMs = generateSiteTimeoutMs();
-  const reportRecords: unknown[] = [
-    {
-      kind: "benchmark_vector_run",
-      runId,
-      targetSet: targets.label,
-      targetCount: targets.urls.length,
-      createdAt: runId
+  const results: PilotTargetResult[] = [];
+  for (const url of urls) results.push(await runTarget(runId, url));
+
+  const metrics = {
+    targetCount: results.length,
+    firstObjectivePasses: count(results, (result) => result.firstObjectivePass),
+    firstJudgeShips: count(results, (result) => result.firstJudgeShip),
+    finalShips: count(results, (result) => result.finalShip),
+    operatorReviews: count(results, (result) => result.generationStatus === "operator_review"),
+    failures: count(results, (result) => result.generationStatus === "failed"),
+    copySchemaRetries: results.reduce((sum, result) => sum + result.copySchemaRetries, 0),
+    unsupportedPublicClaims: results.reduce((sum, result) => sum + result.unsupportedPublicClaims, 0),
+    evidence: {
+      proposed: results.reduce((sum, result) => sum + (result.evidenceYield?.proposed ?? 0), 0),
+      accepted: results.reduce((sum, result) => sum + (result.evidenceYield?.accepted ?? 0), 0),
+      rejected: results.reduce((sum, result) => sum + (result.evidenceYield?.rejected ?? 0), 0),
+      sourceSparseUrls: count(results, (result) => result.evidenceYield?.sourceSparse === true)
     }
+  };
+  const failures = [
+    ...(metrics.firstObjectivePasses === 20 ? [] : [`First-compile objective pass: ${metrics.firstObjectivePasses}/20; required 20/20.`]),
+    ...(metrics.firstJudgeShips >= 14 ? [] : [`First-judge ship: ${metrics.firstJudgeShips}/20; required at least 14/20.`]),
+    ...(metrics.finalShips >= 18 ? [] : [`Final ship: ${metrics.finalShips}/20; required at least 18/20.`]),
+    ...(metrics.copySchemaRetries <= 1 ? [] : [`Whole-site copy schema retries: ${metrics.copySchemaRetries}; allowed at most 1.`]),
+    ...(metrics.unsupportedPublicClaims === 0 ? [] : [`Unsupported public claims: ${metrics.unsupportedPublicClaims}; required 0.`])
   ];
-  const checkedTargets: Array<{ url: string; readiness: GenerationQaReadiness; blockerCount: number; visualJudgment?: Pick<VisualQaResult, "verdict" | "craftScore"> }> = [];
-  const targetCosts: TargetCostSample[] = [];
-  const checkedByVertical = new Map<string, number>();
-  const targetByMeasuredVertical = targetCountsByMeasuredVertical(targets.targets);
-
-  for (const target of targets.targets) {
-    const url = target.url;
-    const targetDeadline = generationTimeoutSignal(targetTimeoutMs, `benchmark target ${url}`);
-    console.error(JSON.stringify({ kind: "benchmark_vector_progress", event: "target_start", runId, url, timeoutMs: targetTimeoutMs }));
-    try {
-      const result = await generateSite({
-        repository,
-        input: { url },
-        source: "api",
-        actorType: "operator",
-        metadata: { reason: "benchmark vector cadence" },
-        signal: targetDeadline.signal
-      });
-      const version = result.bundle.siteModel.versions[0];
-      const qa = version?.generationQa;
-      const measuredVertical = target.expectedVertical ?? result.bundle.businessProfile.vertical;
-      const blockers = await blockersForCandidate(result.siteCandidateId, qa?.blockers);
-      const readiness = qa?.readiness ?? (result.generation.status === "blocked" ? "blocked" : "unavailable");
-      if (readiness !== "unavailable") {
-        checkedTargets.push({
-          url,
-          readiness,
-          blockerCount: blockers.length,
-          visualJudgment: qa?.visualQa ? { verdict: qa.visualQa.verdict, craftScore: qa.visualQa.craftScore } : undefined
-        });
-        checkedByVertical.set(measuredVertical, (checkedByVertical.get(measuredVertical) ?? 0) + 1);
-      }
-      const costEstimate = result.bundle.presenceAssessment.generationCostEstimate;
-      targetCosts.push({ url, status: result.generation.status, costEstimate });
-      const record = {
-        kind: "benchmark_vector_target",
-        runId,
-        url,
-        candidateId: result.siteCandidateId,
-        adminReviewUrl: `/admin/site-candidates/${result.siteCandidateId}`,
-        vertical: result.bundle.businessProfile.vertical,
-        expectedVertical: target.expectedVertical,
-        status: result.generation.status,
-        stage: stageForTarget(result.generation.status, blockers),
-        readiness,
-        visualQa: qa?.visualQa
-          ? {
-              source: qa.visualQa.source,
-              verdict: qa.visualQa.verdict,
-              craftScore: qa.visualQa.craftScore,
-              findingCount: qa.visualQa.findings.length
-            }
-          : undefined,
-        blockers,
-        errorDetail: result.generation.status === "blocked"
-          ? {
-              stage: "precompile_gate",
-              code: "precompile_generation_block",
-              message: blockers.length ? "Generation blocked before scoring." : "Generation blocked."
-            }
-          : undefined,
-        costEstimate
-      };
-      reportRecords.push(record);
-      console.log(JSON.stringify(record));
-      console.error(JSON.stringify({ kind: "benchmark_vector_progress", event: "target_done", runId, url, status: result.generation.status }));
-    } catch (error) {
-      const detail = generationFailureDetail(error, {
-        stage: "compile",
-        code: "unknown_generation_failure"
-      });
-      const failedCandidate = detail.siteCandidateId ? await repository.getSiteCandidate(detail.siteCandidateId).catch(() => null) : null;
-      const blockers = detail.siteCandidateId ? await blockersForCandidate(detail.siteCandidateId, detail.blockers) : (detail.blockers ?? []);
-      if (blockers.length) {
-        checkedTargets.push({ url, readiness: "blocked", blockerCount: blockers.length });
-        const measuredVertical = failedCandidate?.vertical ?? target.expectedVertical;
-        if (measuredVertical) checkedByVertical.set(measuredVertical, (checkedByVertical.get(measuredVertical) ?? 0) + 1);
-      }
-      const costEstimate = failedCandidate?.bundle.presenceAssessment.generationCostEstimate;
-      if (costEstimate) targetCosts.push({ url, status: "failed", costEstimate });
-      const record = {
-        kind: "benchmark_vector_target",
-        runId,
-        url,
-        status: "failed",
-        stage: detail.stage,
-        candidateId: detail.siteCandidateId,
-        adminReviewUrl: detail.siteCandidateId ? `/admin/site-candidates/${detail.siteCandidateId}` : undefined,
-        vertical: failedCandidate?.vertical ?? target.expectedVertical,
-        expectedVertical: target.expectedVertical,
-        blockers,
-        errorDetail: detail,
-        validationIssues: detail.validationIssues,
-        readiness: blockers.length ? "blocked" : "unavailable",
-        costEstimate
-      };
-      reportRecords.push(record);
-      console.log(JSON.stringify(record));
-      console.error(JSON.stringify({ kind: "benchmark_vector_progress", event: "target_failed", runId, url, stage: detail.stage, code: detail.code }));
-    } finally {
-      targetDeadline.clear();
-    }
-  }
-  const scoredTargets = checkedTargets.length;
-  const failedTargets = targets.urls.length - scoredTargets;
-  const readinessCounts = checkedTargets.reduce<Record<string, number>>((counts, target) => {
-    counts[target.readiness] = (counts[target.readiness] ?? 0) + 1;
-    return counts;
-  }, {});
   const summary = {
-    kind: "benchmark_vector_summary",
+    kind: "canonical_auto_body_pilot_summary",
     runId,
-    targetSet: targets.label,
-    targetCount: targets.urls.length,
-    scoredTargets,
-    failedTargets,
-    minScoredTargets,
-    minScoredPerMeasuredVertical,
-    readinessCounts,
-    checkedByVertical: Object.fromEntries([...checkedByVertical.entries()].sort(([left], [right]) => left.localeCompare(right))),
-    targetByMeasuredVertical: Object.fromEntries([...targetByMeasuredVertical.entries()].sort(([left], [right]) => left.localeCompare(right))),
-    costTotals: costTotals(targetCosts)
+    targetsFile: parsed.targetsFile,
+    thresholds: {
+      firstObjectivePasses: 20,
+      firstJudgeShips: 14,
+      finalShips: 18,
+      maxCopySchemaRetries: 1,
+      unsupportedPublicClaims: 0
+    },
+    metrics,
+    status: failures.length ? "fail" : "pass",
+    failures
   };
-  reportRecords.push(summary);
+  appendReport(parsed.reportPath, [
+    { kind: "canonical_auto_body_pilot_run", runId, targetsFile: parsed.targetsFile, targetCount: urls.length },
+    ...results,
+    summary
+  ]);
+  for (const result of results) console.log(JSON.stringify(result));
   console.log(JSON.stringify(summary));
-  const measuredVerticals = targetByMeasuredVertical.size ? targetByMeasuredVertical : checkedByVertical;
-  const underScoredMeasuredVerticals = [...measuredVerticals.entries()]
-    .map(([vertical]) => ({ vertical, scored: checkedByVertical.get(vertical) ?? 0, minScoredPerMeasuredVertical }))
-    .filter((entry) => entry.scored < minScoredPerMeasuredVertical);
-  if (scoredTargets < minScoredTargets || underScoredMeasuredVerticals.length) {
-    const failure = {
-      kind: "benchmark_vector_failure",
-      runId,
-      targetSet: targets.label,
-      scoredTargets,
-      minScoredTargets,
-      underScoredMeasuredVerticals,
-      reason: scoredTargets < minScoredTargets
-        ? "Benchmark vector run produced fewer scored targets than required."
-        : "Benchmark vector run produced fewer than the required scored targets for a measured vertical."
-    };
-    reportRecords.push(failure);
-    console.error(JSON.stringify(failure));
-    if (parsed.reportPath) appendReport(parsed.reportPath, reportRecords);
-    process.exitCode = 1;
-    return;
-  }
-  if (parsed.reportPath) appendReport(parsed.reportPath, reportRecords);
-}
-
-async function blockersForCandidate(siteCandidateId: string, qaBlockers: readonly GenerationQaBlocker[] | undefined) {
-  const blockers = new Map<string, GenerationQaBlocker>();
-  for (const blocker of qaBlockers ?? []) blockers.set(blocker.id, blocker);
-  const artifacts = await repository.listSiteArtifacts({ siteCandidateId, scope: "qa_evidence" }).catch(() => []);
-  for (const artifact of artifacts) {
-    for (const blocker of blockersFromArtifact(artifact)) blockers.set(blocker.id, blocker);
-  }
-  return [...blockers.values()].map((blocker) => ({
-    id: blocker.id,
-    title: blocker.title,
-    detail: blocker.detail,
-    category: blocker.category,
-    severity: blocker.severity
-  }));
-}
-
-function blockersFromArtifact(artifact: SiteArtifactRecord): GenerationQaBlocker[] {
-  const raw = artifact.payload.blockers;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((entry): entry is GenerationQaBlocker => {
-    if (!entry || typeof entry !== "object") return false;
-    const record = entry as Record<string, unknown>;
-    return typeof record.id === "string" && typeof record.title === "string" && typeof record.detail === "string";
-  });
-}
-
-function stageForTarget(status: string, blockers: readonly unknown[]) {
-  if (status === "blocked" && blockers.length) return "precompile_gate";
-  if (status === "blocked") return "qa";
-  return "qa";
-}
-
-function targetCountsByMeasuredVertical(targets: readonly BenchmarkTarget[]) {
-  const counts = new Map<string, number>();
-  for (const target of targets) {
-    if (!target.expectedVertical) continue;
-    counts.set(target.expectedVertical, (counts.get(target.expectedVertical) ?? 0) + 1);
-  }
-  return counts;
-}
-
-function costTotals(samples: TargetCostSample[]) {
-  const estimates = samples.map((sample) => sample.costEstimate).filter((estimate): estimate is GenerationCostEstimate => Boolean(estimate));
-  return {
-    targetsWithCostEstimate: estimates.length,
-    estimatedUnits: estimates.reduce((sum, estimate) => sum + estimate.estimatedUnits, 0),
-    budgetUnits: estimates.reduce((sum, estimate) => sum + estimate.budgetUnits, 0),
-    byStatus: samples.reduce<Record<string, { targets: number; estimatedUnits: number }>>((accumulator, sample) => {
-      const current = accumulator[sample.status] ?? { targets: 0, estimatedUnits: 0 };
-      current.targets += 1;
-      current.estimatedUnits += sample.costEstimate?.estimatedUnits ?? 0;
-      accumulator[sample.status] = current;
-      return accumulator;
-    }, {})
-  };
+  if (failures.length) process.exitCode = 1;
 }
 
 main().catch((error) => {

@@ -9,9 +9,7 @@ const jobSchema = z.object({
   kind: z.enum([
     "presence_assessment",
     "prospect_presence_report",
-    "audit_site",
     "generate_site",
-    "monthly_action_list",
     "import_batch"
   ]),
   payload: z.record(z.unknown()).default({})

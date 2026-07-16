@@ -256,7 +256,7 @@ async function checkOpenAiConfig({ deep }: { deep: boolean }): Promise<HealthChe
       "OpenAI",
       [
         `OPENAI_API_KEY is configured with settings_source=${runtimeSettings.source}.`,
-        `Generation ${runtimeSettings.settings.generationModel}; visual QA ${runtimeSettings.settings.visualQaModel}; mockups ${runtimeSettings.settings.imageModel}.`,
+        `Generation ${runtimeSettings.settings.generationModel}; final judge ${runtimeSettings.settings.generationJudgeModel}; mockups ${runtimeSettings.settings.imageModel}.`,
         runtimeSettings.warning
       ]
         .filter(Boolean)

@@ -62,11 +62,6 @@ export function applySiteIdentity(bundle: SiteBundle, slug: string) {
     siteId
   }));
 
-  bundle.optimizationFindings = bundle.optimizationFindings.map((finding) => ({
-    ...finding,
-    siteId
-  }));
-
   bundle.experiments = bundle.experiments.map((experiment) => ({
     ...experiment,
     id: experiment.id.includes(previousSiteId)

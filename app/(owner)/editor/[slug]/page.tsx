@@ -1,17 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AiEditChat } from "@/components/AiEditChat";
-import { DesignControls } from "@/components/DesignControls";
 import { ResponsivePreview } from "@/components/ResponsivePreview";
 import { SectionEditorForm } from "@/components/SectionEditorForm";
 import { getEditingVersion } from "@/lib/sample-data";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { runSiteQa } from "@/lib/qa";
 import { claimGateForBundle } from "@/lib/site-publication";
 import { assertSiteVersionV3 } from "@/lib/site-version-v3";
-import { designSectionsForV3, editableV3Sections } from "@/lib/v3-editor";
-import type { BusinessProfile, DesignPlan } from "@/lib/models";
+import { editableV3Sections } from "@/lib/v3-editor";
+import { managedSiteStatus } from "@/lib/managed-site-status";
 
 export const dynamic = "force-dynamic";
 
@@ -32,16 +29,15 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
     repository.listDomains(siteId)
   ]);
   const claimGate = claimGateForBundle(bundle, claims);
-  const qa = runSiteQa(bundle, { versionStatus: "draft" });
+  const managedStatus = managedSiteStatus(bundle);
   const readiness = ownerReadinessItems({
     slug: bundle.siteModel.slug,
     claimReady: claimGate.ok,
     claimReason: claimGate.ok ? undefined : claimGate.reason,
-    qaPassed: qa.passed,
-    qaFailures: qa.checks.filter((check) => check.severity === "fail").length,
     formCount: bundle.extensionModel.forms.length,
     domainCount: domains.filter((domain) => domain.status === "active").length,
-    openFindings: bundle.optimizationFindings.filter((finding) => finding.status === "open").length
+    generation: managedStatus.generation,
+    generationDetail: managedStatus.blockers[0]
   });
 
   return (
@@ -62,8 +58,8 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
           <Link className="button secondary" href={`/business/${bundle.siteModel.slug}`}>
             Business
           </Link>
-          <Link className="button secondary" href={`/optimization/${bundle.siteModel.slug}`}>
-            Optimization
+          <Link className="button secondary" href={`/status/${bundle.siteModel.slug}`}>
+            Status
           </Link>
           <Link className="button secondary" href={`/experiments/${bundle.siteModel.slug}`}>
             Experiments
@@ -97,21 +93,14 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
           <span>Leads</span>
         </div>
         <div className="metric-card">
-          <strong>{bundle.optimizationFindings.length}</strong>
-          <span>Open findings</span>
+          <strong>{managedStatus.evidence.pendingConfirmation}</strong>
+          <span>Confirmations</span>
         </div>
       </section>
 
       <div className="admin-grid">
         <section className="panel">
           <ResponsivePreview siteSlug={bundle.siteModel.slug} />
-
-          <DesignControls
-            siteId={bundle.businessProfile.siteId}
-            pageId={home.id}
-            initialDesignPlan={version.designPlan ?? fallbackDesignPlan(bundle.businessProfile)}
-            sections={designSectionsForV3(version)}
-          />
 
           <h2>Editable sections</h2>
           <div className="finding-list">
@@ -131,13 +120,6 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
         </section>
 
         <aside className="panel">
-          <AiEditChat
-            siteId={siteId}
-            siteSlug={bundle.siteModel.slug}
-            publishDisabled={!claimGate.ok}
-            publishDisabledReason={claimGate.ok ? undefined : claimGate.reason}
-          />
-
           <h2>Owner readiness</h2>
           <div className="finding-list">
             {readiness.map((item) => (
@@ -156,16 +138,7 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
 
           <h2>Guardrails</h2>
           <p>System-only and pinned fields cannot be edited here. Owner-truth copy is saved to draft before publish.</p>
-          <h2>Action List</h2>
-          <div className="finding-list">
-            {bundle.optimizationFindings.map((finding) => (
-              <article key={finding.id} className="finding-card">
-                <span className="badge">{finding.severity}</span>
-                <h3>{finding.title}</h3>
-                <p>{finding.recommendedAction}</p>
-              </article>
-            ))}
-          </div>
+          <Link className="button secondary" href={`/status/${bundle.siteModel.slug}`}>Managed site status</Link>
         </aside>
       </div>
     </main>
@@ -176,11 +149,10 @@ function ownerReadinessItems(input: {
   slug: string;
   claimReady: boolean;
   claimReason?: string;
-  qaPassed: boolean;
-  qaFailures: number;
   formCount: number;
   domainCount: number;
-  openFindings: number;
+  generation: ReturnType<typeof managedSiteStatus>["generation"];
+  generationDetail?: string;
 }) {
   return [
     {
@@ -190,10 +162,10 @@ function ownerReadinessItems(input: {
       detail: input.claimReady ? "Owner facts and management acceptance are ready for publish." : input.claimReason ?? "Claim facts need confirmation."
     },
     {
-      label: "Draft QA",
-      status: input.qaPassed ? "pass" : `${input.qaFailures} fail`,
+      label: "Objective QA",
+      status: input.generation === "ready" ? "pass" : "review",
       href: `/versions/${input.slug}`,
-      detail: input.qaPassed ? "The current draft passes the Standard checks needed before publish." : "Resolve failing checks before confirming publish."
+      detail: input.generation === "ready" ? "The canonical browser gate is current for this draft." : input.generationDetail ?? "Managed QA is pending for this draft."
     },
     {
       label: "Lead Capture",
@@ -206,25 +178,6 @@ function ownerReadinessItems(input: {
       status: input.domainCount ? "active" : "pending",
       href: `/domains/${input.slug}`,
       detail: input.domainCount ? `${input.domainCount} active domain route${input.domainCount === 1 ? "" : "s"} configured.` : "Register or verify a custom domain when the owner is ready."
-    },
-    {
-      label: "Action List",
-      status: input.openFindings ? `${input.openFindings} open` : "clear",
-      href: `/optimization/${input.slug}`,
-      detail: input.openFindings ? "Review safe recommendations before publishing the next draft." : "No open recommendations are waiting."
     }
   ];
-}
-
-function fallbackDesignPlan(business: BusinessProfile): DesignPlan {
-  return {
-    stylePack: business.vertical === "home_services" || business.vertical === "auto_services" ? "urgent_service" : "local_modern",
-    typographyPack: "clean_sans",
-    colorSystem: "warm",
-    spacingDensity: "standard",
-    buttonStyle: "solid",
-    radiusStyle: "soft",
-    imageTreatment: "natural",
-    motionPolicy: "subtle"
-  };
 }

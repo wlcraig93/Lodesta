@@ -55,7 +55,7 @@ export function VersionPublishForm({ siteId, versionId, current, disabled = fals
       setStatus(result.error ?? "Unable to restore version.");
       return;
     }
-    setStatus(result.qa?.passed ? "Restored draft passed QA." : "Restored draft needs QA review.");
+    setStatus("Restored draft needs objective QA before publishing.");
     router.refresh();
   }
 

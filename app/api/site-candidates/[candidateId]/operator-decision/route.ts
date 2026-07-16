@@ -38,8 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
   const artifact = await repository.upsertSiteArtifact(
     operatorDecisionArtifactV1({
       candidateId,
-      payload,
-      sourceFactIds: candidate.bundle.presenceAssessment.businessFactGraph?.facts.map((fact) => fact.id) ?? []
+      payload
     })
   );
 

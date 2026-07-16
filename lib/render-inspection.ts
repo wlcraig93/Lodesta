@@ -1,5 +1,5 @@
-import { mkdir, readFile, stat } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { mkdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   RenderInspectionFinding,
   RenderInspectionResult,
@@ -428,11 +428,6 @@ async function publicAssetForRequest(requestUrl: string, expectedOrigin: string 
   }
   if (expectedOrigin && parsed.origin !== expectedOrigin) return undefined;
   const pathname = decodeURIComponent(parsed.pathname);
-  // Asset-library media is app-served; resolve it through the same storage
-  // path the public route uses so QA renders can load approved imagery.
-  if (pathname.startsWith("/api/asset-library/public/")) {
-    return assetLibraryBytesForRequest(pathname);
-  }
   // Locally stored site assets (incl. private scraped media): QA renders are a
   // trusted local context, so serve bytes directly from storage.
   const siteAssetMatch = pathname.match(/^\/api\/assets\/([^/]+)\/([^/]+)$/);
@@ -446,37 +441,7 @@ async function publicAssetForRequest(requestUrl: string, expectedOrigin: string 
       return undefined;
     }
   }
-  if (!pathname.startsWith("/generated-site-assets/")) return undefined;
-  const normalizedPath = normalize(pathname).replace(/^(\.\.[/\\])+/, "");
-  const publicRoot = join(process.cwd(), "public");
-  const filePath = join(publicRoot, normalizedPath);
-  if (!filePath.startsWith(publicRoot)) return undefined;
-  try {
-    const body = await readFile(filePath);
-    return { body, contentType: contentTypeForAsset(filePath) };
-  } catch {
-    return undefined;
-  }
-}
-
-async function assetLibraryBytesForRequest(pathname: string): Promise<{ body: Buffer; contentType: string } | undefined> {
-  const segments = pathname.split("/").filter(Boolean);
-  const assetId = decodeURIComponent(segments[3] ?? "");
-  const variant = segments[4] ?? "";
-  if (!assetId || !variant) return undefined;
-  try {
-    const { ASSET_LIBRARY_BUCKET_NAME, assessAssetLibraryPolicy, getAssetLibraryAsset } = await import("./asset-library");
-    const { getSupabaseAdminClient } = await import("./supabase/client");
-    const asset = await getAssetLibraryAsset(assetId);
-    if (!asset || asset.status !== "approved" || !assessAssetLibraryPolicy(asset).siteSelectable) return undefined;
-    const storagePath = (asset.approvedStoragePaths as Record<string, string | undefined>)[variant];
-    if (!storagePath || storagePath.startsWith("raw/")) return undefined;
-    const { data } = await getSupabaseAdminClient().storage.from(ASSET_LIBRARY_BUCKET_NAME).download(storagePath);
-    if (!data) return undefined;
-    return { body: Buffer.from(await data.arrayBuffer()), contentType: "image/webp" };
-  } catch {
-    return undefined;
-  }
+  return undefined;
 }
 
 function safeOrigin(url: string) {
@@ -484,24 +449,6 @@ function safeOrigin(url: string) {
     return new URL(url).origin;
   } catch {
     return undefined;
-  }
-}
-
-function contentTypeForAsset(path: string) {
-  switch (extname(path).toLowerCase()) {
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    case ".svg":
-      return "image/svg+xml";
-    case ".gif":
-      return "image/gif";
-    default:
-      return "application/octet-stream";
   }
 }
 
@@ -811,33 +758,11 @@ function collectBrowserMetricsScript() {
           return foreground && relativeLuminance(foreground) > 0.5 ? { r: 22, g: 20, b: 18, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
         }
       }
-      const listArticle = element.closest(".site-visual-list-v3 article");
-      const listParent = listArticle?.parentElement;
-      const owningVisualSection = listArticle?.closest(".site-visual-section-v3");
-      const firstListArticle = Boolean(listArticle && listParent?.firstElementChild === listArticle);
-      if (
-        firstListArticle &&
-        (listParent?.getAttribute("data-presentation") === "feature_list" ||
-          owningVisualSection?.getAttribute("data-card-tone") === "featured_first" ||
-          owningVisualSection?.getAttribute("data-grid-pattern") === "lead_card")
-      ) {
-        const foreground = parseRgb(getComputedStyle(element).color);
-        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 34, g: 26, b: 22, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
-      }
       const proofCard = element.closest(".site-visual-facts-v3[data-presentation='proof_cards'] div");
       if (proofCard?.parentElement) {
         const siblingIndex = Array.from(proofCard.parentElement.children).indexOf(proofCard) + 1;
         if (siblingIndex > 0 && siblingIndex % 4 === 0) return { r: 22, g: 20, b: 18, a: 1 };
         return { r: 252, g: 249, b: 243, a: 1 };
-      }
-      const featureListLeadCard = element.closest(".site-visual-list-v3[data-presentation='feature_list'] article:first-child");
-      const emphasizedIntroCard = element.closest(
-        ".site-visual-section-v3[data-section-template='intro_grid'][data-card-tone='featured_first'] .site-visual-list-v3 article:first-child, " +
-          ".site-visual-section-v3[data-section-template='intro_grid'][data-grid-pattern='lead_card'] .site-visual-list-v3 article:first-child"
-      );
-      if (featureListLeadCard || emphasizedIntroCard) {
-        const foreground = parseRgb(getComputedStyle(element).color);
-        return foreground && relativeLuminance(foreground) > 0.5 ? { r: 34, g: 26, b: 22, a: 1 } : { r: 252, g: 249, b: 243, a: 1 };
       }
       if (element.closest(".site-portfolio-index-v3 article")) return { r: 8, g: 8, b: 8, a: 1 };
       if (element.closest(".site-visual-list-v3[data-presentation='portfolio_index'] article")) return { r: 12, g: 12, b: 12, a: 1 };
@@ -1724,9 +1649,6 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
   const primaryCtaRect = metrics.rects?.primaryHeroCta;
   const stickyRect = metrics.rects?.stickyCta;
   const mediaRect = metrics.rects?.primaryMedia;
-  const h1LineCount = metrics.heroH1LineCount;
-  const viewportName = viewport ?? metrics.viewport?.name;
-  const maxH1Lines = viewportName === "mobile" ? 6 : viewportName === "tablet" ? 5 : 4;
 
   findings.push({
     id: `render.body_text${suffix}`,
@@ -1766,15 +1688,6 @@ function findingsForMetrics(metrics: BrowserMetrics, viewport?: RenderViewportNa
       severity: h1Rect.height <= viewportHeight * 0.45 && h1Rect.width <= heroRect.width ? "pass" : "fail",
       title: `Hero headline fits the first viewport${titleSuffix}`,
       evidence: `H1 rect ${Math.round(h1Rect.width)}x${Math.round(h1Rect.height)} in ${Math.round(heroRect.width)}px hero width.`,
-      viewport
-    });
-  }
-  if (typeof h1LineCount === "number") {
-    findings.push({
-      id: `render.hero_h1_lines${suffix}`,
-      severity: h1LineCount <= maxH1Lines ? "pass" : "fail",
-      title: `Hero headline line count is controlled${titleSuffix}`,
-      evidence: `${h1LineCount} rendered H1 line boxes detected; maximum for this viewport is ${maxH1Lines}.`,
       viewport
     });
   }

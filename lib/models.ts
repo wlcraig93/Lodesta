@@ -1,4 +1,3 @@
-import type { BackgroundFocalPointV3 } from "./generated-site-v3-visual-controls";
 import type { ClaimVerificationLevel } from "./owner-access";
 
 export type Vertical =
@@ -16,14 +15,6 @@ export type Vertical =
   | "veterinary"
   | "creative_studio"
   | "general_local";
-
-export type ConversionGoal =
-  | "calls"
-  | "forms"
-  | "booking_clicks"
-  | "order_clicks"
-  | "directions"
-  | "store_visits";
 
 export type FieldProvenanceSource =
   | "website"
@@ -291,12 +282,6 @@ export type BusinessProfile = {
   provenance: Record<string, FieldProvenance>;
 };
 
-export type FieldPolicy = {
-  editScope: "system_only" | "owner_choice" | "owner_freetext" | "pinned";
-  experimentEligible: boolean;
-  factField: boolean;
-};
-
 export type SeoMetadata = {
   title: string;
   description: string;
@@ -326,317 +311,11 @@ export type Theme = {
   mood: "warm" | "premium" | "clinical" | "bold" | "utilitarian" | "editorial";
 };
 
-export type RendererVersion = "layout-v1" | "layout-v2" | "layout-v3";
+export type RendererVersion = "layout-v3";
 
-export type DesignSchemaVersion = "design-v1" | "design-v2" | "design-v3";
+export type DesignSchemaVersion = "design-v3";
 
-export type SiteStylePack = "local_modern" | "premium_editorial" | "urgent_service" | "warm_neighborhood" | "clinical_trust";
-
-export type TypographyPack =
-  | "clean_sans"
-  | "editorial_serif"
-  | "rounded_friendly"
-  | "utility_sans"
-  | "premium_sans";
-
-export type ButtonStyle = "solid" | "outline_heavy" | "pill" | "understated";
-
-export type RadiusStyle = "sharp" | "soft" | "rounded";
-
-export type ImageTreatment = "natural" | "full_bleed" | "framed" | "soft_crop" | "collage";
-
-export type MotionPolicy = "none" | "subtle";
-
-export type DesignPlan = {
-  stylePack: SiteStylePack;
-  typographyPack: TypographyPack;
-  colorSystem: "warm" | "premium" | "bold" | "clinical";
-  spacingDensity: "compact" | "standard" | "spacious";
-  buttonStyle: ButtonStyle;
-  radiusStyle: RadiusStyle;
-  imageTreatment: ImageTreatment;
-  motionPolicy: MotionPolicy;
-  hostedFontAssetId?: string;
-};
-
-export type SectionType =
-  | "hero"
-  | "trust_bar"
-  | "services"
-  | "gallery"
-  | "testimonials"
-  | "faq"
-  | "cta"
-  | "contact"
-  | "map"
-  | "menu_deals"
-  | "team"
-  | "press_video"
-  | "before_after";
-
-export type LayoutSectionKind =
-  | "hero"
-  | "trust"
-  | "services"
-  | "gallery"
-  | "proof"
-  | "faq"
-  | "cta"
-  | "contact"
-  | "map"
-  | "menu"
-  | "team"
-  | "press"
-  | "before_after"
-  | "footer";
-
-export type LayoutSectionPreset =
-  | "hero.full_bleed_media"
-  | "hero.split_media"
-  | "hero.centered_editorial"
-  | "hero.collage"
-  | "hero.service_first"
-  | "hero.proof_first"
-  | "services.card_grid"
-  | "services.compact_list"
-  | "services.media_feature"
-  | "gallery.masonry"
-  | "gallery.proof_grid"
-  | "proof.review_band"
-  | "proof.before_after_grid"
-  | "contact.form_split"
-  | "contact.contact_card"
-  | "cta.overlay_media"
-  | "cta.simple_band"
-  | "faq.conversion_list"
-  | "map.service_area"
-  | "team.profile_grid"
-  | "press.link_strip"
-  | "footer.standard";
-
-export type LayoutComponentType =
-  | "header"
-  | "hero_copy"
-  | "text"
-  | "image"
-  | "image_collage"
-  | "services"
-  | "gallery"
-  | "proof"
-  | "cta"
-  | "form"
-  | "contact_facts"
-  | "map_area"
-  | "faq"
-  | "team"
-  | "before_after"
-  | "footer";
-
-export type LayoutComponentInstance = {
-  id: string;
-  type: LayoutComponentType;
-  props: Record<string, unknown>;
-  bindings?: Record<string, string>;
-  fieldPolicies?: Record<string, FieldPolicy>;
-};
-
-export type LayoutSection = {
-  id: string;
-  kind: LayoutSectionKind;
-  preset: LayoutSectionPreset;
-  slots: Record<string, LayoutComponentInstance[]>;
-  background: "default" | "surface" | "primary" | "accent" | "image" | "split";
-  width: "contained" | "wide" | "full_bleed";
-  spacing: "compact" | "standard" | "spacious";
-  mobileBehavior: "stack" | "media_first" | "content_first" | "hide_media";
-  visibility: "all" | "desktop_only" | "mobile_only";
-  designOverrides?: Partial<Pick<DesignPlan, "buttonStyle" | "imageTreatment" | "radiusStyle" | "spacingDensity">>;
-};
-
-export type SectionModel = {
-  id: string;
-  type: SectionType;
-  variant: string;
-  props: Record<string, unknown>;
-  bindings: Record<string, string>;
-  responsiveOverrides?: SectionResponsiveOverrides;
-  fieldPolicies: Record<string, FieldPolicy>;
-};
-
-export type SectionResponsiveOverrides = {
-  heroScale?: "standard" | "compact";
-  compactAboveFold?: boolean;
-  heroMediaMaxHeight?: {
-    desktop?: number;
-    mobile?: number;
-  };
-} & Record<string, unknown>;
-
-export type PageModel = {
-  id: string;
-  slug: string;
-  title: string;
-  seo: SeoMetadata;
-  /**
-   * Deprecated legacy projection. Active generated-site rendering uses
-   * SiteVersionV3.pageComposition.
-   */
-  sections: SectionModel[];
-};
-
-export type SiteDesignSystemV2 = {
-  version: "site-design-system-v2";
-  recipeId: string;
-  typography: {
-    headingFamily: string;
-    bodyFamily: string;
-    headingWeight: number;
-    bodyWeight: number;
-    scale: "compact" | "standard" | "editorial";
-  };
-  color: {
-    background: string;
-    surface: string;
-    text: string;
-    muted: string;
-    primary: string;
-    primaryText: string;
-    accent: string;
-    border: string;
-  };
-  buttons: {
-    radius: "sharp" | "soft" | "pill";
-    height: "compact" | "standard" | "large";
-    weight: "medium" | "bold";
-    variants: Array<"primary" | "secondary" | "subtle" | "high_emphasis">;
-  };
-  header: {
-    mode: "transparent_overlay" | "adaptive_overlay" | "solid_sticky" | "shrinking_sticky";
-    mobileBehavior: "drawer" | "compact_links";
-  };
-  cards: {
-    radius: "sharp" | "soft" | "rounded";
-    border: "none" | "subtle" | "strong";
-    shadow: "none" | "subtle";
-  };
-  media: {
-    treatment: "natural" | "full_bleed" | "framed" | "editorial_crop";
-    cropRule: "center" | "subject" | "wide";
-  };
-  rhythm: {
-    sectionSpacing: "compact" | "standard" | "spacious";
-    contentWidth: "contained" | "wide";
-  };
-  motion: "none" | "subtle";
-};
-
-export type SectionFamilyV2 =
-  | "hero.estimate_intake"
-  | "hero.order_path"
-  | "hero.service_request"
-  | "hero.local_action"
-  | "services.matrix"
-  | "menu.highlights"
-  | "media.service_gallery"
-  | "proof.trust_band"
-  | "process.repair_steps"
-  | "process.order_steps"
-  | "process.service_steps"
-  | "guidance.insurance_estimate"
-  | "faq.repair_questions"
-  | "faq.local_questions"
-  | "coverage.service_area"
-  | "contact.location_hours"
-  | "cta.final_band"
-  | "footer.standard";
-
-export type ClaimCategoryV2 =
-  | "business_identity"
-  | "service"
-  | "location"
-  | "contact"
-  | "hours"
-  | "reviews"
-  | "credentials"
-  | "insurance"
-  | "pricing"
-  | "warranty"
-  | "emergency"
-  | "regulated";
-
-export type ClaimSpanV2 = {
-  id: string;
-  sourceFactIds: string[];
-  category: ClaimCategoryV2;
-  normalizedClaimValue: string;
-  textHash: string;
-  renderPolicy: SourceAwareFactPolicy;
-  sourcePolicy: SourceAwareFactPolicy;
-};
-
-export type CopyArtifactV2 = {
-  id: string;
-  artifactVersion: "copy-artifact-v2";
-  producerId: string;
-  producerVersion: string;
-  verticalPlaybookVersion: string;
-  sectionContractVersion: string;
-  slotId: string;
-  text: string;
-  claimSpans: ClaimSpanV2[];
-  scorecard?: Record<string, unknown>;
-  status: "selected" | "rejected" | "candidate";
-};
-
-export type CompiledSectionV2 = {
-  id: string;
-  family: SectionFamilyV2;
-  variant: string;
-  props: Record<string, unknown>;
-  sourceFactIds: string[];
-  copyArtifactIds: string[];
-  assetArtifactIds: string[];
-  claimSpanIds: string[];
-};
-
-export type CompiledPageV2 = {
-  id: string;
-  slug: string;
-  title: string;
-  seo: SeoMetadata;
-  sections: CompiledSectionV2[];
-};
-
-export type BlueprintSectionV2 = {
-  id: string;
-  family: SectionFamilyV2;
-  variant: string;
-  requiredFactKinds: BusinessFactKind[];
-  optionalFactKinds: BusinessFactKind[];
-  conversionRole: "primary" | "supporting" | "proof" | "contact" | "navigation";
-};
-
-export type BlueprintPageV2 = {
-  id: string;
-  slug: string;
-  title: string;
-  sections: BlueprintSectionV2[];
-};
-
-export type BlueprintV2 = {
-  id: string;
-  version: "blueprint-v2";
-  vertical: Vertical;
-  verticalPlaybookVersion: string;
-  primaryGoal: ConversionGoal;
-  pages: BlueprintPageV2[];
-  headerMode: SiteDesignSystemV2["header"]["mode"];
-  requiredFactIds: string[];
-  optionalFactIds: string[];
-  assetNeeds: string[];
-};
-
-export type SiteVersionArtifactRefV2 = {
+export type SiteVersionArtifactRef = {
   artifactId: string;
   artifactType: SiteArtifactType;
   artifactVersion: string;
@@ -647,38 +326,15 @@ export type SiteVersionArtifactRefV2 = {
 };
 
 export type SiteArtDirectionFontPairingIdV3 =
-  | "editorial_serif_clean_sans"
   | "display_sans_humanist"
-  | "condensed_service_sans"
-  | "warm_editorial_sans"
-  | "precision_grotesk"
-  | "friendly_rounded"
-  | "magazine_grotesk"
-  | "quiet_serif";
+  | "precision_grotesk";
 
 export type SiteHeaderModeV3 =
-  | "transparent_overlay"
   | "solid_editorial"
-  | "compact_sticky"
-  | "split_brand_rail"
-  | "utility_call_bar"
-  | "minimal_wordmark";
-
-export type SiteArtDirectionRecipeV3 = {
-  id: string;
-  version: "site-art-direction-recipe-v1";
-  fontPairingId: SiteArtDirectionFontPairingIdV3;
-  colorSystem: "light_editorial" | "media_neutral" | "warm_neighborhood" | "high_contrast_neutral" | "quiet_boutique" | "auto_body_premium_no_media";
-  spacingRhythm: "compact" | "standard" | "spacious" | "cinematic";
-  headerModes: SiteHeaderModeV3[];
-  mediaTreatment: "natural_crop" | "subject_crop" | "editorial_crop" | "full_bleed_story" | "text_first_fallback" | "media_independent";
-  buttonSystem: "solid_with_quiet_secondary" | "high_contrast_primary" | "rounded_primary" | "understated";
-  cardTreatment: "borderless" | "minimal_surface" | "soft_surface" | "hairline_surface";
-  density: "open" | "balanced" | "dense";
-};
+  | "compact_sticky";
 
 export type SiteArtDirectionNavPlanV3 = {
-  source: "site_director";
+  source: "generation_plan";
   items: Array<{
     label: string;
     kind: "anchor" | "page" | "dropdown";
@@ -690,52 +346,16 @@ export type SiteArtDirectionNavPlanV3 = {
 
 export type SiteArtDirectionV3 = {
   version: "site-art-direction-v3";
-  recipeId: string;
-  /** Coherent visual direction assigned before section hydration; used for fleet differentiation diagnostics. */
-  designArchetypeId?: string;
-  /** Human-readable reason for the archetype assignment. */
-  archetypeAssignmentReason?: string;
-  /** Geometry pressure supplied to the SiteDirector/compiler for this generation. */
-  geometryDiversityDirective?: string;
+  recipeId: "precision_shop_editorial" | "trusted_local_service";
   fontPairingId: SiteArtDirectionFontPairingIdV3;
-  colorSystem: SiteArtDirectionRecipeV3["colorSystem"];
-  spacingRhythm: SiteArtDirectionRecipeV3["spacingRhythm"];
+  colorSystem: "light_editorial" | "warm_neighborhood";
+  spacingRhythm: "standard" | "spacious";
   headerMode: SiteHeaderModeV3;
-  mediaTreatment: SiteArtDirectionRecipeV3["mediaTreatment"];
-  buttonSystem: SiteArtDirectionRecipeV3["buttonSystem"];
-  cardTreatment: SiteArtDirectionRecipeV3["cardTreatment"];
-  density: SiteArtDirectionRecipeV3["density"];
-  /** Named heading-weight scale; unset keeps the per-pairing CSS defaults. */
-  weightScale?: import("./generated-site-v3-art-direction-catalog").ArtDirectionWeightScaleV3;
-  /** Per-section-role presentation choices; unset roles keep compiler defaults. */
-  sectionPresentation?: import("./generated-site-v3-art-direction-catalog").SectionPresentationMapV3;
-  /** Bounded header/nav plan emitted by the AI site director. */
+  mediaTreatment: "editorial_crop" | "media_independent";
+  buttonSystem: "solid_with_quiet_secondary" | "understated";
+  cardTreatment: "minimal_surface" | "hairline_surface";
+  density: "balanced";
   navPlan?: SiteArtDirectionNavPlanV3;
-  /**
-   * Design profile (learning signal) + resolved dressing controls (rendering
-   * authority). Renders ALWAYS read `controls`; the profile feeds analysis
-   * only — the reproducibility rule from the next-level plan.
-   */
-  designProfile?: import("./generated-site-v3-art-direction-catalog").DesignProfileV3;
-  controls?: import("./generated-site-v3-art-direction-catalog").DesignControlsV3;
-};
-
-export type ArtDirectionDecisionV3 = {
-  id: string;
-  version: "art-direction-decision-v3";
-  selectedRecipeId: string;
-  rejectedRecipeIds: string[];
-  inputSignals: string[];
-  rationale: string;
-  validation: {
-    status: "passed" | "failed";
-    issues: string[];
-  };
-  tokenVersions: {
-    fontPool: string;
-    recipeCatalog: string;
-    componentControls: string;
-  };
 };
 
 export type SlotKindV3 = "text" | "image" | "button" | "list" | "proof" | "contact_fact" | "map_link" | "form" | "nav";
@@ -745,7 +365,7 @@ export type SlotV3 = {
   kind: SlotKindV3;
   required: boolean;
   sourceFactIds: string[];
-  artifactRefs: SiteVersionArtifactRefV2[];
+  artifactRefs: SiteVersionArtifactRef[];
 };
 
 export type ResponsiveRuleV3 = {
@@ -818,32 +438,6 @@ export type MediaAssetDecisionV3 = {
   artifactRef?: string;
   policyNotes: string[];
   mayImplyRealBusinessWork: boolean;
-  selectionSnapshot?: MediaSelectionSnapshotV1;
-};
-
-export type MediaSelectionSnapshotV1 = {
-  version: "media-selection-snapshot-v1";
-  id: string;
-  url?: string;
-  artifactRef?: string;
-  rightsStatus: MediaAssetDecisionV3["rightsStatus"];
-  source: MediaAssetDecisionV3["source"];
-  policyNotes: string[];
-  mayImplyRealBusinessWork: boolean;
-};
-
-export type VisualQaReportV3 = {
-  id: string;
-  version: "visual-qa-report-v3";
-  readiness: GenerationQaReadiness;
-  screenshotArtifactIds: string[];
-  deterministicFindings: GenerationQaBlocker[];
-  rubricScores: Record<string, number>;
-  reviewer?: {
-    id: string;
-    reviewedAt: string;
-    notes: string;
-  };
 };
 
 export type SiteVersionBase = {
@@ -859,85 +453,16 @@ export type SiteVersionBase = {
   generationQa?: GenerationQaMetadata;
 };
 
-export type LegacySiteVersionBase = SiteVersionBase & {
-  pages: PageModel[];
-  designPlan: DesignPlan;
-};
-
-export type SiteVersionV1 = LegacySiteVersionBase & {
-  rendererVersion: "layout-v1";
-  designSchemaVersion: "design-v1";
-};
-
-export type SiteVersionV2 = LegacySiteVersionBase & {
-  rendererVersion: "layout-v2";
-  designSchemaVersion: "design-v2";
-  blueprint: BlueprintV2;
-  siteDesignSystem: SiteDesignSystemV2;
-  compiledPages: CompiledPageV2[];
-  artifactRefs: SiteVersionArtifactRefV2[];
-};
-
 export type SiteVersionV3 = SiteVersionBase & {
   rendererVersion: "layout-v3";
   designSchemaVersion: "design-v3";
-  designPlan?: DesignPlan;
   artDirection: SiteArtDirectionV3;
-  artDirectionDecision?: ArtDirectionDecisionV3;
   pageComposition: PageCompositionV3;
   mediaDecisions: MediaAssetDecisionV3[];
-  designArchetypeId?: string;
-  archetypeAssignmentReason?: string;
-  geometryDiversityDirective?: string;
-  compilerDecisions?: GeneratedSiteCompilerDecisionV3[];
-  sectionOptionSequence?: string[];
-  mediaReuseDecisions?: GeneratedSiteMediaReuseDecisionV3[];
-  rightsDeclinedBackupGallerySnapshot?: SiteMediaItemSnapshotV3[];
-  visualQa?: VisualQaReportV3;
-  artifactRefs: SiteVersionArtifactRefV2[];
+  artifactRefs: SiteVersionArtifactRef[];
 };
 
-export type SiteVersion = SiteVersionV1 | SiteVersionV2 | SiteVersionV3;
-
-export type SiteMediaItemSnapshotV3 = {
-  url: string;
-  label: string;
-  publicCaption?: string;
-  focalPoint?: BackgroundFocalPointV3;
-  cropIntent?: "center" | "subject" | "wide" | "portrait";
-};
-
-export type GeneratedSiteCompilerDecisionV3 = {
-  id: string;
-  kind:
-    | "template_option_clamp"
-    | "archetype_assignment"
-    | "default_heavy_variant_selection"
-    | "composition_section_drop"
-    | "quality_profile_assignment"
-    | "media_suitability_reject"
-    | "proof_section_fallback"
-    | "service_semantic_dedupe"
-    | "profile_archetype_constraint"
-    | "repair_target_geometry"
-    | "repair_target_media_suitability";
-  severity: "info" | "warning";
-  sectionId?: string;
-  templateId?: string;
-  optionName?: string;
-  requestedValue?: string;
-  resolvedValue?: string;
-  reason: string;
-};
-
-export type GeneratedSiteMediaReuseDecisionV3 = {
-  id: string;
-  sectionId: string;
-  slotId: string;
-  originalUrl: string;
-  replacementUrl?: string;
-  reason: "duplicate_replaced" | "duplicate_allowed_no_alternative";
-};
+export type SiteVersion = SiteVersionV3;
 
 export type SiteModel = {
   id: string;
@@ -987,33 +512,8 @@ export type GenerationQaPrimaryScreenshot = {
   capturedAt: string;
 };
 
-export type LegacyGenerationQaV1 = {
-  version: "legacy-generation-qa-v1";
-  scorecard?: Record<string, unknown>;
-  repairTargets?: Record<string, unknown>[];
-  repairLog?: Record<string, unknown>;
-  qualityReport?: Record<string, unknown>;
-  craftLoop?: Record<string, unknown>;
-};
-
-export type GenerationQaRegenerationMetadataV1 = {
-  version: "generation-regeneration-v1";
-  role: "initial_failed" | "retry";
-  attempt: 0 | 1;
-  triggerVersionId?: string;
-  triggerVerdict?: "needs_regen" | "operator_review";
-  triggerFindings?: string[];
-  mode?: "copy_only" | "planner_and_copy";
-  createdAt: string;
-};
-
 export type GenerationQaMetadata = {
-  /**
-   * New writes use generation-qa-v4. Missing/older values identify stale
-   * pre-simplification rows that admin surfaces should soft-render with a
-   * regenerate notice instead of treating as current QA.
-   */
-  schemaVersion?: "generation-qa-v4";
+  schemaVersion: "canonical-generation-qa-v1";
   readiness: GenerationQaReadiness;
   siteModelHash?: string;
   qaRunId?: string;
@@ -1024,10 +524,6 @@ export type GenerationQaMetadata = {
   artifactRefs?: RenderInspectionArtifactRef[];
   /** Durable copy of the lead QA screenshot, stored in asset storage so admin surfaces can render thumbnails without re-rendering the site. */
   primaryScreenshot?: GenerationQaPrimaryScreenshot;
-  visualQa?: VisualQaResult;
-  generationCostEstimate?: GenerationCostEstimate;
-  regeneration?: GenerationQaRegenerationMetadataV1;
-  legacy?: LegacyGenerationQaV1;
 };
 
 /**
@@ -1087,86 +583,10 @@ export type BusinessUnderstandingV2 = {
   /** What makes this business memorable: founders, family, history, mascots. */
   businessStory?: { summary: string; distinctives: string[] };
   brandExpression?: BusinessBrandExpressionV1;
+  /** Exact source-block proposals; deterministic verification decides what is renderable. */
+  evidenceProposals: import("./evidence-ledger").EvidenceProposal[];
   factConfidence: BusinessUnderstandingFactConfidenceV2[];
   notes: string[];
-};
-
-export type GeneratedServicePageCopyV2 = {
-  serviceName: string;
-  hero: { heading: string; body: string };
-  detail: { heading: string; body: string };
-  faqs: Array<{ question: string; answer: string }>;
-  seo: { title: string; description: string };
-};
-
-export type GeneratedCopySlotJobV2 = {
-  slotId: string;
-  point: string;
-  proofToUse?: string;
-  customerQuestion?: string;
-  slotShape?: string;
-  avoid?: string;
-  genericRisk?: string;
-};
-
-export type GeneratedCopySectionJobV2 = {
-  sectionId: string;
-  /**
-   * Transitional summary retained for older fixtures and reports. Model-backed
-   * generation writes the structured fields below.
-   */
-  job?: string;
-  avoid?: string;
-  point?: string;
-  proofToUse?: string;
-  customerQuestion?: string;
-  slotShape?: string;
-  genericRisk?: string;
-  slotJobs?: GeneratedCopySlotJobV2[];
-};
-
-export type GeneratedCopyPlanV2 = {
-  siteArgument: string;
-  proofHierarchy: string[];
-  sectionJobs: GeneratedCopySectionJobV2[];
-  ctaRhythm: string;
-  repetitionRisks: string[];
-};
-
-export type GeneratedCopyDeckV2 = {
-  version: "generated-copy-deck-v2";
-  source: "openai";
-  provenance?: RegenerableArtifactProvenanceV1;
-  /** Page-level copy strategy used before section slot writing. New model-backed decks include this; stale/internal fixtures may omit it. */
-  copyPlan?: GeneratedCopyPlanV2;
-  hero: { eyebrow?: string; heading: string; body: string };
-  servicesIntro: { heading: string; body: string };
-  serviceItems: Array<{ title: string; body: string }>;
-  processIntro: { heading: string; body: string };
-  processSteps: Array<{ title: string; body: string }>;
-  faqs: Array<{ question: string; answer: string }>;
-  locationIntro?: { heading: string; body: string };
-  contactIntro: { heading: string; body: string };
-  /** Approach/working-with-us section shown beside a workshop photo. */
-  splitMedia: { heading: string; body: string };
-  /** Story section: founders, family, history — present only when the source has a story. */
-  about?: { heading: string; body: string };
-  /** Short intro for the photo gallery section. */
-  gallery: { heading: string; body: string };
-  seo: { title: string; description: string };
-  groundingNotes: string[];
-  /** Voice the copy was written in; defaulted per vertical, owner-changeable later. */
-  voiceProfile: GeneratedCopyVoiceProfileV2;
-  /** Per-service landing page copy; pages only generate for source-backed services. */
-  servicePages?: GeneratedServicePageCopyV2[];
-};
-
-export type GeneratedCopyVoicePovV2 = "first_plural" | "first_singular" | "brand_direct";
-
-export type GeneratedCopyVoiceProfileV2 = {
-  pov: GeneratedCopyVoicePovV2;
-  /** Energy register (next-level plan, C): aligned with the design profile's register. */
-  register?: import("./generated-site-v3-art-direction-catalog").DesignRegisterV3;
 };
 
 export type ExtensionModel = {
@@ -1297,40 +717,6 @@ export type CustomBlockDefinition = {
   author: "platform";
 };
 
-export type OptimizationFinding = {
-  id: string;
-  siteId: string;
-  standardCriterionId?: string;
-  category:
-    | "seo"
-    | "conversion"
-    | "accessibility"
-    | "content"
-    | "performance"
-    | "trust"
-    | "technical";
-  severity: "critical" | "recommended" | "nice_to_have";
-  title: string;
-  rationale: string;
-  recommendedAction: string;
-  status: "open" | "dismissed" | "applied";
-  applyMode: "auto_fix" | "one_click" | "manual_service";
-  suggestedEditPayload?: Record<string, unknown>;
-  expectedOutcomeMetric?: ConversionGoal | "engaged_sessions";
-};
-
-export type QACheck = {
-  id: string;
-  siteId: string;
-  standardCriterionId?: string;
-  category: "seo" | "conversion" | "accessibility" | "forms" | "technical" | "trust" | "content";
-  severity: "pass" | "warning" | "fail";
-  title: string;
-  detail: string;
-  pageId?: string;
-  sectionId?: string;
-};
-
 export type Experiment = {
   id: string;
   cohort: string;
@@ -1411,7 +797,8 @@ export type AnalyticsEvent = {
     | "scroll_depth"
     | "web_vital"
     | "experiment_assignment"
-    | "agent_readable_request";
+    | "agent_readable_request"
+    | "places_ui";
   timestamp: string;
   sectionId?: string;
   elementRole?: string;
@@ -1452,6 +839,13 @@ export type AnalyticsSummary = {
   }>;
   agentReadableRequests: number;
   agentReadableByResource: AnalyticsAgentReadableResource[];
+  placesUi: {
+    loads: number;
+    failures: number;
+    fallbacks: number;
+    fallbackRate: number;
+    estimatedCostUsd: number;
+  };
   outcomesByPage: AnalyticsOutcomeRow[];
   outcomesByCtaRole: AnalyticsOutcomeRow[];
   outcomesBySection: AnalyticsOutcomeRow[];
@@ -2038,7 +1432,7 @@ export type RenderInspectionResult = {
   screenshots: RenderScreenshotArtifact[];
   /**
    * Viewport-only thumbnail captures (e.g. desktop above-the-fold JPEG) kept
-   * separate from `screenshots` so model visual QA inputs stay unchanged.
+   * separate from `screenshots` so final visual-judgment inputs stay unchanged.
    */
   aboveFoldScreenshots?: RenderScreenshotArtifact[];
   sectionScreenshots?: RenderSectionScreenshotArtifact[];
@@ -2105,145 +1499,23 @@ export type RenderInspectionResult = {
   unavailableReason?: string;
 };
 
-/**
- * Normalized visual defect taxonomy for model-based QA. Only taxonomy-typed
- * findings (never free prose) may influence quality scoring; "none" marks
- * observations that map to no concrete defect.
- */
-export type VisualQaDefectCategory =
-  | "contrast"
-  | "overflow"
-  | "blank_layout"
-  | "unreadable_text"
-  | "broken_media"
-  | "cramped_layout"
-  | "identity_coherence"
-  | "repetition"
-  | "none";
-
-export type VisualQaFinding = {
-  id: string;
-  category: "hierarchy" | "responsive" | "conversion" | "brand" | "trust" | "accessibility" | "content";
-  severity: "warning" | "fail";
-  title: string;
-  evidence: string;
-  recommendation?: string;
-  viewport?: RenderViewportName;
-  defectCategory?: VisualQaDefectCategory;
-  confidence?: number;
-};
-
-export type VisualQaResult = {
-  schemaVersion: "visual-judgment-v1";
-  siteId: string;
-  source: "openai" | "unavailable";
-  model?: string;
-  target: "source_site" | "generated_site" | "generated_site_model";
-  versionId?: string;
-  siteModelHash?: string;
-  qaRunId?: string;
-  evaluatedAt: string;
-  screenshotCount: number;
-  verdict: "ship" | "revise" | "not_evaluated";
-  summary: string;
-  /** Diagnostic only. The generation gate consumes verdict, never a score threshold. */
-  craftScore?: number;
-  findings: VisualQaFinding[];
-  limitations: string[];
-};
-
-export type GenerationCostBudgetMode = "normal_generation" | "operator_premium_generation";
-
-export type GenerationCostLineItem = {
-  id: string;
-  label: string;
-  quantity: number;
-  unitWeight: number;
-  units: number;
-  required: boolean;
-};
-
-export type GenerationCostGateState = "allowed" | "skipped" | "required";
-
-export type GenerationCostEstimate = {
-  id: string;
-  policyVersion: "generation-cost-v1";
-  mode: GenerationCostBudgetMode;
-  status: "within_budget" | "over_budget";
-  estimatedUnits: number;
-  budgetUnits: number;
-  computedAt: string;
-  lineItems: GenerationCostLineItem[];
-  gates: {
-    generatedRenderQa: "required";
-    visualJudgment: "required";
-    mockupImageGeneration: GenerationCostGateState;
-  };
-  minimums: {
-    generatedRenderQa: "required_before_ready";
-    visualJudgment: "required_before_ready";
-  };
-  reasons: string[];
-};
-
 export type PresenceAssessment = {
   siteId: string;
   sourceUrl?: string;
   businessFactGraph?: BusinessFactGraph;
-  /** Regenerable, page-provenance-aware source evidence for proof and brand decisions. */
-  evidenceLedgerV1?: import("./evidence-ledger-v1").SiteEvidenceLedgerV1;
+  /** Canonical fail-closed evidence used by generation and owner confirmation. */
+  evidenceLedger?: import("./evidence-ledger").EvidenceLedger;
+  generationPlan?: import("./generation-contracts").GenerationPlan;
+  siteCopy?: import("./generation-contracts").SiteCopy;
+  generationTrace?: import("./generation-pipeline").GenerationPipelineTrace;
+  generationJudge?: import("./generation-judge").GenerationJudgeResult;
   normalizedBusinessFacts?: NormalizedBusinessFacts;
   standardEvaluation?: StandardEvaluation;
   renderInspection?: RenderInspectionResult;
-  generationCostEstimate?: GenerationCostEstimate;
   assetInventory?: SiteAsset[];
   publicPresenceSignals?: PublicPresenceSignal[];
   brandAssessment?: BrandAssessment;
-  generationPlanningSource?: "deterministic_design_system";
   businessUnderstanding?: BusinessUnderstandingV2;
-  /** Regenerable deterministic evidence cache for prompts and operator review; old candidates may lack it. */
-  siteDossierV1?: import("./site-dossier-v1").SiteDossierV1;
-  ownerDesignSystemEditsV1?: {
-    version: "owner-design-system-edits-v1";
-    fontPosture?: BrandExpressionFontPostureV1;
-    paletteMode?: "brand" | "neutral";
-    voiceRegister?: BrandExpressionVoiceRegisterV1;
-    hiddenSectionIds?: string[];
-    heroMediaAssetId?: string;
-    heroMediaFocalPoint?: AssetAnalysisFocalPointV1;
-    updatedAt: string;
-  };
-  generatedCopyDeck?: GeneratedCopyDeckV2;
-  v3CompilerOverrides?: {
-    heroPrimaryCta?: {
-      label: string;
-      href: string;
-      style?: "primary" | "secondary" | "text";
-    };
-  };
-  /**
-   * Catalog-bounded AI site director runtime record. This is the staged
-   * replacement for hidden seed-owned creative decisions; current compiler
-   * stages consume its safe order/presentation controls while hydration is
-   * being split out.
-   */
-  siteDirectorPlanV1?: import("./site-director-plan-v1").SiteDirectorRuntimeV1;
-  /** Operator approval for shipping a text-first candidate in a visual-trade vertical. */
-  textFirstFallbackApproval?: {
-    approvedBy: string;
-    reason: string;
-    approvedAt: string;
-  };
-  /** Deterministic brand-derivation outcome for the compiled V3 theme. */
-  brandCueReport?: {
-    version: "brand-cue-report-v2";
-    provenance?: RegenerableArtifactProvenanceV1;
-    cues: Array<{ hex: string; source: "render_sample" | "ai_signal"; saturation: number; lightness: number }>;
-    selectedPrimary?: string;
-    selectedAccent?: string;
-    applied: boolean;
-    reason: string;
-  };
   /** Privately stored scraped media (reference_only until owner attestation). */
   scrapedMediaManifest?: Array<{
     assetId: string;
@@ -2264,40 +1536,16 @@ export type PresenceAssessment = {
 
 export type SiteArtifactScope =
   | "candidate_selected"
-  | "candidate_alternative"
   | "site_selected"
-  | "site_alternative"
-  | "evaluation_candidate"
   | "qa_evidence";
 
 export type SiteArtifactType =
-  | "copy_artifact"
-  | "business_context_report"
-  | "change_impact_report"
-  | "identity_reconcile_report"
-  | "service_catalog_report"
-  | "vertical_classification_report"
-  | "conversion_path_report"
-  | "information_architecture_report"
-  | "brand_cue_report"
-  | "brand_direction_report"
-  | "brand_mark_generation_report"
-  | "asset_selection_report"
-  | "performance_audit_report"
-  | "social_proof_report"
-  | "design_system"
-  | "blueprint"
-  | "compiled_section"
-  | "compiled_page"
-  | "claim_report"
-  | "policy_report"
-  | "page_opportunity_report"
-  | "visual_benchmark"
-  | "art_direction_decision"
-  | "media_asset_decision"
-  | "copy_evaluation_report"
-  | "v3_review_packet"
-  | "generation_cost_report";
+  | "evidence_ledger"
+  | "generation_plan"
+  | "site_copy"
+  | "generation_review"
+  | "generation_failure"
+  | "operator_decision";
 
 export type SiteArtifactRecord = {
   id: string;
@@ -2306,15 +1554,7 @@ export type SiteArtifactRecord = {
   scope: SiteArtifactScope;
   artifactType: SiteArtifactType;
   artifactVersion: string;
-  producerId: string;
-  producerVersion: string;
-  verticalPlaybookVersion?: string;
-  sectionContractVersion?: string;
-  siteDesignSystemVersion?: string;
-  sourceFactIds: string[];
-  affectedPageId?: string;
-  affectedSectionId?: string;
-  affectedSlotId?: string;
+  provenance: RegenerableArtifactProvenanceV1;
   contentHash: string;
   payload: Record<string, unknown>;
   createdAt: string;
@@ -2372,7 +1612,6 @@ export type SiteBundle = {
   renderProfile?: BusinessProfile;
   siteModel: SiteModel;
   extensionModel: ExtensionModel;
-  optimizationFindings: OptimizationFinding[];
   experiments: Experiment[];
   experimentLearnings?: ExperimentLearning[];
   presenceAssessment: PresenceAssessment;
@@ -2527,10 +1766,8 @@ export type AgentRunDetail = {
 export type JobKind =
   | "presence_assessment"
   | "prospect_presence_report"
-  | "audit_site"
   | "generate_site"
   | "agent_telemetry_cleanup"
-  | "monthly_action_list"
   | "import_batch"
   | "inquiry_notification"
   | "inquiry_ai_enrichment";

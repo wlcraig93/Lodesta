@@ -5,7 +5,12 @@ import {
   type AgentTelemetryRecorder
 } from "./agent-telemetry";
 import { readLocalAsset, isSupportedAssetMimeType, imageMimeTypeMatchesBytes } from "./asset-storage";
-import { elapsedOpenAiCallMs, extractOpenAiResponseText, openAiErrorMessage } from "./openai-generation";
+import {
+  elapsedOpenAiCallMs,
+  extractOpenAiResponseText,
+  openAiErrorMessage,
+  openAiResponseIncompleteReason
+} from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
 import { validatePublicHostname } from "./url-safety";
 import type {
@@ -100,7 +105,7 @@ export async function analyzeBusinessAssetsV1(input: {
     return result;
   }
 
-  const model = process.env.LODESTA_ASSET_ANALYSIS_MODEL ?? process.env.LODESTA_VISUAL_QA_MODEL ?? "gpt-5-mini";
+  const model = process.env.LODESTA_ASSET_ANALYSIS_MODEL ?? "gpt-5-mini";
 
   const concurrency = assetAnalysisConcurrencyV1();
   for (let offset = 0; offset < candidates.length; offset += concurrency) {
@@ -142,7 +147,6 @@ export async function analyzeBusinessAssetsV1(input: {
         continue;
       }
       result.failed += 1;
-      if (input.strict) throw outcome.error;
       input.bundle.presenceAssessment.technicalNotes.push(
         `Asset analysis skipped for ${outcome.candidate.asset.id}: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`
       );
@@ -284,10 +288,30 @@ async function createOpenAiAssetAnalysisV1(input: {
   spanId?: string;
   signal?: AbortSignal;
 }): Promise<AssetAnalysisV1> {
+  let lastError: unknown;
+  for (const attempt of [1, 2] as const) {
+    try {
+      return await createOpenAiAssetAnalysisAttemptV1(input, attempt);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("OpenAI asset analysis failed after one retry.");
+}
+
+async function createOpenAiAssetAnalysisAttemptV1(input: {
+  apiKey: string;
+  model: string;
+  asset: AssetReference;
+  imageInput: LoadedImageInputV1;
+  telemetry?: AgentTelemetryRecorder;
+  spanId?: string;
+  signal?: AbortSignal;
+}, attempt: 1 | 2): Promise<AssetAnalysisV1> {
   const body = {
     model: input.model,
     reasoning: { effort: "low" as const },
-    max_output_tokens: 1400,
+    max_output_tokens: attempt === 1 ? 1400 : 2200,
     input: [
       {
         role: "system",
@@ -352,13 +376,34 @@ async function createOpenAiAssetAnalysisV1(input: {
     });
     const payload = (await response.json().catch(() => null)) as unknown;
     const endedAt = new Date().toISOString();
+    const incomplete = response.ok ? openAiResponseIncompleteReason(payload) : undefined;
+    let parsed: AssetAnalysisResponseV1 | undefined;
+    let parseError: unknown;
+    if (response.ok && !incomplete) {
+      try {
+        const text = extractOpenAiResponseText(payload);
+        if (!text) throw new Error("OpenAI asset analysis response did not include output text.");
+        parsed = assetAnalysisResponseSchema.parse(JSON.parse(text));
+      } catch (error) {
+        parseError = error;
+      }
+    }
+    const failureMessage = !response.ok
+      ? openAiErrorMessage(payload) ?? `HTTP ${response.status}`
+      : incomplete
+        ? `Incomplete response (${incomplete})`
+        : parseError instanceof Error
+          ? parseError.message
+          : parseError
+            ? String(parseError)
+            : undefined;
     await input.telemetry?.recordModelCall({
       spanId: input.spanId,
       provider: "openai",
       model: input.model,
       endpoint: "/v1/responses",
       operation: "asset_analysis_v1",
-      status: response.ok ? "completed" : "failed",
+      status: failureMessage ? "failed" : "completed",
       requestJson: sanitizeTelemetryPayload({
         model: input.model,
         assetId: input.asset.id,
@@ -367,20 +412,19 @@ async function createOpenAiAssetAnalysisV1(input: {
         height: input.asset.height,
         mimeType: input.imageInput.mimeType,
         bytes: input.imageInput.bytes,
-        promptVersion: assetAnalysisVersionV1
+        promptVersion: assetAnalysisVersionV1,
+        attempt
       }),
       responseJson: sanitizeTelemetryPayload(payload),
       ...extractOpenAiUsage(payload),
-      errorMessage: response.ok ? undefined : openAiErrorMessage(payload) ?? `HTTP ${response.status}`,
+      errorMessage: failureMessage,
       startedAt,
       endedAt,
       durationMs: elapsedOpenAiCallMs(startedAt, endedAt)
     });
     recorded = true;
-    if (!response.ok) throw new Error(openAiErrorMessage(payload) ?? `OpenAI asset analysis failed with status ${response.status}`);
-    const text = extractOpenAiResponseText(payload);
-    if (!text) throw new Error("OpenAI asset analysis response did not include output text.");
-    const parsed = assetAnalysisResponseSchema.parse(JSON.parse(text));
+    if (failureMessage) throw new Error(`OpenAI asset analysis failed: ${failureMessage}`);
+    if (!parsed) throw new Error("OpenAI asset analysis did not produce a validated payload.");
     return normalizeAssetAnalysisV1(parsed, input.model);
   } catch (error) {
     if (!recorded) {
@@ -397,7 +441,8 @@ async function createOpenAiAssetAnalysisV1(input: {
           assetId: input.asset.id,
           mimeType: input.imageInput.mimeType,
           bytes: input.imageInput.bytes,
-          promptVersion: assetAnalysisVersionV1
+          promptVersion: assetAnalysisVersionV1,
+          attempt
         }),
         errorMessage: error instanceof Error ? error.message : String(error),
         startedAt,

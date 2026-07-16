@@ -64,15 +64,9 @@ export function compileSite(input: {
       policyNotes: ["Selected by the canonical generation plan."],
       mayImplyRealBusinessWork: asset.source === "website_reference" || asset.source === "uploaded"
     }] : []),
-    designArchetypeId: designSystem,
-    archetypeAssignmentReason: mediaLed ? "First-party media cleared the hero floor." : "No first-party media cleared the hero floor; use the robust text-led system.",
-    geometryDiversityDirective: "Use only the selected design system's pre-tuned section geometry.",
     artDirection: {
       version: "site-art-direction-v3",
       recipeId: designSystem,
-      designArchetypeId: designSystem,
-      archetypeAssignmentReason: mediaLed ? "First-party media cleared the hero floor." : "No first-party media cleared the hero floor.",
-      geometryDiversityDirective: "Use only pre-tuned system geometry.",
       fontPairingId: mediaLed ? "precision_grotesk" : "display_sans_humanist",
       colorSystem: mediaLed ? "light_editorial" : "warm_neighborhood",
       spacingRhythm: mediaLed ? "spacious" : "standard",
@@ -82,20 +76,10 @@ export function compileSite(input: {
       cardTreatment: mediaLed ? "hairline_surface" : "minimal_surface",
       density: "balanced",
       navPlan: {
-        source: "site_director",
+        source: "generation_plan",
         items: input.plan.navigation.items.map((item) => ({ label: item.label, target: item.target, kind: item.kind })),
         primaryCta: input.plan.navigation.primaryCta
       }
-    },
-    artDirectionDecision: {
-      id: `art_${input.business.siteId}_${designSystem}`,
-      version: "art-direction-decision-v3",
-      selectedRecipeId: designSystem,
-      rejectedRecipeIds: [mediaLed ? "trusted_local_service" : "precision_shop_editorial"],
-      inputSignals: [mediaLed ? "first_party_hero_media" : "no_compatible_hero_media"],
-      rationale: mediaLed ? "Use the media-led precision system." : "Use the no-media trusted local system.",
-      validation: { status: "passed", issues: [] },
-      tokenVersions: { fontPool: "canonical-v1", recipeCatalog: "two-system-v1", componentControls: "visual-section-v3" }
     },
     pageComposition: { id: `composition_${input.business.siteId}`, version: "page-composition-v3", pages }
   };

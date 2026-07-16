@@ -37,7 +37,9 @@ export function AdminSiteWorkspaceShell({
   children
 }: AdminSiteWorkspaceShellProps) {
   const slug = bundle.siteModel.slug;
-  const openFindings = bundle.optimizationFindings.filter((finding) => finding.status === "open").length;
+  const pendingEvidence = bundle.presenceAssessment.evidenceLedger?.items.filter(
+    (item) => item.renderPolicy !== "durable_render" && !item.confirmation
+  ).length ?? 0;
   const previewReadiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
 
   return (
@@ -66,7 +68,7 @@ export function AdminSiteWorkspaceShell({
             <StatusPill label="Source" value={scoreLabel(sourceEvaluation)} />
             <StatusPill label="Preview QA" value={readinessLabel(previewReadiness)} />
             <StatusPill label="Versions" value={String(bundle.siteModel.versions.length)} />
-            <StatusPill label="Open findings" value={String(openFindings)} />
+            <StatusPill label="Confirmations" value={String(pendingEvidence)} />
           </section>
 
           <AdminArtifactNav slug={slug} view={view} selectedVersionId={selectedVersion.id} />
@@ -92,7 +94,7 @@ export function AdminSiteWorkspaceShell({
 
           <section className="workspace-sidebar-section">
             <h2>Actions</h2>
-            <div className="workspace-action-list">
+            <div className="workspace-command-list">
               <AdminButtonLink variant="secondary" href={workspaceHref(slug, "site", selectedVersion.id)}>
                 View preview
               </AdminButtonLink>

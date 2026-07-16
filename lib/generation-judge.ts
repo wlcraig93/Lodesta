@@ -7,7 +7,7 @@ import type { BusinessProfile, RegenerableArtifactProvenanceV1, SiteAsset, SiteV
 import type { GenerationPlan } from "./generation-contracts";
 import type { ObjectiveGenerationGateResult } from "./generation-objective-gate";
 import { renderedTextManifest } from "./generation-objective-gate";
-import { alternateDesignSystem } from "./vertical-packs";
+import { alternateDesignSystem, publicGenerationServices } from "./vertical-packs";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import {
   elapsedOpenAiCallMs,
@@ -135,17 +135,8 @@ export async function createGenerationJudge(input: {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return unavailableJudgeResult(input, evaluatedAt, "OPENAI_API_KEY is not configured.");
   const runtime = await getOpenAiRuntimeSettings();
-  const model = runtime.settings.visualQaModel;
-  const context = {
-    business: {
-      name: input.business.name,
-      services: input.business.services,
-      location: input.business.address?.city ?? input.business.serviceAreas[0]
-    },
-    designSystem: input.plan.designSystem,
-    availableActions: input.packet.availableActions,
-    renderedTextManifest: input.packet.textManifest
-  };
+  const model = runtime.settings.generationJudgeModel;
+  const context = generationJudgeContext(input);
   const body = {
     model,
     reasoning: { effort: "medium" },
@@ -257,6 +248,23 @@ export async function createGenerationJudge(input: {
     }
     return unavailableJudgeResult(input, evaluatedAt, error instanceof Error ? error.message : String(error), model);
   }
+}
+
+export function generationJudgeContext(input: {
+  business: BusinessProfile;
+  plan: GenerationPlan;
+  packet: GenerationJudgePacket;
+}) {
+  return {
+    business: {
+      name: input.business.name,
+      services: publicGenerationServices(input.business.services),
+      location: input.business.address?.city ?? input.business.serviceAreas[0]
+    },
+    designSystem: input.plan.designSystem,
+    availableActions: input.packet.availableActions,
+    renderedTextManifest: input.packet.textManifest
+  };
 }
 
 function unavailableJudgeResult(

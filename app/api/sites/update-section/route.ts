@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const result = await repository.updateSectionProps(parsed.data);
   if (!result) return NextResponse.json({ error: "Unknown site, page, or section" }, { status: 404 });
   if (!result.ok) {
-    return NextResponse.json({ error: result.reason, issues: result.issues, qa: result.qa }, { status: 400 });
+    return NextResponse.json({ error: result.reason, issues: result.issues }, { status: 400 });
   }
   return NextResponse.json(result);
 }

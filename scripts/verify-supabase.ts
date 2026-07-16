@@ -4,8 +4,9 @@ import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
 import { requiredClaimFactIds } from "../lib/fact-verification";
 import { ASSET_BUCKET_NAME, imageMimeTypeMatchesBytes, storeAssetBytes } from "../lib/asset-storage";
-import { ASSET_LIBRARY_BUCKET_NAME } from "../lib/asset-library";
 import { assertSiteVersionV3, pageCountForVersionV3 } from "../lib/site-version-v3";
+import { sampleSiteBundle } from "../lib/sample-data";
+import { applySiteIdentity } from "../lib/site-identity";
 
 type CheckResult = {
   name: string;
@@ -18,14 +19,6 @@ const keep = args.has("--keep");
 const liveIntegrations = args.has("--live-integrations");
 const storageOnly = args.has("--storage-only");
 const runId = `${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 17)}${crypto.randomUUID().slice(0, 8)}`;
-const prompt = [
-  `Build a website for Lodesta Verify ${runId}.`,
-  "A home services company based in Austin.",
-  "services: HVAC repair, emergency plumbing, electrical safety inspections.",
-  "phone: +1 555 010 1200.",
-  `email: verify-${runId}@example.com.`
-].join(" ");
-
 if (!liveIntegrations) {
   process.env.STRIPE_SECRET_KEY = "";
   process.env.STRIPE_PRICE_ID = "";
@@ -33,7 +26,8 @@ if (!liveIntegrations) {
   process.env.CLOUDFLARE_ZONE_ID = "";
 }
 const checks: CheckResult[] = [];
-let acceptedSiteId: string | undefined;
+let acceptedSiteId = "";
+let createdCandidateId = "";
 const createdJobIds = new Set<string>();
 const createdAgentRunIds = new Set<string>();
 let createdCampaignId: string | undefined;
@@ -52,19 +46,31 @@ async function main() {
   checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
   await verifyAgentTelemetry(supabase);
   await verifyAssetStorage(supabase);
-  await verifyAssetLibrary(supabase);
   if (storageOnly) {
     process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
     return;
   }
 
-  const bundle = await supabaseRepository.createAndStoreSite({ prompt });
+  const candidateBundle = structuredClone(sampleSiteBundle);
+  applySiteIdentity(candidateBundle, `verify-${runId}`);
+  const candidate = await supabaseRepository.createSiteCandidate({
+    id: `sitecand_verify_${runId}`,
+    bundle: candidateBundle,
+    sourceUrl: `https://verify-${runId}.example`,
+    sourceHost: `verify-${runId}.example`,
+    status: "ready",
+    candidatePurpose: "test_generation"
+  });
+  createdCandidateId = candidate.id;
+  const accepted = await supabaseRepository.acceptSiteCandidateAsSite(candidate.id);
+  assert(accepted?.ok, `Canonical candidate was not accepted: ${accepted && !accepted.ok ? accepted.reason : "missing result"}`);
+  const bundle = accepted.bundle;
   acceptedSiteId = bundle.businessProfile.siteId;
   assert(bundle.siteModel.versions.length > 0, "Generated site has no versions.");
   checks.push({
-    name: "create_site",
+    name: "accept_canonical_candidate",
     ok: true,
-    detail: `Created ${bundle.businessProfile.name} (${bundle.businessProfile.siteId}) with slug ${bundle.siteModel.slug}.`
+    detail: `Accepted canonical candidate ${candidate.id} as ${bundle.businessProfile.siteId}.`
   });
 
   const loaded = await supabaseRepository.getSiteBundle(acceptedSiteId);
@@ -124,10 +130,6 @@ async function main() {
     "Expired Supabase preview tokens must not resolve."
   );
   checks.push({ name: "preview_token", ok: true, detail: `Created active ${preview.token} and rejected an expired preview token.` });
-
-  const findings = await supabaseRepository.runAndStoreAudit(acceptedSiteId);
-  assert(Array.isArray(findings), "Audit did not return findings.");
-  checks.push({ name: "audit", ok: true, detail: `Stored ${findings.length} finding(s).` });
 
   const sourceVersionId = assetReload.siteModel.versions[0]?.id;
   assert(sourceVersionId, "No version is available to restore.");
@@ -209,8 +211,8 @@ async function main() {
     visitorId: `visitor_${runId}`,
     payload: {
       name: "Supabase Verify",
-      email: "verify@example.com",
-      message: "Testing Supabase persistence."
+      phone: "+15125550199",
+      details: "Testing Supabase persistence."
     },
     metadata: {
       sessionId: `verify_${runId}`,
@@ -229,7 +231,7 @@ async function main() {
   const inquiries = await supabaseRepository.listInquiries(acceptedSiteId);
   assert(inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id), "Inquiry was not persisted.");
   assert(
-    inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id && candidate.contactEmail === "verify@example.com"),
+    inquiries.some((candidate) => candidate.id === inquiryResult.inquiry.id && candidate.contactPhone === "+15125550199"),
     "Inquiry contact snapshot was not persisted."
   );
   const events = await supabaseRepository.listInquiryEvents(inquiryResult.inquiry.id);
@@ -274,49 +276,9 @@ async function main() {
     siteId: acceptedSiteId,
     sessionId: `verify_${runId}`
   });
-  assert(!draftAssignment.assigned, "Experiment assignment should not run before owner opt-in.");
-
-  const experiment = bundle.experiments[0];
-  assert(experiment, "Created site has no experiment candidate.");
-  const optIn = await supabaseRepository.updateExperiment({
-    siteId: acceptedSiteId,
-    experimentId: experiment.id,
-    status: "running"
-  });
-  assert(optIn?.ok && optIn.experiment.status === "running", "Experiment opt-in did not persist.");
-
-  const assignment = await supabaseRepository.assignExperiment({
-    siteId: acceptedSiteId,
-    sessionId: `verify_${runId}`
-  });
-  assert(assignment.assigned, "Experiment assignment failed.");
-  for (let index = 1; index <= 20; index += 1) {
-    const variantId = index <= 10 ? "control" : "sticky_action";
-    await supabaseRepository.recordAnalyticsEvent({
-      siteId: acceptedSiteId,
-      sessionId: `verify_experiment_${runId}_${index}`,
-      pageId: "home",
-      eventType: "experiment_assignment",
-      timestamp: new Date().toISOString(),
-      metadata: { experimentId: experiment.id, variantId, runId }
-    });
-  }
-  for (let index = 11; index <= 14; index += 1) {
-    await supabaseRepository.recordAnalyticsEvent({
-      siteId: acceptedSiteId,
-      sessionId: `verify_experiment_${runId}_${index}`,
-      pageId: "home",
-      eventType: "tel_click",
-      timestamp: new Date().toISOString(),
-      metadata: { runId }
-    });
-  }
-  const learning = await supabaseRepository.concludeExperimentWithLearning({
-    siteId: acceptedSiteId,
-    experimentId: experiment.id
-  });
-  assert(learning?.ok && learning.learning.status === "active", "Experiment learning was not adopted.");
-  checks.push({ name: "experiment", ok: true, detail: `Opted in, assigned, and adopted learning ${learning.learning.id}.` });
+  assert(!draftAssignment.assigned, "Canonical sites must not seed per-site experiments.");
+  assert((await supabaseRepository.listExperiments(acceptedSiteId)).length === 0, "Persisted canonical bundle must keep experiment rails dormant.");
+  checks.push({ name: "experiment", ok: true, detail: "Confirmed per-site experiment rails remain dormant." });
 
   const claim = await supabaseRepository.createClaim({
     siteId: acceptedSiteId,
@@ -402,7 +364,7 @@ async function main() {
     campaignId: campaign.id,
     siteId: acceptedSiteId,
     businessName: bundle.businessProfile.name,
-    vertical: "home_services",
+    vertical: "auto_body",
     previewToken: preview.token,
     mailingCode: `VERIFY-${runId.slice(-6)}`
   });
@@ -424,7 +386,7 @@ async function main() {
   assert(outbound.mailerToPreviewRate >= 1 && outbound.mailerToClaimRate >= 1, "Outbound summary did not include verification events.");
   checks.push({ name: "outbound", ok: true, detail: `Recorded outbound campaign ${campaign.id} with prospect ${prospect.id}.` });
 
-  const job = await supabaseRepository.enqueueJob("monthly_action_list", { siteId: acceptedSiteId });
+  const job = await supabaseRepository.enqueueJob("agent_telemetry_cleanup", { olderThanDays: 30, limit: 1 });
   createdJobIds.add(job.id);
   assert(job.maxAttempts >= 1 && Boolean(job.runAfter), "Queued job did not include retry/backoff metadata.");
   const processed = await supabaseRepository.processNextJob();
@@ -432,7 +394,7 @@ async function main() {
     processed?.id === job.id && processed.status === "completed" && !processed.lockedBy && !processed.lockedAt,
     "Queued job did not complete and release its worker lock."
   );
-  checks.push({ name: "job", ok: true, detail: `Processed monthly action-list job ${job.id}.` });
+  checks.push({ name: "job", ok: true, detail: `Processed telemetry cleanup job ${job.id}.` });
 
   const heartbeatJobId = `verify_heartbeat_${runId}`;
   const heartbeatWorkerId = `verify-heartbeat-${runId}`;
@@ -441,7 +403,7 @@ async function main() {
   await requireSupabase(
     supabase.from("jobs").insert({
       id: heartbeatJobId,
-      kind: "monthly_action_list",
+      kind: "agent_telemetry_cleanup",
       status: "running",
       payload: { siteId: acceptedSiteId, verifier: "heartbeat_job" },
       attempts: 1,
@@ -486,7 +448,7 @@ async function main() {
   await requireSupabase(
     supabase.from("jobs").insert({
       id: staleJobId,
-      kind: "monthly_action_list",
+      kind: "agent_telemetry_cleanup",
       status: "running",
       payload: { siteId: acceptedSiteId, verifier: "stale_exhausted_job" },
       attempts: 1,
@@ -516,24 +478,13 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ ok: true, runId, kept: keep, checks }, null, 2)}\n`);
 }
 
-async function verifyAssetLibrary(supabase: ReturnType<typeof getSupabaseAdminClient>) {
-  await requireSupabase(supabase.from("asset_library_batches").select("id", { count: "exact", head: true }), "Query asset library batches");
-  await requireSupabase(supabase.from("asset_library_assets").select("id", { count: "exact", head: true }), "Query asset library assets");
-  await requireSupabase(supabase.from("asset_library_reviews").select("id", { count: "exact", head: true }), "Query asset library reviews");
-  const { data, error } = await supabase.storage.getBucket(ASSET_LIBRARY_BUCKET_NAME);
-  if (error || !data) throw new Error(`Asset library bucket is missing or inaccessible: ${error?.message ?? "bucket not found"}`);
-  assert(data.public === false, "Asset library bucket must remain private; approved assets are served through the app route.");
-  checks.push({
-    name: "asset_library",
-    ok: true,
-    detail: `Asset library tables are queryable and ${ASSET_LIBRARY_BUCKET_NAME} is private.`
-  });
-}
-
 async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   await cleanupStorageProbe(supabase);
   if (createdCampaignId) {
     await requireSupabase(supabase.from("outbound_campaigns").delete().eq("id", createdCampaignId), "Cleanup outbound campaign");
+  }
+  if (createdCandidateId) {
+    await requireSupabase(supabase.from("site_candidates").delete().eq("id", createdCandidateId), "Cleanup site candidate");
   }
   if (acceptedSiteId) {
     await requireSupabase(supabase.from("sites").delete().eq("id", acceptedSiteId), "Cleanup site");

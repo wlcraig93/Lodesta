@@ -20,6 +20,7 @@ export type CanonicalFixtureDefinition = {
   id: string;
   sourceUrl: string;
   htmlPath: string;
+  heroImagePath?: string;
   profile: string;
   expectedDesignSystem: ShippingDesignSystemId;
   evidenceProposals: Array<Omit<EvidenceProposal, "sourceUrl">>;
@@ -62,11 +63,12 @@ export async function buildCanonicalFixture(definition: CanonicalFixtureDefiniti
     createdAt: fixtureTimestamp
   });
   const business = businessFromFixture(definition.id, definition.sourceUrl, page);
-  const assets = assetsFromFixture(
+  const assets = await assetsFromFixture(
     business.siteId,
     page,
     html,
-    definition.expectedDesignSystem === "precision_shop_editorial"
+    definition.expectedDesignSystem === "precision_shop_editorial",
+    definition.heroImagePath
   );
   const plan = buildGenerationPlan({ business, evidence, assets, createdAt: fixtureTimestamp });
   const copy = createFixtureSiteCopy(plan, business);
@@ -126,16 +128,26 @@ function businessFromFixture(
   };
 }
 
-function assetsFromFixture(
+async function assetsFromFixture(
   siteId: string,
   page: ReturnType<typeof summarizeCrawlHtml>,
   html: string,
-  allowHero: boolean
-): SiteAsset[] {
+  allowHero: boolean,
+  heroImagePath?: string
+): Promise<SiteAsset[]> {
   if (!allowHero) return [];
   const retained = page.assetReferences.filter((asset) => asset.kind === "image").slice(0, 1);
   const embeddedUrl = html.match(/<img[^>]+src=(["'])(.*?)\1/i)?.[2];
-  const sourceAssets = retained.length ? retained : embeddedUrl ? [{ url: embeddedUrl, alt: "Source business repair photo" }] : [];
+  const sourceAssets = heroImagePath
+    ? [{
+        url: `data:image/jpeg;base64,${(await readFile(path.join(process.cwd(), heroImagePath))).toString("base64")}`,
+        alt: "Technician inspecting a vehicle in a clean independent repair shop"
+      }]
+    : retained.length
+      ? retained
+      : embeddedUrl
+        ? [{ url: embeddedUrl, alt: "Source business repair photo" }]
+        : [];
   return sourceAssets.map((asset, index) => ({
     id: `asset_fixture_${index + 1}`,
     siteId,
@@ -146,7 +158,7 @@ function assetsFromFixture(
     rightsStatus: "preclaim_safe",
     usageScope: "preclaim_preview",
     ownerApproved: false,
-    metadata: { analysisV1: { imageKind: "repair_detail", warnings: [] } },
+    metadata: { analysisV1: { imageKind: "repair_environment", warnings: [] } },
     createdAt: fixtureTimestamp
   }));
 }
@@ -197,13 +209,11 @@ function fixtureBundle(
       workflows: [],
       customBlocks: []
     },
-    optimizationFindings: [],
     experiments: [],
     presenceAssessment: {
       siteId: business.siteId,
       sourceUrl,
       assetInventory: assets,
-      generationPlanningSource: "deterministic_design_system",
       technicalNotes: [],
       visualNotes: [],
       brandNotes: [],

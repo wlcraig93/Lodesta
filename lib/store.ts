@@ -11,7 +11,6 @@ import type {
   InquiryDelivery,
   InquiryEvent,
   SiteArtifactRecord,
-  OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
   OutboundProspect,
@@ -24,18 +23,12 @@ import type {
   SiteCandidateStatus,
   SiteVersion,
 } from "./models";
-import { runAudit } from "./audit";
-import { createSiteV3FromInput } from "./intake";
-import { applySuggestedEdit, preserveFindingLifecycle } from "./optimization";
 import { applyV3SectionUpdate } from "./v3-editor";
 import { sampleSiteBundle } from "./sample-data";
 import { summarizeAnalytics } from "./analytics";
-import { mergeFindings, recommendFromAnalytics } from "./analytics-insights";
 import { analyzeExperiment } from "./experiment-analysis";
 import { createExperimentLearning } from "./experiment-learning";
-import { applyAiEditToBundle } from "./ai-editor";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "./editor-guardrails";
-import { updateSiteDesignBundle, type UpdateSiteDesignInput } from "./design";
 import { applySiteIdentity, makeUniqueSlug } from "./site-identity";
 import { applyVerifiedFacts } from "./fact-verification";
 import { claimVerificationSatisfies, type ClaimVerificationLevel } from "./owner-access";
@@ -43,6 +36,7 @@ import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./b
 import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-settings";
 import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
 import { restoreVersionToDraftBundle } from "./site-versions";
+import { applyEvidenceConfirmation } from "./evidence-ledger";
 import { sanitizeAnalyticsMetadata } from "./privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "./site-version-metadata";
 import { copyCandidateArtifactToSite } from "./site-artifacts";
@@ -166,17 +160,6 @@ export function getSiteBundle(siteId: string) {
 export function getSiteBundleBySlug(slug: string) {
   const siteId = state().slugToSiteId.get(slug);
   return siteId ? getSiteBundle(siteId) : null;
-}
-
-export function createAndStoreSite(input: Parameters<typeof createSiteV3FromInput>[0]) {
-  let bundle = withBusinessBundleFields(createSiteV3FromInput({ ...input, experimentLearnings: listExperimentLearnings({ status: "active" }) }));
-  const store = state();
-  applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
-  bundle = withBusinessBundleFields(bundle, { businessId: bundle.business?.id });
-  assertBundleVersionsV3(bundle, "store create bundle");
-  store.bundles.set(bundle.businessProfile.siteId, bundle);
-  store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
-  return bundle;
 }
 
 export function createSiteCandidate(input: {
@@ -462,6 +445,7 @@ export function acceptSiteCandidateAsVersion(input: { candidateId: string; siteI
   if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
 
   targetBundle.siteModel.versions.unshift(version);
+  applyAcceptedGenerationState(targetBundle, candidate.bundle);
   copySelectedArtifactsToSite({
     candidateId: input.candidateId,
     siteId: input.siteId,
@@ -481,6 +465,16 @@ export function acceptSiteCandidateAsVersion(input: { candidateId: string; siteI
     acceptedSiteId: input.siteId,
     acceptedVersionId: version.id
   };
+}
+
+function applyAcceptedGenerationState(target: SiteBundle, candidate: SiteBundle) {
+  const standardEvaluation = target.presenceAssessment.standardEvaluation;
+  target.presenceAssessment = {
+    ...structuredClone(candidate.presenceAssessment),
+    siteId: target.businessProfile.siteId,
+    ...(candidate.presenceAssessment.standardEvaluation || !standardEvaluation ? {} : { standardEvaluation })
+  };
+  target.siteModel.theme = structuredClone(candidate.siteModel.theme);
 }
 
 function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
@@ -704,16 +698,6 @@ export function saveSiteVersion(input: { siteId: string; version: SiteBundle["si
   return bundle;
 }
 
-export function runAndStoreAudit(siteId: string) {
-  const bundle = getSiteBundle(siteId);
-  if (!bundle) return null;
-  bundle.optimizationFindings = preserveFindingLifecycle(
-    buildOptimizationFindings(bundle),
-    bundle.optimizationFindings
-  );
-  return bundle.optimizationFindings;
-}
-
 export function updateSectionProps(input: {
   siteId: string;
   pageId: string;
@@ -727,30 +711,17 @@ export function updateSectionProps(input: {
     return {
       ok: false as const,
       reason: guardrails.reason,
-      issues: guardrails.issues,
-      qa: guardrails.qa
+      issues: guardrails.issues
     };
   }
 
   const applied = applyV3SectionUpdate(bundle, input);
   if (!applied.ok) return applied;
-  bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return {
     ok: true as const,
     bundle,
     guardrailWarnings: guardrails.warnings
   };
-}
-
-export function updateSiteDesign(input: UpdateSiteDesignInput) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const result = updateSiteDesignBundle(bundle, input);
-  if (result.ok) {
-    const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
-    if (draft) markVersionOwnerTouched(draft);
-  }
-  return result;
 }
 
 export function publishDraft(siteId: string) {
@@ -771,7 +742,6 @@ export function publishVersion(input: { siteId: string; versionId: string }) {
   }
   target.status = "published";
   if (target.theme) bundle.siteModel.theme = structuredClone(target.theme);
-  bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return { ok: true as const, bundle };
 }
 
@@ -782,7 +752,6 @@ export function restoreVersionToDraft(input: { siteId: string; versionId: string
   if (!result.ok) return result;
   const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
   if (draft) markVersionOwnerTouched(draft);
-  bundle.optimizationFindings = buildOptimizationFindings(bundle);
   return result;
 }
 
@@ -794,8 +763,7 @@ export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
     return {
       ok: false as const,
       reason: guardrails.reason,
-      issues: guardrails.issues,
-      qa: guardrails.qa
+      issues: guardrails.issues
     };
   }
   return {
@@ -803,6 +771,19 @@ export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
     bundle: markProfileUpdated(applyBusinessProfileUpdate(bundle, input)),
     guardrailWarnings: guardrails.warnings
   };
+}
+
+export function confirmSiteEvidence(input: {
+  siteId: string;
+  evidenceId: string;
+  decision: "confirmed" | "rejected";
+  decidedBy: string;
+}) {
+  const bundle = getSiteBundle(input.siteId);
+  const ledger = bundle?.presenceAssessment.evidenceLedger;
+  if (!bundle || !ledger) return null;
+  const result = applyEvidenceConfirmation({ ledger, ...input });
+  return result.ok ? { ok: true as const, bundle, item: result.item } : result;
 }
 
 export function updateOwnerAssets(input: UpdateOwnerAssetsInput) {
@@ -1006,14 +987,6 @@ export function analyticsSummary(siteId: string) {
   return summarizeAnalytics(siteId, listAnalyticsEvents(siteId));
 }
 
-function buildOptimizationFindings(bundle: SiteBundle) {
-  const nextFindings = mergeFindings(
-    runAudit(bundle.businessProfile, bundle.siteModel),
-    recommendFromAnalytics(bundle, analyticsSummary(bundle.businessProfile.siteId))
-  );
-  return preserveFindingLifecycle(nextFindings, bundle.optimizationFindings);
-}
-
 export function assignExperiment(input: { siteId: string; sessionId: string; experimentId?: string }) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return { assigned: false as const, reason: "Unknown site" };
@@ -1128,49 +1101,6 @@ export function updateFormSettings(input: UpdateFormSettingsInput) {
   return result;
 }
 
-export function applyFindingToDraft(input: { siteId: string; findingId: string }) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
-  if (!finding) return { ok: false as const, reason: "Finding not found." };
-
-  const applied = applySuggestedEdit(bundle, finding);
-  if (!applied.ok) return applied;
-  const draft = bundle.siteModel.versions.find((version) => version.status === "draft");
-  if (draft) markVersionOwnerTouched(draft);
-  return {
-    ok: true as const,
-    draftCreated: true,
-    qaRequired: true,
-    finding: applied.finding,
-    changeSummary: applied.changeSummary
-  };
-}
-
-export function dismissFinding(input: { siteId: string; findingId: string }) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
-  if (!finding) return { ok: false as const, reason: "Finding not found." };
-  if (finding.status === "applied") return { ok: false as const, reason: "Applied findings cannot be dismissed." };
-  finding.status = "dismissed";
-  return { ok: true as const, finding };
-}
-
-export async function applyAiEditToSite(input: { siteId: string; message: string }) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const result = await applyAiEditToBundle(bundle, input.message);
-  if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
-    if (result.mutated && result.draftVersionId) {
-      const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
-      if (draft) markVersionOwnerTouched(draft);
-    }
-    bundle.optimizationFindings = buildOptimizationFindings(bundle);
-    result.findings = bundle.optimizationFindings;
-  }
-  return result;
-}
 
 function markProfileUpdated(bundle: SiteBundle) {
   markAllVersionsOwnerTouched(bundle);

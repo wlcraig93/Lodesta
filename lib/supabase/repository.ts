@@ -24,7 +24,6 @@ import type {
   SiteArtifactRecord,
   JobKind,
   JobRecord,
-  OptimizationFinding,
   OutboundCampaign,
   OutboundEvent,
   OutboundProspect,
@@ -61,11 +60,8 @@ import type {
   UpdateProspectReportInput,
   UpdateSectionInput
 } from "../repository";
-import { runAudit } from "../audit";
-import { updateSiteDesignBundle } from "../design";
 import { createCheckoutSession } from "../billing";
 import { refreshCustomHostnameStatus, registerCustomHostname } from "../domains";
-import { createSiteV3FromInput } from "../intake";
 import {
   defaultJobStaleAfterMs,
   executeJob,
@@ -76,18 +72,16 @@ import {
   type JobHeartbeatResult
 } from "../jobs";
 import { summarizeAnalytics } from "../analytics";
-import { mergeFindings, recommendFromAnalytics } from "../analytics-insights";
 import { analyzeExperiment, analyzeExperiments } from "../experiment-analysis";
 import { createExperimentLearning } from "../experiment-learning";
-import { applySuggestedEdit, preserveFindingLifecycle } from "../optimization";
 import { applyV3SectionUpdate } from "../v3-editor";
-import { applyAiEditToBundle } from "../ai-editor";
 import { validateBusinessProfileUpdate, validateSectionUpdate } from "../editor-guardrails";
 import { applyFormSettingsUpdate } from "../form-settings";
 import { applyOwnerAssetsUpdate } from "../owner-assets";
 import { applySiteIdentity, makeUniqueSlug } from "../site-identity";
 import { applyVerifiedFacts } from "../fact-verification";
 import { applyBusinessProfileUpdate } from "../business-profile-update";
+import { applyEvidenceConfirmation } from "../evidence-ledger";
 import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
 import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "../site-version-metadata";
@@ -95,7 +89,6 @@ import { copyCandidateArtifactToSite } from "../site-artifacts";
 import { businessIdForProfile, businessLocationsFromProfile, businessRecordFromProfile, normalizeSiteLocationRole, withBusinessBundleFields } from "../business-model";
 import { assertBundleVersionsV3, assertSiteVersionV3 } from "../site-version-v3";
 import { getSupabaseAdminClient } from "./client";
-import { prepareIntakeInput } from "../intake-pipeline";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
 import { aggregateNotificationState, executeInquiryNotificationWorkflows } from "../workflows";
 import { runInquiryAiEnrichmentJob } from "../groq-inquiry-ai";
@@ -235,15 +228,7 @@ type SiteArtifactRow = {
   scope: SiteArtifactRecord["scope"];
   artifact_type: SiteArtifactRecord["artifactType"];
   artifact_version: string;
-  producer_id: string;
-  producer_version: string;
-  vertical_playbook_version: string | null;
-  section_contract_version: string | null;
-  site_design_system_version: string | null;
-  source_fact_ids: string[];
-  affected_page_id: string | null;
-  affected_section_id: string | null;
-  affected_slot_id: string | null;
+  provenance_json: SiteArtifactRecord["provenance"];
   content_hash: string;
   payload_json: unknown;
   created_at: string;
@@ -286,21 +271,6 @@ type FormRow = {
   site_id: string;
   name: string;
   schema: unknown;
-};
-
-type FindingRow = {
-  id: string;
-  site_id: string;
-  standard_criterion_id: string | null;
-  category: OptimizationFinding["category"];
-  severity: OptimizationFinding["severity"];
-  title: string;
-  rationale: string;
-  recommended_action: string;
-  status: OptimizationFinding["status"];
-  apply_mode: OptimizationFinding["applyMode"];
-  suggested_edit_payload: unknown;
-  expected_outcome_metric: OptimizationFinding["expectedOutcomeMetric"] | null;
 };
 
 type ExperimentRow = {
@@ -635,44 +605,6 @@ export const supabaseRepository: LodestaRepository = {
     return row ? hydrateBundle(row) : null;
   },
 
-  async createAndStoreSite(input, options) {
-    let bundle = createSiteV3FromInput({
-      ...(await prepareIntakeInput(input, { telemetry: options?.telemetry })),
-      experimentLearnings: await this.listExperimentLearnings({ status: "active" })
-    });
-    const existingRows = await requireData<Array<{ slug: string }>>(
-      getSupabaseAdminClient().from("sites").select("slug"),
-      "Load existing slugs"
-    );
-    applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
-    bundle = withBusinessBundleFields(bundle, { businessId: bundle.business?.id });
-    const persistenceSpan = await options?.telemetry?.startSpan({
-      spanType: "persistence",
-      name: "Persist generated site",
-      inputJson: {
-        siteId: bundle.businessProfile.siteId,
-        slug: bundle.siteModel.slug,
-        businessName: bundle.businessProfile.name
-      }
-    });
-    try {
-      await persistBundle(bundle);
-      await persistenceSpan?.end({
-        outputJson: {
-          siteId: bundle.businessProfile.siteId,
-          slug: bundle.siteModel.slug,
-          versions: bundle.siteModel.versions.length,
-          forms: bundle.extensionModel.forms.length,
-          findings: bundle.optimizationFindings.length
-        }
-      });
-    } catch (error) {
-      await persistenceSpan?.fail(error);
-      throw error;
-    }
-    return bundle;
-  },
-
   async createSiteCandidate(input) {
     const now = new Date().toISOString();
     const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
@@ -869,7 +801,8 @@ export const supabaseRepository: LodestaRepository = {
     if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
 
     targetBundle.siteModel.versions.unshift(version);
-    await persistVersions(targetBundle);
+    applyAcceptedGenerationState(targetBundle, candidate.bundle);
+    await persistBundle(targetBundle, { businessId: targetBusinessId ?? candidate.businessId });
     await copySelectedArtifactsToSite(this, {
       candidateId: input.candidateId,
       siteId: input.siteId,
@@ -1035,15 +968,7 @@ export const supabaseRepository: LodestaRepository = {
           scope: artifact.scope,
           artifact_type: artifact.artifactType,
           artifact_version: artifact.artifactVersion,
-          producer_id: artifact.producerId,
-          producer_version: artifact.producerVersion,
-          vertical_playbook_version: artifact.verticalPlaybookVersion,
-          section_contract_version: artifact.sectionContractVersion,
-          site_design_system_version: artifact.siteDesignSystemVersion,
-          source_fact_ids: artifact.sourceFactIds,
-          affected_page_id: artifact.affectedPageId,
-          affected_section_id: artifact.affectedSectionId,
-          affected_slot_id: artifact.affectedSlotId,
+          provenance_json: artifact.provenance,
           content_hash: artifact.contentHash,
           payload_json: artifact.payload,
           created_at: artifact.createdAt
@@ -1119,14 +1044,6 @@ export const supabaseRepository: LodestaRepository = {
     return bundle;
   },
 
-  async runAndStoreAudit(siteId) {
-    const bundle = await this.getSiteBundle(siteId);
-    if (!bundle) return null;
-    const findings = await buildOptimizationFindings(bundle);
-    await persistFindings(siteId, findings);
-    return findings;
-  },
-
   async updateSectionProps(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
@@ -1135,28 +1052,13 @@ export const supabaseRepository: LodestaRepository = {
       return {
         ok: false as const,
         reason: guardrails.reason,
-        issues: guardrails.issues,
-        qa: guardrails.qa
+        issues: guardrails.issues
       };
     }
     const result = updateBundleSection(bundle, input);
     if (!result.ok) return result;
     await persistVersions(bundle);
-    const findings = await buildOptimizationFindings(bundle);
-    await persistFindings(input.siteId, findings);
-    return { ok: true as const, bundle: { ...bundle, optimizationFindings: findings }, guardrailWarnings: guardrails.warnings };
-  },
-
-  async updateSiteDesign(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const result = updateSiteDesignBundle(bundle, input);
-    if (!result.ok) return result;
-    const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
-    if (draft) markVersionOwnerTouched(draft);
-    await persistVersions(bundle);
-    await persistFindings(input.siteId, bundle.optimizationFindings);
-    return result;
+    return { ok: true as const, bundle, guardrailWarnings: guardrails.warnings };
   },
 
   async publishDraft(siteId) {
@@ -1177,8 +1079,6 @@ export const supabaseRepository: LodestaRepository = {
     }
     target.status = "published";
     if (target.theme) bundle.siteModel.theme = structuredClone(target.theme);
-    const findings = await buildOptimizationFindings(bundle);
-    bundle.optimizationFindings = findings;
     await persistBundle(bundle);
     return { ok: true as const, bundle };
   },
@@ -1190,8 +1090,6 @@ export const supabaseRepository: LodestaRepository = {
     if (!result.ok) return result;
     const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
     if (draft) markVersionOwnerTouched(draft);
-    const findings = await buildOptimizationFindings(bundle);
-    bundle.optimizationFindings = findings;
     await persistBundle(bundle);
     return result;
   },
@@ -1204,14 +1102,23 @@ export const supabaseRepository: LodestaRepository = {
       return {
         ok: false as const,
         reason: guardrails.reason,
-        issues: guardrails.issues,
-        qa: guardrails.qa
+        issues: guardrails.issues
       };
     }
     const updated = applyBusinessProfileUpdate(bundle, input);
     markAllVersionsOwnerTouched(updated);
     await persistBundle(updated);
     return { ok: true as const, bundle: updated, guardrailWarnings: guardrails.warnings };
+  },
+
+  async confirmSiteEvidence(input) {
+    const bundle = await this.getSiteBundle(input.siteId);
+    const ledger = bundle?.presenceAssessment.evidenceLedger;
+    if (!bundle || !ledger) return null;
+    const result = applyEvidenceConfirmation({ ledger, ...input });
+    if (!result.ok) return result;
+    await persistBundle(bundle);
+    return { ok: true as const, bundle, item: result.item };
   },
 
   async updateOwnerAssets(input) {
@@ -1594,62 +1501,6 @@ export const supabaseRepository: LodestaRepository = {
     return result;
   },
 
-  async applyFindingToDraft(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
-    if (!finding) return { ok: false as const, reason: "Finding not found." };
-    const applied = applySuggestedEdit(bundle, finding);
-    if (!applied.ok) return applied;
-    const draft = bundle.siteModel.versions.find((version) => version.status === "draft");
-    if (draft) markVersionOwnerTouched(draft);
-    await persistVersions(bundle);
-    await persistFindings(input.siteId, bundle.optimizationFindings);
-    return {
-      ok: true as const,
-      draftCreated: true,
-      qaRequired: true,
-      finding: applied.finding,
-      changeSummary: applied.changeSummary
-    };
-  },
-
-  async dismissFinding(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const finding = bundle.optimizationFindings.find((candidate) => candidate.id === input.findingId);
-    if (!finding) return { ok: false as const, reason: "Finding not found." };
-    if (finding.status === "applied") return { ok: false as const, reason: "Applied findings cannot be dismissed." };
-
-    const row = await requireData<FindingRow>(
-      getSupabaseAdminClient()
-        .from("optimization_findings")
-        .update({ status: "dismissed" })
-        .eq("site_id", input.siteId)
-        .eq("id", input.findingId)
-        .select("*")
-        .single(),
-      "Dismiss finding"
-    );
-    return { ok: true as const, finding: rowToFinding(row) };
-  },
-
-  async applyAiEdit(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const result = await applyAiEditToBundle(bundle, input.message);
-    if (result.mutated || result.operations.some((operation) => operation.type === "run_audit")) {
-      if (result.mutated && result.draftVersionId) {
-        const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
-        if (draft) markVersionOwnerTouched(draft);
-      }
-      const findings = await buildOptimizationFindings(bundle);
-      bundle.optimizationFindings = findings;
-      await persistBundle(bundle);
-      result.findings = findings;
-    }
-    return result;
-  },
 
   async createClaim(input) {
     if (!claimVerificationSatisfies(input.verificationLevel)) return null;
@@ -2342,12 +2193,6 @@ export const supabaseRepository: LodestaRepository = {
         heartbeatJob: heartbeatSupabaseJob,
         generateSite: supabaseJobGenerateSite,
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
-        runAndStoreAudit: (siteId) => this.runAndStoreAudit(siteId),
-        analyticsSummary: (siteId) => this.analyticsSummary(siteId),
-        analyzeExperiments: (siteId) => this.analyzeExperiments(siteId),
-        listExperimentLearnings: (siteId) => this.listExperimentLearnings({ siteId }),
-        listInquiries: (siteId) => this.listInquiries(siteId),
-        listClaims: (siteId) => this.listClaims(siteId),
         listInquiryEvents: (inquiryId) => this.listInquiryEvents(inquiryId),
         processInquiryNotification: (input) => this.processInquiryNotification(input),
         processInquiryAiEnrichment: (input) => this.processInquiryAiEnrichment(input),
@@ -2522,6 +2367,16 @@ function siteVersionFromCandidate(input: {
   return version;
 }
 
+function applyAcceptedGenerationState(target: SiteBundle, candidate: SiteBundle) {
+  const standardEvaluation = target.presenceAssessment.standardEvaluation;
+  target.presenceAssessment = {
+    ...structuredClone(candidate.presenceAssessment),
+    siteId: target.businessProfile.siteId,
+    ...(candidate.presenceAssessment.standardEvaluation || !standardEvaluation ? {} : { standardEvaluation })
+  };
+  target.siteModel.theme = structuredClone(candidate.siteModel.theme);
+}
+
 function nextAcceptedVersionId(bundle: SiteBundle, acceptedAt: string) {
   const seed = Date.parse(acceptedAt);
   const base = `version_${bundle.siteModel.slug}_candidate_${Number.isFinite(seed) ? seed : Date.now()}`;
@@ -2556,7 +2411,7 @@ async function copySelectedArtifactsToSite(
 
 async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
   const supabase = getSupabaseAdminClient();
-  const [profileRow, businessRow, siteLocationRows, assetRows, versionRows, formRows, findingRows, experimentRows, learningRows] = await Promise.all([
+  const [profileRow, businessRow, siteLocationRows, assetRows, versionRows, formRows, experimentRows, learningRows] = await Promise.all([
     requireData<BusinessProfileRow>(
       supabase.from("business_profiles").select("*").eq("site_id", siteRow.id).single(),
       "Load business profile"
@@ -2575,10 +2430,6 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
       "Load site versions"
     ),
     requireData<FormRow[]>(supabase.from("forms").select("*").eq("site_id", siteRow.id).order("created_at"), "Load forms"),
-    requireData<FindingRow[]>(
-      supabase.from("optimization_findings").select("*").eq("site_id", siteRow.id).order("created_at"),
-      "Load findings"
-    ),
     requireData<ExperimentRow[]>(
       supabase.from("experiments").select("*").eq("site_id", siteRow.id).order("created_at"),
       "Load experiments"
@@ -2629,7 +2480,6 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
       workflows: extensionShell.workflows ?? [],
       customBlocks: extensionShell.customBlocks ?? []
     },
-    optimizationFindings: findingRows.map(rowToFinding),
     experiments: experimentRows.map(rowToExperiment),
     experimentLearnings: learningRows.map(rowToExperimentLearning),
     presenceAssessment: {
@@ -2672,7 +2522,6 @@ async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: b
     await persistAssets(hydratedBundle.businessProfile.siteId, hydratedBundle.presenceAssessment.assetInventory ?? []);
     await persistVersions(hydratedBundle);
     await persistForms(hydratedBundle.businessProfile.siteId, hydratedBundle.extensionModel.forms);
-    await persistFindings(hydratedBundle.businessProfile.siteId, hydratedBundle.optimizationFindings);
     await persistExperiments(hydratedBundle.businessProfile.siteId, hydratedBundle.experiments);
   } catch (error) {
     if (options.cleanupOnFailure) {
@@ -2850,34 +2699,6 @@ function assertUniqueAssetIds(assets: SiteAsset[]) {
   if (duplicates.size) {
     throw new Error(`Persist site assets: duplicate asset ids in bundle: ${Array.from(duplicates).join(", ")}`);
   }
-}
-
-async function persistFindings(siteId: string, findings: OptimizationFinding[]) {
-  const supabase = getSupabaseAdminClient();
-  await requireSuccess(supabase.from("optimization_findings").delete().eq("site_id", siteId), "Clear findings");
-  if (findings.length === 0) return;
-  await requireData<FindingRow[]>(
-    supabase
-      .from("optimization_findings")
-      .insert(
-        findings.map((finding) => ({
-          id: finding.id,
-          site_id: siteId,
-          standard_criterion_id: finding.standardCriterionId,
-          category: finding.category,
-          severity: finding.severity,
-          title: finding.title,
-          rationale: finding.rationale,
-          recommended_action: finding.recommendedAction,
-          status: finding.status,
-          apply_mode: finding.applyMode,
-          suggested_edit_payload: finding.suggestedEditPayload,
-          expected_outcome_metric: finding.expectedOutcomeMetric
-        }))
-      )
-      .select("*"),
-    "Persist findings"
-  );
 }
 
 async function persistExperiments(siteId: string, experiments: Experiment[]) {
@@ -3099,15 +2920,7 @@ function rowToSiteArtifact(row: SiteArtifactRow): SiteArtifactRecord {
     scope: row.scope,
     artifactType: row.artifact_type,
     artifactVersion: row.artifact_version,
-    producerId: row.producer_id,
-    producerVersion: row.producer_version,
-    verticalPlaybookVersion: row.vertical_playbook_version ?? undefined,
-    sectionContractVersion: row.section_contract_version ?? undefined,
-    siteDesignSystemVersion: row.site_design_system_version ?? undefined,
-    sourceFactIds: row.source_fact_ids,
-    affectedPageId: row.affected_page_id ?? undefined,
-    affectedSectionId: row.affected_section_id ?? undefined,
-    affectedSlotId: row.affected_slot_id ?? undefined,
+    provenance: row.provenance_json,
     contentHash: row.content_hash,
     payload: asRecord(row.payload_json),
     createdAt: row.created_at
@@ -3121,23 +2934,6 @@ function rowToPreviewToken(row: PreviewTokenRow): PreviewToken {
     versionId: row.version_id ?? undefined,
     expiresAt: row.expires_at ?? undefined,
     createdAt: row.created_at
-  };
-}
-
-function rowToFinding(row: FindingRow): OptimizationFinding {
-  return {
-    id: row.id,
-    siteId: row.site_id,
-    standardCriterionId: row.standard_criterion_id ?? undefined,
-    category: row.category,
-    severity: row.severity,
-    title: row.title,
-    rationale: row.rationale,
-    recommendedAction: row.recommended_action,
-    status: row.status,
-    applyMode: row.apply_mode,
-    suggestedEditPayload: row.suggested_edit_payload as Record<string, unknown> | undefined,
-    expectedOutcomeMetric: row.expected_outcome_metric ?? undefined
   };
 }
 
@@ -3410,23 +3206,6 @@ async function applyOutboundEventToProspectRow(prospectId: string, event: Outbou
       .single(),
     "Update outbound prospect from event"
   );
-}
-
-async function buildOptimizationFindings(bundle: SiteBundle) {
-  const rows = await requireData<AnalyticsRow[]>(
-    getSupabaseAdminClient()
-      .from("analytics_events")
-      .select("*")
-      .eq("site_id", bundle.businessProfile.siteId)
-      .order("occurred_at", { ascending: false }),
-    "List analytics events for optimization"
-  );
-  const events = rows.map(rowToAnalyticsEvent);
-  const nextFindings = mergeFindings(
-    runAudit(bundle.businessProfile, bundle.siteModel),
-    recommendFromAnalytics(bundle, summarizeAnalytics(bundle.businessProfile.siteId, events))
-  );
-  return preserveFindingLifecycle(nextFindings, bundle.optimizationFindings);
 }
 
 function rowToJob(row: JobRow): JobRecord {

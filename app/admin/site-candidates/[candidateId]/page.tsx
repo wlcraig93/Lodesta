@@ -8,8 +8,6 @@ import { CandidateReviewPane } from "@/components/admin/CandidateReviewPane";
 import { CandidateOperatorDecisionForm } from "@/components/admin/CandidateOperatorDecisionForm";
 import { CopyIdTag } from "@/components/admin/CopyIdTag";
 import { RegenerateCandidateButton } from "@/components/admin/RegenerateCandidateButton";
-import { parseAdHocDesignExampleArtifactV1 } from "@/lib/ad-hoc-design-examples";
-import { designSystemGateReviewFixtureByCandidateIdV1 } from "@/lib/design-system-gate-review-fixtures-v1";
 import {
   latestOperatorDecisionArtifactV1,
   operatorDecisionPassedV1,
@@ -64,13 +62,12 @@ export default async function AdminSiteCandidateDetailPage({
   ]);
 
   const queueNav = buildQueueNav(queue.summaries, candidate.id);
-  const designSystemGateFixture = designSystemGateReviewFixtureByCandidateIdV1(candidate.id);
   const operatorDecisionArtifact = latestOperatorDecisionArtifactV1(candidateArtifacts);
   const operatorDecision = operatorDecisionArtifact ? parseOperatorDecisionArtifactV1(operatorDecisionArtifact) : undefined;
   const operatorApproved = operatorDecisionPassedV1(operatorDecision);
   const acceptDisabledReason =
     candidate.status !== "accepted" && schemaIssue
-      ? `Stored version schema is stale (${schemaIssue}); run the backfill or regenerate before promotion.`
+      ? `Stored version schema is stale (${schemaIssue}); regenerate before promotion.`
     : candidate.status !== "accepted" && (candidate.status === "blocked" || readiness !== "ready")
       ? `Candidate QA is ${readiness}; fix blockers before promotion.`
       : candidate.status !== "accepted" && !operatorApproved
@@ -84,28 +81,9 @@ export default async function AdminSiteCandidateDetailPage({
         ...qa.warnings.map((warning) => ({ id: warning.id, severity: "warning" as const, title: warning.title, detail: warning.detail }))
       ]
     : [];
-  const visualQa = qa?.visualQa;
-  const siteDossier = bundle.presenceAssessment.siteDossierV1;
+  const visualQa = bundle.presenceAssessment.generationJudge;
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
   const timelineSpans = runDetail ? topLevelSpans(runDetail.spans) : [];
-  const designExamples = candidateArtifacts
-    .map((artifact) => {
-      const payload = parseAdHocDesignExampleArtifactV1(artifact);
-      if (!payload) return undefined;
-      return {
-        artifactId: artifact.id,
-        exampleId: payload.exampleId,
-        title: payload.title,
-        direction: payload.direction,
-        mediaMode: payload.mediaMode,
-        status: payload.status,
-        scores: {
-          visualQuality: payload.rubric.visualQuality,
-          noMediaCompleteness: payload.rubric.noMediaCompleteness
-        }
-      };
-    })
-    .filter((example): example is NonNullable<typeof example> => Boolean(example));
 
   return (
     <main className="admin-page admin-candidate-detail-page">
@@ -127,15 +105,6 @@ export default async function AdminSiteCandidateDetailPage({
           )}
         </div>
         <div className="candidate-review-header-right">
-          {designSystemGateFixture ? (
-            <AdminButtonLink
-              variant="secondary"
-              size="sm"
-              href={`/admin/site-candidates/${candidate.id}/design-system-review`}
-            >
-              Compare four ways
-            </AdminButtonLink>
-          ) : null}
           {queueNav ? (
             <nav className="candidate-review-queue-nav" aria-label="Review queue position">
               {queueNav.previousId ? (
@@ -161,6 +130,7 @@ export default async function AdminSiteCandidateDetailPage({
             candidateId={candidate.id}
             accepted={candidate.status === "accepted"}
             disabledReason={acceptDisabledReason}
+            intendedSiteId={candidate.intendedSiteId}
           />
         </div>
       </header>
@@ -171,7 +141,6 @@ export default async function AdminSiteCandidateDetailPage({
             candidateId={candidate.id}
             businessName={candidate.businessName}
             pages={previewAvailable && selectedVersion ? assertSiteVersionV3(selectedVersion, "candidate review version").pageComposition.pages.map((page) => ({ slug: page.slug, title: page.title })) : []}
-            designExamples={designExamples}
             previewAvailable={previewAvailable}
             fallbackSlot={<PreviewFallback candidate={candidate} version={selectedVersion} schemaIssue={schemaIssue} />}
             reportSlot={
@@ -239,15 +208,6 @@ export default async function AdminSiteCandidateDetailPage({
           </section>
 
           <section className="candidate-rail-section">
-            <p className="candidate-rail-label">Site dossier</p>
-            {siteDossier ? (
-              <DossierSummary dossier={siteDossier} />
-            ) : (
-              <p className="candidate-rail-footnote">No dossier cache recorded for this candidate; regenerate to populate it.</p>
-            )}
-          </section>
-
-          <section className="candidate-rail-section">
             <p className="candidate-rail-label">Operator decision</p>
             <CandidateOperatorDecisionForm
               candidateId={candidate.id}
@@ -281,9 +241,10 @@ export default async function AdminSiteCandidateDetailPage({
               candidateId={candidate.id}
               accepted={candidate.status === "accepted"}
               disabledReason={acceptDisabledReason}
+              intendedSiteId={candidate.intendedSiteId}
             />
             {acceptDisabledReason ? <p className="candidate-rail-footnote">{acceptDisabledReason}</p> : null}
-            {candidate.sourceUrl ? <RegenerateCandidateButton sourceUrl={candidate.sourceUrl} /> : null}
+            {candidate.sourceUrl ? <RegenerateCandidateButton sourceUrl={candidate.sourceUrl} intendedSiteId={candidate.intendedSiteId} /> : null}
           </section>
         </aside>
       </div>
@@ -324,7 +285,7 @@ function PreviewFallback({
         <h2>Stored version schema is stale</h2>
         <p className="muted">
           This candidate ({candidate.candidateSlug}) was generated before the latest stored-version schema change: {schemaIssue}.
-          Run <code>npm run backfill:strip-pages-projection</code> or regenerate the candidate.
+          Regenerate the candidate through the canonical pipeline.
         </p>
       </div>
     );
@@ -337,29 +298,6 @@ function PreviewFallback({
         Candidate previews render layout-v3 only. Regenerate this pre-cutover candidate ({candidate.candidateSlug}) before judging
         customer-site output.
       </p>
-    </div>
-  );
-}
-
-function DossierSummary({
-  dossier
-}: {
-  dossier: NonNullable<SiteCandidateRecord["bundle"]["presenceAssessment"]["siteDossierV1"]>;
-}) {
-  const highlights = dossier.sections
-    .filter((section) => ["identity", "source-pages", "understanding", "brand-assets"].includes(section.id))
-    .slice(0, 4);
-  return (
-    <div className="candidate-dossier-summary">
-      <p className="candidate-rail-footnote">
-        {dossier.sourcePageCount} pages · {dossier.proseCharCount.toLocaleString()} prose chars · {dossier.reviewEvidence.length} private review evidence signal{dossier.reviewEvidence.length === 1 ? "" : "s"}
-      </p>
-      {highlights.map((section) => (
-        <details key={section.id} className="candidate-dossier-section">
-          <summary>{section.title}</summary>
-          <pre>{section.body.slice(0, 1200)}</pre>
-        </details>
-      ))}
     </div>
   );
 }

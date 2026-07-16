@@ -31,13 +31,13 @@ async function main() {
       requireArgs(command, args, 1);
       await printJson(post("/api/presence/assess", { url: args[0] }));
       return;
-    case "run-audit":
+    case "run-objective-qa":
       requireArgs(command, args, 1);
-      await printJson(post("/api/audits/run", { siteId: args[0] }));
+      await printJson(post("/api/sites/qa", { siteId: args[0], versionId: args[1] }));
       return;
-    case "run-qa":
+    case "regenerate-site":
       requireArgs(command, args, 1);
-      await printJson(post("/api/qa/run", { siteId: args[0], versionStatus: args[1] === "draft" ? "draft" : "published" }));
+      await printJson(post("/api/sites/regenerate", { siteId: args[0] }));
       return;
     case "publish":
       requireArgs(command, args, 1);
@@ -46,14 +46,6 @@ async function main() {
     case "restore-version":
       requireArgs(command, args, 2);
       await printJson(post("/api/sites/versions", { siteId: args[0], versionId: args[1], action: "restore_draft" }));
-      return;
-    case "apply-safe-findings":
-      requireArgs(command, args, 1);
-      await printJson(post("/api/action-list/apply-all", { siteId: args[0], mode: args[1] === "qa" ? "qa" : "draft" }));
-      return;
-    case "dismiss-finding":
-      requireArgs(command, args, 2);
-      await printJson(post("/api/action-list/dismiss", { siteId: args[0], findingId: args[1] }));
       return;
     case "create-preview":
       requireArgs(command, args, 1);
@@ -90,13 +82,6 @@ async function main() {
       requireArgs(command, args, 1);
       const payload = parseImportBatchPayload(args);
       const job = await post("/api/jobs", { kind: "import_batch", payload });
-      const processed = await post("/api/jobs/process", { limit: 1 });
-      await printJson(Promise.resolve({ job, processed }));
-      return;
-    }
-    case "monthly-action-list": {
-      requireArgs(command, args, 1);
-      const job = await post("/api/jobs", { kind: "monthly_action_list", payload: { siteId: args[0] } });
       const processed = await post("/api/jobs/process", { limit: 1 });
       await printJson(Promise.resolve({ job, processed }));
       return;
@@ -215,11 +200,9 @@ function isHttpUrl(value) {
 
 function parseScheduleArgs(args) {
   const payload = {};
-  const task = args.find((arg) => ["monthly_action_lists", "launch_maintenance"].includes(arg));
+  const task = args.find((arg) => arg === "launch_maintenance");
   if (task) payload.task = task;
-  const siteIds = args.filter(
-    (arg) => !["monthly_action_lists", "launch_maintenance"].includes(arg)
-  );
+  const siteIds = args.filter((arg) => arg !== "launch_maintenance");
   if (siteIds.length) payload.siteIds = siteIds;
   return payload;
 }
@@ -245,12 +228,10 @@ Commands:
   generate-draft <prompt>                  Queue async generation from a prompt
   generation-job-status <jobId>            Inspect an async generation job
   run-presence <url>                       Crawl and score an existing URL
-  run-audit <siteId>                       Run the optimization audit
-  run-qa <siteId> [published|draft]         Run QA checks
+  run-objective-qa <siteId> [versionId]    Run the canonical browser gate
+  regenerate-site <siteId>                 Queue explicit structural regeneration
   publish <siteId>                         Confirm and publish the current QA-passing draft
   restore-version <siteId> <versionId>      Restore a historical version into a QA-checkable draft
-  apply-safe-findings <siteId> [qa]         Apply auto-fix/one-click findings and optionally run QA
-  dismiss-finding <siteId> <findingId>      Dismiss an action-list finding after review
   create-preview <siteId>                  Create a tokenized noindex preview URL
   connect-domain <siteId> <hostname>        Register a custom hostname and print verification
   refresh-domain <domainId>                 Refresh custom-domain provider status
@@ -260,7 +241,6 @@ Commands:
   adopt-experiment-learning <siteId> <expId> Adopt a detected experiment winner into generation defaults
   enqueue-job <kind> [key=value|json]       Queue a worker job
   import-batch <url...|json>                Import URLs, generate sites, and create previews
-  monthly-action-list <siteId>              Queue and process a site action-list job
   create-outbound-campaign <name>           Create a running direct-mail test campaign
   add-outbound-prospect <campaignId> <json> Add or update an outbound prospect
   record-outbound-event <campaignId> <json> Record outbound test event

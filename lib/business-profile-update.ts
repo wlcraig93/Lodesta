@@ -1,8 +1,6 @@
 import type { SiteBundle } from "./models";
-import { runAudit } from "./audit";
 import { applyVerifiedFacts } from "./fact-verification";
 import { createBusinessFactGraph } from "./business-fact-graph";
-import { applyGeneratedSiteV3 } from "./generated-site-v3-pipeline";
 import { markRegenerableArtifactProvenanceStaleV1 } from "./regenerable-artifact-provenance";
 
 export type BusinessProfileUpdateInput = {
@@ -92,25 +90,26 @@ export function applyBusinessProfileUpdate(bundle: SiteBundle, input: BusinessPr
           )
         }
       : undefined;
-    if (bundle.presenceAssessment.siteDossierV1) {
-      bundle.presenceAssessment.siteDossierV1 = {
-        ...bundle.presenceAssessment.siteDossierV1,
-        stale: true
-      };
-    }
-    bundle.presenceAssessment.siteDirectorPlanV1 = undefined;
-    bundle.presenceAssessment.generationPlanningSource = "deterministic_design_system";
     bundle.presenceAssessment.businessFactGraph = createBusinessFactGraph({
       business: profile,
       presence: bundle.presenceAssessment
     });
-    bundle.presenceAssessment.generatedCopyDeck = undefined;
-    const recompile = applyGeneratedSiteV3({ bundle });
+    bundle.presenceAssessment.generationPlan = bundle.presenceAssessment.generationPlan
+      ? {
+          ...bundle.presenceAssessment.generationPlan,
+          provenance: markRegenerableArtifactProvenanceStaleV1(bundle.presenceAssessment.generationPlan.provenance, staleReason)!
+        }
+      : undefined;
+    bundle.presenceAssessment.siteCopy = bundle.presenceAssessment.siteCopy
+      ? {
+          ...bundle.presenceAssessment.siteCopy,
+          provenance: markRegenerableArtifactProvenanceStaleV1(bundle.presenceAssessment.siteCopy.provenance, staleReason)!
+        }
+      : undefined;
     bundle.presenceAssessment.technicalNotes.push(
-      `Owner business facts changed (${changedFacts.join(", ")}); source copy was invalidated and ${recompile.reason}`
+      `Owner business facts changed (${changedFacts.join(", ")}); explicit site regeneration is required.`
     );
   }
-  bundle.optimizationFindings = runAudit(bundle.businessProfile, bundle.siteModel);
   return bundle;
 }
 

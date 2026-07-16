@@ -16,7 +16,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run install:browsers
       - run: npm run typecheck
       - run: npm run verify:evidence-ledger
       - run: npm run verify:canonical-generation
+      - run: npm run verify:canonical-render-browser
       - run: npm run verify:generation-architecture

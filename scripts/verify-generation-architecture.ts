@@ -7,9 +7,11 @@ const canonicalFiles = [
   "lib/source-text-blocks.ts",
   "lib/evidence-ledger.ts",
   "lib/generation-contracts.ts",
+  "lib/business-fact-normalization.ts",
   "lib/vertical-packs.ts",
   "lib/site-copy.ts",
-  "lib/site-compiler.ts"
+  "lib/site-compiler.ts",
+  "lib/generation-objective-gate.ts"
 ];
 const forbiddenImports = [
   "deterministic-site-director-plan-v1",

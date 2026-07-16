@@ -8587,13 +8587,13 @@ a.candidate-review-source:hover {
   }
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"] {
+.public-site-v3[data-art-recipe="precision_shop_editorial"] {
   --site-canonical-tight-pad: clamp(34px, 4.6vw, 54px);
   --site-canonical-standard-pad: clamp(44px, 5.6vw, 72px);
   --site-canonical-deep-pad: clamp(58px, 7vw, 88px);
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="eligibility_band"]
   h2 {
   font-size: clamp(3rem, 5.2vw, 4.8rem);
@@ -8601,7 +8601,7 @@ a.candidate-review-source:hover {
   max-width: 13ch;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="service_index"]
   h2 {
   font-size: clamp(2.8rem, 4.6vw, 4rem);
@@ -8609,7 +8609,7 @@ a.candidate-review-source:hover {
   max-width: 16ch;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="numbered_steps"]
   h2 {
   font-size: clamp(3rem, 5vw, 4.5rem);
@@ -8617,7 +8617,7 @@ a.candidate-review-source:hover {
   max-width: 13ch;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3:is(
     [data-section-template="quote_wall"],
     [data-section-template="location_showcase"],
@@ -8630,11 +8630,11 @@ a.candidate-review-source:hover {
   max-width: 16ch;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="service_index"]
   .site-visual-list-v3
   article,
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="numbered_steps"]
   .site-visual-list-v3
   article {
@@ -9629,7 +9629,7 @@ a.candidate-review-source:hover {
 }
 
 @media (min-width: 760px) and (max-width: 1079px) {
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="hero_split"]
     .site-visual-block-v3-hero_copy {
     grid-column: 1 / -1;
@@ -9637,7 +9637,7 @@ a.candidate-review-source:hover {
     max-width: 720px;
   }
 
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="hero_split"]
     .site-visual-block-v3-hero_media {
     grid-column: 1 / -1;
@@ -9647,10 +9647,10 @@ a.candidate-review-source:hover {
     transform: none;
   }
 
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="hero_split"]
     .site-visual-media-v3[data-presentation="single"],
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="hero_split"]
     .site-visual-media-v3[data-presentation="single"]
     figure {
@@ -9660,7 +9660,7 @@ a.candidate-review-source:hover {
     min-height: 0;
   }
 
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="hero_split"]
     .site-visual-media-v3[data-presentation="single"]
     img {
@@ -9670,7 +9670,7 @@ a.candidate-review-source:hover {
 }
 
 @media (max-width: 759px) {
-  .public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+  .public-site-v3[data-art-recipe="precision_shop_editorial"]
     .site-visual-section-v3[data-section-template="editorial_statement"]
     h2 {
     font-size: clamp(2.35rem, 11vw, 2.65rem);
@@ -12099,7 +12099,7 @@ a.candidate-review-source:hover {
   text-underline-offset: 0.25em;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="eligibility_band"]
   .site-visual-facts-v3
   > * {
@@ -12112,7 +12112,7 @@ a.candidate-review-source:hover {
   padding-right: 0;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="service_index"]
   .site-visual-list-v3
   article {
@@ -12125,14 +12125,14 @@ a.candidate-review-source:hover {
   padding-right: 0;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="service_index"]
   .site-visual-list-v3
   article:last-child {
   border-bottom: 1px solid var(--site-section-line, var(--site-v3-line));
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="numbered_steps"][data-step-treatment="numbered_ledger"] {
   background-image: repeating-linear-gradient(
     90deg,
@@ -12141,7 +12141,7 @@ a.candidate-review-source:hover {
   );
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="quote_wall"]
   .site-visual-list-v3[data-presentation="action_tiles"]
   article {
@@ -12156,7 +12156,7 @@ a.candidate-review-source:hover {
   padding-right: 0;
 }
 
-.public-site-v3[data-art-recipe$=":precision_shop_editorial"]
+.public-site-v3[data-art-recipe="precision_shop_editorial"]
   .site-visual-section-v3[data-section-template="quote_wall"]
   .site-visual-list-v3[data-presentation="action_tiles"]
   article::before {
@@ -17597,6 +17597,14 @@ a.candidate-review-source:hover {
     p {
     max-width: none;
     overflow-wrap: anywhere;
+  }
+}
+
+/* Canonical review walls prioritize readable source quotes over card count. */
+@media (min-width: 760px) {
+  .site-visual-section-v3[data-section-template="quote_wall"]
+    .site-visual-list-v3[data-presentation="action_tiles"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

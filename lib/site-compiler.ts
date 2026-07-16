@@ -16,6 +16,7 @@ import {
   type VisualFactV3,
   type VisualSectionV3
 } from "./generated-site-v3-visual-controls";
+import { canonicalBusinessHours } from "./business-fact-normalization";
 
 export function compileSite(input: {
   business: BusinessProfile;
@@ -120,7 +121,7 @@ function compileSection(input: {
     visual = {
       version: "visual-section-v3",
       templateId: "hero_split",
-      options: { background: { kind: "solid", token: "page" }, heroLayout: "editorial_overlap", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "bleed", headlineScale: "display" },
+      options: { background: { kind: "solid", token: "page" }, heroLayout: "classic_split", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "rounded_panel", headlineScale: "compact" },
       slots: {
         copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business) },
         media: { items: [{ url: asset.url, label: asset.alt, cropIntent: "subject" }], caption: "none" }
@@ -131,7 +132,7 @@ function compileSection(input: {
     visual = {
       version: "visual-section-v3",
       templateId: "hero_statement",
-      options: { align: "left", background, heroLayout: "no_media_editorial", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "flush", headlineScale: "display" },
+      options: { align: "left", background, heroLayout: "no_media_editorial", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "flush", headlineScale: "compact" },
       slots: { copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business) } },
       anchorId: section.id === "home.hero" ? "top" : undefined
     };
@@ -141,7 +142,8 @@ function compileSection(input: {
   } else if (section.templateId === "service_index") {
     visual = { version: "visual-section-v3", templateId: "service_index", options: { background, serviceIndexTreatment: "featured_services_plus_all" }, slots: { intro: { heading: heading(), body: body() }, items: { items: indexedItems(input.copy, prefix) } }, anchorId: "services" };
   } else if (section.templateId === "numbered_steps") {
-    visual = { version: "visual-section-v3", templateId: "numbered_steps", options: { background, stepTreatment: "numbered_ledger", orientation: "ledger", numberStyle: "oversized", mediaMode: "none", stepDensity: "balanced" }, slots: { intro: { heading: heading(), body: body() }, items: { items: indexedItems(input.copy, prefix) } }, anchorId: "process" };
+    const items = indexedItems(input.copy, prefix).map((item, index) => ({ ...item, meta: String(index + 1).padStart(2, "0") }));
+    visual = { version: "visual-section-v3", templateId: "numbered_steps", options: { background, stepTreatment: "numbered_ledger", orientation: "ledger", numberStyle: "oversized", mediaMode: "none", stepDensity: "balanced" }, slots: { intro: { heading: heading(), body: body() }, items: { items } }, anchorId: "process" };
   } else if (section.templateId === "quote_wall") {
     const items = section.evidenceIds.flatMap((id) => {
       const item = input.evidence.items.find((candidate) => candidate.id === id && candidate.kind === "testimonial" && candidate.publicText);
@@ -208,7 +210,7 @@ function contactFacts(business: BusinessProfile): VisualFactV3[] {
   const facts: VisualFactV3[] = [
     ...(business.phone ? [{ label: "Phone", value: business.phone, href: `tel:${business.phone.replace(/[^\d+]/g, "")}` }] : []),
     ...(business.address ? [{ label: "Address", value: addressLine(business) }] : []),
-    ...(business.hours ? [{ label: "Hours", value: Object.entries(business.hours).slice(0, 2).map(([day, hours]) => `${day}: ${hours}`).join("; ") }] : []),
+    ...(canonicalBusinessHours(business.hours).length ? [{ label: "Hours", value: canonicalBusinessHours(business.hours).slice(0, 2).map(({ label, value }) => `${label}: ${value}`).join("; ") }] : []),
     ...(business.email ? [{ label: "Email", value: business.email, href: `mailto:${business.email}` }] : []),
     ...business.serviceAreas.slice(0, 1).map((value) => ({ label: "Service area", value })),
     ...business.services.slice(0, 2).map((value) => ({ label: "Service", value })),
@@ -228,7 +230,7 @@ function locationForBusiness(business: BusinessProfile): RenderableLocationV3 {
     localityLine: [business.address?.city, business.address?.region, business.address?.postalCode].filter(Boolean).join(", "),
     phone: business.phone,
     email: business.email,
-    hours: Object.entries(business.hours ?? {}).map(([label, value]) => ({ label, value })),
+    hours: canonicalBusinessHours(business.hours),
     serviceAreas: business.serviceAreas,
     directionsUrl: business.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addressLine(business))}` : undefined,
     mapEmbedIntent: business.address ? { kind: "address", address: addressLine(business) } : undefined

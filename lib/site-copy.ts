@@ -210,23 +210,26 @@ export function createFixtureSiteCopy(plan: GenerationPlan, business: BusinessPr
 }
 
 function fixtureValue(slotId: string, role: string, business: BusinessProfile, services: string[], pageService?: string) {
-  const location = business.address?.city ?? business.serviceAreas[0] ?? "the local area";
+  const location = business.address?.city ?? business.serviceAreas[0];
   const index = Number(slotId.match(/\.(\d+)\.(?:title|body|question|answer)$/)?.[1] ?? 0);
   const service = pageService ?? services[index % Math.max(services.length, 1)] ?? "Auto body repair";
   if (slotId.endsWith("hero.eyebrow")) return pageService ? `${business.name} service` : business.name;
-  if (slotId.endsWith("hero.heading")) return pageService ? `${pageService} in ${location}` : `Auto body repair in ${location}`;
+  if (slotId.endsWith("hero.heading")) {
+    if (pageService) return location ? `${pageService} in ${location}` : `${pageService} from ${business.name}`;
+    return location ? `Auto body repair in ${location}` : `${business.name} auto body repair`;
+  }
   if (slotId.endsWith("hero.body")) return pageService ? `Understand the damage, repair approach, and next step for ${pageService.toLowerCase()} at ${business.name}.` : `${business.name} handles ${services.slice(0, 3).join(", ").toLowerCase()} with a clear estimate and repair plan.`;
   if (slotId.includes("services") && slotId.endsWith("heading")) return "Repairs matched to the damage";
-  if (slotId.includes("services") && slotId.endsWith(".body")) return `Start with the visible damage and we will help identify the right repair path.`;
+  if (slotId.includes("services") && slotId.endsWith(".body")) return "Start with the visible damage and the shop can identify the repair work it needs.";
   if (slotId.includes("services") && slotId.endsWith(".title")) return service;
   if (slotId.includes("services") && /\.\d+\.body$/.test(slotId)) return `Ask about ${service.toLowerCase()}, the estimate, and what the repair will involve.`;
-  if (slotId.includes("process") && slotId.endsWith("heading")) return "A repair path you can follow";
+  if (slotId.includes("process") && slotId.endsWith("heading")) return "From damage review to pickup";
   if (slotId.includes("process") && slotId.endsWith(".body")) return "Each step keeps the estimate, repair decision, and pickup expectations visible.";
   if (slotId.includes("process") && slotId.endsWith(".title")) return ["Share the damage", "Review the estimate", "Approve the plan", "Inspect and pick up"][index] ?? "Confirm the next step";
   if (slotId.includes("process") && /\.\d+\.body$/.test(slotId)) return ["Send photos or arrange an in-person inspection.", "Review the documented damage and proposed work.", "Confirm the repair scope before work begins.", "Review the finished repair and pickup details."][index] ?? "Confirm details with the shop.";
   if (slotId.includes("testimonials") && slotId.endsWith("heading")) return "What customers said";
   if (slotId.includes("testimonials")) return "Exact comments retained from the business website.";
-  if (slotId.includes("location") && slotId.endsWith("heading")) return `Visit the shop in ${location}`;
+  if (slotId.includes("location") && slotId.endsWith("heading")) return location ? `Visit the shop in ${location}` : `Visit ${business.name}`;
   if (slotId.includes("location")) return "Check the address, hours, and best way to reach the shop before you go.";
   if (slotId.includes("faq") && slotId.endsWith("heading")) return pageService ? `${pageService} questions` : "Before you request an estimate";
   if (slotId.includes("faq") && slotId.endsWith(".body")) return "Direct answers about estimates, repair scope, timing, and insurance paperwork.";

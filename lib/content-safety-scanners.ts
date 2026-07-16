@@ -46,7 +46,7 @@ const sensitiveClaimPatterns: Array<SensitiveClaimMatch & { pattern: RegExp }> =
   { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(cure|diagnos(?:e|is)|treats? disease|treatment|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
   { category: "pricing", label: "pricing claim", severity: "warning", pattern: /\b(best prices?|free estimate|free quote|no out of pocket|affordable)\b/i, requiredEvidence: "pricing" },
   { category: "reviews", label: "top-rated review claim", severity: "warning", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
-  { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /\b(best|#\s?1|number\s?one)\b/i, requiredEvidence: "proof" },
+  { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bbest\b(?!\s+(?:way|time|place)\b)|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
   { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
   { category: "marketing", label: "market leadership claim", severity: "warning", pattern: /\b(leading|most trusted|premier)\b/i, requiredEvidence: "proof" },
   { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" }

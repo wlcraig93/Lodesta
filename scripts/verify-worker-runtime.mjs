@@ -121,6 +121,7 @@ await executeJob(generationJob("snapshot", {
 assert.equal(snapshotGenerationOptions.mode, "snapshot");
 assert.equal(snapshotGenerationOptions.inputSnapshot.id, sampleGenerationInputSnapshot.id);
 assert.equal("input" in snapshotGenerationOptions, false);
+assert.equal("modelFallbackPolicy" in snapshotGenerationOptions, false);
 
 await assert.rejects(
   () =>

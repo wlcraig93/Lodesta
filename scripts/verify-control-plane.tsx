@@ -17,7 +17,7 @@ import {
   validateControlPlaneChange
 } from "../lib/control-plane";
 import type { AssetRevisionV1, BusinessAssetV1, BusinessProofV1 } from "../lib/control-plane-contracts";
-import { createFixtureSiteCopy } from "../lib/site-copy";
+import { createTestSiteCopy } from "../lib/test-support/site-copy";
 import { compileSite } from "../lib/site-compiler";
 import { SiteRenderer } from "../lib/site-renderer";
 import { copyCandidateArtifactToSite } from "../lib/site-artifacts";
@@ -521,7 +521,7 @@ assert.equal(immutableLocationEnvelope.locations?.[0]?.googlePlaceId, "place_sna
 assert.equal(immutableLocationEnvelope.locationBindings?.[0]?.role, "primary");
 
 const candidatePlan = buildGenerationPlan({ snapshot: candidateSnapshot, evidence: candidateSnapshot.evidenceManifest, createdAt: now });
-const candidateCopy = createFixtureSiteCopy(candidatePlan, candidateSnapshot);
+const candidateCopy = createTestSiteCopy(candidatePlan, candidateSnapshot);
 const candidateVersion = compileSite({ snapshot: candidateSnapshot, plan: candidatePlan, copy: candidateCopy, createdAt: now });
 saveSiteVersion({ siteId: sampleBusinessProfile.siteId, version: candidateVersion });
 const protectedPublish = publishVersion({ siteId: sampleBusinessProfile.siteId, versionId: candidateVersion.id });

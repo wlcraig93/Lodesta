@@ -26,7 +26,7 @@
     "verify:market-benchmark-fixtures": "node --import tsx scripts/verify-market-benchmark-fixtures.ts",
     "verify:evidence-manifest": "node --import tsx scripts/verify-generation-evidence-manifest.ts",
     "verify:canonical-generation": "node --import tsx scripts/verify-canonical-generation.ts",
-    "freeze:generation-bakeoff": "node --import tsx scripts/freeze-generation-bakeoff-fixtures.ts",
+    "freeze:generation-inputs": "node --import tsx scripts/freeze-generation-inputs.ts",
     "verify:control-plane": "node --import tsx scripts/verify-control-plane.tsx",
     "verify:canonical-render-browser": "node --import tsx scripts/verify-canonical-render-browser.ts",
     "verify:render-browser": "node --import tsx scripts/verify-canonical-render-browser.ts",

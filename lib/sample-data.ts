@@ -1,7 +1,7 @@
 import type { BusinessProfile, ExtensionModel, PresenceAssessment, SiteAsset, SiteBundle, SiteModel, SiteVersion } from "./models";
 import { composeGenerationEvidenceManifestV1 } from "./generation-evidence-manifest";
 import { buildGenerationPlan } from "./vertical-packs";
-import { createFixtureSiteCopy } from "./site-copy";
+import { createTestSiteCopy } from "./test-support/site-copy";
 import { compileSite } from "./site-compiler";
 import { createDefaultSiteIntent, createGenerationInputSnapshot } from "./control-plane";
 import type { CanonicalBusinessStateV1 } from "./control-plane";
@@ -130,7 +130,7 @@ export const sampleGenerationPlan = buildGenerationPlan({
   evidence: sampleEvidence,
   createdAt: observedAt
 });
-export const sampleSiteCopy = createFixtureSiteCopy(sampleGenerationPlan, sampleGenerationInputSnapshot);
+export const sampleSiteCopy = createTestSiteCopy(sampleGenerationPlan, sampleGenerationInputSnapshot);
 const sampleVersion = compileSite({
   snapshot: sampleGenerationInputSnapshot,
   plan: sampleGenerationPlan,

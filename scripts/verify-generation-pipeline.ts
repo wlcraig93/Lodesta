@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { ObjectiveGenerationGateResult } from "../lib/generation-objective-gate";
 import type { GenerationJudgePacket, GenerationJudgeResult } from "../lib/generation-judge";
-import { createFixtureSiteCopy } from "../lib/site-copy";
+import { createTestSiteCopy } from "../lib/test-support/site-copy";
 import {
   runCanonicalGenerationPipeline,
   validateGenerationPipelineTrace,
@@ -65,7 +65,7 @@ async function runScenario(
   return runCanonicalGenerationPipeline({
     snapshot: fixture.snapshot,
     dependencies: {
-      copy: async ({ snapshot, plan }) => ({ copy: createFixtureSiteCopy(plan, snapshot), attempts: 1 }),
+      copy: async ({ snapshot, plan }) => ({ copy: createTestSiteCopy(plan, snapshot), attempts: 1 }),
       gate: async ({ qaRunId }) => passingGate(qaRunId),
       packet: async ({ snapshot, plan }) => ({
         availableActions: ["copy", ...(plan.designSystem === "precision_shop_editorial" || snapshot.assets.length ? ["alternate_system" as const] : []), "operator_review"],

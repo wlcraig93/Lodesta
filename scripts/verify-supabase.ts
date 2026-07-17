@@ -9,7 +9,7 @@ import { sampleSiteBundle } from "../lib/sample-data";
 import { applySiteIdentity } from "../lib/site-identity";
 import { generationSnapshotFromIntakeBundle } from "../lib/intake-generation-snapshot";
 import { buildGenerationPlan } from "../lib/vertical-packs";
-import { createFixtureSiteCopy } from "../lib/site-copy";
+import { createTestSiteCopy } from "../lib/test-support/site-copy";
 import { compileSite } from "../lib/site-compiler";
 import { submitControlPlaneChange } from "../lib/control-plane-service";
 
@@ -90,7 +90,7 @@ async function main() {
     snapshot: canonicalInput.snapshot,
     evidence: canonicalInput.snapshot.evidenceManifest
   });
-  const candidateCopy = createFixtureSiteCopy(candidatePlan, canonicalInput.snapshot);
+  const candidateCopy = createTestSiteCopy(candidatePlan, canonicalInput.snapshot);
   const candidateVersion = compileSite({
     snapshot: canonicalInput.snapshot,
     plan: candidatePlan,

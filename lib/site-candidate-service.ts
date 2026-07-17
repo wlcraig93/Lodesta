@@ -9,9 +9,7 @@ import { castScrapedPhotos, scrapeAndStoreBusinessMedia } from "./scraped-media"
 import { analyzeBusinessAssetsV1 } from "./asset-analysis-v1";
 import { extractImagePalette } from "./image-palette";
 import { runCanonicalGenerationPipeline, type CanonicalGenerationResult } from "./generation-pipeline";
-import { createFixtureSiteCopy } from "./site-copy";
 import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
-import { generationJudgeSchemaVersion, type GenerationJudgeResult } from "./generation-judge";
 import { generationQaFromObjectiveGate } from "./generation-objective-gate";
 import { persistPrimaryQaScreenshot } from "./candidate-screenshot";
 import { normalizePublicFetchUrlInput } from "./url-safety";
@@ -52,8 +50,6 @@ export type GenerateSitePreviewOptions = {
   origin?: string;
 };
 
-export type ModelFallbackPolicy = "fail" | "allow";
-
 type GenerateSiteBaseOptions = {
   repository: SiteCandidateRepository;
   source: AgentRunSource;
@@ -62,8 +58,6 @@ type GenerateSiteBaseOptions = {
   metadata?: Record<string, unknown>;
   candidatePurpose?: SiteCandidatePurpose;
   preview?: GenerateSitePreviewOptions;
-  /** Deterministic fallback exists only for tests and fixture rendering. */
-  modelFallbackPolicy?: ModelFallbackPolicy;
   signal?: AbortSignal;
 };
 
@@ -119,7 +113,6 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
   if (options.mode === "snapshot" && options.inputSnapshot.siteId !== options.intendedSiteId) {
     throw new Error("Regeneration snapshot does not target the intended managed site.");
   }
-  const allowModelFallback = options.modelFallbackPolicy === "allow";
   const telemetry = await startRequiredSiteCandidateTelemetry(options.repository, {
     ...input,
     ...(options.mode === "snapshot" ? {
@@ -143,8 +136,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
         options,
         telemetry,
         siteCandidateId,
-        snapshot: options.inputSnapshot,
-        allowModelFallback
+        snapshot: options.inputSnapshot
       });
     }
     if (!input) throw new Error("Fresh generation input was not normalized.");
@@ -154,7 +146,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       identity: { siteId: generatedSiteId },
       signal: options.signal
     });
-    assertCanonicalUnderstanding(prepared, allowModelFallback);
+    assertCanonicalUnderstanding(prepared);
     bundle = createSiteBundleFromInput(prepared);
     sourceHost = hostFromUrl(bundle.presenceAssessment.sourceUrl ?? input.url);
     verticalPackFor(bundle.businessProfile.vertical);
@@ -169,7 +161,6 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     await retainAndAnalyzeAssets({
       bundle,
       telemetry,
-      allowModelFallback,
       signal: options.signal
     });
     const assets = canonicalAssets(bundle);
@@ -194,8 +185,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       snapshot,
       bundle,
       sourceHost,
-      sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url,
-      allowModelFallback
+      sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url
     });
   } catch (error) {
     const detail = failureDetail(error, telemetry.runId, siteCandidateId);
@@ -226,7 +216,6 @@ async function runAndPersistCanonicalCandidate(input: {
   bundle?: SiteBundle;
   sourceHost?: string;
   sourceUrl?: string;
-  allowModelFallback: boolean;
 }): Promise<GenerateSiteResult> {
   const evidence = input.snapshot.evidenceManifest;
   const generationSpan = await input.telemetry.startSpan({
@@ -247,8 +236,7 @@ async function runAndPersistCanonicalCandidate(input: {
       snapshot: input.snapshot,
       telemetry: input.telemetry,
       spanId: generationSpan.id,
-      signal: input.options.signal,
-      ...(input.allowModelFallback ? { dependencies: deterministicFixtureDependencies() } : {})
+      signal: input.options.signal
     });
     await generationSpan.end({
       outputJson: {
@@ -325,15 +313,14 @@ async function runAndPersistCanonicalCandidate(input: {
   return { runId: input.telemetry.runId, siteCandidateId: generation.id, generation, bundle };
 }
 
-function assertCanonicalUnderstanding(prepared: IntakeInput, allowModelFallback: boolean) {
-  if (allowModelFallback || prepared.understanding?.source === "openai") return;
+function assertCanonicalUnderstanding(prepared: IntakeInput) {
+  if (prepared.understanding?.source === "openai") return;
   throw new Error("Canonical generation requires model-backed business understanding; deterministic fallback is disabled.");
 }
 
 async function retainAndAnalyzeAssets(input: {
   bundle: SiteBundle;
   telemetry: Awaited<ReturnType<typeof startRequiredSiteCandidateTelemetry>>;
-  allowModelFallback: boolean;
   signal?: AbortSignal;
 }) {
   try {
@@ -378,16 +365,13 @@ async function retainAndAnalyzeAssets(input: {
       bundle: input.bundle,
       telemetry: input.telemetry,
       spanId: span.id,
-      strict: !input.allowModelFallback,
+      strict: true,
       signal: input.signal
     });
     await span.end({ outputJson: analysis });
   } catch (error) {
     await span.fail(error);
-    if (!input.allowModelFallback) throw error;
-    input.bundle.presenceAssessment.technicalNotes.push(
-      `Asset analysis fixture fallback used: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw error;
   }
 }
 
@@ -460,30 +444,6 @@ function applyCanonicalResult(bundle: SiteBundle, snapshot: GenerationInputSnaps
   bundle.presenceAssessment.siteCopy = result.copy;
   bundle.presenceAssessment.generationTrace = result.trace;
   bundle.presenceAssessment.generationJudge = result.judge;
-}
-
-function deterministicFixtureDependencies() {
-  return {
-    copy: async (input: Parameters<typeof createFixtureSiteCopy>[0] extends never ? never : {
-      snapshot: GenerationInputSnapshotV1;
-      plan: Parameters<typeof createFixtureSiteCopy>[0];
-    }) => ({ copy: createFixtureSiteCopy(input.plan, input.snapshot), attempts: 1 as const }),
-    judge: async (input: { packet: { images: Array<unknown> } }): Promise<GenerationJudgeResult> => ({
-      schemaVersion: generationJudgeSchemaVersion,
-      provenance: createRegenerableArtifactProvenanceV1({
-        producerId: "fixture-generation-judge",
-        producerVersion: generationJudgeSchemaVersion,
-        inputs: { deterministicFixture: true }
-      }),
-      source: "unavailable",
-      evaluatedAt: new Date().toISOString(),
-      screenshotCount: input.packet.images.length,
-      verdict: "ship",
-      action: "none",
-      summary: "Deterministic fixture generation passed the objective browser gate.",
-      findings: []
-    })
-  };
 }
 
 function canonicalArtifactRecords(candidateId: string, snapshot: GenerationInputSnapshotV1, result: CanonicalGenerationResult) {

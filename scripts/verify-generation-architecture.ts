@@ -110,6 +110,25 @@ for (const [file, source] of productionSources) {
       `${relativeFile} bypasses the canonical site-candidate generation entrypoint.`
     );
   }
+  if (/(?:from\s+|import\s*\()\s*["'][^"']*test-support\//.test(source)) {
+    assert.equal(
+      relativeFile,
+      "lib/sample-data.ts",
+      `${relativeFile} imports test support; only the local sample store may do so outside scripts.`
+    );
+  }
+  if (!relativeFile.startsWith("lib/test-support/")) {
+    for (const forbiddenFallback of ["modelFallbackPolicy", "deterministicFixtureDependencies", "createFixtureSiteCopy"]) {
+      assert.equal(
+        source.includes(forbiddenFallback),
+        false,
+        `${relativeFile} exposes removed production generation fallback ${forbiddenFallback}.`
+      );
+    }
+    if (source.includes("createTestSiteCopy")) {
+      assert.equal(relativeFile, "lib/sample-data.ts", `${relativeFile} uses deterministic test copy outside the local sample store.`);
+    }
+  }
 }
 
 const verticalBranch = /(?:business(?:Profile)?\.vertical|\bvertical)\s*(?:===|!==)|switch\s*\([^)]*\bvertical\b/;
@@ -167,6 +186,9 @@ const copySource = await readFile(path.join(root, "lib/site-copy.ts"), "utf8");
 assert.equal((copySource.match(/operation: "whole_site_copy"/g) ?? []).length, 1, "Canonical copy must expose one whole-site model operation.");
 assert.equal((copySource.match(/for \(const attempt of \[1, 2\]/g) ?? []).length, 1, "Canonical copy permits exactly one schema/transient retry.");
 assert.match(copySource, /allowedEvidence:\s*\[\]/, "Trust-sensitive proof must not enter model-authored copy.");
+assert.equal(copySource.includes("createTestSiteCopy"), false, "Production site copy must not contain deterministic test generation.");
+const testCopySource = await readFile(path.join(root, "lib/test-support/site-copy.ts"), "utf8");
+assert.match(testCopySource, /export function createTestSiteCopy/, "Deterministic copy must remain explicit test support.");
 
 const judgeSource = await readFile(path.join(root, "lib/generation-judge.ts"), "utf8");
 for (const [relativeFile, source] of [["lib/site-copy.ts", copySource], ["lib/generation-judge.ts", judgeSource]] as const) {
@@ -283,9 +305,32 @@ assert.match(regenerationRouteSource, /inputSnapshotId:\s*controlPlane\.latestSn
 const candidateServiceSource = await readFile(path.join(root, "lib/site-candidate-service.ts"), "utf8");
 assert.match(candidateServiceSource, /mode:\s*"fresh"/, "Generation must expose an explicit fresh URL mode.");
 assert.match(candidateServiceSource, /mode:\s*"snapshot"/, "Generation must expose an explicit immutable-snapshot mode.");
+assert.equal(candidateServiceSource.includes("modelFallbackPolicy"), false, "Production generation must fail loudly instead of selecting deterministic fallback.");
+const jobsSource = await readFile(path.join(root, "lib/jobs.ts"), "utf8");
+assert.equal(jobsSource.includes("modelFallbackPolicy"), false, "Jobs must not carry a production fallback policy.");
 const assetRouteSource = await readFile(path.join(root, "app/api/assets/[siteId]/[file]/route.ts"), "utf8");
 assert.match(assetRouteSource, /readStoredAsset/, "The authenticated asset route must read from configured durable storage.");
 assert.equal(assetRouteSource.includes("readLocalAsset"), false, "The authenticated asset route must not bypass configured durable storage.");
+
+const packageSource = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as { scripts?: Record<string, string> };
+assert.equal(typeof packageSource.scripts?.["freeze:generation-inputs"], "string", "Canonical inputs need an explicit freeze command.");
+assert.equal(packageSource.scripts?.["freeze:generation-bakeoff"], undefined, "The obsolete baseline freeze command must remain deleted.");
+const fixtureRoot = path.join(root, "fixtures/generation-pipeline/bakeoff-v1");
+const fixtureFiles = await allFiles(fixtureRoot);
+assert.equal(
+  fixtureFiles.some((file) => path.basename(file) === "compiler-references.json"),
+  true,
+  "Canonical fixtures must retain one reviewable compiler reference file."
+);
+assert.equal(
+  fixtureFiles.some((file) => path.basename(file) === "templated-baseline.json"),
+  false,
+  "Full compiled templated baselines must not be committed."
+);
+const browserVerifierSource = await readFile(path.join(root, "scripts/verify-canonical-render-browser.ts"), "utf8");
+assert.match(browserVerifierSource, /"\.data",\s*"generation-review",\s*runId/, "Browser captures must use unique ignored run directories.");
+assert.equal(browserVerifierSource.includes('".design", "generation-review"'), false, "Browser verification must not write tracked design artifacts.");
+assert.equal(browserVerifierSource.includes("rm(artifactRoot"), false, "Browser verification must not delete a previous review run.");
 
 const strict = process.argv.includes("--cutover");
 const legacyFiles = legacyModules.map((moduleName) => `lib/${moduleName}.ts`);
@@ -331,6 +376,15 @@ async function sourceFiles(directory: string): Promise<string[]> {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) return sourceFiles(file);
     return /\.(?:ts|tsx)$/.test(entry.name) ? [file] : [];
+  }));
+  return nested.flat();
+}
+
+async function allFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const file = path.join(directory, entry.name);
+    return entry.isDirectory() ? allFiles(file) : [file];
   }));
   return nested.flat();
 }

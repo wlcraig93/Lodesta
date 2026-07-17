@@ -241,7 +241,6 @@ async function executeJobBody(
       const rawUrl = typeof job.payload.url === "string" ? job.payload.url : undefined;
       const prompt = typeof job.payload.prompt === "string" ? job.payload.prompt : undefined;
       const candidatePurpose = job.payload.candidatePurpose === "test_generation" ? "test_generation" : undefined;
-      const modelFallbackPolicy = job.payload.modelFallbackPolicy === "allow" ? "allow" : undefined;
       const intendedSiteId = typeof job.payload.intendedSiteId === "string" ? job.payload.intendedSiteId : undefined;
       const inputSnapshotId = typeof job.payload.inputSnapshotId === "string" ? job.payload.inputSnapshotId : undefined;
       const inputSnapshot = inputSnapshotId && context.getGenerationInputSnapshot
@@ -264,7 +263,6 @@ async function executeJobBody(
               intendedSiteId,
               source: "job",
               candidatePurpose,
-              modelFallbackPolicy,
               metadata: jobGenerationMetadata(job, context),
               signal: timeout.signal
             })
@@ -273,7 +271,6 @@ async function executeJobBody(
               input: { url: url as string, prompt },
               source: "job",
               candidatePurpose,
-              modelFallbackPolicy,
               metadata: jobGenerationMetadata(job, context),
               signal: timeout.signal
             });

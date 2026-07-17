@@ -3,20 +3,27 @@ import path from "node:path";
 import {
   bakeoffInputArtifact,
   buildCanonicalFixture,
-  loadCanonicalFixtureDefinitions,
-  templatedBaselineArtifact
+  compilerReferenceArtifact,
+  loadCanonicalFixtureDefinitions
 } from "./canonical-generation-fixtures";
 
 const root = path.join(process.cwd(), "fixtures/generation-pipeline/bakeoff-v1");
 const definitions = await loadCanonicalFixtureDefinitions();
+const references = [];
 
 for (const definition of definitions) {
   const fixture = await buildCanonicalFixture(definition);
   const directory = path.join(root, definition.id);
   await mkdir(directory, { recursive: true });
   await writeJson(path.join(directory, "input.json"), bakeoffInputArtifact(fixture));
-  await writeJson(path.join(directory, "templated-baseline.json"), templatedBaselineArtifact(fixture));
+  references.push(compilerReferenceArtifact(fixture));
 }
+
+await writeJson(path.join(root, "compiler-references.json"), {
+  schemaVersion: "compiler-references-v1",
+  createdAt: "2026-07-16T00:00:00.000Z",
+  fixtures: references
+});
 
 await writeJson(path.join(root, "manifest.json"), {
   schemaVersion: "generation-bakeoff-manifest-v1",
@@ -25,8 +32,7 @@ await writeJson(path.join(root, "manifest.json"), {
   fixtures: definitions.map((definition) => ({
     id: definition.id,
     profile: definition.profile,
-    input: `${definition.id}/input.json`,
-    templatedBaseline: `${definition.id}/templated-baseline.json`
+    input: `${definition.id}/input.json`
   }))
 });
 

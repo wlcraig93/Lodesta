@@ -6,26 +6,22 @@
     {
       "id": "austin-dent-paint-rich-media",
       "profile": "rich_media_and_first_party_testimonials",
-      "input": "austin-dent-paint-rich-media/input.json",
-      "templatedBaseline": "austin-dent-paint-rich-media/templated-baseline.json"
+      "input": "austin-dent-paint-rich-media/input.json"
     },
     {
       "id": "south-congress-collision-service-breadth",
       "profile": "service_breadth_with_single_media_asset",
-      "input": "south-congress-collision-service-breadth/input.json",
-      "templatedBaseline": "south-congress-collision-service-breadth/templated-baseline.json"
+      "input": "south-congress-collision-service-breadth/input.json"
     },
     {
       "id": "east-austin-collision-sparse",
       "profile": "sparse_source_no_usable_media",
-      "input": "east-austin-collision-sparse/input.json",
-      "templatedBaseline": "east-austin-collision-sparse/templated-baseline.json"
+      "input": "east-austin-collision-sparse/input.json"
     },
     {
       "id": "north-loop-collision-no-media-proof",
       "profile": "no_media_with_credentials_reviews_and_negated_claim",
-      "input": "north-loop-collision-no-media-proof/input.json",
-      "templatedBaseline": "north-loop-collision-no-media-proof/templated-baseline.json"
+      "input": "north-loop-collision-no-media-proof/input.json"
     }
   ]
 }

@@ -13,9 +13,10 @@ import type { CrawlAssessment } from "../lib/crawler";
 import { summarizeCrawlHtml } from "../lib/crawler";
 import { composeGenerationEvidenceManifestV1, type GenerationEvidenceManifestV1, type EvidenceProposal } from "../lib/generation-evidence-manifest";
 import { buildGenerationPlan } from "../lib/vertical-packs";
-import { createFixtureSiteCopy } from "../lib/site-copy";
+import { createTestSiteCopy } from "../lib/test-support/site-copy";
 import { compileSite } from "../lib/site-compiler";
 import type { GenerationPlan, ShippingDesignSystemId, SiteCopy } from "../lib/generation-contracts";
+import { getVisualSectionV3 } from "../lib/generated-site-v3-visual-controls";
 import { slugify } from "../lib/slug";
 import { renderProfileFromSnapshot, siteRenderEnvelopeFromSnapshot } from "../lib/site-render-envelope";
 import { createSiteBundleFromInput } from "../lib/intake";
@@ -100,7 +101,7 @@ export async function buildCanonicalFixture(definition: CanonicalFixtureDefiniti
   const snapshot = canonicalInput.snapshot;
   const assets = snapshot.assets;
   const plan = buildGenerationPlan({ snapshot, evidence, createdAt: fixtureTimestamp });
-  const copy = createFixtureSiteCopy(plan, snapshot, fixtureTimestamp);
+  const copy = createTestSiteCopy(plan, snapshot, fixtureTimestamp);
   const version = compileSite({
     snapshot,
     plan,
@@ -140,24 +141,151 @@ export function bakeoffInputArtifact(fixture: CanonicalFixtureBuild) {
   };
 }
 
-export function templatedBaselineArtifact(fixture: CanonicalFixtureBuild) {
+export function compilerReferenceArtifact(fixture: CanonicalFixtureBuild) {
+  const planStructure = normalizedPlanStructure(fixture.plan);
+  const compiledStructure = normalizedCompiledStructure(fixture.version);
   return {
-    schemaVersion: "templated-generation-baseline-v1" as const,
     fixtureId: fixture.definition.id,
-    generator: "lodesta-canonical-templated-v1" as const,
     inputSnapshotId: fixture.snapshot.id,
     inputHash: fixture.snapshot.inputHash,
-    output: {
-      plan: fixture.plan,
-      copy: fixture.copy,
-      version: fixture.version
+    expectedDesignSystem: fixture.definition.expectedDesignSystem,
+    summary: {
+      routeSlugs: fixture.plan.pages.map((page) => page.slug),
+      pageCount: fixture.plan.pages.length,
+      sectionCount: fixture.plan.pages.reduce((sum, page) => sum + page.sections.length, 0),
+      copySlotCount: fixture.plan.pages.reduce(
+        (sum, page) => sum + page.sections.reduce((sectionSum, section) => sectionSum + section.copySlots.length, 0),
+        0
+      )
     },
-    trace: {
-      schemaVersion: "bakeoff-templated-trace-v1" as const,
-      stages: ["vertical_pack", "plan", "fixture_copy", "compile"] as const,
-      counts: { plans: 1, copies: 1, compiles: 1, gates: 0, judges: 0 }
+    planStructure,
+    compiledStructure,
+    checksums: {
+      planStructure: structureHash(planStructure),
+      compiledStructure: structureHash(compiledStructure)
     }
   };
+}
+
+function normalizedPlanStructure(plan: GenerationPlan) {
+  return {
+    schemaVersion: plan.schemaVersion,
+    verticalPack: plan.verticalPack,
+    designSystem: plan.designSystem,
+    navigation: {
+      items: plan.navigation.items.map((item) => ({ target: item.target, kind: item.kind })),
+      primaryCta: { target: plan.navigation.primaryCta.target }
+    },
+    pages: plan.pages.map((page) => ({
+      slug: page.slug,
+      purpose: page.purpose,
+      sections: page.sections.map((section) => ({
+        template: section.templateId,
+        media: Boolean(section.mediaAssetId),
+        evidence: section.evidenceIds.length,
+        copySlotCount: section.copySlots.length,
+        copyContract: normalizedCopyContract(section.copySlots)
+      }))
+    }))
+  };
+}
+
+function normalizedCompiledStructure(version: SiteVersionV3) {
+  return {
+    rendererVersion: version.rendererVersion,
+    designSchemaVersion: version.designSchemaVersion,
+    pageCompositionVersion: version.pageComposition.version,
+    pages: version.pageComposition.pages.map((page) => ({
+      slug: page.slug,
+      purpose: page.purpose,
+      sections: page.sections.map((section) => {
+        const visual = getVisualSectionV3(section.props);
+        return {
+          template: `${section.family}/${section.variant}`,
+          controls: controlsSignature(section.controls),
+          responsiveRules: section.responsiveRules.map((rule) => `${rule.breakpoint}:${rule.behavior}`),
+          facts: normalizedFactContract(section.requiredFactKinds, section.optionalFactKinds),
+          sparseBehavior: normalizedSparseBehavior(section.sparseBehavior),
+          visual: visual ? {
+            template: visual.templateId,
+            anchorId: visual.anchorId,
+            options: flattenedOptions(visual.options).join("; "),
+            slotShapes: Object.entries(visual.slots).map(([key, value]) => `${key}=${structuralSignature(value)}`)
+          } : undefined
+        };
+      })
+    })),
+    mediaDecisions: version.mediaDecisions.map(
+      (decision) => `${decision.source}|${decision.rightsStatus}|${decision.usageScope}|implies=${decision.mayImplyRealBusinessWork}`
+    )
+  };
+}
+
+function normalizedSparseBehavior(value: {
+  minimumValidSlots: string[];
+  omitWhenMissingFactKinds: string[];
+  blockWhenMissingFactKinds: string[];
+}) {
+  const entries = [
+    ["minimumValidSlots", value.minimumValidSlots],
+    ["omitWhenMissingFactKinds", value.omitWhenMissingFactKinds],
+    ["blockWhenMissingFactKinds", value.blockWhenMissingFactKinds]
+  ].filter((entry): entry is [string, string[]] => entry[1].length > 0);
+  return entries.length > 0 ? Object.fromEntries(entries) : "none";
+}
+
+function normalizedFactContract(required: string[], optional: string[]) {
+  if (required.length === 0 && optional.length === 0) return "none";
+  return { required, optional };
+}
+
+function normalizedCopyContract(copySlots: GenerationPlan["pages"][number]["sections"][number]["copySlots"]) {
+  const groups = new Map<string, number>();
+  for (const slot of copySlots) {
+    const contract = `${slot.role} [max=${slot.maxCharacters}; evidence=${slot.allowedEvidence.length}]`;
+    groups.set(contract, (groups.get(contract) ?? 0) + 1);
+  }
+  return [...groups.entries()].map(([contract, count]) => `${count}x ${contract}`);
+}
+
+function controlsSignature(controls: SiteVersionV3["pageComposition"]["pages"][number]["sections"][number]["controls"]) {
+  return [
+    `layout=${controls.layout}`,
+    `align=${controls.alignment}`,
+    `width=${controls.width}`,
+    `padding=${controls.padding}`,
+    `background=${controls.background}`,
+    `crop=${controls.mediaCrop}`,
+    `density=${controls.density}`
+  ].join("; ");
+}
+
+function flattenedOptions(value: unknown, prefix = ""): string[] {
+  if (!value || typeof value !== "object") return [`${prefix}=${String(value)}`];
+  if (Array.isArray(value)) return [`${prefix}=${JSON.stringify(value)}`];
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
+    const itemPath = prefix ? `${prefix}.${key}` : key;
+    if (key === "url") return [`${itemPath}=<asset>`];
+    return flattenedOptions(item, itemPath);
+  });
+}
+
+function structuralSignature(value: unknown): string {
+  if (Array.isArray(value)) {
+    const itemShapes = [...new Set(value.map(structuralSignature))];
+    return `[${value.length}]<${itemShapes.join(" | ")}>`;
+  }
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value !== "object") return typeof value;
+  const fields = Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => `${key}:${structuralSignature(item)}`)
+    .join(", ");
+  return `{${fields}}`;
+}
+
+function structureHash(value: unknown) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function fixtureCrawl(sourceUrl: string, page: ReturnType<typeof summarizeCrawlHtml>): CrawlAssessment {

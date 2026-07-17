@@ -145,10 +145,22 @@ The consolidated schema is the authority. The pre-launch cutover migration asser
 - hard-coded forms or public form submission without published-version authorization;
 - missing delete-restrict references for immutable snapshots, sources, assets, and forms;
 - protected-preview publication and unbounded structural job creation.
+- production imports of deterministic test support or generation fallback controls;
+- committed full-site baselines and browser captures written outside ignored run directories.
 
 `npm run verify:control-plane` exercises observations-not-truth, public proof policy, owner provenance, catalog and custom offerings, intent-driven generation, immutable assets and snapshots, stale acceptance, protected publication, exact form rendering, candidate-only form rejection, and artifact rebinding.
 
-The four presentation-neutral bakeoff inputs live under `fixtures/generation-pipeline/bakeoff-v1`. `npm run verify:canonical-generation` rebuilds them through canonical intake and fails on any input hash, source, observation, plan, copy, or compiled-version drift. Intentional changes require `npm run freeze:generation-bakeoff`; both future presentation systems must consume these exact snapshots without crawling or mutating business state.
+### Fixture and review artifacts
+
+The four sanitized source cases and their proposals exercise crawl parsing, observation resolution, evidence verification, vertical-pack selection, and asset floors. Frozen presentation-neutral inputs live under `fixtures/generation-pipeline/bakeoff-v1`; they are immutable test data for downstream planning and compilation, not saved website contestants.
+
+`BusinessUnderstandingV2.source` is `deterministic_fallback` in these frozen inputs because the fixture builder is an offline test double. These inputs do not measure production ingestion quality. Production generation requires model-backed understanding and model-backed whole-site copy and fails loudly when either is unavailable. Deterministic slot copy lives only in `lib/test-support/site-copy.ts`; scripts may use it directly, and `lib/sample-data.ts` may use it for the local repository and smoke environment.
+
+`compiler-references.json` commits normalized plan and compiler structure for reviewable diffs, with hashes as supplemental checks. It excludes generated prose, timestamps, runtime IDs, and rendered site payloads. `npm run verify:canonical-generation` rebuilds each fixture, validates its contracts, and compares the frozen input and normalized structure. On structural drift it writes expected and actual artifacts to ignored `.data/generation-reference-diffs`; intentional changes require `npm run freeze:generation-inputs` after reviewing that diff. Full `templated-baseline.json` artifacts are forbidden.
+
+`npm run verify:render-browser` writes screenshots, contact sheets, and a manifest to a unique ignored `.data/generation-review/<run-id>` directory. Verification runs never rewrite tracked design artifacts or delete an earlier local run.
+
+The future bakeoff has two separate experiments. The controlled design test gives both arms the exact same frozen canonical input without recrawling or mutating business state. The templated arm must run the current production planner, live model copy, and compiler; deterministic test copy and saved baselines are never contestants. A later URL-only test gives each arm the same URL and permits independent recrawling so it measures ingestion plus presentation rather than design alone. Neither bakeoff is part of this cleanup.
 
 ## Launch Gates
 

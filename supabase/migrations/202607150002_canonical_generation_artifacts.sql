@@ -17,4 +17,4 @@ alter table site_artifacts
   add constraint site_artifacts_scope_check
     check (scope in ('candidate_selected', 'site_selected', 'qa_evidence')),
   add constraint site_artifacts_artifact_type_check
-    check (artifact_type in ('evidence_ledger', 'generation_plan', 'site_copy', 'generation_review', 'generation_failure', 'operator_decision'));
+    check (artifact_type in ('generation_evidence_manifest', 'generation_plan', 'site_copy', 'generation_review', 'generation_failure', 'operator_decision'));

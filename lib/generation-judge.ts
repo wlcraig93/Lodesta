@@ -3,11 +3,12 @@ import { extname, join } from "node:path";
 import { z } from "zod";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
 import { extractOpenAiUsage, sanitizeTelemetryPayload } from "./agent-telemetry";
-import type { BusinessProfile, RegenerableArtifactProvenanceV1, SiteAsset, SiteVersionV3 } from "./models";
+import type { RegenerableArtifactProvenanceV1, SiteVersionV3 } from "./models";
+import type { GenerationInputSnapshotV1, ResolvedAssetV1, VerticalPackV1 } from "./control-plane-contracts";
 import type { GenerationPlan } from "./generation-contracts";
 import type { ObjectiveGenerationGateResult } from "./generation-objective-gate";
 import { renderedTextManifest } from "./generation-objective-gate";
-import { alternateDesignSystem, publicGenerationServices } from "./vertical-packs";
+import { alternateDesignSystem, offeringNamesForGeneration, publicGenerationServices, verticalPackFor } from "./vertical-packs";
 import { getOpenAiRuntimeSettings } from "./operator-settings";
 import {
   elapsedOpenAiCallMs,
@@ -82,9 +83,9 @@ const judgePayloadSchema = z.discriminatedUnion("verdict", [
 ]);
 
 export async function buildGenerationJudgePacket(input: {
+  snapshot: GenerationInputSnapshotV1;
   plan: GenerationPlan;
   version: SiteVersionV3;
-  assets: SiteAsset[];
   gate: ObjectiveGenerationGateResult;
   artifactRoot: string;
 }): Promise<GenerationJudgePacket> {
@@ -98,13 +99,13 @@ export async function buildGenerationJudgePacket(input: {
   const serviceDesktop = await createServiceContactSheet(serviceRoutes, "desktop", input.artifactRoot, input.gate.qaRunId);
   const serviceMobile = await createServiceContactSheet(serviceRoutes, "mobile", input.artifactRoot, input.gate.qaRunId);
   return {
-    availableActions: availableJudgeActions(input.plan, input.assets),
+    availableActions: availableJudgeActions(input.plan, input.snapshot.assets),
     images: [homepageDesktop, homepageMobile, serviceDesktop, serviceMobile],
     textManifest: renderedTextManifest(input.version)
   };
 }
 
-export function availableJudgeActions(plan: GenerationPlan, assets: SiteAsset[]): GenerationJudgeRevisionAction[] {
+export function availableJudgeActions(plan: GenerationPlan, assets: ResolvedAssetV1[]): GenerationJudgeRevisionAction[] {
   return [
     "copy",
     ...(alternateDesignSystem(plan.designSystem, assets) ? ["alternate_system" as const] : []),
@@ -124,7 +125,7 @@ export function parseGenerationJudgeResult(
 }
 
 export async function createGenerationJudge(input: {
-  business: BusinessProfile;
+  snapshot: GenerationInputSnapshotV1;
   plan: GenerationPlan;
   packet: GenerationJudgePacket;
   telemetry?: AgentTelemetryRecorder;
@@ -147,7 +148,7 @@ export async function createGenerationJudge(input: {
         content: [{
           type: "input_text",
           text: [
-            "You are the single final creative director for a generated US auto-body business website.",
+            "You are the single final creative director for a generated US local-business website described by the selected vertical pack.",
             "Make one holistic decision; do not score dimensions, average grades, or repeat objective browser checks.",
             "Ship only when the site looks intentional, specific, trustworthy, coherent on desktop and mobile, and commercially credible at a $30-$100 monthly managed-site price.",
             "Use the complete text manifest to judge copy on service pages because their contact-sheet text may be small.",
@@ -251,20 +252,35 @@ export async function createGenerationJudge(input: {
 }
 
 export function generationJudgeContext(input: {
-  business: BusinessProfile;
+  snapshot: GenerationInputSnapshotV1;
   plan: GenerationPlan;
   packet: GenerationJudgePacket;
 }) {
+  const business = input.snapshot.business;
+  const pack = verticalPackFor(business.vertical);
+  assertPlanUsesPack(input.plan, pack);
   return {
     business: {
-      name: input.business.name,
-      services: publicGenerationServices(input.business.services),
-      location: input.business.address?.city ?? input.business.serviceAreas[0]
+      name: business.name,
+      services: publicGenerationServices(offeringNamesForGeneration(input.snapshot)),
+      location: business.address?.city ?? business.serviceAreas[0]
+    },
+    verticalPack: {
+      id: pack.id,
+      version: pack.version,
+      businessCategory: pack.businessCategory,
+      copyBrief: pack.copyBrief
     },
     designSystem: input.plan.designSystem,
     availableActions: input.packet.availableActions,
     renderedTextManifest: input.packet.textManifest
   };
+}
+
+function assertPlanUsesPack(plan: GenerationPlan, pack: VerticalPackV1) {
+  if (plan.verticalPack.id !== pack.id || plan.verticalPack.version !== pack.version) {
+    throw new Error(`Generation plan pack ${plan.verticalPack.id}@${plan.verticalPack.version} does not match selected pack ${pack.id}@${pack.version}.`);
+  }
 }
 
 function unavailableJudgeResult(

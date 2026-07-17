@@ -112,7 +112,7 @@ export function siteCandidateIdForJob(job: JobRecord) {
 }
 
 function candidateSummary(candidate: SiteCandidateRecord, origin: string): NonNullable<IntakeJobStatusResponse["candidate"]> {
-  const version = candidate.bundle.siteModel.versions[0];
+  const version = candidate.version;
   return {
     id: candidate.id,
     businessName: candidate.businessName,
@@ -132,7 +132,7 @@ function effectiveStatus(
 ): IntakeJobStatusResponse["job"]["effectiveStatus"] {
   if (job.status === "failed") return "failed";
   if (candidate?.status === "blocked") return "blocked";
-  const readiness = candidate?.bundle.siteModel.versions[0]?.generationQa?.readiness;
+  const readiness = candidate?.version.generationQa?.readiness;
   if (job.status === "completed" && readiness === "ready") return "ready";
   if (job.status === "completed" && candidate?.status === "ready") return "ready";
   if (job.status === "running") return "running";

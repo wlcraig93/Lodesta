@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 
 import { generationFailureDetail } from "../lib/generation-failure";
 import { generateSiteTimeoutMs, generationTimeoutSignal } from "../lib/generation-timeout";
-import type { EvidenceLedger } from "../lib/evidence-ledger";
+import type { GenerationEvidenceManifestV1 } from "../lib/generation-evidence-manifest";
 import type { GenerationPipelineTrace } from "../lib/generation-pipeline";
 import type { GenerationQaBlocker } from "../lib/models";
 import { repository } from "../lib/repository";
@@ -40,7 +40,7 @@ type PilotTargetResult = {
   copySchemaRetries: number;
   unsupportedPublicClaims: number;
   trace?: GenerationPipelineTrace["counts"];
-  evidenceYield?: EvidenceLedger["yield"];
+  evidenceYield?: GenerationEvidenceManifestV1["yield"];
   blockers: Array<Pick<GenerationQaBlocker, "id" | "title" | "detail" | "category">>;
   failure?: ReturnType<typeof generationFailureDetail>;
 };
@@ -87,6 +87,7 @@ async function runTarget(runId: string, url: string): Promise<PilotTargetResult>
   try {
     const result = await generateSite({
       repository,
+      mode: "fresh",
       input: { url },
       source: "api",
       actorType: "operator",
@@ -116,7 +117,7 @@ async function runTarget(runId: string, url: string): Promise<PilotTargetResult>
       copySchemaRetries: trace ? Math.max(0, trace.counts.copyModelAttempts - trace.counts.copies) : 0,
       unsupportedPublicClaims,
       trace: trace?.counts,
-      evidenceYield: assessment.evidenceLedger?.yield,
+      evidenceYield: assessment.evidenceManifest?.yield,
       blockers
     };
     console.error(JSON.stringify({ kind: "canonical_auto_body_pilot_progress", runId, event: "target_done", url, generationStatus: record.generationStatus }));

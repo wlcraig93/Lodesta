@@ -1,5 +1,5 @@
-import { mkdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, stat } from "node:fs/promises";
+import { extname, join, resolve, sep } from "node:path";
 import type {
   RenderInspectionFinding,
   RenderInspectionResult,
@@ -441,6 +441,29 @@ async function publicAssetForRequest(requestUrl: string, expectedOrigin: string 
       return undefined;
     }
   }
+  const publicAsset = await publicStaticImage(pathname);
+  if (publicAsset) return publicAsset;
+  return undefined;
+}
+
+async function publicStaticImage(pathname: string) {
+  const contentType = publicImageContentType(pathname);
+  if (!contentType) return undefined;
+  const publicRoot = resolve(process.cwd(), "public");
+  const filePath = resolve(publicRoot, `.${pathname}`);
+  if (!filePath.startsWith(`${publicRoot}${sep}`)) return undefined;
+  try {
+    return { body: await readFile(filePath), contentType };
+  } catch {
+    return undefined;
+  }
+}
+
+function publicImageContentType(pathname: string) {
+  const extension = extname(pathname).toLowerCase();
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
   return undefined;
 }
 

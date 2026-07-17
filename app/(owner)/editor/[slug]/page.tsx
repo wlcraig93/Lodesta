@@ -22,14 +22,15 @@ export default async function EditorPage({ params }: { params: Promise<{ slug: s
   const home = version.pageComposition.pages.find((page) => page.slug === "") ?? version.pageComposition.pages[0];
   const editableSections = editableV3Sections(bundle, version);
   const siteId = bundle.businessProfile.siteId;
-  const [summary, inquiries, claims, domains] = await Promise.all([
+  const [summary, inquiries, claims, domains, controlPlane] = await Promise.all([
     repository.analyticsSummary(siteId),
     repository.listInquiries(siteId),
     repository.listClaims(siteId),
-    repository.listDomains(siteId)
+    repository.listDomains(siteId),
+    repository.getCanonicalControlPlane(siteId)
   ]);
   const claimGate = claimGateForBundle(bundle, claims);
-  const managedStatus = managedSiteStatus(bundle);
+  const managedStatus = managedSiteStatus(bundle, controlPlane);
   const readiness = ownerReadinessItems({
     slug: bundle.siteModel.slug,
     claimReady: claimGate.ok,

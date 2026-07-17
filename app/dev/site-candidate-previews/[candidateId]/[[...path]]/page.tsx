@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { repository } from "@/lib/repository";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { assertSiteVersionV3, findPageBySlugV3, siteVersionV3Issue } from "@/lib/site-version-v3";
+import { siteCandidateRenderEnvelope } from "@/lib/site-candidate-render";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,8 @@ export default async function DevelopmentSiteCandidatePreviewPage({
   const candidate = await repository.getSiteCandidate(candidateId);
   if (!candidate || candidate.candidatePurpose !== "test_generation") notFound();
 
-  const bundle = candidate.bundle;
-  const rawVersion = bundle.siteModel.versions.find((version) => version.status === "draft") ?? bundle.siteModel.versions[0];
+  const bundle = siteCandidateRenderEnvelope(candidate);
+  const rawVersion = candidate.version;
   if (siteVersionV3Issue(rawVersion)) notFound();
 
   const version = assertSiteVersionV3(rawVersion, "development candidate preview version");

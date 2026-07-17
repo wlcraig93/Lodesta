@@ -23,6 +23,7 @@ import type {
   SiteCandidateRecord,
   SiteVersion
 } from "@/lib/models";
+import { siteCandidateRenderEnvelope } from "@/lib/site-candidate-render";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -45,9 +46,8 @@ export default async function AdminSiteCandidateDetailPage({
   const candidate = await repository.getSiteCandidate(candidateId);
   if (!candidate) notFound();
 
-  const bundle = candidate.bundle;
-  const versions = bundle.siteModel.versions;
-  const selectedVersion = versions.find((version) => version.status === "draft") ?? versions[0];
+  const bundle = siteCandidateRenderEnvelope(candidate);
+  const selectedVersion = candidate.version;
   const readiness: GenerationQaReadiness = selectedVersion
     ? getEffectiveGenerationQaReadiness(bundle, selectedVersion)
     : "unavailable";

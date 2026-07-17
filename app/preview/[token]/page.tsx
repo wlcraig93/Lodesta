@@ -5,6 +5,8 @@ import { PreviewWedge } from "@/components/PreviewWedge";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { consumePreviewProofSlot } from "@/lib/live-proof";
 import { repository } from "@/lib/repository";
+import { storedVersionRenderEnvelope } from "@/lib/site-render-envelope";
+import { assertSiteVersionV3 } from "@/lib/site-version-v3";
 
 export const metadata: Metadata = {
   title: "Review Packet | Lodesta",
@@ -35,6 +37,9 @@ export default async function PreviewPage({
     ? bundle.siteModel.versions.find((version) => version.id === preview.token.versionId)
     : bundle.siteModel.versions.find((version) => version.status === "draft") ?? bundle.siteModel.versions[0];
   if (!selectedVersion) notFound();
+  const snapshot = await repository.getGenerationInputSnapshot(selectedVersion.inputSnapshotId);
+  if (!snapshot) notFound();
+  const renderBundle = storedVersionRenderEnvelope({ shell: bundle, snapshot, version: assertSiteVersionV3(selectedVersion) });
   const outboundProspect = await repository.findOutboundProspectByPreviewToken(token);
   if (outboundProspect) {
     await repository.recordOutboundEvent({
@@ -53,15 +58,15 @@ export default async function PreviewPage({
     const proofMode = consumePreviewProofSlot() ? ("ui_kit" as const) : ("link_only" as const);
     return (
       <>
-        <DraftPreviewLabel businessName={bundle.businessProfile.name} />
+        <DraftPreviewLabel businessName={renderBundle.businessProfile.name} />
         <SiteRenderer
-          business={bundle.businessProfile}
-          site={bundle.siteModel}
-          extensions={bundle.extensionModel}
-          locations={bundle.locations}
-          locationBindings={bundle.locationBindings}
+          business={renderBundle.businessProfile}
+          site={renderBundle.siteModel}
+          extensions={renderBundle.extensionModel}
+          locations={renderBundle.locations}
+          locationBindings={renderBundle.locationBindings}
           version={selectedVersion}
-          experiments={bundle.experiments}
+          experiments={renderBundle.experiments}
           tracking={false}
           formsEnabled={false}
           proofMode={proofMode}
@@ -104,15 +109,15 @@ export default async function PreviewPage({
       <section className="review-packet-content" aria-label={artifact === "site" ? "Generated site" : "Current website report"}>
         {artifact === "site" ? (
           <>
-            <DraftPreviewLabel businessName={bundle.businessProfile.name} />
+            <DraftPreviewLabel businessName={renderBundle.businessProfile.name} />
             <SiteRenderer
-              business={bundle.businessProfile}
-              site={bundle.siteModel}
-              extensions={bundle.extensionModel}
-              locations={bundle.locations}
-              locationBindings={bundle.locationBindings}
+              business={renderBundle.businessProfile}
+              site={renderBundle.siteModel}
+              extensions={renderBundle.extensionModel}
+              locations={renderBundle.locations}
+              locationBindings={renderBundle.locationBindings}
               version={selectedVersion}
-              experiments={bundle.experiments}
+              experiments={renderBundle.experiments}
               tracking={false}
               formsEnabled={false}
               referenceBrandingEnabled

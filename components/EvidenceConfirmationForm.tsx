@@ -9,10 +9,13 @@ export function EvidenceConfirmationForm({ siteId, evidenceId }: { siteId: strin
   async function decide(decision: "confirmed" | "rejected") {
     setPending(true);
     setStatus(undefined);
-    const response = await fetch("/api/evidence/confirm", {
+    const response = await fetch("/api/control-plane/changes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId, evidenceId, decision })
+      body: JSON.stringify({
+        siteId,
+        payload: { kind: "set_proof", proofId: evidenceId, decision: decision === "confirmed" ? "confirm" : "reject" }
+      })
     });
     const payload = await response.json().catch(() => ({}));
     setPending(false);

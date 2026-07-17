@@ -4,7 +4,7 @@ import { coldUrlCheckableChecks } from "@/lib/standard-evaluation";
 
 export function PreviewWedge({ bundle }: { bundle: SiteBundle }) {
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const evidence = bundle.presenceAssessment.evidenceLedger;
+  const evidence = bundle.presenceAssessment.evidenceManifest;
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
   const sourceUrl = bundle.presenceAssessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
   const reviewVersion = bundle.siteModel.versions.find((version) => version.status === "draft")

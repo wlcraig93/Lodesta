@@ -6,7 +6,7 @@ import { activeSectionTemplateOrderV3 } from "../lib/generated-site-v3-section-t
 const root = process.cwd();
 const canonicalFiles = [
   "lib/source-text-blocks.ts",
-  "lib/evidence-ledger.ts",
+  "lib/generation-evidence-manifest.ts",
   "lib/generation-contracts.ts",
   "lib/business-fact-normalization.ts",
   "lib/vertical-packs.ts",
@@ -14,7 +14,14 @@ const canonicalFiles = [
   "lib/site-compiler.ts",
   "lib/generation-objective-gate.ts",
   "lib/generation-judge.ts",
-  "lib/generation-pipeline.ts"
+  "lib/generation-pipeline.ts",
+  "lib/control-plane-contracts.ts",
+  "lib/control-plane.ts",
+  "lib/control-plane-service.ts",
+  "lib/generation-entry-contracts.ts",
+  "lib/intake-generation-snapshot.ts",
+  "lib/site-render-envelope.ts",
+  "lib/public-site-version.ts"
 ];
 const productionRoots = ["app", "components", "lib", "workers"];
 const runtimeGraph = [
@@ -25,6 +32,17 @@ const runtimeGraph = [
   "lib/generation-objective-gate.ts",
   "lib/generation-judge.ts",
   "lib/intake.ts",
+  "lib/site-renderer-v3.tsx"
+];
+const snapshotOnlyGenerationModules = [
+  "lib/generation-pipeline.ts",
+  "lib/vertical-packs.ts",
+  "lib/site-copy.ts",
+  "lib/site-compiler.ts",
+  "lib/generation-objective-gate.ts",
+  "lib/generation-judge.ts",
+  "lib/site-render-envelope.ts",
+  "lib/site-renderer.tsx",
   "lib/site-renderer-v3.tsx"
 ];
 const legacyModules = [
@@ -43,7 +61,8 @@ const legacyModules = [
   "design-system-planner-constraints-v1",
   "design-system-planner-manifest-v1",
   "deterministic-site-director-plan-v1",
-  "evidence-ledger-v1",
+  "fact-verification",
+  "generation-evidence-manifest-v1",
   "generated-copy-v2",
   "generated-site-design-systems-v1",
   "generated-site-v3-art-direction-catalog",
@@ -109,16 +128,30 @@ for (const relativeFile of runtimeGraph) {
   const source = await readFile(path.join(root, relativeFile), "utf8");
   assert.equal(verticalBranch.test(source), false, `${relativeFile} branches on a vertical inside the canonical runtime graph.`);
 }
+for (const relativeFile of snapshotOnlyGenerationModules) {
+  const source = await readFile(path.join(root, relativeFile), "utf8");
+  const imports = importedModuleNames(source);
+  for (const mutableAuthorityModule of ["repository", "store", "supabase"]) {
+    assert.equal(
+      imports.includes(mutableAuthorityModule),
+      false,
+      `${relativeFile} imports mutable authority ${mutableAuthorityModule}; canonical generation consumes immutable snapshots only.`
+    );
+  }
+}
 
 const contracts = await readFile(path.join(root, "lib/generation-contracts.ts"), "utf8");
 assert.match(contracts, /"precision_shop_editorial"\s*\|\s*"trusted_local_service"/);
 assert.equal((contracts.match(/export type ShippingDesignSystemId/g) ?? []).length, 1);
+assert.match(contracts, /verticalPack:\s*\{\s*id: string;\s*version: string;/, "Generation plans must retain the selected vertical-pack identity.");
 
 const systems = await readFile(path.join(root, "lib/vertical-packs.ts"), "utf8");
 assert.match(systems, /"trusted_local_service"/);
 assert.match(systems, /"precision_shop_editorial"/);
+assert.match(systems, /verticalPack:\s*\{ id: pack\.id, version: pack\.version \}/, "The planner must bind the selected vertical-pack identity into every plan.");
 
 assert.deepEqual([...activeSectionTemplateOrderV3].sort(), [
+  "auto_body_service_index",
   "contact_split",
   "faq_list",
   "hero_split",
@@ -127,13 +160,20 @@ assert.deepEqual([...activeSectionTemplateOrderV3].sort(), [
   "numbered_steps",
   "quote_wall",
   "service_area_showcase",
-  "service_index",
   "side_intro_rows"
 ], "The public renderer catalog must expose only the two-system canonical templates.");
 
 const copySource = await readFile(path.join(root, "lib/site-copy.ts"), "utf8");
 assert.equal((copySource.match(/operation: "whole_site_copy"/g) ?? []).length, 1, "Canonical copy must expose one whole-site model operation.");
 assert.equal((copySource.match(/for \(const attempt of \[1, 2\]/g) ?? []).length, 1, "Canonical copy permits exactly one schema/transient retry.");
+assert.match(copySource, /allowedEvidence:\s*\[\]/, "Trust-sensitive proof must not enter model-authored copy.");
+
+const judgeSource = await readFile(path.join(root, "lib/generation-judge.ts"), "utf8");
+for (const [relativeFile, source] of [["lib/site-copy.ts", copySource], ["lib/generation-judge.ts", judgeSource]] as const) {
+  assert.equal(/auto[- ]body/i.test(source), false, `${relativeFile} embeds auto-body domain language outside the selected vertical pack.`);
+  assert.match(source, /verticalPackFor\(/, `${relativeFile} must obtain domain context from the selected vertical pack.`);
+  assert.match(source, /businessCategory:\s*pack\.businessCategory/, `${relativeFile} must pass pack-owned business context to the model.`);
+}
 
 const understandingSource = await readFile(path.join(root, "lib/business-understanding-v2.ts"), "utf8");
 assert.equal(
@@ -153,7 +193,7 @@ assert.match(pipelineSource, /validateGenerationPipelineTrace\(trace\)/);
 
 const modelsSource = await readFile(path.join(root, "lib/models.ts"), "utf8");
 const canonicalArtifactTypes = [
-  "evidence_ledger",
+  "generation_evidence_manifest",
   "generation_plan",
   "site_copy",
   "generation_review",
@@ -175,6 +215,25 @@ for (const legacyArtifactColumn of ["producer_id", "vertical_playbook_version", 
   assert.equal(schemaSource.includes(legacyArtifactColumn), false, `Database schema still exposes legacy artifact column ${legacyArtifactColumn}.`);
 }
 assert.equal(schemaSource.includes("optimization_findings"), false, "Database schema still exposes legacy optimization findings.");
+for (const legacyAuthority of ["profile_json", "bundle_json", "business_profiles", "site_assets", "fact_candidates", "business_services"]) {
+  assert.equal(schemaSource.includes(legacyAuthority), false, `Database schema still exposes legacy authority ${legacyAuthority}.`);
+}
+for (const retainedReference of [
+  /source_snapshot_id text not null references source_snapshots\(id\) on delete restrict/,
+  /asset_revision_id text not null references asset_revisions\(id\) on delete restrict/,
+  /input_snapshot_id text not null references generation_input_snapshots\(id\) on delete restrict/,
+  /form_definition_id text not null references form_definitions\(id\) on delete restrict/
+]) {
+  assert.match(schemaSource, retainedReference, `Strict retained input is missing an on-delete-restrict reference: ${retainedReference}.`);
+}
+assert.match(schemaSource, /state_hash text not null/, "Canonical business revisions must bind to an immutable content hash.");
+assert.match(schemaSource, /intent_hash text not null/, "Site-intent revisions must bind to an immutable content hash.");
+const cutoverMigrationSource = await readFile(path.join(root, "supabase/migrations/202607160002_canonical_control_plane.sql"), "utf8");
+assert.match(cutoverMigrationSource, /add column state_hash text not null/, "The hard cutover must install business-state content hashes.");
+assert.match(cutoverMigrationSource, /intent_hash text not null/, "The hard cutover must install site-intent content hashes.");
+const supabaseRepositorySource = await readFile(path.join(root, "lib/supabase/repository.ts"), "utf8");
+assert.match(supabaseRepositorySource, /currentBusiness\.state_hash !== stateHash/, "Durable business writes must reject same-revision content changes.");
+assert.match(supabaseRepositorySource, /currentIntent\.intent_hash !== intentHash/, "Durable intent writes must reject same-revision content changes.");
 
 const stylesheet = await readFile(path.join(root, "app/globals.css"), "utf8");
 const retiredStyleSelectors = [
@@ -189,6 +248,44 @@ for (const retiredStyleSelector of retiredStyleSelectors) {
 const rendererSource = await readFile(path.join(root, "lib/site-renderer-v3.tsx"), "utf8");
 assert.equal(rendererSource.includes("site-location-showcase-map-fallback-v3"), false, "Location link-only mode must collapse to a complete visit card, not a fake map placeholder.");
 assert.equal(stylesheet.includes("site-location-showcase-map-fallback-v3"), false, "Fake location-map fallback styles must remain deleted.");
+assert.equal(rendererSource.includes('value="form_contact"'), false, "Public renderer must not hard-code a form identity.");
+assert.match(rendererSource, /value=\{formDefinition\.id\}/, "Public renderer must use the immutable form identity.");
+assert.match(rendererSource, /formDefinition\.fields\.map/, "Public renderer must use the immutable form field list.");
+
+const formSubmitSource = await readFile(path.join(root, "app/api/forms/submit/route.ts"), "utf8");
+assert.match(formSubmitSource, /getPublishedFormDefinition\(siteId, formId\)/, "Public form submissions must authorize against a retained published version.");
+const publicSiteSource = await readFile(path.join(root, "app/sites/[slug]/[[...path]]/page.tsx"), "utf8");
+assert.match(publicSiteSource, /loadPublicSiteVersion/, "Public rendering must resolve an eligible immutable published version.");
+const renderEnvelopeSource = await readFile(path.join(root, "lib/site-render-envelope.ts"), "utf8");
+assert.equal(renderEnvelopeSource.includes("envelope.locations = input.shell.locations"), false, "Retained versions must not render mutable shell locations.");
+assert.match(renderEnvelopeSource, /input\.snapshot\.business\.googlePlaceId/, "Retained location proof must derive from the immutable generation snapshot.");
+const controlPlaneServiceSource = await readFile(path.join(root, "lib/control-plane-service.ts"), "utf8");
+assert.match(controlPlaneServiceSource, /coalesceKey: `control_plane:\$\{request\.siteId\}`/, "Structural rebuilds must coalesce by managed site.");
+assert.match(controlPlaneServiceSource, /snapshot\.eligibilityMode !== "public"/, "Protected-preview deterministic recompiles must remain drafts.");
+const scrapedMediaSource = await readFile(path.join(root, "lib/scraped-media.ts"), "utf8");
+assert.equal(scrapedMediaSource.includes("forceLocal: true"), false, "Scraped media must use durable configured storage, not process-local storage.");
+assert.match(scrapedMediaSource, /publicUrl:\s*false/, "Scraped media must be uploaded without a public storage URL.");
+assert.match(scrapedMediaSource, /storagePath:\s*stored\.storagePath/, "Scraped media must retain its durable storage identity.");
+assert.match(scrapedMediaSource, /mimeType:\s*downloaded\.mimeType/, "Scraped media must retain the downloaded MIME type.");
+const intakeSnapshotSource = await readFile(path.join(root, "lib/intake-generation-snapshot.ts"), "utf8");
+assert.equal(intakeSnapshotSource.includes("Math.max(1, asset.url?.length"), false, "Asset revisions must never synthesize byte counts from URLs.");
+assert.equal(intakeSnapshotSource.includes("external/${hash(asset.url"), false, "Asset revisions must never synthesize storage paths from remote URLs.");
+assert.match(intakeSnapshotSource, /sourceType:\s*"google_places"/, "Intake must retain Google Places as an independent source snapshot.");
+assert.match(intakeSnapshotSource, /status = canonicalJson\(candidate\.normalizedValue\) === selectedValue \? "superseded" : "conflict"/, "Non-selected scalar observations must preserve source conflicts.");
+const intakeRouteSource = await readFile(path.join(root, "app/api/intake/route.ts"), "utf8");
+assert.match(intakeRouteSource, /freshIntakeRequestSchema\.safeParse\(body\)/, "Fresh intake must use the canonical URL request contract.");
+const generationEntryContractsSource = await readFile(path.join(root, "lib/generation-entry-contracts.ts"), "utf8");
+assert.match(generationEntryContractsSource, /url:\s*z\.string\(\)\.trim\(\)\.min\(1\),/, "Fresh intake must require a URL.");
+assert.equal(intakeRouteSource.includes("Provide a URL or prompt"), false, "Prompt-only intake must remain deleted.");
+const regenerationRouteSource = await readFile(path.join(root, "app/api/sites/regenerate/route.ts"), "utf8");
+assert.equal(regenerationRouteSource.includes("sourceUrl"), false, "Snapshot regeneration must not depend on a retained source URL.");
+assert.match(regenerationRouteSource, /inputSnapshotId:\s*controlPlane\.latestSnapshot\.id/, "Snapshot regeneration must queue the exact immutable input.");
+const candidateServiceSource = await readFile(path.join(root, "lib/site-candidate-service.ts"), "utf8");
+assert.match(candidateServiceSource, /mode:\s*"fresh"/, "Generation must expose an explicit fresh URL mode.");
+assert.match(candidateServiceSource, /mode:\s*"snapshot"/, "Generation must expose an explicit immutable-snapshot mode.");
+const assetRouteSource = await readFile(path.join(root, "app/api/assets/[siteId]/[file]/route.ts"), "utf8");
+assert.match(assetRouteSource, /readStoredAsset/, "The authenticated asset route must read from configured durable storage.");
+assert.equal(assetRouteSource.includes("readLocalAsset"), false, "The authenticated asset route must not bypass configured durable storage.");
 
 const strict = process.argv.includes("--cutover");
 const legacyFiles = legacyModules.map((moduleName) => `lib/${moduleName}.ts`);
@@ -201,6 +298,12 @@ legacyFiles.push(
   "app/api/generated-qa/run/route.ts",
   "app/api/qa/run/route.ts",
   "app/api/sites/design/route.ts",
+  "app/api/business-profile/route.ts",
+  "app/api/business-services/route.ts",
+  "app/api/evidence/confirm/route.ts",
+  "app/api/forms/settings/route.ts",
+  "app/api/sites/update-section/route.ts",
+  "app/api/site-candidates/[candidateId]/business-profile/route.ts",
   "components/RunGeneratedQaForm.tsx"
 );
 const presentLegacyFiles = [];
@@ -216,6 +319,7 @@ console.log(JSON.stringify({
   mode: strict ? "cutover" : "walking_skeleton",
   scannedProductionFiles: productionFiles.length,
   runtimeGraphFiles: runtimeGraph.length,
+  snapshotOnlyGenerationModules: snapshotOnlyGenerationModules.length,
   canonicalFiles: canonicalFiles.length,
   shippingDesignSystems: 2,
   presentLegacyFiles

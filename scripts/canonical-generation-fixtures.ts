@@ -1,20 +1,26 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import type {
   BusinessProfile,
-  FieldProvenance,
+  BusinessUnderstandingV2,
   SiteAsset,
   SiteBundle,
   SiteVersionV3
 } from "../lib/models";
+import type { FactObservationV1, GenerationInputSnapshotV1, ResolvedAssetV1, SourceSnapshotV1 } from "../lib/control-plane-contracts";
+import type { CrawlAssessment } from "../lib/crawler";
 import { summarizeCrawlHtml } from "../lib/crawler";
-import { composeEvidenceLedger, type EvidenceLedger, type EvidenceProposal } from "../lib/evidence-ledger";
+import { composeGenerationEvidenceManifestV1, type GenerationEvidenceManifestV1, type EvidenceProposal } from "../lib/generation-evidence-manifest";
 import { buildGenerationPlan } from "../lib/vertical-packs";
 import { createFixtureSiteCopy } from "../lib/site-copy";
 import { compileSite } from "../lib/site-compiler";
 import type { GenerationPlan, ShippingDesignSystemId, SiteCopy } from "../lib/generation-contracts";
 import { slugify } from "../lib/slug";
-import { canonicalBusinessHours, canonicalBusinessServices } from "../lib/business-fact-normalization";
+import { renderProfileFromSnapshot, siteRenderEnvelopeFromSnapshot } from "../lib/site-render-envelope";
+import { createSiteBundleFromInput } from "../lib/intake";
+import { generationSnapshotFromIntakeBundle, type CanonicalGenerationInputV1 } from "../lib/intake-generation-snapshot";
+import { measureImageDimensions } from "../lib/image-dimensions";
 
 export type CanonicalFixtureDefinition = {
   id: string;
@@ -34,8 +40,12 @@ type Manifest = {
 export type CanonicalFixtureBuild = {
   definition: CanonicalFixtureDefinition;
   business: BusinessProfile;
-  assets: SiteAsset[];
-  evidence: EvidenceLedger;
+  snapshot: GenerationInputSnapshotV1;
+  canonicalInput: CanonicalGenerationInputV1;
+  sourceSnapshots: SourceSnapshotV1[];
+  observations: FactObservationV1[];
+  assets: ResolvedAssetV1[];
+  evidence: GenerationEvidenceManifestV1;
   plan: GenerationPlan;
   copy: SiteCopy;
   version: SiteVersionV3;
@@ -56,168 +66,206 @@ export async function loadCanonicalFixtureDefinitions() {
 export async function buildCanonicalFixture(definition: CanonicalFixtureDefinition): Promise<CanonicalFixtureBuild> {
   const html = await readFile(path.join(process.cwd(), definition.htmlPath), "utf8");
   const page = summarizeCrawlHtml(html, definition.sourceUrl);
-  const crawl = { pageSummaries: [page] } as Parameters<typeof composeEvidenceLedger>[0]["crawl"];
-  const evidence = composeEvidenceLedger({
+  const crawl = fixtureCrawl(definition.sourceUrl, page);
+  const evidence = composeGenerationEvidenceManifestV1({
     crawl,
     proposals: definition.evidenceProposals.map((proposal) => ({ ...proposal, sourceUrl: definition.sourceUrl })),
     createdAt: fixtureTimestamp
   });
-  const business = businessFromFixture(definition.id, definition.sourceUrl, page);
-  const assets = await assetsFromFixture(
-    business.siteId,
-    page,
-    html,
+  const understanding = fixtureUnderstanding(definition, crawl);
+  const intakeBundle = createSiteBundleFromInput({
+    url: definition.sourceUrl,
+    identity: {
+      siteId: `site_fixture_${slugify(definition.id)}`,
+      slug: slugify(definition.id),
+      businessProfileId: `bp_fixture_${slugify(definition.id)}`
+    },
+    crawl,
+    understanding,
+    createdAt: fixtureTimestamp
+  });
+  intakeBundle.presenceAssessment.evidenceManifest = evidence;
+  const retainedAssets = await assetsFromFixture(
+    intakeBundle.businessProfile.siteId,
     definition.expectedDesignSystem === "precision_shop_editorial",
     definition.heroImagePath
   );
-  const plan = buildGenerationPlan({ business, evidence, assets, createdAt: fixtureTimestamp });
-  const copy = createFixtureSiteCopy(plan, business);
-  const version = compileSite({ business, plan, copy, evidence, assets, createdAt: fixtureTimestamp });
-  const bundle = fixtureBundle(business, version, assets, definition.sourceUrl);
-  return { definition, business, assets, evidence, plan, copy, version, bundle };
+  const canonicalInput = generationSnapshotFromIntakeBundle({
+    bundle: intakeBundle,
+    assets: retainedAssets,
+    crawl,
+    eligibilityMode: "public",
+    createdAt: fixtureTimestamp
+  });
+  const snapshot = canonicalInput.snapshot;
+  const assets = snapshot.assets;
+  const plan = buildGenerationPlan({ snapshot, evidence, createdAt: fixtureTimestamp });
+  const copy = createFixtureSiteCopy(plan, snapshot, fixtureTimestamp);
+  const version = compileSite({
+    snapshot,
+    plan,
+    copy,
+    createdAt: fixtureTimestamp,
+    versionId: `version_fixture_${slugify(definition.id)}_v1`
+  });
+  const bundle = fixtureBundle(snapshot, version, plan, copy, definition.sourceUrl);
+  const business = renderProfileFromSnapshot(snapshot.business);
+  return {
+    definition,
+    business,
+    snapshot,
+    canonicalInput,
+    sourceSnapshots: canonicalInput.sourceSnapshots,
+    observations: canonicalInput.observations,
+    assets,
+    evidence,
+    plan,
+    copy,
+    version,
+    bundle
+  };
 }
 
-function businessFromFixture(
-  id: string,
-  sourceUrl: string,
-  page: ReturnType<typeof summarizeCrawlHtml>
-): BusinessProfile {
-  const facts = page.extractedFacts;
-  const name = facts.name ?? page.title?.split("|")[0]?.trim() ?? id;
-  const siteId = `site_fixture_${slugify(id)}`;
-  const provenance = (_field: string): FieldProvenance => ({
-    source: "website",
-    sourceUrl,
-    confidence: 0.9,
-    verified: false,
-    observedAt: fixtureTimestamp
-  });
-  const extractedServices = canonicalBusinessServices(facts.services);
-  const services = extractedServices.length
-    ? extractedServices
-    : page.mainText?.match(/windshield/i)
-      ? ["Windshield Repair", "Window Replacement"]
-      : ["Auto Body Repair"];
+export function bakeoffInputArtifact(fixture: CanonicalFixtureBuild) {
   return {
-    id: `bp_${slugify(id)}`,
-    siteId,
-    name,
-    vertical: "auto_body",
-    categories: facts.categories.length ? facts.categories : ["Auto Body Shop"],
-    description: facts.description ?? page.metaDescription,
-    phone: facts.phone,
-    email: facts.email,
-    address: facts.address,
-    geo: facts.geo,
-    hours: Object.fromEntries(canonicalBusinessHours(facts.hours).map(({ label, value }) => [label, value])),
-    services,
-    serviceHighlights: facts.serviceHighlights ?? [],
-    serviceAreas: facts.serviceAreas.length ? facts.serviceAreas : facts.address?.city ? [facts.address.city] : [],
-    socialLinks: facts.socialLinks,
-    bookingLinks: facts.bookingLinks,
-    orderingLinks: facts.orderingLinks,
-    photos: [],
-    pressLinks: facts.pressLinks,
-    reviewsSummary: facts.reviewsSummary,
-    provenance: {
-      name: provenance("name"),
-      ...(facts.phone ? { phone: provenance("phone") } : {}),
-      ...(facts.address ? { address: provenance("address") } : {}),
-      services: provenance("services")
+    schemaVersion: "generation-bakeoff-input-v1" as const,
+    fixture: {
+      id: fixture.definition.id,
+      profile: fixture.definition.profile,
+      sourceUrl: fixture.definition.sourceUrl
+    },
+    sourceSnapshots: fixture.sourceSnapshots,
+    observations: fixture.observations,
+    generationInputSnapshot: fixture.snapshot
+  };
+}
+
+export function templatedBaselineArtifact(fixture: CanonicalFixtureBuild) {
+  return {
+    schemaVersion: "templated-generation-baseline-v1" as const,
+    fixtureId: fixture.definition.id,
+    generator: "lodesta-canonical-templated-v1" as const,
+    inputSnapshotId: fixture.snapshot.id,
+    inputHash: fixture.snapshot.inputHash,
+    output: {
+      plan: fixture.plan,
+      copy: fixture.copy,
+      version: fixture.version
+    },
+    trace: {
+      schemaVersion: "bakeoff-templated-trace-v1" as const,
+      stages: ["vertical_pack", "plan", "fixture_copy", "compile"] as const,
+      counts: { plans: 1, copies: 1, compiles: 1, gates: 0, judges: 0 }
     }
+  };
+}
+
+function fixtureCrawl(sourceUrl: string, page: ReturnType<typeof summarizeCrawlHtml>): CrawlAssessment {
+  return {
+    url: sourceUrl,
+    fetched: true,
+    status: 200,
+    finalUrl: sourceUrl,
+    title: page.title,
+    metaDescription: page.metaDescription,
+    canonical: page.canonical,
+    hasViewportMeta: page.hasViewportMeta,
+    hasLocalBusinessSchema: page.hasLocalBusinessSchema,
+    hasTelLink: page.hasTelLink,
+    robotsFound: true,
+    sitemapFound: true,
+    formCount: page.formCount,
+    imageCount: page.imageCount,
+    imagesWithoutAlt: page.imagesWithoutAlt,
+    internalLinkCount: page.internalLinkCount,
+    externalLinkCount: page.externalLinkCount,
+    jsonLdTypes: page.jsonLdTypes,
+    extractedFacts: structuredClone(page.extractedFacts),
+    formReferences: structuredClone(page.formReferences),
+    linkReferences: structuredClone(page.linkReferences),
+    assetReferences: structuredClone(page.assetReferences),
+    sampledInternalPages: [],
+    pageSummaries: [page],
+    score: { overall: 0, max: 0, percent: 0, grade: "needs_work", checks: [] },
+    findings: []
+  };
+}
+
+function fixtureUnderstanding(definition: CanonicalFixtureDefinition, crawl: CrawlAssessment): BusinessUnderstandingV2 {
+  return {
+    version: "business-understanding-v2",
+    source: "deterministic_fallback",
+    vertical: "auto_body",
+    verticalConfidence: 1,
+    detectedSubverticals: [],
+    cleanedServices: crawl.extractedFacts.services.map((service) => ({
+      name: service,
+      sourceText: service,
+      confidence: 0.9
+    })),
+    hours: Object.entries(crawl.extractedFacts.hours ?? {}).map(([label, value]) => ({ label, value })),
+    primaryConversionGoal: "form_first",
+    urgentServiceSignals: [],
+    brandExpression: {
+      version: "brand-expression-v1",
+      mood: "technical",
+      fontPosture: "utility",
+      voiceRegister: "plainspoken",
+      paletteSeed: { strategy: "neutral" },
+      rationale: "Deterministic bakeoff fixture expression."
+    },
+    evidenceProposals: definition.evidenceProposals.map((proposal) => ({ ...proposal, sourceUrl: definition.sourceUrl })),
+    factConfidence: [
+      { field: "name", confidence: 0.9, sourceBacked: true },
+      { field: "services", confidence: 0.9, sourceBacked: true }
+    ],
+    notes: ["Deterministic bakeoff fixture interpretation."]
   };
 }
 
 async function assetsFromFixture(
   siteId: string,
-  page: ReturnType<typeof summarizeCrawlHtml>,
-  html: string,
   allowHero: boolean,
   heroImagePath?: string
 ): Promise<SiteAsset[]> {
-  if (!allowHero) return [];
-  const retained = page.assetReferences.filter((asset) => asset.kind === "image").slice(0, 1);
-  const embeddedUrl = html.match(/<img[^>]+src=(["'])(.*?)\1/i)?.[2];
-  const sourceAssets = heroImagePath
-    ? [{
-        url: `data:image/jpeg;base64,${(await readFile(path.join(process.cwd(), heroImagePath))).toString("base64")}`,
-        alt: "Technician inspecting a vehicle in a clean independent repair shop"
-      }]
-    : retained.length
-      ? retained
-      : embeddedUrl
-        ? [{ url: embeddedUrl, alt: "Source business repair photo" }]
-        : [];
-  return sourceAssets.map((asset, index) => ({
-    id: `asset_fixture_${index + 1}`,
+  if (!allowHero || !heroImagePath) return [];
+  const bytes = await readFile(path.join(process.cwd(), heroImagePath));
+  const mimeType = heroImagePath.endsWith(".png") ? "image/png" as const
+    : heroImagePath.endsWith(".webp") ? "image/webp" as const
+      : "image/jpeg" as const;
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
+  const dimensions = measureImageDimensions(bytes, mimeType);
+  const assetId = `asset_fixture_${slugify(siteId)}_hero`;
+  return [{
+    id: assetId,
     siteId,
     kind: "photo",
-    url: asset.url,
-    alt: asset.alt ?? "Source business photo",
+    url: `/${heroImagePath.replace(/^public\//, "")}`,
+    alt: "Technician inspecting a vehicle in a clean independent repair shop",
     source: "website_reference",
-    rightsStatus: "preclaim_safe",
+    rightsStatus: "reference_only",
     usageScope: "preclaim_preview",
     ownerApproved: false,
-    metadata: { analysisV1: { imageKind: "repair_environment", warnings: [] } },
+    metadata: {
+      contentHash,
+      storagePath: heroImagePath,
+      mimeType,
+      bytes: bytes.byteLength,
+      ...(dimensions ?? {}),
+      analysisV1: { imageKind: "repair_environment", warnings: [] }
+    },
     createdAt: fixtureTimestamp
-  }));
+  }];
 }
 
 function fixtureBundle(
-  business: BusinessProfile,
+  snapshot: GenerationInputSnapshotV1,
   version: SiteVersionV3,
-  assets: SiteAsset[],
+  plan: GenerationPlan,
+  copy: SiteCopy,
   sourceUrl: string
 ): SiteBundle {
-  return {
-    businessProfile: business,
-    siteModel: {
-      id: business.siteId,
-      slug: slugify(business.name),
-      theme: version.theme ?? {
-        paletteName: "canonical-fixture",
-        colors: {
-          background: "#ffffff",
-          surface: "#ffffff",
-          text: "#171717",
-          muted: "#5f5f5f",
-          primary: "#174c3c",
-          primaryText: "#ffffff",
-          accent: "#c84a2f",
-          border: "#d6d6d6"
-        },
-        typography: { heading: "Arial, sans-serif", body: "Arial, sans-serif" },
-        radius: "sm",
-        density: "standard",
-        mood: "utilitarian"
-      },
-      versions: [version],
-      pinList: []
-    },
-    extensionModel: {
-      forms: [{
-        id: `form_${business.siteId}_estimate`,
-        siteId: business.siteId,
-        name: "Estimate request",
-        fields: [
-          { id: "name", label: "Name", type: "text", required: true },
-          { id: "phone", label: "Phone", type: "phone", required: true },
-          { id: "details", label: "Damage details", type: "textarea", required: true }
-        ],
-        submitLabel: "Request an estimate"
-      }],
-      workflows: [],
-      customBlocks: []
-    },
-    experiments: [],
-    presenceAssessment: {
-      siteId: business.siteId,
-      sourceUrl,
-      assetInventory: assets,
-      technicalNotes: [],
-      visualNotes: [],
-      brandNotes: [],
-      publicPresenceNotes: []
-    }
-  };
+  const bundle = siteRenderEnvelopeFromSnapshot({ snapshot, version, plan, copy });
+  bundle.presenceAssessment.sourceUrl = sourceUrl;
+  return bundle;
 }

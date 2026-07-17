@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { repository } from "../lib/repository";
-import { requiredClaimFactIds } from "../lib/fact-verification";
+import { requiredPublicEligibilityFactIds } from "../lib/control-plane";
 import {
   asStripeInvoice,
   asStripeCheckoutSession,
@@ -15,6 +15,8 @@ const ownerEmail = `stripe-verify-${Date.now()}@example.com`;
 async function main() {
   const bundle = await repository.getSiteBundle("site_joes_pizza");
   if (!bundle) throw new Error("Unable to load Joe's Pizza bundle.");
+  const controlPlane = await repository.getCanonicalControlPlane("site_joes_pizza");
+  if (!controlPlane) throw new Error("Unable to load Joe's Pizza canonical control plane.");
   const claim = await repository.createClaim({
     siteId: "site_joes_pizza",
     ownerEmail,
@@ -22,7 +24,7 @@ async function main() {
     verificationMethod: "operator_manual",
     verifiedBy: "stripe-webhook-verifier",
     verifiedAt: new Date().toISOString(),
-    verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
+    verifiedFacts: requiredPublicEligibilityFactIds(controlPlane.state),
     acceptedTerms: true,
     acceptedManagement: true
   });

@@ -149,10 +149,6 @@ export type PublicPresenceSignal = {
   notes: string[];
 };
 
-export type BusinessFactRenderSafety = "render_safe" | "review_required" | "internal_only" | "blocked";
-
-export type BusinessFactConfidence = "high" | "medium" | "low";
-
 export type BusinessFactKind =
   | "name"
   | "description"
@@ -180,65 +176,6 @@ export type BusinessFactKind =
   | "ordering_link"
   | "press_link"
   | "proof_signal";
-
-export type BusinessFact = {
-  id: string;
-  kind: BusinessFactKind;
-  label: string;
-  value: string | number | boolean | string[] | Record<string, unknown>;
-  provenance: FieldProvenance;
-  confidence: BusinessFactConfidence;
-  renderSafety: BusinessFactRenderSafety;
-  sourceUrl?: string;
-  notes?: string[];
-};
-
-export type BusinessFactGraph = {
-  id: string;
-  siteId: string;
-  createdAt: string;
-  sources: Array<{
-    id: string;
-    type: "website" | "places_api" | "prompt" | "system";
-    url?: string;
-    confidence: number;
-    observedAt: string;
-  }>;
-  facts: BusinessFact[];
-  omittedFacts: Array<{
-    id: string;
-    kind: BusinessFactKind;
-    label: string;
-    reason: string;
-  }>;
-  sourceFactsV2?: SourceAwareFactV2[];
-};
-
-export type SourceAwareFactSourceType =
-  | "crawl"
-  | "schema"
-  | "owner_admin"
-  | "first_party"
-  | "places_identity"
-  | "manual"
-  | "system";
-
-export type SourceAwareFactPolicy = "durable_render" | "owner_review_required" | "live_only" | "internal_only" | "blocked";
-
-export type SourceAwareFactV2 = {
-  id: string;
-  kind: BusinessFactKind;
-  label: string;
-  value: string | number | boolean | string[] | Record<string, unknown>;
-  sourceType: SourceAwareFactSourceType;
-  sourceId?: string;
-  sourceUrl?: string;
-  observedAt: string;
-  confidence: number;
-  renderPolicy: SourceAwareFactPolicy;
-  sourcePolicy: SourceAwareFactPolicy;
-  notes?: string[];
-};
 
 export type BusinessProfile = {
   id: string;
@@ -443,6 +380,11 @@ export type MediaAssetDecisionV3 = {
 export type SiteVersionBase = {
   id: string;
   status: "draft" | "published";
+  inputSnapshotId: string;
+  businessStateRevision: number;
+  siteIntentRevision: number;
+  formDefinitionId: string;
+  assetRevisionIds: string[];
   rendererVersion: RendererVersion;
   designSchemaVersion: DesignSchemaVersion;
   createdAt: string;
@@ -584,7 +526,7 @@ export type BusinessUnderstandingV2 = {
   businessStory?: { summary: string; distinctives: string[] };
   brandExpression?: BusinessBrandExpressionV1;
   /** Exact source-block proposals; deterministic verification decides what is renderable. */
-  evidenceProposals: import("./evidence-ledger").EvidenceProposal[];
+  evidenceProposals: import("./generation-evidence-manifest").EvidenceProposal[];
   factConfidence: BusinessUnderstandingFactConfidenceV2[];
   notes: string[];
 };
@@ -1502,9 +1444,9 @@ export type RenderInspectionResult = {
 export type PresenceAssessment = {
   siteId: string;
   sourceUrl?: string;
-  businessFactGraph?: BusinessFactGraph;
-  /** Canonical fail-closed evidence used by generation and owner confirmation. */
-  evidenceLedger?: import("./evidence-ledger").EvidenceLedger;
+  /** Derived, fail-closed evidence manifest used only while producing an immutable input snapshot. */
+  evidenceManifest?: import("./generation-evidence-manifest").GenerationEvidenceManifestV1;
+  generationInputSnapshot?: import("./control-plane-contracts").GenerationInputSnapshotV1;
   generationPlan?: import("./generation-contracts").GenerationPlan;
   siteCopy?: import("./generation-contracts").SiteCopy;
   generationTrace?: import("./generation-pipeline").GenerationPipelineTrace;
@@ -1522,8 +1464,10 @@ export type PresenceAssessment = {
     kind: "photo" | "logo";
     originalUrl: string;
     storedUrl: string;
+    storagePath: string;
     contentHash: string;
     bytes: number;
+    mimeType: "image/jpeg" | "image/png" | "image/webp";
     scrapedAt: string;
     width?: number;
     height?: number;
@@ -1540,7 +1484,8 @@ export type SiteArtifactScope =
   | "qa_evidence";
 
 export type SiteArtifactType =
-  | "evidence_ledger"
+  | "generation_evidence_manifest"
+  | "generation_input_snapshot"
   | "generation_plan"
   | "site_copy"
   | "generation_review"
@@ -1650,7 +1595,7 @@ export type BusinessLocationRecord = {
   updatedAt: string;
 };
 
-export type SiteCandidateStatus = "ready" | "blocked" | "accepted" | "archived";
+export type SiteCandidateStatus = "ready" | "blocked" | "stale" | "accepted" | "archived";
 export type SiteCandidatePurpose = "customer_prospect" | "test_generation";
 
 export type SiteCandidateRecord = {
@@ -1662,8 +1607,16 @@ export type SiteCandidateRecord = {
   businessName: string;
   vertical: Vertical;
   candidateSlug: string;
-  bundle: SiteBundle;
+  inputSnapshotId: string;
+  inputSnapshot: import("./control-plane-contracts").GenerationInputSnapshotV1;
+  version: SiteVersionV3;
+  formDefinitionId: string;
+  formDefinition: import("./control-plane-contracts").FormDefinitionV1;
+  generationPlan: import("./generation-contracts").GenerationPlan;
+  siteCopy: import("./generation-contracts").SiteCopy;
+  evidenceManifest: import("./generation-evidence-manifest").GenerationEvidenceManifestV1;
   status: SiteCandidateStatus;
+  staleReason?: string;
   candidatePurpose: SiteCandidatePurpose;
   intendedSiteId?: string;
   acceptedSiteId?: string;

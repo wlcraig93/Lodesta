@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { BusinessLocationRecord, BusinessProfile, ComponentControlSchemaV3, SiteArtDirectionFontPairingIdV3, SiteArtDirectionV3, SiteLocationBinding, SiteModel, SiteVersionV3 } from "./models";
+import type { BusinessLocationRecord, BusinessProfile, ComponentControlSchemaV3, FormDefinition, SiteArtDirectionFontPairingIdV3, SiteArtDirectionV3, SiteLocationBinding, SiteModel, SiteVersionV3 } from "./models";
 import type {
   ActionSlotV3,
   BackgroundFocalPointV3,
@@ -41,8 +41,11 @@ type SiteRendererV3Props = {
   experiments?: Experiment[];
   tracking?: boolean;
   formsEnabled?: boolean;
+  formDefinition?: FormDefinition;
   /** Link prefix: "/sites/{slug}" on the platform host, "" on custom domains. */
   basePath?: string;
+  /** Exact public homepage URL for LocalBusiness structured data. */
+  siteUrl?: string;
   /**
    * Google proof per docs/social-proof-agent-brief.md: "ui_kit" for claimed
    * sites and capped tokenized previews, "link_only" for anonymous unclaimed
@@ -73,7 +76,9 @@ export function SiteRendererV3({
   experiments = [],
   tracking = true,
   formsEnabled = true,
+  formDefinition,
   basePath,
+  siteUrl,
   proofMode = "none",
   referenceBrandingEnabled = false,
   assetAccessToken
@@ -86,6 +91,7 @@ export function SiteRendererV3({
     ? makeLocalBusinessJsonLdForBundle({
         business,
         site,
+        url: siteUrl,
         locations: rendererLocations.locations,
         locationBindings: rendererLocations.locationBindings
       })
@@ -138,6 +144,7 @@ export function SiteRendererV3({
           controls={section.controls}
           business={business}
           formsEnabled={formsEnabled}
+          formDefinition={formDefinition}
           pageId={page.id}
           linkBase={linkBase}
           assetAccessToken={assetAccessToken}
@@ -336,6 +343,7 @@ function SectionV3({
   controls,
   business,
   formsEnabled,
+  formDefinition,
   pageId,
   linkBase,
   assetAccessToken
@@ -346,6 +354,7 @@ function SectionV3({
   controls?: ComponentControlSchemaV3;
   business: BusinessProfile;
   formsEnabled: boolean;
+  formDefinition?: FormDefinition;
   pageId?: string;
   linkBase?: string;
   assetAccessToken?: string;
@@ -360,6 +369,7 @@ function SectionV3({
         controls={controls}
         business={business}
         formsEnabled={formsEnabled}
+        formDefinition={formDefinition}
         pageId={pageId}
         linkBase={linkBase}
         assetAccessToken={assetAccessToken}
@@ -375,6 +385,7 @@ export function VisualSectionRendererV3({
   controls,
   business,
   formsEnabled = true,
+  formDefinition,
   pageId,
   linkBase,
   assetAccessToken
@@ -384,6 +395,7 @@ export function VisualSectionRendererV3({
   controls?: ComponentControlSchemaV3;
   business?: BusinessProfile;
   formsEnabled?: boolean;
+  formDefinition?: FormDefinition;
   pageId?: string;
   linkBase?: string;
   assetAccessToken?: string;
@@ -436,7 +448,7 @@ export function VisualSectionRendererV3({
       data-caption-mode={section.templateId === "media_mosaic" ? section.options.captionMode : undefined}
       data-crop-set={section.templateId === "media_mosaic" ? section.options.cropSet : undefined}
       data-eligibility-treatment={section.templateId === "eligibility_band" ? section.options.eligibilityTreatment : undefined}
-      data-service-index-treatment={section.templateId === "service_index" ? section.options.serviceIndexTreatment : undefined}
+      data-service-index-treatment={section.templateId === "auto_body_service_index" ? section.options.serviceIndexTreatment : undefined}
       data-case-study-treatment={section.templateId === "case_study_preview" ? section.options.caseStudyTreatment : undefined}
       data-comparison-treatment={section.templateId === "comparison_table" ? section.options.comparisonTreatment : undefined}
       data-team-story-treatment={section.templateId === "team_story" ? section.options.teamStoryTreatment : undefined}
@@ -469,7 +481,7 @@ export function VisualSectionRendererV3({
         } as React.CSSProperties
       }
     >
-      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} pageId={pageId} linkBase={linkBase} assetAccessToken={assetAccessToken} />
+      <VisualTemplateSlotsRendererV3 section={section} business={business} formsEnabled={formsEnabled} formDefinition={formDefinition} pageId={pageId} linkBase={linkBase} assetAccessToken={assetAccessToken} />
     </section>
   );
 }
@@ -478,6 +490,7 @@ function VisualTemplateSlotsRendererV3({
   section,
   business,
   formsEnabled,
+  formDefinition,
   pageId,
   linkBase,
   assetAccessToken
@@ -485,6 +498,7 @@ function VisualTemplateSlotsRendererV3({
   section: VisualSectionV3;
   business?: BusinessProfile;
   formsEnabled: boolean;
+  formDefinition?: FormDefinition;
   pageId?: string;
   linkBase?: string;
   assetAccessToken?: string;
@@ -624,15 +638,15 @@ function VisualTemplateSlotsRendererV3({
           {section.slots.action ? <SlotBlockV3 role="eligibility_action" kind="action_card" className="site-visual-block-v3-surface-card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
-    case "service_index":
+    case "auto_body_service_index":
       return (
         <>
-          <SlotBlockV3 role="service_index_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
+          <SlotBlockV3 role="auto_body_service_index_intro" kind="text">{renderCopySlotV3(section.slots.intro)}</SlotBlockV3>
           <SlotBlockV3 role="auto_body_schematic" kind="facts">
             <AutoBodyRepairSchematicV3 />
           </SlotBlockV3>
-          <SlotBlockV3 role="service_index_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, serviceIndexPresentationForOptions(section), linkBase, { showMeta: false, assetAccessToken })}</SlotBlockV3>
-          {section.slots.action ? <SlotBlockV3 role="service_index_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
+          <SlotBlockV3 role="auto_body_service_index_items" kind="list">{renderStandardItemsSlotV3(section.slots.items.items, serviceIndexPresentationForOptions(section), linkBase, { showMeta: false, assetAccessToken })}</SlotBlockV3>
+          {section.slots.action ? <SlotBlockV3 role="auto_body_service_index_action" kind="action_card">{renderActionSlotV3(section.slots.action)}</SlotBlockV3> : null}
         </>
       );
     case "case_study_preview":
@@ -805,14 +819,14 @@ function VisualTemplateSlotsRendererV3({
     case "contact_split": {
       const contactFactsPresentation = contactFactsPresentationForOptions(section);
       const contactAction = section.slots.action ?? (business ? contactActionForMode(section.options.ctaMode ?? "phone", business) : undefined);
-      const rendersForm = Boolean(business && section.options.formComplexity !== "none");
+      const rendersForm = Boolean(business && formDefinition?.siteId === business.siteId && section.options.formComplexity !== "none");
       return (
         <>
           <SlotBlockV3 role="contact_copy" kind="text">{renderCopySlotV3(section.slots.copy)}</SlotBlockV3>
           {section.options.proofSidebar !== "none" ? <SlotBlockV3 role="contact_facts" kind="facts">{renderFactsSlotV3({ items: section.slots.contact.facts }, contactFactsPresentation)}</SlotBlockV3> : null}
-          {business && section.options.formComplexity !== "none" ? (
+          {business && formDefinition?.siteId === business.siteId && section.options.formComplexity !== "none" ? (
             <SlotBlockV3 role="contact_form" kind="action_card" className="site-visual-block-v3-form-card">
-              <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} formComplexity={section.options.formComplexity ?? "short"} />
+              <ContactFormV3 business={business} formDefinition={formDefinition} formsEnabled={formsEnabled} pageId={pageId} />
             </SlotBlockV3>
           ) : null}
           {contactAction && !rendersForm ? <SlotBlockV3 role="contact_action" kind="action_card">{renderActionSlotV3(contactAction)}</SlotBlockV3> : null}
@@ -826,7 +840,7 @@ type HeroRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "hero_spli
 type HeroSplitRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "hero_split" }>;
 type IntroGridRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "intro_grid" }>;
 type MediaMosaicRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "media_mosaic" }>;
-type ServiceIndexRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "service_index" }>;
+type ServiceIndexRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "auto_body_service_index" }>;
 type EligibilityBandRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "eligibility_band" }>;
 type CaseStudyRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "case_study_preview" }>;
 type ComparisonRenderableSectionV3 = Extract<VisualSectionV3, { templateId: "comparison_table" }>;
@@ -960,9 +974,9 @@ function contactActionForMode(mode: NonNullable<ContactSplitRenderableSectionV3[
   }
   if (mode === "estimate") {
     return {
-      title: "Start the repair estimate.",
-      body: "Include the vehicle, damage area, and whether it still drives.",
-      cta: { label: "Send repair details", href: "#contact", style: "primary" }
+      title: "Start an estimate request.",
+      body: "Share the scope, timing, and contact details needed for a useful response.",
+      cta: { label: "Request an estimate", href: "#contact", style: "primary" }
     };
   }
   return {
@@ -1356,7 +1370,7 @@ function renderStandardItemsSlotV3(
           <p data-copy-part="item_body">{item.body}</p>
           {item.href ? (
             <a className="site-item-link-v3" href={`${linkBase ?? ""}${item.href}`} data-action-index={0} data-copy-part="item_cta">
-              {itemLinkLabel(item.title)} {"\u2192"}
+              View details {"\u2192"}
             </a>
           ) : null}
         </article>
@@ -1376,9 +1390,9 @@ function itemMediaCropStyle(item: StandardItemV3, presentation: ListPresentation
   if (presentation === "menu_preview" || presentation === "service_problem_rows") zoom = 1.2;
   if (presentation === "feature_list" || presentation === "showcase_grid" || presentation === "image_tiles" || presentation === "media_grid") zoom = 1.22;
   if (presentation === "premium_showcase") zoom = 1.18;
-  if (/\b(before|after|proof|reference|finished-shop|context)\b/.test(haystack)) zoom = 1.26;
-  if (/\b(panel|paint|refinish|dent|pdr|collision|bumper|glass|windshield|window)\b/.test(haystack)) zoom = Math.max(zoom, 1.18);
-  if (/\b(lift|shop|bay|overview)\b/.test(haystack)) {
+  if (/\b(before|after|proof|reference|context)\b/.test(haystack)) zoom = 1.26;
+  if (/\b(detail|closeup|close-up|macro)\b/.test(haystack)) zoom = Math.max(zoom, 1.18);
+  if (/\b(wide|overview|interior|exterior)\b/.test(haystack)) {
     zoom = Math.max(zoom, 1.14);
     position = "center center";
   }
@@ -1403,16 +1417,6 @@ function itemCardPresentationHasMediaCrop(presentation: ListPresentationIdV3) {
     "menu_preview",
     "service_problem_rows"
   ].includes(presentation);
-}
-
-function itemLinkLabel(title: string) {
-  const clean = title.trim().replace(/\s+/g, " ");
-  if (!clean) return "View service details";
-  if (/\binsurance|claim|deductible\b/i.test(clean)) return "Discuss claim details";
-  if (/\bhail|dent|pdr|paintless|paint|refinish|collision|body|glass|windshield|window|bumper|panel|repair\b/i.test(clean)) {
-    return "Request an estimate";
-  }
-  return "View service details";
 }
 
 function displayableServiceMeta(meta?: string) {
@@ -2030,62 +2034,17 @@ function FaqProcessV3({ variant, props }: { variant: string; props: SectionProps
   );
 }
 
-function ContactV3({ variant, props, business, formsEnabled, pageId }: { variant: string; props: SectionProps; business: BusinessProfile; formsEnabled: boolean; pageId?: string }) {
-  const actionItems = arrayProp<{ label: string; value: string; href?: string }>(props.actionItems);
-  const fallbackActionItems = actionItems.length
-    ? actionItems
-    : [
-        ...(business.phone ? [{ label: "Call", value: formatPhone(business.phone), href: `tel:${phoneHrefValue(business.phone)}` }] : []),
-        ...(business.address ? [{ label: "Visit", value: formatAddress(business.address) }] : [])
-      ];
-  return (
-    <section id="contact" className="site-section-v3 site-contact-v3" data-variant={variant} aria-labelledby="v3-contact-heading">
-      <div>
-        <p className="site-eyebrow-v3">{stringProp(props.eyebrow)}</p>
-        <h2 id="v3-contact-heading">{stringProp(props.heading)}</h2>
-        <p>{stringProp(props.intro)}</p>
-        {formsEnabled ? (
-          <div className="site-contact-facts-v3">
-            {business.phone ? <a href={`tel:${phoneHrefValue(business.phone)}`}>{formatPhone(business.phone)}</a> : null}
-            {business.address ? <span>{formatAddress(business.address)}</span> : null}
-          </div>
-        ) : null}
-      </div>
-      {formsEnabled ? (
-        <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
-      ) : (
-        <aside className="site-contact-action-v3" aria-label="Contact actions">
-          {fallbackActionItems.map((item) => (
-            <div key={item.label}>
-              <span>{item.label}</span>
-              {item.href ? <a href={item.href}>{item.value}</a> : <strong>{item.value}</strong>}
-            </div>
-          ))}
-          <a className="site-button-v3 site-button-v3-primary" href={business.phone ? `tel:${phoneHrefValue(business.phone)}` : "#contact"}>
-            {business.phone ? "Call the shop" : "Send details"}
-          </a>
-          <ContactFormV3 business={business} formsEnabled={formsEnabled} pageId={pageId} />
-        </aside>
-      )}
-    </section>
-  );
-}
-
 function ContactFormV3({
   business,
+  formDefinition,
   formsEnabled,
-  pageId,
-  formComplexity = "detailed"
+  pageId
 }: {
   business: BusinessProfile;
+  formDefinition: FormDefinition;
   formsEnabled: boolean;
   pageId?: string;
-  formComplexity?: "short" | "detailed";
 }) {
-  // Claimed sites can post the form. Unclaimed previews render the same form
-  // surface without an action; the server-side reject remains the backstop for
-  // direct POSTs.
-  const detailed = formComplexity === "detailed";
   return (
     <form
       className="site-contact-form-v3"
@@ -2095,30 +2054,55 @@ function ContactFormV3({
       method={formsEnabled ? "post" : undefined}
     >
       <input type="hidden" name="siteId" value={business.siteId} disabled={!formsEnabled} />
-      <input type="hidden" name="formId" value="form_contact" disabled={!formsEnabled} />
+      <input type="hidden" name="formId" value={formDefinition.id} disabled={!formsEnabled} />
       <input type="hidden" name="pageId" value={pageId ?? "home"} disabled={!formsEnabled} />
-      <label>Name<input name="name" autoComplete="name" placeholder="Your name" /></label>
-      <label>Phone<input name="phone" type="tel" autoComplete="tel" placeholder="Your phone number" /></label>
-      {detailed ? <label>Email<input name="email" type="email" autoComplete="email" placeholder="you@example.com" /></label> : null}
-      {detailed ? (
-        <>
-          <label>Damage or service<input name="vehicle_issue" autoComplete="off" placeholder="Describe the damage" /></label>
-          <label>
-            Preferred contact
-            <select name="preferred_contact" defaultValue="phone">
-              <option value="phone">Phone</option>
-              <option value="email">Email</option>
-              <option value="either">Either</option>
-            </select>
-          </label>
-        </>
-      ) : null}
-      <label>{detailed ? "Message" : "Brief note"}<textarea name="message" placeholder="Vehicle, damage area, timing, and whether it still drives" /></label>
+      <input type="text" name="companyWebsite" tabIndex={-1} autoComplete="off" aria-hidden="true" hidden disabled={!formsEnabled} />
+      {formDefinition.fields.map((field) => (
+        <FormFieldV3 key={field.id} field={field} disabled={!formsEnabled} />
+      ))}
       <button className="site-button-v3 site-button-v3-primary" type={formsEnabled ? "submit" : "button"} aria-disabled={formsEnabled ? undefined : true}>
-        Send repair details
+        {formDefinition.submitLabel}
       </button>
     </form>
   );
+}
+
+function FormFieldV3({ field, disabled }: { field: FormDefinition["fields"][number]; disabled: boolean }) {
+  const controlId = `site-form-${field.id}`;
+  if (field.type === "textarea") {
+    return <label htmlFor={controlId}>{field.label}<textarea id={controlId} name={field.id} required={field.required} disabled={disabled} /></label>;
+  }
+  if (field.type === "select") {
+    return (
+      <label htmlFor={controlId}>
+        {field.label}
+        <select id={controlId} name={field.id} required={field.required} disabled={disabled} defaultValue="">
+          <option value="" disabled={field.required}>Select</option>
+          {(field.options ?? []).map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      </label>
+    );
+  }
+  return (
+    <label htmlFor={controlId}>
+      {field.label}
+      <input
+        id={controlId}
+        name={field.id}
+        type={field.type === "phone" ? "tel" : field.type}
+        required={field.required}
+        disabled={disabled}
+        autoComplete={formFieldAutocomplete(field)}
+      />
+    </label>
+  );
+}
+
+function formFieldAutocomplete(field: FormDefinition["fields"][number]) {
+  if (field.type === "email") return "email";
+  if (field.type === "phone") return "tel";
+  if (/name/i.test(field.id)) return "name";
+  return "off";
 }
 
 function FinalCtaV3({ variant, props }: { variant: string; props: SectionProps }) {
@@ -2519,7 +2503,7 @@ function headerLogoForBusiness(logo: BusinessProfile["logo"] | undefined, refere
 
 function brandDescriptorForBusiness(business: BusinessProfile) {
   const category = business.categories?.find((item) => item.trim())?.trim();
-  const trade = category || "Auto Body & Collision";
+  const trade = category || "Local service";
   const city = business.address?.city?.trim();
   const region = business.address?.region?.trim();
   const place = [city, region].filter(Boolean).join(", ");

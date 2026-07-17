@@ -20,6 +20,7 @@ import {
   maxGenerateSiteTimeoutMs
 } from "../lib/generation-timeout.ts";
 import { JobLockLostError, executeJob } from "../lib/jobs.ts";
+import { sampleGenerationInputSnapshot } from "../lib/sample-data.ts";
 import {
   buildWorkerQueueStatus,
   devWorkerHeartbeatStaleMs,
@@ -94,6 +95,32 @@ const generationDeadline = generationTimeoutSignal(1, "verify-worker-runtime");
 await onceAbort(generationDeadline.signal);
 assert.equal(generationDeadline.signal.reason instanceof GenerateSiteTimeoutError, true);
 generationDeadline.clear();
+
+await assert.rejects(
+  () => executeJob(generationJob("prompt-only", { prompt: "Build a site without a URL" }), {
+    workerId: "verify-worker",
+    generateSite: async () => {
+      throw new Error("Prompt-only generation must be rejected before invoking generateSite.");
+    }
+  }),
+  /Fresh site generation requires a website URL/
+);
+
+let snapshotGenerationOptions;
+await executeJob(generationJob("snapshot", {
+  inputSnapshotId: sampleGenerationInputSnapshot.id,
+  intendedSiteId: sampleGenerationInputSnapshot.siteId
+}), {
+  workerId: "verify-worker",
+  getGenerationInputSnapshot: async (id) => id === sampleGenerationInputSnapshot.id ? sampleGenerationInputSnapshot : null,
+  generateSite: async (options) => {
+    snapshotGenerationOptions = options;
+    return fakeGenerateSiteResult();
+  }
+});
+assert.equal(snapshotGenerationOptions.mode, "snapshot");
+assert.equal(snapshotGenerationOptions.inputSnapshot.id, sampleGenerationInputSnapshot.id);
+assert.equal("input" in snapshotGenerationOptions, false);
 
 await assert.rejects(
   () =>
@@ -244,6 +271,24 @@ function importBatchJob(id) {
     kind: "import_batch",
     status: "running",
     payload: { urls: ["https://example.com"] },
+    attempts: 1,
+    maxAttempts: 3,
+    runAfter: now,
+    lockedBy: "verify-worker",
+    lockedAt: now,
+    startedAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function generationJob(id, payload) {
+  const now = new Date().toISOString();
+  return {
+    id: `verify-generate-${id}`,
+    kind: "generate_site",
+    status: "running",
+    payload,
     attempts: 1,
     maxAttempts: 3,
     runAfter: now,

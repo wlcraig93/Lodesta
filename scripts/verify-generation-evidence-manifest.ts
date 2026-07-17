@@ -4,10 +4,10 @@ import path from "node:path";
 import type { CrawlAssessment } from "../lib/crawler";
 import { summarizeCrawlHtml } from "../lib/crawler";
 import {
-  composeEvidenceLedger,
+  composeGenerationEvidenceManifestV1,
   verifyEvidenceProposal,
   type EvidenceProposal
-} from "../lib/evidence-ledger";
+} from "../lib/generation-evidence-manifest";
 import { extractSourceTextBlocks } from "../lib/source-text-blocks";
 
 type FixtureManifest = {
@@ -31,7 +31,7 @@ for (const fixture of manifest.fixtures) {
     `${fixture.id} tokens must map back to non-empty display spans.`
   );
   const crawl = { pageSummaries: [summary] } as CrawlAssessment;
-  const ledger = composeEvidenceLedger({ crawl, createdAt: "2026-07-16T00:00:00.000Z" });
+  const ledger = composeGenerationEvidenceManifestV1({ crawl, createdAt: "2026-07-16T00:00:00.000Z" });
   fixtureResults.push({
     id: fixture.id,
     blocks: summary.sourceTextBlocks.length,

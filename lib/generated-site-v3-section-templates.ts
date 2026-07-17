@@ -31,7 +31,7 @@ export const activeSectionTemplateOrderV3 = [
   "hero_split",
   "hero_statement",
   "side_intro_rows",
-  "service_index",
+  "auto_body_service_index",
   "numbered_steps",
   "quote_wall",
   "faq_list",
@@ -51,7 +51,7 @@ export const sectionTemplateCatalogV3: readonly SectionTemplateDefinitionV3[] = 
   template("side_intro_rows", "rows", ["intro", "items"], [], surfaceBackground, "standard", {
     itemCount: { min: 3, max: 8 }
   }),
-  template("service_index", "grid", ["intro", "items"], ["action"], surfaceBackground, "standard", {
+  template("auto_body_service_index", "grid", ["intro", "items"], ["action"], surfaceBackground, "standard", {
     itemCount: { min: 3, max: 8 }
   }),
   template("numbered_steps", "rows", ["intro", "items"], [], surfaceBackground, "standard", {

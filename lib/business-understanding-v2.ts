@@ -12,7 +12,7 @@ import {
 } from "./openai-generation";
 import { openAiRequestSignal } from "./openai-timeout";
 import { createRegenerableArtifactProvenanceV1 } from "./regenerable-artifact-provenance";
-import type { EvidenceKind, EvidenceProposal } from "./evidence-ledger";
+import type { EvidenceKind, EvidenceProposal } from "./generation-evidence-manifest";
 
 export const understandingVerticalValues = [
   "restaurant",

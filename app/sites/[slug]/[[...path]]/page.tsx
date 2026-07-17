@@ -1,14 +1,15 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import type { Metadata } from "next";
-import { getPublishedVersion } from "@/lib/sample-data";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { repository } from "@/lib/repository";
 import { isIndexableSite } from "@/lib/site-publication";
 import { canonicalUrlForPage } from "@/lib/public-site-seo";
 import { markdownUrlForPage } from "@/lib/public-site-markdown";
 import { isCustomDomainRequest } from "@/lib/host-routing";
-import { assertSiteVersionV3, findPageBySlugV3, publicSiteVersionV3Issue } from "@/lib/site-version-v3";
+import { findPageBySlugV3 } from "@/lib/site-version-v3";
+import { storedVersionRenderEnvelope } from "@/lib/site-render-envelope";
+import { loadPublicSiteVersion } from "@/lib/public-site-version";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,9 @@ export async function generateMetadata({
   const { slug, path } = await params;
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) return {};
-  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published public site version");
-  if (publicSiteVersionV3Issue(version)) return {};
+  const live = await loadPublicSiteVersion(repository, bundle);
+  if (!live) return {};
+  const { version } = live;
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(version, pageSlug);
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
@@ -57,13 +59,16 @@ export default async function PublicSitePage({
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) notFound();
 
-  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "published public site version");
-  if (publicSiteVersionV3Issue(version)) notFound();
+  const live = await loadPublicSiteVersion(repository, bundle);
+  if (!live) notFound();
+  const { version, snapshot } = live;
+  const renderBundle = storedVersionRenderEnvelope({ shell: bundle, snapshot, version });
   const pageSlug = path?.join("/") ?? "";
   const page = findPageBySlugV3(version, pageSlug);
   if (!page) notFound();
   const claims = await repository.listClaims(bundle.businessProfile.siteId);
   const claimedForPublicRuntime = isIndexableSite(bundle, claims);
+  const requestHeaders = await headers();
   // Versions composed with scraped reference media are protected-preview only:
   // the public route never renders them. Owner attestation converts the media
   // and recompiles before anything publishes.
@@ -73,22 +78,24 @@ export default async function PublicSitePage({
   }
   // Custom-domain requests are internally rewritten to /sites/{slug}; rendered
   // navigation must stay on the customer's domain, never the platform path.
-  const customDomain = isCustomDomainRequest(await headers());
+  const customDomain = isCustomDomainRequest(requestHeaders);
+  const homepage = version.pageComposition.pages.find((candidate) => !candidate.slug) ?? page;
 
   return (
     <>
       <SiteRenderer
-        business={bundle.businessProfile}
-        site={bundle.siteModel}
-        extensions={bundle.extensionModel}
-        locations={bundle.locations}
-        locationBindings={bundle.locationBindings}
+        business={renderBundle.businessProfile}
+        site={renderBundle.siteModel}
+        extensions={renderBundle.extensionModel}
+        locations={renderBundle.locations}
+        locationBindings={renderBundle.locationBindings}
         page={page}
         theme={version.theme ?? bundle.siteModel.theme}
-        experiments={bundle.experiments}
+        experiments={renderBundle.experiments}
         tracking={claimedForPublicRuntime}
         formsEnabled={claimedForPublicRuntime}
         basePath={customDomain ? "" : `/sites/${bundle.siteModel.slug}`}
+        siteUrl={canonicalUrlForPage(bundle, homepage, requestHeaders)}
         proofMode={claimedForPublicRuntime ? "ui_kit" : "link_only"}
       />
     </>

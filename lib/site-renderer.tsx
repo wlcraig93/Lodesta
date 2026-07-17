@@ -23,6 +23,8 @@ type SiteRendererProps = {
    * linked back to platform URLs.
    */
   basePath?: string;
+  /** Exact public homepage URL for structured data on the active host. */
+  siteUrl?: string;
   /** Google proof mode (see SiteRendererV3); defaults to "none" for QA/internal renders. */
   proofMode?: "ui_kit" | "link_only" | "none";
   /** Allow scraped reference-rights branding (see SiteRendererV3); admin/editor previews only. */
@@ -44,6 +46,7 @@ export function SiteRenderer({
   tracking = true,
   formsEnabled = true,
   basePath,
+  siteUrl,
   proofMode,
   referenceBrandingEnabled,
   assetAccessToken
@@ -63,7 +66,9 @@ export function SiteRenderer({
       experiments={experiments}
       tracking={tracking}
       formsEnabled={formsEnabled}
+      formDefinition={extensions.forms.find((form) => form.siteId === business.siteId)}
       basePath={basePath}
+      siteUrl={siteUrl}
       proofMode={proofMode}
       referenceBrandingEnabled={referenceBrandingEnabled}
       assetAccessToken={assetAccessToken}

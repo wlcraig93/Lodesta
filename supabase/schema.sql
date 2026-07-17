@@ -11,7 +11,14 @@ create table businesses (
   workspace_id text references workspaces(id) on delete cascade,
   name text not null,
   vertical text not null,
-  profile_json jsonb not null,
+  state_revision integer not null default 1 check (state_revision > 0),
+  state_hash text not null,
+  description text,
+  categories text[] not null default '{}',
+  social_links text[] not null default '{}',
+  booking_links text[] not null default '{}',
+  ordering_links text[] not null default '{}',
+  press_links text[] not null default '{}',
   provenance jsonb not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -19,7 +26,7 @@ create table businesses (
 
 create table business_locations (
   id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
+  business_id text not null references businesses(id) on delete restrict,
   label text,
   address jsonb,
   service_areas text[] not null default '{}',
@@ -41,60 +48,173 @@ create table sites (
   status text not null default 'draft',
   is_primary boolean not null default true,
   site_model jsonb not null,
-  extension_model jsonb not null default '{"forms":[],"workflows":[],"inboundSettings":{"captureMode":"form_only","aiHandlingMode":"classify_only","notificationMode":"all_inquiries"},"customBlocks":[]}',
+  extension_model jsonb not null default '{"workflows":[],"customBlocks":[]}',
   presence_assessment jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
 
-create table site_locations (
-  site_id text not null references sites(id) on delete cascade,
-  location_id text not null references business_locations(id) on delete cascade,
-  role text not null default 'covered' check (role in ('primary', 'covered')),
-  created_at timestamptz not null default now(),
-  primary key (site_id, location_id)
+create table source_snapshots (
+  id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
+  source_type text not null check (source_type in ('website', 'google_places', 'owner_input', 'operator_input')),
+  source_url text,
+  content_hash text not null,
+  captured_at timestamptz not null,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
 );
 
-create table business_profiles (
+create table fact_observations (
   id text primary key,
-  site_id text references sites(id) on delete cascade,
-  name text not null,
-  vertical text not null,
-  profile jsonb not null,
-  provenance jsonb not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  business_id text not null references businesses(id) on delete restrict,
+  source_snapshot_id text not null references source_snapshots(id) on delete restrict,
+  field text not null,
+  value jsonb not null,
+  normalized_value jsonb,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
+  status text not null check (status in ('observed', 'selected_for_preview', 'conflict', 'superseded', 'rejected')),
+  source_block_id text,
+  observed_at timestamptz not null
 );
 
-create table site_assets (
+create table business_offerings (
   id text primary key,
-  site_id text references sites(id) on delete cascade,
+  business_id text not null references businesses(id) on delete restrict,
+  catalog_id text,
+  custom_name text,
+  status text not null check (status in ('observed', 'confirmed', 'rejected', 'inactive')),
+  visibility text not null check (visibility in ('preview', 'public', 'hidden')),
+  page_mode text not null check (page_mode in ('none', 'shared', 'dedicated')),
+  featured boolean not null default false,
+  evidence_ids text[] not null default '{}',
+  confirmed_by text,
+  confirmed_at timestamptz,
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  check (catalog_id is not null or custom_name is not null)
+);
+
+create table business_proof (
+  id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
+  kind text not null check (kind in ('testimonial', 'credential', 'warranty', 'award', 'offer', 'insurance_support', 'longevity')),
+  status text not null check (status in ('observed', 'confirmed', 'rejected', 'inactive')),
+  public_text text,
+  source_excerpt text,
+  source_snapshot_id text references source_snapshots(id) on delete restrict,
+  source_block_id text,
+  evidence_ids text[] not null default '{}',
+  expires_at timestamptz,
+  confirmed_by text,
+  confirmed_at timestamptz,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table asset_revisions (
+  id text primary key,
+  asset_id text not null,
+  business_id text not null references businesses(id) on delete restrict,
+  schema_version text not null check (schema_version = 'asset-revision-v1'),
+  content_hash text not null,
+  storage_path text not null,
+  public_url text,
+  mime_type text not null check (mime_type in ('image/png', 'image/jpeg', 'image/webp')),
+  bytes integer not null check (bytes > 0),
+  width integer,
+  height integer,
+  provenance jsonb,
+  rights_status text not null check (rights_status in ('preclaim_safe', 'customer_granted', 'reference_only', 'unknown')),
+  attestation jsonb,
+  created_at timestamptz not null
+);
+
+create table business_assets (
+  id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
   kind text not null check (kind in ('photo', 'logo', 'mockup', 'screenshot', 'icon', 'document', 'other')),
-  url text,
   alt text not null,
   source text not null check (source in ('generated', 'licensed', 'uploaded', 'website_reference', 'placeholder')),
-  rights_status text not null check (rights_status in ('preclaim_safe', 'customer_granted', 'reference_only', 'unknown')),
   usage_scope text not null check (usage_scope in ('preclaim_preview', 'published_site', 'owner_dashboard', 'internal_planning', 'reference_only')),
   owner_approved boolean not null default false,
-  provenance jsonb,
   metadata jsonb not null default '{}',
-  created_at timestamptz not null default now()
+  active boolean not null default true,
+  current_revision_id text not null references asset_revisions(id) on delete restrict,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table site_intents (
+  id text primary key,
+  site_id text not null unique,
+  schema_version text not null check (schema_version = 'site-intent-v1'),
+  revision integer not null check (revision > 0),
+  intent_hash text not null,
+  intent jsonb not null,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table form_definitions (
+  id text primary key,
+  site_id text not null,
+  schema_version text not null check (schema_version = 'form-definition-v1'),
+  definition jsonb not null,
+  created_at timestamptz not null
+);
+
+create table generation_input_snapshots (
+  id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
+  site_id text not null,
+  schema_version text not null check (schema_version = 'generation-input-snapshot-v1'),
+  business_state_revision integer not null,
+  site_intent_revision integer not null,
+  form_definition_id text not null references form_definitions(id) on delete restrict,
+  input_hash text not null,
+  eligibility_mode text not null check (eligibility_mode in ('protected_preview', 'public')),
+  snapshot jsonb not null,
+  created_at timestamptz not null,
+  unique (site_id, input_hash)
+);
+
+create table generation_snapshot_sources (
+  snapshot_id text not null references generation_input_snapshots(id) on delete restrict,
+  source_snapshot_id text not null references source_snapshots(id) on delete restrict,
+  primary key (snapshot_id, source_snapshot_id)
+);
+
+create table generation_snapshot_asset_revisions (
+  snapshot_id text not null references generation_input_snapshots(id) on delete restrict,
+  asset_revision_id text not null references asset_revisions(id) on delete restrict,
+  primary key (snapshot_id, asset_revision_id)
+);
+
+create table control_plane_change_requests (
+  id text primary key,
+  business_id text not null references businesses(id) on delete restrict,
+  site_id text not null,
+  schema_version text not null check (schema_version = 'control-plane-change-request-v1'),
+  target_authority text not null check (target_authority in ('business_state', 'site_intent')),
+  change_kind text not null,
+  payload jsonb not null,
+  impact text not null check (impact in ('deterministic', 'structural')),
+  status text not null check (status in ('pending', 'approved', 'rejected', 'applied', 'failed')),
+  requested_by text not null,
+  requested_at timestamptz not null,
+  decided_by text,
+  decided_at timestamptz,
+  failure_reason text
 );
 
 create table site_versions (
   id text primary key,
   site_id text references sites(id) on delete cascade,
   status text not null check (status in ('draft', 'published')),
+  input_snapshot_id text not null references generation_input_snapshots(id) on delete restrict,
+  form_definition_id text not null references form_definitions(id) on delete restrict,
   version_model jsonb not null,
   created_at timestamptz not null default now()
-);
-
-create table forms (
-  id text not null,
-  site_id text references sites(id) on delete cascade,
-  name text not null,
-  schema jsonb not null,
-  created_at timestamptz not null default now(),
-  primary key (site_id, id)
 );
 
 create table inquiries (
@@ -300,6 +420,11 @@ create table claims (
   stripe_checkout_session_id text,
   status text not null default 'preview',
   fact_verification jsonb not null default '{}',
+  verification_level text not null default 'unverified'
+    check (verification_level in ('unverified', 'contact_verified', 'owner_verified', 'operator_verified')),
+  verification_method text,
+  verified_by text,
+  verified_at timestamptz,
   created_at timestamptz not null default now(),
   claimed_at timestamptz
 );
@@ -372,8 +497,14 @@ create table site_candidates (
   business_name text not null,
   vertical text not null,
   candidate_slug text not null,
-  bundle_json jsonb not null,
-  status text not null default 'ready' check (status in ('ready', 'blocked', 'accepted', 'archived')),
+  input_snapshot_id text not null references generation_input_snapshots(id) on delete restrict,
+  version_model jsonb not null,
+  form_definition_id text not null references form_definitions(id) on delete restrict,
+  generation_plan jsonb not null,
+  site_copy jsonb not null,
+  evidence_manifest jsonb not null,
+  status text not null default 'ready' check (status in ('ready', 'blocked', 'stale', 'accepted', 'archived')),
+  stale_reason text,
   candidate_purpose text not null default 'customer_prospect' check (candidate_purpose in ('customer_prospect', 'test_generation')),
   intended_site_id text references sites(id) on delete set null,
   accepted_site_id text references sites(id) on delete set null,
@@ -388,7 +519,7 @@ create table site_artifacts (
   site_candidate_id text references site_candidates(id) on delete cascade,
   site_id text references sites(id) on delete cascade,
   scope text not null check (scope in ('candidate_selected', 'site_selected', 'qa_evidence')),
-  artifact_type text not null check (artifact_type in ('evidence_ledger', 'generation_plan', 'site_copy', 'generation_review', 'generation_failure', 'operator_decision')),
+  artifact_type text not null check (artifact_type in ('generation_evidence_manifest', 'generation_plan', 'site_copy', 'generation_review', 'generation_failure', 'operator_decision')),
   artifact_version text not null,
   provenance_json jsonb not null,
   content_hash text not null,
@@ -465,10 +596,14 @@ create index business_locations_business_idx on business_locations(business_id);
 create index business_locations_google_place_idx on business_locations(google_place_id) where google_place_id is not null;
 create index sites_business_idx on sites(business_id);
 create unique index sites_one_primary_per_business_idx on sites(business_id) where is_primary;
-create index site_locations_location_idx on site_locations(location_id);
-create unique index business_profiles_site_idx on business_profiles(site_id);
-create index site_assets_site_kind_idx on site_assets(site_id, kind);
-create index site_assets_site_rights_idx on site_assets(site_id, rights_status);
+create index source_snapshots_business_idx on source_snapshots(business_id, captured_at desc);
+create index fact_observations_business_idx on fact_observations(business_id, field, status);
+create index business_offerings_business_idx on business_offerings(business_id, status);
+create index business_proof_business_idx on business_proof(business_id, status);
+create index asset_revisions_business_idx on asset_revisions(business_id, asset_id);
+create index business_assets_business_idx on business_assets(business_id, active);
+create index generation_input_snapshots_site_idx on generation_input_snapshots(site_id, created_at desc);
+create index control_plane_change_requests_site_idx on control_plane_change_requests(site_id, requested_at desc);
 create index inquiries_site_time_idx on inquiries(site_id, created_at desc);
 create index inquiries_site_status_time_idx on inquiries(site_id, status, created_at desc);
 create index inquiries_notification_queue_idx on inquiries(notification_state, created_at);
@@ -478,7 +613,6 @@ create index inquiries_phone_normalized_idx on inquiries(site_id, contact_phone_
 create index inquiry_events_inquiry_time_idx on inquiry_events(inquiry_id, created_at desc);
 create index inquiry_events_site_time_idx on inquiry_events(site_id, created_at desc);
 create index inquiry_events_dedupe_idx on inquiry_events(site_id, type, dedupe_key, created_at desc) where dedupe_key is not null;
-create index forms_site_idx on forms(site_id);
 create index site_versions_site_status_idx on site_versions(site_id, status);
 create index inquiry_deliveries_site_time_idx on inquiry_deliveries(site_id, created_at desc);
 create index inquiry_deliveries_inquiry_time_idx on inquiry_deliveries(inquiry_id, created_at desc);
@@ -857,10 +991,19 @@ $$;
 
 alter table workspaces enable row level security;
 alter table sites enable row level security;
-alter table business_profiles enable row level security;
-alter table site_assets enable row level security;
 alter table site_versions enable row level security;
-alter table forms enable row level security;
+alter table source_snapshots enable row level security;
+alter table fact_observations enable row level security;
+alter table business_offerings enable row level security;
+alter table business_proof enable row level security;
+alter table asset_revisions enable row level security;
+alter table business_assets enable row level security;
+alter table site_intents enable row level security;
+alter table form_definitions enable row level security;
+alter table generation_input_snapshots enable row level security;
+alter table generation_snapshot_sources enable row level security;
+alter table generation_snapshot_asset_revisions enable row level security;
+alter table control_plane_change_requests enable row level security;
 alter table inquiries enable row level security;
 alter table inquiry_events enable row level security;
 alter table inquiry_deliveries enable row level security;
@@ -879,7 +1022,6 @@ alter table jobs enable row level security;
 alter table agent_runs enable row level security;
 alter table businesses enable row level security;
 alter table business_locations enable row level security;
-alter table site_locations enable row level security;
 alter table site_candidates enable row level security;
 alter table site_artifacts enable row level security;
 alter table agent_run_spans enable row level security;
@@ -891,20 +1033,24 @@ create policy "site owners can read claimed sites"
 on sites for select
 using (public.is_claimed_site_owner(id));
 
-create policy "site owners can read claimed business profiles"
-on business_profiles for select
-using (public.is_claimed_site_owner(site_id));
-
-create policy "site owners can read claimed site assets"
-on site_assets for select
-using (public.is_claimed_site_owner(site_id));
-
 create policy "site owners can read claimed site versions"
 on site_versions for select
 using (public.is_claimed_site_owner(site_id));
 
-create policy "site owners can read claimed forms"
-on forms for select
+create policy "site owners can read claimed form definitions"
+on form_definitions for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed site intent"
+on site_intents for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed generation snapshots"
+on generation_input_snapshots for select
+using (public.is_claimed_site_owner(site_id));
+
+create policy "site owners can read claimed control-plane changes"
+on control_plane_change_requests for select
 using (public.is_claimed_site_owner(site_id));
 
 create policy "site owners can read claimed inquiries"
@@ -951,148 +1097,3 @@ grant usage on schema public to anon, authenticated, service_role;
 grant select on all tables in schema public to authenticated;
 grant all privileges on all tables in schema public to service_role;
 grant execute on all functions in schema public to service_role;
-
--- Evidence/truth model v1 (Phase 1)
-create table if not exists external_sources (
-  id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
-  source_type text not null check (source_type in ('website', 'web_search', 'google_places', 'owner_input')),
-  external_ref text,
-  connected_by_owner boolean not null default false,
-  last_checked_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists external_sources_business_idx on external_sources(business_id);
-
-create table if not exists fact_candidates (
-  id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
-  source_id text references external_sources(id) on delete set null,
-  source_type text not null check (source_type in ('website', 'web_search', 'google_places', 'owner_input')),
-  field_key text not null,
-  -- Null for google_places rows: values are live-resolved, never persisted.
-  proposed_value jsonb,
-  normalized_value jsonb,
-  confidence numeric not null default 0 check (confidence >= 0 and confidence <= 1),
-  status text not null default 'discovered'
-    check (status in ('discovered', 'system_selected_for_preview', 'owner_confirmed', 'owner_rejected', 'superseded', 'drift_candidate')),
-  evidence_label text,
-  evidence_excerpt text,
-  evidence_url text,
-  -- google_places comparison metadata (no raw values)
-  place_id text,
-  comparison_result jsonb,
-  observed_at timestamptz not null default now(),
-  decided_by text,
-  decided_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists fact_candidates_business_idx on fact_candidates(business_id, field_key, status);
-
-create table if not exists service_definitions (
-  id text primary key,
-  vertical text not null,
-  slug text not null,
-  name text not null,
-  category text,
-  aliases text[] not null default '{}',
-  default_questions jsonb not null default '[]',
-  page_strategy text not null default 'auto' check (page_strategy in ('auto', 'always', 'never')),
-  created_at timestamptz not null default now(),
-  unique (vertical, slug)
-);
-
-create table if not exists business_services (
-  id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
-  service_definition_id text references service_definitions(id) on delete set null,
-  custom_name text,
-  status text not null default 'proposed' check (status in ('proposed', 'active', 'hidden', 'rejected')),
-  confirmation_source text check (confirmation_source in ('owner', 'website', 'web_search', 'import')),
-  owner_notes text,
-  pricing_model text,
-  starting_price text,
-  featured boolean not null default false,
-  publish_landing_page boolean,
-  confirmed_by text,
-  confirmed_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  check (service_definition_id is not null or custom_name is not null)
-);
-
-create index if not exists business_services_business_idx on business_services(business_id, status);
-
-create table if not exists business_service_attributes (
-  id text primary key,
-  business_service_id text not null references business_services(id) on delete cascade,
-  key text not null,
-  value jsonb not null,
-  source text not null default 'owner_confirmed' check (source in ('owner_confirmed', 'imported_candidate')),
-  created_at timestamptz not null default now(),
-  unique (business_service_id, key)
-);
-
-alter table external_sources enable row level security;
-alter table fact_candidates enable row level security;
-alter table service_definitions enable row level security;
-alter table business_services enable row level security;
-alter table business_service_attributes enable row level security;
-
--- Claims verification levels, audit, revisions (Phase 1.5)
-alter table claims add column if not exists verification_level text not null default 'unverified'
-  check (verification_level in ('unverified', 'contact_verified', 'owner_verified', 'operator_verified'));
-alter table claims add column if not exists verification_method text;
-alter table claims add column if not exists verified_by text;
-alter table claims add column if not exists verified_at timestamptz;
-
-create table if not exists owner_audit_log (
-  id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
-  site_id text,
-  actor text not null,
-  actor_role text not null check (actor_role in ('owner', 'operator', 'system')),
-  action text not null,
-  field_key text,
-  prior_value jsonb,
-  new_value jsonb,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists owner_audit_log_business_idx on owner_audit_log(business_id, created_at desc);
-
-create table if not exists fact_revisions (
-  id text primary key,
-  business_id text not null references businesses(id) on delete cascade,
-  field_key text not null,
-  value jsonb not null,
-  revision int not null,
-  source text not null check (source in ('owner_confirmed', 'system_selected_for_preview', 'operator')),
-  created_by text not null,
-  created_at timestamptz not null default now(),
-  unique (business_id, field_key, revision)
-);
-
-create index if not exists fact_revisions_business_idx on fact_revisions(business_id, field_key, revision desc);
-
--- Publish records: which site version went live, from which fact snapshot,
--- and the rollback pointer. site_versions already exist in bundle storage;
--- this records the publish event itself.
-create table if not exists publish_records (
-  id text primary key,
-  site_id text not null,
-  version_id text not null,
-  fact_snapshot jsonb not null default '{}',
-  risk_tier text not null default 'safe' check (risk_tier in ('safe', 'preview_approved', 'operator_approved')),
-  published_by text not null,
-  published_at timestamptz not null default now(),
-  rolled_back_to text
-);
-
-create index if not exists publish_records_site_idx on publish_records(site_id, published_at desc);
-
-alter table owner_audit_log enable row level security;
-alter table fact_revisions enable row level security;
-alter table publish_records enable row level security;

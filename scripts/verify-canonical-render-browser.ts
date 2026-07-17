@@ -19,11 +19,10 @@ const results = [];
 for (const definition of await loadCanonicalFixtureDefinitions()) {
     const fixture = await buildCanonicalFixture(definition);
     const gate = await runObjectiveGenerationGate({
-      bundle: fixture.bundle,
+      snapshot: fixture.snapshot,
       version: fixture.version,
       plan: fixture.plan,
       copy: fixture.copy,
-      evidence: fixture.evidence,
       qaRunId: `qa_fixture_${definition.id}`,
       artifactRoot,
       captureScreenshots: true
@@ -38,9 +37,9 @@ for (const definition of await loadCanonicalFixtureDefinitions()) {
     assert(gate.routes.every((route) => route.inspection.screenshots.length === 3));
     assert(gate.routes.every((route) => route.inspection.screenshots.every((screenshot) => (screenshot.bytes ?? 0) > 0)));
     const judgePacket = await buildGenerationJudgePacket({
+      snapshot: fixture.snapshot,
       plan: fixture.plan,
       version: fixture.version,
-      assets: fixture.assets,
       gate,
       artifactRoot
     });

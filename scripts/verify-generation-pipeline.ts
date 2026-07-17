@@ -63,14 +63,12 @@ async function runScenario(
 ) {
   let judgeIndex = 0;
   return runCanonicalGenerationPipeline({
-    bundle: fixture.bundle,
-    evidence: fixture.evidence,
-    assets: fixture.assets,
+    snapshot: fixture.snapshot,
     dependencies: {
-      copy: async ({ business, plan }) => ({ copy: createFixtureSiteCopy(plan, business), attempts: 1 }),
+      copy: async ({ snapshot, plan }) => ({ copy: createFixtureSiteCopy(plan, snapshot), attempts: 1 }),
       gate: async ({ qaRunId }) => passingGate(qaRunId),
-      packet: async ({ plan, version, assets }) => ({
-        availableActions: ["copy", ...(plan.designSystem === "precision_shop_editorial" || assets.length ? ["alternate_system" as const] : []), "operator_review"],
+      packet: async ({ snapshot, plan }) => ({
+        availableActions: ["copy", ...(plan.designSystem === "precision_shop_editorial" || snapshot.assets.length ? ["alternate_system" as const] : []), "operator_review"],
         images: [],
         textManifest: []
       }) satisfies GenerationJudgePacket,

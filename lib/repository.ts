@@ -1,4 +1,3 @@
-import type { BusinessServiceRecord, FactCandidate } from "./business-evidence";
 import type {
   AgentModelCallRecord,
   AgentRunDetail,
@@ -38,13 +37,8 @@ import type {
   SiteVersion,
 } from "./models";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
-import type { BusinessProfileUpdateInput } from "./business-profile-update";
-import type { EditorGuardrailIssue } from "./editor-guardrails";
-import type { UpdateFormSettingsInput, UpdateFormSettingsResult } from "./form-settings";
-import type { UpdateOwnerAssetsInput, UpdateOwnerAssetsResult } from "./owner-assets";
+import type { UpdateInquiryRoutingInput } from "./form-settings";
 import {
-  updateBusinessProfile,
-  confirmSiteEvidence,
   analyticsSummary,
   assignExperiment,
   concludeExperimentWithLearning,
@@ -58,13 +52,18 @@ import {
   createProspectReport as createProspectReportStore,
   createProspectReportLead as createProspectReportLeadStore,
   getForms,
+  getPublishedFormDefinition as getPublishedFormDefinitionStore,
   getDomainById,
   getDomainByHostname,
   getProspectReport as getProspectReportStore,
   getSiteBundle,
   getSiteBundleBySlug,
+  persistCanonicalGenerationInput as persistCanonicalGenerationInputStore,
+  getCanonicalControlPlane as getCanonicalControlPlaneStore,
+  getGenerationInputSnapshot as getGenerationInputSnapshotStore,
+  saveControlPlaneChangeRequest as saveControlPlaneChangeRequestStore,
+  listControlPlaneChangeRequests as listControlPlaneChangeRequestsStore,
   getSiteCandidate as getSiteCandidateStore,
-  updateSiteCandidateBundle as updateSiteCandidateBundleStore,
   archiveSiteCandidates as archiveSiteCandidatesStore,
   listAnalyticsEvents,
   listClaims,
@@ -98,22 +97,15 @@ import {
   resolvePreviewToken,
   saveSiteVersion,
   updateExperiment,
-  updateFormSettings,
+  updateInquiryRouting as updateInquiryRoutingStore,
   updateInquiryAiEnrichment,
   updateInquiryNotificationState,
   updateInquiryStatus,
   countRecentInquiries,
   getInquiry,
   updateDomain,
-  updateOwnerAssets,
   updateProspectReport as updateProspectReportStore,
-  updateSectionProps,
   upsertSiteArtifact as upsertSiteArtifactStore,
-  replaceFactCandidates as replaceFactCandidatesStore,
-  listFactCandidates as listFactCandidatesStore,
-  replaceProposedBusinessServices as replaceProposedBusinessServicesStore,
-  listBusinessServices as listBusinessServicesStore,
-  updateBusinessService as updateBusinessServiceStore,
   upsertOutboundProspect
 } from "./store";
 import {
@@ -144,7 +136,7 @@ import { aggregateNotificationState, executeInquiryNotificationWorkflows } from 
 import { runInquiryAiEnrichmentJob } from "./groq-inquiry-ai";
 
 export type CreateSiteInput = {
-  url?: string;
+  url: string;
   prompt?: string;
 };
 
@@ -156,7 +148,10 @@ export type CreateSiteCandidateInput = {
   id?: string;
   businessId?: string;
   agentRunId?: string;
-  bundle: SiteBundle;
+  snapshot: import("./control-plane-contracts").GenerationInputSnapshotV1;
+  version: import("./models").SiteVersionV3;
+  plan: import("./generation-contracts").GenerationPlan;
+  copy: import("./generation-contracts").SiteCopy;
   sourceUrl?: string;
   sourceHost?: string;
   intendedSiteId?: string;
@@ -201,8 +196,7 @@ export type ListSiteCandidateSummariesResult = {
 };
 
 export function siteCandidateSummaryFromRecord(record: SiteCandidateRecord): SiteCandidateSummary {
-  const versions = record.bundle.siteModel.versions;
-  const version = versions.find((candidateVersion) => candidateVersion.status === "draft") ?? versions[0];
+  const version = record.version;
   return {
     id: record.id,
     businessName: record.businessName,
@@ -225,6 +219,14 @@ export function siteCandidateSummaryFromRecord(record: SiteCandidateRecord): Sit
 export type ListSiteCandidatesResult = {
   candidates: SiteCandidateRecord[];
   total: number;
+};
+
+export type CanonicalControlPlaneView = {
+  state: import("./control-plane").CanonicalBusinessStateV1;
+  siteIntent: import("./control-plane-contracts").SiteIntentV1;
+  latestSnapshot: import("./control-plane-contracts").GenerationInputSnapshotV1;
+  sourceSnapshots: import("./control-plane-contracts").SourceSnapshotV1[];
+  observations: import("./control-plane-contracts").FactObservationV1[];
 };
 
 export type ListSiteArtifactsFilter = {
@@ -360,13 +362,6 @@ export type ListAgentRunsResult = {
   total: number;
 };
 
-export type UpdateSectionInput = {
-  siteId: string;
-  pageId: string;
-  sectionId: string;
-  props: Record<string, unknown>;
-};
-
 const localAgentRuns = new Map<string, AgentRunRecord>();
 const localAgentRunSpans = new Map<string, AgentRunSpanRecord>();
 const localAgentModelCalls = new Map<string, AgentModelCallRecord>();
@@ -442,15 +437,7 @@ export type CreateProspectReportLeadInput = {
   metadata?: Record<string, string | number | boolean>;
 };
 
-type SectionUpdateResult =
-  | { ok: false; reason: string; issues?: EditorGuardrailIssue[] }
-  | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
-  | null;
 type PublishResult = { ok: false; reason: string } | { ok: true; bundle: SiteBundle } | null;
-type BusinessProfileUpdateResult =
-  | { ok: false; reason: string; issues?: EditorGuardrailIssue[] }
-  | { ok: true; bundle: SiteBundle; guardrailWarnings?: EditorGuardrailIssue[] }
-  | null;
 type ExperimentAssignment =
   | { assigned: false; reason: string }
   | {
@@ -492,38 +479,34 @@ export type LodestaRepository = {
   listSiteBundles(): Promise<SiteBundle[]>;
   getSiteBundle(siteId: string): Promise<SiteBundle | null>;
   getSiteBundleBySlug(slug: string): Promise<SiteBundle | null>;
+  persistCanonicalGenerationInput(
+    input: import("./intake-generation-snapshot").CanonicalGenerationInputV1
+  ): Promise<import("./control-plane-contracts").GenerationInputSnapshotV1>;
+  getCanonicalControlPlane(siteId: string): Promise<CanonicalControlPlaneView | null>;
+  getGenerationInputSnapshot(id: string): Promise<import("./control-plane-contracts").GenerationInputSnapshotV1 | null>;
+  saveControlPlaneChangeRequest(
+    request: import("./control-plane-contracts").ControlPlaneChangeRequestV1
+  ): Promise<import("./control-plane-contracts").ControlPlaneChangeRequestV1>;
+  listControlPlaneChangeRequests(
+    siteId: string
+  ): Promise<import("./control-plane-contracts").ControlPlaneChangeRequestV1[]>;
   createSiteCandidate(input: CreateSiteCandidateInput): Promise<SiteCandidateRecord>;
   listSiteCandidates(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidatesResult>;
   listSiteCandidateSummaries(filter?: ListSiteCandidatesFilter): Promise<ListSiteCandidateSummariesResult>;
   getSiteCandidate(candidateId: string): Promise<SiteCandidateRecord | null>;
-  updateSiteCandidateBundle(candidateId: string, bundle: SiteBundle): Promise<SiteCandidateRecord | null>;
   archiveSiteCandidates(candidateIds: string[]): Promise<SiteCandidateRecord[]>;
   acceptSiteCandidateAsSite(candidateId: string): Promise<AcceptSiteCandidateResult | null>;
   acceptSiteCandidateAsVersion(input: AcceptSiteCandidateAsVersionInput): Promise<AcceptSiteCandidateResult | null>;
   mergeBusinesses(input: { sourceBusinessId: string; targetBusinessId: string }): Promise<BusinessMergeResult>;
   upsertSiteArtifact(artifact: SiteArtifactRecord): Promise<SiteArtifactRecord>;
-  replaceFactCandidates(businessId: string, candidates: FactCandidate[]): Promise<FactCandidate[]>;
-  listFactCandidates(businessId: string): Promise<FactCandidate[]>;
-  replaceProposedBusinessServices(businessId: string, records: BusinessServiceRecord[]): Promise<BusinessServiceRecord[]>;
-  listBusinessServices(businessId: string): Promise<BusinessServiceRecord[]>;
-  updateBusinessService(input: { id: string; status: "active" | "hidden" | "rejected"; confirmedBy: string }): Promise<BusinessServiceRecord | null>;
   listSiteArtifacts(filter?: ListSiteArtifactsFilter): Promise<SiteArtifactRecord[]>;
   createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }): Promise<PreviewToken | null>;
   resolvePreviewToken(token: string): Promise<PreviewResolveResult>;
   listPreviewTokens(siteId?: string): Promise<PreviewToken[]>;
   saveSiteVersion(input: { siteId: string; version: SiteVersion }): Promise<SiteBundle | null>;
-  updateSectionProps(input: UpdateSectionInput): Promise<SectionUpdateResult>;
   publishDraft(siteId: string): Promise<PublishResult>;
   publishVersion(input: { siteId: string; versionId: string }): Promise<PublishResult>;
   restoreVersionToDraft(input: { siteId: string; versionId: string }): Promise<RestoreVersionResult>;
-  updateBusinessProfile(input: BusinessProfileUpdateInput): Promise<BusinessProfileUpdateResult>;
-  confirmSiteEvidence(input: {
-    siteId: string;
-    evidenceId: string;
-    decision: "confirmed" | "rejected";
-    decidedBy: string;
-  }): Promise<{ ok: true; bundle: SiteBundle; item: import("./evidence-ledger").VerifiedEvidence } | { ok: false; reason: string } | null>;
-  updateOwnerAssets(input: UpdateOwnerAssetsInput): Promise<UpdateOwnerAssetsResult | null>;
   createInquiryFromForm(input: CreateInquiryFromFormInput): Promise<CreateInquiryFromFormResult>;
   listInquiries(siteId?: string): Promise<Inquiry[]>;
   getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
@@ -557,7 +540,8 @@ export type LodestaRepository = {
   concludeExperimentWithLearning(input: { siteId: string; experimentId: string }): Promise<ExperimentLearningResult>;
   listExperimentLearnings(filter?: { siteId?: string; status?: ExperimentLearning["status"] }): Promise<ExperimentLearning[]>;
   getForms(siteId: string): Promise<FormDefinition[]>;
-  updateFormSettings(input: UpdateFormSettingsInput): Promise<UpdateFormSettingsResult | null>;
+  getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinition | null>;
+  updateInquiryRouting(input: UpdateInquiryRoutingInput): Promise<{ ok: true; workflows: import("./models").WorkflowDefinition[] } | { ok: false; reason: string } | null>;
   createClaim(input: CreateClaimInput): Promise<ClaimResult>;
   completeClaimCheckout(input: CompleteClaimCheckoutInput): Promise<ClaimRecord | null>;
   listClaims(siteId?: string): Promise<ClaimRecord[]>;
@@ -609,6 +593,21 @@ export const localRepository: LodestaRepository = {
   async getSiteBundleBySlug(slug) {
     return getSiteBundleBySlug(slug);
   },
+  async persistCanonicalGenerationInput(input) {
+    return persistCanonicalGenerationInputStore(input);
+  },
+  async getCanonicalControlPlane(siteId) {
+    return getCanonicalControlPlaneStore(siteId);
+  },
+  async getGenerationInputSnapshot(id) {
+    return getGenerationInputSnapshotStore(id);
+  },
+  async saveControlPlaneChangeRequest(request) {
+    return saveControlPlaneChangeRequestStore(request);
+  },
+  async listControlPlaneChangeRequests(siteId) {
+    return listControlPlaneChangeRequestsStore(siteId);
+  },
   async createSiteCandidate(input) {
     return createSiteCandidateStore(input);
   },
@@ -621,9 +620,6 @@ export const localRepository: LodestaRepository = {
   },
   async getSiteCandidate(candidateId) {
     return getSiteCandidateStore(candidateId);
-  },
-  async updateSiteCandidateBundle(candidateId, bundle) {
-    return updateSiteCandidateBundleStore(candidateId, bundle);
   },
   async archiveSiteCandidates(candidateIds) {
     return archiveSiteCandidatesStore(candidateIds);
@@ -640,21 +636,6 @@ export const localRepository: LodestaRepository = {
   async upsertSiteArtifact(artifact) {
     return upsertSiteArtifactStore(artifact);
   },
-  async replaceFactCandidates(businessId, candidates) {
-    return replaceFactCandidatesStore(businessId, candidates);
-  },
-  async listFactCandidates(businessId) {
-    return listFactCandidatesStore(businessId);
-  },
-  async replaceProposedBusinessServices(businessId, records) {
-    return replaceProposedBusinessServicesStore(businessId, records);
-  },
-  async listBusinessServices(businessId) {
-    return listBusinessServicesStore(businessId);
-  },
-  async updateBusinessService(input) {
-    return updateBusinessServiceStore(input);
-  },
   async listSiteArtifacts(filter) {
     return listSiteArtifactsStore(filter);
   },
@@ -670,9 +651,6 @@ export const localRepository: LodestaRepository = {
   async saveSiteVersion(input) {
     return saveSiteVersion(input);
   },
-  async updateSectionProps(input) {
-    return updateSectionProps(input);
-  },
   async publishDraft(siteId) {
     return publishDraft(siteId);
   },
@@ -681,15 +659,6 @@ export const localRepository: LodestaRepository = {
   },
   async restoreVersionToDraft(input) {
     return restoreVersionToDraft(input);
-  },
-  async updateBusinessProfile(input) {
-    return updateBusinessProfile(input);
-  },
-  async confirmSiteEvidence(input) {
-    return confirmSiteEvidence(input);
-  },
-  async updateOwnerAssets(input) {
-    return updateOwnerAssets(input);
   },
   async createInquiryFromForm(input) {
     const result = createInquiryFromFormStore(input);
@@ -764,8 +733,11 @@ export const localRepository: LodestaRepository = {
   async getForms(siteId) {
     return getForms(siteId);
   },
-  async updateFormSettings(input) {
-    return updateFormSettings(input);
+  async getPublishedFormDefinition(siteId, formId) {
+    return getPublishedFormDefinitionStore(siteId, formId);
+  },
+  async updateInquiryRouting(input) {
+    return updateInquiryRoutingStore(input);
   },
   async createClaim(input) {
     if (!claimVerificationSatisfies(input.verificationLevel)) return null;
@@ -1067,6 +1039,7 @@ function createLocalJobContext(): JobExecutionContext {
       return generateSite({ ...options, repository: localRepository });
     },
     getSiteBundle: localRepository.getSiteBundle,
+    getGenerationInputSnapshot: localRepository.getGenerationInputSnapshot,
     listInquiryEvents: localRepository.listInquiryEvents,
     processInquiryNotification: (input) => localRepository.processInquiryNotification(input),
     processInquiryAiEnrichment: (input) => localRepository.processInquiryAiEnrichment(input),

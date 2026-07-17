@@ -6,6 +6,7 @@
  */
 import { supabaseRepository } from "../lib/supabase/repository";
 import type { SiteVersionV3 } from "../lib/models";
+import { siteCandidateRenderEnvelope } from "../lib/site-candidate-render";
 
 function line(label: string, value: unknown) {
   console.log(`${label}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
@@ -21,7 +22,7 @@ async function main() {
     return;
   }
 
-  const bundle = candidate.bundle;
+  const bundle = siteCandidateRenderEnvelope(candidate);
   const biz = bundle.businessProfile;
   const versions = bundle.siteModel.versions;
   const version = (versions.find((v) => v.status === "draft") ?? versions[0]) as SiteVersionV3 | undefined;

@@ -5,6 +5,7 @@ import { repository } from "@/lib/repository";
 import { SiteRenderer } from "@/lib/site-renderer";
 import { applyMediaRightsFallbackV3 } from "@/lib/media-rights-preview";
 import { assertSiteVersionV3, findPageBySlugV3, siteVersionV3Issue } from "@/lib/site-version-v3";
+import { siteCandidateRenderEnvelope } from "@/lib/site-candidate-render";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,8 @@ export default async function SiteCandidatePreviewPage({
   const candidate = await repository.getSiteCandidate(candidateId);
   if (!candidate) notFound();
 
-  const bundle = candidate.bundle;
-  const previewVersion = bundle.siteModel.versions.find((version) => version.status === "draft") ?? bundle.siteModel.versions[0];
+  const bundle = siteCandidateRenderEnvelope(candidate);
+  const previewVersion = candidate.version;
   const schemaIssue = siteVersionV3Issue(previewVersion);
   if (schemaIssue) {
     return (

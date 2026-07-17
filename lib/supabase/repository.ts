@@ -8,8 +8,6 @@ import type {
   AgentRunTokenTotals,
   AnalyticsEvent,
   BusinessLocationRecord,
-  BusinessProfile,
-  BusinessRecord,
   ClaimRecord,
   DomainRecord,
   Experiment,
@@ -31,12 +29,12 @@ import type {
   PreviewToken,
   ProspectReportLead,
   ProspectReportRecord,
-  SiteAsset,
   SiteBundle,
   SiteCandidateRecord,
   SiteCandidateStatus,
   SiteModel,
   SiteVersion,
+  SiteVersionV3,
   WorkerHeartbeatRecord,
 } from "../models";
 import type {
@@ -57,8 +55,7 @@ import type {
   LodestaRepository,
   UpdateAgentRunInput,
   UpdateAgentRunSpanInput,
-  UpdateProspectReportInput,
-  UpdateSectionInput
+  UpdateProspectReportInput
 } from "../repository";
 import { createCheckoutSession } from "../billing";
 import { refreshCustomHostnameStatus, registerCustomHostname } from "../domains";
@@ -74,19 +71,13 @@ import {
 import { summarizeAnalytics } from "../analytics";
 import { analyzeExperiment, analyzeExperiments } from "../experiment-analysis";
 import { createExperimentLearning } from "../experiment-learning";
-import { applyV3SectionUpdate } from "../v3-editor";
-import { validateBusinessProfileUpdate, validateSectionUpdate } from "../editor-guardrails";
-import { applyFormSettingsUpdate } from "../form-settings";
-import { applyOwnerAssetsUpdate } from "../owner-assets";
-import { applySiteIdentity, makeUniqueSlug } from "../site-identity";
-import { applyVerifiedFacts } from "../fact-verification";
-import { applyBusinessProfileUpdate } from "../business-profile-update";
-import { applyEvidenceConfirmation } from "../evidence-ledger";
+import { applyInquiryRoutingUpdate } from "../form-settings";
+import { makeUniqueSlug } from "../site-identity";
 import { restoreVersionToDraftBundle } from "../site-versions";
 import { sanitizeAnalyticsMetadata } from "../privacy";
-import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "../site-version-metadata";
+import { markVersionOwnerTouched } from "../site-version-metadata";
 import { copyCandidateArtifactToSite } from "../site-artifacts";
-import { businessIdForProfile, businessLocationsFromProfile, businessRecordFromProfile, normalizeSiteLocationRole, withBusinessBundleFields } from "../business-model";
+import { withBusinessBundleFields } from "../business-model";
 import { assertBundleVersionsV3, assertSiteVersionV3 } from "../site-version-v3";
 import { getSupabaseAdminClient } from "./client";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "../worker-identity";
@@ -107,6 +98,31 @@ import {
   serializeGenerationFailure
 } from "../generation-failure";
 import { setWorkerCurrentJob } from "../worker-runtime";
+import type {
+  AssetRevisionV1,
+  BusinessAssetV1,
+  BusinessOfferingV1,
+  BusinessProofV1,
+  ControlPlaneChangeRequestV1,
+  FactObservationV1,
+  FormDefinitionV1,
+  GenerationInputSnapshotV1,
+  SiteIntentV1,
+  SourceSnapshotV1
+} from "../control-plane-contracts";
+import type { CanonicalBusinessStateV1 } from "../control-plane";
+import type { GenerationPlan, SiteCopy } from "../generation-contracts";
+import type { GenerationEvidenceManifestV1 } from "../generation-evidence-manifest";
+import type { CanonicalGenerationInputV1 } from "../intake-generation-snapshot";
+import { siteCandidateRenderEnvelope } from "../site-candidate-render";
+import { siteRenderEnvelopeFromSnapshot } from "../site-render-envelope";
+import {
+  candidateRevisionIssue,
+  canonicalBusinessStateHash,
+  changeImpact,
+  siteIntentHash
+} from "../control-plane";
+import { slugify } from "../slug";
 
 type SiteRow = {
   id: string;
@@ -118,17 +134,6 @@ type SiteRow = {
   extension_model: unknown;
   presence_assessment: unknown;
   created_at: string;
-};
-
-type BusinessRow = {
-  id: string;
-  workspace_id: string | null;
-  name: string;
-  vertical: BusinessProfile["vertical"];
-  profile_json: unknown;
-  provenance: unknown;
-  created_at: string;
-  updated_at: string;
 };
 
 type BusinessLocationRow = {
@@ -145,13 +150,6 @@ type BusinessLocationRow = {
   provenance: unknown;
   created_at: string;
   updated_at: string;
-};
-
-type SiteLocationRow = {
-  site_id: string;
-  location_id: string;
-  role: string | null;
-  created_at: string;
 };
 
 type SupabaseJobGenerateSite = NonNullable<JobExecutionContext["generateSite"]>;
@@ -171,8 +169,14 @@ type SiteCandidateRow = {
   business_name: string;
   vertical: SiteCandidateRecord["vertical"];
   candidate_slug: string;
-  bundle_json: unknown;
+  input_snapshot_id: string;
+  version_model: unknown;
+  form_definition_id: string;
+  generation_plan: unknown;
+  site_copy: unknown;
+  evidence_manifest: unknown;
   status: SiteCandidateStatus;
+  stale_reason: string | null;
   candidate_purpose: SiteCandidateRecord["candidatePurpose"] | null;
   intended_site_id: string | null;
   accepted_site_id: string | null;
@@ -180,11 +184,10 @@ type SiteCandidateRow = {
   accepted_at: string | null;
   created_at: string;
   updated_at: string;
+  generation_input_snapshots?: { snapshot: unknown } | Array<{ snapshot: unknown }> | null;
+  form_definitions?: { definition: unknown } | Array<{ definition: unknown }> | null;
 };
 
-// PostgREST JSON-path projection so queue surfaces never transfer bundle_json.
-// Generation writes a single draft version at index 0, so versions->0 is the
-// draft; the strict draft-or-first selection stays in full-bundle reads.
 const siteCandidateSummarySelect = [
   "id",
   "business_name",
@@ -198,10 +201,12 @@ const siteCandidateSummarySelect = [
   "accepted_at",
   "created_at",
   "updated_at",
-  "readiness:bundle_json->siteModel->versions->0->generationQa->>readiness",
-  "screenshot_path:bundle_json->siteModel->versions->0->generationQa->primaryScreenshot->>storagePath",
-  "renderer_version:bundle_json->siteModel->versions->0->>rendererVersion"
+  "readiness:version_model->generationQa->>readiness",
+  "screenshot_path:version_model->generationQa->primaryScreenshot->>storagePath",
+  "renderer_version:version_model->>rendererVersion"
 ].join(", ");
+
+const siteCandidateSelect = "*, generation_input_snapshots(snapshot), form_definitions(definition)";
 
 type SiteCandidateSummaryRow = {
   id: string;
@@ -234,43 +239,12 @@ type SiteArtifactRow = {
   created_at: string;
 };
 
-type BusinessProfileRow = {
-  id: string;
-  site_id: string;
-  name: string;
-  vertical: string;
-  profile: unknown;
-  provenance: unknown;
-};
-
-type SiteAssetRow = {
-  id: string;
-  site_id: string;
-  kind: SiteAsset["kind"];
-  url: string | null;
-  alt: string;
-  source: SiteAsset["source"];
-  rights_status: SiteAsset["rightsStatus"];
-  usage_scope: SiteAsset["usageScope"];
-  owner_approved: boolean;
-  provenance: unknown;
-  metadata: unknown;
-  created_at: string;
-};
-
 type SiteVersionRow = {
   id: string;
   site_id: string;
   status: "draft" | "published";
   version_model: unknown;
   created_at: string;
-};
-
-type FormRow = {
-  id: string;
-  site_id: string;
-  name: string;
-  schema: unknown;
 };
 
 type ExperimentRow = {
@@ -605,14 +579,78 @@ export const supabaseRepository: LodestaRepository = {
     return row ? hydrateBundle(row) : null;
   },
 
+  async persistCanonicalGenerationInput(input) {
+    return persistCanonicalGenerationInputV1(input);
+  },
+
+  async getCanonicalControlPlane(siteId) {
+    return loadCanonicalControlPlane(siteId);
+  },
+
+  async getGenerationInputSnapshot(id) {
+    const row = await requireMaybe<{ snapshot: GenerationInputSnapshotV1 }>(
+      getSupabaseAdminClient().from("generation_input_snapshots").select("snapshot").eq("id", id).maybeSingle(),
+      "Load generation input snapshot"
+    );
+    return row?.snapshot ?? null;
+  },
+
+  async saveControlPlaneChangeRequest(request) {
+    await requireSuccess(
+      getSupabaseAdminClient().from("control_plane_change_requests").upsert({
+        id: request.id,
+        business_id: request.businessId,
+        site_id: request.siteId,
+        schema_version: request.schemaVersion,
+        target_authority: request.targetAuthority,
+        change_kind: request.payload.kind,
+        payload: request.payload,
+        impact: changeImpact(request.payload),
+        status: request.status,
+        requested_by: request.requestedBy,
+        requested_at: request.requestedAt,
+        decided_by: request.decidedBy ?? null,
+        decided_at: request.decidedAt ?? null,
+        failure_reason: request.failureReason ?? null
+      }),
+      "Persist control-plane change request"
+    );
+    return structuredClone(request);
+  },
+
+  async listControlPlaneChangeRequests(siteId) {
+    const rows = await requireData<Array<{
+      id: string; business_id: string; site_id: string; schema_version: ControlPlaneChangeRequestV1["schemaVersion"];
+      target_authority: ControlPlaneChangeRequestV1["targetAuthority"]; payload: ControlPlaneChangeRequestV1["payload"];
+      status: ControlPlaneChangeRequestV1["status"]; requested_by: string; requested_at: string; decided_by: string | null;
+      decided_at: string | null; failure_reason: string | null;
+    }>>(
+      getSupabaseAdminClient().from("control_plane_change_requests").select("*").eq("site_id", siteId).order("requested_at", { ascending: false }),
+      "List control-plane change requests"
+    );
+    return rows.map((row) => ({
+      schemaVersion: row.schema_version,
+      id: row.id,
+      businessId: row.business_id,
+      siteId: row.site_id,
+      targetAuthority: row.target_authority,
+      payload: row.payload,
+      status: row.status,
+      requestedBy: row.requested_by,
+      requestedAt: row.requested_at,
+      decidedBy: row.decided_by ?? undefined,
+      decidedAt: row.decided_at ?? undefined,
+      failureReason: row.failure_reason ?? undefined
+    }));
+  },
+
   async createSiteCandidate(input) {
     const now = new Date().toISOString();
-    const sourceUrl = input.sourceUrl ?? input.bundle.presenceAssessment.sourceUrl;
+    const sourceUrl = input.sourceUrl;
     const businessId = input.intendedSiteId
-      ? (await businessIdForSite(input.intendedSiteId)) ?? input.businessId ?? businessIdForProfile(input.bundle.businessProfile)
-      : input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
-    const bundle = assertBundleVersionsV3(withBusinessBundleFields(input.bundle, { businessId, now }), "supabase create candidate bundle");
-    await persistBusinessFromProfile(bundle.businessProfile, businessId);
+      ? (await businessIdForSite(input.intendedSiteId)) ?? input.businessId ?? input.snapshot.businessId
+      : input.businessId ?? input.snapshot.businessId;
+    if (businessId !== input.snapshot.businessId) throw new Error("Candidate business ID must match its immutable input snapshot.");
     const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
         .from("site_candidates")
@@ -622,17 +660,22 @@ export const supabaseRepository: LodestaRepository = {
           agent_run_id: input.agentRunId,
           source_url: sourceUrl,
           source_host: input.sourceHost ?? hostFromUrl(sourceUrl),
-          business_name: bundle.businessProfile.name,
-          vertical: bundle.businessProfile.vertical,
-          candidate_slug: bundle.siteModel.slug,
-          bundle_json: bundle,
+          business_name: input.snapshot.business.name,
+          vertical: input.snapshot.business.vertical,
+          candidate_slug: slugify(input.snapshot.business.name),
+          input_snapshot_id: input.snapshot.id,
+          version_model: assertSiteVersionV3(input.version, "supabase candidate version"),
+          form_definition_id: input.snapshot.formDefinition.id,
+          generation_plan: input.plan,
+          site_copy: input.copy,
+          evidence_manifest: input.snapshot.evidenceManifest,
           status: input.status ?? "ready",
           candidate_purpose: input.candidatePurpose ?? "customer_prospect",
           intended_site_id: input.intendedSiteId,
           created_at: now,
           updated_at: now
         })
-        .select("*")
+        .select(siteCandidateSelect)
         .single(),
       "Create site candidate"
     );
@@ -644,7 +687,7 @@ export const supabaseRepository: LodestaRepository = {
     const offset = Math.max(0, filter.offset ?? 0);
     let query = getSupabaseAdminClient()
       .from("site_candidates")
-      .select("*", { count: "exact" })
+      .select(siteCandidateSelect, { count: "exact" })
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
     query = applySiteCandidateFilters(query, filter);
@@ -671,22 +714,8 @@ export const supabaseRepository: LodestaRepository = {
 
   async getSiteCandidate(candidateId) {
     const row = await requireMaybe<SiteCandidateRow>(
-      getSupabaseAdminClient().from("site_candidates").select("*").eq("id", candidateId).maybeSingle(),
+      getSupabaseAdminClient().from("site_candidates").select(siteCandidateSelect).eq("id", candidateId).maybeSingle(),
       "Get site candidate"
-    );
-    return row ? rowToSiteCandidate(row) : null;
-  },
-
-  async updateSiteCandidateBundle(candidateId, bundle) {
-    const v3Bundle = assertBundleVersionsV3(bundle, "supabase update candidate bundle");
-    const row = await requireMaybe<SiteCandidateRow>(
-      getSupabaseAdminClient()
-        .from("site_candidates")
-        .update({ bundle_json: v3Bundle })
-        .eq("id", candidateId)
-        .select("*")
-        .maybeSingle(),
-      "Update site candidate bundle"
     );
     return row ? rowToSiteCandidate(row) : null;
   },
@@ -701,7 +730,7 @@ export const supabaseRepository: LodestaRepository = {
         .update({ status: "archived", updated_at: now })
         .in("id", uniqueIds)
         .neq("status", "accepted")
-        .select("*"),
+        .select(siteCandidateSelect),
       "Archive site candidates"
     );
     return rows.map(rowToSiteCandidate);
@@ -733,16 +762,20 @@ export const supabaseRepository: LodestaRepository = {
       getSupabaseAdminClient().from("sites").select("slug"),
       "Load existing slugs"
     );
-    let bundle = structuredClone(candidate.bundle);
-    applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug)));
-    bundle = withBusinessBundleFields(bundle, { businessId: candidate.businessId });
+    const freshness = await candidateFreshnessFromDatabase(candidate);
+    if (freshness.length) return markSupabaseCandidateStale(candidate, freshness);
+    const bundle = siteCandidateRenderEnvelope(candidate);
+    bundle.siteModel.slug = makeUniqueSlug(bundle.siteModel.slug, existingRows.map((row) => row.slug));
     await persistBundle(bundle, { cleanupOnFailure: true, businessId: candidate.businessId });
     const acceptedAt = new Date().toISOString();
-    await copySelectedArtifactsToSite(this, {
+    const copiedArtifacts = await copySelectedArtifactsToSite(this, {
       candidateId,
       siteId: bundle.businessProfile.siteId,
-      acceptedAt
+      acceptedAt,
+      artifactIds: bundle.siteModel.versions[0]?.artifactRefs.map((reference) => reference.artifactId) ?? []
     });
+    rebindVersionArtifacts(bundle.siteModel.versions[0], copiedArtifacts);
+    await persistVersions(bundle);
     const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
         .from("site_candidates")
@@ -755,7 +788,7 @@ export const supabaseRepository: LodestaRepository = {
           updated_at: acceptedAt
         })
         .eq("id", candidateId)
-        .select("*")
+        .select(siteCandidateSelect)
         .single(),
       "Mark site candidate accepted"
     );
@@ -793,21 +826,20 @@ export const supabaseRepository: LodestaRepository = {
 
     const acceptedAt = new Date().toISOString();
     const targetBusinessId = await businessIdForSite(input.siteId);
-    const version = siteVersionFromCandidate({
-      candidateBundle: candidate.bundle,
-      targetBundle,
-      acceptedAt
-    });
-    if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
+    const freshness = await candidateFreshnessFromDatabase(candidate, targetBundle);
+    if (freshness.length) return markSupabaseCandidateStale(candidate, freshness);
+    const version = structuredClone(assertSiteVersionV3(candidate.version, "accepted candidate version"));
 
-    targetBundle.siteModel.versions.unshift(version);
-    applyAcceptedGenerationState(targetBundle, candidate.bundle);
-    await persistBundle(targetBundle, { businessId: targetBusinessId ?? candidate.businessId });
-    await copySelectedArtifactsToSite(this, {
+    const copiedArtifacts = await copySelectedArtifactsToSite(this, {
       candidateId: input.candidateId,
       siteId: input.siteId,
-      acceptedAt
+      acceptedAt,
+      artifactIds: version.artifactRefs.map((reference) => reference.artifactId)
     });
+    rebindVersionArtifacts(version, copiedArtifacts);
+    targetBundle.siteModel.versions.unshift(version);
+    applyAcceptedGenerationState(targetBundle, siteCandidateRenderEnvelope(candidate));
+    await persistBundle(targetBundle, { businessId: targetBusinessId ?? candidate.businessId });
 
     const row = await requireData<SiteCandidateRow>(
       getSupabaseAdminClient()
@@ -822,7 +854,7 @@ export const supabaseRepository: LodestaRepository = {
           updated_at: acceptedAt
         })
         .eq("id", input.candidateId)
-        .select("*")
+        .select(siteCandidateSelect)
         .single(),
       "Mark site candidate accepted as version"
     );
@@ -858,105 +890,6 @@ export const supabaseRepository: LodestaRepository = {
     };
   },
 
-  async replaceFactCandidates(businessId, candidates) {
-    const client = getSupabaseAdminClient();
-    await client.from("fact_candidates").delete().eq("business_id", businessId).in("status", ["discovered", "system_selected_for_preview", "superseded"]);
-    if (!candidates.length) return [];
-    await requireOk(
-      client.from("fact_candidates").upsert(
-        candidates.map((candidate) => ({
-          id: candidate.id,
-          business_id: candidate.businessId,
-          source_type: candidate.sourceType,
-          field_key: candidate.fieldKey,
-          proposed_value: candidate.proposedValue ?? null,
-          confidence: candidate.confidence,
-          status: candidate.status,
-          evidence_label: candidate.evidenceLabel,
-          evidence_url: candidate.evidenceUrl ?? null,
-          place_id: candidate.placeId ?? null,
-          comparison_result: candidate.comparisonResult ?? null,
-          observed_at: candidate.observedAt,
-          created_at: candidate.createdAt
-        }))
-      )
-    );
-    return candidates;
-  },
-  async listFactCandidates(businessId) {
-    const { data } = await getSupabaseAdminClient().from("fact_candidates").select("*").eq("business_id", businessId);
-    return (data ?? []).map(factCandidateFromRow);
-  },
-  async replaceProposedBusinessServices(businessId, records) {
-    const client = getSupabaseAdminClient();
-    // Idempotent catalog sync: business_services rows reference
-    // service_definitions; the canonical catalog is code-defined, so upsert
-    // any referenced definitions before inserting.
-    const referencedDefinitionIds = new Set(records.map((record) => record.serviceDefinitionId).filter(Boolean));
-    if (referencedDefinitionIds.size) {
-      const { serviceCatalog } = await import("../service-catalog");
-      const referenced = serviceCatalog.filter((definition) => referencedDefinitionIds.has(definition.id));
-      if (referenced.length) {
-        await requireOk(
-          client.from("service_definitions").upsert(
-            referenced.map((definition) => ({
-              id: definition.id,
-              vertical: definition.vertical,
-              slug: definition.slug,
-              name: definition.name,
-              category: definition.category ?? null,
-              aliases: definition.aliases,
-              default_questions: definition.defaultQuestions,
-              page_strategy: definition.pageStrategy
-            }))
-          )
-        );
-      }
-    }
-    const { data: existing } = await client.from("business_services").select("*").eq("business_id", businessId);
-    const ownerDecided = (existing ?? []).filter((row) => row.status !== "proposed");
-    const decidedKeys = new Set(ownerDecided.map((row) => row.service_definition_id ?? `custom:${(row.custom_name ?? "").toLowerCase()}`));
-    await client.from("business_services").delete().eq("business_id", businessId).eq("status", "proposed");
-    const fresh = records.filter((record) => !decidedKeys.has(record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
-    if (fresh.length) {
-      await requireOk(
-        client.from("business_services").upsert(
-          fresh.map((record) => ({
-            id: record.id,
-            business_id: record.businessId,
-            service_definition_id: record.serviceDefinitionId ?? null,
-            custom_name: record.customName ?? null,
-            status: record.status,
-            confirmation_source: record.confirmationSource ?? null,
-            featured: record.featured,
-            publish_landing_page: record.publishLandingPage ?? null,
-            created_at: record.createdAt,
-            updated_at: record.updatedAt
-          }))
-        )
-      );
-    }
-    return this.listBusinessServices(businessId);
-  },
-  async listBusinessServices(businessId) {
-    const { data } = await getSupabaseAdminClient().from("business_services").select("*").eq("business_id", businessId);
-    return (data ?? []).map(businessServiceFromRow);
-  },
-  async updateBusinessService(input) {
-    const { data } = await getSupabaseAdminClient()
-      .from("business_services")
-      .update({
-        status: input.status,
-        confirmation_source: "owner",
-        confirmed_by: input.confirmedBy,
-        confirmed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", input.id)
-      .select("*")
-      .maybeSingle();
-    return data ? businessServiceFromRow(data) : null;
-  },
   async upsertSiteArtifact(artifact) {
     const row = await requireData<SiteArtifactRow>(
       getSupabaseAdminClient()
@@ -1038,27 +971,10 @@ export const supabaseRepository: LodestaRepository = {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
     const index = bundle.siteModel.versions.findIndex((version) => version.id === input.version.id);
-    if (index < 0) return null;
-    bundle.siteModel.versions[index] = input.version;
+    if (index < 0) bundle.siteModel.versions.unshift(input.version);
+    else bundle.siteModel.versions[index] = input.version;
     await persistVersions(bundle);
     return bundle;
-  },
-
-  async updateSectionProps(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const guardrails = validateSectionUpdate(bundle, input);
-    if (!guardrails.ok) {
-      return {
-        ok: false as const,
-        reason: guardrails.reason,
-        issues: guardrails.issues
-      };
-    }
-    const result = updateBundleSection(bundle, input);
-    if (!result.ok) return result;
-    await persistVersions(bundle);
-    return { ok: true as const, bundle, guardrailWarnings: guardrails.warnings };
   },
 
   async publishDraft(siteId) {
@@ -1074,6 +990,13 @@ export const supabaseRepository: LodestaRepository = {
     if (!bundle) return null;
     const target = bundle.siteModel.versions.find((version) => version.id === input.versionId);
     if (!target) return { ok: false as const, reason: "Version not found." };
+    const snapshot = await requireMaybe<{ eligibility_mode: string }>(
+      getSupabaseAdminClient().from("generation_input_snapshots").select("eligibility_mode").eq("id", target.inputSnapshotId).maybeSingle(),
+      "Authorize public generation snapshot"
+    );
+    if (!snapshot || snapshot.eligibility_mode !== "public") {
+      return { ok: false as const, reason: "Protected-preview versions cannot be published. Confirm canonical business facts and regenerate a public-eligible version first." };
+    }
     for (const version of bundle.siteModel.versions) {
       if (version.status === "published") version.status = "draft";
     }
@@ -1090,43 +1013,6 @@ export const supabaseRepository: LodestaRepository = {
     if (!result.ok) return result;
     const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
     if (draft) markVersionOwnerTouched(draft);
-    await persistBundle(bundle);
-    return result;
-  },
-
-  async updateBusinessProfile(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const guardrails = validateBusinessProfileUpdate(bundle, input);
-    if (!guardrails.ok) {
-      return {
-        ok: false as const,
-        reason: guardrails.reason,
-        issues: guardrails.issues
-      };
-    }
-    const updated = applyBusinessProfileUpdate(bundle, input);
-    markAllVersionsOwnerTouched(updated);
-    await persistBundle(updated);
-    return { ok: true as const, bundle: updated, guardrailWarnings: guardrails.warnings };
-  },
-
-  async confirmSiteEvidence(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    const ledger = bundle?.presenceAssessment.evidenceLedger;
-    if (!bundle || !ledger) return null;
-    const result = applyEvidenceConfirmation({ ledger, ...input });
-    if (!result.ok) return result;
-    await persistBundle(bundle);
-    return { ok: true as const, bundle, item: result.item };
-  },
-
-  async updateOwnerAssets(input) {
-    const bundle = await this.getSiteBundle(input.siteId);
-    if (!bundle) return null;
-    const result = applyOwnerAssetsUpdate(bundle, input);
-    if (!result.ok) return result;
-    markAllVersionsOwnerTouched(bundle);
     await persistBundle(bundle);
     return result;
   },
@@ -1484,20 +1370,55 @@ export const supabaseRepository: LodestaRepository = {
   },
 
   async getForms(siteId) {
-    const rows = await requireData<FormRow[]>(
-      getSupabaseAdminClient().from("forms").select("*").eq("site_id", siteId).order("created_at"),
-      "Get forms"
+    const rows = await requireData<Array<{ definition: FormDefinitionV1 }>>(
+      getSupabaseAdminClient()
+        .from("form_definitions")
+        .select("definition, site_versions!inner(id)")
+        .eq("site_id", siteId)
+        .eq("site_versions.site_id", siteId)
+        .order("created_at"),
+      "Get published forms"
     );
-    return rows.map(rowToForm);
+    return rows.map((row) => row.definition);
   },
 
-  async updateFormSettings(input) {
+  async getPublishedFormDefinition(siteId, formId) {
+    const version = await requireMaybe<{ id: string }>(
+      getSupabaseAdminClient()
+        .from("site_versions")
+        .select("id")
+        .eq("site_id", siteId)
+        .eq("status", "published")
+        .eq("form_definition_id", formId)
+        .limit(1)
+        .maybeSingle(),
+      "Authorize published form definition"
+    );
+    if (!version) return null;
+    const row = await requireMaybe<{ definition: FormDefinitionV1 }>(
+      getSupabaseAdminClient().from("form_definitions").select("definition").eq("site_id", siteId).eq("id", formId).maybeSingle(),
+      "Load published form definition"
+    );
+    return row?.definition ?? null;
+  },
+
+  async updateInquiryRouting(input) {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
-    const result = applyFormSettingsUpdate(bundle, input);
+    const result = applyInquiryRoutingUpdate(bundle.extensionModel.workflows, input);
     if (!result.ok) return result;
-    markAllVersionsOwnerTouched(bundle);
-    await persistBundle(bundle);
+    await requireSuccess(
+      getSupabaseAdminClient()
+        .from("sites")
+        .update({
+          extension_model: {
+            workflows: result.workflows,
+            customBlocks: bundle.extensionModel.customBlocks
+          }
+        })
+        .eq("id", input.siteId),
+      "Persist inquiry routing"
+    );
     return result;
   },
 
@@ -1507,8 +1428,6 @@ export const supabaseRepository: LodestaRepository = {
     const bundle = await this.getSiteBundle(input.siteId);
     if (!bundle) return null;
     const acceptedAt = new Date().toISOString();
-    applyVerifiedFacts(bundle.businessProfile, input.verifiedFacts ?? []);
-    await persistBusinessProfile(bundle.businessProfile);
     const claim = await requireData<ClaimRow>(
       getSupabaseAdminClient()
         .from("claims")
@@ -2137,6 +2056,34 @@ export const supabaseRepository: LodestaRepository = {
 
   async enqueueJob(kind, payload) {
     const now = new Date().toISOString();
+    const coalesceKey = typeof payload.coalesceKey === "string" ? payload.coalesceKey : undefined;
+    if (coalesceKey) {
+      const existing = await requireMaybe<JobRow>(
+        getSupabaseAdminClient()
+          .from("jobs")
+          .select("*")
+          .eq("kind", kind)
+          .eq("status", "queued")
+          .contains("payload", { coalesceKey })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        "Load coalescible job"
+      );
+      if (existing) {
+        const row = await requireData<JobRow>(
+          getSupabaseAdminClient()
+            .from("jobs")
+            .update({ payload, run_after: runAfterFromPayload(payload, now), updated_at: now })
+            .eq("id", existing.id)
+            .eq("status", "queued")
+            .select("*")
+            .single(),
+          "Coalesce queued job"
+        );
+        return rowToJob(row);
+      }
+    }
     const row = await requireData<JobRow>(
       getSupabaseAdminClient()
         .from("jobs")
@@ -2193,6 +2140,7 @@ export const supabaseRepository: LodestaRepository = {
         heartbeatJob: heartbeatSupabaseJob,
         generateSite: supabaseJobGenerateSite,
         getSiteBundle: (siteId) => this.getSiteBundle(siteId),
+        getGenerationInputSnapshot: (id) => this.getGenerationInputSnapshot(id),
         listInquiryEvents: (inquiryId) => this.listInquiryEvents(inquiryId),
         processInquiryNotification: (input) => this.processInquiryNotification(input),
         processInquiryAiEnrichment: (input) => this.processInquiryAiEnrichment(input),
@@ -2334,6 +2282,489 @@ async function heartbeatSupabaseJob(jobId: string, workerId: string): Promise<Jo
   return data ? { status: "ok" } : { status: "lock_lost" };
 }
 
+async function persistCanonicalGenerationInputV1(input: CanonicalGenerationInputV1) {
+  const { state, siteIntent, sourceSnapshots, observations, snapshot } = input;
+  if (state.business.id !== snapshot.businessId || siteIntent.siteId !== snapshot.siteId) {
+    throw new Error("Canonical generation authorities do not match the immutable snapshot identity.");
+  }
+  const sourceIds = new Set(sourceSnapshots.map((source) => source.id));
+  for (const sourceId of snapshot.sourceSnapshotIds) {
+    if (!sourceIds.has(sourceId)) throw new Error(`Immutable generation snapshot references missing source snapshot ${sourceId}.`);
+  }
+  if (snapshot.formDefinition.siteId !== snapshot.siteId) {
+    throw new Error("Immutable form definition does not match its generation snapshot.");
+  }
+  const supabase = getSupabaseAdminClient();
+  const now = new Date().toISOString();
+  const stateHash = canonicalBusinessStateHash(state);
+  const currentBusiness = await requireMaybe<{ state_revision: number; state_hash: string }>(
+    supabase.from("businesses").select("state_revision,state_hash").eq("id", state.business.id).maybeSingle(),
+    "Load canonical business revision"
+  );
+  if (currentBusiness && currentBusiness.state_revision > state.business.stateRevision) {
+    throw new Error("Refusing to replace canonical business state with an older revision.");
+  }
+  if (currentBusiness && currentBusiness.state_revision === state.business.stateRevision && currentBusiness.state_hash !== stateHash) {
+    throw new Error("Canonical business state content changed without a new revision.");
+  }
+  await requireSuccess(
+    supabase.from("businesses").upsert({
+      id: state.business.id,
+      workspace_id: state.business.workspaceId ?? null,
+      name: state.business.name,
+      vertical: state.business.vertical,
+      state_revision: state.business.stateRevision,
+      state_hash: stateHash,
+      description: state.business.description ?? null,
+      categories: state.business.categories,
+      social_links: state.socialLinks,
+      booking_links: state.bookingLinks,
+      ordering_links: state.orderingLinks,
+      press_links: state.pressLinks,
+      provenance: state.business.provenance,
+      created_at: state.business.createdAt,
+      updated_at: state.business.updatedAt || now
+    }),
+    "Persist canonical business"
+  );
+  if (state.locations.length) {
+    await requireSuccess(
+      supabase.from("business_locations").upsert(
+        state.locations.map((location) => ({
+          id: location.id,
+          business_id: state.business.id,
+          label: location.label ?? null,
+          address: location.address ?? null,
+          service_areas: location.serviceAreas,
+          phone: location.phone ?? null,
+          email: location.email ?? null,
+          hours: location.hours ?? null,
+          geo: location.geo ?? null,
+          google_place_id: location.googlePlaceId ?? null,
+          provenance: location.provenance,
+          created_at: location.createdAt,
+          updated_at: location.updatedAt
+        }))
+      ),
+      "Persist canonical business locations"
+    );
+  }
+  await persistImmutableSourceSnapshots(sourceSnapshots);
+  if (observations.length) {
+    await requireSuccess(
+      supabase.from("fact_observations").upsert(
+        observations.map((observation) => ({
+          id: observation.id,
+          business_id: observation.businessId,
+          source_snapshot_id: observation.sourceSnapshotId,
+          field: observation.field,
+          value: observation.value,
+          normalized_value: observation.normalizedValue ?? null,
+          confidence: observation.confidence,
+          status: observation.status,
+          source_block_id: observation.sourceBlockId ?? null,
+          observed_at: observation.observedAt
+        })),
+        { onConflict: "id", ignoreDuplicates: true }
+      ),
+      "Persist fact observations"
+    );
+  }
+  if (state.offerings.length) {
+    await requireSuccess(
+      supabase.from("business_offerings").upsert(
+        state.offerings.map((offering) => ({
+          id: offering.id,
+          business_id: offering.businessId,
+          catalog_id: offering.catalogId ?? null,
+          custom_name: offering.customName ?? null,
+          status: offering.status,
+          visibility: offering.visibility,
+          page_mode: offering.pageMode,
+          featured: offering.featured,
+          evidence_ids: offering.evidenceIds,
+          confirmed_by: offering.confirmedBy ?? null,
+          confirmed_at: offering.confirmedAt ?? null,
+          created_at: offering.createdAt,
+          updated_at: offering.updatedAt
+        }))
+      ),
+      "Persist canonical offerings"
+    );
+  }
+  if (state.proof.length) {
+    await requireSuccess(
+      supabase.from("business_proof").upsert(
+        state.proof.map((proof) => ({
+          id: proof.id,
+          business_id: proof.businessId,
+          kind: proof.kind,
+          status: proof.status,
+          public_text: proof.publicText ?? null,
+          source_excerpt: proof.sourceExcerpt ?? null,
+          source_snapshot_id: proof.sourceSnapshotId ?? null,
+          source_block_id: proof.sourceBlockId ?? null,
+          evidence_ids: proof.evidenceIds,
+          expires_at: proof.expiresAt ?? null,
+          confirmed_by: proof.confirmedBy ?? null,
+          confirmed_at: proof.confirmedAt ?? null,
+          created_at: proof.createdAt,
+          updated_at: proof.updatedAt
+        }))
+      ),
+      "Persist canonical proof"
+    );
+  }
+  await persistImmutableAssetRevisions(state.assetRevisions);
+  if (state.assets.length) {
+    await requireSuccess(
+      supabase.from("business_assets").upsert(
+        state.assets.map((asset) => ({
+          id: asset.id,
+          business_id: asset.businessId,
+          kind: asset.kind,
+          alt: asset.alt,
+          source: asset.source,
+          usage_scope: asset.usageScope,
+          owner_approved: asset.ownerApproved,
+          metadata: asset.metadata ?? {},
+          active: asset.active,
+          current_revision_id: asset.currentRevisionId,
+          created_at: asset.createdAt,
+          updated_at: asset.updatedAt
+        }))
+      ),
+      "Persist canonical assets"
+    );
+  }
+  const intentHash = siteIntentHash(siteIntent);
+  const currentIntent = await requireMaybe<{ revision: number; intent_hash: string }>(
+    supabase.from("site_intents").select("revision,intent_hash").eq("site_id", siteIntent.siteId).maybeSingle(),
+    "Load site-intent revision"
+  );
+  if (currentIntent && currentIntent.revision > siteIntent.revision) {
+    throw new Error("Refusing to replace site intent with an older revision.");
+  }
+  if (currentIntent && currentIntent.revision === siteIntent.revision && currentIntent.intent_hash !== intentHash) {
+    throw new Error("Site intent content changed without a new revision.");
+  }
+  await requireSuccess(
+    supabase.from("site_intents").upsert({
+      id: siteIntent.id,
+      site_id: siteIntent.siteId,
+      schema_version: siteIntent.schemaVersion,
+      revision: siteIntent.revision,
+      intent_hash: intentHash,
+      intent: siteIntent,
+      created_at: siteIntent.createdAt,
+      updated_at: siteIntent.updatedAt
+    }, { onConflict: "site_id" }),
+    "Persist site intent"
+  );
+  await persistImmutableFormDefinition(snapshot.formDefinition);
+  await persistImmutableGenerationSnapshot(snapshot);
+  if (snapshot.sourceSnapshotIds.length) {
+    await requireSuccess(
+      supabase.from("generation_snapshot_sources").upsert(
+        snapshot.sourceSnapshotIds.map((sourceSnapshotId) => ({ snapshot_id: snapshot.id, source_snapshot_id: sourceSnapshotId })),
+        { onConflict: "snapshot_id,source_snapshot_id", ignoreDuplicates: true }
+      ),
+      "Bind generation snapshot sources"
+    );
+  }
+  if (snapshot.assets.length) {
+    await requireSuccess(
+      supabase.from("generation_snapshot_asset_revisions").upsert(
+        snapshot.assets.map((asset) => ({ snapshot_id: snapshot.id, asset_revision_id: asset.revision.id })),
+        { onConflict: "snapshot_id,asset_revision_id", ignoreDuplicates: true }
+      ),
+      "Bind generation snapshot asset revisions"
+    );
+  }
+  return structuredClone(snapshot);
+}
+
+async function loadCanonicalControlPlane(siteId: string) {
+  const supabase = getSupabaseAdminClient();
+  const snapshotRow = await requireMaybe<{ snapshot: GenerationInputSnapshotV1 }>(
+    supabase
+      .from("generation_input_snapshots")
+      .select("snapshot")
+      .eq("site_id", siteId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "Load latest generation input snapshot"
+  );
+  if (!snapshotRow) return null;
+  const latestSnapshot = snapshotRow.snapshot;
+  const [business, locations, offeringRows, proofRows, assetRows, revisionRows, intentRow, sourceRows, observationRows] = await Promise.all([
+    requireMaybe<{
+      id: string; workspace_id: string | null; name: string; vertical: CanonicalBusinessStateV1["business"]["vertical"];
+      state_revision: number; description: string | null; categories: string[]; social_links: string[]; booking_links: string[];
+      ordering_links: string[]; press_links: string[]; provenance: CanonicalBusinessStateV1["business"]["provenance"];
+      created_at: string; updated_at: string;
+    }>(supabase.from("businesses").select("*").eq("id", latestSnapshot.businessId).maybeSingle(), "Load canonical business"),
+    requireData<BusinessLocationRow[]>(supabase.from("business_locations").select("*").eq("business_id", latestSnapshot.businessId).order("created_at"), "Load canonical locations"),
+    requireData<Array<{
+      id: string; business_id: string; catalog_id: string | null; custom_name: string | null; status: BusinessOfferingV1["status"];
+      visibility: BusinessOfferingV1["visibility"]; page_mode: BusinessOfferingV1["pageMode"]; featured: boolean; evidence_ids: string[];
+      confirmed_by: string | null; confirmed_at: string | null; created_at: string; updated_at: string;
+    }>>(supabase.from("business_offerings").select("*").eq("business_id", latestSnapshot.businessId), "Load canonical offerings"),
+    requireData<Array<{
+      id: string; business_id: string; kind: BusinessProofV1["kind"]; status: BusinessProofV1["status"]; public_text: string | null;
+      source_excerpt: string | null; source_snapshot_id: string | null; source_block_id: string | null; evidence_ids: string[];
+      expires_at: string | null; confirmed_by: string | null; confirmed_at: string | null; created_at: string; updated_at: string;
+    }>>(supabase.from("business_proof").select("*").eq("business_id", latestSnapshot.businessId), "Load canonical proof"),
+    requireData<Array<{
+      id: string; business_id: string; kind: BusinessAssetV1["kind"]; alt: string; source: BusinessAssetV1["source"];
+      usage_scope: BusinessAssetV1["usageScope"]; owner_approved: boolean; metadata: Record<string, unknown>; active: boolean;
+      current_revision_id: string; created_at: string; updated_at: string;
+    }>>(supabase.from("business_assets").select("*").eq("business_id", latestSnapshot.businessId), "Load canonical assets"),
+    requireData<Array<{
+      id: string; asset_id: string; business_id: string; schema_version: AssetRevisionV1["schemaVersion"]; content_hash: string;
+      storage_path: string; public_url: string | null; mime_type: AssetRevisionV1["mimeType"]; bytes: number; width: number | null;
+      height: number | null; provenance: AssetRevisionV1["provenance"] | null; rights_status: AssetRevisionV1["rightsStatus"];
+      attestation: AssetRevisionV1["attestation"] | null; created_at: string;
+    }>>(supabase.from("asset_revisions").select("*").eq("business_id", latestSnapshot.businessId), "Load asset revisions"),
+    requireMaybe<{ intent: SiteIntentV1 }>(supabase.from("site_intents").select("intent").eq("site_id", siteId).maybeSingle(), "Load canonical site intent"),
+    latestSnapshot.sourceSnapshotIds.length
+      ? requireData<Array<{
+          id: string; business_id: string; source_type: SourceSnapshotV1["sourceType"]; source_url: string | null; content_hash: string;
+          captured_at: string; payload: Record<string, unknown>;
+        }>>(supabase.from("source_snapshots").select("*").in("id", latestSnapshot.sourceSnapshotIds), "Load retained source snapshots")
+      : Promise.resolve([]),
+    latestSnapshot.sourceSnapshotIds.length
+      ? requireData<Array<{
+          id: string; business_id: string; source_snapshot_id: string; field: string; value: unknown; normalized_value: unknown;
+          confidence: number; status: FactObservationV1["status"]; source_block_id: string | null; observed_at: string;
+        }>>(supabase.from("fact_observations").select("*").in("source_snapshot_id", latestSnapshot.sourceSnapshotIds), "Load fact observations")
+      : Promise.resolve([])
+  ]);
+  if (!business || !intentRow) return null;
+  const assetRevisions: AssetRevisionV1[] = revisionRows.map((row) => ({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    assetId: row.asset_id,
+    businessId: row.business_id,
+    contentHash: row.content_hash,
+    storagePath: row.storage_path,
+    publicUrl: row.public_url ?? undefined,
+    mimeType: row.mime_type,
+    bytes: row.bytes,
+    width: row.width ?? undefined,
+    height: row.height ?? undefined,
+    provenance: row.provenance ?? undefined,
+    rightsStatus: row.rights_status,
+    attestation: row.attestation ?? undefined,
+    createdAt: row.created_at
+  }));
+  const state: CanonicalBusinessStateV1 = {
+    business: {
+      id: business.id,
+      workspaceId: business.workspace_id ?? undefined,
+      name: business.name,
+      vertical: business.vertical,
+      stateRevision: business.state_revision,
+      description: business.description ?? undefined,
+      categories: business.categories,
+      provenance: business.provenance,
+      createdAt: business.created_at,
+      updatedAt: business.updated_at
+    },
+    locations: locations.map((row) => ({
+      id: row.id,
+      businessId: row.business_id,
+      label: row.label ?? undefined,
+      address: row.address as BusinessLocationRecord["address"],
+      serviceAreas: row.service_areas,
+      phone: row.phone ?? undefined,
+      email: row.email ?? undefined,
+      hours: row.hours as BusinessLocationRecord["hours"],
+      geo: row.geo as BusinessLocationRecord["geo"],
+      googlePlaceId: row.google_place_id ?? undefined,
+      provenance: row.provenance as BusinessLocationRecord["provenance"],
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    })),
+    offerings: offeringRows.map((row) => ({
+      id: row.id, businessId: row.business_id, catalogId: row.catalog_id ?? undefined, customName: row.custom_name ?? undefined,
+      status: row.status, visibility: row.visibility, pageMode: row.page_mode, featured: row.featured, evidenceIds: row.evidence_ids,
+      confirmedBy: row.confirmed_by ?? undefined, confirmedAt: row.confirmed_at ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at
+    })),
+    proof: proofRows.map((row) => ({
+      id: row.id, businessId: row.business_id, kind: row.kind, status: row.status, publicText: row.public_text ?? undefined,
+      sourceExcerpt: row.source_excerpt ?? undefined, sourceSnapshotId: row.source_snapshot_id ?? undefined, sourceBlockId: row.source_block_id ?? undefined,
+      evidenceIds: row.evidence_ids, expiresAt: row.expires_at ?? undefined, confirmedBy: row.confirmed_by ?? undefined,
+      confirmedAt: row.confirmed_at ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at
+    })),
+    assets: assetRows.map((row) => ({
+      id: row.id, businessId: row.business_id, kind: row.kind, alt: row.alt, source: row.source, usageScope: row.usage_scope,
+      ownerApproved: row.owner_approved, metadata: row.metadata, active: row.active, currentRevisionId: row.current_revision_id,
+      createdAt: row.created_at, updatedAt: row.updated_at
+    })),
+    assetRevisions,
+    socialLinks: business.social_links,
+    bookingLinks: business.booking_links,
+    orderingLinks: business.ordering_links,
+    pressLinks: business.press_links
+  };
+  return {
+    state,
+    siteIntent: intentRow.intent,
+    latestSnapshot,
+    sourceSnapshots: sourceRows.map((row) => ({
+      id: row.id, businessId: row.business_id, sourceType: row.source_type, sourceUrl: row.source_url ?? undefined,
+      contentHash: row.content_hash, capturedAt: row.captured_at, payload: row.payload
+    })),
+    observations: observationRows.map((row) => ({
+      id: row.id, businessId: row.business_id, sourceSnapshotId: row.source_snapshot_id, field: row.field, value: row.value,
+      normalizedValue: row.normalized_value ?? undefined, confidence: Number(row.confidence), status: row.status,
+      sourceBlockId: row.source_block_id ?? undefined, observedAt: row.observed_at
+    }))
+  };
+}
+
+async function persistImmutableSourceSnapshots(sources: CanonicalGenerationInputV1["sourceSnapshots"]) {
+  if (!sources.length) return;
+  const supabase = getSupabaseAdminClient();
+  for (const source of sources) {
+    const existing = await requireMaybe<{ content_hash: string }>(
+      supabase.from("source_snapshots").select("content_hash").eq("id", source.id).maybeSingle(),
+      "Load source snapshot identity"
+    );
+    if (existing && existing.content_hash !== source.contentHash) throw new Error(`Immutable source snapshot collision for ${source.id}.`);
+  }
+  await requireSuccess(
+    supabase.from("source_snapshots").upsert(
+      sources.map((source) => ({
+        id: source.id,
+        business_id: source.businessId,
+        source_type: source.sourceType,
+        source_url: source.sourceUrl ?? null,
+        content_hash: source.contentHash,
+        captured_at: source.capturedAt,
+        payload: source.payload
+      })),
+      { onConflict: "id", ignoreDuplicates: true }
+    ),
+    "Persist source snapshots"
+  );
+}
+
+async function persistImmutableAssetRevisions(revisions: CanonicalGenerationInputV1["state"]["assetRevisions"]) {
+  if (!revisions.length) return;
+  const supabase = getSupabaseAdminClient();
+  for (const revision of revisions) {
+    const existing = await requireMaybe<{ content_hash: string }>(
+      supabase.from("asset_revisions").select("content_hash").eq("id", revision.id).maybeSingle(),
+      "Load asset revision identity"
+    );
+    if (existing && existing.content_hash !== revision.contentHash) throw new Error(`Immutable asset revision collision for ${revision.id}.`);
+  }
+  await requireSuccess(
+    supabase.from("asset_revisions").upsert(
+      revisions.map((revision) => ({
+        id: revision.id,
+        asset_id: revision.assetId,
+        business_id: revision.businessId,
+        schema_version: revision.schemaVersion,
+        content_hash: revision.contentHash,
+        storage_path: revision.storagePath,
+        public_url: revision.publicUrl ?? null,
+        mime_type: revision.mimeType,
+        bytes: revision.bytes,
+        width: revision.width ?? null,
+        height: revision.height ?? null,
+        provenance: revision.provenance ?? null,
+        rights_status: revision.rightsStatus,
+        attestation: revision.attestation ?? null,
+        created_at: revision.createdAt
+      })),
+      { onConflict: "id", ignoreDuplicates: true }
+    ),
+    "Persist asset revisions"
+  );
+}
+
+async function persistImmutableFormDefinition(form: FormDefinitionV1) {
+  const supabase = getSupabaseAdminClient();
+  const existing = await requireMaybe<{ definition: unknown }>(
+    supabase.from("form_definitions").select("definition").eq("id", form.id).maybeSingle(),
+    "Load form definition identity"
+  );
+  if (existing && JSON.stringify(existing.definition) !== JSON.stringify(form)) {
+    throw new Error(`Immutable form-definition collision for ${form.id}.`);
+  }
+  await requireSuccess(
+    supabase.from("form_definitions").upsert({
+      id: form.id,
+      site_id: form.siteId,
+      schema_version: form.schemaVersion,
+      definition: form,
+      created_at: form.createdAt
+    }, { onConflict: "id", ignoreDuplicates: true }),
+    "Persist form definition"
+  );
+}
+
+async function persistImmutableGenerationSnapshot(snapshot: GenerationInputSnapshotV1) {
+  const supabase = getSupabaseAdminClient();
+  const existing = await requireMaybe<{ input_hash: string }>(
+    supabase.from("generation_input_snapshots").select("input_hash").eq("id", snapshot.id).maybeSingle(),
+    "Load generation snapshot identity"
+  );
+  if (existing && existing.input_hash !== snapshot.inputHash) throw new Error(`Immutable generation snapshot collision for ${snapshot.id}.`);
+  await requireSuccess(
+    supabase.from("generation_input_snapshots").upsert({
+      id: snapshot.id,
+      business_id: snapshot.businessId,
+      site_id: snapshot.siteId,
+      schema_version: snapshot.schemaVersion,
+      business_state_revision: snapshot.businessStateRevision,
+      site_intent_revision: snapshot.siteIntentRevision,
+      form_definition_id: snapshot.formDefinition.id,
+      input_hash: snapshot.inputHash,
+      eligibility_mode: snapshot.eligibilityMode,
+      snapshot,
+      created_at: snapshot.createdAt
+    }, { onConflict: "id", ignoreDuplicates: true }),
+    "Persist generation input snapshot"
+  );
+}
+
+async function candidateFreshnessFromDatabase(candidate: SiteCandidateRecord, _targetBundle?: SiteBundle) {
+  const supabase = getSupabaseAdminClient();
+  const [business, intent] = await Promise.all([
+    requireMaybe<{ state_revision: number }>(
+      supabase.from("businesses").select("state_revision").eq("id", candidate.businessId).maybeSingle(),
+      "Load candidate business revision"
+    ),
+    requireMaybe<{ revision: number }>(
+      supabase.from("site_intents").select("revision").eq("site_id", candidate.inputSnapshot.siteId).maybeSingle(),
+      "Load candidate site-intent revision"
+    )
+  ]);
+  if (!business || !intent) return ["canonical_authority_missing"];
+  return candidateRevisionIssue({
+    candidate: candidate.inputSnapshot,
+    currentBusinessStateRevision: business.state_revision,
+    currentSiteIntentRevision: intent.revision
+  });
+}
+
+async function markSupabaseCandidateStale(candidate: SiteCandidateRecord, issues: string[]) {
+  const reason = `Candidate input is stale: ${issues.join(", ")}. Rebuild from current canonical state before acceptance.`;
+  await requireSuccess(
+    getSupabaseAdminClient()
+      .from("site_candidates")
+      .update({ status: "stale", stale_reason: reason, updated_at: new Date().toISOString() })
+      .eq("id", candidate.id),
+    "Mark stale site candidate"
+  );
+  return { ok: false as const, reason };
+}
+
 function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
   if (candidate.status === "blocked") {
     return { ok: false as const, reason: "Blocked site candidates cannot be accepted." };
@@ -2347,26 +2778,6 @@ function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
   return { ok: true as const };
 }
 
-function siteVersionFromCandidate(input: {
-  candidateBundle: SiteBundle;
-  targetBundle: SiteBundle;
-  acceptedAt: string;
-}): SiteVersion | null {
-  const candidateBundle = structuredClone(input.candidateBundle);
-  applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
-  assertBundleVersionsV3(candidateBundle, "supabase accepted candidate version bundle");
-  const candidateVersion =
-    candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
-    candidateBundle.siteModel.versions[0];
-  if (!candidateVersion) return null;
-  const version = structuredClone(assertSiteVersionV3(candidateVersion, "accepted candidate version"));
-  version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
-  version.status = "draft";
-  version.createdAt = input.acceptedAt;
-  version.theme ??= structuredClone(candidateBundle.siteModel.theme);
-  return version;
-}
-
 function applyAcceptedGenerationState(target: SiteBundle, candidate: SiteBundle) {
   const standardEvaluation = target.presenceAssessment.standardEvaluation;
   target.presenceAssessment = {
@@ -2377,59 +2788,45 @@ function applyAcceptedGenerationState(target: SiteBundle, candidate: SiteBundle)
   target.siteModel.theme = structuredClone(candidate.siteModel.theme);
 }
 
-function nextAcceptedVersionId(bundle: SiteBundle, acceptedAt: string) {
-  const seed = Date.parse(acceptedAt);
-  const base = `version_${bundle.siteModel.slug}_candidate_${Number.isFinite(seed) ? seed : Date.now()}`;
-  const existing = new Set(bundle.siteModel.versions.map((version) => version.id));
-  let candidate = base;
-  let counter = 2;
-  while (existing.has(candidate)) {
-    candidate = `${base}_${counter}`;
-    counter += 1;
-  }
-  return candidate;
-}
-
 async function copySelectedArtifactsToSite(
   repository: Pick<LodestaRepository, "listSiteArtifacts" | "upsertSiteArtifact">,
-  input: { candidateId: string; siteId: string; acceptedAt: string }
+  input: { candidateId: string; siteId: string; acceptedAt: string; artifactIds: string[] }
 ) {
-  const selectedArtifacts = await repository.listSiteArtifacts({
-    siteCandidateId: input.candidateId,
-    scope: "candidate_selected"
-  });
+  const referenced = new Set(input.artifactIds);
+  const selectedArtifacts = (await repository.listSiteArtifacts({ siteCandidateId: input.candidateId }))
+    .filter((artifact) => referenced.has(artifact.id));
+  const copied: Array<{ source: SiteArtifactRecord; target: SiteArtifactRecord }> = [];
   for (const artifact of selectedArtifacts) {
-    await repository.upsertSiteArtifact(
-      copyCandidateArtifactToSite({
-        artifact,
-        managedSiteId: input.siteId,
-        acceptedAt: input.acceptedAt
-      })
-    );
+    const target = copyCandidateArtifactToSite({
+      artifact,
+      managedSiteId: input.siteId,
+      acceptedAt: input.acceptedAt
+    });
+    await repository.upsertSiteArtifact(target);
+    copied.push({ source: artifact, target });
   }
+  return copied;
+}
+
+function rebindVersionArtifacts(
+  version: SiteVersionV3 | undefined,
+  copied: Array<{ source: SiteArtifactRecord; target: SiteArtifactRecord }>
+) {
+  if (!version) return;
+  const ids = new Map(copied.map((item) => [item.source.id, item.target.id]));
+  version.artifactRefs = version.artifactRefs.map((reference) => ({
+    ...reference,
+    artifactId: ids.get(reference.artifactId) ?? reference.artifactId
+  }));
 }
 
 async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
   const supabase = getSupabaseAdminClient();
-  const [profileRow, businessRow, siteLocationRows, assetRows, versionRows, formRows, experimentRows, learningRows] = await Promise.all([
-    requireData<BusinessProfileRow>(
-      supabase.from("business_profiles").select("*").eq("site_id", siteRow.id).single(),
-      "Load business profile"
-    ),
-    requireData<BusinessRow>(supabase.from("businesses").select("*").eq("id", siteRow.business_id).single(), "Load business"),
-    requireData<SiteLocationRow[]>(
-      supabase.from("site_locations").select("*").eq("site_id", siteRow.id).order("created_at"),
-      "Load site locations"
-    ),
-    requireData<SiteAssetRow[]>(
-      supabase.from("site_assets").select("*").eq("site_id", siteRow.id).order("created_at"),
-      "Load site assets"
-    ),
+  const [versionRows, experimentRows, learningRows, artifactRows] = await Promise.all([
     requireData<SiteVersionRow[]>(
       supabase.from("site_versions").select("*").eq("site_id", siteRow.id).order("created_at", { ascending: false }),
       "Load site versions"
     ),
-    requireData<FormRow[]>(supabase.from("forms").select("*").eq("site_id", siteRow.id).order("created_at"), "Load forms"),
     requireData<ExperimentRow[]>(
       supabase.from("experiments").select("*").eq("site_id", siteRow.id).order("created_at"),
       "Load experiments"
@@ -2437,65 +2834,90 @@ async function hydrateBundle(siteRow: SiteRow): Promise<SiteBundle> {
     requireData<ExperimentLearningRow[]>(
       supabase.from("experiment_learnings").select("*").eq("site_id", siteRow.id).order("created_at", { ascending: false }),
       "Load experiment learnings"
+    ),
+    requireData<SiteArtifactRow[]>(
+      supabase.from("site_artifacts").select("*").eq("site_id", siteRow.id).order("created_at", { ascending: false }),
+      "Load retained generation artifacts"
     )
   ]);
-
+  const versions = versionRows.map((row) => assertSiteVersionV3(row.version_model as SiteVersionV3, "stored site version"));
+  const primaryVersion = versions.find((version) => version.status === "draft") ?? versions.find((version) => version.status === "published") ?? versions[0];
+  if (!primaryVersion) throw new Error(`Canonical site ${siteRow.id} has no retained version.`);
+  const versionArtifactIds = new Set(primaryVersion.artifactRefs.map((reference) => reference.artifactId));
+  const versionArtifactRows = artifactRows.filter((row) => versionArtifactIds.has(row.id));
+  const snapshot = await requireMaybe<{ snapshot: GenerationInputSnapshotV1 }>(
+    supabase.from("generation_input_snapshots").select("snapshot").eq("id", primaryVersion.inputSnapshotId).maybeSingle(),
+    "Load site version input snapshot"
+  );
+  if (!snapshot) throw new Error(`Canonical site version ${primaryVersion.id} is missing input snapshot ${primaryVersion.inputSnapshotId}.`);
   const siteShell = siteRow.site_model as Omit<SiteModel, "versions">;
   const extensionShell = (siteRow.extension_model as Pick<ExtensionModel, "workflows" | "customBlocks"> | null) ?? {
     workflows: [],
     customBlocks: []
   };
-  const presenceAssessment = siteRow.presence_assessment as PresenceAssessment;
-  const profile = profileRow.profile as BusinessProfile;
-  const sortedSiteLocationRows = [...siteLocationRows].sort(compareSiteLocationRows);
-  const locationIds = sortedSiteLocationRows.map((row) => row.location_id);
-  const locationRows = locationIds.length
-    ? await requireData<BusinessLocationRow[]>(
-        supabase.from("business_locations").select("*").in("id", locationIds),
-        "Load business locations"
-      )
-    : [];
-  const locationById = new Map(locationRows.map((row) => [row.id, rowToBusinessLocation(row)]));
-  const locations = locationIds.map((id) => locationById.get(id)).filter((location): location is BusinessLocationRecord => Boolean(location));
-  const locationBindings = sortedSiteLocationRows
-    .filter((row) => locationById.has(row.location_id))
-    .map((row, index) => ({
-      locationId: row.location_id,
-      role: normalizeSiteLocationRole(row.role),
-      orderIndex: index
-    }));
-
-  const bundle: SiteBundle = {
-    businessProfile: profile,
-    business: rowToBusiness(businessRow),
-    locations,
-    locationBindings,
-    renderProfile: profile,
-    siteModel: {
-      ...siteShell,
-      versions: versionRows.map((row) => row.version_model as SiteVersion)
-    },
-    extensionModel: {
-      forms: formRows.map(rowToForm),
-      workflows: extensionShell.workflows ?? [],
-      customBlocks: extensionShell.customBlocks ?? []
-    },
-    experiments: experimentRows.map(rowToExperiment),
-    experimentLearnings: learningRows.map(rowToExperimentLearning),
-    presenceAssessment: {
-      ...presenceAssessment,
-      assetInventory: assetRows.length ? assetRows.map(rowToSiteAsset) : presenceAssessment.assetInventory
-    }
+  const plan = artifactPayload<GenerationPlan>(versionArtifactRows, "generation_plan", "plan");
+  const copy = artifactPayload<SiteCopy>(versionArtifactRows, "site_copy", "copy");
+  const review = artifactPayload<Record<string, unknown>>(versionArtifactRows, "generation_review");
+  const bundle = siteRenderEnvelopeFromSnapshot({
+    snapshot: snapshot.snapshot,
+    version: primaryVersion,
+    plan,
+    copy,
+    slug: siteShell.slug
+  });
+  bundle.siteModel = { ...siteShell, theme: primaryVersion.theme ?? siteShell.theme, versions };
+  bundle.extensionModel.workflows = extensionShell.workflows ?? [];
+  bundle.extensionModel.customBlocks = extensionShell.customBlocks ?? [];
+  bundle.experiments = experimentRows.map(rowToExperiment);
+  bundle.experimentLearnings = learningRows.map(rowToExperimentLearning);
+  const cachedPresence = (siteRow.presence_assessment as PresenceAssessment | null) ?? ({} as PresenceAssessment);
+  bundle.presenceAssessment = {
+    ...cachedPresence,
+    ...bundle.presenceAssessment,
+    generationInputSnapshot: snapshot.snapshot,
+    generationPlan: plan,
+    siteCopy: copy,
+    generationTrace: review?.trace as PresenceAssessment["generationTrace"],
+    generationJudge: review?.judge as PresenceAssessment["generationJudge"]
   };
-  return assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: businessRow.id }), "supabase hydrated bundle");
+  const sourceId = snapshot.snapshot.sourceSnapshotIds[0];
+  if (sourceId) {
+    const source = await requireMaybe<{ source_url: string | null }>(
+      supabase.from("source_snapshots").select("source_url").eq("id", sourceId).maybeSingle(),
+      "Load site source URL"
+    );
+    bundle.presenceAssessment.sourceUrl = source?.source_url ?? bundle.presenceAssessment.sourceUrl;
+  }
+  return assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: snapshot.snapshot.businessId }), "supabase hydrated canonical bundle");
+}
+
+function artifactPayload<T>(rows: SiteArtifactRow[], type: SiteArtifactRecord["artifactType"], key?: string): T | undefined {
+  const payload = rows.find((row) => row.artifact_type === type)?.payload_json;
+  if (!payload || typeof payload !== "object") return undefined;
+  if (!key) return payload as T;
+  return (payload as Record<string, unknown>)[key] as T | undefined;
 }
 
 async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: boolean; businessId?: string } = {}) {
   try {
-    const businessId = options.businessId ?? (await businessIdForSite(bundle.businessProfile.siteId)) ?? businessIdForProfile(bundle.businessProfile);
+    const businessId = options.businessId ?? (await businessIdForSite(bundle.businessProfile.siteId));
+    if (!businessId) throw new Error(`Site ${bundle.businessProfile.siteId} is not bound to a canonical business.`);
     const hydratedBundle = assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId }), "supabase persisted bundle");
     const siteShell = siteModelShell(hydratedBundle.siteModel);
-    await persistBusinessFromProfile(hydratedBundle.businessProfile, businessId);
+    const persistedBusiness = await requireMaybe<{ id: string }>(
+      getSupabaseAdminClient().from("businesses").select("id").eq("id", businessId).maybeSingle(),
+      "Require canonical business before site persistence"
+    );
+    if (!persistedBusiness) throw new Error(`Canonical business ${businessId} must exist before a site can be persisted.`);
+    const {
+      evidenceManifest: _evidenceManifest,
+      generationInputSnapshot: _generationInputSnapshot,
+      generationPlan: _generationPlan,
+      siteCopy: _siteCopy,
+      generationTrace: _generationTrace,
+      generationJudge: _generationJudge,
+      ...presenceCache
+    } = hydratedBundle.presenceAssessment;
     await requireData<SiteRow>(
       getSupabaseAdminClient()
         .from("sites")
@@ -2510,18 +2932,13 @@ async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: b
             workflows: hydratedBundle.extensionModel.workflows,
             customBlocks: hydratedBundle.extensionModel.customBlocks
           },
-          presence_assessment: hydratedBundle.presenceAssessment
+          presence_assessment: presenceCache
         })
         .select("*")
         .single(),
       "Persist site"
     );
-
-    await persistBusinessProfile(hydratedBundle.businessProfile);
-    await persistBusinessLocations(hydratedBundle, businessId);
-    await persistAssets(hydratedBundle.businessProfile.siteId, hydratedBundle.presenceAssessment.assetInventory ?? []);
     await persistVersions(hydratedBundle);
-    await persistForms(hydratedBundle.businessProfile.siteId, hydratedBundle.extensionModel.forms);
     await persistExperiments(hydratedBundle.businessProfile.siteId, hydratedBundle.experiments);
   } catch (error) {
     if (options.cleanupOnFailure) {
@@ -2534,90 +2951,6 @@ async function persistBundle(bundle: SiteBundle, options: { cleanupOnFailure?: b
   }
 }
 
-async function persistBusinessProfile(profile: BusinessProfile) {
-  await requireData<BusinessProfileRow>(
-    getSupabaseAdminClient()
-      .from("business_profiles")
-      .upsert({
-        id: profile.id,
-        site_id: profile.siteId,
-        name: profile.name,
-        vertical: profile.vertical,
-        profile,
-        provenance: profile.provenance
-      })
-      .select("*")
-      .single(),
-    "Persist business profile"
-  );
-}
-
-async function persistBusinessFromProfile(profile: BusinessProfile, businessId: string) {
-  const now = new Date().toISOString();
-  const business = businessRecordFromProfile(profile, businessId, now);
-  await requireData<BusinessRow>(
-    getSupabaseAdminClient()
-      .from("businesses")
-      .upsert({
-        id: business.id,
-        workspace_id: business.workspaceId,
-        name: business.name,
-        vertical: business.vertical,
-        profile_json: business.profile,
-        provenance: business.provenance,
-        updated_at: now
-      })
-      .select("*")
-      .single(),
-    "Persist business"
-  );
-}
-
-async function persistBusinessLocations(bundle: SiteBundle, businessId: string) {
-  const profile = bundle.businessProfile;
-  const normalizedBundle = withBusinessBundleFields(bundle, { businessId });
-  const locations = normalizedBundle.locations ?? businessLocationsFromProfile(profile, businessId);
-  const bindingByLocationId = new Map((normalizedBundle.locationBindings ?? []).map((binding) => [binding.locationId, binding]));
-  const supabase = getSupabaseAdminClient();
-  await requireSuccess(supabase.from("site_locations").delete().eq("site_id", profile.siteId), "Clear site locations");
-  if (locations.length === 0) return;
-  await requireData<BusinessLocationRow[]>(
-    supabase
-      .from("business_locations")
-      .upsert(
-        locations.map((location) => ({
-          id: location.id,
-          business_id: location.businessId,
-          label: location.label,
-          address: location.address,
-          service_areas: location.serviceAreas,
-          phone: location.phone,
-          email: location.email,
-          hours: location.hours,
-          geo: location.geo,
-          google_place_id: location.googlePlaceId,
-          provenance: location.provenance,
-          updated_at: location.updatedAt
-        }))
-      )
-      .select("*"),
-    "Persist business locations"
-  );
-  await requireData<Array<{ site_id: string; location_id: string }>>(
-    supabase
-      .from("site_locations")
-      .upsert(
-        locations.map((location, index) => ({
-          site_id: profile.siteId,
-          location_id: location.id,
-          role: bindingByLocationId.get(location.id)?.role ?? (index === 0 ? "primary" : "covered")
-        }))
-      )
-      .select("site_id, location_id"),
-    "Persist site locations"
-  );
-}
-
 async function businessIdForSite(siteId: string) {
   const row = await requireMaybe<{ business_id: string | null }>(
     getSupabaseAdminClient().from("sites").select("business_id").eq("id", siteId).maybeSingle(),
@@ -2628,77 +2961,25 @@ async function businessIdForSite(siteId: string) {
 
 async function persistVersions(bundle: SiteBundle) {
   const supabase = getSupabaseAdminClient();
-  await requireSuccess(supabase.from("site_versions").delete().eq("site_id", bundle.businessProfile.siteId), "Clear versions");
   if (bundle.siteModel.versions.length === 0) return;
   await requireData<SiteVersionRow[]>(
     supabase
       .from("site_versions")
-      .insert(
+      .upsert(
         bundle.siteModel.versions.map((version) => ({
           id: version.id,
           site_id: bundle.businessProfile.siteId,
           status: version.status,
+          input_snapshot_id: version.inputSnapshotId,
+          form_definition_id: version.formDefinitionId,
           version_model: version,
           created_at: version.createdAt
-        }))
+        })),
+        { onConflict: "id" }
       )
       .select("*"),
     "Persist versions"
   );
-}
-
-async function persistForms(siteId: string, forms: FormDefinition[]) {
-  const supabase = getSupabaseAdminClient();
-  await requireSuccess(supabase.from("forms").delete().eq("site_id", siteId), "Clear forms");
-  if (forms.length === 0) return;
-  await requireData<FormRow[]>(
-    supabase
-      .from("forms")
-      .insert(forms.map((form) => ({ id: form.id, site_id: siteId, name: form.name, schema: form })))
-      .select("*"),
-    "Persist forms"
-  );
-}
-
-async function persistAssets(siteId: string, assets: SiteAsset[]) {
-  const supabase = getSupabaseAdminClient();
-  if (assets.length) assertUniqueAssetIds(assets);
-  await requireSuccess(supabase.from("site_assets").delete().eq("site_id", siteId), "Clear site assets");
-  if (assets.length === 0) return;
-  await requireData<SiteAssetRow[]>(
-    supabase
-      .from("site_assets")
-      .insert(
-        assets.map((asset) => ({
-          id: asset.id,
-          site_id: siteId,
-          kind: asset.kind,
-          url: asset.url,
-          alt: asset.alt,
-          source: asset.source,
-          rights_status: asset.rightsStatus,
-          usage_scope: asset.usageScope,
-          owner_approved: asset.ownerApproved,
-          provenance: asset.provenance,
-          metadata: asset.metadata ?? {},
-          created_at: asset.createdAt
-        }))
-      )
-      .select("*"),
-    "Persist site assets"
-  );
-}
-
-function assertUniqueAssetIds(assets: SiteAsset[]) {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
-  for (const asset of assets) {
-    if (seen.has(asset.id)) duplicates.add(asset.id);
-    seen.add(asset.id);
-  }
-  if (duplicates.size) {
-    throw new Error(`Persist site assets: duplicate asset ids in bundle: ${Array.from(duplicates).join(", ")}`);
-  }
 }
 
 async function persistExperiments(siteId: string, experiments: Experiment[]) {
@@ -2764,7 +3045,7 @@ async function persistExperimentLearning(learning: ExperimentLearning) {
 }
 
 async function rollbackExperimentLearnings(experimentId: string, rolledBackAt: string) {
-  await requireData<unknown>(
+  await requireSuccess(
     getSupabaseAdminClient()
       .from("experiment_learnings")
       .update({ status: "rolled_back", rolled_back_at: rolledBackAt })
@@ -2772,22 +3053,6 @@ async function rollbackExperimentLearnings(experimentId: string, rolledBackAt: s
       .eq("status", "active"),
     "Rollback experiment learnings"
   );
-}
-
-function updateBundleSection(bundle: SiteBundle, input: UpdateSectionInput) {
-  return applyV3SectionUpdate(bundle, input);
-}
-
-function clonePublishedAsDraft(bundle: SiteBundle) {
-  const existingDraft = bundle.siteModel.versions.find((version) => version.status === "draft");
-  if (existingDraft) return assertSiteVersionV3(existingDraft, "supabase existing draft");
-  const published = bundle.siteModel.versions.find((version) => version.status === "published") ?? bundle.siteModel.versions[0];
-  const draft = structuredClone(assertSiteVersionV3(published, "supabase published version for draft"));
-  draft.id = `version_${bundle.siteModel.slug}_draft_${Date.now()}`;
-  draft.status = "draft";
-  draft.createdAt = new Date().toISOString();
-  bundle.siteModel.versions.unshift(draft);
-  return draft;
 }
 
 function siteModelShell(siteModel: SiteModel): Omit<SiteModel, "versions"> {
@@ -2799,28 +3064,12 @@ function siteModelShell(siteModel: SiteModel): Omit<SiteModel, "versions"> {
   };
 }
 
-function rowToForm(row: FormRow): FormDefinition {
-  return row.schema as FormDefinition;
-}
-
-function rowToSiteAsset(row: SiteAssetRow): SiteAsset {
-  return {
-    id: row.id,
-    siteId: row.site_id,
-    kind: row.kind,
-    url: row.url ?? undefined,
-    alt: row.alt,
-    source: row.source,
-    rightsStatus: row.rights_status,
-    usageScope: row.usage_scope,
-    ownerApproved: row.owner_approved,
-    provenance: row.provenance as SiteAsset["provenance"],
-    metadata: row.metadata as Record<string, unknown> | undefined,
-    createdAt: row.created_at
-  };
-}
-
 function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
+  const snapshotRelation = Array.isArray(row.generation_input_snapshots) ? row.generation_input_snapshots[0] : row.generation_input_snapshots;
+  const formRelation = Array.isArray(row.form_definitions) ? row.form_definitions[0] : row.form_definitions;
+  const snapshot = snapshotRelation?.snapshot as GenerationInputSnapshotV1 | undefined;
+  const formDefinition = formRelation?.definition as FormDefinitionV1 | undefined;
+  if (!snapshot || !formDefinition) throw new Error(`Candidate ${row.id} is missing its immutable input snapshot or form definition.`);
   return {
     id: row.id,
     businessId: row.business_id,
@@ -2830,11 +3079,16 @@ function rowToSiteCandidate(row: SiteCandidateRow): SiteCandidateRecord {
     businessName: row.business_name,
     vertical: row.vertical,
     candidateSlug: row.candidate_slug,
-    // Candidate reads stay unchecked so admin repair surfaces can soft-check
-    // stale stored schemas (siteVersionV3Issue) instead of crashing; writes
-    // and render paths keep the strict assert.
-    bundle: withBusinessBundleFields(row.bundle_json as SiteBundle, { businessId: row.business_id }),
+    inputSnapshotId: row.input_snapshot_id,
+    inputSnapshot: snapshot,
+    version: row.version_model as SiteCandidateRecord["version"],
+    formDefinitionId: row.form_definition_id,
+    formDefinition,
+    generationPlan: row.generation_plan as GenerationPlan,
+    siteCopy: row.site_copy as SiteCopy,
+    evidenceManifest: row.evidence_manifest as GenerationEvidenceManifestV1,
     status: row.status,
+    staleReason: row.stale_reason ?? undefined,
     candidatePurpose: row.candidate_purpose ?? "customer_prospect",
     intendedSiteId: row.intended_site_id ?? undefined,
     acceptedSiteId: row.accepted_site_id ?? undefined,
@@ -2867,49 +3121,6 @@ function rowToSiteCandidateSummary(row: SiteCandidateSummaryRow): SiteCandidateS
 
 function isGenerationQaReadiness(value: string | null): value is GenerationQaReadiness {
   return value === "pending" || value === "ready" || value === "blocked" || value === "unavailable";
-}
-
-function rowToBusiness(row: BusinessRow): BusinessRecord {
-  return {
-    id: row.id,
-    workspaceId: row.workspace_id ?? undefined,
-    name: row.name,
-    vertical: row.vertical,
-    profile: row.profile_json as BusinessProfile,
-    provenance: row.provenance as BusinessRecord["provenance"],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-
-function rowToBusinessLocation(row: BusinessLocationRow): BusinessLocationRecord {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    label: row.label ?? undefined,
-    address: row.address as BusinessLocationRecord["address"] | undefined,
-    serviceAreas: row.service_areas,
-    phone: row.phone ?? undefined,
-    email: row.email ?? undefined,
-    hours: row.hours as BusinessLocationRecord["hours"] | undefined,
-    geo: row.geo as BusinessLocationRecord["geo"] | undefined,
-    googlePlaceId: row.google_place_id ?? undefined,
-    provenance: row.provenance as BusinessLocationRecord["provenance"],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-
-function compareSiteLocationRows(left: SiteLocationRow, right: SiteLocationRow) {
-  const roleDelta = siteLocationRoleSortValue(left.role) - siteLocationRoleSortValue(right.role);
-  if (roleDelta !== 0) return roleDelta;
-  const createdAtDelta = left.created_at.localeCompare(right.created_at);
-  if (createdAtDelta !== 0) return createdAtDelta;
-  return left.location_id.localeCompare(right.location_id);
-}
-
-function siteLocationRoleSortValue(role: string | null) {
-  return normalizeSiteLocationRole(role) === "primary" ? 0 : 1;
 }
 
 function rowToSiteArtifact(row: SiteArtifactRow): SiteArtifactRecord {
@@ -3457,72 +3668,6 @@ async function requireMaybe<T>(
   return response.data;
 }
 
-
-type FactCandidateRow = {
-  id: string;
-  business_id: string;
-  source_type: string;
-  field_key: string;
-  proposed_value: unknown;
-  confidence: number;
-  status: string;
-  evidence_label: string | null;
-  evidence_url: string | null;
-  place_id: string | null;
-  comparison_result: Record<string, unknown> | null;
-  observed_at: string;
-  created_at: string;
-};
-
-function factCandidateFromRow(row: FactCandidateRow): import("../business-evidence").FactCandidate {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    sourceType: row.source_type as import("../business-evidence").FactCandidateSourceType,
-    fieldKey: row.field_key,
-    proposedValue: row.proposed_value ?? undefined,
-    confidence: Number(row.confidence),
-    status: row.status as import("../business-evidence").FactCandidateStatus,
-    evidenceLabel: row.evidence_label ?? "",
-    evidenceUrl: row.evidence_url ?? undefined,
-    placeId: row.place_id ?? undefined,
-    comparisonResult: row.comparison_result ?? undefined,
-    observedAt: row.observed_at,
-    createdAt: row.created_at
-  };
-}
-
-type BusinessServiceRow = {
-  id: string;
-  business_id: string;
-  service_definition_id: string | null;
-  custom_name: string | null;
-  status: string;
-  confirmation_source: string | null;
-  featured: boolean;
-  publish_landing_page: boolean | null;
-  confirmed_by: string | null;
-  confirmed_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-function businessServiceFromRow(row: BusinessServiceRow): import("../business-evidence").BusinessServiceRecord {
-  return {
-    id: row.id,
-    businessId: row.business_id,
-    serviceDefinitionId: row.service_definition_id ?? undefined,
-    customName: row.custom_name ?? undefined,
-    status: row.status as import("../business-evidence").BusinessServiceRecord["status"],
-    confirmationSource: (row.confirmation_source ?? undefined) as import("../business-evidence").BusinessServiceRecord["confirmationSource"],
-    featured: row.featured,
-    publishLandingPage: row.publish_landing_page ?? undefined,
-    confirmedBy: row.confirmed_by ?? undefined,
-    confirmedAt: row.confirmed_at ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
 
 async function requireOk(query: PromiseLike<{ error: { message: string } | null }>) {
   const { error } = await query;

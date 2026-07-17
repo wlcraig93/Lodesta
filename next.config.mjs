@@ -2,6 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  outputFileTracingExcludes: {
+    "*": [".data/**", ".design/**"]
+  },
   images: {
     remotePatterns: [
       {

@@ -12,8 +12,7 @@ import type {
 } from "./models";
 import type { PublicPresenceEnrichment } from "./public-presence";
 import { normalizeServiceList } from "./business-understanding-v2";
-import { composeEvidenceLedger } from "./evidence-ledger";
-import { createBusinessFactGraph } from "./business-fact-graph";
+import { composeGenerationEvidenceManifestV1 } from "./generation-evidence-manifest";
 import { withBusinessBundleFields } from "./business-model";
 import { slugify } from "./slug";
 import { inferVertical } from "./vertical-classification";
@@ -32,10 +31,12 @@ export type IntakeInput = {
   renderInspection?: RenderInspectionResult;
   understanding?: BusinessUnderstandingV2;
   publicPresence?: PublicPresenceEnrichment;
+  /** Deterministic fixture clock; production intake always omits this. */
+  createdAt?: string;
 };
 
 export function createSiteBundleFromInput(input: IntakeInput): SiteBundle {
-  const now = new Date().toISOString();
+  const now = input.createdAt ?? new Date().toISOString();
   const facts = mergeFacts(input.crawl?.extractedFacts, input.publicPresence?.facts);
   const vertical = input.understanding?.vertical ?? inferVertical({
     url: input.url,
@@ -81,7 +82,7 @@ export function createSiteBundleFromInput(input: IntakeInput): SiteBundle {
     pressLinks: unique(facts?.pressLinks ?? []).slice(0, 8),
     provenance: profileProvenance(input, facts, now)
   };
-  const evidenceLedger = composeEvidenceLedger({
+  const evidenceManifest = composeGenerationEvidenceManifestV1({
     crawl: input.crawl,
     proposals: input.understanding?.evidenceProposals ?? [],
     createdAt: now
@@ -90,7 +91,7 @@ export function createSiteBundleFromInput(input: IntakeInput): SiteBundle {
   const presenceAssessment: PresenceAssessment = {
     siteId,
     sourceUrl: input.url,
-    evidenceLedger,
+    evidenceManifest,
     renderInspection: input.renderInspection,
     publicPresenceSignals,
     brandAssessment: brandAssessment(profile, input, now),
@@ -113,11 +114,6 @@ export function createSiteBundleFromInput(input: IntakeInput): SiteBundle {
     extensionModel: estimateExtension(siteId),
     experiments: [],
     presenceAssessment
-  });
-  presenceAssessment.businessFactGraph = createBusinessFactGraph({
-    business: profile,
-    presence: presenceAssessment,
-    observedAt: now
   });
   return bundle;
 }

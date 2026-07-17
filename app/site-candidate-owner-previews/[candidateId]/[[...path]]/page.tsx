@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { OwnerFactsReview } from "@/components/OwnerFactsReview";
 import { PreviewWedge } from "@/components/PreviewWedge";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { repository } from "@/lib/repository";
@@ -10,6 +9,7 @@ import { applyMediaRightsFallbackV3 } from "@/lib/media-rights-preview";
 import { getEffectiveGenerationQaReadiness } from "@/lib/site-version-metadata";
 import { assertSiteVersionV3, findPageBySlugV3, siteVersionV3Issue } from "@/lib/site-version-v3";
 import type { SiteCandidateRecord, SiteVersionV3 } from "@/lib/models";
+import { siteCandidateRenderEnvelope } from "@/lib/site-candidate-render";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +42,8 @@ export default async function SiteCandidateOwnerPreviewPage({
   const mode = parseMode(query.mode);
   const artifact = parseArtifact(query.artifact);
   const view = parseOwnerView(query.view);
-  const bundle = candidate.bundle;
-  const rawVersion = bundle.siteModel.versions.find((version) => version.status === "draft") ?? bundle.siteModel.versions[0];
+  const bundle = siteCandidateRenderEnvelope(candidate);
+  const rawVersion = candidate.version;
   const schemaIssue = siteVersionV3Issue(rawVersion);
   if (schemaIssue) {
     return <StaleCandidateNotice candidate={candidate} schemaIssue={schemaIssue} />;
@@ -197,7 +197,7 @@ function CandidateOwnerSiteReview({
   pageSlug: string;
   previewSrc: string;
 }) {
-  const bundle = candidate.bundle;
+  const bundle = siteCandidateRenderEnvelope(candidate);
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
   const readiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
   const pages = selectedVersion.pageComposition.pages;
@@ -303,7 +303,7 @@ function ownerReadinessLabel(readiness: "ready" | "blocked" | "pending" | "unava
 }
 
 function CandidateBusinessFactsView({ candidate }: { candidate: SiteCandidateRecord }) {
-  const profile = candidate.bundle.businessProfile;
+  const profile = siteCandidateRenderEnvelope(candidate).businessProfile;
   return (
     <main className="admin-page owner-page">
       <header className="owner-page-header">
@@ -324,24 +324,14 @@ function CandidateBusinessFactsView({ candidate }: { candidate: SiteCandidateRec
         </div>
       </header>
 
-      <OwnerFactsReview
-        saveUrl={`/api/site-candidates/${candidate.id}/business-profile`}
-        profile={{
-          siteId: profile.siteId,
-          phone: profile.phone,
-          email: profile.email,
-          address: profile.address,
-          hours: profile.hours,
-          serviceAreas: profile.serviceAreas,
-          credentials: profile.credentials ?? [],
-          offers: profile.offers ?? [],
-          bookingLinks: profile.bookingLinks,
-          orderingLinks: profile.orderingLinks,
-          socialLinks: profile.socialLinks,
-          pressLinks: profile.pressLinks,
-          provenance: profile.provenance
-        }}
-      />
+      <section className="owner-panel">
+        <dl className="owner-summary-list">
+          <div><dt>Phone</dt><dd>{profile.phone ?? "Not confirmed"}</dd></div>
+          <div><dt>Email</dt><dd>{profile.email ?? "Not confirmed"}</dd></div>
+          <div><dt>Location</dt><dd>{[profile.address?.street, profile.address?.city, profile.address?.region].filter(Boolean).join(", ") || "Not confirmed"}</dd></div>
+          <div><dt>Services</dt><dd>{profile.services.join(", ") || "Not confirmed"}</dd></div>
+        </dl>
+      </section>
     </main>
   );
 }

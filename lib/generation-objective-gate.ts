@@ -1,5 +1,4 @@
 import type {
-  BusinessProfile,
   GenerationQaMetadata,
   GenerationQaBlockerCategory,
   RenderInspectionFinding,
@@ -7,7 +6,7 @@ import type {
   SiteBundle,
   SiteVersionV3
 } from "./models";
-import type { EvidenceLedger } from "./evidence-ledger";
+import type { GenerationInputSnapshotV1, ResolvedBusinessSnapshotV1 } from "./control-plane-contracts";
 import type { GenerationPlan, SiteCopy } from "./generation-contracts";
 import { validateSiteCopyForPlan } from "./generation-contracts";
 import { inspectGeneratedSiteBundleRender } from "./generated-site-render-inspection";
@@ -15,7 +14,8 @@ import { gatedSensitiveClaims, scanPlaceholderText } from "./content-safety-scan
 import { detectInternalStateCopy } from "./generation-objective-signals";
 import { getVisualSectionV3 } from "./generated-site-v3-visual-controls";
 import { computeSiteModelHash } from "./site-version-metadata";
-import { publicGenerationServices } from "./vertical-packs";
+import { offeringNamesForGeneration, publicGenerationServices } from "./vertical-packs";
+import { siteRenderEnvelopeFromSnapshot } from "./site-render-envelope";
 
 export const objectiveGenerationGateSchemaVersion = "objective-generation-gate-v1" as const;
 
@@ -73,19 +73,19 @@ export function generationQaFromObjectiveGate(
 }
 
 export async function runObjectiveGenerationGate(input: {
-  bundle: SiteBundle;
+  snapshot: GenerationInputSnapshotV1;
   version: SiteVersionV3;
   plan: GenerationPlan;
   copy: SiteCopy;
-  evidence: EvidenceLedger;
   qaRunId: string;
   artifactRoot?: string;
   captureScreenshots?: boolean;
 }): Promise<ObjectiveGenerationGateResult> {
+  const bundle = siteRenderEnvelopeFromSnapshot({ snapshot: input.snapshot, version: input.version, plan: input.plan, copy: input.copy });
   const routes = [];
   for (const page of input.version.pageComposition.pages) {
     const inspection = await inspectGeneratedSiteBundleRender({
-      bundle: input.bundle,
+      bundle,
       version: input.version,
       qaRunId: input.qaRunId,
       pageSlug: page.slug || undefined,
@@ -99,18 +99,17 @@ export async function runObjectiveGenerationGate(input: {
 }
 
 export function evaluateObjectiveGenerationGate(input: {
-  bundle: SiteBundle;
+  snapshot: GenerationInputSnapshotV1;
   version: SiteVersionV3;
   plan: GenerationPlan;
   copy: SiteCopy;
-  evidence: EvidenceLedger;
   qaRunId: string;
   routes: ObjectiveGenerationGateResult["routes"];
 }): ObjectiveGenerationGateResult {
   const blockers: ObjectiveGateIssue[] = [];
   const warnings: ObjectiveGateIssue[] = [];
   blockers.push(...contractBlockers(input));
-  blockers.push(...contentBlockers(input.bundle.businessProfile, input.version, input.copy));
+  blockers.push(...contentBlockers(input.snapshot, input.version, input.copy));
   for (const route of input.routes) {
     const pageSlug = route.slug || "/";
     const inspection = route.inspection;
@@ -216,10 +215,11 @@ function contractBlockers(input: {
 }
 
 function contentBlockers(
-  business: BusinessProfile,
+  snapshot: GenerationInputSnapshotV1,
   version: SiteVersionV3,
   copy: SiteCopy
 ) {
+  const business: ResolvedBusinessSnapshotV1 = snapshot.business;
   const blockers: ObjectiveGateIssue[] = [];
   const manifest = renderedTextManifest(version);
   const allText = manifest.flatMap((page) => page.sections.flatMap((section) => section.text)).join(" ");
@@ -233,7 +233,7 @@ function contentBlockers(
   if (business.phone && !normalizedDigits(allText).includes(normalizedDigits(business.phone).slice(-7))) {
     blockers.push(issue("phone_grounding", "Known phone number is not rendered", "The source-backed phone number must appear on the generated site.", "data_incomplete"));
   }
-  const publicServices = publicGenerationServices(business.services);
+  const publicServices = publicGenerationServices(offeringNamesForGeneration(snapshot));
   if (publicServices.length && !publicServices.some((service) => normalizedText(allText).includes(normalizedText(service)))) {
     blockers.push(issue("service_grounding", "Known services are not rendered", "At least one source-backed service name must appear on the generated site.", "data_incomplete"));
   }

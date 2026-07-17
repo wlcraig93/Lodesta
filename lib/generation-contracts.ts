@@ -19,7 +19,7 @@ export type GenerationPlanSection = {
     | "hero_split"
     | "hero_statement"
     | "side_intro_rows"
-    | "service_index"
+    | "auto_body_service_index"
     | "numbered_steps"
     | "quote_wall"
     | "faq_list"
@@ -34,6 +34,10 @@ export type GenerationPlanSection = {
 export type GenerationPlan = {
   schemaVersion: typeof generationPlanSchemaVersion;
   provenance: RegenerableArtifactProvenanceV1;
+  verticalPack: {
+    id: string;
+    version: string;
+  };
   designSystem: ShippingDesignSystemId;
   brandTokens: Theme;
   navigation: {

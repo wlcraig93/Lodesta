@@ -12,7 +12,7 @@ export function copyCandidateArtifactToSite(input: {
     id: `artifact_${input.managedSiteId}_${hashId(input.artifact.id)}`,
     siteCandidateId: undefined,
     siteId: input.managedSiteId,
-    scope: "site_selected",
+    scope: input.artifact.scope === "qa_evidence" ? "qa_evidence" : "site_selected",
     createdAt: acceptedAt
   };
 }

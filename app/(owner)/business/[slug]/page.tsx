@@ -6,6 +6,7 @@ import { OwnerServicesPanel } from "@/components/OwnerServicesPanel";
 import { repository } from "@/lib/repository";
 import { requireSiteOwnerAccess } from "@/lib/page-access";
 import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
+import { renderProfileFromGenerationSnapshot } from "@/lib/site-render-envelope";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,9 @@ export default async function BusinessProfilePage({ params }: { params: Promise<
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/business/${slug}`);
 
-  const profile = bundle.businessProfile;
+  const controlPlane = await repository.getCanonicalControlPlane(bundle.businessProfile.siteId);
+  if (!controlPlane) notFound();
+  const profile = renderProfileFromGenerationSnapshot(controlPlane.latestSnapshot);
   const factCount = countConfirmedOwnerFacts(profile);
 
   return (

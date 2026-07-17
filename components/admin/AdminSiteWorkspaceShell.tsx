@@ -37,8 +37,8 @@ export function AdminSiteWorkspaceShell({
   children
 }: AdminSiteWorkspaceShellProps) {
   const slug = bundle.siteModel.slug;
-  const pendingEvidence = bundle.presenceAssessment.evidenceLedger?.items.filter(
-    (item) => item.renderPolicy !== "durable_render" && !item.confirmation
+  const pendingEvidence = bundle.presenceAssessment.evidenceManifest?.items.filter(
+    (item) => item.renderPolicy !== "durable_render"
   ).length ?? 0;
   const previewReadiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
 

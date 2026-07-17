@@ -238,7 +238,14 @@ async function checkAssetStorageReadiness(): Promise<HealthCheck> {
         `Supabase Storage bucket ${ASSET_BUCKET_NAME} is missing or inaccessible: ${bucketError?.message ?? "bucket not found"}.`
       );
     }
-    return ok("asset_storage", "Asset storage", `Supabase Storage bucket ${ASSET_BUCKET_NAME} is accessible.`);
+    if (data.public) {
+      return error(
+        "asset_storage",
+        "Asset storage",
+        `Supabase Storage bucket ${ASSET_BUCKET_NAME} must be private because it stores unconfirmed scraped media.`
+      );
+    }
+    return ok("asset_storage", "Asset storage", `Private Supabase Storage bucket ${ASSET_BUCKET_NAME} is accessible.`);
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);
     return error("asset_storage", "Asset storage", `Supabase Storage bucket ${ASSET_BUCKET_NAME} check failed: ${message}`);

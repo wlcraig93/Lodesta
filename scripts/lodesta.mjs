@@ -59,9 +59,9 @@ async function main() {
       requireArgs(command, args, 1);
       await printJson(post("/api/domains/refresh", { domainId: args[0] }));
       return;
-    case "update-business":
+    case "request-control-plane-change":
       requireArgs(command, args, 2);
-      await printJson(post("/api/business-profile", { siteId: args[0], ...JSON.parse(args.slice(1).join(" ")) }));
+      await printJson(post("/api/control-plane/changes", { siteId: args[0], payload: JSON.parse(args.slice(1).join(" ")) }));
       return;
     case "inspect-inquiries":
       await printJson(get(`/api/inquiries${args[0] ? `?siteId=${encodeURIComponent(args[0])}` : ""}`));
@@ -235,7 +235,7 @@ Commands:
   create-preview <siteId>                  Create a tokenized noindex preview URL
   connect-domain <siteId> <hostname>        Register a custom hostname and print verification
   refresh-domain <domainId>                 Refresh custom-domain provider status
-  update-business <siteId> <json>           Update owner-truth business facts
+  request-control-plane-change <siteId> <json> Submit a typed business-state or site-intent change
   inspect-inquiries [siteId]               List captured inquiries
   update-experiment <siteId> <expId> <status> Start, pause, conclude, or rollback an experiment
   adopt-experiment-learning <siteId> <expId> Adopt a detected experiment winner into generation defaults

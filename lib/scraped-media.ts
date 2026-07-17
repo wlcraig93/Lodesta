@@ -43,8 +43,10 @@ export type ScrapedMediaManifestEntry = {
   kind: "photo" | "logo";
   originalUrl: string;
   storedUrl: string;
+  storagePath: string;
   contentHash: string;
   bytes: number;
+  mimeType: "image/jpeg" | "image/png" | "image/webp";
   scrapedAt: string;
   /** Natural dimensions, measured during palette sampling; feeds media casting. */
   width?: number;
@@ -100,11 +102,11 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
       assetId,
       bytes: downloaded.bytes,
       mimeType: downloaded.mimeType as "image/jpeg" | "image/png" | "image/webp",
-      // Privacy invariant: scraped media never goes to the public bucket.
-      // Local storage serves through the auth-gated /api/assets route only.
-      forceLocal: true
+      // Privacy invariant: scraped media is stored privately and is served
+      // only through the authenticated /api/assets route.
+      publicUrl: false
     });
-    if (!stored.url) return reference;
+    const storedUrl = `/api/assets/${stored.storagePath}`;
     // Measured from the file header at download time; the Playwright palette
     // pass later re-measures, but render gating must not depend on it.
     const dimensions = measureImageDimensions(downloaded.bytes, downloaded.mimeType);
@@ -112,13 +114,15 @@ export async function scrapeAndStoreBusinessMedia(bundle: SiteBundle): Promise<S
       assetId,
       kind,
       originalUrl: reference.url,
-      storedUrl: stored.url,
+      storedUrl,
+      storagePath: stored.storagePath,
       contentHash,
       bytes: downloaded.bytes.byteLength,
+      mimeType: downloaded.mimeType as "image/jpeg" | "image/png" | "image/webp",
       scrapedAt,
       ...(dimensions ?? {})
     });
-    return { ...reference, url: stored.url, rightsStatus: "reference_only", ...(dimensions ?? {}) };
+    return { ...reference, url: storedUrl, rightsStatus: "reference_only", ...(dimensions ?? {}) };
   };
 
   const photos: AssetReference[] = [];

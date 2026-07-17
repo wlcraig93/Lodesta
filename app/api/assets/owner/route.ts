@@ -6,11 +6,16 @@ import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import {
   imageMimeTypeMatchesBytes,
   isSupportedAssetMimeType,
+  readStoredAsset,
   storeAssetBytes,
   type SupportedAssetMimeType
 } from "@/lib/asset-storage";
-import { validatePublicHostname } from "@/lib/url-safety";
+import { assertPublicFetchUrl, validatePublicHostname } from "@/lib/url-safety";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { createHash } from "node:crypto";
+import { submitControlPlaneChange } from "@/lib/control-plane-service";
+import type { AssetRevisionV1, BusinessAssetV1 } from "@/lib/control-plane-contracts";
+import { attestExistingBusinessAsset } from "@/lib/control-plane-assets";
 
 export const runtime = "nodejs";
 
@@ -70,25 +75,176 @@ export async function POST(request: Request) {
   const auth = await getCurrentUser();
   const attestedBy = auth.user?.email ?? auth.user?.id ?? "site_owner";
 
-  const result = await repository.updateOwnerAssets({
-    siteId: parsed.data.siteId,
-    attestedBy,
-    logo: materialized.logo ?? parsed.data.logo,
-    photos: [...(parsed.data.photos ?? []), ...materialized.photos],
-    scrapedAttestations: parsed.data.scrapedAttestations
-  });
-  if (!result) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
-  if (!result.ok) return applyRateLimitHeaders(NextResponse.json({ error: result.reason }, { status: 400 }), limit);
+  const controlPlane = await repository.getCanonicalControlPlane(parsed.data.siteId);
+  if (!controlPlane) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown canonical site" }, { status: 404 }), limit);
+  const retainedLogo = await retainOwnerAssets(parsed.data.siteId, [materialized.logo ?? parsed.data.logo].filter(isOwnerAssetRow));
+  const retainedPhotos = await retainOwnerAssets(parsed.data.siteId, [...(parsed.data.photos ?? []), ...materialized.photos]);
+  const requested = [
+    ...assetRegistrations({
+      businessId: controlPlane.state.business.id,
+      kind: "logo",
+      rows: retainedLogo,
+      attestedBy
+    }),
+    ...assetRegistrations({
+      businessId: controlPlane.state.business.id,
+      kind: "photo",
+      rows: retainedPhotos,
+      attestedBy
+    }),
+    ...attestedExistingAssets(controlPlane.state.assets, controlPlane.state.assetRevisions, parsed.data.scrapedAttestations ?? [], attestedBy)
+  ];
+  if (!requested.length) {
+    return applyRateLimitHeaders(NextResponse.json({ error: "No owner-approved assets were provided." }, { status: 400 }), limit);
+  }
+  try {
+    for (const payload of requested) {
+      await submitControlPlaneChange({ repository, siteId: parsed.data.siteId, payload, requestedBy: attestedBy });
+    }
+  } catch (error) {
+    return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
+  }
+  const updated = await repository.getCanonicalControlPlane(parsed.data.siteId);
+  const assets = updated?.latestSnapshot.assets ?? [];
+  const logoAsset = assets.find((asset) => asset.kind === "logo" && asset.revision.publicUrl);
+  const photoAssets = assets.filter((asset) => asset.kind === "photo" && asset.revision.publicUrl);
 
   return applyRateLimitHeaders(
     NextResponse.json({
       ok: true,
-      logo: result.logo,
-      photos: result.photos,
-      assets: result.assets
+      logo: logoAsset ? { url: logoAsset.revision.publicUrl, alt: logoAsset.alt, rightsConfirmed: true } : undefined,
+      photos: photoAssets.map((asset) => ({ url: asset.revision.publicUrl!, alt: asset.alt, rightsConfirmed: true })),
+      assets
     }),
     limit
   );
+}
+
+function assetRegistrations(input: {
+  businessId: string;
+  kind: "logo" | "photo";
+  rows: OwnerAssetRow[];
+  attestedBy: string;
+}) {
+  return input.rows.map((row) => {
+    if (!row.rightsConfirmed) throw new Error(`Rights confirmation is required for ${row.alt}.`);
+    const now = new Date().toISOString();
+    const contentHash = row.contentHash;
+    const assetId = `asset_${crypto.randomUUID().replace(/-/g, "")}`;
+    const revisionId = `assetrev_${crypto.randomUUID().replace(/-/g, "")}`;
+    const revision: AssetRevisionV1 = {
+      schemaVersion: "asset-revision-v1",
+      id: revisionId,
+      assetId,
+      businessId: input.businessId,
+      contentHash,
+      storagePath: row.storagePath,
+      publicUrl: row.url,
+      mimeType: row.mimeType,
+      bytes: row.bytes,
+      rightsStatus: "customer_granted",
+      attestation: { attestedBy: input.attestedBy, attestedAt: now, statement: "Owner attests they own this image or hold rights to use it." },
+      createdAt: now
+    };
+    const asset: BusinessAssetV1 = {
+      id: assetId,
+      businessId: input.businessId,
+      kind: input.kind,
+      alt: row.alt,
+      source: "uploaded",
+      usageScope: "published_site",
+      ownerApproved: true,
+      active: true,
+      currentRevisionId: revisionId,
+      createdAt: now,
+      updatedAt: now
+    };
+    return { kind: "register_asset" as const, asset, revision };
+  });
+}
+
+function attestedExistingAssets(
+  assets: BusinessAssetV1[],
+  revisions: AssetRevisionV1[],
+  attestations: Array<{ assetId: string; rightsConfirmed: boolean }>,
+  attestedBy: string
+) {
+  return attestations
+    .filter((item) => item.rightsConfirmed)
+    .map((item) => attestExistingBusinessAsset({ assets, revisions, assetId: item.assetId, attestedBy }));
+}
+
+type OwnerAssetRow = {
+  url: string;
+  alt: string;
+  rightsConfirmed: boolean;
+  contentHash: string;
+  storagePath: string;
+  mimeType: AssetRevisionV1["mimeType"];
+  bytes: number;
+};
+
+function isOwnerAssetRow(value: unknown): value is { url: string; alt: string; rightsConfirmed: boolean } {
+  return Boolean(value && typeof value === "object" && "url" in value);
+}
+
+async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt: string; rightsConfirmed: boolean } & Partial<OwnerAssetRow>>) {
+  const retained: OwnerAssetRow[] = [];
+  for (const row of rows) {
+    if (!row.rightsConfirmed) throw new Error(`Rights confirmation is required for ${row.alt}.`);
+    if (row.contentHash && row.storagePath && row.mimeType && row.bytes) {
+      retained.push(row as OwnerAssetRow);
+      continue;
+    }
+    const localPath = row.url.match(/^\/api\/assets\/(.+)$/)?.[1];
+    if (localPath) {
+      const stored = await readStoredAsset(localPath);
+      if (!stored || !isSupportedAssetMimeType(stored.mimeType) || !imageMimeTypeMatchesBytes(stored.mimeType, stored.bytes)) {
+        throw new Error(`Retained owner asset ${row.alt} could not be read.`);
+      }
+      retained.push({
+        url: row.url,
+        alt: row.alt,
+        rightsConfirmed: true,
+        contentHash: createHash("sha256").update(stored.bytes).digest("hex"),
+        storagePath: localPath,
+        mimeType: stored.mimeType,
+        bytes: stored.bytes.byteLength
+      });
+      continue;
+    }
+    const safeUrl = await assertPublicFetchUrl(row.url);
+    const response = await fetch(safeUrl, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: "image/png,image/jpeg,image/webp" },
+      redirect: "error"
+    });
+    if (!response.ok) throw new Error(`Could not retain owner asset ${row.alt}.`);
+    const mimeType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
+    if (!isSupportedAssetMimeType(mimeType)) throw new Error(`Owner asset ${row.alt} is not PNG, JPEG, or WebP.`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!bytes.byteLength || bytes.byteLength > maxOwnerAssetBytes || !imageMimeTypeMatchesBytes(mimeType, bytes)) {
+      throw new Error(`Owner asset ${row.alt} failed image validation.`);
+    }
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const stored = await storeAssetBytes({
+      siteId,
+      assetId: `owner-retained-${contentHash.slice(0, 20)}`,
+      bytes,
+      mimeType
+    });
+    if (!stored.url) throw new Error(`Owner asset ${row.alt} could not be retained.`);
+    retained.push({
+      url: stored.url,
+      alt: row.alt,
+      rightsConfirmed: true,
+      contentHash,
+      storagePath: stored.storagePath,
+      mimeType,
+      bytes: stored.bytes
+    });
+  }
+  return retained;
 }
 
 type ParsedOwnerAssetsRequest =
@@ -225,7 +381,11 @@ async function storeOwnerAssetUpload(input: {
   return {
     url: stored.url,
     alt: input.upload.alt,
-    rightsConfirmed: input.upload.rightsConfirmed
+    rightsConfirmed: input.upload.rightsConfirmed,
+    contentHash: createHash("sha256").update(bytes).digest("hex"),
+    storagePath: stored.storagePath,
+    mimeType: input.upload.mimeType as AssetRevisionV1["mimeType"],
+    bytes: stored.bytes
   };
 }
 

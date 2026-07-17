@@ -1,20 +1,12 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { repository } from "@/lib/repository";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-safety";
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
+import { freshIntakeRequestSchema } from "@/lib/generation-entry-contracts";
 
 export const runtime = "nodejs";
-
-const intakeSchema = z
-  .object({
-    url: z.string().trim().min(1).optional(),
-    prompt: z.string().trim().min(3).optional(),
-    telemetrySource: z.enum(["admin_console"]).optional()
-  })
-  .refine((value) => value.url || value.prompt, "Provide a URL or prompt.");
 
 export async function POST(request: Request) {
   const unauthorized = await requireAdmin(request);
@@ -28,13 +20,13 @@ export async function POST(request: Request) {
   if (!limit.ok) return limit.response;
 
   const body = await request.json().catch(() => null);
-  const parsed = intakeSchema.safeParse(body);
+  const parsed = freshIntakeRequestSchema.safeParse(body);
 
   if (!parsed.success) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Invalid intake request", issues: parsed.error.issues }, { status: 400 }), limit);
   }
 
-  let sourceUrl = parsed.data.url ? normalizePublicFetchUrlInput(parsed.data.url) : undefined;
+  let sourceUrl = normalizePublicFetchUrlInput(parsed.data.url);
   try {
     assertLaunchMarket({ ...parsed.data, url: sourceUrl });
   } catch (error) {
@@ -43,11 +35,9 @@ export async function POST(request: Request) {
     }
     throw error;
   }
-  if (parsed.data.url) {
-    const urlSafety = await validatePublicFetchUrl(parsed.data.url);
-    if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
-    sourceUrl = urlSafety.url;
-  }
+  const urlSafety = await validatePublicFetchUrl(parsed.data.url);
+  if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
+  sourceUrl = urlSafety.url;
 
   try {
     const job = await repository.enqueueJob("generate_site", {

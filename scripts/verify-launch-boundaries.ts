@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import { buildCanonicalFixture, loadCanonicalFixtureDefinitions } from "./canonical-generation-fixtures";
-import { applyEvidenceConfirmation, verifyEvidenceProposal } from "../lib/evidence-ledger";
-import { applyBusinessProfileUpdate } from "../lib/business-profile-update";
-import { managedSiteStatus } from "../lib/managed-site-status";
-import { applyV3SectionUpdate } from "../lib/v3-editor";
+import { verifyEvidenceProposal } from "../lib/generation-evidence-manifest";
+import { applyBusinessStateChange, applyCopyOverrides, applySiteIntentChange, changeImpact, type CanonicalBusinessStateV1 } from "../lib/control-plane";
 import { buildGenerationPlan, compatibleDesignSystems } from "../lib/vertical-packs";
 import { containsGatedSensitiveClaim, scanPlaceholderText, scanSensitiveClaimText } from "../lib/content-safety-scanners";
 import { isDynamicHoursStatus } from "../lib/business-understanding-v2";
@@ -38,21 +36,22 @@ assert.equal(rich.plan.designSystem, "precision_shop_editorial");
 assert.equal(sparse.plan.designSystem, "trusted_local_service");
 
 const sourceBrandPlan = buildGenerationPlan({
-  business: rich.business,
+  snapshot: {
+    ...rich.snapshot,
+    brandAssessment: {
+      id: "brand_source_contrast",
+      siteId: rich.business.siteId,
+      confidence: 1,
+      cues: [],
+      colorSignals: ["#0376ba"],
+      typographySignals: [],
+      imageStyleSignals: [],
+      toneSignals: [],
+      preservationRules: [],
+      sourceNotes: []
+    }
+  },
   evidence: rich.evidence,
-  assets: rich.assets,
-  brandAssessment: {
-    id: "brand_source_contrast",
-    siteId: rich.business.siteId,
-    confidence: 1,
-    cues: [],
-    colorSignals: ["#0376ba"],
-    typographySignals: [],
-    imageStyleSignals: [],
-    toneSignals: [],
-    preservationRules: [],
-    sourceNotes: []
-  }
 });
 assert(
   (contrastRatioV3(sourceBrandPlan.brandTokens.colors.primary, sourceBrandPlan.brandTokens.colors.background) ?? 0) >= 4.75,
@@ -75,43 +74,76 @@ assert.equal(altered.ok, false, "Evidence without a retained matching block must
 
 const confirmationFixture = fixtures.find((fixture) => fixture.evidence.items.some((item) => item.renderPolicy !== "durable_render"));
 assert(confirmationFixture, "Fixture set must exercise owner-confirmed protected evidence.");
-const confirmationBundle = structuredClone(confirmationFixture.bundle);
-confirmationBundle.presenceAssessment.evidenceLedger = structuredClone(confirmationFixture.evidence);
-const protectedEvidence = confirmationBundle.presenceAssessment.evidenceLedger.items.find(
+const protectedEvidence = confirmationFixture.evidence.items.find(
   (item) => item.renderPolicy !== "durable_render"
 );
 assert(protectedEvidence, "Fixture must exercise owner-confirmed protected evidence.");
-const confirmation = applyEvidenceConfirmation({
-  ledger: confirmationBundle.presenceAssessment.evidenceLedger,
-  evidenceId: protectedEvidence.id,
-  decision: "confirmed",
-  decidedBy: "launch-boundary-verifier",
-  decidedAt: "2026-07-15T00:00:00.000Z"
-});
-assert(confirmation.ok);
-assert.equal(confirmation.item.renderPolicy, "durable_render");
-assert.equal(confirmation.item.publicText, confirmation.item.sourceExcerpt);
+const snapshotBusiness = confirmationFixture.snapshot.business;
+const confirmationState: CanonicalBusinessStateV1 = {
+  business: {
+    id: snapshotBusiness.businessId,
+    name: snapshotBusiness.name,
+    vertical: snapshotBusiness.vertical,
+    stateRevision: snapshotBusiness.stateRevision,
+    description: snapshotBusiness.description,
+    categories: snapshotBusiness.categories,
+    provenance: snapshotBusiness.provenance,
+    createdAt: confirmationFixture.snapshot.createdAt,
+    updatedAt: confirmationFixture.snapshot.createdAt
+  },
+  locations: [{
+    id: `location_${snapshotBusiness.businessId}_primary`,
+    businessId: snapshotBusiness.businessId,
+    address: snapshotBusiness.address,
+    serviceAreas: snapshotBusiness.serviceAreas,
+    phone: snapshotBusiness.phone,
+    email: snapshotBusiness.email,
+    hours: snapshotBusiness.hours,
+    geo: snapshotBusiness.geo,
+    googlePlaceId: snapshotBusiness.googlePlaceId,
+    provenance: snapshotBusiness.provenance,
+    createdAt: confirmationFixture.snapshot.createdAt,
+    updatedAt: confirmationFixture.snapshot.createdAt
+  }],
+  offerings: structuredClone(snapshotBusiness.offerings),
+  proof: confirmationFixture.evidence.items.map((item) => ({
+    id: item.id,
+    businessId: snapshotBusiness.businessId,
+    kind: item.kind === "years_in_business" ? "longevity" : item.kind,
+    status: item.renderPolicy === "durable_render" ? "confirmed" : "observed",
+    publicText: item.publicText,
+    sourceExcerpt: item.sourceExcerpt,
+    sourceSnapshotId: confirmationFixture.snapshot.sourceSnapshotIds[0],
+    sourceBlockId: item.source.blockId,
+    evidenceIds: [item.id],
+    createdAt: confirmationFixture.snapshot.createdAt,
+    updatedAt: confirmationFixture.snapshot.createdAt
+  })),
+  assets: confirmationFixture.snapshot.assets.map(({ revision: _revision, ...asset }) => structuredClone(asset)),
+  assetRevisions: confirmationFixture.snapshot.assets.map((asset) => structuredClone(asset.revision)),
+  socialLinks: snapshotBusiness.socialLinks,
+  bookingLinks: snapshotBusiness.bookingLinks,
+  orderingLinks: snapshotBusiness.orderingLinks,
+  pressLinks: snapshotBusiness.pressLinks
+};
+const confirmedState = applyBusinessStateChange(confirmationState, {
+  kind: "set_proof",
+  proofId: protectedEvidence.id,
+  decision: "confirm",
+  publicText: protectedEvidence.sourceExcerpt
+}, "launch-boundary-verifier", "2026-07-15T00:00:00.000Z");
+assert.equal(confirmedState.proof.find((item) => item.id === protectedEvidence.id)?.status, "confirmed");
+assert.equal(confirmedState.proof.find((item) => item.id === protectedEvidence.id)?.publicText, protectedEvidence.sourceExcerpt);
 
-const editable = structuredClone(rich.bundle);
-editable.presenceAssessment.evidenceLedger = structuredClone(rich.evidence);
-editable.presenceAssessment.generationPlan = structuredClone(rich.plan);
-editable.presenceAssessment.siteCopy = structuredClone(rich.copy);
-const edit = applyV3SectionUpdate(editable, {
-  pageId: "home",
-  sectionId: "home.hero",
-  props: { heading: "Collision repair with a clear next step" }
-});
-assert(edit.ok, "Owner copy-slot edits must recompile the stored plan.");
-assert.equal(edit.bundle.presenceAssessment.generationPlan?.provenance.stale, false);
-assert.equal(edit.bundle.presenceAssessment.siteCopy?.slots.find((slot) => slot.slotId === "home.hero.heading")?.value, "Collision repair with a clear next step");
-
-applyBusinessProfileUpdate(editable, {
-  siteId: editable.businessProfile.siteId,
-  services: [...editable.businessProfile.services, "Frame Repair"]
-});
-assert.equal(editable.presenceAssessment.generationPlan?.provenance.stale, true);
-assert.equal(editable.presenceAssessment.siteCopy?.provenance.stale, true);
-assert.equal(managedSiteStatus(editable).generation, "stale");
+const editedIntent = applySiteIntentChange(rich.snapshot.siteIntent, {
+  kind: "set_copy_override",
+  slotId: "home.hero.heading",
+  value: "Collision repair with a clear next step"
+}, "launch-boundary-verifier", "2026-07-15T00:00:00.000Z");
+const editedCopy = applyCopyOverrides(rich.copy, editedIntent);
+assert.equal(editedCopy.slots.find((slot) => slot.slotId === "home.hero.heading")?.value, "Collision repair with a clear next step");
+assert.equal(changeImpact({ kind: "set_contact", phone: "512-555-0100" }), "deterministic");
+assert.equal(changeImpact({ kind: "set_offering", catalogId: "auto_body.frame_repair", enabled: true }), "structural");
 
 const sensitive = scanSensitiveClaimText("Every repair includes a lifetime warranty and guaranteed results.");
 assert(sensitive.some((finding) => finding.severity === "block"), "Unsupported sensitive claims must remain blocked.");
@@ -145,7 +177,7 @@ console.log(JSON.stringify({
   shippingDesignSystems: 2,
   exactEvidence: true,
   ownerConfirmation: true,
-  copyRecompile: true,
+  deterministicCopyOverride: true,
   structuralRegeneration: true,
   unsupportedClaimsBlocked: true
 }, null, 2));

@@ -28,7 +28,7 @@ export async function GET(request: Request) {
         createdAt: version.createdAt,
         pages: pageCountForVersionV3(assertSiteVersionV3(version, "site API version"))
       })),
-      evidenceItems: bundle.presenceAssessment.evidenceLedger?.items.length ?? 0,
+      evidenceItems: bundle.presenceAssessment.evidenceManifest?.items.length ?? 0,
       experiments: bundle.experiments.length
     }))
   });

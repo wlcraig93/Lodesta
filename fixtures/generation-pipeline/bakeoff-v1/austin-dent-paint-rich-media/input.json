@@ -1,0 +1,2132 @@
+{
+  "schemaVersion": "generation-bakeoff-input-v1",
+  "fixture": {
+    "id": "austin-dent-paint-rich-media",
+    "profile": "rich_media_and_first_party_testimonials",
+    "sourceUrl": "https://austindentpaint.example/"
+  },
+  "sourceSnapshots": [
+    {
+      "id": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "businessId": "biz_gq5qgs",
+      "sourceType": "website",
+      "sourceUrl": "https://austindentpaint.example/",
+      "contentHash": "e7326cf5f9535e17a9df0ac4094ee4357651af3c9132ecfda5784936e7e4025d",
+      "capturedAt": "2026-07-16T00:00:00.000Z",
+      "payload": {
+        "url": "https://austindentpaint.example/",
+        "finalUrl": "https://austindentpaint.example/",
+        "extractedFacts": {
+          "categories": [
+            "Auto Body Shop"
+          ],
+          "services": [
+            "Request A Repair Estimate",
+            "Auto Body Repair",
+            "Paintless Dent Repair",
+            "Hail Damage Repair",
+            "Collision Repair",
+            "Professional Paint Services",
+            "Dent Repair"
+          ],
+          "serviceHighlights": [
+            "PDR for smaller dents and hail repair"
+          ],
+          "serviceAreas": [],
+          "socialLinks": [],
+          "bookingLinks": [],
+          "orderingLinks": [],
+          "pressLinks": [],
+          "name": "Austin Dent & Paint",
+          "description": "Independent Austin auto body shop for collision repair, paint refinishing, dent repair, insurance claims, estimates, and before-after repair proof.",
+          "phone": "+15125550101",
+          "address": {
+            "street": "1201 South Lamar Blvd",
+            "city": "Austin",
+            "region": "TX",
+            "postalCode": "78704"
+          },
+          "hours": {
+            "hours_1": "Mo-Fr 08:00-18:00"
+          }
+        },
+        "pages": [
+          {
+            "url": "https://austindentpaint.example/",
+            "source": "primary",
+            "purposeTags": [
+              "home",
+              "contact"
+            ],
+            "title": "Austin Dent & Paint | Collision Repair and Auto Body Shop in Austin",
+            "sourceTextBlocks": [
+              {
+                "id": "source_block_85dd8b4e7209efad",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > h1:nth-of-type(1)",
+                "order": 0,
+                "displayText": "Collision repair, paint refinishing, and dent work in South Austin",
+                "canonicalTokens": [
+                  {
+                    "value": "collision",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 10,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "paint",
+                    "displayStart": 18,
+                    "displayEnd": 23
+                  },
+                  {
+                    "value": "refinishing",
+                    "displayStart": 24,
+                    "displayEnd": 35
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 37,
+                    "displayEnd": 40
+                  },
+                  {
+                    "value": "dent",
+                    "displayStart": 41,
+                    "displayEnd": 45
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 46,
+                    "displayEnd": 50
+                  },
+                  {
+                    "value": "in",
+                    "displayStart": 51,
+                    "displayEnd": 53
+                  },
+                  {
+                    "value": "south",
+                    "displayStart": 54,
+                    "displayEnd": 59
+                  },
+                  {
+                    "value": "austin",
+                    "displayStart": 60,
+                    "displayEnd": 66
+                  }
+                ]
+              },
+              {
+                "id": "source_block_d3ef6ce80714c5a1",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+                "order": 1,
+                "displayText": "Independent auto body repair with photo estimates, insurance claim guidance, I-CAR trained technicians, and a clear repair timeline before work begins.",
+                "canonicalTokens": [
+                  {
+                    "value": "independent",
+                    "displayStart": 0,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "auto",
+                    "displayStart": 12,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "body",
+                    "displayStart": 17,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 22,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "with",
+                    "displayStart": 29,
+                    "displayEnd": 33
+                  },
+                  {
+                    "value": "photo",
+                    "displayStart": 34,
+                    "displayEnd": 39
+                  },
+                  {
+                    "value": "estimates",
+                    "displayStart": 40,
+                    "displayEnd": 49
+                  },
+                  {
+                    "value": "insurance",
+                    "displayStart": 51,
+                    "displayEnd": 60
+                  },
+                  {
+                    "value": "claim",
+                    "displayStart": 61,
+                    "displayEnd": 66
+                  },
+                  {
+                    "value": "guidance",
+                    "displayStart": 67,
+                    "displayEnd": 75
+                  },
+                  {
+                    "value": "i",
+                    "displayStart": 77,
+                    "displayEnd": 78
+                  },
+                  {
+                    "value": "car",
+                    "displayStart": 79,
+                    "displayEnd": 82
+                  },
+                  {
+                    "value": "trained",
+                    "displayStart": 83,
+                    "displayEnd": 90
+                  },
+                  {
+                    "value": "technicians",
+                    "displayStart": 91,
+                    "displayEnd": 102
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 104,
+                    "displayEnd": 107
+                  },
+                  {
+                    "value": "a",
+                    "displayStart": 108,
+                    "displayEnd": 109
+                  },
+                  {
+                    "value": "clear",
+                    "displayStart": 110,
+                    "displayEnd": 115
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 116,
+                    "displayEnd": 122
+                  },
+                  {
+                    "value": "timeline",
+                    "displayStart": 123,
+                    "displayEnd": 131
+                  },
+                  {
+                    "value": "before",
+                    "displayStart": 132,
+                    "displayEnd": 138
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 139,
+                    "displayEnd": 143
+                  },
+                  {
+                    "value": "begins",
+                    "displayStart": 144,
+                    "displayEnd": 150
+                  }
+                ]
+              },
+              {
+                "id": "source_block_eaeacbca5940bfeb",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(2)",
+                "order": 2,
+                "displayText": "Request a Repair Estimate Call (512) 555-0101",
+                "canonicalTokens": [
+                  {
+                    "value": "request",
+                    "displayStart": 0,
+                    "displayEnd": 7
+                  },
+                  {
+                    "value": "a",
+                    "displayStart": 8,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 10,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 17,
+                    "displayEnd": 25
+                  },
+                  {
+                    "value": "call",
+                    "displayStart": 26,
+                    "displayEnd": 30
+                  },
+                  {
+                    "value": "512",
+                    "displayStart": 32,
+                    "displayEnd": 35
+                  },
+                  {
+                    "value": "555",
+                    "displayStart": 37,
+                    "displayEnd": 40
+                  },
+                  {
+                    "value": "0101",
+                    "displayStart": 41,
+                    "displayEnd": 45
+                  }
+                ]
+              },
+              {
+                "id": "source_block_117dde97016feae3",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)",
+                "order": 3,
+                "displayText": "12 yearslocally owned",
+                "canonicalTokens": [
+                  {
+                    "value": "12",
+                    "displayStart": 0,
+                    "displayEnd": 2
+                  },
+                  {
+                    "value": "yearslocally",
+                    "displayStart": 3,
+                    "displayEnd": 15
+                  },
+                  {
+                    "value": "owned",
+                    "displayStart": 16,
+                    "displayEnd": 21
+                  }
+                ]
+              },
+              {
+                "id": "source_block_58f69518eb16f728",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2)",
+                "order": 4,
+                "displayText": "I-CAR trainedrepair process",
+                "canonicalTokens": [
+                  {
+                    "value": "i",
+                    "displayStart": 0,
+                    "displayEnd": 1
+                  },
+                  {
+                    "value": "car",
+                    "displayStart": 2,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "trainedrepair",
+                    "displayStart": 6,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "process",
+                    "displayStart": 20,
+                    "displayEnd": 27
+                  }
+                ]
+              },
+              {
+                "id": "source_block_6016e86463803909",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3)",
+                "order": 5,
+                "displayText": "Insurance helpclaim photos and supplements",
+                "canonicalTokens": [
+                  {
+                    "value": "insurance",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "helpclaim",
+                    "displayStart": 10,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "photos",
+                    "displayStart": 20,
+                    "displayEnd": 26
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 27,
+                    "displayEnd": 30
+                  },
+                  {
+                    "value": "supplements",
+                    "displayStart": 31,
+                    "displayEnd": 42
+                  }
+                ]
+              },
+              {
+                "id": "source_block_012f7f8b7ee8875d",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(4)",
+                "order": 6,
+                "displayText": "Lifetime paint warrantyon refinish work",
+                "canonicalTokens": [
+                  {
+                    "value": "lifetime",
+                    "displayStart": 0,
+                    "displayEnd": 8
+                  },
+                  {
+                    "value": "paint",
+                    "displayStart": 9,
+                    "displayEnd": 14
+                  },
+                  {
+                    "value": "warrantyon",
+                    "displayStart": 15,
+                    "displayEnd": 25
+                  },
+                  {
+                    "value": "refinish",
+                    "displayStart": 26,
+                    "displayEnd": 34
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 35,
+                    "displayEnd": 39
+                  }
+                ]
+              },
+              {
+                "id": "source_block_a07ff56c595cb830",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > h2:nth-of-type(1)",
+                "order": 7,
+                "displayText": "Auto body services",
+                "canonicalTokens": [
+                  {
+                    "value": "auto",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "body",
+                    "displayStart": 5,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "services",
+                    "displayStart": 10,
+                    "displayEnd": 18
+                  }
+                ]
+              },
+              {
+                "id": "source_block_ab41650c534a472e",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(1) > h3:nth-of-type(1)",
+                "order": 8,
+                "displayText": "Collision repair",
+                "canonicalTokens": [
+                  {
+                    "value": "collision",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 10,
+                    "displayEnd": 16
+                  }
+                ]
+              },
+              {
+                "id": "source_block_1cf1816d1bb21c29",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(1) > p:nth-of-type(1)",
+                "order": 9,
+                "displayText": "Panel repair, structural measuring, bumper replacement, and post-repair inspection.",
+                "canonicalTokens": [
+                  {
+                    "value": "panel",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 6,
+                    "displayEnd": 12
+                  },
+                  {
+                    "value": "structural",
+                    "displayStart": 14,
+                    "displayEnd": 24
+                  },
+                  {
+                    "value": "measuring",
+                    "displayStart": 25,
+                    "displayEnd": 34
+                  },
+                  {
+                    "value": "bumper",
+                    "displayStart": 36,
+                    "displayEnd": 42
+                  },
+                  {
+                    "value": "replacement",
+                    "displayStart": 43,
+                    "displayEnd": 54
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 56,
+                    "displayEnd": 59
+                  },
+                  {
+                    "value": "post",
+                    "displayStart": 60,
+                    "displayEnd": 64
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 65,
+                    "displayEnd": 71
+                  },
+                  {
+                    "value": "inspection",
+                    "displayStart": 72,
+                    "displayEnd": 82
+                  }
+                ]
+              },
+              {
+                "id": "source_block_f7547b465af5cdfc",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(2) > h3:nth-of-type(1)",
+                "order": 10,
+                "displayText": "Paint refinishing",
+                "canonicalTokens": [
+                  {
+                    "value": "paint",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "refinishing",
+                    "displayStart": 6,
+                    "displayEnd": 17
+                  }
+                ]
+              },
+              {
+                "id": "source_block_35adf375876ee669",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(2) > p:nth-of-type(1)",
+                "order": 11,
+                "displayText": "Color matching, blend panels, clear coat correction, and warranty-backed refinish work.",
+                "canonicalTokens": [
+                  {
+                    "value": "color",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "matching",
+                    "displayStart": 6,
+                    "displayEnd": 14
+                  },
+                  {
+                    "value": "blend",
+                    "displayStart": 16,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "panels",
+                    "displayStart": 22,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "clear",
+                    "displayStart": 30,
+                    "displayEnd": 35
+                  },
+                  {
+                    "value": "coat",
+                    "displayStart": 36,
+                    "displayEnd": 40
+                  },
+                  {
+                    "value": "correction",
+                    "displayStart": 41,
+                    "displayEnd": 51
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 53,
+                    "displayEnd": 56
+                  },
+                  {
+                    "value": "warranty",
+                    "displayStart": 57,
+                    "displayEnd": 65
+                  },
+                  {
+                    "value": "backed",
+                    "displayStart": 66,
+                    "displayEnd": 72
+                  },
+                  {
+                    "value": "refinish",
+                    "displayStart": 73,
+                    "displayEnd": 81
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 82,
+                    "displayEnd": 86
+                  }
+                ]
+              },
+              {
+                "id": "source_block_c95bed97bd3eeb6c",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(3) > h3:nth-of-type(1)",
+                "order": 12,
+                "displayText": "Dent and hail repair",
+                "canonicalTokens": [
+                  {
+                    "value": "dent",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 5,
+                    "displayEnd": 8
+                  },
+                  {
+                    "value": "hail",
+                    "displayStart": 9,
+                    "displayEnd": 13
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 14,
+                    "displayEnd": 20
+                  }
+                ]
+              },
+              {
+                "id": "source_block_fa433a7a91612f99",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#services > div:nth-of-type(1) > article:nth-of-type(3) > p:nth-of-type(1)",
+                "order": 13,
+                "displayText": "Paintless dent repair, hail damage estimates, and before-after photo documentation.",
+                "canonicalTokens": [
+                  {
+                    "value": "paintless",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "dent",
+                    "displayStart": 10,
+                    "displayEnd": 14
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 15,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "hail",
+                    "displayStart": 23,
+                    "displayEnd": 27
+                  },
+                  {
+                    "value": "damage",
+                    "displayStart": 28,
+                    "displayEnd": 34
+                  },
+                  {
+                    "value": "estimates",
+                    "displayStart": 35,
+                    "displayEnd": 44
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 46,
+                    "displayEnd": 49
+                  },
+                  {
+                    "value": "before",
+                    "displayStart": 50,
+                    "displayEnd": 56
+                  },
+                  {
+                    "value": "after",
+                    "displayStart": 57,
+                    "displayEnd": 62
+                  },
+                  {
+                    "value": "photo",
+                    "displayStart": 63,
+                    "displayEnd": 68
+                  },
+                  {
+                    "value": "documentation",
+                    "displayStart": 69,
+                    "displayEnd": 82
+                  }
+                ]
+              },
+              {
+                "id": "source_block_0050fa1b3c083d87",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#proof > h2:nth-of-type(1)",
+                "order": 14,
+                "displayText": "Before and after repair proof",
+                "canonicalTokens": [
+                  {
+                    "value": "before",
+                    "displayStart": 0,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 7,
+                    "displayEnd": 10
+                  },
+                  {
+                    "value": "after",
+                    "displayStart": 11,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 17,
+                    "displayEnd": 23
+                  },
+                  {
+                    "value": "proof",
+                    "displayStart": 24,
+                    "displayEnd": 29
+                  }
+                ]
+              },
+              {
+                "id": "source_block_db57b4b3d76234b9",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > h2:nth-of-type(1)",
+                "order": 15,
+                "displayText": "Insurance claim and estimate process",
+                "canonicalTokens": [
+                  {
+                    "value": "insurance",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "claim",
+                    "displayStart": 10,
+                    "displayEnd": 15
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 16,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 20,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "process",
+                    "displayStart": 29,
+                    "displayEnd": 36
+                  }
+                ]
+              },
+              {
+                "id": "source_block_8574f84d1a40b682",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > ol:nth-of-type(1) > li:nth-of-type(1)",
+                "order": 16,
+                "displayText": "Send photos or stop by for an initial estimate.",
+                "canonicalTokens": [
+                  {
+                    "value": "send",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "photos",
+                    "displayStart": 5,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "or",
+                    "displayStart": 12,
+                    "displayEnd": 14
+                  },
+                  {
+                    "value": "stop",
+                    "displayStart": 15,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "by",
+                    "displayStart": 20,
+                    "displayEnd": 22
+                  },
+                  {
+                    "value": "for",
+                    "displayStart": 23,
+                    "displayEnd": 26
+                  },
+                  {
+                    "value": "an",
+                    "displayStart": 27,
+                    "displayEnd": 29
+                  },
+                  {
+                    "value": "initial",
+                    "displayStart": 30,
+                    "displayEnd": 37
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 38,
+                    "displayEnd": 46
+                  }
+                ]
+              },
+              {
+                "id": "source_block_91375be00052ad7f",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > ol:nth-of-type(1) > li:nth-of-type(2)",
+                "order": 17,
+                "displayText": "We document hidden damage and coordinate supplements with your insurer.",
+                "canonicalTokens": [
+                  {
+                    "value": "we",
+                    "displayStart": 0,
+                    "displayEnd": 2
+                  },
+                  {
+                    "value": "document",
+                    "displayStart": 3,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "hidden",
+                    "displayStart": 12,
+                    "displayEnd": 18
+                  },
+                  {
+                    "value": "damage",
+                    "displayStart": 19,
+                    "displayEnd": 25
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 26,
+                    "displayEnd": 29
+                  },
+                  {
+                    "value": "coordinate",
+                    "displayStart": 30,
+                    "displayEnd": 40
+                  },
+                  {
+                    "value": "supplements",
+                    "displayStart": 41,
+                    "displayEnd": 52
+                  },
+                  {
+                    "value": "with",
+                    "displayStart": 53,
+                    "displayEnd": 57
+                  },
+                  {
+                    "value": "your",
+                    "displayStart": 58,
+                    "displayEnd": 62
+                  },
+                  {
+                    "value": "insurer",
+                    "displayStart": 63,
+                    "displayEnd": 70
+                  }
+                ]
+              },
+              {
+                "id": "source_block_a9ae358b044f67d9",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > ol:nth-of-type(1) > li:nth-of-type(3)",
+                "order": 18,
+                "displayText": "You receive timeline updates, warranty notes, and pickup instructions.",
+                "canonicalTokens": [
+                  {
+                    "value": "you",
+                    "displayStart": 0,
+                    "displayEnd": 3
+                  },
+                  {
+                    "value": "receive",
+                    "displayStart": 4,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "timeline",
+                    "displayStart": 12,
+                    "displayEnd": 20
+                  },
+                  {
+                    "value": "updates",
+                    "displayStart": 21,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "warranty",
+                    "displayStart": 30,
+                    "displayEnd": 38
+                  },
+                  {
+                    "value": "notes",
+                    "displayStart": 39,
+                    "displayEnd": 44
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 46,
+                    "displayEnd": 49
+                  },
+                  {
+                    "value": "pickup",
+                    "displayStart": 50,
+                    "displayEnd": 56
+                  },
+                  {
+                    "value": "instructions",
+                    "displayStart": 57,
+                    "displayEnd": 69
+                  }
+                ]
+              },
+              {
+                "id": "source_block_0bc864359981304d",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#reviews > h2:nth-of-type(1)",
+                "order": 19,
+                "displayText": "Customer reviews",
+                "canonicalTokens": [
+                  {
+                    "value": "customer",
+                    "displayStart": 0,
+                    "displayEnd": 8
+                  },
+                  {
+                    "value": "reviews",
+                    "displayStart": 9,
+                    "displayEnd": 16
+                  }
+                ]
+              },
+              {
+                "id": "source_block_5dafdcd55cd13088",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(1)",
+                "order": 20,
+                "displayText": "\"Clear estimate, great paint match, and regular updates.\"",
+                "canonicalTokens": [
+                  {
+                    "value": "clear",
+                    "displayStart": 1,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 7,
+                    "displayEnd": 15
+                  },
+                  {
+                    "value": "great",
+                    "displayStart": 17,
+                    "displayEnd": 22
+                  },
+                  {
+                    "value": "paint",
+                    "displayStart": 23,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "match",
+                    "displayStart": 29,
+                    "displayEnd": 34
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 36,
+                    "displayEnd": 39
+                  },
+                  {
+                    "value": "regular",
+                    "displayStart": 40,
+                    "displayEnd": 47
+                  },
+                  {
+                    "value": "updates",
+                    "displayStart": 48,
+                    "displayEnd": 55
+                  }
+                ]
+              },
+              {
+                "id": "source_block_30c45262a916ee10",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(2)",
+                "order": 21,
+                "displayText": "\"They helped with the insurance claim and the bumper looks new.\"",
+                "canonicalTokens": [
+                  {
+                    "value": "they",
+                    "displayStart": 1,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "helped",
+                    "displayStart": 6,
+                    "displayEnd": 12
+                  },
+                  {
+                    "value": "with",
+                    "displayStart": 13,
+                    "displayEnd": 17
+                  },
+                  {
+                    "value": "the",
+                    "displayStart": 18,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "insurance",
+                    "displayStart": 22,
+                    "displayEnd": 31
+                  },
+                  {
+                    "value": "claim",
+                    "displayStart": 32,
+                    "displayEnd": 37
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 38,
+                    "displayEnd": 41
+                  },
+                  {
+                    "value": "the",
+                    "displayStart": 42,
+                    "displayEnd": 45
+                  },
+                  {
+                    "value": "bumper",
+                    "displayStart": 46,
+                    "displayEnd": 52
+                  },
+                  {
+                    "value": "looks",
+                    "displayStart": 53,
+                    "displayEnd": 58
+                  },
+                  {
+                    "value": "new",
+                    "displayStart": 59,
+                    "displayEnd": 62
+                  }
+                ]
+              },
+              {
+                "id": "source_block_9828c07dcf67b27b",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(3)",
+                "order": 22,
+                "displayText": "\"Local shop, honest timeline, and the hail repair photos were excellent.\"",
+                "canonicalTokens": [
+                  {
+                    "value": "local",
+                    "displayStart": 1,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "shop",
+                    "displayStart": 7,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "honest",
+                    "displayStart": 13,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "timeline",
+                    "displayStart": 20,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 30,
+                    "displayEnd": 33
+                  },
+                  {
+                    "value": "the",
+                    "displayStart": 34,
+                    "displayEnd": 37
+                  },
+                  {
+                    "value": "hail",
+                    "displayStart": 38,
+                    "displayEnd": 42
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 43,
+                    "displayEnd": 49
+                  },
+                  {
+                    "value": "photos",
+                    "displayStart": 50,
+                    "displayEnd": 56
+                  },
+                  {
+                    "value": "were",
+                    "displayStart": 57,
+                    "displayEnd": 61
+                  },
+                  {
+                    "value": "excellent",
+                    "displayStart": 62,
+                    "displayEnd": 71
+                  }
+                ]
+              },
+              {
+                "id": "source_block_330945a349d81ff5",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#estimate > div:nth-of-type(1) > h2:nth-of-type(1)",
+                "order": 23,
+                "displayText": "Request an estimate",
+                "canonicalTokens": [
+                  {
+                    "value": "request",
+                    "displayStart": 0,
+                    "displayEnd": 7
+                  },
+                  {
+                    "value": "an",
+                    "displayStart": 8,
+                    "displayEnd": 10
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 11,
+                    "displayEnd": 19
+                  }
+                ]
+              },
+              {
+                "id": "source_block_9fb35c4e0f90330b",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#estimate > div:nth-of-type(1) > p:nth-of-type(1)",
+                "order": 24,
+                "displayText": "1201 South Lamar Blvd, Austin, TX 78704",
+                "canonicalTokens": [
+                  {
+                    "value": "1201",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "south",
+                    "displayStart": 5,
+                    "displayEnd": 10
+                  },
+                  {
+                    "value": "lamar",
+                    "displayStart": 11,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "blvd",
+                    "displayStart": 17,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "austin",
+                    "displayStart": 23,
+                    "displayEnd": 29
+                  },
+                  {
+                    "value": "tx",
+                    "displayStart": 31,
+                    "displayEnd": 33
+                  },
+                  {
+                    "value": "78704",
+                    "displayStart": 34,
+                    "displayEnd": 39
+                  }
+                ]
+              },
+              {
+                "id": "source_block_4e796ae297b88a0a",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#estimate > div:nth-of-type(1) > p:nth-of-type(2)",
+                "order": 25,
+                "displayText": "Hours: Monday-Friday 8:00 AM-6:00 PM",
+                "canonicalTokens": [
+                  {
+                    "value": "hours",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "monday",
+                    "displayStart": 7,
+                    "displayEnd": 13
+                  },
+                  {
+                    "value": "friday",
+                    "displayStart": 14,
+                    "displayEnd": 20
+                  },
+                  {
+                    "value": "8",
+                    "displayStart": 21,
+                    "displayEnd": 22
+                  },
+                  {
+                    "value": "00",
+                    "displayStart": 23,
+                    "displayEnd": 25
+                  },
+                  {
+                    "value": "am",
+                    "displayStart": 26,
+                    "displayEnd": 28
+                  },
+                  {
+                    "value": "6",
+                    "displayStart": 29,
+                    "displayEnd": 30
+                  },
+                  {
+                    "value": "00",
+                    "displayStart": 31,
+                    "displayEnd": 33
+                  },
+                  {
+                    "value": "pm",
+                    "displayStart": 34,
+                    "displayEnd": 36
+                  }
+                ]
+              },
+              {
+                "id": "source_block_066d5da9fcfffc04",
+                "sourceUrl": "https://austindentpaint.example/",
+                "sourcePageHash": "5eb2184ff037fd87",
+                "containerId": "section#estimate > div:nth-of-type(1) > p:nth-of-type(3)",
+                "order": 26,
+                "displayText": "Call the Shop",
+                "canonicalTokens": [
+                  {
+                    "value": "call",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "the",
+                    "displayStart": 5,
+                    "displayEnd": 8
+                  },
+                  {
+                    "value": "shop",
+                    "displayStart": 9,
+                    "displayEnd": 13
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "observations": [
+    {
+      "id": "observation_biz_gq5qgs_0a9e9705a65254f430b9",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "categories",
+      "value": "Auto Body Shop",
+      "normalizedValue": "auto body shop",
+      "confidence": 0.7,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_bcbed9a46897ac4bfdc1",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Request A Repair Estimate",
+      "normalizedValue": "request a repair estimate",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_863dd9e0493ff9fdaf65",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Auto Body Repair",
+      "normalizedValue": "auto body repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_416a649b480d6a010e35",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Paintless Dent Repair",
+      "normalizedValue": "paintless dent repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_9307f16374614091b0f0",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Hail Damage Repair",
+      "normalizedValue": "hail damage repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_9d1c088432568b532a51",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Collision Repair",
+      "normalizedValue": "collision repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_bb054feeaa3c3dd82d3d",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Professional Paint Services",
+      "normalizedValue": "professional paint services",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_4083a9d8ed6e28599911",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Dent Repair",
+      "normalizedValue": "dent repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_77430668fe58f0931f0d",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "serviceHighlights",
+      "value": "PDR for smaller dents and hail repair",
+      "normalizedValue": "pdr for smaller dents and hail repair",
+      "confidence": 0.7,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_7aa0b1ff4c73a7e33bd1",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "name",
+      "value": "Austin Dent & Paint",
+      "normalizedValue": "austin dent & paint",
+      "confidence": 0.85,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_4a9a6cb3043cf383fa26",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "description",
+      "value": "Independent Austin auto body shop for collision repair, paint refinishing, dent repair, insurance claims, estimates, and before-after repair proof.",
+      "normalizedValue": "independent austin auto body shop for collision repair, paint refinishing, dent repair, insurance claims, estimates, and before-after repair proof.",
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_c4dc41d50492aadc1ed3",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "phone",
+      "value": "+15125550101",
+      "normalizedValue": "+15125550101",
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_92322f1a906731e493a4",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "address",
+      "value": {
+        "street": "1201 South Lamar Blvd",
+        "city": "Austin",
+        "region": "TX",
+        "postalCode": "78704"
+      },
+      "normalizedValue": {
+        "city": "austin",
+        "postalCode": "78704",
+        "region": "tx",
+        "street": "1201 south lamar blvd"
+      },
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_f5265fadfef84fa5fa41",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "hours",
+      "value": {
+        "hours_1": "Mo-Fr 08:00-18:00"
+      },
+      "normalizedValue": {
+        "hours_1": "mo-fr 08:00-18:00"
+      },
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_70e4c2ad563fb86400bb",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Request A Repair Estimate",
+      "normalizedValue": {
+        "name": "request a repair estimate",
+        "sourceText": "request a repair estimate"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_eaeacbca5940bfeb",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_8a1ead482adf243d3cd8",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Auto Body Repair",
+      "normalizedValue": {
+        "name": "auto body repair",
+        "sourceText": "auto body repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_d3ef6ce80714c5a1",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_fadab0d07d5dabfcbcc0",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Paintless Dent Repair",
+      "normalizedValue": {
+        "name": "paintless dent repair",
+        "sourceText": "paintless dent repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_fa433a7a91612f99",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_f97349918cf1754e85b3",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Hail Damage Repair",
+      "normalizedValue": {
+        "name": "hail damage repair",
+        "sourceText": "hail damage repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_33e680f551fe3aa0c4e0",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Collision Repair",
+      "normalizedValue": {
+        "name": "collision repair",
+        "sourceText": "collision repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_85dd8b4e7209efad",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_a688f89fba5351930d83",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Professional Paint Services",
+      "normalizedValue": {
+        "name": "professional paint services",
+        "sourceText": "professional paint services"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_gq5qgs_grounded_service_3dcc0e5fa45a35d26c6d",
+      "businessId": "biz_gq5qgs",
+      "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+      "field": "services",
+      "value": "Dent Repair",
+      "normalizedValue": {
+        "name": "dent repair",
+        "sourceText": "dent repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_fa433a7a91612f99",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    }
+  ],
+  "generationInputSnapshot": {
+    "schemaVersion": "generation-input-snapshot-v1",
+    "id": "gensnap_site_fixture_austin-dent-paint-rich-media_1_1_2b2aef56a8ac",
+    "businessId": "biz_gq5qgs",
+    "siteId": "site_fixture_austin-dent-paint-rich-media",
+    "businessStateRevision": 1,
+    "siteIntentRevision": 1,
+    "business": {
+      "schemaVersion": "resolved-business-snapshot-v1",
+      "businessId": "biz_gq5qgs",
+      "siteId": "site_fixture_austin-dent-paint-rich-media",
+      "stateRevision": 1,
+      "resolvedAt": "2026-07-16T00:00:00.000Z",
+      "name": "Austin Dent & Paint",
+      "vertical": "auto_body",
+      "categories": [
+        "Auto Body Shop"
+      ],
+      "description": "Independent Austin auto body shop for collision repair, paint refinishing, dent repair, insurance claims, estimates, and before-after repair proof.",
+      "phone": "+15125550101",
+      "address": {
+        "street": "1201 South Lamar Blvd",
+        "city": "Austin",
+        "region": "TX",
+        "postalCode": "78704"
+      },
+      "hours": {
+        "hours_1": "Mo-Fr 08:00-18:00"
+      },
+      "serviceAreas": [],
+      "offerings": [
+        {
+          "id": "offering_biz_gq5qgs_svc-auto-body-repair-estimates_1",
+          "businessId": "biz_gq5qgs",
+          "catalogId": "svc_auto_body_repair-estimates",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_gq5qgs_auto-body-repair_2",
+          "businessId": "biz_gq5qgs",
+          "customName": "Auto Body Repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_gq5qgs_svc-auto-body-dent-repair_3",
+          "businessId": "biz_gq5qgs",
+          "catalogId": "svc_auto_body_dent-repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_gq5qgs_svc-auto-body-hail-damage_4",
+          "businessId": "biz_gq5qgs",
+          "catalogId": "svc_auto_body_hail-damage",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_gq5qgs_svc-auto-body-collision-repair_5",
+          "businessId": "biz_gq5qgs",
+          "catalogId": "svc_auto_body_collision-repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_gq5qgs_svc-auto-body-auto-paint_6",
+          "businessId": "biz_gq5qgs",
+          "catalogId": "svc_auto_body_auto-paint",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        }
+      ],
+      "proof": [
+        {
+          "id": "evidence_testimonial_f03c3f246d790fad",
+          "businessId": "biz_gq5qgs",
+          "kind": "testimonial",
+          "status": "confirmed",
+          "publicText": "Clear estimate, great paint match, and regular updates",
+          "sourceExcerpt": "Clear estimate, great paint match, and regular updates",
+          "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+          "sourceBlockId": "source_block_5dafdcd55cd13088",
+          "evidenceIds": [
+            "evidence_testimonial_f03c3f246d790fad"
+          ],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "evidence_testimonial_176b8585fbf661f2",
+          "businessId": "biz_gq5qgs",
+          "kind": "testimonial",
+          "status": "confirmed",
+          "publicText": "They helped with the insurance claim and the bumper looks new",
+          "sourceExcerpt": "They helped with the insurance claim and the bumper looks new",
+          "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+          "sourceBlockId": "source_block_30c45262a916ee10",
+          "evidenceIds": [
+            "evidence_testimonial_176b8585fbf661f2"
+          ],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "evidence_testimonial_ea79bd46ac5fce60",
+          "businessId": "biz_gq5qgs",
+          "kind": "testimonial",
+          "status": "confirmed",
+          "publicText": "Local shop, honest timeline, and the hail repair photos were excellent",
+          "sourceExcerpt": "Local shop, honest timeline, and the hail repair photos were excellent",
+          "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+          "sourceBlockId": "source_block_9828c07dcf67b27b",
+          "evidenceIds": [
+            "evidence_testimonial_ea79bd46ac5fce60"
+          ],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "evidence_credential_d997f987752b296a",
+          "businessId": "biz_gq5qgs",
+          "kind": "credential",
+          "status": "observed",
+          "publicText": "I-CAR",
+          "sourceExcerpt": "I-CAR trained",
+          "sourceSnapshotId": "source_biz_gq5qgs_website_e7326cf5f9535e17",
+          "sourceBlockId": "source_block_d3ef6ce80714c5a1",
+          "evidenceIds": [
+            "evidence_credential_d997f987752b296a"
+          ],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        }
+      ],
+      "socialLinks": [],
+      "bookingLinks": [],
+      "orderingLinks": [],
+      "pressLinks": [],
+      "provenance": {
+        "categories": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.7,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "serviceHighlights": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.7,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "name": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.85,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "description": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "phone": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "address": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "hours": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "services": {
+          "source": "website",
+          "sourceUrl": "https://austindentpaint.example/",
+          "confidence": 0.9,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        }
+      }
+    },
+    "siteIntent": {
+      "schemaVersion": "site-intent-v1",
+      "id": "intent_site_fixture_austin-dent-paint-rich-media",
+      "siteId": "site_fixture_austin-dent-paint-rich-media",
+      "revision": 1,
+      "primaryConversion": "form",
+      "featuredOfferingIds": [],
+      "offeringPageModes": {},
+      "selectedProofIds": [],
+      "copyOverrides": [],
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "updatedAt": "2026-07-16T00:00:00.000Z"
+    },
+    "assets": [
+      {
+        "id": "asset_fixture_site-fixture-austin-dent-paint-rich-media_hero",
+        "businessId": "biz_gq5qgs",
+        "kind": "photo",
+        "alt": "Technician inspecting a vehicle in a clean independent repair shop",
+        "source": "website_reference",
+        "usageScope": "preclaim_preview",
+        "ownerApproved": false,
+        "metadata": {
+          "contentHash": "a2e386882757a8f1bef24143f3cd702f48b95622484c18ebc8cf1d9da01a2d0a",
+          "storagePath": "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "mimeType": "image/jpeg",
+          "bytes": 383036,
+          "width": 1536,
+          "height": 1024,
+          "analysisV1": {
+            "imageKind": "repair_environment",
+            "warnings": []
+          }
+        },
+        "active": true,
+        "currentRevisionId": "assetrev_3753c637422f70df29d70cfd",
+        "revision": {
+          "schemaVersion": "asset-revision-v1",
+          "id": "assetrev_3753c637422f70df29d70cfd",
+          "assetId": "asset_fixture_site-fixture-austin-dent-paint-rich-media_hero",
+          "businessId": "biz_gq5qgs",
+          "contentHash": "a2e386882757a8f1bef24143f3cd702f48b95622484c18ebc8cf1d9da01a2d0a",
+          "storagePath": "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "publicUrl": "/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "mimeType": "image/jpeg",
+          "bytes": 383036,
+          "width": 1536,
+          "height": 1024,
+          "rightsStatus": "reference_only",
+          "createdAt": "2026-07-16T00:00:00.000Z"
+        },
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "updatedAt": "2026-07-16T00:00:00.000Z"
+      }
+    ],
+    "evidenceManifest": {
+      "schemaVersion": "generation-evidence-manifest-v1",
+      "provenance": {
+        "version": "regenerable-artifact-provenance-v1",
+        "producerId": "compose-generation-evidence-manifest",
+        "producerVersion": "generation-evidence-manifest-v1",
+        "modelId": "deterministic",
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "inputHashes": {
+          "sourcePages": "c73ede8f4e1999f7",
+          "proposals": "96422ccccae09d13"
+        },
+        "stale": false
+      },
+      "items": [
+        {
+          "id": "evidence_testimonial_f03c3f246d790fad",
+          "kind": "testimonial",
+          "sourceExcerpt": "Clear estimate, great paint match, and regular updates",
+          "publicText": "Clear estimate, great paint match, and regular updates",
+          "renderPolicy": "durable_render",
+          "source": {
+            "url": "https://austindentpaint.example/",
+            "pageHash": "5eb2184ff037fd87",
+            "blockId": "source_block_5dafdcd55cd13088",
+            "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(1)",
+            "startToken": 0,
+            "endToken": 8
+          }
+        },
+        {
+          "id": "evidence_testimonial_176b8585fbf661f2",
+          "kind": "testimonial",
+          "sourceExcerpt": "They helped with the insurance claim and the bumper looks new",
+          "publicText": "They helped with the insurance claim and the bumper looks new",
+          "renderPolicy": "durable_render",
+          "source": {
+            "url": "https://austindentpaint.example/",
+            "pageHash": "5eb2184ff037fd87",
+            "blockId": "source_block_30c45262a916ee10",
+            "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(2)",
+            "startToken": 0,
+            "endToken": 11
+          }
+        },
+        {
+          "id": "evidence_testimonial_ea79bd46ac5fce60",
+          "kind": "testimonial",
+          "sourceExcerpt": "Local shop, honest timeline, and the hail repair photos were excellent",
+          "publicText": "Local shop, honest timeline, and the hail repair photos were excellent",
+          "renderPolicy": "durable_render",
+          "source": {
+            "url": "https://austindentpaint.example/",
+            "pageHash": "5eb2184ff037fd87",
+            "blockId": "source_block_9828c07dcf67b27b",
+            "containerId": "section#reviews > div:nth-of-type(1) > blockquote:nth-of-type(3)",
+            "startToken": 0,
+            "endToken": 11
+          }
+        },
+        {
+          "id": "evidence_credential_d997f987752b296a",
+          "kind": "credential",
+          "sourceExcerpt": "I-CAR trained",
+          "publicText": "I-CAR",
+          "renderPolicy": "durable_render",
+          "source": {
+            "url": "https://austindentpaint.example/",
+            "pageHash": "5eb2184ff037fd87",
+            "blockId": "source_block_d3ef6ce80714c5a1",
+            "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(1) > p:nth-of-type(1)",
+            "startToken": 10,
+            "endToken": 13
+          }
+        }
+      ],
+      "rejected": [
+        {
+          "kind": "warranty",
+          "proposedText": "Lifetime paint warranty",
+          "reason": "quote_not_contiguous"
+        }
+      ],
+      "yield": {
+        "proposed": 5,
+        "accepted": 4,
+        "rejected": 1,
+        "acceptanceRate": 0.8,
+        "rejectedByReason": {
+          "quote_not_contiguous": 1
+        },
+        "sourceBlockCount": 27,
+        "sourceSparse": false
+      }
+    },
+    "formDefinition": {
+      "schemaVersion": "form-definition-v1",
+      "name": "Estimate request",
+      "fields": [
+        {
+          "id": "name",
+          "label": "Name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "phone",
+          "label": "Phone",
+          "type": "phone",
+          "required": true
+        },
+        {
+          "id": "details",
+          "label": "Damage details",
+          "type": "textarea",
+          "required": true
+        }
+      ],
+      "submitLabel": "Request an estimate",
+      "id": "form_site_fixture_austin-dent-paint-rich-media_estimate-request",
+      "siteId": "site_fixture_austin-dent-paint-rich-media",
+      "createdAt": "2026-07-16T00:00:00.000Z"
+    },
+    "brandExpression": {
+      "version": "brand-expression-v1",
+      "mood": "technical",
+      "fontPosture": "utility",
+      "voiceRegister": "plainspoken",
+      "paletteSeed": {
+        "strategy": "neutral"
+      },
+      "rationale": "Deterministic bakeoff fixture expression."
+    },
+    "brandAssessment": {
+      "id": "brand_site_fixture_austin-dent-paint-rich-media",
+      "siteId": "site_fixture_austin-dent-paint-rich-media",
+      "confidence": 0.5,
+      "cues": [
+        "Austin Dent & Paint",
+        "Auto Body Shop"
+      ],
+      "colorSignals": [],
+      "typographySignals": [
+        "utility"
+      ],
+      "imageStyleSignals": [],
+      "toneSignals": [
+        "plainspoken"
+      ],
+      "preservationRules": [
+        "Preserve source-backed identity and owner-confirmed claims."
+      ],
+      "sourceNotes": [
+        "Source captured 2026-07-16T00:00:00.000Z from https://austindentpaint.example/."
+      ]
+    },
+    "businessUnderstanding": {
+      "version": "business-understanding-v2",
+      "source": "deterministic_fallback",
+      "vertical": "auto_body",
+      "verticalConfidence": 1,
+      "detectedSubverticals": [],
+      "cleanedServices": [
+        {
+          "name": "Request A Repair Estimate",
+          "sourceText": "Request A Repair Estimate",
+          "confidence": 0.9
+        },
+        {
+          "name": "Auto Body Repair",
+          "sourceText": "Auto Body Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Paintless Dent Repair",
+          "sourceText": "Paintless Dent Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Hail Damage Repair",
+          "sourceText": "Hail Damage Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Collision Repair",
+          "sourceText": "Collision Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Professional Paint Services",
+          "sourceText": "Professional Paint Services",
+          "confidence": 0.9
+        },
+        {
+          "name": "Dent Repair",
+          "sourceText": "Dent Repair",
+          "confidence": 0.9
+        }
+      ],
+      "hours": [
+        {
+          "label": "hours_1",
+          "value": "Mo-Fr 08:00-18:00"
+        }
+      ],
+      "primaryConversionGoal": "form_first",
+      "urgentServiceSignals": [],
+      "brandExpression": {
+        "version": "brand-expression-v1",
+        "mood": "technical",
+        "fontPosture": "utility",
+        "voiceRegister": "plainspoken",
+        "paletteSeed": {
+          "strategy": "neutral"
+        },
+        "rationale": "Deterministic bakeoff fixture expression."
+      },
+      "evidenceProposals": [
+        {
+          "kind": "testimonial",
+          "proposedText": "Clear estimate, great paint match, and regular updates.",
+          "sourceUrl": "https://austindentpaint.example/"
+        },
+        {
+          "kind": "testimonial",
+          "proposedText": "They helped with the insurance claim and the bumper looks new.",
+          "sourceUrl": "https://austindentpaint.example/"
+        },
+        {
+          "kind": "testimonial",
+          "proposedText": "Local shop, honest timeline, and the hail repair photos were excellent.",
+          "sourceUrl": "https://austindentpaint.example/"
+        },
+        {
+          "kind": "credential",
+          "proposedText": "I-CAR trained",
+          "sourceUrl": "https://austindentpaint.example/"
+        },
+        {
+          "kind": "warranty",
+          "proposedText": "Lifetime paint warranty",
+          "sourceUrl": "https://austindentpaint.example/"
+        }
+      ],
+      "factConfidence": [
+        {
+          "field": "name",
+          "confidence": 0.9,
+          "sourceBacked": true
+        },
+        {
+          "field": "services",
+          "confidence": 0.9,
+          "sourceBacked": true
+        }
+      ],
+      "notes": [
+        "Deterministic bakeoff fixture interpretation."
+      ]
+    },
+    "sourceSnapshotIds": [
+      "source_biz_gq5qgs_website_e7326cf5f9535e17"
+    ],
+    "verticalPack": {
+      "id": "auto_body",
+      "version": "auto-body-pack-v1"
+    },
+    "eligibilityMode": "public",
+    "inputHash": "2b2aef56a8accb02edeb7f8f9e6df9f98a5b1eeb062275b078137ea5d3ee3001",
+    "createdAt": "2026-07-16T00:00:00.000Z"
+  }
+}

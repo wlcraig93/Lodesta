@@ -21,7 +21,7 @@ export type SectionTemplateIdV3 =
   | "facts_cta"
   | "stat_band"
   | "eligibility_band"
-  | "service_index"
+  | "auto_body_service_index"
   | "case_study_preview"
   | "comparison_table"
   | "team_story"
@@ -333,7 +333,7 @@ export type EligibilityBandSectionV3 = {
 };
 export type ServiceIndexSectionV3 = {
   version: "visual-section-v3";
-  templateId: "service_index";
+  templateId: "auto_body_service_index";
   options: BaseSectionOptionsV3 & { serviceIndexTreatment?: ServiceIndexTreatmentV3 };
   slots: { intro: CopySlotV3; items: ItemsSlotV3<StandardItemV3>; action?: ActionSlotV3 };
   anchorId?: string;
@@ -771,12 +771,12 @@ function normalizeTemplateOptionsV3(section: VisualSectionV3, violations: Visual
     };
   }
 
-  if (normalized.templateId === "service_index") {
+  if (normalized.templateId === "auto_body_service_index") {
     normalized = {
       ...normalized,
       options: {
         ...normalized.options,
-        serviceIndexTreatment: normalizeOptionalEnumOptionV3(normalized.options.serviceIndexTreatment, serviceIndexTreatmentOptionsV3, "categorized_menu", "service_index_treatment", "ServiceIndex serviceIndexTreatment", violations)
+        serviceIndexTreatment: normalizeOptionalEnumOptionV3(normalized.options.serviceIndexTreatment, serviceIndexTreatmentOptionsV3, "categorized_menu", "auto_body_service_index_treatment", "ServiceIndex serviceIndexTreatment", violations)
       }
     };
   }
@@ -1025,7 +1025,7 @@ function knownTemplateIdV3(value: string): value is SectionTemplateIdV3 {
     value === "facts_strip" ||
     value === "facts_cta" ||
     value === "eligibility_band" ||
-    value === "service_index" ||
+    value === "auto_body_service_index" ||
     value === "case_study_preview" ||
     value === "comparison_table" ||
     value === "team_story" ||

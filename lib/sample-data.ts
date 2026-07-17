@@ -1,9 +1,13 @@
 import type { BusinessProfile, ExtensionModel, PresenceAssessment, SiteAsset, SiteBundle, SiteModel, SiteVersion } from "./models";
-import { composeEvidenceLedger } from "./evidence-ledger";
+import { composeGenerationEvidenceManifestV1 } from "./generation-evidence-manifest";
 import { buildGenerationPlan } from "./vertical-packs";
 import { createFixtureSiteCopy } from "./site-copy";
 import { compileSite } from "./site-compiler";
-import { createBusinessFactGraph } from "./business-fact-graph";
+import { createDefaultSiteIntent, createGenerationInputSnapshot } from "./control-plane";
+import type { CanonicalBusinessStateV1 } from "./control-plane";
+import { autoBodyVerticalPack } from "./vertical-packs";
+import type { ResolvedBusinessSnapshotV1 } from "./control-plane-contracts";
+import type { CanonicalGenerationInputV1 } from "./intake-generation-snapshot";
 
 const observedAt = "2026-07-15T00:00:00.000Z";
 
@@ -67,21 +71,70 @@ export const sampleExtensionModel: ExtensionModel = {
   customBlocks: []
 };
 
-const sampleEvidence = composeEvidenceLedger({ crawl: undefined, proposals: [], createdAt: observedAt });
+const sampleEvidence = composeGenerationEvidenceManifestV1({ crawl: undefined, proposals: [], createdAt: observedAt });
 const sampleAssets: SiteAsset[] = [];
-const samplePlan = buildGenerationPlan({
-  business: sampleBusinessProfile,
-  evidence: sampleEvidence,
-  assets: sampleAssets,
+const sampleResolvedBusiness: ResolvedBusinessSnapshotV1 = {
+  schemaVersion: "resolved-business-snapshot-v1",
+  businessId: "biz_austin_collision_works",
+  siteId: sampleBusinessProfile.siteId,
+  stateRevision: 1,
+  resolvedAt: observedAt,
+  name: sampleBusinessProfile.name,
+  vertical: sampleBusinessProfile.vertical,
+  categories: sampleBusinessProfile.categories,
+  description: sampleBusinessProfile.description,
+  phone: sampleBusinessProfile.phone,
+  email: sampleBusinessProfile.email,
+  address: sampleBusinessProfile.address,
+  hours: sampleBusinessProfile.hours,
+  serviceAreas: sampleBusinessProfile.serviceAreas,
+  offerings: sampleBusinessProfile.services.map((name, index) => ({
+    id: `offering_sample_${index + 1}`,
+    businessId: "biz_austin_collision_works",
+    customName: name,
+    status: "confirmed",
+    visibility: "public",
+    pageMode: "dedicated",
+    featured: index < 3,
+    evidenceIds: [],
+    confirmedBy: "sample",
+    confirmedAt: observedAt,
+    createdAt: observedAt,
+    updatedAt: observedAt
+  })),
+  proof: [],
+  socialLinks: [],
+  bookingLinks: [],
+  orderingLinks: [],
+  pressLinks: [],
+  provenance: sampleBusinessProfile.provenance
+};
+export const sampleGenerationInputSnapshot = createGenerationInputSnapshot({
+  business: sampleResolvedBusiness,
+  siteIntent: createDefaultSiteIntent({ siteId: sampleBusinessProfile.siteId, now: observedAt }),
+  assets: [],
+  evidenceManifest: sampleEvidence,
+  formDefinition: {
+    ...autoBodyVerticalPack.formBlueprint,
+    id: sampleExtensionModel.forms[0].id,
+    siteId: sampleBusinessProfile.siteId,
+    createdAt: observedAt
+  },
+  sourceSnapshotIds: ["source_sample_austin_collision_works"],
+  verticalPack: { id: autoBodyVerticalPack.id, version: autoBodyVerticalPack.version },
+  eligibilityMode: "public",
   createdAt: observedAt
 });
-const sampleCopy = createFixtureSiteCopy(samplePlan, sampleBusinessProfile);
-const sampleVersion = compileSite({
-  business: sampleBusinessProfile,
-  plan: samplePlan,
-  copy: sampleCopy,
+export const sampleGenerationPlan = buildGenerationPlan({
+  snapshot: sampleGenerationInputSnapshot,
   evidence: sampleEvidence,
-  assets: sampleAssets,
+  createdAt: observedAt
+});
+export const sampleSiteCopy = createFixtureSiteCopy(sampleGenerationPlan, sampleGenerationInputSnapshot);
+const sampleVersion = compileSite({
+  snapshot: sampleGenerationInputSnapshot,
+  plan: sampleGenerationPlan,
+  copy: sampleSiteCopy,
   createdAt: observedAt
 });
 sampleVersion.status = "published";
@@ -97,20 +150,67 @@ export const sampleSiteModel: SiteModel = {
 const samplePresenceAssessment: PresenceAssessment = {
   siteId: sampleBusinessProfile.siteId,
   sourceUrl: "https://example.com",
-  evidenceLedger: sampleEvidence,
-  generationPlan: samplePlan,
-  siteCopy: sampleCopy,
+  generationInputSnapshot: sampleGenerationInputSnapshot,
+  evidenceManifest: sampleEvidence,
+  generationPlan: sampleGenerationPlan,
+  siteCopy: sampleSiteCopy,
   assetInventory: sampleAssets,
   technicalNotes: ["Canonical local sample bundle."],
   visualNotes: [],
   brandNotes: [],
   publicPresenceNotes: []
 };
-samplePresenceAssessment.businessFactGraph = createBusinessFactGraph({
-  business: sampleBusinessProfile,
-  presence: samplePresenceAssessment,
-  observedAt
-});
+
+const sampleCanonicalState: CanonicalBusinessStateV1 = {
+  business: {
+    id: sampleResolvedBusiness.businessId,
+    name: sampleResolvedBusiness.name,
+    vertical: sampleResolvedBusiness.vertical,
+    provenance: sampleResolvedBusiness.provenance,
+    createdAt: observedAt,
+    updatedAt: observedAt,
+    stateRevision: sampleResolvedBusiness.stateRevision,
+    description: sampleResolvedBusiness.description,
+    categories: sampleResolvedBusiness.categories
+  },
+  locations: [{
+    id: "location_austin_collision_works",
+    businessId: sampleResolvedBusiness.businessId,
+    label: "Austin",
+    address: sampleResolvedBusiness.address,
+    serviceAreas: sampleResolvedBusiness.serviceAreas,
+    phone: sampleResolvedBusiness.phone,
+    email: sampleResolvedBusiness.email,
+    hours: sampleResolvedBusiness.hours,
+    provenance: sampleResolvedBusiness.provenance,
+    createdAt: observedAt,
+    updatedAt: observedAt
+  }],
+  offerings: sampleResolvedBusiness.offerings,
+  proof: sampleResolvedBusiness.proof,
+  assets: [],
+  assetRevisions: [],
+  socialLinks: [],
+  bookingLinks: [],
+  orderingLinks: [],
+  pressLinks: []
+};
+
+export const sampleCanonicalGenerationInput: CanonicalGenerationInputV1 = {
+  state: sampleCanonicalState,
+  siteIntent: sampleGenerationInputSnapshot.siteIntent,
+  sourceSnapshots: [{
+    id: sampleGenerationInputSnapshot.sourceSnapshotIds[0],
+    businessId: sampleResolvedBusiness.businessId,
+    sourceType: "website",
+    sourceUrl: "https://example.com",
+    contentHash: "sample-austin-collision-works-source-v1",
+    capturedAt: observedAt,
+    payload: { pages: [] }
+  }],
+  observations: [],
+  snapshot: sampleGenerationInputSnapshot
+};
 
 export const sampleSiteBundle: SiteBundle = {
   businessProfile: sampleBusinessProfile,

@@ -10,14 +10,14 @@ This repository currently contains the launch foundation:
 - Standard criteria registry
 - Dynamic public-site renderer
 - Tokenized noindex preview route
-- Intake, audit, forms, analytics, monthly action-list, and experiment APIs
+- URL intake, canonical control-plane, versioned forms, analytics, and experiment APIs
 - Analytics summaries for traffic sources, click-map aggregates, section outcomes, funnels, experiments, Web Vitals, and Standard correlations
 - URL crawler that extracts technical SEO signals and owner-verifiable facts without copying protected site assets into previews
 - Stripe-ready claim checkout flow
 - Cloudflare for SaaS-ready custom-domain flow
 - Supabase Auth-ready owner login/account flow
 - Lead workflow delivery logging with optional Resend email and webhook notifications
-- Review-mode optimization loop with one-click draft edits, QA gate, and explicit publish confirmation
+- Canonical business control plane with deterministic recompilation, objective QA, and immutable published inputs
 - Opt-in experiment runtime for content-neutral sticky CTA, CTA prominence, form length/order, and hero-layout testing
 - Explicit experiment holdout percentage so cohort-level lift can be compared against a persistent control
 - Experiment learning registry that can adopt directional winners into future generation defaults and roll them back
@@ -60,16 +60,16 @@ Open:
 - `http://localhost:4330/dashboard` for the operator dashboard
 - `http://localhost:4330/settings` for operator runtime settings
 - `http://localhost:4330/preview/demo-token` for the pre-claim preview
-- `http://localhost:4330/sites/joes-pizza` for the public rendered site
-- `http://localhost:4330/editor/joes-pizza` for curated owner editing
-- `http://localhost:4330/business/joes-pizza` for owner-truth business facts
-- `http://localhost:4330/analytics/joes-pizza` for first-party analytics
-- `http://localhost:4330/optimization/joes-pizza` for action list and QA
-- `http://localhost:4330/experiments/joes-pizza` for experiment opt-in, rollback, and assignment reporting
-- `http://localhost:4330/claim/joes-pizza` for fact verification and checkout
-- `http://localhost:4330/domains/joes-pizza` for custom-domain connection
-- `http://localhost:4330/leads/joes-pizza` for form submissions and CSV export
-- `http://localhost:4330/versions/joes-pizza` for version history and rollback
+- `http://localhost:4330/sites/austin-collision-works` for the public rendered site
+- `http://localhost:4330/editor/austin-collision-works` for curated owner editing
+- `http://localhost:4330/business/austin-collision-works` for canonical business facts
+- `http://localhost:4330/analytics/austin-collision-works` for first-party analytics
+- `http://localhost:4330/status/austin-collision-works` for managed publish, QA, and evidence status
+- `http://localhost:4330/experiments/austin-collision-works` for experiment opt-in, rollback, and assignment reporting
+- `http://localhost:4330/claim/austin-collision-works` for fact verification and checkout
+- `http://localhost:4330/domains/austin-collision-works` for custom-domain connection
+- `http://localhost:4330/leads/austin-collision-works` for form submissions and CSV export
+- `http://localhost:4330/versions/austin-collision-works` for version history and rollback
 - `http://localhost:4330/auth/login` for owner login
 - `http://localhost:4330/account` for the authenticated owner dashboard
 
@@ -77,23 +77,20 @@ Useful API smoke routes:
 
 - `POST /api/intake`
 - `POST /api/preview-tokens`
-- `GET /api/preview-tokens?siteId=site_joes_pizza`
+- `GET /api/preview-tokens?siteId=site_austin_collision_works`
 - `POST /api/presence/assess`
-- `POST /api/audits/run`
-- `POST /api/qa/run`
-- `POST /api/action-list/apply`
-- `POST /api/action-list/apply-all`
-- `POST /api/action-list/dismiss`
+- `GET /api/control-plane/changes?siteId=site_austin_collision_works`
+- `POST /api/control-plane/changes`
 - `POST /api/forms/submit`
 - `POST /api/analytics`
-- `POST /api/business-profile`
 - `POST /api/experiments/update`
 - `POST /api/experiments/learn`
-- `GET /api/experiments/learn?siteId=site_joes_pizza`
+- `GET /api/experiments/learn?siteId=site_austin_collision_works`
 - `POST /api/experiments/assign`
-- `GET /api/experiments/analyze?siteId=site_joes_pizza`
-- `POST /api/sites/update-section`
-- `GET /api/sites/versions?siteId=site_joes_pizza`
+- `GET /api/experiments/analyze?siteId=site_austin_collision_works`
+- `POST /api/sites/qa`
+- `POST /api/sites/regenerate`
+- `GET /api/sites/versions?siteId=site_austin_collision_works`
 - `POST /api/sites/versions`
 - `POST /api/claim`
 - `POST /api/domains`
@@ -101,8 +98,8 @@ Useful API smoke routes:
 - `POST /api/jobs/process`
 - `GET /api/jobs`
 - `GET /api/sites`
-- `GET /api/inquiries?siteId=site_joes_pizza`
-- `GET /api/inquiries/export?siteId=site_joes_pizza`
+- `GET /api/inquiries?siteId=site_austin_collision_works`
+- `GET /api/inquiries/export?siteId=site_austin_collision_works`
 
 Admin CLI:
 
@@ -113,16 +110,12 @@ LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- list-sites
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-site-from-url https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- import-batch https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza https://dev.lodesta.com/crawl-fixtures/<fixture-token>/menu
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-presence https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-audit site_joes_pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-qa site_joes_pizza published
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- apply-safe-findings site_joes_pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- apply-safe-findings site_joes_pizza qa
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- dismiss-finding site_joes_pizza analytics_engaged_no_action
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-preview site_joes_pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- connect-domain site_joes_pizza www.joespizza.example
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-objective-qa site_austin_collision_works
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- regenerate-site site_austin_collision_works
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-preview site_austin_collision_works
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- connect-domain site_austin_collision_works www.austincollision.example
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- refresh-domain domain_id
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- update-business site_joes_pizza '{"phone":"+15551234567","services":["Pizza","Catering"]}'
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- monthly-action-list site_joes_pizza
+LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- request-control-plane-change site_austin_collision_works '{"kind":"set_contact","phone":"+15125550199"}'
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- schedule-maintenance launch_maintenance
 LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
 ```
@@ -130,7 +123,7 @@ LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
 The CLI calls the same HTTP API as the app. It is intended for operator/admin workflows from Codex, Claude Code, or a terminal.
 If `LODESTA_ADMIN_TOKEN` is set on the server, set the same variable in the CLI environment; the CLI sends it as a bearer token.
 Local Node entry points (`npm run cli`, `npm run worker`, and verification scripts) automatically load `.env` and `.env.local` from the repository root. Shell-provided variables still take precedence.
-The batch-import job generates structured sites and tokenized previews for outbound lists. The monthly action-list job runs the Standard audit, analytics summary, lead count, QA checks, and experiment analysis through the same repository boundary used by the web app. `POST /api/jobs/schedule` or `npm run cli -- schedule-maintenance` is the cron-safe scheduler for queuing monthly action-list jobs across all sites without immediately processing them. Action-list applies stage a draft and return QA status; publishing is a separate confirmed action.
+The batch-import job generates structured sites and tokenized previews for outbound lists. Fresh intake always requires a website URL; optional prompt text is guidance, not a prompt-only generation path. `POST /api/jobs/schedule` or `npm run cli -- schedule-maintenance` is the cron-safe scheduler for recurring maintenance. Business and presentation changes go through the typed control plane; deterministic changes compile and pass objective QA before publication, while structural changes queue one coalesced regeneration from the exact immutable snapshot without recrawling.
 
 ## Deployment Readiness
 
@@ -157,7 +150,7 @@ Optional launch integrations:
 - `LODESTA_CLAIM_CHALLENGE_SECRET` for signed business-contact claim verification challenges
 - `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
 - `LODESTA_WORKER_IDLE_MS` for deployed worker polling idle interval; recommended `1000` ms for the two-replica worker rollout after heartbeat verification
-- `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of ratings, counts, categories, hours, phone, website, and map URL with provenance
+- `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of matched identity, categories, hours, phone, website, location, and place ID with provenance; ratings, counts, and review text are not retained
 - `OPENAI_API_KEY` for business understanding, grounded copy, objective first-party image analysis, and the final screenshot visual judgment; model options are managed at `/settings`
 - `OPENAI_REQUEST_TIMEOUT_MS` for the universal model-call deadline; default is `300000` ms and valid range is `5000` to `600000`
 - `LODESTA_GENERATE_SITE_TIMEOUT_MS` for each `generate_site` attempt and each URL inside `import_batch`; default is `1200000` ms and valid range is `120000` to `1800000`
@@ -210,7 +203,7 @@ Supabase implementation path:
 1. Run `supabase/schema.sql` in the target Supabase project.
 2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for server-side repository access.
 3. Keep `SUPABASE_ANON_KEY` available for the browser/auth layer when the dashboard auth screens are wired.
-4. Create the Supabase Storage bucket `lodesta-assets` for generated image/mockup bytes; keep the `site_assets` registry and each `AssetReference` rights status as the source of truth.
+4. Create the Supabase Storage bucket `lodesta-assets` for retained image bytes; `business_assets` is the mutable registry and immutable `asset_revisions` are the versioned source of truth.
 5. Run `npm run verify:supabase` against that environment. It creates a unique verification site, uploads and removes a probe image in `lodesta-assets`, verifies persistence flows, and deletes verification rows unless `-- --keep` is passed. Use `npm run verify:supabase -- --storage-only` to verify only the storage bucket path.
 6. Keep worker processing behind the same repository methods so Railway web and worker services share one persistence layer.
 
@@ -237,7 +230,7 @@ Operator/admin APIs are open only in local development when `LODESTA_ADMIN_TOKEN
 Claim checkout uses Stripe only when both `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID` are set. Without those variables, the claim API returns an explicit unconfigured checkout object so local demos can continue without live billing.
 Set Stripe's webhook endpoint to `https://YOUR_APP_URL/api/stripe/webhook` and configure `STRIPE_WEBHOOK_SECRET`. The webhook handles `checkout.session.completed` and marks the claim as `claimed`, persisting the Stripe customer, subscription, and checkout session ids.
 Use `npm run verify:stripe-webhook` for local signature/claim-completion verification before testing a live Stripe webhook.
-Verified facts selected during claim update the site's `BusinessProfile.provenance` as owner-confirmed fields, which keeps later schema, optimization, and presence-sync decisions gated on explicit confirmation.
+Verified facts selected during claim update canonical business-state provenance and create a public-eligible immutable snapshot. Publication, schema, forms, and later regeneration remain gated on that snapshot.
 Publishing through `/api/sites/publish` or `/api/sites/versions` is blocked until the site has a completed `claimed` record. A `checkout_required` claim still returns `402 Payment Required`.
 
 Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution uses positive customer-domain lookup and serves only completed `claimed` sites, so pending checkout records do not expose customer domains. Unknown non-platform hostnames receive a bare `404`.

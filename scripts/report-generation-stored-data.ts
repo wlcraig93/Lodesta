@@ -1,91 +1,130 @@
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import {
   isCanonicalStoredCandidate,
-  isCanonicalStoredSite,
-  isCanonicalStoredVersion,
-  schema,
-  versionModel,
+  isCanonicalStoredVersionRow,
   type StoredCandidateProjection,
-  type StoredSiteProjection
+  type StoredVersionProjection
 } from "../lib/generation-stored-state";
 
 const client = getSupabaseAdminClient();
-const candidates: StoredCandidateProjection[] = [];
-const pageSize = 100;
-for (let offset = 0; ; offset += pageSize) {
-  const response = await client
-    .from("site_candidates")
-    .select([
+const preCutoverTables = [
+  "site_candidates",
+  "site_versions",
+  "sites",
+  "businesses",
+  "business_locations",
+  "business_profiles",
+  "site_assets",
+  "forms",
+  "fact_candidates",
+  "business_services",
+  "owner_audit_log",
+  "fact_revisions",
+  "publish_records"
+] as const;
+
+const canonicalSchemaPresent = await columnExists("businesses", "state_revision")
+  && await columnExists("site_candidates", "input_snapshot_id");
+if (!canonicalSchemaPresent) {
+  const counts = Object.fromEntries(await Promise.all(preCutoverTables.map(async (table) => [table, await tableCount(table)])));
+  const cutoverReady = Object.values(counts).every((count) => count === 0);
+  console.log(JSON.stringify({
+    schemaVersion: "canonical-control-plane-stored-data-report-v1",
+    schemaState: "pre_cutover",
+    mutation: "none",
+    generatedAt: new Date().toISOString(),
+    counts,
+    cutoverReady
+  }, null, 2));
+  if (!cutoverReady) process.exitCode = 1;
+} else {
+  await reportCanonicalState();
+}
+
+async function reportCanonicalState() {
+  const [candidateResponse, siteResponse, versionResponse, snapshotResponse, formResponse] = await Promise.all([
+    client.from("site_candidates").select([
       "id",
       "status",
       "candidate_purpose",
-      "versions:bundle_json->siteModel->versions",
-      "plan:bundle_json->presenceAssessment->generationPlan",
-      "copy:bundle_json->presenceAssessment->siteCopy",
-      "evidence:bundle_json->presenceAssessment->evidenceLedger",
-      "trace:bundle_json->presenceAssessment->generationTrace",
-      "judge:bundle_json->presenceAssessment->generationJudge"
-    ].join(","))
-    .order("created_at", { ascending: true })
-    .range(offset, offset + pageSize - 1);
-  if (response.error) throw new Error(`Read site candidate generation shapes: ${response.error.message}`);
-  candidates.push(...((response.data ?? []) as unknown as StoredCandidateProjection[]));
-  if ((response.data?.length ?? 0) < pageSize) break;
+      "input_snapshot_id",
+      "version_model",
+      "form_definition_id",
+      "plan:generation_plan",
+      "copy:site_copy",
+      "evidence:evidence_manifest"
+    ].join(",")),
+    client.from("sites").select("id,slug,status,business_id"),
+    client.from("site_versions").select("id,site_id,input_snapshot_id,form_definition_id,version_model"),
+    client.from("generation_input_snapshots").select("id,site_id,business_state_revision,site_intent_revision,input_hash"),
+    client.from("form_definitions").select("id,site_id")
+  ]);
+  for (const [label, response] of [
+    ["site candidates", candidateResponse],
+    ["sites", siteResponse],
+    ["site versions", versionResponse],
+    ["generation input snapshots", snapshotResponse],
+    ["form definitions", formResponse]
+  ] as const) {
+    if (response.error) throw new Error(`Read ${label}: ${response.error.message}`);
+  }
+
+  const candidates = (candidateResponse.data ?? []) as unknown as StoredCandidateProjection[];
+  const versions = (versionResponse.data ?? []) as unknown as StoredVersionProjection[];
+  const invalidCandidates = candidates.filter((candidate) => !isCanonicalStoredCandidate(candidate));
+  const invalidVersions = versions.filter((version) => !isCanonicalStoredVersionRow(version));
+  const snapshotIds = new Set((snapshotResponse.data ?? []).map((row) => row.id));
+  const formIds = new Set((formResponse.data ?? []).map((row) => row.id));
+  const danglingCandidates = candidates.filter(
+    (candidate) => !snapshotIds.has(candidate.input_snapshot_id ?? "") || !formIds.has(candidate.form_definition_id ?? "")
+  );
+  const danglingVersions = versions.filter(
+    (version) => !snapshotIds.has(version.input_snapshot_id ?? "") || !formIds.has(version.form_definition_id ?? "")
+  );
+  const cutoverReady = invalidCandidates.length === 0
+    && invalidVersions.length === 0
+    && danglingCandidates.length === 0
+    && danglingVersions.length === 0;
+
+  console.log(JSON.stringify({
+    schemaVersion: "canonical-control-plane-stored-data-report-v1",
+    schemaState: "canonical",
+    mutation: "none",
+    generatedAt: new Date().toISOString(),
+    sites: { total: siteResponse.data?.length ?? 0 },
+    siteCandidates: {
+      total: candidates.length,
+      canonical: candidates.length - invalidCandidates.length,
+      invalidIds: invalidCandidates.map((candidate) => candidate.id),
+      danglingReferenceIds: danglingCandidates.map((candidate) => candidate.id)
+    },
+    siteVersions: {
+      total: versions.length,
+      canonical: versions.length - invalidVersions.length,
+      invalidIds: invalidVersions.map((version) => version.id),
+      danglingReferenceIds: danglingVersions.map((version) => version.id)
+    },
+    generationInputSnapshots: snapshotResponse.data?.length ?? 0,
+    formDefinitions: formResponse.data?.length ?? 0,
+    cutoverReady
+  }, null, 2));
+  if (!cutoverReady) process.exitCode = 1;
 }
 
-const storedVersionsResponse = await client.from("site_versions").select("id,site_id,version_model");
-if (storedVersionsResponse.error) throw new Error(`Read stored site versions: ${storedVersionsResponse.error.message}`);
-const sitesResponse = await client.from("sites").select("id,slug,status,site_model,presence_assessment");
-if (sitesResponse.error) throw new Error(`Read sites: ${sitesResponse.error.message}`);
+async function tableCount(table: string) {
+  const response = await client.from(table).select("id", { count: "exact" }).limit(1);
+  if (!response.error) return response.count ?? 0;
+  if (missingRelation(response.error.message)) return 0;
+  throw new Error(`Count ${table}: ${response.error.message}`);
+}
 
-const sites = (sitesResponse.data ?? []) as unknown as StoredSiteProjection[];
-const canonicalCandidates = candidates.filter(isCanonicalStoredCandidate);
-const preCutoverCandidates = candidates.filter((candidate) => !isCanonicalStoredCandidate(candidate));
-const canonicalSites = sites.filter(isCanonicalStoredSite);
-const preCutoverSites = sites.filter((site) => !isCanonicalStoredSite(site));
-const storedVersions = storedVersionsResponse.data ?? [];
-const noncanonicalStoredVersions = storedVersions.filter((row) => !isCanonicalStoredVersion(versionModel(row)));
-const report = {
-  schemaVersion: "generation-stored-data-report-v2",
-  mutation: "none",
-  generatedAt: new Date().toISOString(),
-  sites: {
-    total: sites.length,
-    canonical: canonicalSites.length,
-    preCutover: preCutoverSites.length,
-    preCutoverIds: preCutoverSites.map((site) => site.id),
-    nonDraftPreCutover: preCutoverSites.filter((site) => site.status !== "draft").length
-  },
-  siteCandidates: {
-    total: candidates.length,
-    canonical: canonicalCandidates.length,
-    preCutover: preCutoverCandidates.length,
-    preCutoverIds: preCutoverCandidates.map((candidate) => candidate.id),
-    acceptedPreCutover: preCutoverCandidates.filter((candidate) => candidate.status === "accepted").length,
-    byStatus: countBy(candidates.map((candidate) => candidate.status)),
-    byPurpose: countBy(candidates.map((candidate) => candidate.candidate_purpose ?? "customer_prospect")),
-    canonicalContractCoverage: {
-      generationPlan: candidates.filter((candidate) => schema(candidate.plan) === "generation-plan-v1").length,
-      siteCopy: candidates.filter((candidate) => schema(candidate.copy) === "site-copy-v1").length,
-      evidenceLedger: candidates.filter((candidate) => schema(candidate.evidence) === "evidence-ledger-v1").length,
-      generationTrace: candidates.filter((candidate) => schema(candidate.trace) === "generation-pipeline-trace-v1").length,
-      generationJudge: candidates.filter((candidate) => schema(candidate.judge) === "generation-judge-v1").length
-    }
-  },
-  storedSiteVersions: {
-    total: storedVersions.length,
-    canonical: storedVersions.length - noncanonicalStoredVersions.length,
-    noncanonical: noncanonicalStoredVersions.length,
-    noncanonicalIds: noncanonicalStoredVersions.map((row) => row.id)
-  },
-  operatorAction: preCutoverCandidates.length || preCutoverSites.length || noncanonicalStoredVersions.length
-    ? "Delete pre-cutover test candidates/sites/versions or regenerate them canonically before cutover."
-    : "No stored generation cleanup is required.",
-  cutoverReady: preCutoverCandidates.length === 0 && preCutoverSites.length === 0 && noncanonicalStoredVersions.length === 0
-};
+async function columnExists(table: string, column: string) {
+  const response = await client.from(table).select(column).limit(1);
+  if (!response.error) return true;
+  if (missingRelation(response.error.message) || /column .* does not exist/i.test(response.error.message)) return false;
+  throw new Error(`Inspect ${table}.${column}: ${response.error.message}`);
+}
 
-console.log(JSON.stringify(report, null, 2));
-
-function countBy(values: string[]) {
-  return Object.fromEntries([...new Set(values)].sort().map((value) => [value, values.filter((candidate) => candidate === value).length]));
+function missingRelation(message: string) {
+  return /does not exist|schema cache|could not find the table/i.test(message);
 }

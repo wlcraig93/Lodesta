@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readLocalAsset } from "@/lib/asset-storage";
+import { readStoredAsset } from "@/lib/asset-storage";
 import { isPublicLocalAssetPath } from "@/lib/public-assets";
 import { repository } from "@/lib/repository";
 import { isScrapedAssetFile } from "@/lib/scraped-media";
@@ -17,9 +17,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ site
     // and scraped reference media never becomes publicly reachable here.
     const unauthorized = await requireAdmin(request);
     if (unauthorized) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-    const candidateAsset = await readLocalAsset(storagePath);
+    const candidateAsset = await readStoredAsset(storagePath);
     if (!candidateAsset) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-    return new Response(candidateAsset.bytes, {
+    return new Response(new Uint8Array(candidateAsset.bytes), {
       headers: {
         "Content-Type": candidateAsset.mimeType,
         "Cache-Control": "private, max-age=3600"
@@ -43,9 +43,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ site
   } else if (!publicLocalAsset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
-  const asset = await readLocalAsset(storagePath);
+  const asset = await readStoredAsset(storagePath);
   if (!asset) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-  return new Response(asset.bytes, {
+  return new Response(new Uint8Array(asset.bytes), {
     headers: {
       "Content-Type": asset.mimeType,
       "Cache-Control": publicLocalAsset ? "public, max-age=31536000, immutable" : "private, max-age=3600"

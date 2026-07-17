@@ -2,43 +2,41 @@ export type StoredCandidateProjection = {
   id: string;
   status: string;
   candidate_purpose: string;
-  versions: unknown;
+  input_snapshot_id: string | null;
+  version_model: unknown;
+  form_definition_id: string | null;
   plan: unknown;
   copy: unknown;
   evidence: unknown;
-  trace: unknown;
-  judge: unknown;
 };
 
-export type StoredSiteProjection = {
+export type StoredVersionProjection = {
   id: string;
-  slug: string;
-  status: string;
-  site_model: unknown;
-  presence_assessment: unknown;
+  site_id: string;
+  input_snapshot_id: string | null;
+  form_definition_id: string | null;
+  version_model: unknown;
 };
 
 export function isCanonicalStoredCandidate(candidate: StoredCandidateProjection) {
-  return schema(candidate.plan) === "generation-plan-v1"
+  const version = versionModel(candidate);
+  return Boolean(candidate.input_snapshot_id)
+    && Boolean(candidate.form_definition_id)
+    && version.inputSnapshotId === candidate.input_snapshot_id
+    && version.formDefinitionId === candidate.form_definition_id
+    && schema(candidate.plan) === "generation-plan-v1"
     && schema(candidate.copy) === "site-copy-v1"
-    && schema(candidate.evidence) === "evidence-ledger-v1"
-    && schema(candidate.trace) === "generation-pipeline-trace-v1"
-    && schema(candidate.judge) === "generation-judge-v1"
-    && storedCandidateVersions(candidate).length > 0
-    && storedCandidateVersions(candidate).every(isCanonicalStoredVersion);
+    && schema(candidate.evidence) === "generation-evidence-manifest-v1"
+    && isCanonicalStoredVersion(version);
 }
 
-export function isCanonicalStoredSite(site: StoredSiteProjection) {
-  const assessment = record(site.presence_assessment);
-  const siteModel = record(site.site_model);
-  const versions = Array.isArray(siteModel?.versions) ? siteModel.versions.filter(isRecord) : [];
-  return schema(assessment?.generationPlan) === "generation-plan-v1"
-    && schema(assessment?.siteCopy) === "site-copy-v1"
-    && schema(assessment?.evidenceLedger) === "evidence-ledger-v1"
-    && schema(assessment?.generationTrace) === "generation-pipeline-trace-v1"
-    && schema(assessment?.generationJudge) === "generation-judge-v1"
-    && versions.length > 0
-    && versions.every(isCanonicalStoredVersion);
+export function isCanonicalStoredVersionRow(row: StoredVersionProjection) {
+  const version = versionModel(row);
+  return Boolean(row.input_snapshot_id)
+    && Boolean(row.form_definition_id)
+    && version.inputSnapshotId === row.input_snapshot_id
+    && version.formDefinitionId === row.form_definition_id
+    && isCanonicalStoredVersion(version);
 }
 
 export function isCanonicalStoredVersion(version: Record<string, unknown>) {
@@ -47,10 +45,6 @@ export function isCanonicalStoredVersion(version: Record<string, unknown>) {
     && version.designSchemaVersion === "design-v3"
     && isRecord(version.pageComposition)
     && qa?.schemaVersion === "canonical-generation-qa-v1";
-}
-
-export function storedCandidateVersions(candidate: StoredCandidateProjection) {
-  return Array.isArray(candidate.versions) ? candidate.versions.filter(isRecord) : [];
 }
 
 export function versionModel(row: { version_model: unknown }) {

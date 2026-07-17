@@ -25,11 +25,9 @@ type ProfileSnapshot = {
 const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export function OwnerFactsReview({
-  profile,
-  saveUrl = "/api/business-profile"
+  profile
 }: {
   profile: ProfileSnapshot;
-  saveUrl?: string;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<FactCardId | null>(null);
@@ -56,19 +54,21 @@ export function OwnerFactsReview({
   const [socialLinks, setSocialLinks] = useState(profile.socialLinks.join(", "));
   const [pressLinks, setPressLinks] = useState(profile.pressLinks.join(", "));
 
-  async function save(card: FactCardId, payload: Record<string, unknown>) {
+  async function save(card: FactCardId, payloads: Array<Record<string, unknown>>) {
     setBusy(card);
     setError(null);
     try {
-      const response = await fetch(saveUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ siteId: profile.siteId, ...payload })
-      });
-      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) {
-        setError({ card, message: result.error ?? "We couldn't save that. Try again." });
-        return;
+      for (const payload of payloads) {
+        const response = await fetch("/api/control-plane/changes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ siteId: profile.siteId, payload })
+        });
+        const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!response.ok || !result.ok) {
+          setError({ card, message: result.error ?? "We couldn't save that. Try again." });
+          return;
+        }
       }
       setEditing(null);
       router.refresh();
@@ -79,19 +79,22 @@ export function OwnerFactsReview({
     }
   }
 
-  function payloadFor(card: FactCardId): Record<string, unknown> {
-    if (card === "phone") return { phone };
-    if (card === "email") return { email };
-    if (card === "address") return { address };
-    if (card === "hours") return { hours };
-    if (card === "serviceAreas") return { serviceAreas: splitList(serviceAreas) };
-    if (card === "proof") return { credentials: splitList(credentials), offers: splitList(offers) };
-    return {
-      bookingLinks: splitList(bookingLinks),
-      orderingLinks: splitList(orderingLinks),
-      socialLinks: splitList(socialLinks),
-      pressLinks: splitList(pressLinks)
-    };
+  function payloadFor(card: FactCardId): Array<Record<string, unknown>> {
+    if (card === "phone") return [{ kind: "set_contact", phone }];
+    if (card === "email") return [{ kind: "set_contact", email }];
+    if (card === "address") return [{ kind: "set_location", address }];
+    if (card === "hours") return [{ kind: "set_hours", hours: cleanHours(hours) }];
+    if (card === "serviceAreas") return [{ kind: "set_location", serviceAreas: splitList(serviceAreas) }];
+    if (card === "proof") {
+      return [
+        ...splitList(credentials).map((publicText) => ({ kind: "register_proof", proofKind: "credential", publicText })),
+        ...splitList(offers).map((publicText) => ({ kind: "register_proof", proofKind: "offer", publicText }))
+      ];
+    }
+    return linkChanges("booking", profile.bookingLinks, splitList(bookingLinks))
+      .concat(linkChanges("ordering", profile.orderingLinks, splitList(orderingLinks)))
+      .concat(linkChanges("social", profile.socialLinks, splitList(socialLinks)))
+      .concat(linkChanges("press", profile.pressLinks, splitList(pressLinks)));
   }
 
   function factCard(input: {
@@ -338,4 +341,17 @@ function splitList(value: string) {
     .split(/[\n,]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function cleanHours(hours: Record<string, string>) {
+  return Object.fromEntries(Object.entries(hours).filter(([, value]) => value.trim()).map(([day, value]) => [day, value.trim()]));
+}
+
+function linkChanges(linkType: "booking" | "ordering" | "social" | "press", previous: string[], next: string[]) {
+  const previousSet = new Set(previous);
+  const nextSet = new Set(next);
+  return [
+    ...next.filter((url) => !previousSet.has(url)).map((url) => ({ kind: "set_external_link", linkType, url, enabled: true })),
+    ...previous.filter((url) => !nextSet.has(url)).map((url) => ({ kind: "set_external_link", linkType, url, enabled: false }))
+  ];
 }

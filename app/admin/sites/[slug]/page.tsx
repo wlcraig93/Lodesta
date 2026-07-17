@@ -9,6 +9,7 @@ import {
   workspaceHref
 } from "@/components/admin/AdminSiteWorkspaceShell";
 import { CurrentWebsiteReportPanel } from "@/components/admin/CurrentWebsiteReportPanel";
+import { ControlPlaneChangeReview } from "@/components/admin/ControlPlaneChangeReview";
 import { GeneratedSiteQaPanel } from "@/components/admin/GeneratedSiteQaPanel";
 import { SiteVersionsPanel } from "@/components/SiteVersionsPanel";
 import { requireAdminPageAccess } from "@/lib/page-access";
@@ -55,14 +56,16 @@ export default async function AdminSiteWorkspacePage({
   const selectedVersion = selectedVersionForView(bundle, view, query.versionId);
   if (!selectedVersion) notFound();
 
-  const [previewTokens, runsResult] = await Promise.all([
+  const [previewTokens, runsResult, controlPlane, controlPlaneChanges] = await Promise.all([
     repository.listPreviewTokens(bundle.businessProfile.siteId),
     repository.listAgentRuns({
       runType: "site_generation",
       targetType: "site",
       targetId: bundle.businessProfile.siteId,
       limit: view === "runs" ? 25 : 5
-    })
+    }),
+    repository.getCanonicalControlPlane(bundle.businessProfile.siteId),
+    repository.listControlPlaneChangeRequests(bundle.businessProfile.siteId)
   ]);
   const previewToken = previewTokens[0];
   const latestRun = runsResult.runs[0];
@@ -80,7 +83,9 @@ export default async function AdminSiteWorkspacePage({
         bundle,
         view,
         selectedVersion,
-        runs: runsResult.runs
+        runs: runsResult.runs,
+        controlPlane,
+        controlPlaneChanges
       })}
     </AdminSiteWorkspaceShell>
   );
@@ -91,6 +96,8 @@ async function renderWorkspaceView(input: {
   view: AdminSiteWorkspaceView;
   selectedVersion: SiteVersion;
   runs: AgentRunRecord[];
+  controlPlane: Awaited<ReturnType<typeof repository.getCanonicalControlPlane>>;
+  controlPlaneChanges: Awaited<ReturnType<typeof repository.listControlPlaneChangeRequests>>;
 }) {
   switch (input.view) {
     case "report":
@@ -129,6 +136,8 @@ async function renderWorkspaceView(input: {
           bundle={input.bundle}
           selectedVersion={input.selectedVersion}
           latestRun={input.runs[0]}
+          controlPlane={input.controlPlane}
+          controlPlaneChanges={input.controlPlaneChanges}
         />
       );
   }
@@ -137,16 +146,18 @@ async function renderWorkspaceView(input: {
 function OverviewPanel({
   bundle,
   selectedVersion,
-  latestRun
+  latestRun,
+  controlPlane,
+  controlPlaneChanges
 }: {
   bundle: SiteBundle;
   selectedVersion: SiteVersion;
   latestRun?: AgentRunRecord;
+  controlPlane: Awaited<ReturnType<typeof repository.getCanonicalControlPlane>>;
+  controlPlaneChanges: Awaited<ReturnType<typeof repository.listControlPlaneChangeRequests>>;
 }) {
   const sourceEvaluation = bundle.presenceAssessment.standardEvaluation;
-  const pendingEvidence = bundle.presenceAssessment.evidenceLedger?.items.filter(
-    (item) => item.renderPolicy !== "durable_render" && !item.confirmation
-  ).length ?? 0;
+  const pendingEvidence = controlPlane?.state.proof.filter((item) => item.status === "observed").length ?? 0;
   const draftVersion = getEditingVersion(bundle.siteModel);
   const sourceScore = sourceEvaluation ? `${sourceEvaluation.score.percent}/100` : "Not scored";
   const previewReadiness = getEffectiveGenerationQaReadiness(bundle, selectedVersion);
@@ -228,6 +239,7 @@ function OverviewPanel({
           </div>
         </aside>
       </div>
+      <ControlPlaneChangeReview siteId={bundle.businessProfile.siteId} initialChanges={controlPlaneChanges} />
     </div>
   );
 }

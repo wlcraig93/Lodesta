@@ -1,0 +1,2047 @@
+{
+  "schemaVersion": "templated-generation-baseline-v1",
+  "fixtureId": "east-austin-collision-sparse",
+  "generator": "lodesta-canonical-templated-v1",
+  "inputSnapshotId": "gensnap_site_fixture_east-austin-collision-sparse_1_1_0ee420f83bbf",
+  "inputHash": "0ee420f83bbf9d7dda7dda49e426d4a5d0617c5862c79f84aefd9866ab386a87",
+  "output": {
+    "plan": {
+      "schemaVersion": "generation-plan-v1",
+      "provenance": {
+        "version": "regenerable-artifact-provenance-v1",
+        "producerId": "build-generation-plan",
+        "producerVersion": "generation-plan-v1",
+        "modelId": "deterministic",
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "inputHashes": {
+          "inputSnapshotId": "efb1173ae0c67d33",
+          "evidence": "d73259e53bd1086a",
+          "assets": "4f53cda18c2baa0c",
+          "verticalPack": "6aa8e5f791d1b6c1",
+          "designSystem": "25586e1e6f5d95ee"
+        },
+        "stale": false
+      },
+      "verticalPack": {
+        "id": "auto_body",
+        "version": "auto-body-pack-v1"
+      },
+      "designSystem": "trusted_local_service",
+      "brandTokens": {
+        "paletteName": "trusted-local",
+        "colors": {
+          "background": "#f7f7f4",
+          "surface": "#ffffff",
+          "text": "#1c1c1a",
+          "muted": "#62625d",
+          "primary": "#174c3c",
+          "primaryText": "#ffffff",
+          "accent": "#cda862",
+          "border": "#d8d8d1"
+        },
+        "typography": {
+          "heading": "Arial, sans-serif",
+          "body": "Arial, sans-serif"
+        },
+        "radius": "sm",
+        "density": "standard",
+        "mood": "utilitarian"
+      },
+      "navigation": {
+        "items": [
+          {
+            "label": "Collision Repair",
+            "target": "/services/collision-repair",
+            "kind": "page"
+          },
+          {
+            "label": "Bumper Repair",
+            "target": "/services/bumper-repair",
+            "kind": "page"
+          }
+        ],
+        "primaryCta": {
+          "label": "Request an estimate",
+          "target": "#contact"
+        }
+      },
+      "pages": [
+        {
+          "id": "home",
+          "slug": "",
+          "purpose": "homepage",
+          "title": "East Austin Collision",
+          "sections": [
+            {
+              "id": "home.hero",
+              "templateId": "hero_statement",
+              "copySlots": [
+                {
+                  "slotId": "home.hero.eyebrow",
+                  "role": "eyebrow",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.hero.heading",
+                  "role": "heading",
+                  "maxCharacters": 72,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.hero.body",
+                  "role": "body",
+                  "maxCharacters": 220,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "home.process",
+              "templateId": "numbered_steps",
+              "copySlots": [
+                {
+                  "slotId": "home.process.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.body",
+                  "role": "body",
+                  "maxCharacters": 180,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.0.title",
+                  "role": "item_title",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.0.body",
+                  "role": "item_body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.1.title",
+                  "role": "item_title",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.1.body",
+                  "role": "item_body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.2.title",
+                  "role": "item_title",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.2.body",
+                  "role": "item_body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.3.title",
+                  "role": "item_title",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.process.3.body",
+                  "role": "item_body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "home.faq",
+              "templateId": "faq_list",
+              "copySlots": [
+                {
+                  "slotId": "home.faq.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.body",
+                  "role": "body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.0.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.0.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.1.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.1.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.2.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.2.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.3.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.faq.3.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "home.contact",
+              "templateId": "contact_split",
+              "copySlots": [
+                {
+                  "slotId": "home.contact.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "home.contact.body",
+                  "role": "body",
+                  "maxCharacters": 180,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            }
+          ]
+        },
+        {
+          "id": "service-1",
+          "slug": "services/collision-repair",
+          "purpose": "service_landing",
+          "title": "Collision Repair",
+          "sections": [
+            {
+              "id": "service-1.hero",
+              "templateId": "hero_statement",
+              "copySlots": [
+                {
+                  "slotId": "service-1.hero.eyebrow",
+                  "role": "eyebrow",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.hero.heading",
+                  "role": "heading",
+                  "maxCharacters": 72,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.hero.body",
+                  "role": "body",
+                  "maxCharacters": 220,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-1.detail",
+              "templateId": "side_intro_rows",
+              "copySlots": [
+                {
+                  "slotId": "service-1.detail.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.body",
+                  "role": "body",
+                  "maxCharacters": 220,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.0.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.0.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.1.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.1.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.2.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.2.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.3.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.detail.3.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-1.faq",
+              "templateId": "faq_list",
+              "copySlots": [
+                {
+                  "slotId": "service-1.faq.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.body",
+                  "role": "body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.0.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.0.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.1.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.1.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.2.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.2.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.3.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.faq.3.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-1.contact",
+              "templateId": "contact_split",
+              "copySlots": [
+                {
+                  "slotId": "service-1.contact.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-1.contact.body",
+                  "role": "body",
+                  "maxCharacters": 180,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            }
+          ]
+        },
+        {
+          "id": "service-2",
+          "slug": "services/bumper-repair",
+          "purpose": "service_landing",
+          "title": "Bumper Repair",
+          "sections": [
+            {
+              "id": "service-2.hero",
+              "templateId": "hero_statement",
+              "copySlots": [
+                {
+                  "slotId": "service-2.hero.eyebrow",
+                  "role": "eyebrow",
+                  "maxCharacters": 48,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.hero.heading",
+                  "role": "heading",
+                  "maxCharacters": 72,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.hero.body",
+                  "role": "body",
+                  "maxCharacters": 220,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-2.detail",
+              "templateId": "side_intro_rows",
+              "copySlots": [
+                {
+                  "slotId": "service-2.detail.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.body",
+                  "role": "body",
+                  "maxCharacters": 220,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.0.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.0.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.1.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.1.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.2.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.2.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.3.title",
+                  "role": "item_title",
+                  "maxCharacters": 54,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.detail.3.body",
+                  "role": "item_body",
+                  "maxCharacters": 170,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-2.faq",
+              "templateId": "faq_list",
+              "copySlots": [
+                {
+                  "slotId": "service-2.faq.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.body",
+                  "role": "body",
+                  "maxCharacters": 140,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.0.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.0.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.1.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.1.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.2.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.2.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.3.question",
+                  "role": "question",
+                  "maxCharacters": 90,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.faq.3.answer",
+                  "role": "answer",
+                  "maxCharacters": 240,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            },
+            {
+              "id": "service-2.contact",
+              "templateId": "contact_split",
+              "copySlots": [
+                {
+                  "slotId": "service-2.contact.heading",
+                  "role": "heading",
+                  "maxCharacters": 64,
+                  "allowedEvidence": []
+                },
+                {
+                  "slotId": "service-2.contact.body",
+                  "role": "body",
+                  "maxCharacters": 180,
+                  "allowedEvidence": []
+                }
+              ],
+              "evidenceIds": []
+            }
+          ]
+        }
+      ],
+      "formId": "form_site_fixture_east-austin-collision-sparse_estimate-request"
+    },
+    "copy": {
+      "schemaVersion": "site-copy-v1",
+      "provenance": {
+        "version": "regenerable-artifact-provenance-v1",
+        "producerId": "create-fixture-site-copy",
+        "producerVersion": "site-copy-v1",
+        "modelId": "deterministic",
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "inputHashes": {
+          "plan": "bd802343dbf92311",
+          "inputSnapshotId": "efb1173ae0c67d33"
+        },
+        "stale": false
+      },
+      "slots": [
+        {
+          "slotId": "home.hero.eyebrow",
+          "value": "East Austin Collision",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.hero.heading",
+          "value": "East Austin Collision",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.hero.body",
+          "value": "East Austin Collision provides collision repair, bumper repair with a clear next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.heading",
+          "value": "What to expect",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.body",
+          "value": "A clear sequence keeps decisions and expectations visible from first contact through completion.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.0.title",
+          "value": "Share the damage",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.0.body",
+          "value": "Send photos or arrange an inspection.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.1.title",
+          "value": "Review the estimate",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.1.body",
+          "value": "Review the documented damage and proposed work.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.2.title",
+          "value": "Approve the repair plan",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.2.body",
+          "value": "Confirm the repair scope before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.3.title",
+          "value": "Inspect and pick up",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.process.3.body",
+          "value": "Review the finished repair and pickup details.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.heading",
+          "value": "Questions before you get started",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.body",
+          "value": "Direct answers about preparation, options, timing, and next steps.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.0.question",
+          "value": "How do I get started?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.0.answer",
+          "value": "Contact the business with the available details so it can recommend the next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.1.question",
+          "value": "What information should I provide?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.1.answer",
+          "value": "Share the relevant context and ask what else is needed before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.2.question",
+          "value": "What determines timing?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.2.answer",
+          "value": "Timing depends on the service, availability, and the final scope.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.3.question",
+          "value": "How will I know the next step?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.faq.3.answer",
+          "value": "Confirm the communication and completion process before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.contact.heading",
+          "value": "Request an estimate",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "home.contact.body",
+          "value": "Call +15125550132 or send the relevant details to discuss the next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.hero.eyebrow",
+          "value": "East Austin Collision service",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.hero.heading",
+          "value": "Collision Repair from East Austin Collision",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.hero.body",
+          "value": "Learn what to expect and how to take the next step for collision repair at East Austin Collision.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.heading",
+          "value": "What collision repair may include",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.body",
+          "value": "The business reviews the request before confirming the work needed for collision repair.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.0.title",
+          "value": "Review the need",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.0.body",
+          "value": "The first review identifies the relevant needs and constraints.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.1.title",
+          "value": "Confirm the scope",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.1.body",
+          "value": "The business explains the proposed work and approval path.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.2.title",
+          "value": "Complete the work",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.2.body",
+          "value": "The completed work is reviewed before the final handoff.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.3.title",
+          "value": "Plan the next step",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.detail.3.body",
+          "value": "Questions can be resolved before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.heading",
+          "value": "Collision Repair questions",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.body",
+          "value": "Direct answers about preparation, options, timing, and next steps.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.0.question",
+          "value": "How do I get started?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.0.answer",
+          "value": "Contact the business with the available details so it can recommend the next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.1.question",
+          "value": "What information should I provide?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.1.answer",
+          "value": "Share the relevant context and ask what else is needed before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.2.question",
+          "value": "What determines timing?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.2.answer",
+          "value": "Timing depends on the service, availability, and the final scope.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.3.question",
+          "value": "How will I know the next step?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.faq.3.answer",
+          "value": "Confirm the communication and completion process before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.contact.heading",
+          "value": "Ask about collision repair",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-1.contact.body",
+          "value": "Call +15125550132 or send the relevant details to discuss the next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.hero.eyebrow",
+          "value": "East Austin Collision service",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.hero.heading",
+          "value": "Bumper Repair from East Austin Collision",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.hero.body",
+          "value": "Learn what to expect and how to take the next step for bumper repair at East Austin Collision.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.heading",
+          "value": "What bumper repair may include",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.body",
+          "value": "The business reviews the request before confirming the work needed for bumper repair.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.0.title",
+          "value": "Review the need",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.0.body",
+          "value": "The first review identifies the relevant needs and constraints.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.1.title",
+          "value": "Confirm the scope",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.1.body",
+          "value": "The business explains the proposed work and approval path.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.2.title",
+          "value": "Complete the work",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.2.body",
+          "value": "The completed work is reviewed before the final handoff.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.3.title",
+          "value": "Plan the next step",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.detail.3.body",
+          "value": "Questions can be resolved before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.heading",
+          "value": "Bumper Repair questions",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.body",
+          "value": "Direct answers about preparation, options, timing, and next steps.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.0.question",
+          "value": "How do I get started?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.0.answer",
+          "value": "Contact the business with the available details so it can recommend the next step.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.1.question",
+          "value": "What information should I provide?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.1.answer",
+          "value": "Share the relevant context and ask what else is needed before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.2.question",
+          "value": "What determines timing?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.2.answer",
+          "value": "Timing depends on the service, availability, and the final scope.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.3.question",
+          "value": "How will I know the next step?",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.faq.3.answer",
+          "value": "Confirm the communication and completion process before work begins.",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.contact.heading",
+          "value": "Ask about bumper repair",
+          "evidenceIds": []
+        },
+        {
+          "slotId": "service-2.contact.body",
+          "value": "Call +15125550132 or send the relevant details to discuss the next step.",
+          "evidenceIds": []
+        }
+      ]
+    },
+    "version": {
+      "id": "version_fixture_east-austin-collision-sparse_v1",
+      "status": "draft",
+      "inputSnapshotId": "gensnap_site_fixture_east-austin-collision-sparse_1_1_0ee420f83bbf",
+      "businessStateRevision": 1,
+      "siteIntentRevision": 1,
+      "formDefinitionId": "form_site_fixture_east-austin-collision-sparse_estimate-request",
+      "assetRevisionIds": [],
+      "rendererVersion": "layout-v3",
+      "designSchemaVersion": "design-v3",
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "theme": {
+        "paletteName": "trusted-local",
+        "colors": {
+          "background": "#f7f7f4",
+          "surface": "#ffffff",
+          "text": "#1c1c1a",
+          "muted": "#62625d",
+          "primary": "#174c3c",
+          "primaryText": "#ffffff",
+          "accent": "#cda862",
+          "border": "#d8d8d1"
+        },
+        "typography": {
+          "heading": "Arial, sans-serif",
+          "body": "Arial, sans-serif"
+        },
+        "radius": "sm",
+        "density": "standard",
+        "mood": "utilitarian"
+      },
+      "presentation": {
+        "mobileActionBehavior": "disabled",
+        "reservedMobileActionSpace": false
+      },
+      "artifactRefs": [],
+      "mediaDecisions": [],
+      "artDirection": {
+        "version": "site-art-direction-v3",
+        "recipeId": "trusted_local_service",
+        "fontPairingId": "display_sans_humanist",
+        "colorSystem": "warm_neighborhood",
+        "spacingRhythm": "standard",
+        "headerMode": "compact_sticky",
+        "mediaTreatment": "media_independent",
+        "buttonSystem": "solid_with_quiet_secondary",
+        "cardTreatment": "minimal_surface",
+        "density": "balanced",
+        "navPlan": {
+          "source": "generation_plan",
+          "items": [
+            {
+              "label": "Collision Repair",
+              "target": "/services/collision-repair",
+              "kind": "page"
+            },
+            {
+              "label": "Bumper Repair",
+              "target": "/services/bumper-repair",
+              "kind": "page"
+            }
+          ],
+          "primaryCta": {
+            "label": "Request an estimate",
+            "target": "#contact"
+          }
+        }
+      },
+      "pageComposition": {
+        "id": "composition_site_fixture_east-austin-collision-sparse",
+        "version": "page-composition-v3",
+        "pages": [
+          {
+            "id": "home",
+            "slug": "",
+            "title": "East Austin Collision",
+            "purpose": "homepage",
+            "seo": {
+              "title": "East Austin Collision | auto body repair",
+              "description": "East Austin Collision provides collision repair, bumper repair. Request an estimate.",
+              "canonicalPath": "/"
+            },
+            "sections": [
+              {
+                "id": "home.hero",
+                "family": "hero_statement",
+                "variant": "hero_statement",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "hero_statement",
+                    "options": {
+                      "align": "left",
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      },
+                      "heroLayout": "no_media_editorial",
+                      "proofPlacement": "none",
+                      "ctaLayout": "button_plus_text_link",
+                      "mediaTreatment": "flush",
+                      "headlineScale": "compact"
+                    },
+                    "slots": {
+                      "copy": {
+                        "eyebrow": "East Austin Collision",
+                        "heading": "East Austin Collision",
+                        "body": "East Austin Collision provides collision repair, bumper repair with a clear next step.",
+                        "actions": [
+                          {
+                            "label": "Request an estimate",
+                            "href": "#contact",
+                            "style": "primary"
+                          },
+                          {
+                            "label": "Call now",
+                            "href": "tel:+15125550132",
+                            "style": "secondary"
+                          }
+                        ]
+                      }
+                    },
+                    "anchorId": "top"
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "home.process",
+                "family": "numbered_steps",
+                "variant": "numbered_steps",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "numbered_steps",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "surface"
+                      },
+                      "stepTreatment": "numbered_ledger",
+                      "orientation": "ledger",
+                      "numberStyle": "oversized",
+                      "mediaMode": "none",
+                      "stepDensity": "balanced"
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "What to expect",
+                        "body": "A clear sequence keeps decisions and expectations visible from first contact through completion."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "title": "Share the damage",
+                            "body": "Send photos or arrange an inspection.",
+                            "meta": "01"
+                          },
+                          {
+                            "title": "Review the estimate",
+                            "body": "Review the documented damage and proposed work.",
+                            "meta": "02"
+                          },
+                          {
+                            "title": "Approve the repair plan",
+                            "body": "Confirm the repair scope before work begins.",
+                            "meta": "03"
+                          },
+                          {
+                            "title": "Inspect and pick up",
+                            "body": "Review the finished repair and pickup details.",
+                            "meta": "04"
+                          }
+                        ]
+                      }
+                    },
+                    "anchorId": "process"
+                  }
+                },
+                "controls": {
+                  "layout": "editorial_rows",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "surface",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "home.faq",
+                "family": "faq_list",
+                "variant": "faq_list",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "faq_list",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      }
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "Questions before you get started",
+                        "body": "Direct answers about preparation, options, timing, and next steps."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "question": "How do I get started?",
+                            "answer": "Contact the business with the available details so it can recommend the next step."
+                          },
+                          {
+                            "question": "What information should I provide?",
+                            "answer": "Share the relevant context and ask what else is needed before work begins."
+                          },
+                          {
+                            "question": "What determines timing?",
+                            "answer": "Timing depends on the service, availability, and the final scope."
+                          },
+                          {
+                            "question": "How will I know the next step?",
+                            "answer": "Confirm the communication and completion process before work begins."
+                          }
+                        ]
+                      }
+                    },
+                    "anchorId": "faq"
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "home.contact",
+                "family": "contact_split",
+                "variant": "contact_split",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "contact_split",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "dark"
+                      },
+                      "contactLayout": "quote_card",
+                      "formComplexity": "short",
+                      "proofSidebar": "response_expectation",
+                      "ctaMode": "estimate"
+                    },
+                    "slots": {
+                      "copy": {
+                        "heading": "Request an estimate",
+                        "body": "Call +15125550132 or send the relevant details to discuss the next step."
+                      },
+                      "contact": {
+                        "facts": [
+                          {
+                            "label": "Phone",
+                            "value": "+15125550132",
+                            "href": "tel:+15125550132"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Collision Repair"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Bumper Repair"
+                          },
+                          {
+                            "label": "Business",
+                            "value": "East Austin Collision"
+                          }
+                        ]
+                      },
+                      "action": {
+                        "title": "Request an estimate",
+                        "body": "Share the relevant details and the business will explain the next step.",
+                        "cta": {
+                          "label": "Request an estimate",
+                          "href": "#contact",
+                          "style": "primary"
+                        }
+                      }
+                    },
+                    "anchorId": "contact"
+                  }
+                },
+                "controls": {
+                  "layout": "contact_panel",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "contrast",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              }
+            ]
+          },
+          {
+            "id": "service-1",
+            "slug": "services/collision-repair",
+            "title": "Collision Repair",
+            "purpose": "service_landing",
+            "seo": {
+              "title": "Collision Repair | East Austin Collision",
+              "description": "Collision Repair from East Austin Collision. Review the service approach and request an estimate.",
+              "canonicalPath": "/services/collision-repair"
+            },
+            "sections": [
+              {
+                "id": "service-1.hero",
+                "family": "hero_statement",
+                "variant": "hero_statement",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "hero_statement",
+                    "options": {
+                      "align": "left",
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      },
+                      "heroLayout": "no_media_editorial",
+                      "proofPlacement": "none",
+                      "ctaLayout": "button_plus_text_link",
+                      "mediaTreatment": "flush",
+                      "headlineScale": "compact"
+                    },
+                    "slots": {
+                      "copy": {
+                        "eyebrow": "East Austin Collision service",
+                        "heading": "Collision Repair from East Austin Collision",
+                        "body": "Learn what to expect and how to take the next step for collision repair at East Austin Collision.",
+                        "actions": [
+                          {
+                            "label": "Request an estimate",
+                            "href": "#contact",
+                            "style": "primary"
+                          },
+                          {
+                            "label": "Call now",
+                            "href": "tel:+15125550132",
+                            "style": "secondary"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-1.detail",
+                "family": "side_intro_rows",
+                "variant": "side_intro_rows",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "side_intro_rows",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      }
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "What collision repair may include",
+                        "body": "The business reviews the request before confirming the work needed for collision repair."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "title": "Review the need",
+                            "body": "The first review identifies the relevant needs and constraints."
+                          },
+                          {
+                            "title": "Confirm the scope",
+                            "body": "The business explains the proposed work and approval path."
+                          },
+                          {
+                            "title": "Complete the work",
+                            "body": "The completed work is reviewed before the final handoff."
+                          },
+                          {
+                            "title": "Plan the next step",
+                            "body": "Questions can be resolved before work begins."
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "editorial_rows",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-1.faq",
+                "family": "faq_list",
+                "variant": "faq_list",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "faq_list",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      }
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "Collision Repair questions",
+                        "body": "Direct answers about preparation, options, timing, and next steps."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "question": "How do I get started?",
+                            "answer": "Contact the business with the available details so it can recommend the next step."
+                          },
+                          {
+                            "question": "What information should I provide?",
+                            "answer": "Share the relevant context and ask what else is needed before work begins."
+                          },
+                          {
+                            "question": "What determines timing?",
+                            "answer": "Timing depends on the service, availability, and the final scope."
+                          },
+                          {
+                            "question": "How will I know the next step?",
+                            "answer": "Confirm the communication and completion process before work begins."
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-1.contact",
+                "family": "contact_split",
+                "variant": "contact_split",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "contact_split",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "dark"
+                      },
+                      "contactLayout": "quote_card",
+                      "formComplexity": "short",
+                      "proofSidebar": "response_expectation",
+                      "ctaMode": "estimate"
+                    },
+                    "slots": {
+                      "copy": {
+                        "heading": "Ask about collision repair",
+                        "body": "Call +15125550132 or send the relevant details to discuss the next step."
+                      },
+                      "contact": {
+                        "facts": [
+                          {
+                            "label": "Phone",
+                            "value": "+15125550132",
+                            "href": "tel:+15125550132"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Collision Repair"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Bumper Repair"
+                          },
+                          {
+                            "label": "Business",
+                            "value": "East Austin Collision"
+                          }
+                        ]
+                      },
+                      "action": {
+                        "title": "Request an estimate",
+                        "body": "Share the relevant details and the business will explain the next step.",
+                        "cta": {
+                          "label": "Request an estimate",
+                          "href": "#contact",
+                          "style": "primary"
+                        }
+                      }
+                    },
+                    "anchorId": "contact"
+                  }
+                },
+                "controls": {
+                  "layout": "contact_panel",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "contrast",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              }
+            ]
+          },
+          {
+            "id": "service-2",
+            "slug": "services/bumper-repair",
+            "title": "Bumper Repair",
+            "purpose": "service_landing",
+            "seo": {
+              "title": "Bumper Repair | East Austin Collision",
+              "description": "Bumper Repair from East Austin Collision. Review the service approach and request an estimate.",
+              "canonicalPath": "/services/bumper-repair"
+            },
+            "sections": [
+              {
+                "id": "service-2.hero",
+                "family": "hero_statement",
+                "variant": "hero_statement",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "hero_statement",
+                    "options": {
+                      "align": "left",
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      },
+                      "heroLayout": "no_media_editorial",
+                      "proofPlacement": "none",
+                      "ctaLayout": "button_plus_text_link",
+                      "mediaTreatment": "flush",
+                      "headlineScale": "compact"
+                    },
+                    "slots": {
+                      "copy": {
+                        "eyebrow": "East Austin Collision service",
+                        "heading": "Bumper Repair from East Austin Collision",
+                        "body": "Learn what to expect and how to take the next step for bumper repair at East Austin Collision.",
+                        "actions": [
+                          {
+                            "label": "Request an estimate",
+                            "href": "#contact",
+                            "style": "primary"
+                          },
+                          {
+                            "label": "Call now",
+                            "href": "tel:+15125550132",
+                            "style": "secondary"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-2.detail",
+                "family": "side_intro_rows",
+                "variant": "side_intro_rows",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "side_intro_rows",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      }
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "What bumper repair may include",
+                        "body": "The business reviews the request before confirming the work needed for bumper repair."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "title": "Review the need",
+                            "body": "The first review identifies the relevant needs and constraints."
+                          },
+                          {
+                            "title": "Confirm the scope",
+                            "body": "The business explains the proposed work and approval path."
+                          },
+                          {
+                            "title": "Complete the work",
+                            "body": "The completed work is reviewed before the final handoff."
+                          },
+                          {
+                            "title": "Plan the next step",
+                            "body": "Questions can be resolved before work begins."
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "editorial_rows",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-2.faq",
+                "family": "faq_list",
+                "variant": "faq_list",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "faq_list",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "page"
+                      }
+                    },
+                    "slots": {
+                      "intro": {
+                        "heading": "Bumper Repair questions",
+                        "body": "Direct answers about preparation, options, timing, and next steps."
+                      },
+                      "items": {
+                        "items": [
+                          {
+                            "question": "How do I get started?",
+                            "answer": "Contact the business with the available details so it can recommend the next step."
+                          },
+                          {
+                            "question": "What information should I provide?",
+                            "answer": "Share the relevant context and ask what else is needed before work begins."
+                          },
+                          {
+                            "question": "What determines timing?",
+                            "answer": "Timing depends on the service, availability, and the final scope."
+                          },
+                          {
+                            "question": "How will I know the next step?",
+                            "answer": "Confirm the communication and completion process before work begins."
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "controls": {
+                  "layout": "single_column",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "site_bg",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              },
+              {
+                "id": "service-2.contact",
+                "family": "contact_split",
+                "variant": "contact_split",
+                "props": {
+                  "visualSectionV3": {
+                    "version": "visual-section-v3",
+                    "templateId": "contact_split",
+                    "options": {
+                      "background": {
+                        "kind": "solid",
+                        "token": "dark"
+                      },
+                      "contactLayout": "quote_card",
+                      "formComplexity": "short",
+                      "proofSidebar": "response_expectation",
+                      "ctaMode": "estimate"
+                    },
+                    "slots": {
+                      "copy": {
+                        "heading": "Ask about bumper repair",
+                        "body": "Call +15125550132 or send the relevant details to discuss the next step."
+                      },
+                      "contact": {
+                        "facts": [
+                          {
+                            "label": "Phone",
+                            "value": "+15125550132",
+                            "href": "tel:+15125550132"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Collision Repair"
+                          },
+                          {
+                            "label": "Service",
+                            "value": "Bumper Repair"
+                          },
+                          {
+                            "label": "Business",
+                            "value": "East Austin Collision"
+                          }
+                        ]
+                      },
+                      "action": {
+                        "title": "Request an estimate",
+                        "body": "Share the relevant details and the business will explain the next step.",
+                        "cta": {
+                          "label": "Request an estimate",
+                          "href": "#contact",
+                          "style": "primary"
+                        }
+                      }
+                    },
+                    "anchorId": "contact"
+                  }
+                },
+                "controls": {
+                  "layout": "contact_panel",
+                  "alignment": "start",
+                  "width": "contained",
+                  "padding": "standard",
+                  "background": "contrast",
+                  "mediaCrop": "none",
+                  "density": "balanced"
+                },
+                "slots": [],
+                "responsiveRules": [
+                  {
+                    "breakpoint": "mobile",
+                    "behavior": "stack",
+                    "notes": [
+                      "Design-system mobile stack."
+                    ]
+                  }
+                ],
+                "requiredFactKinds": [],
+                "optionalFactKinds": [],
+                "sparseBehavior": {
+                  "minimumValidSlots": [],
+                  "omitWhenMissingFactKinds": [],
+                  "blockWhenMissingFactKinds": [],
+                  "gracefulDegradation": "The planner omits unsupported sections before compilation."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "trace": {
+    "schemaVersion": "bakeoff-templated-trace-v1",
+    "stages": [
+      "vertical_pack",
+      "plan",
+      "fixture_copy",
+      "compile"
+    ],
+    "counts": {
+      "plans": 1,
+      "copies": 1,
+      "compiles": 1,
+      "gates": 0,
+      "judges": 0
+    }
+  }
+}

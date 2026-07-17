@@ -51,6 +51,8 @@ export type SiteCandidateTelemetryInput = {
   source: AgentRunSource;
   url?: string;
   prompt?: string;
+  inputSnapshotId?: string;
+  intendedSiteId?: string;
   actorType?: string;
   actorId?: string;
   metadata?: Record<string, unknown>;
@@ -87,10 +89,12 @@ function siteCandidateRunInput(input: SiteCandidateTelemetryInput): CreateAgentR
     sourceHost: sourceUrl ? hostnameFromUrl(sourceUrl) : undefined,
     actorType: input.actorType,
     actorId: input.actorId,
-    inputSummary: input.url ?? input.prompt?.slice(0, 240) ?? "Prompt-only site candidate",
+    inputSummary: input.url ?? (input.inputSnapshotId ? `Immutable snapshot ${input.inputSnapshotId}` : "Site candidate"),
     inputJson: sanitizeTelemetryPayload({
       url: input.url,
-      prompt: input.prompt
+      prompt: input.prompt,
+      inputSnapshotId: input.inputSnapshotId,
+      intendedSiteId: input.intendedSiteId
     }),
     metadata: sanitizeTelemetryPayload({
       ...input.metadata,

@@ -24,12 +24,14 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 ## Stored Artifact Schema Changes
 
-- Stored artifact policy is two-tier. Strict stored-schema and per-change backfill obligations apply only to public `SiteVersionV3` (`site_versions.version_model` and the published/customer-rendered version inside candidate bundles) and the business fact graph. These are the two shapes that public rendering, owner truth, publish gates, and auditability depend on.
-- Regenerable intermediates are caches: `businessUnderstanding`, `generationPlan`, `siteCopy`, `evidenceLedger`, `generationTrace`, `generationJudge`, and similar prompt/debug artifacts may be added or reshaped without a historical backfill. Old candidate rows may simply lack them or show a stale/regenerate notice in admin surfaces.
+- Stored artifact policy is two-tier. Strict authorities are normalized canonical business state, `SiteIntentV1`, immutable `SourceSnapshotV1`, `AssetRevisionV1`, `FormDefinitionV1`, `GenerationInputSnapshotV1`, and public `SiteVersionV3`. Public rendering, owner truth, publish gates, form handling, and auditability depend on these shapes.
+- Mutable business state and site intent evolve through typed control-plane changes and monotonically increasing revisions. Immutable snapshots, asset revisions, form definitions, and site versions are never rewritten or backfilled in place; schema evolution creates a new version and readers must support every retained version.
+- Regenerable intermediates are caches: `businessUnderstanding`, `generationPlan`, `siteCopy`, evidence manifest, generation trace, generation judge, and similar prompt/debug artifacts may be added or reshaped without a historical backfill. Old internal candidates may simply lack them or show a stale/regenerate notice in admin surfaces.
 - Regenerable does not mean unaccountable. Intermediates that affect a generated or published candidate should carry provenance where practical: producer/prompt/config version, model id when model-backed, input hashes, timestamp, and a stale marker or equivalent regeneration signal. Evidence snapshots that fed a published version must remain answerable for as long as that version exists.
-- Do not delete stored rows from migrations to satisfy a strict schema change; backfill or report them so an operator decides. Deleting test data is fine when an operator does it deliberately.
+- Source snapshots, asset revision binaries, form definitions, generation snapshots, and artifacts referenced by a retained version must use delete-restrict or independent-copy semantics. Owner deletion marks mutable assets inactive for future versions; it never breaks a retained version.
+- Do not delete stored rows from migrations to satisfy a strict schema change; backfill or report them so an operator decides. Pre-launch test data may be deleted only by an explicit operator command before an assert-empty hard cutover.
 - Keep strict fail-loud assertions on boundary-sensitive surfaces (public `/sites/*`, owner editor, APIs). Admin/operator surfaces must degrade legibly instead: soft-check with `siteVersionV3Issue` and show a "stale schema — regenerate" notice, never a raw error page. Repository reads of internal candidate records stay unchecked so repair surfaces can load stale rows; writes assert.
-- When adding a new strict assertion over `SiteVersionV3` or the fact graph, run the relevant backfill `--check` first to prove zero violations.
+- When adding a new strict assertion, run the stored-data report first and prove zero violations or perform an explicit pre-launch hard cutover. Never add a compatibility reader without an external boundary requirement.
 
 ## Secrets And Data
 

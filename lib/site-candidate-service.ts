@@ -15,8 +15,10 @@ import { generationJudgeSchemaVersion, type GenerationJudgeResult } from "./gene
 import { generationQaFromObjectiveGate } from "./generation-objective-gate";
 import { persistPrimaryQaScreenshot } from "./candidate-screenshot";
 import { normalizePublicFetchUrlInput } from "./url-safety";
-import { createBusinessFactGraph } from "./business-fact-graph";
 import { verticalPackFor } from "./vertical-packs";
+import { generationSnapshotFromIntakeBundle } from "./intake-generation-snapshot";
+import { siteRenderEnvelopeFromSnapshot } from "./site-render-envelope";
+import type { GenerationInputSnapshotV1 } from "./control-plane-contracts";
 import {
   generationFailure,
   generationFailureDetail,
@@ -39,9 +41,8 @@ export type SiteCandidateRepository = AgentTelemetryRepository &
   Pick<
     LodestaRepository,
     | "createSiteCandidate"
+    | "persistCanonicalGenerationInput"
     | "upsertSiteArtifact"
-    | "replaceFactCandidates"
-    | "replaceProposedBusinessServices"
     | "listExperimentLearnings"
   >;
 
@@ -53,21 +54,28 @@ export type GenerateSitePreviewOptions = {
 
 export type ModelFallbackPolicy = "fail" | "allow";
 
-export type GenerateSiteOptions = {
+type GenerateSiteBaseOptions = {
   repository: SiteCandidateRepository;
-  input: CreateSiteInput;
   source: AgentRunSource;
   actorType?: string;
   actorId?: string;
   metadata?: Record<string, unknown>;
   candidatePurpose?: SiteCandidatePurpose;
-  /** Existing managed site whose owner-truth profile and identity must survive regeneration. */
-  intendedSite?: SiteBundle;
   preview?: GenerateSitePreviewOptions;
   /** Deterministic fallback exists only for tests and fixture rendering. */
   modelFallbackPolicy?: ModelFallbackPolicy;
   signal?: AbortSignal;
 };
+
+export type GenerateSiteOptions = GenerateSiteBaseOptions & (
+  | { mode: "fresh"; input: CreateSiteInput; inputSnapshot?: never; intendedSiteId?: never }
+  | { mode: "snapshot"; input?: never; inputSnapshot: GenerationInputSnapshotV1; intendedSiteId: string }
+);
+
+export type GenerateSiteJobOptions = Omit<GenerateSiteBaseOptions, "repository"> & (
+  | { mode: "fresh"; input: CreateSiteInput; inputSnapshot?: never; intendedSiteId?: never }
+  | { mode: "snapshot"; input?: never; inputSnapshot: GenerationInputSnapshotV1; intendedSiteId: string }
+);
 
 export type GenerateSiteResult = {
   runId: string;
@@ -107,30 +115,47 @@ export function createPreCompileSiteCandidateBlock(input: PreCompileSiteCandidat
 }
 
 export async function generateSite(options: GenerateSiteOptions): Promise<GenerateSiteResult> {
-  const input = normalizeGenerationInput(options.input);
+  const input = options.mode === "fresh" ? normalizeGenerationInput(options.input) : undefined;
+  if (options.mode === "snapshot" && options.inputSnapshot.siteId !== options.intendedSiteId) {
+    throw new Error("Regeneration snapshot does not target the intended managed site.");
+  }
   const allowModelFallback = options.modelFallbackPolicy === "allow";
   const telemetry = await startRequiredSiteCandidateTelemetry(options.repository, {
     ...input,
+    ...(options.mode === "snapshot" ? {
+      inputSnapshotId: options.inputSnapshot.id,
+      intendedSiteId: options.intendedSiteId
+    } : {}),
     source: options.source,
     actorType: options.actorType,
     actorId: options.actorId,
     metadata: options.metadata
   });
   const siteCandidateId = siteCandidateIdForRun(telemetry.runId);
+  const generatedSiteId = options.mode === "snapshot" ? options.inputSnapshot.siteId : siteIdForRun(telemetry.runId);
   let bundle: SiteBundle | undefined;
   let sourceHost: string | undefined;
 
   try {
     options.signal?.throwIfAborted();
+    if (options.mode === "snapshot") {
+      return await runAndPersistCanonicalCandidate({
+        options,
+        telemetry,
+        siteCandidateId,
+        snapshot: options.inputSnapshot,
+        allowModelFallback
+      });
+    }
+    if (!input) throw new Error("Fresh generation input was not normalized.");
     logGenerateSiteProgress("intake_start", { siteCandidateId });
     const prepared = await prepareIntakeInput(input, {
       telemetry,
-      identity: { siteId: siteCandidateId },
+      identity: { siteId: generatedSiteId },
       signal: options.signal
     });
     assertCanonicalUnderstanding(prepared, allowModelFallback);
     bundle = createSiteBundleFromInput(prepared);
-    if (options.intendedSite) bundle = applyIntendedSiteContext(bundle, options.intendedSite);
     sourceHost = hostFromUrl(bundle.presenceAssessment.sourceUrl ?? input.url);
     verticalPackFor(bundle.businessProfile.vertical);
     logGenerateSiteProgress("intake_done", {
@@ -138,7 +163,7 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
       businessName: bundle.businessProfile.name,
       services: bundle.businessProfile.services.length,
       proposedEvidence: prepared.understanding?.evidenceProposals.length ?? 0,
-      acceptedEvidence: bundle.presenceAssessment.evidenceLedger?.items.length ?? 0
+      acceptedEvidence: bundle.presenceAssessment.evidenceManifest?.items.length ?? 0
     });
 
     await retainAndAnalyzeAssets({
@@ -149,109 +174,35 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
     });
     const assets = canonicalAssets(bundle);
     bundle.presenceAssessment.assetInventory = assets;
-    const evidence = bundle.presenceAssessment.evidenceLedger;
-    if (!evidence) throw new Error("Canonical evidence ledger was not composed during intake.");
-
-    const generationSpan = await telemetry.startSpan({
-      spanType: "canonical_generation",
-      name: "Canonical plan, copy, compile, gate, and judgment",
-      inputJson: {
-        siteId: bundle.businessProfile.siteId,
-        vertical: bundle.businessProfile.vertical,
-        evidenceAccepted: evidence.items.length,
-        evidenceRejected: evidence.rejected.length,
-        assets: assets.length
-      }
-    });
-    let result: CanonicalGenerationResult;
-    try {
-      result = await runCanonicalGenerationPipeline({
-        bundle,
-        evidence,
-        assets,
-        telemetry,
-        spanId: generationSpan.id,
-        signal: options.signal,
-        ...(allowModelFallback ? { dependencies: deterministicFixtureDependencies() } : {})
-      });
-      await generationSpan.end({
-        outputJson: {
-          status: result.status,
-          reason: result.reason,
-          designSystem: result.plan.designSystem,
-          trace: result.trace.counts,
-          objectiveGate: result.gate.status,
-          judgeVerdict: result.judge?.verdict
-        },
-        artifactRefs: {
-          screenshots: result.gate.routes.flatMap((route) => route.inspection.screenshots.map((screenshot) => screenshot.path))
-        }
-      });
-    } catch (error) {
-      await generationSpan.fail(error);
-      throw error;
-    }
-
-    applyCanonicalResult(bundle, result);
-    try {
-      await persistPrimaryQaScreenshot({ candidateId: siteCandidateId, version: result.version });
-    } catch (error) {
-      bundle.presenceAssessment.technicalNotes.push(
-        `Primary QA screenshot persistence skipped: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    const generation = await options.repository.createSiteCandidate({
-      id: siteCandidateId,
-      agentRunId: telemetry.runId,
-      sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url,
-      sourceHost,
+    const evidence = bundle.presenceAssessment.evidenceManifest;
+    if (!evidence) throw new Error("Canonical generation evidence manifest was not composed during intake.");
+    const canonicalInput = generationSnapshotFromIntakeBundle({
       bundle,
-      status: result.status === "ship" ? "ready" : "blocked",
-      candidatePurpose: options.candidatePurpose,
-      intendedSiteId: options.intendedSite?.businessProfile.siteId
+      assets,
+      crawl: prepared.crawl,
+      publicPresence: prepared.publicPresence,
+      eligibilityMode: "protected_preview"
     });
-    await persistCanonicalArtifacts(options.repository, generation, result);
-    await telemetry.completeRun({
-      targetType: "site_candidate",
-      targetId: generation.id,
-      outputSummary: runSummary(generation),
-      outputJson: {
-        ...baseRunOutput(generation),
-        generationStatus: result.status,
-        generationReason: result.reason,
-        designSystem: result.plan.designSystem,
-        evidenceYield: evidence.yield,
-        traceCounts: result.trace.counts
-      },
-      metadata: {
-        ...options.metadata,
-        targetName: generation.businessName,
-        candidatePurpose: generation.candidatePurpose,
-        previewStatus: options.preview?.create ? "admin_only_until_acceptance" : "skipped"
-      }
+    const snapshot = canonicalInput.snapshot;
+    await options.repository.persistCanonicalGenerationInput(canonicalInput);
+    bundle.presenceAssessment.generationInputSnapshot = snapshot;
+
+    return await runAndPersistCanonicalCandidate({
+      options,
+      telemetry,
+      siteCandidateId,
+      snapshot,
+      bundle,
+      sourceHost,
+      sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url,
+      allowModelFallback
     });
-    return { runId: telemetry.runId, siteCandidateId: generation.id, generation, bundle: generation.bundle };
   } catch (error) {
     const detail = failureDetail(error, telemetry.runId, siteCandidateId);
     if (bundle) {
       bundle.presenceAssessment.technicalNotes.push(
         `Canonical generation failed at ${detail.stage} (${detail.code}): ${detail.message}`
       );
-      try {
-        const failed = await options.repository.createSiteCandidate({
-          id: siteCandidateId,
-          agentRunId: telemetry.runId,
-          sourceUrl: bundle.presenceAssessment.sourceUrl ?? input.url,
-          sourceHost,
-          bundle,
-          status: "blocked",
-          candidatePurpose: options.candidatePurpose,
-          intendedSiteId: options.intendedSite?.businessProfile.siteId
-        });
-        await options.repository.upsertSiteArtifact(generationFailureArtifact(failed.id, detail));
-      } catch (persistenceError) {
-        console.warn(`Blocked candidate persistence skipped: ${persistenceError instanceof Error ? persistenceError.message : String(persistenceError)}`);
-      }
     }
     await telemetry.failRun(error, {
       errorCode: detail.code,
@@ -267,41 +218,111 @@ export async function generateSite(options: GenerateSiteOptions): Promise<Genera
   }
 }
 
-function applyIntendedSiteContext(generated: SiteBundle, intended: SiteBundle): SiteBundle {
-  const businessProfile = structuredClone(intended.businessProfile);
-  const presenceAssessment = {
-    ...generated.presenceAssessment,
-    siteId: businessProfile.siteId,
-    publicPresenceSignals: generated.presenceAssessment.publicPresenceSignals?.map((signal) => ({
-      ...signal,
-      siteId: businessProfile.siteId
-    })),
-    brandAssessment: generated.presenceAssessment.brandAssessment
-      ? {
-          ...generated.presenceAssessment.brandAssessment,
-          id: `brand_${businessProfile.siteId}`,
-          siteId: businessProfile.siteId
-        }
-      : undefined
-  };
-  presenceAssessment.businessFactGraph = createBusinessFactGraph({
-    business: businessProfile,
-    presence: presenceAssessment
+async function runAndPersistCanonicalCandidate(input: {
+  options: GenerateSiteOptions;
+  telemetry: Awaited<ReturnType<typeof startRequiredSiteCandidateTelemetry>>;
+  siteCandidateId: string;
+  snapshot: GenerationInputSnapshotV1;
+  bundle?: SiteBundle;
+  sourceHost?: string;
+  sourceUrl?: string;
+  allowModelFallback: boolean;
+}): Promise<GenerateSiteResult> {
+  const evidence = input.snapshot.evidenceManifest;
+  const generationSpan = await input.telemetry.startSpan({
+    spanType: "canonical_generation",
+    name: "Canonical plan, copy, compile, gate, and judgment",
+    inputJson: {
+      siteId: input.snapshot.siteId,
+      vertical: input.snapshot.business.vertical,
+      evidenceAccepted: evidence.items.length,
+      evidenceRejected: evidence.rejected.length,
+      assets: input.snapshot.assets.length,
+      immutableInputSnapshotId: input.snapshot.id
+    }
   });
-  return {
-    ...generated,
-    businessProfile,
-    siteModel: {
-      ...generated.siteModel,
-      id: intended.siteModel.id,
-      slug: intended.siteModel.slug,
-      pinList: structuredClone(intended.siteModel.pinList),
-      versions: []
+  let result: CanonicalGenerationResult;
+  try {
+    result = await runCanonicalGenerationPipeline({
+      snapshot: input.snapshot,
+      telemetry: input.telemetry,
+      spanId: generationSpan.id,
+      signal: input.options.signal,
+      ...(input.allowModelFallback ? { dependencies: deterministicFixtureDependencies() } : {})
+    });
+    await generationSpan.end({
+      outputJson: {
+        status: result.status,
+        reason: result.reason,
+        designSystem: result.plan.designSystem,
+        trace: result.trace.counts,
+        objectiveGate: result.gate.status,
+        judgeVerdict: result.judge?.verdict
+      },
+      artifactRefs: {
+        screenshots: result.gate.routes.flatMap((route) => route.inspection.screenshots.map((screenshot) => screenshot.path))
+      }
+    });
+  } catch (error) {
+    await generationSpan.fail(error);
+    throw error;
+  }
+  const bundle = input.bundle ?? siteRenderEnvelopeFromSnapshot({
+    snapshot: input.snapshot,
+    version: result.version,
+    plan: result.plan,
+    copy: result.copy
+  });
+  if (input.sourceUrl) bundle.presenceAssessment.sourceUrl = input.sourceUrl;
+  applyCanonicalResult(bundle, input.snapshot, result);
+  const artifactRecords = canonicalArtifactRecords(input.siteCandidateId, input.snapshot, result);
+  result.version.artifactRefs = artifactRecords.map((item) => ({
+    artifactId: item.id,
+    artifactType: item.artifactType,
+    artifactVersion: item.artifactVersion,
+    contentHash: item.contentHash
+  }));
+  try {
+    await persistPrimaryQaScreenshot({ candidateId: input.siteCandidateId, version: result.version });
+  } catch (error) {
+    bundle.presenceAssessment.technicalNotes.push(
+      `Primary QA screenshot persistence skipped: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const generation = await input.options.repository.createSiteCandidate({
+    id: input.siteCandidateId,
+    agentRunId: input.telemetry.runId,
+    sourceUrl: input.sourceUrl,
+    sourceHost: input.sourceHost,
+    snapshot: input.snapshot,
+    version: result.version,
+    plan: result.plan,
+    copy: result.copy,
+    status: result.status === "ship" ? "ready" : "blocked",
+    candidatePurpose: input.options.candidatePurpose,
+    intendedSiteId: input.options.mode === "snapshot" ? input.options.intendedSiteId : undefined
+  });
+  await persistCanonicalArtifacts(input.options.repository, artifactRecords);
+  await input.telemetry.completeRun({
+    targetType: "site_candidate",
+    targetId: generation.id,
+    outputSummary: runSummary(generation),
+    outputJson: {
+      ...baseRunOutput(generation),
+      generationStatus: result.status,
+      generationReason: result.reason,
+      designSystem: result.plan.designSystem,
+      evidenceYield: evidence.yield,
+      traceCounts: result.trace.counts
     },
-    extensionModel: structuredClone(intended.extensionModel),
-    experiments: [] as SiteBundle["experiments"],
-    presenceAssessment
-  };
+    metadata: {
+      ...input.options.metadata,
+      targetName: generation.businessName,
+      candidatePurpose: generation.candidatePurpose,
+      previewStatus: input.options.preview?.create ? "admin_only_until_acceptance" : "skipped"
+    }
+  });
+  return { runId: input.telemetry.runId, siteCandidateId: generation.id, generation, bundle };
 }
 
 function assertCanonicalUnderstanding(prepared: IntakeInput, allowModelFallback: boolean) {
@@ -372,45 +393,60 @@ async function retainAndAnalyzeAssets(input: {
 
 function canonicalAssets(bundle: SiteBundle): SiteAsset[] {
   const createdAt = new Date().toISOString();
-  const photoAssets = bundle.businessProfile.photos.map((photo, index): SiteAsset => ({
-    id: photo.id || `${bundle.businessProfile.siteId}_photo_${index + 1}`,
-    siteId: bundle.businessProfile.siteId,
-    kind: "photo",
-    url: photo.url,
-    alt: photo.alt,
-    source: photo.source,
-    rightsStatus: photo.rightsStatus,
-    usageScope: photo.rightsStatus === "reference_only" ? "preclaim_preview" : "published_site",
-    ownerApproved: photo.rightsStatus === "customer_granted",
-    metadata: {
-      ...(photo.width ? { width: photo.width } : {}),
-      ...(photo.height ? { height: photo.height } : {}),
-      ...(photo.analysisV1 ? { analysisV1: photo.analysisV1 } : {})
-    },
-    createdAt
-  }));
+  const retainedByUrl = new Map(
+    (bundle.presenceAssessment.scrapedMediaManifest ?? []).map((entry) => [entry.storedUrl, entry])
+  );
+  const toCanonicalAsset = (
+    reference: NonNullable<SiteBundle["businessProfile"]["logo"]>,
+    kind: "photo" | "logo",
+    fallbackId: string
+  ): SiteAsset | undefined => {
+    const retained = retainedByUrl.get(reference.url);
+    if (reference.source === "website_reference" && !retained) return undefined;
+    if (!retained) {
+      throw new Error(`Asset ${reference.id || fallbackId} is missing retained binary revision metadata.`);
+    }
+    return {
+      id: reference.id || fallbackId,
+      siteId: bundle.businessProfile.siteId,
+      kind,
+      url: retained.storedUrl,
+      alt: reference.alt,
+      source: reference.source,
+      rightsStatus: reference.rightsStatus,
+      usageScope: reference.rightsStatus === "reference_only" ? "preclaim_preview" : "published_site",
+      ownerApproved: reference.rightsStatus === "customer_granted",
+      metadata: {
+        contentHash: retained.contentHash,
+        bytes: retained.bytes,
+        mimeType: retained.mimeType,
+        storagePath: retained.storagePath,
+        width: retained.width ?? reference.width,
+        height: retained.height ?? reference.height,
+        ...(reference.analysisV1 ? { analysisV1: reference.analysisV1 } : {})
+      },
+      createdAt: retained.scrapedAt || createdAt
+    };
+  };
+  const photoAssets = bundle.businessProfile.photos.flatMap((photo, index): SiteAsset[] => {
+    const asset = toCanonicalAsset(photo, "photo", `${bundle.businessProfile.siteId}_photo_${index + 1}`);
+    return asset ? [asset] : [];
+  });
   const logo = bundle.businessProfile.logo;
-  const logoAssets: SiteAsset[] = logo ? [{
-    id: logo.id || `${bundle.businessProfile.siteId}_logo`,
-    siteId: bundle.businessProfile.siteId,
-    kind: "logo",
-    url: logo.url,
-    alt: logo.alt,
-    source: logo.source,
-    rightsStatus: logo.rightsStatus,
-    usageScope: logo.rightsStatus === "reference_only" ? "preclaim_preview" : "published_site",
-    ownerApproved: logo.rightsStatus === "customer_granted",
-    metadata: {
-      ...(logo.width ? { width: logo.width } : {}),
-      ...(logo.height ? { height: logo.height } : {}),
-      ...(logo.analysisV1 ? { analysisV1: logo.analysisV1 } : {})
-    },
-    createdAt
-  }] : [];
+  const retainedLogo = logo
+    ? toCanonicalAsset(logo, "logo", `${bundle.businessProfile.siteId}_logo`)
+    : undefined;
+  const logoAssets: SiteAsset[] = retainedLogo ? [retainedLogo] : [];
+  const excludedReferences = bundle.businessProfile.photos.length + (logo ? 1 : 0) - photoAssets.length - logoAssets.length;
+  if (excludedReferences > 0) {
+    bundle.presenceAssessment.technicalNotes.push(
+      `${excludedReferences} website media reference(s) were excluded because their bytes were not retained.`
+    );
+  }
   return [...photoAssets, ...logoAssets];
 }
 
-function applyCanonicalResult(bundle: SiteBundle, result: CanonicalGenerationResult) {
+function applyCanonicalResult(bundle: SiteBundle, snapshot: GenerationInputSnapshotV1, result: CanonicalGenerationResult) {
   result.version.generationQa = generationQaFromObjectiveGate(
     bundle,
     result.version,
@@ -420,6 +456,7 @@ function applyCanonicalResult(bundle: SiteBundle, result: CanonicalGenerationRes
   bundle.siteModel.theme = result.version.theme ?? bundle.siteModel.theme;
   bundle.siteModel.versions = [result.version];
   bundle.presenceAssessment.generationPlan = result.plan;
+  bundle.presenceAssessment.generationInputSnapshot = snapshot;
   bundle.presenceAssessment.siteCopy = result.copy;
   bundle.presenceAssessment.generationTrace = result.trace;
   bundle.presenceAssessment.generationJudge = result.judge;
@@ -428,9 +465,9 @@ function applyCanonicalResult(bundle: SiteBundle, result: CanonicalGenerationRes
 function deterministicFixtureDependencies() {
   return {
     copy: async (input: Parameters<typeof createFixtureSiteCopy>[0] extends never ? never : {
-      business: SiteBundle["businessProfile"];
+      snapshot: GenerationInputSnapshotV1;
       plan: Parameters<typeof createFixtureSiteCopy>[0];
-    }) => ({ copy: createFixtureSiteCopy(input.plan, input.business), attempts: 1 as const }),
+    }) => ({ copy: createFixtureSiteCopy(input.plan, input.snapshot), attempts: 1 as const }),
     judge: async (input: { packet: { images: Array<unknown> } }): Promise<GenerationJudgeResult> => ({
       schemaVersion: generationJudgeSchemaVersion,
       provenance: createRegenerableArtifactProvenanceV1({
@@ -449,19 +486,15 @@ function deterministicFixtureDependencies() {
   };
 }
 
-async function persistCanonicalArtifacts(
-  repository: SiteCandidateRepository,
-  generation: SiteCandidateRecord,
-  result: CanonicalGenerationResult
-) {
+function canonicalArtifactRecords(candidateId: string, snapshot: GenerationInputSnapshotV1, result: CanonicalGenerationResult) {
   const createdAt = new Date().toISOString();
-  const evidence = generation.bundle.presenceAssessment.evidenceLedger;
-  if (!evidence) throw new Error("Canonical generation completed without an evidence ledger.");
-  const artifacts: SiteArtifactRecord[] = [
-    artifact(generation.id, "evidence_ledger", "evidence-ledger-v1", evidence.provenance, { evidence }, createdAt),
-    artifact(generation.id, "generation_plan", result.plan.schemaVersion, result.plan.provenance, { plan: result.plan }, createdAt),
-    artifact(generation.id, "site_copy", result.copy.schemaVersion, result.copy.provenance, { copy: result.copy }, createdAt),
-    artifact(generation.id, "generation_review", result.trace.schemaVersion, result.trace.provenance, {
+  const evidence = snapshot.evidenceManifest;
+  return [
+    artifact(candidateId, "generation_input_snapshot", snapshot.schemaVersion, snapshot.evidenceManifest.provenance, { snapshot }, createdAt),
+    artifact(candidateId, "generation_evidence_manifest", "generation-evidence-manifest-v1", evidence.provenance, { evidence }, createdAt),
+    artifact(candidateId, "generation_plan", result.plan.schemaVersion, result.plan.provenance, { plan: result.plan }, createdAt),
+    artifact(candidateId, "site_copy", result.copy.schemaVersion, result.copy.provenance, { copy: result.copy }, createdAt),
+    artifact(candidateId, "generation_review", result.trace.schemaVersion, result.trace.provenance, {
       status: result.status,
       reason: result.reason,
       gate: {
@@ -476,6 +509,9 @@ async function persistCanonicalArtifacts(
       trace: result.trace
     }, createdAt)
   ];
+}
+
+async function persistCanonicalArtifacts(repository: SiteCandidateRepository, artifacts: SiteArtifactRecord[]) {
   for (const item of artifacts) await repository.upsertSiteArtifact(item);
 }
 
@@ -521,9 +557,9 @@ function failureDetail(error: unknown, runId: string, siteCandidateId: string) {
 }
 
 function normalizeGenerationInput(input: CreateSiteInput): CreateSiteInput {
-  const url = input.url ? normalizePublicFetchUrlInput(input.url) || undefined : undefined;
+  const url = normalizePublicFetchUrlInput(input.url);
   const prompt = input.prompt?.trim() || undefined;
-  if (!url && !prompt) throw new Error("Provide a URL or prompt.");
+  if (!url) throw new Error("Provide a valid website URL.");
   return { url, prompt };
 }
 
@@ -534,7 +570,7 @@ function runSummary(generation: SiteCandidateRecord) {
 function baseRunOutput(generation: SiteCandidateRecord) {
   return {
     siteCandidateId: generation.id,
-    candidateSiteId: generation.bundle.businessProfile.siteId,
+    candidateSiteId: generation.inputSnapshot.siteId,
     candidateSlug: generation.candidateSlug,
     businessName: generation.businessName,
     vertical: generation.vertical
@@ -547,6 +583,10 @@ function contentHash(payload: unknown) {
 
 function siteCandidateIdForRun(runId: string) {
   return `sitecand_${runId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}`;
+}
+
+function siteIdForRun(runId: string) {
+  return `site_${runId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase()}`;
 }
 
 function hostFromUrl(value: string | undefined) {

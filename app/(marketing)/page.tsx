@@ -31,7 +31,7 @@ const MANAGED_ITEMS = [
   { tag: "Search", title: "Local SEO & Google", body: "Your Google Business Profile and on-site SEO kept aligned so you show up when neighbors search." },
   { tag: "Trust", title: "Reviews & trust signals", body: "Reviews, hours, and contact details surfaced where customers look for them first." },
   { tag: "Leads", title: "Lead capture & analytics", body: "Calls, forms, and directions tracked first-party, so you see what's actually working." },
-  { tag: "Upkeep", title: "Monthly optimization", body: "A standing action list and ongoing tuning — handled for you, every month." }
+  { tag: "Upkeep", title: "Monthly optimization", body: "Site-health checks and ongoing tuning handled for you every month." }
 ];
 
 export default async function HomePage({

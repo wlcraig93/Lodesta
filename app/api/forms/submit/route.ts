@@ -40,8 +40,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const form = bundle.extensionModel.forms.find((candidate) => candidate.id === formId && candidate.siteId === siteId);
-  if (!form) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown form" }, { status: 404 }), limit);
+  const form = await repository.getPublishedFormDefinition(siteId, formId);
+  if (!form) {
+    return applyRateLimitHeaders(
+      NextResponse.json({ error: "Form is not referenced by a retained published version" }, { status: 404 }),
+      limit
+    );
+  }
 
   const tooFast = renderedAt > 0 && Date.now() - renderedAt < 800;
   if (honeypot || tooFast) {

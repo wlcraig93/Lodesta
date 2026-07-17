@@ -4,7 +4,7 @@ import { ClaimSiteForm, type ClaimAssetRight, type ClaimFact } from "@/component
 import { repository } from "@/lib/repository";
 import type { BusinessProfile } from "@/lib/models";
 import { requiredAssetRightsForBundle } from "@/lib/asset-rights";
-import { requiredClaimFactIds } from "@/lib/fact-verification";
+import { requiredPublicEligibilityFactIds } from "@/lib/control-plane";
 import { claimVerificationTargets } from "@/lib/claim-verification-challenge";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,9 @@ export default async function ClaimPage({
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) notFound();
 
-  const facts = claimFacts(bundle.businessProfile);
+  const controlPlane = await repository.getCanonicalControlPlane(bundle.businessProfile.siteId);
+  if (!controlPlane) throw new Error("Claim page requires canonical business state.");
+  const facts = claimFacts(bundle.businessProfile, requiredPublicEligibilityFactIds(controlPlane.state));
   const previewTokens = await repository.listPreviewTokens(bundle.businessProfile.siteId);
   const linkedPreviewToken = previewTokens.find((token) => token.token === previewTokenParam);
   const linkedPreviewTokenValue = linkedPreviewToken?.token;
@@ -121,8 +123,8 @@ function previewAssetUrl(value: string, previewToken: string) {
   return `${path}?${params.toString()}${hash ? `#${hash}` : ""}`;
 }
 
-function claimFacts(profile: BusinessProfile): ClaimFact[] {
-  const requiredFacts = new Set(requiredClaimFactIds(profile));
+function claimFacts(profile: BusinessProfile, requiredFactIds: string[]): ClaimFact[] {
+  const requiredFacts = new Set(requiredFactIds);
   const facts: ClaimFact[] = [claimFact(profile, "name", "Business name", profile.name, requiredFacts)];
   if (profile.phone) facts.push(claimFact(profile, "phone", "Phone", profile.phone, requiredFacts));
   if (profile.email) facts.push(claimFact(profile, "email", "Email", profile.email, requiredFacts));

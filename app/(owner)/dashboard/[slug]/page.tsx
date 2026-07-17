@@ -16,14 +16,15 @@ export default async function OwnerDashboardPage({ params }: { params: Promise<{
   await requireSiteOwnerAccess(bundle, `/dashboard/${slug}`);
 
   const siteId = bundle.businessProfile.siteId;
-  const [analytics, inquiries, domains, claims] = await Promise.all([
+  const [analytics, inquiries, domains, claims, controlPlane] = await Promise.all([
     repository.analyticsSummary(siteId),
     repository.listInquiries(siteId),
     repository.listDomains(siteId),
-    repository.listClaims(siteId)
+    repository.listClaims(siteId),
+    repository.getCanonicalControlPlane(siteId)
   ]);
   const claimGate = claimGateForBundle(bundle, claims);
-  const managedStatus = managedSiteStatus(bundle);
+  const managedStatus = managedSiteStatus(bundle, controlPlane);
   const activeDomains = domains.filter((domain) => domain.status === "active");
   const pendingDomains = domains.filter((domain) => domain.status !== "active");
   const recentInquiries = inquiries.slice(0, 3);

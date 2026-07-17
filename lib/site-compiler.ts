@@ -1,11 +1,10 @@
 import type {
-  BusinessProfile,
   ComponentControlSchemaV3,
   SectionInstanceV3,
-  SiteAsset,
   SiteVersionV3
 } from "./models";
-import type { EvidenceLedger } from "./evidence-ledger";
+import type { GenerationEvidenceManifestV1 } from "./generation-evidence-manifest";
+import type { GenerationInputSnapshotV1, ResolvedAssetV1, ResolvedBusinessSnapshotV1 } from "./control-plane-contracts";
 import { copySlotValue, validateSiteCopyForPlan, type GenerationPlan, type SiteCopy } from "./generation-contracts";
 import {
   compileVisualSectionV3,
@@ -17,15 +16,20 @@ import {
   type VisualSectionV3
 } from "./generated-site-v3-visual-controls";
 import { canonicalBusinessHours } from "./business-fact-normalization";
+import { verticalPackFor } from "./vertical-packs";
 
 export function compileSite(input: {
-  business: BusinessProfile;
+  snapshot: GenerationInputSnapshotV1;
   plan: GenerationPlan;
   copy: SiteCopy;
-  evidence: EvidenceLedger;
-  assets: SiteAsset[];
   createdAt?: string;
+  versionId?: string;
 }): SiteVersionV3 {
+  const business = input.snapshot.business;
+  const assets = input.snapshot.assets;
+  const evidence = input.snapshot.evidenceManifest;
+  const pack = verticalPackFor(business.vertical);
+  const services = offeringNames(business);
   const validation = validateSiteCopyForPlan(input.plan, input.copy);
   if (!validation.ok) throw new Error(`Cannot compile invalid site copy: ${validation.issues.join(" ")}`);
   const pages = input.plan.pages.map((page) => ({
@@ -34,33 +38,46 @@ export function compileSite(input: {
     title: page.title,
     purpose: page.purpose,
     seo: {
-      title: page.slug ? `${page.title} | ${input.business.name}` : `${input.business.name} | Auto Body Repair`,
+      title: page.slug ? `${page.title} | ${business.name}` : `${business.name} | ${pack.seoVocabulary[0]}`,
       description: page.slug
-        ? `${page.title} from ${input.business.name}. Review the repair approach and request an estimate.`
-        : `${input.business.name} provides ${input.business.services.slice(0, 3).join(", ").toLowerCase()}. Request an estimate.`,
+        ? `${page.title} from ${business.name}. Review the service approach and ${pack.primaryCtaLabel.toLowerCase()}.`
+        : `${business.name} provides ${services.slice(0, 3).join(", ").toLowerCase()}. ${pack.primaryCtaLabel}.`,
       canonicalPath: page.slug ? `/${page.slug}` : "/"
     },
-    sections: page.sections.map((section) => compileSection({ ...input, section }))
+    sections: page.sections.map((section) => compileSection({
+      business,
+      selectedProofIds: input.snapshot.siteIntent.selectedProofIds,
+      plan: input.plan,
+      copy: input.copy,
+      evidence,
+      assets,
+      section
+    }))
   }));
   const designSystem = input.plan.designSystem;
   const mediaLed = designSystem === "precision_shop_editorial";
   return {
-    id: `version_${input.business.siteId}_${Date.now()}`,
+    id: input.versionId ?? `version_${business.siteId}_${Date.now()}`,
     status: "draft",
+    inputSnapshotId: input.snapshot.id,
+    businessStateRevision: input.snapshot.businessStateRevision,
+    siteIntentRevision: input.snapshot.siteIntentRevision,
+    formDefinitionId: input.snapshot.formDefinition.id,
+    assetRevisionIds: assets.map((asset) => asset.revision.id),
     rendererVersion: "layout-v3",
     designSchemaVersion: "design-v3",
     createdAt: input.createdAt ?? new Date().toISOString(),
     theme: input.plan.brandTokens,
     presentation: { mobileActionBehavior: "disabled", reservedMobileActionSpace: false },
     artifactRefs: [],
-    mediaDecisions: input.assets.flatMap((asset) => asset.url ? [{
+    mediaDecisions: assets.flatMap((asset) => asset.revision.publicUrl ? [{
       id: `media_${asset.id}`,
       version: "media-asset-decision-v3" as const,
       slotId: asset.id,
       source: asset.source === "website_reference" || asset.source === "uploaded" ? "first_party" as const : asset.source === "generated" ? "generated_ai" as const : "curated_stock" as const,
-      rightsStatus: asset.rightsStatus === "customer_granted" ? "approved" as const : asset.rightsStatus === "preclaim_safe" ? "preclaim_safe" as const : "owner_attestation_required" as const,
+      rightsStatus: asset.revision.rightsStatus === "customer_granted" ? "approved" as const : asset.revision.rightsStatus === "preclaim_safe" ? "preclaim_safe" as const : "owner_attestation_required" as const,
       usageScope: input.plan.pages.some((page) => page.sections.some((section) => section.mediaAssetId === asset.id)) ? "hero" as const : "not_public" as const,
-      sourceUrl: asset.url,
+      sourceUrl: asset.revision.publicUrl,
       policyNotes: ["Selected by the canonical generation plan."],
       mayImplyRealBusinessWork: asset.source === "website_reference" || asset.source === "uploaded"
     }] : []),
@@ -81,16 +98,17 @@ export function compileSite(input: {
         primaryCta: input.plan.navigation.primaryCta
       }
     },
-    pageComposition: { id: `composition_${input.business.siteId}`, version: "page-composition-v3", pages }
+    pageComposition: { id: `composition_${business.siteId}`, version: "page-composition-v3", pages }
   };
 }
 
 function compileSection(input: {
-  business: BusinessProfile;
+  business: ResolvedBusinessSnapshotV1;
+  selectedProofIds: string[];
   plan: GenerationPlan;
   copy: SiteCopy;
-  evidence: EvidenceLedger;
-  assets: SiteAsset[];
+  evidence: GenerationEvidenceManifestV1;
+  assets: ResolvedAssetV1[];
   section: GenerationPlan["pages"][number]["sections"][number];
 }) {
   const { section } = input;
@@ -100,15 +118,15 @@ function compileSection(input: {
   const background = { kind: "solid" as const, token: section.templateId === "contact_split" ? "dark" as const : section.id.includes("process") ? "surface" as const : "page" as const };
   let visual: VisualSectionV3;
   if (section.templateId === "hero_split") {
-    const asset = input.assets.find((candidate) => candidate.id === section.mediaAssetId && candidate.url);
-    if (!asset?.url) throw new Error(`Hero section ${section.id} references missing media ${section.mediaAssetId}.`);
+    const asset = input.assets.find((candidate) => candidate.id === section.mediaAssetId && candidate.revision.publicUrl);
+    if (!asset?.revision.publicUrl) throw new Error(`Hero section ${section.id} references missing media ${section.mediaAssetId}.`);
     visual = {
       version: "visual-section-v3",
       templateId: "hero_split",
       options: { background: { kind: "solid", token: "page" }, heroLayout: "classic_split", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "rounded_panel", headlineScale: "compact" },
       slots: {
-        copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business) },
-        media: { items: [{ url: asset.url, label: asset.alt, cropIntent: "subject" }], caption: "none" }
+        copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business, input.plan.navigation.primaryCta) },
+        media: { items: [{ url: asset.revision.publicUrl, label: asset.alt, cropIntent: "subject" }], caption: "none" }
       },
       anchorId: "top"
     };
@@ -117,14 +135,14 @@ function compileSection(input: {
       version: "visual-section-v3",
       templateId: "hero_statement",
       options: { align: "left", background, heroLayout: "no_media_editorial", proofPlacement: "none", ctaLayout: "button_plus_text_link", mediaTreatment: "flush", headlineScale: "compact" },
-      slots: { copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business) } },
+      slots: { copy: { eyebrow: copySlotValue(input.copy, `${prefix}.eyebrow`), heading: heading(), body: body(), actions: primaryActions(input.business, input.plan.navigation.primaryCta) } },
       anchorId: section.id === "home.hero" ? "top" : undefined
     };
   } else if (section.templateId === "side_intro_rows") {
     const items = indexedItems(input.copy, prefix);
     visual = { version: "visual-section-v3", templateId: "side_intro_rows", options: { background }, slots: { intro: { heading: heading(), body: body() }, items: { items } }, anchorId: section.id === "home.services" ? "services" : undefined };
-  } else if (section.templateId === "service_index") {
-    visual = { version: "visual-section-v3", templateId: "service_index", options: { background, serviceIndexTreatment: "featured_services_plus_all" }, slots: { intro: { heading: heading(), body: body() }, items: { items: indexedItems(input.copy, prefix) } }, anchorId: "services" };
+  } else if (section.templateId === "auto_body_service_index") {
+    visual = { version: "visual-section-v3", templateId: "auto_body_service_index", options: { background, serviceIndexTreatment: "featured_services_plus_all" }, slots: { intro: { heading: heading(), body: body() }, items: { items: indexedItems(input.copy, prefix) } }, anchorId: "services" };
   } else if (section.templateId === "numbered_steps") {
     const items = indexedItems(input.copy, prefix).map((item, index) => ({ ...item, meta: String(index + 1).padStart(2, "0") }));
     visual = { version: "visual-section-v3", templateId: "numbered_steps", options: { background, stepTreatment: "numbered_ledger", orientation: "ledger", numberStyle: "oversized", mediaMode: "none", stepDensity: "balanced" }, slots: { intro: { heading: heading(), body: body() }, items: { items } }, anchorId: "process" };
@@ -139,9 +157,9 @@ function compileSection(input: {
   } else if (section.templateId === "location_showcase") {
     visual = { version: "visual-section-v3", templateId: "location_showcase", options: { background, locationLayout: "map_left_hours_right", statusBadge: "none", hoursDisplay: "full_week", actionCluster: "directions_call" }, slots: { copy: { heading: heading(), body: body() }, locations: { locations: [locationForBusiness(input.business)] } }, anchorId: "location" };
   } else if (section.templateId === "service_area_showcase") {
-    visual = { version: "visual-section-v3", templateId: "service_area_showcase", options: { background }, slots: { copy: { heading: heading(), body: body() }, facts: { items: input.business.serviceAreas.map((value) => ({ label: "Service area", value })) }, action: { title: "Discuss your repair", cta: primaryActions(input.business)[0] } }, anchorId: "location" };
+    visual = { version: "visual-section-v3", templateId: "service_area_showcase", options: { background }, slots: { copy: { heading: heading(), body: body() }, facts: { items: input.business.serviceAreas.map((value) => ({ label: "Service area", value })) }, action: { title: "Discuss your needs", cta: primaryActions(input.business, input.plan.navigation.primaryCta)[0] } }, anchorId: "location" };
   } else {
-    visual = { version: "visual-section-v3", templateId: "contact_split", options: { background, contactLayout: "quote_card", formComplexity: "short", proofSidebar: input.business.address ? "location" : "response_expectation", ctaMode: "estimate" }, slots: { copy: { heading: heading(), body: body() }, contact: { facts: contactFacts(input.business) }, action: { title: "Request an estimate", body: "Share the damage details and the shop will explain the next step.", cta: primaryActions(input.business)[0] } }, anchorId: "contact" };
+    visual = { version: "visual-section-v3", templateId: "contact_split", options: { background, contactLayout: "quote_card", formComplexity: "short", proofSidebar: input.business.address ? "location" : "response_expectation", ctaMode: "estimate" }, slots: { copy: { heading: heading(), body: body() }, contact: { facts: contactFacts(input.business, input.selectedProofIds) }, action: { title: input.plan.navigation.primaryCta.label, body: "Share the relevant details and the business will explain the next step.", cta: primaryActions(input.business, input.plan.navigation.primaryCta)[0] } }, anchorId: "contact" };
   }
   const compiled = compileVisualSectionV3(visual);
   const errors = compiled.violations.filter((violation) => violation.severity === "error");
@@ -151,7 +169,7 @@ function compileSection(input: {
 
 function sectionInstance(id: string, visual: VisualSectionV3): SectionInstanceV3 {
   const controls: ComponentControlSchemaV3 = {
-    layout: visual.templateId === "hero_split" ? "architectural_split" : visual.templateId === "contact_split" ? "contact_panel" : visual.templateId === "side_intro_rows" || visual.templateId === "numbered_steps" || visual.templateId === "service_index" ? "editorial_rows" : "single_column",
+    layout: visual.templateId === "hero_split" ? "architectural_split" : visual.templateId === "contact_split" ? "contact_panel" : visual.templateId === "side_intro_rows" || visual.templateId === "numbered_steps" || visual.templateId === "auto_body_service_index" ? "editorial_rows" : "single_column",
     alignment: "start",
     width: visual.templateId === "hero_split" ? "wide" : "contained",
     padding: visual.templateId === "hero_split" ? "spacious" : "standard",
@@ -183,28 +201,41 @@ function indexedFaq(copy: SiteCopy, prefix: string): FaqItemV3[] {
   return questions.map((question) => ({ question: question.value, answer: copySlotValue(copy, question.slotId.replace(/\.question$/, ".answer")) }));
 }
 
-function primaryActions(business: BusinessProfile) {
+function primaryActions(business: ResolvedBusinessSnapshotV1, primaryCta: GenerationPlan["navigation"]["primaryCta"]) {
   return [
-    { label: "Request an estimate", href: "#contact", style: "primary" as const },
-    ...(business.phone ? [{ label: "Call the shop", href: `tel:${business.phone.replace(/[^\d+]/g, "")}`, style: "secondary" as const }] : [])
+    { label: primaryCta.label, href: primaryCta.target, style: "primary" as const },
+    ...(business.phone && !primaryCta.target.startsWith("tel:") ? [{ label: "Call now", href: `tel:${business.phone.replace(/[^\d+]/g, "")}`, style: "secondary" as const }] : [])
   ];
 }
 
-function contactFacts(business: BusinessProfile): VisualFactV3[] {
+function contactFacts(business: ResolvedBusinessSnapshotV1, selectedProofIds: string[]): VisualFactV3[] {
+  const services = offeringNames(business);
+  const selected = new Set(selectedProofIds);
+  const proofFacts = business.proof
+    .filter((proof) => proof.kind !== "testimonial" && proof.publicText && (!selected.size || selected.has(proof.id)))
+    .slice(0, 2)
+    .map((proof) => ({ label: proofLabel(proof.kind), value: proof.publicText! }));
   const facts: VisualFactV3[] = [
     ...(business.phone ? [{ label: "Phone", value: business.phone, href: `tel:${business.phone.replace(/[^\d+]/g, "")}` }] : []),
     ...(business.address ? [{ label: "Address", value: addressLine(business) }] : []),
+    ...proofFacts,
     ...(canonicalBusinessHours(business.hours).length ? [{ label: "Hours", value: canonicalBusinessHours(business.hours).slice(0, 2).map(({ label, value }) => `${label}: ${value}`).join("; ") }] : []),
     ...(business.email ? [{ label: "Email", value: business.email, href: `mailto:${business.email}` }] : []),
     ...business.serviceAreas.slice(0, 1).map((value) => ({ label: "Service area", value })),
-    ...business.services.slice(0, 2).map((value) => ({ label: "Service", value })),
+    ...services.slice(0, 2).map((value) => ({ label: "Service", value })),
     ...business.categories.slice(0, 1).map((value) => ({ label: "Category", value })),
     { label: "Business", value: business.name }
   ];
   return facts.slice(0, 4);
 }
 
-function locationForBusiness(business: BusinessProfile): RenderableLocationV3 {
+function proofLabel(kind: ResolvedBusinessSnapshotV1["proof"][number]["kind"]) {
+  if (kind === "insurance_support") return "Insurance support";
+  if (kind === "longevity") return "Experience";
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+function locationForBusiness(business: ResolvedBusinessSnapshotV1): RenderableLocationV3 {
   return {
     id: `location_${business.siteId}`,
     label: business.name,
@@ -221,6 +252,13 @@ function locationForBusiness(business: BusinessProfile): RenderableLocationV3 {
   };
 }
 
-function addressLine(business: BusinessProfile) {
+function addressLine(business: ResolvedBusinessSnapshotV1) {
   return [business.address?.street, business.address?.city, business.address?.region, business.address?.postalCode].filter(Boolean).join(", ");
+}
+
+function offeringNames(business: ResolvedBusinessSnapshotV1) {
+  const names = new Map(verticalPackFor(business.vertical).serviceCatalog.map((entry) => [entry.id, entry.name]));
+  return business.offerings
+    .map((offering) => offering.customName ?? (offering.catalogId ? names.get(offering.catalogId) : undefined))
+    .filter((value): value is string => Boolean(value));
 }

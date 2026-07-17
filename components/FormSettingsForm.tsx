@@ -50,28 +50,38 @@ export function FormSettingsForm({ siteId, form, workflows }: FormSettingsFormPr
   async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus("Saving form settings...");
-    const response = await fetch("/api/forms/settings", {
+    const response = await fetch("/api/control-plane/changes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         siteId,
-        formId: form.id,
-        name,
-        submitLabel,
-        notificationEmail,
-        webhookUrl,
-        fields: fields.map((field) => ({
-          id: field.id,
-          label: field.label,
-          type: field.type,
-          required: field.required,
-          options: splitOptions(field.optionsText ?? "")
-        }))
+        payload: {
+          kind: "set_form_definition",
+          name,
+          submitLabel,
+          fields: fields.map((field) => ({
+            id: field.id,
+            label: field.label,
+            type: field.type,
+            required: field.required,
+            options: splitOptions(field.optionsText ?? "")
+          }))
+        }
       })
     });
     const result = (await response.json()) as FormSettingsResponse;
     if (!response.ok || !result.ok) {
       setStatus(result.error ?? "Unable to save form settings.");
+      return;
+    }
+    const routingResponse = await fetch("/api/inquiry-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siteId, formId: form.id, notificationEmail, webhookUrl })
+    });
+    const routingResult = (await routingResponse.json()) as FormSettingsResponse;
+    if (!routingResponse.ok || !routingResult.ok) {
+      setStatus(routingResult.error ?? "Form saved, but inquiry routing could not be updated.");
       return;
     }
     setStatus("Form settings saved.");

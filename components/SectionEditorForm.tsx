@@ -71,14 +71,15 @@ export function SectionEditorForm({ siteId, pageId, sectionId, fields }: Section
     event.preventDefault();
     setStatus("Saving draft...");
     setIssues([]);
-    const response = await fetch("/api/sites/update-section", {
+    const overrides = Object.entries(values)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([key, value]) => ({ slotId: `${sectionId}.${key}`, value }));
+    const response = await fetch("/api/control-plane/changes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         siteId,
-        pageId,
-        sectionId,
-        props: values
+        payload: { kind: "set_copy_overrides", overrides }
       })
     });
 
@@ -89,8 +90,8 @@ export function SectionEditorForm({ siteId, pageId, sectionId, fields }: Section
       return;
     }
     window.dispatchEvent(new Event("lodesta:preview-refresh"));
-    setIssues(result.guardrailWarnings ?? []);
-    setStatus(result.guardrailWarnings?.length ? "Draft saved with guardrail warnings." : "Draft saved.");
+    setIssues([]);
+    setStatus("Draft saved.");
   }
 
   return (

@@ -47,7 +47,7 @@ export function AdminGenerateForm({ onJobCreated }: { onJobCreated?: (response: 
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<IntakeResponse | null>(null);
   const [jobStatus, setJobStatus] = useState<IntakeJobStatus | null>(null);
-  const canSubmit = Boolean(url.trim() || prompt.trim().length >= 3);
+  const canSubmit = Boolean(url.trim());
 
   useEffect(() => {
     if (!result?.statusUrl) return;
@@ -88,7 +88,7 @@ export function AdminGenerateForm({ onJobCreated }: { onJobCreated?: (response: 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          url: url.trim() || undefined,
+          url: url.trim(),
           prompt: prompt.trim() || undefined,
           telemetrySource: "admin_console"
         })
@@ -137,7 +137,7 @@ export function AdminGenerateForm({ onJobCreated }: { onJobCreated?: (response: 
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           placeholder="example-business.com"
-          type="text"
+          type="url"
           inputMode="url"
           autoCapitalize="none"
           autoComplete="url"

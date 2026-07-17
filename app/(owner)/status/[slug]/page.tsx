@@ -13,10 +13,9 @@ export default async function ManagedStatusPage({ params }: { params: Promise<{ 
   const bundle = await repository.getSiteBundleBySlug(slug);
   if (!bundle) notFound();
   await requireSiteOwnerAccess(bundle, `/status/${slug}`);
-  const status = managedSiteStatus(bundle);
-  const pending = bundle.presenceAssessment.evidenceLedger?.items.filter(
-    (item) => item.renderPolicy !== "durable_render" && !item.confirmation
-  ) ?? [];
+  const controlPlane = await repository.getCanonicalControlPlane(bundle.businessProfile.siteId);
+  const status = managedSiteStatus(bundle, controlPlane);
+  const pending = controlPlane?.state.proof.filter((item) => item.status === "observed") ?? [];
 
   return (
     <main className="admin-page owner-page">
@@ -47,10 +46,10 @@ export default async function ManagedStatusPage({ params }: { params: Promise<{ 
               <article className="finding-card" key={item.id}>
                 <div className="button-row">
                   <span className="badge">{item.kind.replace("_", " ")}</span>
-                  <a className="button secondary" href={item.source.url} target="_blank" rel="noreferrer">Source</a>
+                  {sourceUrl(controlPlane, item.sourceSnapshotId) ? <a className="button secondary" href={sourceUrl(controlPlane, item.sourceSnapshotId)} target="_blank" rel="noreferrer">Source</a> : null}
                 </div>
                 <h3>Confirm before public use</h3>
-                <p>{item.sourceExcerpt}</p>
+                <p>{item.sourceExcerpt ?? item.publicText}</p>
                 <EvidenceConfirmationForm siteId={bundle.businessProfile.siteId} evidenceId={item.id} />
               </article>
             ))}
@@ -73,6 +72,10 @@ export default async function ManagedStatusPage({ params }: { params: Promise<{ 
       </div>
     </main>
   );
+}
+
+function sourceUrl(controlPlane: Awaited<ReturnType<typeof repository.getCanonicalControlPlane>>, sourceSnapshotId: string | undefined) {
+  return controlPlane?.sourceSnapshots.find((source) => source.id === sourceSnapshotId)?.sourceUrl;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {

@@ -2,11 +2,16 @@ import "./load-env";
 
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { supabaseRepository } from "../lib/supabase/repository";
-import { requiredClaimFactIds } from "../lib/fact-verification";
+import { requiredPublicEligibilityFactIds } from "../lib/control-plane";
 import { ASSET_BUCKET_NAME, imageMimeTypeMatchesBytes, storeAssetBytes } from "../lib/asset-storage";
 import { assertSiteVersionV3, pageCountForVersionV3 } from "../lib/site-version-v3";
 import { sampleSiteBundle } from "../lib/sample-data";
 import { applySiteIdentity } from "../lib/site-identity";
+import { generationSnapshotFromIntakeBundle } from "../lib/intake-generation-snapshot";
+import { buildGenerationPlan } from "../lib/vertical-packs";
+import { createFixtureSiteCopy } from "../lib/site-copy";
+import { compileSite } from "../lib/site-compiler";
+import { submitControlPlaneChange } from "../lib/control-plane-service";
 
 type CheckResult = {
   name: string;
@@ -28,6 +33,7 @@ if (!liveIntegrations) {
 const checks: CheckResult[] = [];
 let acceptedSiteId = "";
 let createdCandidateId = "";
+let createdBusinessId = "";
 const createdJobIds = new Set<string>();
 const createdAgentRunIds = new Set<string>();
 let createdCampaignId: string | undefined;
@@ -42,7 +48,6 @@ async function main() {
   checks.push({ name: "connect", ok: true, detail: "Supabase service-role client can query the schema." });
   await requireSupabase(supabase.from("operator_settings").select("key", { count: "exact", head: true }), "Query operator settings");
   await requireSupabase(supabase.from("operator_setting_audits").select("id", { count: "exact", head: true }), "Query operator setting audits");
-  await requireSupabase(supabase.from("site_locations").select("role", { count: "exact", head: true }), "Query site location roles");
   checks.push({ name: "operator_settings", ok: true, detail: "Operator settings and audit tables are queryable." });
   await verifyAgentTelemetry(supabase);
   await verifyAssetStorage(supabase);
@@ -53,9 +58,51 @@ async function main() {
 
   const candidateBundle = structuredClone(sampleSiteBundle);
   applySiteIdentity(candidateBundle, `verify-${runId}`);
+  const canonicalInput = generationSnapshotFromIntakeBundle({
+    bundle: candidateBundle,
+    assets: [],
+    crawl: {
+      url: `https://verify-${runId}.example`,
+      finalUrl: `https://verify-${runId}.example`,
+      title: candidateBundle.businessProfile.name,
+      extractedFacts: {
+        name: candidateBundle.businessProfile.name,
+        description: candidateBundle.businessProfile.description,
+        phone: candidateBundle.businessProfile.phone,
+        email: candidateBundle.businessProfile.email,
+        address: candidateBundle.businessProfile.address,
+        geo: candidateBundle.businessProfile.geo,
+        hours: candidateBundle.businessProfile.hours,
+        categories: candidateBundle.businessProfile.categories,
+        services: candidateBundle.businessProfile.services,
+        serviceAreas: candidateBundle.businessProfile.serviceAreas,
+        socialLinks: candidateBundle.businessProfile.socialLinks,
+        bookingLinks: candidateBundle.businessProfile.bookingLinks,
+        orderingLinks: candidateBundle.businessProfile.orderingLinks,
+        pressLinks: candidateBundle.businessProfile.pressLinks
+      },
+      pageSummaries: []
+    } as unknown as import("../lib/crawler").CrawlAssessment,
+    eligibilityMode: "public"
+  });
+  createdBusinessId = canonicalInput.state.business.id;
+  const candidatePlan = buildGenerationPlan({
+    snapshot: canonicalInput.snapshot,
+    evidence: canonicalInput.snapshot.evidenceManifest
+  });
+  const candidateCopy = createFixtureSiteCopy(candidatePlan, canonicalInput.snapshot);
+  const candidateVersion = compileSite({
+    snapshot: canonicalInput.snapshot,
+    plan: candidatePlan,
+    copy: candidateCopy
+  });
+  await supabaseRepository.persistCanonicalGenerationInput(canonicalInput);
   const candidate = await supabaseRepository.createSiteCandidate({
     id: `sitecand_verify_${runId}`,
-    bundle: candidateBundle,
+    snapshot: canonicalInput.snapshot,
+    version: candidateVersion,
+    plan: candidatePlan,
+    copy: candidateCopy,
     sourceUrl: `https://verify-${runId}.example`,
     sourceHost: `verify-${runId}.example`,
     status: "ready",
@@ -86,32 +133,56 @@ async function main() {
   assert(bySlug?.businessProfile.siteId === acceptedSiteId, "Persisted site could not be loaded by slug.");
   checks.push({ name: "load_by_slug", ok: true, detail: "Loaded persisted site by slug." });
 
-  const ownerAssets = await supabaseRepository.updateOwnerAssets({
+  const assetControlPlane = await supabaseRepository.getCanonicalControlPlane(acceptedSiteId);
+  assert(assetControlPlane, "Canonical control plane was not available for asset verification.");
+  const now = new Date().toISOString();
+  const assetId = `asset_verify_${runId}`;
+  const revisionId = `assetrev_verify_${runId}`;
+  const assetChange = await submitControlPlaneChange({
+    repository: supabaseRepository,
     siteId: acceptedSiteId,
-    attestedBy: "verify-supabase@example.com",
-    logo: {
-      url: `https://assets.example/verify-${runId}-logo.png`,
-      alt: "Lodesta verification logo",
-      rightsConfirmed: true
-    },
-    photos: [
-      {
-        url: `https://assets.example/verify-${runId}-truck.webp`,
-        alt: "Lodesta verification service truck",
-        rightsConfirmed: true
+    requestedBy: "verify-supabase@example.com",
+    payload: {
+      kind: "register_asset",
+      asset: {
+        id: assetId,
+        businessId: assetControlPlane.state.business.id,
+        kind: "logo",
+        alt: "Lodesta verification logo",
+        source: "uploaded",
+        usageScope: "published_site",
+        ownerApproved: true,
+        active: true,
+        currentRevisionId: revisionId,
+        createdAt: now,
+        updatedAt: now
+      },
+      revision: {
+        schemaVersion: "asset-revision-v1",
+        id: revisionId,
+        assetId,
+        businessId: assetControlPlane.state.business.id,
+        contentHash: `verify${runId}`.padEnd(64, "0").slice(0, 64),
+        storagePath: `${acceptedSiteId}/verify-${runId}.png`,
+        publicUrl: `/api/assets/${acceptedSiteId}/verify-${runId}.png`,
+        mimeType: "image/png",
+        bytes: 1,
+        rightsStatus: "customer_granted",
+        attestation: { attestedBy: "verify-supabase@example.com", attestedAt: now, statement: "Verification fixture rights attestation." },
+        createdAt: now
       }
-    ]
+    }
   });
-  assert(ownerAssets?.ok, "Owner-approved assets were not accepted.");
-  const assetReload = await supabaseRepository.getSiteBundle(acceptedSiteId);
-  assert(assetReload?.businessProfile.logo?.rightsStatus === "customer_granted", "Owner logo did not persist.");
   assert(
-    assetReload.presenceAssessment.assetInventory?.some(
-      (asset) => asset.ownerApproved && asset.usageScope === "published_site" && asset.rightsStatus === "customer_granted"
-    ),
-    "Owner-approved site assets did not persist to the asset registry."
+    assetChange.applied && assetChange.publish === "structural_candidate_queued" && assetChange.jobId,
+    "Registering a published asset must queue one structural candidate rebuild."
   );
-  checks.push({ name: "owner_assets", ok: true, detail: `Persisted ${ownerAssets.assets.length} owner-approved asset(s).` });
+  createdJobIds.add(assetChange.jobId);
+  await requireSupabase(supabase.from("jobs").delete().eq("id", assetChange.jobId), "Cleanup structural asset rebuild job");
+  createdJobIds.delete(assetChange.jobId);
+  const assetReload = await supabaseRepository.getCanonicalControlPlane(acceptedSiteId);
+  assert(assetReload?.state.assets.some((asset) => asset.id === assetId && asset.ownerApproved), "Owner-approved canonical asset did not persist.");
+  checks.push({ name: "owner_assets", ok: true, detail: "Persisted one owner-approved immutable asset revision." });
 
   const preview = await supabaseRepository.createPreviewToken({
     siteId: acceptedSiteId,
@@ -131,7 +202,8 @@ async function main() {
   );
   checks.push({ name: "preview_token", ok: true, detail: `Created active ${preview.token} and rejected an expired preview token.` });
 
-  const sourceVersionId = assetReload.siteModel.versions[0]?.id;
+  const reloadedBundle = await supabaseRepository.getSiteBundle(acceptedSiteId);
+  const sourceVersionId = reloadedBundle?.siteModel.versions[0]?.id;
   assert(sourceVersionId, "No version is available to restore.");
   const restored = await supabaseRepository.restoreVersionToDraft({
     siteId: acceptedSiteId,
@@ -287,7 +359,7 @@ async function main() {
     verificationMethod: "operator_manual",
     verifiedBy: "verify-supabase",
     verifiedAt: new Date().toISOString(),
-    verifiedFacts: requiredClaimFactIds(bundle.businessProfile),
+    verifiedFacts: requiredPublicEligibilityFactIds(canonicalInput.state),
     acceptedTerms: true,
     acceptedManagement: true
   });
@@ -489,6 +561,44 @@ async function cleanup(supabase: ReturnType<typeof getSupabaseAdminClient>) {
   if (acceptedSiteId) {
     await requireSupabase(supabase.from("sites").delete().eq("id", acceptedSiteId), "Cleanup site");
   }
+  if (createdBusinessId) {
+    const snapshots = await requireSupabase<Array<{ id: string; site_id: string }>>(
+      supabase.from("generation_input_snapshots").select("id,site_id").eq("business_id", createdBusinessId),
+      "Load verification generation snapshots"
+    );
+    const snapshotIds = snapshots.map((snapshot) => snapshot.id);
+    const siteIds = Array.from(new Set(snapshots.map((snapshot) => snapshot.site_id)));
+    if (snapshotIds.length) {
+      await requireSupabase(
+        supabase.from("generation_snapshot_sources").delete().in("snapshot_id", snapshotIds),
+        "Cleanup generation snapshot sources"
+      );
+      await requireSupabase(
+        supabase.from("generation_snapshot_asset_revisions").delete().in("snapshot_id", snapshotIds),
+        "Cleanup generation snapshot asset revisions"
+      );
+    }
+    await requireSupabase(
+      supabase.from("control_plane_change_requests").delete().eq("business_id", createdBusinessId),
+      "Cleanup control-plane change requests"
+    );
+    await requireSupabase(
+      supabase.from("generation_input_snapshots").delete().eq("business_id", createdBusinessId),
+      "Cleanup generation input snapshots"
+    );
+    await requireSupabase(supabase.from("business_assets").delete().eq("business_id", createdBusinessId), "Cleanup business assets");
+    await requireSupabase(supabase.from("asset_revisions").delete().eq("business_id", createdBusinessId), "Cleanup asset revisions");
+    await requireSupabase(supabase.from("business_proof").delete().eq("business_id", createdBusinessId), "Cleanup business proof");
+    await requireSupabase(supabase.from("fact_observations").delete().eq("business_id", createdBusinessId), "Cleanup fact observations");
+    await requireSupabase(supabase.from("source_snapshots").delete().eq("business_id", createdBusinessId), "Cleanup source snapshots");
+    await requireSupabase(supabase.from("business_offerings").delete().eq("business_id", createdBusinessId), "Cleanup business offerings");
+    await requireSupabase(supabase.from("business_locations").delete().eq("business_id", createdBusinessId), "Cleanup business locations");
+    if (siteIds.length) {
+      await requireSupabase(supabase.from("site_intents").delete().in("site_id", siteIds), "Cleanup site intents");
+      await requireSupabase(supabase.from("form_definitions").delete().in("site_id", siteIds), "Cleanup form definitions");
+    }
+    await requireSupabase(supabase.from("businesses").delete().eq("id", createdBusinessId), "Cleanup canonical business");
+  }
   if (createdJobIds.size) {
     await requireSupabase(supabase.from("jobs").delete().in("id", Array.from(createdJobIds)), "Cleanup jobs");
   }
@@ -578,6 +688,10 @@ async function verifyAgentTelemetry(supabase: ReturnType<typeof getSupabaseAdmin
 }
 
 async function verifyAssetStorage(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  const { data: bucket, error: bucketError } = await supabase.storage.getBucket(ASSET_BUCKET_NAME);
+  assert(!bucketError && bucket, `Asset storage bucket is unavailable: ${bucketError?.message ?? "not found"}.`);
+  assert(bucket.public === false, `Asset storage bucket ${ASSET_BUCKET_NAME} must be private.`);
+
   const probeBytes = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mP8z8AABQMBgGIY4YAAAAAASUVORK5CYII=",
     "base64"
@@ -606,7 +720,7 @@ async function verifyAssetStorage(supabase: ReturnType<typeof getSupabaseAdminCl
     checks.push({
       name: "asset_storage",
       ok: true,
-      detail: `Uploaded, downloaded, and removed a probe image from ${ASSET_BUCKET_NAME}/${stored.storagePath}.`
+      detail: `Verified private storage and uploaded, downloaded, and removed a probe image from ${ASSET_BUCKET_NAME}/${stored.storagePath}.`
     });
   } finally {
     await cleanupStorageProbe(supabase);

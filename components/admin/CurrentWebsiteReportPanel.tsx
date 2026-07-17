@@ -7,7 +7,7 @@ export function CurrentWebsiteReportPanel({ bundle }: { bundle: SiteBundle }) {
   const sourceEvaluation = assessment.standardEvaluation;
   const sourceUrl = assessment.sourceUrl ?? sourceEvaluation?.sourceUrl;
   const failedChecks = topFailedChecks(coldUrlCheckableChecks(sourceEvaluation?.checks ?? []));
-  const evidence = assessment.evidenceLedger;
+  const evidence = assessment.evidenceManifest;
   const renderInspection = assessment.renderInspection;
   const referenceAssets = (assessment.assetInventory ?? []).filter((asset) => asset.rightsStatus === "reference_only");
   const notes = [

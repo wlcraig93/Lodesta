@@ -1,4 +1,3 @@
-import type { BusinessServiceRecord, FactCandidate } from "./business-evidence";
 import type {
   AnalyticsEvent,
   ClaimRecord,
@@ -21,27 +20,26 @@ import type {
   SiteBundle,
   SiteCandidateRecord,
   SiteCandidateStatus,
-  SiteVersion,
 } from "./models";
-import { applyV3SectionUpdate } from "./v3-editor";
-import { sampleSiteBundle } from "./sample-data";
+import { sampleCanonicalGenerationInput, sampleSiteBundle } from "./sample-data";
 import { summarizeAnalytics } from "./analytics";
 import { analyzeExperiment } from "./experiment-analysis";
 import { createExperimentLearning } from "./experiment-learning";
-import { validateBusinessProfileUpdate, validateSectionUpdate } from "./editor-guardrails";
-import { applySiteIdentity, makeUniqueSlug } from "./site-identity";
-import { applyVerifiedFacts } from "./fact-verification";
+import { makeUniqueSlug } from "./site-identity";
 import { claimVerificationSatisfies, type ClaimVerificationLevel } from "./owner-access";
-import { applyBusinessProfileUpdate, type BusinessProfileUpdateInput } from "./business-profile-update";
-import { applyFormSettingsUpdate, type UpdateFormSettingsInput } from "./form-settings";
-import { applyOwnerAssetsUpdate, type UpdateOwnerAssetsInput } from "./owner-assets";
+import { applyInquiryRoutingUpdate, type UpdateInquiryRoutingInput } from "./form-settings";
 import { restoreVersionToDraftBundle } from "./site-versions";
-import { applyEvidenceConfirmation } from "./evidence-ledger";
 import { sanitizeAnalyticsMetadata } from "./privacy";
-import { markAllVersionsOwnerTouched, markVersionOwnerTouched } from "./site-version-metadata";
+import { markVersionOwnerTouched } from "./site-version-metadata";
 import { copyCandidateArtifactToSite } from "./site-artifacts";
-import { businessIdForProfile, withBusinessBundleFields } from "./business-model";
+import { withBusinessBundleFields } from "./business-model";
 import { assertBundleVersionsV3, assertSiteVersionV3 } from "./site-version-v3";
+import { siteCandidateRenderEnvelope } from "./site-candidate-render";
+import { candidateRevisionIssue } from "./control-plane";
+import type { CanonicalBusinessStateV1 } from "./control-plane";
+import type { ControlPlaneChangeRequestV1, FactObservationV1, GenerationInputSnapshotV1, SiteIntentV1, SourceSnapshotV1 } from "./control-plane-contracts";
+import type { CanonicalGenerationInputV1 } from "./intake-generation-snapshot";
+import { slugify } from "./slug";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
@@ -64,6 +62,12 @@ type StoreState = {
   bundles: Map<string, SiteBundle>;
   slugToSiteId: Map<string, string>;
   siteCandidates: Map<string, SiteCandidateRecord>;
+  canonicalBusinesses: Map<string, CanonicalBusinessStateV1>;
+  siteIntents: Map<string, SiteIntentV1>;
+  sourceSnapshots: Map<string, SourceSnapshotV1>;
+  factObservations: Map<string, FactObservationV1>;
+  generationInputSnapshots: Map<string, GenerationInputSnapshotV1>;
+  controlPlaneChangeRequests: Map<string, ControlPlaneChangeRequestV1>;
   inquiries: Inquiry[];
   inquiryEvents: InquiryEvent[];
   inquiryDeliveries: InquiryDelivery[];
@@ -94,6 +98,12 @@ function createInitialState(): StoreState {
     bundles,
     slugToSiteId,
     siteCandidates: new Map(),
+    canonicalBusinesses: new Map([[sampleCanonicalGenerationInput.state.business.id, structuredClone(sampleCanonicalGenerationInput.state)]]),
+    siteIntents: new Map([[sampleCanonicalGenerationInput.siteIntent.siteId, structuredClone(sampleCanonicalGenerationInput.siteIntent)]]),
+    sourceSnapshots: new Map(sampleCanonicalGenerationInput.sourceSnapshots.map((source) => [source.id, structuredClone(source)])),
+    factObservations: new Map(sampleCanonicalGenerationInput.observations.map((observation) => [observation.id, structuredClone(observation)])),
+    generationInputSnapshots: new Map([[sampleCanonicalGenerationInput.snapshot.id, structuredClone(sampleCanonicalGenerationInput.snapshot)]]),
+    controlPlaneChangeRequests: new Map(),
     inquiries: [],
     inquiryEvents: [],
     inquiryDeliveries: [],
@@ -132,6 +142,12 @@ function createInitialState(): StoreState {
 function state() {
   globalStore.__lodestaStore ??= createInitialState();
   globalStore.__lodestaStore.siteCandidates ??= new Map();
+  globalStore.__lodestaStore.canonicalBusinesses ??= new Map();
+  globalStore.__lodestaStore.siteIntents ??= new Map();
+  globalStore.__lodestaStore.sourceSnapshots ??= new Map();
+  globalStore.__lodestaStore.factObservations ??= new Map();
+  globalStore.__lodestaStore.generationInputSnapshots ??= new Map();
+  globalStore.__lodestaStore.controlPlaneChangeRequests ??= new Map();
   globalStore.__lodestaStore.claims ??= [];
   globalStore.__lodestaStore.domains ??= [];
   globalStore.__lodestaStore.previewTokens ??= [];
@@ -162,11 +178,122 @@ export function getSiteBundleBySlug(slug: string) {
   return siteId ? getSiteBundle(siteId) : null;
 }
 
+export function persistCanonicalGenerationInput(input: CanonicalGenerationInputV1) {
+  const store = state();
+  assertCanonicalGenerationInputWrite(store, input);
+  store.canonicalBusinesses.set(input.state.business.id, structuredClone(input.state));
+  store.siteIntents.set(input.siteIntent.siteId, structuredClone(input.siteIntent));
+  for (const source of input.sourceSnapshots) store.sourceSnapshots.set(source.id, structuredClone(source));
+  for (const observation of input.observations) store.factObservations.set(observation.id, structuredClone(observation));
+  store.generationInputSnapshots.set(input.snapshot.id, structuredClone(input.snapshot));
+  return structuredClone(input.snapshot);
+}
+
+function assertCanonicalGenerationInputWrite(store: StoreState, input: CanonicalGenerationInputV1) {
+  if (input.state.business.id !== input.snapshot.businessId || input.siteIntent.siteId !== input.snapshot.siteId) {
+    throw new Error("Canonical generation authorities do not match the immutable snapshot identity.");
+  }
+  if (input.snapshot.formDefinition.siteId !== input.snapshot.siteId) {
+    throw new Error("Immutable form definition does not match its generation snapshot.");
+  }
+  const sourceIds = new Set(input.sourceSnapshots.map((source) => source.id));
+  for (const sourceId of input.snapshot.sourceSnapshotIds) {
+    if (!sourceIds.has(sourceId)) throw new Error(`Immutable generation snapshot references missing source snapshot ${sourceId}.`);
+  }
+
+  const currentBusiness = store.canonicalBusinesses.get(input.state.business.id);
+  if (currentBusiness && currentBusiness.business.stateRevision > input.state.business.stateRevision) {
+    throw new Error("Refusing to replace canonical business state with an older revision.");
+  }
+  if (currentBusiness && currentBusiness.business.stateRevision === input.state.business.stateRevision && !sameStoredValue(currentBusiness, input.state)) {
+    throw new Error("Canonical business state content changed without a new revision.");
+  }
+  const currentIntent = store.siteIntents.get(input.siteIntent.siteId);
+  if (currentIntent && currentIntent.revision > input.siteIntent.revision) {
+    throw new Error("Refusing to replace site intent with an older revision.");
+  }
+  if (currentIntent && currentIntent.revision === input.siteIntent.revision && !sameStoredValue(currentIntent, input.siteIntent)) {
+    throw new Error("Site intent content changed without a new revision.");
+  }
+
+  for (const source of input.sourceSnapshots) {
+    const existing = store.sourceSnapshots.get(source.id);
+    if (existing && existing.contentHash !== source.contentHash) throw new Error(`Immutable source snapshot collision for ${source.id}.`);
+  }
+  for (const observation of input.observations) {
+    const existing = store.factObservations.get(observation.id);
+    if (existing && !sameStoredValue(existing, observation)) throw new Error(`Fact observation identity collision for ${observation.id}.`);
+  }
+  const existingSnapshot = store.generationInputSnapshots.get(input.snapshot.id);
+  if (existingSnapshot && existingSnapshot.inputHash !== input.snapshot.inputHash) {
+    throw new Error(`Immutable generation snapshot collision for ${input.snapshot.id}.`);
+  }
+  for (const snapshot of store.generationInputSnapshots.values()) {
+    if (snapshot.formDefinition.id === input.snapshot.formDefinition.id && !sameStoredValue(snapshot.formDefinition, input.snapshot.formDefinition)) {
+      throw new Error(`Immutable form-definition collision for ${input.snapshot.formDefinition.id}.`);
+    }
+  }
+  const retainedRevisions = new Map<string, string>();
+  for (const business of store.canonicalBusinesses.values()) {
+    for (const revision of business.assetRevisions) retainedRevisions.set(revision.id, revision.contentHash);
+  }
+  for (const snapshot of store.generationInputSnapshots.values()) {
+    for (const asset of snapshot.assets) retainedRevisions.set(asset.revision.id, asset.revision.contentHash);
+  }
+  for (const revision of input.state.assetRevisions) {
+    const contentHash = retainedRevisions.get(revision.id);
+    if (contentHash && contentHash !== revision.contentHash) throw new Error(`Immutable asset revision collision for ${revision.id}.`);
+  }
+}
+
+function sameStoredValue(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function getCanonicalControlPlane(siteId: string) {
+  const store = state();
+  const siteIntent = store.siteIntents.get(siteId);
+  const snapshots = Array.from(store.generationInputSnapshots.values())
+    .filter((snapshot) => snapshot.siteId === siteId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const latestSnapshot = snapshots[0];
+  const canonicalState = latestSnapshot ? store.canonicalBusinesses.get(latestSnapshot.businessId) : undefined;
+  if (!siteIntent || !latestSnapshot || !canonicalState) return null;
+  const sourceIds = new Set(latestSnapshot.sourceSnapshotIds);
+  return structuredClone({
+    state: canonicalState,
+    siteIntent,
+    latestSnapshot,
+    sourceSnapshots: Array.from(store.sourceSnapshots.values()).filter((source) => sourceIds.has(source.id)),
+    observations: Array.from(store.factObservations.values()).filter((observation) => sourceIds.has(observation.sourceSnapshotId))
+  });
+}
+
+export function getGenerationInputSnapshot(id: string) {
+  const snapshot = state().generationInputSnapshots.get(id);
+  return snapshot ? structuredClone(snapshot) : null;
+}
+
+export function saveControlPlaneChangeRequest(request: ControlPlaneChangeRequestV1) {
+  state().controlPlaneChangeRequests.set(request.id, structuredClone(request));
+  return structuredClone(request);
+}
+
+export function listControlPlaneChangeRequests(siteId: string) {
+  return Array.from(state().controlPlaneChangeRequests.values())
+    .filter((request) => request.siteId === siteId)
+    .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt))
+    .map((request) => structuredClone(request));
+}
+
 export function createSiteCandidate(input: {
   id?: string;
   businessId?: string;
   agentRunId?: string;
-  bundle: SiteBundle;
+  snapshot: import("./control-plane-contracts").GenerationInputSnapshotV1;
+  version: import("./models").SiteVersionV3;
+  plan: import("./generation-contracts").GenerationPlan;
+  copy: import("./generation-contracts").SiteCopy;
   sourceUrl?: string;
   sourceHost?: string;
   intendedSiteId?: string;
@@ -174,19 +301,25 @@ export function createSiteCandidate(input: {
   candidatePurpose?: SiteCandidateRecord["candidatePurpose"];
 }) {
   const now = new Date().toISOString();
-  const businessId = input.businessId ?? businessIdForProfile(input.bundle.businessProfile);
-  const bundle = assertBundleVersionsV3(withBusinessBundleFields(input.bundle, { businessId, now }), "store candidate bundle");
-  const sourceUrl = input.sourceUrl ?? bundle.presenceAssessment.sourceUrl;
+  const businessId = input.businessId ?? input.snapshot.businessId;
+  const sourceUrl = input.sourceUrl;
   const candidate: SiteCandidateRecord = {
     id: input.id ?? `sitecand_${crypto.randomUUID().replace(/-/g, "")}`,
     businessId,
     agentRunId: input.agentRunId,
     sourceUrl,
     sourceHost: input.sourceHost ?? hostFromUrl(sourceUrl),
-    businessName: bundle.businessProfile.name,
-    vertical: bundle.businessProfile.vertical,
-    candidateSlug: bundle.siteModel.slug,
-    bundle: structuredClone(bundle),
+    businessName: input.snapshot.business.name,
+    vertical: input.snapshot.business.vertical,
+    candidateSlug: slugify(input.snapshot.business.name),
+    inputSnapshotId: input.snapshot.id,
+    inputSnapshot: structuredClone(input.snapshot),
+    version: structuredClone(assertSiteVersionV3(input.version, "store candidate version")),
+    formDefinitionId: input.snapshot.formDefinition.id,
+    formDefinition: structuredClone(input.snapshot.formDefinition),
+    generationPlan: structuredClone(input.plan),
+    siteCopy: structuredClone(input.copy),
+    evidenceManifest: structuredClone(input.snapshot.evidenceManifest),
     status: input.status ?? "ready",
     candidatePurpose: input.candidatePurpose ?? "customer_prospect",
     intendedSiteId: input.intendedSiteId,
@@ -197,46 +330,6 @@ export function createSiteCandidate(input: {
   return structuredClone(candidate);
 }
 
-const factCandidatesByBusiness = new Map<string, FactCandidate[]>();
-const businessServicesByBusiness = new Map<string, BusinessServiceRecord[]>();
-
-export function replaceFactCandidates(businessId: string, candidates: FactCandidate[]) {
-  factCandidatesByBusiness.set(businessId, candidates.map((candidate) => ({ ...candidate })));
-  return structuredClone(factCandidatesByBusiness.get(businessId) ?? []);
-}
-
-export function listFactCandidates(businessId: string) {
-  return structuredClone(factCandidatesByBusiness.get(businessId) ?? []);
-}
-
-export function replaceProposedBusinessServices(businessId: string, records: BusinessServiceRecord[]) {
-  // Replace machine-proposed rows; owner-decided rows (active/hidden/rejected) persist.
-  const existing = businessServicesByBusiness.get(businessId) ?? [];
-  const ownerDecided = existing.filter((record) => record.status !== "proposed");
-  const decidedKeys = new Set(ownerDecided.map((record) => record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
-  const fresh = records.filter((record) => !decidedKeys.has(record.serviceDefinitionId ?? `custom:${record.customName?.toLowerCase()}`));
-  businessServicesByBusiness.set(businessId, [...ownerDecided, ...fresh.map((record) => ({ ...record }))]);
-  return structuredClone(businessServicesByBusiness.get(businessId) ?? []);
-}
-
-export function listBusinessServices(businessId: string) {
-  return structuredClone(businessServicesByBusiness.get(businessId) ?? []);
-}
-
-export function updateBusinessService(input: { id: string; status: "active" | "hidden" | "rejected"; confirmedBy: string }) {
-  for (const records of businessServicesByBusiness.values()) {
-    const record = records.find((entry) => entry.id === input.id);
-    if (record) {
-      record.status = input.status;
-      record.confirmationSource = "owner";
-      record.confirmedBy = input.confirmedBy;
-      record.confirmedAt = new Date().toISOString();
-      record.updatedAt = record.confirmedAt;
-      return structuredClone(record);
-    }
-  }
-  return null;
-}
 
 export function upsertSiteArtifact(artifact: SiteArtifactRecord) {
   const artifacts = state().siteArtifacts;
@@ -293,13 +386,6 @@ export function getSiteCandidate(candidateId: string) {
   return structuredClone(candidate);
 }
 
-export function updateSiteCandidateBundle(candidateId: string, bundle: SiteBundle) {
-  const candidate = state().siteCandidates.get(candidateId);
-  if (!candidate) return null;
-  candidate.bundle = structuredClone(assertBundleVersionsV3(bundle, "store update candidate bundle"));
-  return structuredClone(candidate);
-}
-
 export function archiveSiteCandidates(candidateIds: string[]) {
   const store = state();
   const now = new Date().toISOString();
@@ -328,7 +414,6 @@ export function mergeBusinesses(input: { sourceBusinessId: string; targetBusines
   }
   for (const candidate of store.siteCandidates.values()) {
     knownBusinessIds.add(candidate.businessId);
-    if (candidate.bundle.business?.id) knownBusinessIds.add(candidate.bundle.business.id);
   }
   if (!knownBusinessIds.has(sourceBusinessId)) return { ok: false as const, reason: "Source business not found." };
   if (!knownBusinessIds.has(targetBusinessId)) return { ok: false as const, reason: "Target business not found." };
@@ -346,14 +431,7 @@ export function mergeBusinesses(input: { sourceBusinessId: string; targetBusines
     movedSites += 1;
     movedLocations += locationCount;
   }
-  for (const candidate of store.siteCandidates.values()) {
-    if (candidate.businessId !== sourceBusinessId && candidate.bundle.business?.id !== sourceBusinessId) continue;
-    candidate.businessId = targetBusinessId;
-    candidate.bundle = assertBundleVersionsV3(withBusinessBundleFields(candidate.bundle, { businessId: targetBusinessId, now }), "store merge candidate bundle");
-    candidate.bundle.locations = candidate.bundle.locations?.map((location) => ({ ...location, businessId: targetBusinessId, updatedAt: now }));
-    candidate.updatedAt = now;
-    movedSiteCandidates += 1;
-  }
+  // Immutable candidate snapshots are never rewritten during a business merge.
   return {
     ok: true as const,
     sourceBusinessId,
@@ -386,18 +464,26 @@ export function acceptSiteCandidateAsSite(candidateId: string) {
   if (candidate.intendedSiteId) {
     return { ok: false as const, reason: "Site candidate is intended for an existing site version." };
   }
+  const freshness = candidateRevisionIssueForAcceptance(candidate);
+  if (freshness.length) {
+    candidate.status = "stale";
+    candidate.staleReason = `Candidate input is stale: ${freshness.join(", ")}.`;
+    candidate.updatedAt = new Date().toISOString();
+    return { ok: false as const, reason: candidate.staleReason };
+  }
 
   const acceptedAt = new Date().toISOString();
-  let bundle = structuredClone(candidate.bundle);
-  applySiteIdentity(bundle, makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys()));
-  bundle = assertBundleVersionsV3(withBusinessBundleFields(bundle, { businessId: candidate.businessId, now: acceptedAt }), "store accepted candidate bundle");
+  const bundle = siteCandidateRenderEnvelope(candidate);
+  bundle.siteModel.slug = makeUniqueSlug(bundle.siteModel.slug, store.slugToSiteId.keys());
   store.bundles.set(bundle.businessProfile.siteId, bundle);
   store.slugToSiteId.set(bundle.siteModel.slug, bundle.businessProfile.siteId);
-  copySelectedArtifactsToSite({
+  const copiedArtifacts = copySelectedArtifactsToSite({
     candidateId,
     siteId: bundle.businessProfile.siteId,
-    acceptedAt
+    acceptedAt,
+    artifactIds: bundle.siteModel.versions[0]?.artifactRefs.map((reference) => reference.artifactId) ?? []
   });
+  rebindVersionArtifacts(bundle.siteModel.versions[0], copiedArtifacts);
   candidate.status = "accepted";
   candidate.acceptedSiteId = bundle.businessProfile.siteId;
   candidate.acceptedVersionId = bundle.siteModel.versions[0]?.id;
@@ -437,20 +523,24 @@ export function acceptSiteCandidateAsVersion(input: { candidateId: string; siteI
   }
 
   const acceptedAt = new Date().toISOString();
-  const version = siteVersionFromCandidate({
-    candidateBundle: candidate.bundle,
-    targetBundle,
-    acceptedAt
-  });
-  if (!version) return { ok: false as const, reason: "Site candidate has no renderable version." };
+  const freshness = candidateRevisionIssueForAcceptance(candidate, targetBundle);
+  if (freshness.length) {
+    candidate.status = "stale";
+    candidate.staleReason = `Candidate input is stale: ${freshness.join(", ")}.`;
+    candidate.updatedAt = acceptedAt;
+    return { ok: false as const, reason: candidate.staleReason };
+  }
+  const version = structuredClone(assertSiteVersionV3(candidate.version, "accepted candidate version"));
 
-  targetBundle.siteModel.versions.unshift(version);
-  applyAcceptedGenerationState(targetBundle, candidate.bundle);
-  copySelectedArtifactsToSite({
+  const copiedArtifacts = copySelectedArtifactsToSite({
     candidateId: input.candidateId,
     siteId: input.siteId,
-    acceptedAt
+    acceptedAt,
+    artifactIds: version.artifactRefs.map((reference) => reference.artifactId)
   });
+  rebindVersionArtifacts(version, copiedArtifacts);
+  targetBundle.siteModel.versions.unshift(version);
+  applyAcceptedGenerationState(targetBundle, siteCandidateRenderEnvelope(candidate));
   candidate.status = "accepted";
   candidate.intendedSiteId = input.siteId;
   candidate.acceptedSiteId = input.siteId;
@@ -481,6 +571,9 @@ function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
   if (candidate.status === "blocked") {
     return { ok: false as const, reason: "Blocked site candidates cannot be accepted." };
   }
+  if (candidate.status === "stale") {
+    return { ok: false as const, reason: candidate.staleReason ?? "Stale site candidates cannot be accepted." };
+  }
   if (candidate.status === "archived") {
     return { ok: false as const, reason: "Archived site candidates cannot be accepted." };
   }
@@ -490,43 +583,24 @@ function assertCandidateAcceptable(candidate: SiteCandidateRecord) {
   return { ok: true as const };
 }
 
-function siteVersionFromCandidate(input: {
-  candidateBundle: SiteBundle;
-  targetBundle: SiteBundle;
-  acceptedAt: string;
-}): SiteVersion | null {
-  const candidateBundle = structuredClone(input.candidateBundle);
-  applySiteIdentity(candidateBundle, input.targetBundle.siteModel.slug);
-  assertBundleVersionsV3(candidateBundle, "store accepted candidate version bundle");
-  const candidateVersion =
-    candidateBundle.siteModel.versions.find((version) => version.status === "draft") ??
-    candidateBundle.siteModel.versions[0];
-  if (!candidateVersion) return null;
-  const version = structuredClone(assertSiteVersionV3(candidateVersion, "accepted candidate version"));
-  version.id = nextAcceptedVersionId(input.targetBundle, input.acceptedAt);
-  version.status = "draft";
-  version.createdAt = input.acceptedAt;
-  version.theme ??= structuredClone(candidateBundle.siteModel.theme);
-  return version;
-}
-
-function nextAcceptedVersionId(bundle: SiteBundle, acceptedAt: string) {
-  const seed = Date.parse(acceptedAt);
-  const base = `version_${bundle.siteModel.slug}_candidate_${Number.isFinite(seed) ? seed : Date.now()}`;
-  const existing = new Set(bundle.siteModel.versions.map((version) => version.id));
-  let candidate = base;
-  let counter = 2;
-  while (existing.has(candidate)) {
-    candidate = `${base}_${counter}`;
-    counter += 1;
-  }
-  return candidate;
-}
-
-function copySelectedArtifactsToSite(input: { candidateId: string; siteId: string; acceptedAt: string }) {
+function candidateRevisionIssueForAcceptance(candidate: SiteCandidateRecord, _targetBundle?: SiteBundle) {
   const store = state();
+  const currentBusiness = store.canonicalBusinesses.get(candidate.businessId);
+  const currentIntent = store.siteIntents.get(candidate.inputSnapshot.siteId);
+  if (!currentBusiness || !currentIntent) return ["target_missing_canonical_authority"];
+  return candidateRevisionIssue({
+    candidate: candidate.inputSnapshot,
+    currentBusinessStateRevision: currentBusiness.business.stateRevision,
+    currentSiteIntentRevision: currentIntent.revision
+  });
+}
+
+function copySelectedArtifactsToSite(input: { candidateId: string; siteId: string; acceptedAt: string; artifactIds: string[] }) {
+  const store = state();
+  const copied: Array<{ source: SiteArtifactRecord; target: SiteArtifactRecord }> = [];
+  const referenced = new Set(input.artifactIds);
   const selectedArtifacts = store.siteArtifacts.filter(
-    (artifact) => artifact.siteCandidateId === input.candidateId && artifact.scope === "candidate_selected"
+    (artifact) => artifact.siteCandidateId === input.candidateId && referenced.has(artifact.id)
   );
   for (const artifact of selectedArtifacts) {
     const acceptedArtifact = copyCandidateArtifactToSite({
@@ -537,7 +611,21 @@ function copySelectedArtifactsToSite(input: { candidateId: string; siteId: strin
     const existingIndex = store.siteArtifacts.findIndex((candidate) => candidate.id === acceptedArtifact.id);
     if (existingIndex >= 0) store.siteArtifacts[existingIndex] = acceptedArtifact;
     else store.siteArtifacts.push(acceptedArtifact);
+    copied.push({ source: artifact, target: acceptedArtifact });
   }
+  return copied;
+}
+
+function rebindVersionArtifacts(
+  version: import("./models").SiteVersionV3 | undefined,
+  copied: Array<{ source: SiteArtifactRecord; target: SiteArtifactRecord }>
+) {
+  if (!version) return;
+  const ids = new Map(copied.map((item) => [item.source.id, item.target.id]));
+  version.artifactRefs = version.artifactRefs.map((reference) => ({
+    ...reference,
+    artifactId: ids.get(reference.artifactId) ?? reference.artifactId
+  }));
 }
 
 export function createPreviewToken(input: { siteId: string; expiresAt?: string; versionId?: string }) {
@@ -693,35 +781,17 @@ export function saveSiteVersion(input: { siteId: string; version: SiteBundle["si
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
   const index = bundle.siteModel.versions.findIndex((version) => version.id === input.version.id);
-  if (index < 0) return null;
-  bundle.siteModel.versions[index] = input.version;
+  if (index < 0) bundle.siteModel.versions.unshift(input.version);
+  else bundle.siteModel.versions[index] = input.version;
+  const artifactIds = new Set(input.version.artifactRefs.map((reference) => reference.artifactId));
+  const artifacts = state().siteArtifacts.filter((artifact) => artifactIds.has(artifact.id));
+  const plan = artifacts.find((artifact) => artifact.artifactType === "generation_plan")?.payload.plan;
+  const copy = artifacts.find((artifact) => artifact.artifactType === "site_copy")?.payload.copy;
+  if (plan) bundle.presenceAssessment.generationPlan = structuredClone(plan) as NonNullable<SiteBundle["presenceAssessment"]["generationPlan"]>;
+  if (copy) bundle.presenceAssessment.siteCopy = structuredClone(copy) as NonNullable<SiteBundle["presenceAssessment"]["siteCopy"]>;
+  const snapshot = state().generationInputSnapshots.get(input.version.inputSnapshotId);
+  if (snapshot) bundle.presenceAssessment.generationInputSnapshot = structuredClone(snapshot);
   return bundle;
-}
-
-export function updateSectionProps(input: {
-  siteId: string;
-  pageId: string;
-  sectionId: string;
-  props: Record<string, unknown>;
-}) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const guardrails = validateSectionUpdate(bundle, input);
-  if (!guardrails.ok) {
-    return {
-      ok: false as const,
-      reason: guardrails.reason,
-      issues: guardrails.issues
-    };
-  }
-
-  const applied = applyV3SectionUpdate(bundle, input);
-  if (!applied.ok) return applied;
-  return {
-    ok: true as const,
-    bundle,
-    guardrailWarnings: guardrails.warnings
-  };
 }
 
 export function publishDraft(siteId: string) {
@@ -737,6 +807,10 @@ export function publishVersion(input: { siteId: string; versionId: string }) {
   if (!bundle) return null;
   const target = bundle.siteModel.versions.find((version) => version.id === input.versionId);
   if (!target) return { ok: false as const, reason: "Version not found." };
+  const snapshot = state().generationInputSnapshots.get(target.inputSnapshotId);
+  if (!snapshot || snapshot.eligibilityMode !== "public") {
+    return { ok: false as const, reason: "Protected-preview versions cannot be published. Confirm canonical business facts and regenerate a public-eligible version first." };
+  }
   for (const version of bundle.siteModel.versions) {
     if (version.status === "published") version.status = "draft";
   }
@@ -752,45 +826,6 @@ export function restoreVersionToDraft(input: { siteId: string; versionId: string
   if (!result.ok) return result;
   const draft = bundle.siteModel.versions.find((version) => version.id === result.draftVersionId);
   if (draft) markVersionOwnerTouched(draft);
-  return result;
-}
-
-export function updateBusinessProfile(input: BusinessProfileUpdateInput) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const guardrails = validateBusinessProfileUpdate(bundle, input);
-  if (!guardrails.ok) {
-    return {
-      ok: false as const,
-      reason: guardrails.reason,
-      issues: guardrails.issues
-    };
-  }
-  return {
-    ok: true as const,
-    bundle: markProfileUpdated(applyBusinessProfileUpdate(bundle, input)),
-    guardrailWarnings: guardrails.warnings
-  };
-}
-
-export function confirmSiteEvidence(input: {
-  siteId: string;
-  evidenceId: string;
-  decision: "confirmed" | "rejected";
-  decidedBy: string;
-}) {
-  const bundle = getSiteBundle(input.siteId);
-  const ledger = bundle?.presenceAssessment.evidenceLedger;
-  if (!bundle || !ledger) return null;
-  const result = applyEvidenceConfirmation({ ledger, ...input });
-  return result.ok ? { ok: true as const, bundle, item: result.item } : result;
-}
-
-export function updateOwnerAssets(input: UpdateOwnerAssetsInput) {
-  const bundle = getSiteBundle(input.siteId);
-  if (!bundle) return null;
-  const result = applyOwnerAssetsUpdate(bundle, input);
-  if (result.ok) markAllVersionsOwnerTouched(bundle);
   return result;
 }
 
@@ -1093,19 +1128,25 @@ export function getForms(siteId: string): FormDefinition[] {
   return getSiteBundle(siteId)?.extensionModel.forms ?? [];
 }
 
-export function updateFormSettings(input: UpdateFormSettingsInput) {
+export function getPublishedFormDefinition(siteId: string, formId: string): FormDefinition | null {
+  const bundle = getSiteBundle(siteId);
+  const referenced = bundle?.siteModel.versions.some((version) => version.status === "published" && version.formDefinitionId === formId);
+  if (!referenced) return null;
+  const definition = Array.from(state().generationInputSnapshots.values())
+    .map((snapshot) => snapshot.formDefinition)
+    .find((form) => form.siteId === siteId && form.id === formId);
+  return definition ? structuredClone(definition) : null;
+}
+
+export function updateInquiryRouting(input: UpdateInquiryRoutingInput) {
   const bundle = getSiteBundle(input.siteId);
   if (!bundle) return null;
-  const result = applyFormSettingsUpdate(bundle, input);
-  if (result.ok) markAllVersionsOwnerTouched(bundle);
+  const result = applyInquiryRoutingUpdate(bundle.extensionModel.workflows, input);
+  if (!result.ok) return result;
+  bundle.extensionModel.workflows = result.workflows;
   return result;
 }
 
-
-function markProfileUpdated(bundle: SiteBundle) {
-  markAllVersionsOwnerTouched(bundle);
-  return bundle;
-}
 
 export function createClaim(input: {
   siteId: string;
@@ -1127,7 +1168,6 @@ export function createClaim(input: {
   if (!bundle) return null;
   if (!claimVerificationSatisfies(input.verificationLevel)) return null;
   const acceptedAt = new Date().toISOString();
-  applyVerifiedFacts(bundle.businessProfile, input.verifiedFacts ?? []);
   const claim: ClaimRecord = {
     id: crypto.randomUUID(),
     siteId: input.siteId,
@@ -1355,3 +1395,4 @@ function clampHoldout(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(0.5, value));
 }
+  const copied: Array<{ source: SiteArtifactRecord; target: SiteArtifactRecord }> = [];

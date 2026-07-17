@@ -9,6 +9,7 @@ import {
   operatorDecisionPassedV1,
   parseOperatorDecisionArtifactV1
 } from "@/lib/operator-decision-v1";
+import { siteCandidateRenderEnvelope } from "@/lib/site-candidate-render";
 
 export const runtime = "nodejs";
 
@@ -30,7 +31,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
 
   const candidate = await repository.getSiteCandidate(candidateId);
   if (!candidate) return NextResponse.json({ error: "Unknown site candidate" }, { status: 404 });
-  const candidateVersion = candidate.bundle.siteModel.versions.find((version) => version.status === "draft") ?? candidate.bundle.siteModel.versions[0];
+  const candidateVersion = candidate.version;
+  const candidateBundle = siteCandidateRenderEnvelope(candidate);
   const schemaIssue = siteVersionV3Issue(candidateVersion);
   if (schemaIssue) {
     return NextResponse.json(
@@ -41,8 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ can
       { status: 409 }
     );
   }
-  const readiness = candidateVersion ? getEffectiveGenerationQaReadiness(candidate.bundle, candidateVersion) : "unavailable";
-  if (candidate.status === "blocked" || candidate.status === "archived" || readiness !== "ready") {
+  const readiness = candidateVersion ? getEffectiveGenerationQaReadiness(candidateBundle, candidateVersion) : "unavailable";
+  if (candidate.status === "blocked" || candidate.status === "stale" || candidate.status === "archived" || readiness !== "ready") {
     return NextResponse.json(
       {
         error: "Site candidate QA must pass before acceptance.",

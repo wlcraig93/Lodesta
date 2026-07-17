@@ -16,9 +16,23 @@ assert.deepEqual(
 );
 assert.deepEqual(
   generationJudgeContext({
-    business: {
-      ...mediaFixture.bundle.businessProfile,
-      services: ["Collision Repair", "Free Repair Estimates", "Insurance Repair Assistance"]
+    snapshot: {
+      ...mediaFixture.snapshot,
+      business: {
+        ...mediaFixture.snapshot.business,
+        offerings: ["Collision Repair", "Free Repair Estimates", "Insurance Repair Assistance"].map((customName, index) => ({
+          id: `judge_offering_${index}`,
+          businessId: mediaFixture.snapshot.businessId,
+          customName,
+          status: "confirmed" as const,
+          visibility: "public" as const,
+          pageMode: "shared" as const,
+          featured: false,
+          evidenceIds: [],
+          createdAt: mediaFixture.snapshot.createdAt,
+          updatedAt: mediaFixture.snapshot.createdAt
+        }))
+      }
     },
     plan: mediaFixture.plan,
     packet: { availableActions: ["copy", "operator_review"], images: [], textManifest: [] }

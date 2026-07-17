@@ -33,13 +33,13 @@ export async function POST(request: Request) {
   const version = assertSiteVersionV3(structuredClone(selected), "objective QA version");
   const plan = bundle.presenceAssessment.generationPlan;
   const copy = bundle.presenceAssessment.siteCopy;
-  const evidence = bundle.presenceAssessment.evidenceLedger;
-  if (!plan || !copy || !evidence) {
+  const snapshot = bundle.presenceAssessment.generationInputSnapshot;
+  if (!plan || !copy || !snapshot || version.inputSnapshotId !== snapshot.id) {
     return NextResponse.json({ error: "This site uses a stale generation schema. Regenerate it before QA." }, { status: 409 });
   }
 
   const qaRunId = `objective_qa_${crypto.randomUUID().replace(/-/g, "")}`;
-  const gate = await runObjectiveGenerationGate({ bundle, version, plan, copy, evidence, qaRunId });
+  const gate = await runObjectiveGenerationGate({ snapshot, version, plan, copy, qaRunId });
   version.generationQa = generationQaFromObjectiveGate(bundle, version, gate);
   await repository.saveSiteVersion({ siteId: parsed.data.siteId, version });
 
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       producerId: "objective-site-qa",
       producerVersion: gate.schemaVersion,
       createdAt,
-      inputs: { siteId: parsed.data.siteId, versionId: version.id, plan, copy, evidence }
+      inputs: { siteId: parsed.data.siteId, versionId: version.id, inputSnapshotId: snapshot.id, plan, copy }
     }),
     contentHash: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
     payload,

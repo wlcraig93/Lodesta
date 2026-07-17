@@ -1,0 +1,1168 @@
+{
+  "schemaVersion": "generation-bakeoff-input-v1",
+  "fixture": {
+    "id": "south-congress-collision-service-breadth",
+    "profile": "service_breadth_with_single_media_asset",
+    "sourceUrl": "https://southcongresscollision.example/"
+  },
+  "sourceSnapshots": [
+    {
+      "id": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "businessId": "biz_lxgd1",
+      "sourceType": "website",
+      "sourceUrl": "https://southcongresscollision.example/",
+      "contentHash": "df68764b6c83e4f23e6e43289f11eac7cb0d32d4cbdb84d916eba2365186c49d",
+      "capturedAt": "2026-07-16T00:00:00.000Z",
+      "payload": {
+        "url": "https://southcongresscollision.example/",
+        "finalUrl": "https://southcongresscollision.example/",
+        "extractedFacts": {
+          "categories": [],
+          "services": [
+            "Auto Body Repair",
+            "Paintless Dent Repair",
+            "Hail Damage Repair",
+            "Collision Repair",
+            "Professional Paint Services",
+            "Bumper Repair",
+            "Dent Repair"
+          ],
+          "serviceHighlights": [
+            "PDR for smaller dents and hail repair"
+          ],
+          "serviceAreas": [],
+          "socialLinks": [],
+          "bookingLinks": [],
+          "orderingLinks": [],
+          "pressLinks": [],
+          "name": "South Congress Collision",
+          "hours": {
+            "hours_1": "Monday-Friday 7:30 AM-5:30 PM, Saturday 8:00 AM-2:00 PM"
+          },
+          "address": {
+            "street": "2215 S Congress Ave",
+            "city": "Austin",
+            "region": "TX",
+            "postalCode": "78704",
+            "country": "US"
+          },
+          "phone": "+15125550115",
+          "description": "Austin collision repair shop for body repair, paintless dent repair, bumper repair, hail damage, and professional paint services near South Congress."
+        },
+        "pages": [
+          {
+            "url": "https://southcongresscollision.example/",
+            "source": "primary",
+            "purposeTags": [
+              "home",
+              "services"
+            ],
+            "title": "South Congress Collision | Auto Body Repair in Austin",
+            "sourceTextBlocks": [
+              {
+                "id": "source_block_928a3ee945093db9",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > h1:nth-of-type(1)",
+                "order": 0,
+                "displayText": "Collision repair and paint work near South Congress",
+                "canonicalTokens": [
+                  {
+                    "value": "collision",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 10,
+                    "displayEnd": 16
+                  },
+                  {
+                    "value": "and",
+                    "displayStart": 17,
+                    "displayEnd": 20
+                  },
+                  {
+                    "value": "paint",
+                    "displayStart": 21,
+                    "displayEnd": 26
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 27,
+                    "displayEnd": 31
+                  },
+                  {
+                    "value": "near",
+                    "displayStart": 32,
+                    "displayEnd": 36
+                  },
+                  {
+                    "value": "south",
+                    "displayStart": 37,
+                    "displayEnd": 42
+                  },
+                  {
+                    "value": "congress",
+                    "displayStart": 43,
+                    "displayEnd": 51
+                  }
+                ]
+              },
+              {
+                "id": "source_block_d4fe4b1471f90096",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(1) > p:nth-of-type(1)",
+                "order": 1,
+                "displayText": "Start with an estimate for collision damage, dents, damaged bumpers, hail damage, or refinishing work.",
+                "canonicalTokens": [
+                  {
+                    "value": "start",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "with",
+                    "displayStart": 6,
+                    "displayEnd": 10
+                  },
+                  {
+                    "value": "an",
+                    "displayStart": 11,
+                    "displayEnd": 13
+                  },
+                  {
+                    "value": "estimate",
+                    "displayStart": 14,
+                    "displayEnd": 22
+                  },
+                  {
+                    "value": "for",
+                    "displayStart": 23,
+                    "displayEnd": 26
+                  },
+                  {
+                    "value": "collision",
+                    "displayStart": 27,
+                    "displayEnd": 36
+                  },
+                  {
+                    "value": "damage",
+                    "displayStart": 37,
+                    "displayEnd": 43
+                  },
+                  {
+                    "value": "dents",
+                    "displayStart": 45,
+                    "displayEnd": 50
+                  },
+                  {
+                    "value": "damaged",
+                    "displayStart": 52,
+                    "displayEnd": 59
+                  },
+                  {
+                    "value": "bumpers",
+                    "displayStart": 60,
+                    "displayEnd": 67
+                  },
+                  {
+                    "value": "hail",
+                    "displayStart": 69,
+                    "displayEnd": 73
+                  },
+                  {
+                    "value": "damage",
+                    "displayStart": 74,
+                    "displayEnd": 80
+                  },
+                  {
+                    "value": "or",
+                    "displayStart": 82,
+                    "displayEnd": 84
+                  },
+                  {
+                    "value": "refinishing",
+                    "displayStart": 85,
+                    "displayEnd": 96
+                  },
+                  {
+                    "value": "work",
+                    "displayStart": 97,
+                    "displayEnd": 101
+                  }
+                ]
+              },
+              {
+                "id": "source_block_5bf0b57cf8df359a",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > h2:nth-of-type(1)",
+                "order": 2,
+                "displayText": "Auto body services",
+                "canonicalTokens": [
+                  {
+                    "value": "auto",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "body",
+                    "displayStart": 5,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "services",
+                    "displayStart": 10,
+                    "displayEnd": 18
+                  }
+                ]
+              },
+              {
+                "id": "source_block_294cd94c09fc536e",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(1)",
+                "order": 3,
+                "displayText": "Collision Repair",
+                "canonicalTokens": [
+                  {
+                    "value": "collision",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 10,
+                    "displayEnd": 16
+                  }
+                ]
+              },
+              {
+                "id": "source_block_fc604e49ceac06ba",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(2)",
+                "order": 4,
+                "displayText": "Paintless Dent Repair",
+                "canonicalTokens": [
+                  {
+                    "value": "paintless",
+                    "displayStart": 0,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "dent",
+                    "displayStart": 10,
+                    "displayEnd": 14
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 15,
+                    "displayEnd": 21
+                  }
+                ]
+              },
+              {
+                "id": "source_block_c9abdbcc553cc3bd",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(3)",
+                "order": 5,
+                "displayText": "Bumper Repair",
+                "canonicalTokens": [
+                  {
+                    "value": "bumper",
+                    "displayStart": 0,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 7,
+                    "displayEnd": 13
+                  }
+                ]
+              },
+              {
+                "id": "source_block_32799221a6c58b5e",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(4)",
+                "order": 6,
+                "displayText": "Hail Damage Repair",
+                "canonicalTokens": [
+                  {
+                    "value": "hail",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "damage",
+                    "displayStart": 5,
+                    "displayEnd": 11
+                  },
+                  {
+                    "value": "repair",
+                    "displayStart": 12,
+                    "displayEnd": 18
+                  }
+                ]
+              },
+              {
+                "id": "source_block_d53d952fd89f4eca",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(2) > ul:nth-of-type(1) > li:nth-of-type(5)",
+                "order": 7,
+                "displayText": "Professional Paint Services",
+                "canonicalTokens": [
+                  {
+                    "value": "professional",
+                    "displayStart": 0,
+                    "displayEnd": 12
+                  },
+                  {
+                    "value": "paint",
+                    "displayStart": 13,
+                    "displayEnd": 18
+                  },
+                  {
+                    "value": "services",
+                    "displayStart": 19,
+                    "displayEnd": 27
+                  }
+                ]
+              },
+              {
+                "id": "source_block_365577fc85c5278b",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(3) > h2:nth-of-type(1)",
+                "order": 8,
+                "displayText": "Shop",
+                "canonicalTokens": [
+                  {
+                    "value": "shop",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  }
+                ]
+              },
+              {
+                "id": "source_block_c81220f1028728b2",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > h2:nth-of-type(1)",
+                "order": 9,
+                "displayText": "Visit the shop",
+                "canonicalTokens": [
+                  {
+                    "value": "visit",
+                    "displayStart": 0,
+                    "displayEnd": 5
+                  },
+                  {
+                    "value": "the",
+                    "displayStart": 6,
+                    "displayEnd": 9
+                  },
+                  {
+                    "value": "shop",
+                    "displayStart": 10,
+                    "displayEnd": 14
+                  }
+                ]
+              },
+              {
+                "id": "source_block_299a82e513062911",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > p:nth-of-type(1)",
+                "order": 10,
+                "displayText": "2215 S Congress Ave, Austin, TX 78704",
+                "canonicalTokens": [
+                  {
+                    "value": "2215",
+                    "displayStart": 0,
+                    "displayEnd": 4
+                  },
+                  {
+                    "value": "s",
+                    "displayStart": 5,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "congress",
+                    "displayStart": 7,
+                    "displayEnd": 15
+                  },
+                  {
+                    "value": "ave",
+                    "displayStart": 16,
+                    "displayEnd": 19
+                  },
+                  {
+                    "value": "austin",
+                    "displayStart": 21,
+                    "displayEnd": 27
+                  },
+                  {
+                    "value": "tx",
+                    "displayStart": 29,
+                    "displayEnd": 31
+                  },
+                  {
+                    "value": "78704",
+                    "displayStart": 32,
+                    "displayEnd": 37
+                  }
+                ]
+              },
+              {
+                "id": "source_block_3f6bfee67246cddf",
+                "sourceUrl": "https://southcongresscollision.example/",
+                "sourcePageHash": "5099ba16a28b62f5",
+                "containerId": "html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > section:nth-of-type(4) > p:nth-of-type(2)",
+                "order": 11,
+                "displayText": "Monday-Friday 7:30 AM-5:30 PM, Saturday 8:00 AM-2:00 PM",
+                "canonicalTokens": [
+                  {
+                    "value": "monday",
+                    "displayStart": 0,
+                    "displayEnd": 6
+                  },
+                  {
+                    "value": "friday",
+                    "displayStart": 7,
+                    "displayEnd": 13
+                  },
+                  {
+                    "value": "7",
+                    "displayStart": 14,
+                    "displayEnd": 15
+                  },
+                  {
+                    "value": "30",
+                    "displayStart": 16,
+                    "displayEnd": 18
+                  },
+                  {
+                    "value": "am",
+                    "displayStart": 19,
+                    "displayEnd": 21
+                  },
+                  {
+                    "value": "5",
+                    "displayStart": 22,
+                    "displayEnd": 23
+                  },
+                  {
+                    "value": "30",
+                    "displayStart": 24,
+                    "displayEnd": 26
+                  },
+                  {
+                    "value": "pm",
+                    "displayStart": 27,
+                    "displayEnd": 29
+                  },
+                  {
+                    "value": "saturday",
+                    "displayStart": 31,
+                    "displayEnd": 39
+                  },
+                  {
+                    "value": "8",
+                    "displayStart": 40,
+                    "displayEnd": 41
+                  },
+                  {
+                    "value": "00",
+                    "displayStart": 42,
+                    "displayEnd": 44
+                  },
+                  {
+                    "value": "am",
+                    "displayStart": 45,
+                    "displayEnd": 47
+                  },
+                  {
+                    "value": "2",
+                    "displayStart": 48,
+                    "displayEnd": 49
+                  },
+                  {
+                    "value": "00",
+                    "displayStart": 50,
+                    "displayEnd": 52
+                  },
+                  {
+                    "value": "pm",
+                    "displayStart": 53,
+                    "displayEnd": 55
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "observations": [
+    {
+      "id": "observation_biz_lxgd1_748ba9d66b0ac94ab71c",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Auto Body Repair",
+      "normalizedValue": "auto body repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_25b12bcfdd7377f3457c",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Paintless Dent Repair",
+      "normalizedValue": "paintless dent repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_52b9024edb10425eb7ab",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Hail Damage Repair",
+      "normalizedValue": "hail damage repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_b13096aa7ae242160fe6",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Collision Repair",
+      "normalizedValue": "collision repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_ea52b597a562dfb1ae1a",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Professional Paint Services",
+      "normalizedValue": "professional paint services",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_37994094a53f99b1244f",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Bumper Repair",
+      "normalizedValue": "bumper repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_9cc09cd0ff49b0434715",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Dent Repair",
+      "normalizedValue": "dent repair",
+      "confidence": 0.78,
+      "status": "superseded",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_e766ff5b74e486002c21",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "serviceHighlights",
+      "value": "PDR for smaller dents and hail repair",
+      "normalizedValue": "pdr for smaller dents and hail repair",
+      "confidence": 0.7,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_90f1cd1a7b166df6da18",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "name",
+      "value": "South Congress Collision",
+      "normalizedValue": "south congress collision",
+      "confidence": 0.85,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_5d1fd2e2c736aee7c277",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "hours",
+      "value": {
+        "hours_1": "Monday-Friday 7:30 AM-5:30 PM, Saturday 8:00 AM-2:00 PM"
+      },
+      "normalizedValue": {
+        "hours_1": "monday-friday 7:30 am-5:30 pm, saturday 8:00 am-2:00 pm"
+      },
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_121f88f2770796049740",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "address",
+      "value": {
+        "street": "2215 S Congress Ave",
+        "city": "Austin",
+        "region": "TX",
+        "postalCode": "78704",
+        "country": "US"
+      },
+      "normalizedValue": {
+        "city": "austin",
+        "country": "us",
+        "postalCode": "78704",
+        "region": "tx",
+        "street": "2215 s congress ave"
+      },
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_e457d636a04b0900ab86",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "phone",
+      "value": "+15125550115",
+      "normalizedValue": "+15125550115",
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_845ca8eeab6a454f492e",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "description",
+      "value": "Austin collision repair shop for body repair, paintless dent repair, bumper repair, hail damage, and professional paint services near South Congress.",
+      "normalizedValue": "austin collision repair shop for body repair, paintless dent repair, bumper repair, hail damage, and professional paint services near south congress.",
+      "confidence": 0.75,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_341fa1cf7c3aec46008d",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Auto Body Repair",
+      "normalizedValue": {
+        "name": "auto body repair",
+        "sourceText": "auto body repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_40598e71a7fa273883d9",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Paintless Dent Repair",
+      "normalizedValue": {
+        "name": "paintless dent repair",
+        "sourceText": "paintless dent repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_fc604e49ceac06ba",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_3cd89728c01309a61e5c",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Hail Damage Repair",
+      "normalizedValue": {
+        "name": "hail damage repair",
+        "sourceText": "hail damage repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_32799221a6c58b5e",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_a2b66105c86e74ee21eb",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Collision Repair",
+      "normalizedValue": {
+        "name": "collision repair",
+        "sourceText": "collision repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_928a3ee945093db9",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_b7f548c2ecdf066f3e21",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Professional Paint Services",
+      "normalizedValue": {
+        "name": "professional paint services",
+        "sourceText": "professional paint services"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_d53d952fd89f4eca",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_dd31711dbe047dfecbb3",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Bumper Repair",
+      "normalizedValue": {
+        "name": "bumper repair",
+        "sourceText": "bumper repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_c9abdbcc553cc3bd",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    },
+    {
+      "id": "observation_biz_lxgd1_grounded_service_893fbda744ac1fce35e7",
+      "businessId": "biz_lxgd1",
+      "sourceSnapshotId": "source_biz_lxgd1_website_df68764b6c83e4f2",
+      "field": "services",
+      "value": "Dent Repair",
+      "normalizedValue": {
+        "name": "dent repair",
+        "sourceText": "dent repair"
+      },
+      "confidence": 0.9,
+      "status": "selected_for_preview",
+      "sourceBlockId": "source_block_fc604e49ceac06ba",
+      "observedAt": "2026-07-16T00:00:00.000Z"
+    }
+  ],
+  "generationInputSnapshot": {
+    "schemaVersion": "generation-input-snapshot-v1",
+    "id": "gensnap_site_fixture_south-congress-collision-service-breadth_1_1_58a3683d63bb",
+    "businessId": "biz_lxgd1",
+    "siteId": "site_fixture_south-congress-collision-service-breadth",
+    "businessStateRevision": 1,
+    "siteIntentRevision": 1,
+    "business": {
+      "schemaVersion": "resolved-business-snapshot-v1",
+      "businessId": "biz_lxgd1",
+      "siteId": "site_fixture_south-congress-collision-service-breadth",
+      "stateRevision": 1,
+      "resolvedAt": "2026-07-16T00:00:00.000Z",
+      "name": "South Congress Collision",
+      "vertical": "auto_body",
+      "categories": [],
+      "description": "Austin collision repair shop for body repair, paintless dent repair, bumper repair, hail damage, and professional paint services near South Congress.",
+      "phone": "+15125550115",
+      "address": {
+        "street": "2215 S Congress Ave",
+        "city": "Austin",
+        "region": "TX",
+        "postalCode": "78704",
+        "country": "US"
+      },
+      "hours": {
+        "hours_1": "Monday-Friday 7:30 AM-5:30 PM, Saturday 8:00 AM-2:00 PM"
+      },
+      "serviceAreas": [],
+      "offerings": [
+        {
+          "id": "offering_biz_lxgd1_auto-body-repair_1",
+          "businessId": "biz_lxgd1",
+          "customName": "Auto Body Repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_lxgd1_svc-auto-body-dent-repair_2",
+          "businessId": "biz_lxgd1",
+          "catalogId": "svc_auto_body_dent-repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_lxgd1_svc-auto-body-hail-damage_3",
+          "businessId": "biz_lxgd1",
+          "catalogId": "svc_auto_body_hail-damage",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "dedicated",
+          "featured": true,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_lxgd1_svc-auto-body-collision-repair_4",
+          "businessId": "biz_lxgd1",
+          "catalogId": "svc_auto_body_collision-repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_lxgd1_svc-auto-body-auto-paint_5",
+          "businessId": "biz_lxgd1",
+          "catalogId": "svc_auto_body_auto-paint",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        },
+        {
+          "id": "offering_biz_lxgd1_svc-auto-body-bumper-repair_6",
+          "businessId": "biz_lxgd1",
+          "catalogId": "svc_auto_body_bumper-repair",
+          "status": "confirmed",
+          "visibility": "public",
+          "pageMode": "shared",
+          "featured": false,
+          "evidenceIds": [],
+          "createdAt": "2026-07-16T00:00:00.000Z",
+          "updatedAt": "2026-07-16T00:00:00.000Z"
+        }
+      ],
+      "proof": [],
+      "socialLinks": [],
+      "bookingLinks": [],
+      "orderingLinks": [],
+      "pressLinks": [],
+      "provenance": {
+        "serviceHighlights": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.7,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "name": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.85,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "hours": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "address": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "phone": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "description": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.75,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        },
+        "services": {
+          "source": "website",
+          "sourceUrl": "https://southcongresscollision.example/",
+          "confidence": 0.9,
+          "verified": false,
+          "observedAt": "2026-07-16T00:00:00.000Z"
+        }
+      }
+    },
+    "siteIntent": {
+      "schemaVersion": "site-intent-v1",
+      "id": "intent_site_fixture_south-congress-collision-service-breadth",
+      "siteId": "site_fixture_south-congress-collision-service-breadth",
+      "revision": 1,
+      "primaryConversion": "form",
+      "featuredOfferingIds": [],
+      "offeringPageModes": {},
+      "selectedProofIds": [],
+      "copyOverrides": [],
+      "createdAt": "2026-07-16T00:00:00.000Z",
+      "updatedAt": "2026-07-16T00:00:00.000Z"
+    },
+    "assets": [
+      {
+        "id": "asset_fixture_site-fixture-south-congress-collision-service-breadth_hero",
+        "businessId": "biz_lxgd1",
+        "kind": "photo",
+        "alt": "Technician inspecting a vehicle in a clean independent repair shop",
+        "source": "website_reference",
+        "usageScope": "preclaim_preview",
+        "ownerApproved": false,
+        "metadata": {
+          "contentHash": "a2e386882757a8f1bef24143f3cd702f48b95622484c18ebc8cf1d9da01a2d0a",
+          "storagePath": "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "mimeType": "image/jpeg",
+          "bytes": 383036,
+          "width": 1536,
+          "height": 1024,
+          "analysisV1": {
+            "imageKind": "repair_environment",
+            "warnings": []
+          }
+        },
+        "active": true,
+        "currentRevisionId": "assetrev_7412c445b6f60ab4487ab195",
+        "revision": {
+          "schemaVersion": "asset-revision-v1",
+          "id": "assetrev_7412c445b6f60ab4487ab195",
+          "assetId": "asset_fixture_site-fixture-south-congress-collision-service-breadth_hero",
+          "businessId": "biz_lxgd1",
+          "contentHash": "a2e386882757a8f1bef24143f3cd702f48b95622484c18ebc8cf1d9da01a2d0a",
+          "storagePath": "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "publicUrl": "/fixture-assets/auto-repair-shop-hero-v1.jpg",
+          "mimeType": "image/jpeg",
+          "bytes": 383036,
+          "width": 1536,
+          "height": 1024,
+          "rightsStatus": "reference_only",
+          "createdAt": "2026-07-16T00:00:00.000Z"
+        },
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "updatedAt": "2026-07-16T00:00:00.000Z"
+      }
+    ],
+    "evidenceManifest": {
+      "schemaVersion": "generation-evidence-manifest-v1",
+      "provenance": {
+        "version": "regenerable-artifact-provenance-v1",
+        "producerId": "compose-generation-evidence-manifest",
+        "producerVersion": "generation-evidence-manifest-v1",
+        "modelId": "deterministic",
+        "createdAt": "2026-07-16T00:00:00.000Z",
+        "inputHashes": {
+          "sourcePages": "372d060d77b8a947",
+          "proposals": "4f53cda18c2baa0c"
+        },
+        "stale": false
+      },
+      "items": [],
+      "rejected": [],
+      "yield": {
+        "proposed": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "acceptanceRate": 1,
+        "rejectedByReason": {},
+        "sourceBlockCount": 12,
+        "sourceSparse": false
+      }
+    },
+    "formDefinition": {
+      "schemaVersion": "form-definition-v1",
+      "name": "Estimate request",
+      "fields": [
+        {
+          "id": "name",
+          "label": "Name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "phone",
+          "label": "Phone",
+          "type": "phone",
+          "required": true
+        },
+        {
+          "id": "details",
+          "label": "Damage details",
+          "type": "textarea",
+          "required": true
+        }
+      ],
+      "submitLabel": "Request an estimate",
+      "id": "form_site_fixture_south-congress-collision-service-breadth_estimate-request",
+      "siteId": "site_fixture_south-congress-collision-service-breadth",
+      "createdAt": "2026-07-16T00:00:00.000Z"
+    },
+    "brandExpression": {
+      "version": "brand-expression-v1",
+      "mood": "technical",
+      "fontPosture": "utility",
+      "voiceRegister": "plainspoken",
+      "paletteSeed": {
+        "strategy": "neutral"
+      },
+      "rationale": "Deterministic bakeoff fixture expression."
+    },
+    "brandAssessment": {
+      "id": "brand_site_fixture_south-congress-collision-service-breadth",
+      "siteId": "site_fixture_south-congress-collision-service-breadth",
+      "confidence": 0.5,
+      "cues": [
+        "South Congress Collision"
+      ],
+      "colorSignals": [],
+      "typographySignals": [
+        "utility"
+      ],
+      "imageStyleSignals": [],
+      "toneSignals": [
+        "plainspoken"
+      ],
+      "preservationRules": [
+        "Preserve source-backed identity and owner-confirmed claims."
+      ],
+      "sourceNotes": [
+        "Source captured 2026-07-16T00:00:00.000Z from https://southcongresscollision.example/."
+      ]
+    },
+    "businessUnderstanding": {
+      "version": "business-understanding-v2",
+      "source": "deterministic_fallback",
+      "vertical": "auto_body",
+      "verticalConfidence": 1,
+      "detectedSubverticals": [],
+      "cleanedServices": [
+        {
+          "name": "Auto Body Repair",
+          "sourceText": "Auto Body Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Paintless Dent Repair",
+          "sourceText": "Paintless Dent Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Hail Damage Repair",
+          "sourceText": "Hail Damage Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Collision Repair",
+          "sourceText": "Collision Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Professional Paint Services",
+          "sourceText": "Professional Paint Services",
+          "confidence": 0.9
+        },
+        {
+          "name": "Bumper Repair",
+          "sourceText": "Bumper Repair",
+          "confidence": 0.9
+        },
+        {
+          "name": "Dent Repair",
+          "sourceText": "Dent Repair",
+          "confidence": 0.9
+        }
+      ],
+      "hours": [
+        {
+          "label": "hours_1",
+          "value": "Monday-Friday 7:30 AM-5:30 PM, Saturday 8:00 AM-2:00 PM"
+        }
+      ],
+      "primaryConversionGoal": "form_first",
+      "urgentServiceSignals": [],
+      "brandExpression": {
+        "version": "brand-expression-v1",
+        "mood": "technical",
+        "fontPosture": "utility",
+        "voiceRegister": "plainspoken",
+        "paletteSeed": {
+          "strategy": "neutral"
+        },
+        "rationale": "Deterministic bakeoff fixture expression."
+      },
+      "evidenceProposals": [],
+      "factConfidence": [
+        {
+          "field": "name",
+          "confidence": 0.9,
+          "sourceBacked": true
+        },
+        {
+          "field": "services",
+          "confidence": 0.9,
+          "sourceBacked": true
+        }
+      ],
+      "notes": [
+        "Deterministic bakeoff fixture interpretation."
+      ]
+    },
+    "sourceSnapshotIds": [
+      "source_biz_lxgd1_website_df68764b6c83e4f2"
+    ],
+    "verticalPack": {
+      "id": "auto_body",
+      "version": "auto-body-pack-v1"
+    },
+    "eligibilityMode": "public",
+    "inputHash": "58a3683d63bbbb85bbaa0efc2e24b48a6da18703151213fcf93d8c84d05dfeb6",
+    "createdAt": "2026-07-16T00:00:00.000Z"
+  }
+}

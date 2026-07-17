@@ -8,7 +8,7 @@ import {
 } from "./source-text-blocks";
 import type { RegenerableArtifactProvenanceV1 } from "./models";
 
-export const evidenceLedgerSchemaVersion = "evidence-ledger-v1" as const;
+export const generationEvidenceManifestSchemaVersion = "generation-evidence-manifest-v1" as const;
 
 export type EvidenceKind =
   | "testimonial"
@@ -29,18 +29,13 @@ export type EvidenceProposal = {
 
 export type EvidenceRenderPolicy = "durable_render" | "protected_preview" | "owner_confirmation";
 
-export type VerifiedEvidence = {
+export type VerifiedGenerationEvidenceV1 = {
   id: string;
   kind: EvidenceKind;
   sourceExcerpt: string;
   publicText?: string;
   attribution?: string;
   renderPolicy: EvidenceRenderPolicy;
-  confirmation?: {
-    status: "confirmed" | "rejected";
-    decidedBy: string;
-    decidedAt: string;
-  };
   source: {
     url: string;
     pageHash: string;
@@ -50,30 +45,6 @@ export type VerifiedEvidence = {
     endToken: number;
   };
 };
-
-export function applyEvidenceConfirmation(input: {
-  ledger: EvidenceLedger;
-  evidenceId: string;
-  decision: "confirmed" | "rejected";
-  decidedBy: string;
-  decidedAt?: string;
-}) {
-  const item = input.ledger.items.find((candidate) => candidate.id === input.evidenceId);
-  if (!item) return { ok: false as const, reason: "Evidence item was not found." };
-  if (item.renderPolicy === "durable_render") {
-    return { ok: false as const, reason: "This evidence is already deterministically renderable and does not require confirmation." };
-  }
-  item.confirmation = {
-    status: input.decision,
-    decidedBy: input.decidedBy,
-    decidedAt: input.decidedAt ?? new Date().toISOString()
-  };
-  if (input.decision === "confirmed") {
-    item.renderPolicy = "durable_render";
-    item.publicText = item.sourceExcerpt;
-  }
-  return { ok: true as const, item };
-}
 
 export type EvidenceRejectionReason =
   | "empty_proposal"
@@ -89,10 +60,10 @@ export type EvidenceRejection = {
   reason: EvidenceRejectionReason;
 };
 
-export type EvidenceLedger = {
-  schemaVersion: typeof evidenceLedgerSchemaVersion;
+export type GenerationEvidenceManifestV1 = {
+  schemaVersion: typeof generationEvidenceManifestSchemaVersion;
   provenance: RegenerableArtifactProvenanceV1;
-  items: VerifiedEvidence[];
+  items: VerifiedGenerationEvidenceV1[];
   rejected: EvidenceRejection[];
   yield: {
     proposed: number;
@@ -105,14 +76,14 @@ export type EvidenceLedger = {
   };
 };
 
-export function composeEvidenceLedger(input: {
+export function composeGenerationEvidenceManifestV1(input: {
   crawl: CrawlAssessment | undefined;
   proposals?: EvidenceProposal[];
   createdAt?: string;
-}): EvidenceLedger {
+}): GenerationEvidenceManifestV1 {
   const blocks = input.crawl?.pageSummaries.flatMap((page) => page.sourceTextBlocks ?? []) ?? [];
   const proposals = input.proposals ?? [];
-  const items: VerifiedEvidence[] = [];
+  const items: VerifiedGenerationEvidenceV1[] = [];
   const rejected: EvidenceRejection[] = [];
 
   for (const proposal of proposals) {
@@ -127,10 +98,10 @@ export function composeEvidenceLedger(input: {
     return counts;
   }, {});
   return {
-    schemaVersion: evidenceLedgerSchemaVersion,
+    schemaVersion: generationEvidenceManifestSchemaVersion,
     provenance: createRegenerableArtifactProvenanceV1({
-      producerId: "compose-evidence-ledger",
-      producerVersion: evidenceLedgerSchemaVersion,
+      producerId: "compose-generation-evidence-manifest",
+      producerVersion: generationEvidenceManifestSchemaVersion,
       createdAt: input.createdAt,
       inputs: {
         sourcePages: input.crawl?.pageSummaries.map((page) => ({
@@ -157,7 +128,7 @@ export function composeEvidenceLedger(input: {
 export function verifyEvidenceProposal(
   proposal: EvidenceProposal,
   blocks: SourceTextBlock[]
-): { ok: true; item: VerifiedEvidence } | { ok: false; reason: EvidenceRejectionReason } {
+): { ok: true; item: VerifiedGenerationEvidenceV1 } | { ok: false; reason: EvidenceRejectionReason } {
   const proposedText = proposal.proposedText.trim();
   if (!proposedText) return { ok: false, reason: "empty_proposal" };
   const proposedTokens = canonicalSourceTokens(proposedText).map((token) => token.value);
@@ -279,7 +250,7 @@ function normalizedUrl(value: string) {
   }
 }
 
-function dedupeEvidence(items: VerifiedEvidence[]) {
+function dedupeEvidence(items: VerifiedGenerationEvidenceV1[]) {
   const seen = new Set<string>();
   return items.filter((item) => {
     const key = `${item.kind}:${item.publicText ?? item.sourceExcerpt}`.toLocaleLowerCase("en-US");

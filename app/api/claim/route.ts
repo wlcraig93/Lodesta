@@ -5,9 +5,11 @@ import { requireAdmin } from "@/lib/security";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { missingAssetRightIds, requiredAssetRightsForBundle } from "@/lib/asset-rights";
-import { missingRequiredClaimFacts } from "@/lib/fact-verification";
+import { requiredPublicEligibilityFactIds } from "@/lib/control-plane";
 import { resolveClaimOwner } from "@/lib/claim-ownership";
 import { verifyClaimVerificationChallenge } from "@/lib/claim-verification-challenge";
+import { submitControlPlaneChange } from "@/lib/control-plane-service";
+import { attestExistingBusinessAsset } from "@/lib/control-plane-assets";
 
 const verifiedClaimLevelSchema = z.enum(["contact_verified", "owner_verified", "operator_verified"]);
 
@@ -108,7 +110,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const missingFacts = missingRequiredClaimFacts(bundle.businessProfile, parsed.data.verifiedFacts ?? []);
+  const controlPlane = await repository.getCanonicalControlPlane(parsed.data.siteId);
+  if (!controlPlane) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown canonical site" }, { status: 404 }), limit);
+  const requiredFacts = requiredPublicEligibilityFactIds(controlPlane.state);
+  const verifiedFacts = new Set(parsed.data.verifiedFacts ?? []);
+  const missingFacts = requiredFacts.filter((factId) => !verifiedFacts.has(factId));
   if (missingFacts.length) {
     return applyRateLimitHeaders(
       NextResponse.json(
@@ -136,16 +142,32 @@ export async function POST(request: Request) {
       limit
     );
   }
-  if (requiredAssets.length) {
-    const assetResult = await repository.updateOwnerAssets({
+  const attestedBy = owner.ownerEmail ?? owner.ownerUserId ?? "site_owner_claim";
+  try {
+    const verifiedFactIds = requiredFacts.filter((factId) => verifiedFacts.has(factId));
+    await submitControlPlaneChange({
+      repository,
       siteId: parsed.data.siteId,
-      attestedBy: owner.ownerEmail ?? owner.ownerUserId ?? "site_owner_claim",
-      scrapedAttestations: requiredAssets.map((asset) => ({ assetId: asset.id, rightsConfirmed: attestedAssetIds.includes(asset.id) }))
+      requestedBy: attestedBy,
+      payload: { kind: "confirm_business_snapshot", factIds: verifiedFactIds, publicEligibility: true }
     });
-    if (!assetResult) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
-    if (!assetResult.ok) {
-      return applyRateLimitHeaders(NextResponse.json({ error: assetResult.reason }, { status: 400 }), limit);
+    if (requiredAssets.length) {
+      for (const asset of requiredAssets.filter((item) => attestedAssetIds.includes(item.id))) {
+        await submitControlPlaneChange({
+          repository,
+          siteId: parsed.data.siteId,
+          requestedBy: attestedBy,
+          payload: attestExistingBusinessAsset({
+            assets: controlPlane.state.assets,
+            revisions: controlPlane.state.assetRevisions,
+            assetId: asset.id,
+            attestedBy
+          })
+        });
+      }
     }
+  } catch (error) {
+    return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
   }
 
   const claim = await repository.createClaim({

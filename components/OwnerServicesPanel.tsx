@@ -5,8 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 type OwnerService = {
   id: string;
   name: string;
-  status: "proposed" | "active" | "hidden" | "rejected";
-  confirmationSource?: string;
+  status: "observed" | "confirmed" | "rejected" | "inactive";
   featured: boolean;
 };
 
@@ -20,26 +19,36 @@ export function OwnerServicesPanel({ siteId }: { siteId: string }) {
   const [status, setStatus] = useState("Loading services…");
 
   const load = useCallback(async () => {
-    const response = await fetch(`/api/business-services?siteId=${encodeURIComponent(siteId)}`);
-    const result = (await response.json()) as { ok?: boolean; services?: OwnerService[]; error?: string };
+    const response = await fetch(`/api/control-plane/changes?siteId=${encodeURIComponent(siteId)}`);
+    const result = (await response.json()) as {
+      ok?: boolean;
+      controlPlane?: { state?: { offerings?: Array<OwnerService & { catalogId?: string; customName?: string }> } };
+      serviceCatalog?: Array<{ id: string; name: string }>;
+      error?: string;
+    };
     if (!response.ok || !result.ok) {
       setStatus(result.error ?? "Unable to load services.");
       return;
     }
-    setServices(result.services ?? []);
-    setStatus(result.services?.length ? "" : "No services found yet — they appear after your site is generated.");
+    const names = new Map((result.serviceCatalog ?? []).map((definition) => [definition.id, definition.name]));
+    const services = (result.controlPlane?.state?.offerings ?? []).map((service) => ({
+      ...service,
+      name: service.customName ?? names.get(service.catalogId ?? "") ?? service.catalogId ?? "Custom service"
+    }));
+    setServices(services);
+    setStatus(services.length ? "" : "No services found yet — they appear after your site is generated.");
   }, [siteId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function decide(serviceId: string, decision: "active" | "rejected") {
+  async function decide(serviceId: string, enabled: boolean) {
     setStatus("Saving…");
-    const response = await fetch("/api/business-services", {
+    const response = await fetch("/api/control-plane/changes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ siteId, serviceId, status: decision })
+      body: JSON.stringify({ siteId, payload: { kind: "set_offering", offeringId: serviceId, enabled } })
     });
     const result = (await response.json()) as { ok?: boolean; error?: string };
     if (!response.ok || !result.ok) {
@@ -60,23 +69,21 @@ export function OwnerServicesPanel({ siteId }: { siteId: string }) {
             <div>
               <strong>{service.name}</strong>
               <small>
-                {service.status === "proposed"
-                  ? service.confirmationSource === "website"
-                    ? "Found on your website"
-                    : "Discovered during setup"
-                  : service.status === "active"
+                {service.status === "observed"
+                  ? "Found during setup"
+                  : service.status === "confirmed"
                     ? "Confirmed"
                     : "Not offered"}
               </small>
             </div>
             <div className="button-row">
-              {service.status !== "active" ? (
-                <button className="button primary" type="button" onClick={() => decide(service.id, "active")}>
+              {service.status !== "confirmed" ? (
+                <button className="button primary" type="button" onClick={() => decide(service.id, true)}>
                   We offer this
                 </button>
               ) : null}
-              {service.status !== "rejected" ? (
-                <button className="button secondary" type="button" onClick={() => decide(service.id, "rejected")}>
+              {service.status !== "inactive" ? (
+                <button className="button secondary" type="button" onClick={() => decide(service.id, false)}>
                   Not offered
                 </button>
               ) : null}

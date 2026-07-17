@@ -9,13 +9,14 @@ import type {
   SiteBundle,
   SiteVersion
 } from "./models";
+import type { GenerationInputSnapshotV1 } from "./control-plane-contracts";
 import { createPresenceIntakePlan } from "./presence-intake";
 import { runProspectPresenceReport } from "./prospect-reports";
 import { runUrlPresenceAssessment } from "./presence-assessment-runner";
 import { assertPublicFetchUrl } from "./url-safety";
 import { assertLaunchMarket } from "./launch-market";
 import { getProcessWorkerId, warnIfDeprecatedWorkerIdEnvSet } from "./worker-identity";
-import type { GenerateSiteOptions, GenerateSiteResult } from "./site-candidate-service";
+import type { GenerateSiteJobOptions, GenerateSiteResult } from "./site-candidate-service";
 import { assertSiteVersionV3, pageCountForVersionV3 } from "./site-version-v3";
 import { generateSiteTimeoutMs, generationTimeoutSignal } from "./generation-timeout";
 import {
@@ -48,8 +49,9 @@ export type JobExecutionContext = {
   workerId?: string;
   signal?: AbortSignal;
   heartbeatJob?: (jobId: string, workerId: string) => Promise<JobHeartbeatResult>;
-  generateSite?: (options: Omit<GenerateSiteOptions, "repository">) => Promise<GenerateSiteResult>;
+  generateSite?: (options: GenerateSiteJobOptions) => Promise<GenerateSiteResult>;
   getSiteBundle?: (siteId: string) => Promise<SiteBundle | null>;
+  getGenerationInputSnapshot?: (id: string) => Promise<GenerationInputSnapshotV1 | null>;
   listInquiryEvents?: (inquiryId: string) => Promise<InquiryEvent[]>;
   processInquiryNotification?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
   processInquiryAiEnrichment?: (input: { siteId: string; inquiryId: string }) => Promise<Record<string, unknown>>;
@@ -73,6 +75,17 @@ export type JobExecutionContext = {
 export async function enqueueJob(kind: JobKind, payload: Record<string, unknown>) {
   const file = await readJobsFile();
   const now = new Date().toISOString();
+  const coalesceKey = typeof payload.coalesceKey === "string" ? payload.coalesceKey : undefined;
+  const existing = coalesceKey
+    ? file.jobs.find((job) => job.kind === kind && job.status === "queued" && job.payload.coalesceKey === coalesceKey)
+    : undefined;
+  if (existing) {
+    existing.payload = payload;
+    existing.runAfter = runAfterFromPayload(payload, now);
+    existing.updatedAt = now;
+    await writeJobsFile(file);
+    return existing;
+  }
   const job: JobRecord = {
     id: crypto.randomUUID(),
     kind,
@@ -230,28 +243,40 @@ async function executeJobBody(
       const candidatePurpose = job.payload.candidatePurpose === "test_generation" ? "test_generation" : undefined;
       const modelFallbackPolicy = job.payload.modelFallbackPolicy === "allow" ? "allow" : undefined;
       const intendedSiteId = typeof job.payload.intendedSiteId === "string" ? job.payload.intendedSiteId : undefined;
-      const intendedSite = intendedSiteId && context.getSiteBundle
-        ? await context.getSiteBundle(intendedSiteId)
+      const inputSnapshotId = typeof job.payload.inputSnapshotId === "string" ? job.payload.inputSnapshotId : undefined;
+      const inputSnapshot = inputSnapshotId && context.getGenerationInputSnapshot
+        ? await context.getGenerationInputSnapshot(inputSnapshotId)
         : undefined;
-      if (intendedSiteId && !intendedSite) throw new Error(`Unknown intended managed site ${intendedSiteId}.`);
-      const url = rawUrl ? await assertPublicFetchUrl(rawUrl) : undefined;
-      assertLaunchMarket({ url, prompt });
-      const input = {
-        url,
-        prompt
-      };
-      const timeout = generationSignalForJob(job, context, lockController, url ?? prompt ?? "generate_site");
+      if (inputSnapshotId && !inputSnapshot) throw new Error(`Unknown immutable generation input snapshot ${inputSnapshotId}.`);
+      if (intendedSiteId && !inputSnapshot) throw new Error("Managed-site regeneration requires an immutable generation input snapshot.");
+      if (intendedSiteId && inputSnapshot?.siteId !== intendedSiteId) throw new Error("Regeneration snapshot does not target the intended managed site.");
+      if (inputSnapshot && !intendedSiteId) throw new Error("Snapshot generation requires an intended managed site ID.");
+      const url = !inputSnapshot && rawUrl ? await assertPublicFetchUrl(rawUrl) : undefined;
+      if (!inputSnapshot && !url) throw new Error("Fresh site generation requires a website URL.");
+      if (!inputSnapshot) assertLaunchMarket({ url, prompt });
+      const timeout = generationSignalForJob(job, context, lockController, url ?? inputSnapshot?.id ?? prompt ?? "generate_site");
       let generation: GenerateSiteResult;
       try {
-        generation = await context.generateSite({
-          input,
-          source: "job",
-          candidatePurpose,
-          modelFallbackPolicy,
-          intendedSite: intendedSite ?? undefined,
-          metadata: jobGenerationMetadata(job, context),
-          signal: timeout.signal
-        });
+        generation = inputSnapshot && intendedSiteId
+          ? await context.generateSite({
+              mode: "snapshot",
+              inputSnapshot,
+              intendedSiteId,
+              source: "job",
+              candidatePurpose,
+              modelFallbackPolicy,
+              metadata: jobGenerationMetadata(job, context),
+              signal: timeout.signal
+            })
+          : await context.generateSite({
+              mode: "fresh",
+              input: { url: url as string, prompt },
+              source: "job",
+              candidatePurpose,
+              modelFallbackPolicy,
+              metadata: jobGenerationMetadata(job, context),
+              signal: timeout.signal
+            });
       } finally {
         timeout.clear();
       }
@@ -295,6 +320,7 @@ async function executeJobBody(
         const timeout = generationSignalForJob(job, context, lockController, url);
         try {
           const generation = await context.generateSite({
+            mode: "fresh",
             input: { url, prompt },
             source: "job",
             metadata: {

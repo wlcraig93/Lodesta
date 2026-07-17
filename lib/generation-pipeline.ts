@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { AgentTelemetryRecorder } from "./agent-telemetry";
-import type { BusinessProfile, RegenerableArtifactProvenanceV1, SiteAsset, SiteBundle, SiteVersionV3 } from "./models";
-import type { EvidenceLedger } from "./evidence-ledger";
+import type { RegenerableArtifactProvenanceV1, SiteVersionV3 } from "./models";
+import type { GenerationInputSnapshotV1 } from "./control-plane-contracts";
 import type { GenerationPlan, SiteCopy } from "./generation-contracts";
 import { buildGenerationPlan, alternateDesignSystem } from "./vertical-packs";
 import { createSiteCopy } from "./site-copy";
@@ -71,10 +71,7 @@ const defaultDependencies: PipelineDependencies = {
 };
 
 export async function runCanonicalGenerationPipeline(input: {
-  bundle: SiteBundle;
-  business?: BusinessProfile;
-  evidence: EvidenceLedger;
-  assets: SiteAsset[];
+  snapshot: GenerationInputSnapshotV1;
   telemetry?: AgentTelemetryRecorder;
   spanId?: string;
   signal?: AbortSignal;
@@ -82,31 +79,28 @@ export async function runCanonicalGenerationPipeline(input: {
   dependencies?: Partial<PipelineDependencies>;
 }): Promise<CanonicalGenerationResult> {
   const dependencies = { ...defaultDependencies, ...input.dependencies };
-  const business = input.business ?? input.bundle.businessProfile;
+  const business = input.snapshot.business;
   const artifactRoot = input.artifactRoot ?? join(process.cwd(), ".data", "canonical-generation", business.siteId);
   const traceCounts = { plans: 1 as 1 | 2, copies: 0, copyModelAttempts: 0, compiles: 0, gates: 0, judges: 0 };
   const traceAttempts: GenerationPipelineTrace["attempts"] = [];
-  const brandExpression = input.bundle.presenceAssessment.businessUnderstanding?.brandExpression;
-  const brandAssessment = input.bundle.presenceAssessment.brandAssessment;
-  let plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets, brandExpression, brandAssessment });
+  let plan = buildGenerationPlan({ snapshot: input.snapshot, evidence: input.snapshot.evidenceManifest });
   let revisionAction: GenerationJudgeRevisionAction | undefined;
   let revisionFindings: string[] = [];
   let lastResult: Omit<CanonicalGenerationResult, "status" | "reason" | "trace"> | undefined;
 
   for (const attempt of [0, 1] as const) {
     if (attempt === 1 && revisionAction === "alternate_system") {
-      const alternate = alternateDesignSystem(plan.designSystem, input.assets);
+      const alternate = alternateDesignSystem(plan.designSystem, input.snapshot.assets);
       if (!alternate) {
         if (!lastResult) throw new Error("Alternate-system resolution requires an initial generation result.");
         return finish("operator_review", "alternate_system_unavailable", lastResult, traceCounts, traceAttempts);
       }
-      plan = buildGenerationPlan({ business, evidence: input.evidence, assets: input.assets, brandExpression, brandAssessment, designSystemOverride: alternate });
+      plan = buildGenerationPlan({ snapshot: input.snapshot, evidence: input.snapshot.evidenceManifest, designSystemOverride: alternate });
       traceCounts.plans = 2;
     }
     const generated = await dependencies.copy({
-      business,
+      snapshot: input.snapshot,
       plan,
-      evidence: input.evidence,
       telemetry: input.telemetry,
       spanId: input.spanId,
       signal: input.signal,
@@ -114,15 +108,13 @@ export async function runCanonicalGenerationPipeline(input: {
     });
     traceCounts.copies = incrementOneOrTwo(traceCounts.copies);
     traceCounts.copyModelAttempts += generated.attempts;
-    const version = compileSite({ business, plan, copy: generated.copy, evidence: input.evidence, assets: input.assets });
+    const version = compileSite({ snapshot: input.snapshot, plan, copy: generated.copy });
     traceCounts.compiles = incrementOneOrTwo(traceCounts.compiles);
-    const renderBundle = bundleForVersion(input.bundle, business, version);
     const gate = await dependencies.gate({
-      bundle: renderBundle,
+      snapshot: input.snapshot,
       version,
       plan,
       copy: generated.copy,
-      evidence: input.evidence,
       qaRunId: `qa_${business.siteId}_${attempt}_${Date.now()}`,
       artifactRoot,
       captureScreenshots: true
@@ -139,9 +131,9 @@ export async function runCanonicalGenerationPipeline(input: {
       traceAttempts.push(attemptTrace);
       return finish("operator_review", "objective_gate_failed", lastResult, traceCounts, traceAttempts);
     }
-    const packet = await dependencies.packet({ plan, version, assets: input.assets, gate, artifactRoot });
+    const packet = await dependencies.packet({ snapshot: input.snapshot, plan, version, gate, artifactRoot });
     const judge = await dependencies.judge({
-      business,
+      snapshot: input.snapshot,
       plan,
       packet,
       telemetry: input.telemetry,
@@ -164,18 +156,6 @@ export async function runCanonicalGenerationPipeline(input: {
     revisionFindings = judge.findings.map((finding) => `${finding.area} on ${finding.pageId}: ${finding.instruction}`);
   }
   throw new Error("Canonical generation exhausted its bounded attempts without a result.");
-}
-
-function bundleForVersion(bundle: SiteBundle, business: BusinessProfile, version: SiteVersionV3): SiteBundle {
-  return {
-    ...bundle,
-    businessProfile: business,
-    siteModel: {
-      ...bundle.siteModel,
-      theme: version.theme ?? bundle.siteModel.theme,
-      versions: [version]
-    }
-  };
 }
 
 function finish(

@@ -1,27 +1,26 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { FormSettingsForm } from "@/components/FormSettingsForm";
 import { LeadStatusControls } from "@/components/LeadStatusControls";
-import { repository } from "@/lib/repository";
-import { requireSiteOwnerAccess } from "@/lib/page-access";
-import type { Inquiry, InquiryEvent } from "@/lib/models";
+import { requirePlatformSiteOwnerAccess } from "@/lib/page-access";
+import type { Inquiry, InquiryEvent } from "@/packages/site-capabilities";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
-  await requireSiteOwnerAccess(bundle, `/leads/${slug}`);
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  await requirePlatformSiteOwnerAccess(site.id, `/leads/${slug}`);
+  const input = site.currentPublicBuildInputId ? await sitePlatformRepository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
+  if (!input) notFound();
 
-  const [inquiries, inquiryDeliveries] = await Promise.all([
-    repository.listInquiries(bundle.businessProfile.siteId),
-    repository.listInquiryDeliveries(bundle.businessProfile.siteId)
-  ]);
+  const inquiries = await siteCapabilityRepository.listInquiries(site.id);
   const eventsByInquiry = new Map<string, InquiryEvent[]>();
   await Promise.all(
     inquiries.map(async (inquiry) => {
-      eventsByInquiry.set(inquiry.id, await repository.listInquiryEvents(inquiry.id));
+      eventsByInquiry.set(inquiry.id, await siteCapabilityRepository.listInquiryEvents(inquiry.id));
     })
   );
 
@@ -30,17 +29,17 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
       <header className="admin-header">
         <div>
           <span className="badge">Leads</span>
-          <h1>{bundle.businessProfile.name}</h1>
+          <h1>{input.business.name}</h1>
           <p>Inbound inquiries from site forms, with normalized contact details and event history.</p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
-            Editor
+          <Link className="button secondary" href={`/editor/${site.slug}`}>
+            Website
           </Link>
-          <Link className="button secondary" href={`/analytics/${bundle.siteModel.slug}`}>
+          <Link className="button secondary" href={`/analytics/${site.slug}`}>
             Analytics
           </Link>
-          <a className="button primary" href={`/api/inquiries/export?siteId=${bundle.businessProfile.siteId}`}>
+          <a className="button primary" href={`/api/inquiries/export?siteId=${site.id}`}>
             Export CSV
           </a>
         </div>
@@ -51,20 +50,12 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
         <Metric label="New" value={inquiries.filter((inquiry) => inquiry.status === "new").length} />
         <Metric label="Need reply" value={inquiries.filter((inquiry) => inquiry.status === "needs_reply").length} />
         <Metric label="Spam" value={inquiries.filter((inquiry) => inquiry.status === "spam").length} />
-        <Metric label="Notification deliveries" value={inquiryDeliveries.length} />
+        <Metric label="Forms" value={input.forms.length} />
       </section>
 
       <section className="panel">
-        <h2>Form Settings</h2>
-        {bundle.extensionModel.forms.map((form) => (
-          <FormSettingsForm
-            key={form.id}
-            siteId={bundle.businessProfile.siteId}
-            form={form}
-            workflows={bundle.extensionModel.workflows}
-          />
-        ))}
-        {bundle.extensionModel.forms.length === 0 ? <p className="muted">No forms are configured for this site.</p> : null}
+        <h2>Managed forms</h2>
+        <p>{input.forms.length ? `${input.forms.length} immutable form definition${input.forms.length === 1 ? " is" : "s are"} active on the published site.` : "No forms are configured."}</p>
       </section>
 
       <section className="panel">
@@ -123,7 +114,7 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
                   </td>
                   <td>
                     <LeadStatusControls
-                      siteId={bundle.businessProfile.siteId}
+                      siteId={site.id}
                       inquiryId={inquiry.id}
                       initialStatus={inquiry.status}
                     />
@@ -136,32 +127,6 @@ export default async function LeadsPage({ params }: { params: Promise<{ slug: st
         {inquiries.length === 0 ? <p className="muted">No inquiries yet.</p> : null}
       </section>
 
-      <section className="panel">
-        <h2>Notification Deliveries</h2>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Destination</th>
-              <th>Target</th>
-              <th>Message</th>
-            </tr>
-          </thead>
-          <tbody>
-            {inquiryDeliveries.map((delivery) => (
-              <tr key={delivery.id}>
-                <td>{formatDate(delivery.createdAt)}</td>
-                <td>{delivery.status}</td>
-                <td>{delivery.destination.replace("_", " ")}</td>
-                <td>{delivery.target ?? "not configured"}</td>
-                <td>{delivery.error ?? delivery.message}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {inquiryDeliveries.length === 0 ? <p className="muted">No notification deliveries yet.</p> : null}
-      </section>
     </main>
   );
 }

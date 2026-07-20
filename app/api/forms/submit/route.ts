@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/repository";
 import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "@/lib/privacy";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { claimGateForBundle } from "@/lib/site-publication";
 import { validateFormSubmission } from "@/lib/form-validation";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export async function POST(request: Request) {
   const limit = rateLimit(request, {
@@ -23,24 +23,24 @@ export async function POST(request: Request) {
   if (!siteId || !formId) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Missing siteId or formId" }, { status: 400 }), limit);
   }
+  if (parsedSubmission.pageId.startsWith("/preview/")) {
+    return applyRateLimitHeaders(NextResponse.json({ accepted: false, status: "preview_disabled", reason: "Preview forms do not accept submissions." }, { status: 403 }), limit);
+  }
 
-  const bundle = await repository.getSiteBundle(siteId);
-  if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
-
-  const claimGate = claimGateForBundle(bundle, await repository.listClaims(siteId));
-  if (!claimGate.ok) {
+  const site = await sitePlatformRepository.getSite(siteId);
+  if (!site) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
+  if (site.status !== "active" || !site.publishedVersionId) {
     return applyRateLimitHeaders(
       NextResponse.json({
         accepted: false,
         status: "inactive",
-        reason: "Lead capture starts after claim and publish.",
-        claimGate: claimGate.code
-      }),
+        reason: "Lead capture starts after publish."
+      }, { status: 403 }),
       limit
     );
   }
 
-  const form = await repository.getPublishedFormDefinition(siteId, formId);
+  const form = await sitePlatformRepository.getPublishedFormDefinition(siteId, formId);
   if (!form) {
     return applyRateLimitHeaders(
       NextResponse.json({ error: "Form is not referenced by a retained published version" }, { status: 404 }),
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
   }
 
   const submittedAt = new Date();
-  const inquiryResult = await repository.createInquiryFromForm({
+  const inquiryResult = await siteCapabilityRepository.createInquiryFromForm({
     siteId,
     form,
     pageId: parsedSubmission.pageId || "unknown",
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
     ipHash: ipHashForRequest(request, { siteId, at: submittedAt })
   });
 
-  repository
+  siteCapabilityRepository
     .recordAnalyticsEvent({
       siteId,
       sessionId: parsedSubmission.sessionId || `form_${inquiryResult.inquiry.id}`,

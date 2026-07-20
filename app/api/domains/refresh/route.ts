@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { invalidateDomainResolution } from "@/lib/domain-resolution-cache";
 

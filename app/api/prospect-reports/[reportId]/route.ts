@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { publicProspectReport } from "@/lib/prospect-reports";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 

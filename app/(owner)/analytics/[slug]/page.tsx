@@ -1,37 +1,27 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getPublishedVersion } from "@/lib/sample-data";
-import { repository } from "@/lib/repository";
-import type { AnalyticsEvent } from "@/lib/models";
-import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { getVisualSectionV3 } from "@/lib/generated-site-v3-visual-controls";
-import { assertSiteVersionV3 } from "@/lib/site-version-v3";
+import type { AnalyticsEvent } from "@/packages/site-capabilities";
+import { requirePlatformSiteOwnerAccess } from "@/lib/page-access";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function AnalyticsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
-  await requireSiteOwnerAccess(bundle, `/analytics/${slug}`);
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  await requirePlatformSiteOwnerAccess(site.id, `/analytics/${slug}`);
+  const input = site.currentPublicBuildInputId ? await sitePlatformRepository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
+  if (!input) notFound();
 
-  const siteId = bundle.businessProfile.siteId;
+  const siteId = site.id;
   const [summary, events, inquiries] = await Promise.all([
-    repository.analyticsSummary(siteId),
-    repository.listAnalyticsEvents(siteId),
-    repository.listInquiries(siteId)
+    siteCapabilityRepository.analyticsSummary(siteId),
+    siteCapabilityRepository.listAnalyticsEvents(siteId),
+    siteCapabilityRepository.listInquiries(siteId)
   ]);
-  const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "analytics published version");
-  const sectionNames = new Map(
-    version.pageComposition.pages.flatMap((page) =>
-      page.sections.map((section) => {
-        const visual = getVisualSectionV3(section.props);
-        const copy = visual?.slots && "copy" in visual.slots ? visual.slots.copy : visual?.slots && "intro" in visual.slots ? visual.slots.intro : undefined;
-        const heading = copy && typeof copy === "object" && "heading" in copy ? String(copy.heading ?? visual?.templateId) : visual?.templateId ?? section.family;
-        return [section.id, `${page.slug || "home"} / ${heading}`] as const;
-      })
-    )
-  );
+  const sectionNames = new Map<string, string>();
 
   const eventCounts = countBy(events, (event) => event.eventType);
   const deviceCounts = countBy(events, (event) => event.deviceType ?? "unknown");
@@ -49,17 +39,17 @@ export default async function AnalyticsPage({ params }: { params: Promise<{ slug
       <header className="admin-header">
         <div>
           <span className="badge">Analytics</span>
-          <h1>{bundle.businessProfile.name}</h1>
+          <h1>{input.business.name}</h1>
           <p>
             First-party behavioral data for the optimization loop: sessions, attention, primary actions, section exposure,
             Web Vitals, and recent conversion clicks.
           </p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
+          <Link className="button secondary" href={`/editor/${site.slug}`}>
             Editor
           </Link>
-          <Link className="button primary" href={`/sites/${bundle.siteModel.slug}`}>
+          <Link className="button primary" href={`/sites/${site.slug}`}>
             View site
           </Link>
         </div>
@@ -464,7 +454,7 @@ function ClickMap({
   points,
   sectionNames
 }: {
-  points: NonNullable<Awaited<ReturnType<typeof repository.analyticsSummary>>["clickMap"]>;
+  points: NonNullable<Awaited<ReturnType<typeof siteCapabilityRepository.analyticsSummary>>["clickMap"]>;
   sectionNames: Map<string, string>;
 }) {
   if (points.length === 0) return <p className="muted">No coordinate click events yet.</p>;

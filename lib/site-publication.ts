@@ -1,6 +1,4 @@
-import type { ClaimRecord, SiteBundle } from "./models";
-import { missingAssetRightIds, requiredAssetRightsForBundle } from "./asset-rights";
-import { requiredPublicEligibilityFactIds } from "./control-plane";
+import type { ClaimRecord } from "@/packages/platform-operations";
 import { claimVerificationSatisfies, minimumCheckoutClaimVerificationLevel } from "./owner-access";
 
 export type ClaimGateResult =
@@ -45,36 +43,4 @@ export function claimGateForSite(siteId: string, claims: ClaimRecord[], required
     code: "claim_required",
     reason: "Claim and pay for this site before publishing or connecting a custom domain."
   };
-}
-
-export function isIndexableSite(bundle: SiteBundle, claims: ClaimRecord[]) {
-  return claimGateForBundle(bundle, claims).ok;
-}
-
-export function claimGateForBundle(bundle: SiteBundle, claims: ClaimRecord[]) {
-  const claimGate = claimGateForSite(bundle.businessProfile.siteId, claims);
-  if (!claimGate.ok) return claimGate;
-  const snapshot = bundle.presenceAssessment.generationInputSnapshot;
-  if (!snapshot) throw new Error("Publication eligibility requires an immutable generation input snapshot.");
-  const verifiedFacts = new Set(claimGate.claim.verifiedFacts);
-  const missingFacts = requiredPublicEligibilityFactIds(snapshot.business).filter((factId) => !verifiedFacts.has(factId));
-  if (missingFacts.length) {
-    return {
-      ok: false,
-      code: "verification_required" as const,
-      reason: "Verify required business facts before publishing or connecting a custom domain.",
-      missingFacts
-    };
-  }
-  const requiredAssets = requiredAssetRightsForBundle(bundle);
-  const missingAssets = missingAssetRightIds(requiredAssets, claimGate.claim.attestedAssetIds ?? []);
-  if (missingAssets.length || (requiredAssets.length && !claimGate.claim.assetRightsAcceptedAt)) {
-    return {
-      ok: false,
-      code: "verification_required" as const,
-      reason: "Confirm rights for every referenced photo and logo before publishing or connecting a custom domain.",
-      missingFacts: missingAssets
-    };
-  }
-  return claimGate;
 }

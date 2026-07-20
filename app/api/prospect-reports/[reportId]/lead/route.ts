@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { publicProspectReport } from "@/lib/prospect-reports";
 import { ipHashForRequest, sanitizeAnalyticsMetadata } from "@/lib/privacy";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";

@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClaimSiteForm, type ClaimAssetRight, type ClaimFact } from "@/components/ClaimSiteForm";
-import { repository } from "@/lib/repository";
-import type { BusinessProfile } from "@/lib/models";
-import { requiredAssetRightsForBundle } from "@/lib/asset-rights";
-import { requiredPublicEligibilityFactIds } from "@/lib/control-plane";
+import { sitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository } from "@/packages/platform-operations";
+import type { BusinessStateV2 } from "@/packages/site-contracts";
 import { claimVerificationTargets } from "@/lib/claim-verification-challenge";
 
 export const dynamic = "force-dynamic";
@@ -17,56 +16,43 @@ export default async function ClaimPage({
   searchParams: Promise<{ previewToken?: string }>;
 }) {
   const { slug } = await params;
-  const { previewToken: previewTokenParam } = await searchParams;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
+  const { previewToken: requestedToken } = await searchParams;
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  const state = await sitePlatformRepository.getBusinessState(site.businessId);
+  if (!state) throw new Error("Claim page requires canonical business state.");
 
-  const controlPlane = await repository.getCanonicalControlPlane(bundle.businessProfile.siteId);
-  if (!controlPlane) throw new Error("Claim page requires canonical business state.");
-  const facts = claimFacts(bundle.businessProfile, requiredPublicEligibilityFactIds(controlPlane.state));
-  const previewTokens = await repository.listPreviewTokens(bundle.businessProfile.siteId);
-  const linkedPreviewToken = previewTokens.find((token) => token.token === previewTokenParam);
-  const linkedPreviewTokenValue = linkedPreviewToken?.token;
-  const previewToken = linkedPreviewToken ?? previewTokens[0];
-  const outboundProspect = linkedPreviewTokenValue ? await repository.findOutboundProspectByPreviewToken(linkedPreviewTokenValue) : null;
-  if (outboundProspect && linkedPreviewTokenValue) {
-    await repository.recordOutboundEvent({
+  const tokens = await platformOperationsRepository.listPreviewTokens(site.id);
+  const previewToken = tokens.find((item) => item.token === requestedToken) ?? tokens[0];
+  const outboundProspect = requestedToken
+    ? await platformOperationsRepository.findOutboundProspectByPreviewToken(requestedToken)
+    : null;
+  if (outboundProspect && requestedToken) {
+    await platformOperationsRepository.recordOutboundEvent({
       campaignId: outboundProspect.campaignId,
       prospectId: outboundProspect.id,
-      siteId: outboundProspect.siteId ?? bundle.businessProfile.siteId,
+      siteId: outboundProspect.siteId ?? site.id,
       type: "claim_started",
-      metadata: { source: "claim_page", previewToken: linkedPreviewTokenValue }
+      metadata: { source: "claim_page", previewToken: requestedToken }
     });
   }
-  const assetRights = claimAssetRights(requiredAssetRightsForBundle(bundle), previewToken?.token);
-  const verificationTargets = claimVerificationTargets(bundle.businessProfile).map((target) => ({
-    channel: target.channel,
-    label: target.label
-  }));
+
+  const versions = await sitePlatformRepository.listSiteVersions(site.id);
+  const published = versions.find((version) => version.status === "published");
+  const verificationTargets = claimVerificationTargets(state).map((target) => ({ channel: target.channel, label: target.label }));
 
   return (
     <main className="admin-page">
       <header className="admin-header">
         <div>
           <span className="badge">Claim</span>
-          <h1>{bundle.businessProfile.name}</h1>
-          <p>
-            Confirm the owner-held facts before this preview becomes a managed site. These fields power schema, forms,
-            domains, and future presence sync, so the system treats them as verified only after claim.
-          </p>
+          <h1>{state.identity.name}</h1>
+          <p>Verify the business facts and media rights that Lodesta may use on this managed website.</p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href={`/auth/login?next=/account`}>
-            Owner login
-          </Link>
-          {previewToken ? (
-            <Link className="button secondary" href={`/preview/${previewToken.token}`}>
-              Preview
-            </Link>
-          ) : null}
-          <Link className="button secondary" href={`/sites/${bundle.siteModel.slug}`}>
-            Public site
-          </Link>
+          <Link className="button secondary" href="/auth/login?next=/account">Owner login</Link>
+          {previewToken ? <Link className="button secondary" href={`/preview/${previewToken.token}`}>Preview</Link> : null}
+          {published ? <Link className="button secondary" href={`/sites/${site.slug}`}>Public site</Link> : null}
         </div>
       </header>
 
@@ -74,91 +60,41 @@ export default async function ClaimPage({
         <section className="panel">
           <h2>Verify facts</h2>
           <ClaimSiteForm
-            siteId={bundle.businessProfile.siteId}
-            facts={facts}
-            assetRights={assetRights}
+            siteId={site.id}
+            facts={claimFacts(state)}
+            assetRights={claimAssetRights(state)}
             verificationTargets={verificationTargets}
-            outboundContext={
-              outboundProspect
-                ? {
-                    campaignId: outboundProspect.campaignId,
-                    prospectId: outboundProspect.id,
-                    previewToken: linkedPreviewTokenValue
-                  }
-                : undefined
-            }
+            outboundContext={outboundProspect ? { campaignId: outboundProspect.campaignId, prospectId: outboundProspect.id, previewToken: requestedToken } : undefined}
           />
         </section>
-
         <aside className="panel">
-          <h2>Management contract</h2>
-          <p>
-            Customers can edit content, photos, CTAs, and business facts. Layout, responsive behavior, and conversion
-            scaffolding stay system-owned so the site can be audited and improved.
-          </p>
-          <h2>Guardrails</h2>
-          <p>
-            Unchecked facts remain unverified. The agent may suggest changes around them, but it should not publish or
-            sync those facts as canonical until they are confirmed.
-          </p>
+          <h2>Managed website</h2>
+          <p>Business facts stay owner-controlled. Site design, SEO, accessibility, and technical checks are managed through the website workspace.</p>
+          <h2>Publishing guardrails</h2>
+          <p>Unconfirmed facts and unlicensed media stay out of public releases. Every published version remains immutable and auditable.</p>
         </aside>
       </div>
     </main>
   );
 }
 
-function claimAssetRights(assets: ClaimAssetRight[], previewToken: string | undefined): ClaimAssetRight[] {
-  return assets.map((asset) => ({
-    ...asset,
-    url: previewToken ? previewAssetUrl(asset.url, previewToken) : asset.url
+function claimFacts(state: BusinessStateV2): ClaimFact[] {
+  return state.facts.map((fact) => ({
+    id: fact.id,
+    label: fact.label,
+    value: typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value),
+    required: fact.publicEligible,
+    verified: fact.source.ownerConfirmed
   }));
 }
 
-function previewAssetUrl(value: string, previewToken: string) {
-  const [pathAndQuery, hash = ""] = value.split("#", 2);
-  const [path, query = ""] = pathAndQuery.split("?", 2);
-  if (!/^\/api\/assets\/[^/?#]+\/scraped-[^/?#]+$/i.test(path)) return value;
-  const params = new URLSearchParams(query);
-  params.set("previewToken", previewToken);
-  return `${path}?${params.toString()}${hash ? `#${hash}` : ""}`;
-}
-
-function claimFacts(profile: BusinessProfile, requiredFactIds: string[]): ClaimFact[] {
-  const requiredFacts = new Set(requiredFactIds);
-  const facts: ClaimFact[] = [claimFact(profile, "name", "Business name", profile.name, requiredFacts)];
-  if (profile.phone) facts.push(claimFact(profile, "phone", "Phone", profile.phone, requiredFacts));
-  if (profile.email) facts.push(claimFact(profile, "email", "Email", profile.email, requiredFacts));
-  const address = [profile.address?.street, profile.address?.city, profile.address?.region, profile.address?.postalCode]
-    .filter(Boolean)
-    .join(", ");
-  if (address) facts.push(claimFact(profile, "address", "Address", address, requiredFacts));
-  if (profile.services.length) {
-    facts.push(claimFact(profile, "services", "Services", profile.services.join(", "), requiredFacts));
-  }
-  if (profile.serviceAreas.length) {
-    facts.push(claimFact(profile, "service_areas", "Service areas", profile.serviceAreas.join(", "), requiredFacts));
-  }
-  if (profile.hours && Object.keys(profile.hours).length) {
-    facts.push(
-      claimFact(
-        profile,
-        "hours",
-        "Hours",
-        Object.entries(profile.hours).map(([day, value]) => `${day}: ${value}`).join("; "),
-        requiredFacts
-      )
-    );
-  }
-  return facts;
-}
-
-function claimFact(profile: BusinessProfile, id: string, label: string, value: string, requiredFacts: Set<string>): ClaimFact {
-  const provenanceKey = id === "service_areas" ? "serviceAreas" : id;
-  return {
-    id,
-    label,
-    value,
-    required: requiredFacts.has(id),
-    verified: profile.provenance[provenanceKey]?.verified ?? false
-  };
+function claimAssetRights(state: BusinessStateV2): ClaimAssetRight[] {
+  return state.assets
+    .filter((asset) => asset.activeForFutureBuilds && asset.rightsStatus === "reference_only" && asset.publicUrl)
+    .map((asset) => ({
+      id: asset.revisionId,
+      kind: asset.kind === "logo" ? "logo" : "photo",
+      url: asset.publicUrl!,
+      alt: asset.alt
+    }));
 }

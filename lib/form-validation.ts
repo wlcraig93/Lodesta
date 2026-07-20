@@ -1,4 +1,12 @@
-import type { FormDefinition } from "./models";
+export type ValidatableFormDefinition = {
+  fields: Array<{
+    id: string;
+    label: string;
+    type: "text" | "email" | "phone" | "textarea" | "select";
+    required: boolean;
+    options?: string[];
+  }>;
+};
 
 export type FormSubmissionValidationIssue = {
   id: string;
@@ -25,7 +33,7 @@ const maxTextareaLength = 5000;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function validateFormSubmission(
-  form: FormDefinition,
+  form: ValidatableFormDefinition,
   payload: Record<string, unknown>
 ): FormSubmissionValidationResult {
   const configuredFieldIds = new Set(form.fields.map((field) => field.id));
@@ -77,7 +85,7 @@ export function validateFormSubmission(
   return { ok: true, payload: cleanedPayload, ignoredFields };
 }
 
-function validateFieldValue(field: FormDefinition["fields"][number], value: string): FormSubmissionValidationIssue | null {
+function validateFieldValue(field: ValidatableFormDefinition["fields"][number], value: string): FormSubmissionValidationIssue | null {
   if ((field.type === "text" || field.type === "email" || field.type === "phone" || field.type === "select") && value.length > maxTextLength) {
     return issue(field, "Value is too long.");
   }
@@ -111,7 +119,7 @@ function digits(value: string) {
   return value.replace(/\D/g, "");
 }
 
-function issue(field: FormDefinition["fields"][number], reason: string): FormSubmissionValidationIssue {
+function issue(field: ValidatableFormDefinition["fields"][number], reason: string): FormSubmissionValidationIssue {
   return {
     id: field.id,
     label: field.label,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { ProspectReportRecord, ProspectWebsiteKind } from "../lib/models";
+import type { ProspectReportRecord, ProspectWebsiteKind } from "../packages/platform-operations";
 import {
   bucketForStandardCriterion,
   classifyProspectWebsite,

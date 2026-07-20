@@ -1,4 +1,4 @@
-import type { StandardCriterion } from "./models";
+import type { StandardCriterion } from "./presence-contracts";
 
 export const standardCriteria: StandardCriterion[] = [
   {

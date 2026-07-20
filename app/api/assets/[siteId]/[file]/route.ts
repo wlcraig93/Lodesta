@@ -1,54 +1,44 @@
 import { NextResponse } from "next/server";
 import { readStoredAsset } from "@/lib/asset-storage";
-import { isPublicLocalAssetPath } from "@/lib/public-assets";
-import { repository } from "@/lib/repository";
-import { isScrapedAssetFile } from "@/lib/scraped-media";
-import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
+import { requireAdminOrSiteOwner } from "@/lib/security";
+import { sitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request, { params }: { params: Promise<{ siteId: string; file: string }> }) {
   const { siteId, file } = await params;
-  const storagePath = `${siteId}/${file}`;
-  if (siteId.startsWith("sitecand_")) {
-    // Candidate preview assets live under the provisional sitecand_*
-    // namespace and stay admin-only until acceptance, like the preview
-    // surface itself. Public visitors keep getting 404 (no existence leak),
-    // and scraped reference media never becomes publicly reachable here.
-    const unauthorized = await requireAdmin(request);
-    if (unauthorized) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-    const candidateAsset = await readStoredAsset(storagePath);
-    if (!candidateAsset) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-    return new Response(new Uint8Array(candidateAsset.bytes), {
-      headers: {
-        "Content-Type": candidateAsset.mimeType,
-        "Cache-Control": "private, max-age=3600"
-      }
-    });
+  const storageKey = `${siteId}/${file}`;
+  const site = await sitePlatformRepository.getSite(siteId);
+  if (!site) return notFound();
+
+  const revision = await sitePlatformRepository.getAssetRevisionByStorageKey(storageKey);
+  if (!revision || revision.businessId !== site.businessId) return notFound();
+
+  const publiclyReferenced = await sitePlatformRepository.isAssetRevisionPublic(revision.id);
+  let previewReferenced = false;
+  const previewToken = new URL(request.url).searchParams.get("previewToken");
+  if (!publiclyReferenced && previewToken) {
+    const token = await platformOperationsRepository.resolvePreviewToken(previewToken);
+    const version = token?.siteId === siteId ? await sitePlatformRepository.getSiteVersion(token.siteVersionId) : undefined;
+    previewReferenced = Boolean(version?.assetRevisionIds.includes(revision.id));
   }
-  const bundle = await repository.getSiteBundle(siteId);
-  if (!bundle) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-  const publicLocalAsset = isPublicLocalAssetPath(bundle, storagePath);
-  if (isScrapedAssetFile(file)) {
-    // Scraped reference media is private until it is either loaded through a
-    // scoped noindex preview token or converted into a public owner-attested
-    // asset. Authenticated owner/admin sessions can also inspect it.
-    const previewToken = new URL(request.url).searchParams.get("previewToken");
-    const preview = previewToken ? await repository.resolvePreviewToken(previewToken) : null;
-    const previewTokenMatchesSite = preview?.bundle.businessProfile.siteId === siteId;
-    if (!publicLocalAsset && !previewTokenMatchesSite) {
-      const unauthorized = await requireAdminOrSiteOwner(request, siteId);
-      if (unauthorized) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-    }
-  } else if (!publicLocalAsset) {
-    return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+  if (!publiclyReferenced && !previewReferenced) {
+    const unauthorized = await requireAdminOrSiteOwner(request, siteId);
+    if (unauthorized) return notFound();
   }
-  const asset = await readStoredAsset(storagePath);
-  if (!asset) return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+
+  const asset = await readStoredAsset(storageKey);
+  if (!asset) return notFound();
   return new Response(new Uint8Array(asset.bytes), {
     headers: {
       "Content-Type": asset.mimeType,
-      "Cache-Control": publicLocalAsset ? "public, max-age=31536000, immutable" : "private, max-age=3600"
+      "Cache-Control": publiclyReferenced ? "public, max-age=31536000, immutable" : "private, no-store",
+      "X-Content-Type-Options": "nosniff"
     }
   });
+}
+
+function notFound() {
+  return NextResponse.json({ error: "Asset not found" }, { status: 404 });
 }

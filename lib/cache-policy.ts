@@ -1,9 +1,4 @@
-export type CachePolicyKind =
-  | "public_site"
-  | "public_asset"
-  | "no_store"
-  | "static_next"
-  | "metadata";
+export type CachePolicyKind = "public_site" | "public_asset" | "no_store" | "static_next" | "metadata";
 
 export type CachePolicy = {
   kind: CachePolicyKind;
@@ -16,10 +11,7 @@ const noStore = "no-store, no-cache, must-revalidate, proxy-revalidate";
 export const publicHostVary = "Host, X-Forwarded-Host";
 
 export function cachePolicyForPathname(pathname: string, options: { customDomain?: boolean } = {}): CachePolicy {
-  if (pathname.startsWith("/_next/static/") || pathname.startsWith("/_next/image")) {
-    return { kind: "static_next" };
-  }
-
+  if (pathname.startsWith("/_next/static/") || pathname.startsWith("/_next/image")) return { kind: "static_next" };
   if (pathname.startsWith("/api/assets/")) {
     return {
       kind: "public_asset",
@@ -27,8 +19,7 @@ export function cachePolicyForPathname(pathname: string, options: { customDomain
       cdnCacheControl: "public, s-maxage=31536000, immutable"
     };
   }
-
-  if (pathname === "/robots.txt" || pathname === "/sitemap.xml" || pathname === "/llms.txt" || pathname === "/favicon.ico") {
+  if (["/robots.txt", "/sitemap.xml", "/llms.txt", "/favicon.ico"].includes(pathname)) {
     return {
       kind: "metadata",
       cacheControl: "public, max-age=300, s-maxage=300",
@@ -36,7 +27,6 @@ export function cachePolicyForPathname(pathname: string, options: { customDomain
       vary: publicHostVary
     };
   }
-
   if (options.customDomain || pathname === "/sites" || pathname.startsWith("/sites/")) {
     return {
       kind: "public_site",
@@ -45,13 +35,7 @@ export function cachePolicyForPathname(pathname: string, options: { customDomain
       vary: publicHostVary
     };
   }
-
-  return {
-    kind: "no_store",
-    cacheControl: noStore,
-    cdnCacheControl: noStore,
-    vary: "Cookie, Authorization"
-  };
+  return { kind: "no_store", cacheControl: noStore, cdnCacheControl: noStore, vary: "Cookie, Authorization" };
 }
 
 export function cachePolicyHeaders(policy: CachePolicy) {

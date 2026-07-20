@@ -1,19 +1,12 @@
 import type {
-  FormDefinition,
-  InboundSettings,
+  CapabilityFormDefinition,
   Inquiry,
-  InquiryDelivery,
   InquiryEvent,
-  InquiryStatus,
-  WorkflowDefinition
-} from "./models";
+  InquiryStatus
+} from "@/packages/site-capabilities/contracts";
 import { hmacSha256Hex } from "./hash-secret";
 
-export const defaultInboundSettings: InboundSettings = {
-  captureMode: "form_only",
-  aiHandlingMode: "classify_only",
-  notificationMode: "all_inquiries"
-};
+export type InquiryFormDefinition = CapabilityFormDefinition;
 
 export type ContactExtractionStatus = "complete" | "partial" | "missing" | "ambiguous";
 
@@ -29,7 +22,7 @@ export type ExtractedInquiryContact = {
 
 export type CreateInquiryFromFormInput = {
   siteId: string;
-  form: FormDefinition;
+  form: InquiryFormDefinition;
   pageId?: string;
   visitorId?: string;
   payload: Record<string, string>;
@@ -51,17 +44,7 @@ export type PublicInquiry = Omit<Inquiry, "aiEnrichment"> & {
 
 const nameFieldPattern = /\b(name|full_name|fullname|first_name|firstname|last_name|lastname|your_name|contact_name)\b/i;
 
-export function withInboundSettings<T extends { inboundSettings?: InboundSettings }>(extensionModel: T): T & { inboundSettings: InboundSettings } {
-  return {
-    ...extensionModel,
-    inboundSettings: {
-      ...defaultInboundSettings,
-      ...extensionModel.inboundSettings
-    }
-  };
-}
-
-export function extractInquiryContact(form: FormDefinition, payload: Record<string, string>): ExtractedInquiryContact {
+export function extractInquiryContact(form: InquiryFormDefinition, payload: Record<string, string>): ExtractedInquiryContact {
   const emailFields = form.fields.filter((field) => field.type === "email" && payload[field.id]);
   const phoneFields = form.fields.filter((field) => field.type === "phone" && payload[field.id]);
   const nameFields = form.fields.filter((field) => nameFieldPattern.test(`${field.id} ${field.label}`) && payload[field.id]);
@@ -93,7 +76,7 @@ export function extractInquiryContact(form: FormDefinition, payload: Record<stri
   };
 }
 
-export function inquiryMessageText(form: FormDefinition, payload: Record<string, string>) {
+export function inquiryMessageText(form: InquiryFormDefinition, payload: Record<string, string>) {
   const messageField =
     form.fields.find((field) => field.type === "textarea" && payload[field.id]) ??
     form.fields.find((field) => /message|comment|question|details|description|request/i.test(`${field.id} ${field.label}`) && payload[field.id]);
@@ -133,14 +116,6 @@ export function publicInquiryEvent(event: InquiryEvent) {
   };
 }
 
-export function publicInquiryDelivery(delivery: InquiryDelivery) {
-  const { metadata, providerMessageId: _providerMessageId, ...rest } = delivery;
-  return {
-    ...rest,
-    metadata: metadata ? sanitizeEventMetadata(metadata) : undefined
-  };
-}
-
 export function inquirySourceHost(inquiry: Inquiry, events: InquiryEvent[] = []) {
   const firstEvent = events.find((event) => event.inquiryId === inquiry.id);
   const referrerHost = stringMetadata(firstEvent?.metadata, "referrerHost");
@@ -151,13 +126,6 @@ export function inquirySourceHost(inquiry: Inquiry, events: InquiryEvent[] = [])
   } catch {
     return undefined;
   }
-}
-
-export function workflowTarget(workflow: WorkflowDefinition, input: { fallbackEmail?: string }) {
-  const configured = workflow.config.to ?? workflow.config.url ?? workflow.config.target;
-  if (typeof configured === "string" && configured.trim()) return configured.trim();
-  if (workflow.destination === "email") return input.fallbackEmail;
-  return undefined;
 }
 
 export function normalizedInquiryStatus(value: string): InquiryStatus | undefined {

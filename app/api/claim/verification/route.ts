@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import {
   createClaimVerificationChallenge,
@@ -37,12 +37,13 @@ export async function POST(request: Request) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Invalid claim verification request", issues: parsed.error.issues }, { status: 400 }), limit);
   }
 
-  const bundle = await repository.getSiteBundle(parsed.data.siteId);
-  if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
+  const site = await sitePlatformRepository.getSite(parsed.data.siteId);
+  const state = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
+  if (!site || !state) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
 
   if (parsed.data.action === "verify") {
     const verified = verifyClaimVerificationChallenge({
-      bundle,
+      state,
       challengeId: parsed.data.challengeId,
       code: parsed.data.code
     });
@@ -62,13 +63,13 @@ export async function POST(request: Request) {
   }
 
   const challenge = createClaimVerificationChallenge({
-    bundle,
+    state,
     channel: parsed.data.channel
   });
   if (!challenge.ok) return applyRateLimitHeaders(NextResponse.json({ error: challenge.reason }, { status: 400 }), limit);
 
   const delivery = await deliverChallengeCode({
-    businessName: bundle.businessProfile.name,
+    businessName: state.identity.name,
     channel: challenge.target.channel,
     destination: challenge.target.destination,
     code: challenge.code

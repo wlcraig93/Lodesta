@@ -1,51 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { SiteVersionsPanel } from "@/components/SiteVersionsPanel";
-import { repository } from "@/lib/repository";
-import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { claimGateForBundle } from "@/lib/site-publication";
+import { SiteVersionActions } from "@/components/SiteVersionActions";
+import { requirePlatformSiteOwnerAccess } from "@/lib/page-access";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function VersionsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
-  await requireSiteOwnerAccess(bundle, `/versions/${slug}`);
-
-  const claims = await repository.listClaims(bundle.businessProfile.siteId);
-  const claimGate = claimGateForBundle(bundle, claims);
-
-  return (
-    <main className="admin-page">
-      <header className="admin-header">
-        <div>
-          <span className="badge">Versions</span>
-          <h1>{bundle.businessProfile.name}</h1>
-          <p>Review generated drafts and rollback safely by making any previous version live again.</p>
-        </div>
-        <div className="button-row">
-          <Link className="button secondary" href={`/status/${bundle.siteModel.slug}`}>
-            Status
-          </Link>
-          <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
-            Editor
-          </Link>
-          <Link className="button primary" href={`/sites/${bundle.siteModel.slug}`}>
-            View site
-          </Link>
-        </div>
-      </header>
-
-      <section className="panel">
-        <h2>Version History</h2>
-        <SiteVersionsPanel
-          siteId={bundle.businessProfile.siteId}
-          versions={bundle.siteModel.versions}
-          publishDisabled={!claimGate.ok}
-          publishDisabledReason={claimGate.ok ? undefined : claimGate.reason}
-        />
-      </section>
-    </main>
-  );
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  await requirePlatformSiteOwnerAccess(site.id, `/versions/${slug}`);
+  const [versions, state] = await Promise.all([sitePlatformRepository.listSiteVersions(site.id), sitePlatformRepository.getBusinessState(site.businessId)]);
+  return <main className="admin-page owner-page"><header className="owner-page-header"><div><p className="owner-page-eyebrow">Version history</p><h1>{state?.identity.name ?? slug}</h1><p className="owner-page-lede">Every candidate and published release retains its exact source, facts, artifact, and runtime binding.</p></div><div className="button-row"><Link className="button secondary" href={`/dashboard/${slug}`}>Dashboard</Link><Link className="button primary" href={`/editor/${slug}`}>Workspace</Link></div></header><section className="panel"><div className="finding-list">{versions.map((version) => <article className="finding-card" key={version.id}><div className="section-heading-row"><div><span className={`badge status-${version.status}`}>{version.status}</span><h3>Version {version.number}</h3></div><small>{new Date(version.createdAt).toLocaleString()}</small></div><p>Artifact {version.artifactHash.slice(0, 28)} · workspace {version.workspaceRevisionId}</p><SiteVersionActions version={version} /></article>)}{!versions.length ? <p className="muted">No site versions exist yet.</p> : null}</div></section></main>;
 }

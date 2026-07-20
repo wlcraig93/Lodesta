@@ -1,4 +1,4 @@
-import type { AnalyticsEvent } from "./models";
+import type { AnalyticsEvent } from "@/packages/site-capabilities/contracts";
 import { hmacSha256Hex } from "./hash-secret";
 
 export function ipHashForRequest(request: Request, input: { siteId: string; at?: Date }) {

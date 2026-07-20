@@ -1,30 +1,13 @@
-import { NextResponse } from "next/server";
-import { cachePolicyForPathname, cachePolicyHeaders } from "@/lib/cache-policy";
-import { repository } from "@/lib/repository";
-import { siteLlmsTxt } from "@/lib/public-site-markdown";
-import { recordAgentReadableRequest } from "@/lib/agent-readable-analytics";
-import { loadPublicSiteVersion } from "@/lib/public-site-version";
+import { loadPublishedSiteContext, llmsTextForSite } from "@/packages/site-platform";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  if (!await loadPublicSiteVersion(repository, bundle)) return NextResponse.json({ error: "Version is not public-renderable" }, { status: 404 });
-  const claims = await repository.listClaims(bundle.businessProfile.siteId);
-  const body = siteLlmsTxt(bundle, claims, request.headers);
-  if (!body) return NextResponse.json({ error: "Site is not indexable" }, { status: 404 });
-  await recordAgentReadableRequest({ bundle, request, resource: "llms_txt" });
-
-  return new Response(body, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      ...cacheHeaders()
-    }
+  const context = await loadPublishedSiteContext(slug);
+  if (!context) return new Response(null, { status: 404 });
+  const customDomain = request.headers.get("x-lodesta-custom-domain-routed") === "1";
+  return new Response(llmsTextForSite(context, new URL(request.url).origin, customDomain), {
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=60, s-maxage=300", "x-robots-tag": "index, follow", "x-lodesta-site-version": context.version.id }
   });
-}
-
-function cacheHeaders() {
-  return cachePolicyHeaders(cachePolicyForPathname("/llms.txt"));
 }

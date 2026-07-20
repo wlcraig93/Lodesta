@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
-import type { ClaimRecord, SiteBundle } from "./models";
-import { repository } from "./repository";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 import { getCurrentUser } from "./supabase/server";
 import { authRequired, hasValidAdminToken, isAdminUserId } from "./auth-policy";
 
@@ -31,7 +30,7 @@ export async function requireAdminPageAccess(nextPath: string) {
   return { ...auth, admin: true as const };
 }
 
-export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: string) {
+export async function requirePlatformSiteOwnerAccess(siteId: string, nextPath: string) {
   if (hasValidAdminToken(await headers())) {
     return { configured: true as const, user: null, admin: true as const };
   }
@@ -43,7 +42,7 @@ export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: strin
   if (!userId && !email) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
   if (isAdminUserId(userId)) return { ...auth, admin: true as const };
 
-  const claims = await repository.listClaims(bundle.businessProfile.siteId);
+  const claims = await platformOperationsRepository.listClaims(siteId);
   const ownsSite = claims.some(
     (claim) =>
       claim.status === "claimed" &&
@@ -51,26 +50,4 @@ export async function requireSiteOwnerAccess(bundle: SiteBundle, nextPath: strin
   );
   if (!ownsSite) notFound();
   return auth;
-}
-
-export function filterSiteBundlesForOwner(input: {
-  bundles: SiteBundle[];
-  claims: ClaimRecord[];
-  authConfigured: boolean;
-  userId?: string;
-  userEmail?: string;
-}) {
-  if (!input.authConfigured) return input.bundles;
-
-  const email = input.userEmail?.toLowerCase();
-  if (!input.userId && !email) return [];
-
-  return input.bundles.filter((bundle) =>
-    input.claims.some(
-      (claim) =>
-        claim.siteId === bundle.businessProfile.siteId &&
-        claim.status === "claimed" &&
-        ((input.userId && claim.ownerUserId === input.userId) || (email && claim.ownerEmail?.toLowerCase() === email))
-    )
-  );
 }

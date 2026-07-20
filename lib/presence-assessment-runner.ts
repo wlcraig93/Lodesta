@@ -3,7 +3,7 @@ import { crawlUrl } from "./crawler";
 import { assertLaunchMarket } from "./launch-market";
 import type { PublicPresenceEnrichment } from "./public-presence";
 import { gatherPublicPresenceSignals } from "./public-presence";
-import type { RenderInspectionResult } from "./models";
+import type { RenderInspectionResult } from "./presence-contracts";
 import { inspectUrlRender } from "./render-inspection";
 import { assertPublicFetchUrl } from "./url-safety";
 

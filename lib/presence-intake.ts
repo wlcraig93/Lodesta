@@ -1,4 +1,4 @@
-import type { PresenceAssessment, RenderInspectionResult, Vertical } from "./models";
+import type { PresenceAssessment, RenderInspectionResult, Vertical } from "./presence-contracts";
 import type { CrawlAssessment } from "./crawler";
 import type { PublicPresenceEnrichment } from "./public-presence";
 import { inferVertical } from "./vertical-classification";

@@ -8,7 +8,7 @@ import type {
   AnalyticsSectionConversionPath,
   AnalyticsStandardCorrelation,
   AnalyticsSummary
-} from "./models";
+} from "@/packages/site-capabilities/contracts";
 import { getStandardCriterion } from "./standard";
 import { formatWebVitalValue, normalizeWebVitalMetric, webVitalWithinThreshold } from "./web-vitals-standard";
 

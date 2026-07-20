@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildOutboundMailerManifest, outboundMailerManifestCsv } from "@/lib/outbound";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdmin } from "@/lib/security";
 
 export const runtime = "nodejs";

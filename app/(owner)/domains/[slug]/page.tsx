@@ -1,31 +1,37 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DomainConnectForm } from "@/components/DomainConnectForm";
-import { repository } from "@/lib/repository";
-import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { claimGateForBundle } from "@/lib/site-publication";
+import { RedirectRulesPanel } from "@/components/RedirectRulesPanel";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
+import { requirePlatformSiteOwnerAccess } from "@/lib/page-access";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function DomainsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
-  await requireSiteOwnerAccess(bundle, `/domains/${slug}`);
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  await requirePlatformSiteOwnerAccess(site.id, `/domains/${slug}`);
 
-  const siteId = bundle.businessProfile.siteId;
-  const [domains, claims] = await Promise.all([
+  const siteId = site.id;
+  const [domains, claims, state, redirects] = await Promise.all([
     repository.listDomains(siteId),
-    repository.listClaims(siteId)
+    repository.listClaims(siteId),
+    sitePlatformRepository.getBusinessState(site.businessId),
+    repository.listRedirects(siteId)
   ]);
-  const claimGate = claimGateForBundle(bundle, claims);
+  const claimed = claims.some((claim) => claim.status === "claimed");
+  const publishedVersion = site.publishedVersionId ? await sitePlatformRepository.getSiteVersion(site.publishedVersionId) : undefined;
+  const publishedArtifact = publishedVersion ? await sitePlatformRepository.getBuildArtifact(publishedVersion.artifactId) : undefined;
+  const publishedRoutes = publishedArtifact?.routes.map((route) => ({ path: route.path, title: route.title })) ?? [];
 
   return (
     <main className="admin-page">
       <header className="admin-header">
         <div>
           <span className="badge">Domains</span>
-          <h1>{bundle.businessProfile.name}</h1>
+          <h1>{state?.identity.name ?? slug}</h1>
           <p>
             Register custom hostnames for claimed sites. In production this path creates Cloudflare for SaaS custom
             hostnames and returns the verification record the owner needs to add. Activation may take up to 30 seconds
@@ -33,10 +39,10 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
           </p>
         </div>
         <div className="button-row">
-          <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
+          <Link className="button secondary" href={`/editor/${site.slug}`}>
             Editor
           </Link>
-          <Link className="button primary" href={`/sites/${bundle.siteModel.slug}`}>
+          <Link className="button primary" href={`/sites/${site.slug}`}>
             View site
           </Link>
         </div>
@@ -47,8 +53,8 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
           <h2>Connect domain</h2>
           <DomainConnectForm
             siteId={siteId}
-            disabled={!claimGate.ok}
-            disabledReason={claimGate.ok ? undefined : claimGate.reason}
+            disabled={!claimed}
+            disabledReason={claimed ? undefined : "The site must be claimed before connecting a domain."}
           />
         </section>
 
@@ -74,6 +80,11 @@ export default async function DomainsPage({ params }: { params: Promise<{ slug: 
           </div>
         </aside>
       </div>
+
+      <section className="panel admin-section">
+        <h2>Redirects</h2>
+        <RedirectRulesPanel siteId={siteId} redirects={redirects} routes={publishedRoutes} />
+      </section>
     </main>
   );
 }

@@ -1,75 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { OwnerAssetsForm } from "@/components/OwnerAssetsForm";
-import { OwnerFactsReview } from "@/components/OwnerFactsReview";
-import { OwnerServicesPanel } from "@/components/OwnerServicesPanel";
-import { repository } from "@/lib/repository";
-import { requireSiteOwnerAccess } from "@/lib/page-access";
-import { countConfirmedOwnerFacts } from "@/lib/owner-facts";
-import { renderProfileFromGenerationSnapshot } from "@/lib/site-render-envelope";
+import { BusinessDataControls } from "@/components/BusinessDataControls";
+import { requirePlatformSiteOwnerAccess } from "@/lib/page-access";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function BusinessProfilePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) notFound();
-  await requireSiteOwnerAccess(bundle, `/business/${slug}`);
-
-  const controlPlane = await repository.getCanonicalControlPlane(bundle.businessProfile.siteId);
-  if (!controlPlane) notFound();
-  const profile = renderProfileFromGenerationSnapshot(controlPlane.latestSnapshot);
-  const factCount = countConfirmedOwnerFacts(profile);
-
-  return (
-    <main className="admin-page owner-page">
-      <header className="owner-page-header">
-        <div>
-          <p className="owner-page-eyebrow">Your business</p>
-          <h1>{profile.name}</h1>
-          <p className="owner-page-lede">
-            We pulled these facts together while building your site. Confirm what&apos;s right and fix what isn&apos;t — confirmed
-            facts power your site&apos;s contact info, hours, and local search presence.
-            {factCount.total > 0 ? ` ${factCount.confirmed} of ${factCount.total} confirmed so far.` : ""}
-          </p>
-        </div>
-        <div className="button-row">
-          <Link className="button secondary" href={`/editor/${bundle.siteModel.slug}`}>
-            Edit site
-          </Link>
-          <Link className="button primary" href={`/business/${slug}/site-review`}>
-            Review your site
-          </Link>
-        </div>
-      </header>
-
-      <OwnerFactsReview
-        profile={{
-          siteId: profile.siteId,
-          phone: profile.phone,
-          email: profile.email,
-          address: profile.address,
-          hours: profile.hours,
-          serviceAreas: profile.serviceAreas,
-          credentials: profile.credentials ?? [],
-          offers: profile.offers ?? [],
-          bookingLinks: profile.bookingLinks,
-          orderingLinks: profile.orderingLinks,
-          socialLinks: profile.socialLinks,
-          pressLinks: profile.pressLinks,
-          provenance: profile.provenance
-        }}
-      />
-
-      <div className="owner-page-panels">
-        <section className="panel">
-          <OwnerServicesPanel siteId={profile.siteId} />
-        </section>
-        <section className="panel">
-          <h2>Your photos and logo</h2>
-          <OwnerAssetsForm profile={profile} />
-        </section>
-      </div>
-    </main>
-  );
+  const site = await sitePlatformRepository.getSiteBySlug(slug);
+  if (!site) notFound();
+  await requirePlatformSiteOwnerAccess(site.id, `/business/${slug}`);
+  const [state, intent] = await Promise.all([
+    sitePlatformRepository.getBusinessState(site.businessId),
+    sitePlatformRepository.getSiteIntent(site.id)
+  ]);
+  if (!state || !intent) notFound();
+  return <main className="admin-page owner-page"><header className="owner-page-header"><div><p className="owner-page-eyebrow">Business authority</p><h1>{state.identity.name}</h1><p className="owner-page-lede">Verified business facts and intent are the source of truth for every future site version.</p></div><div className="button-row"><Link className="button secondary" href={`/dashboard/${slug}`}>Dashboard</Link><Link className="button primary" href={`/editor/${slug}`}>Website workspace</Link></div></header><BusinessDataControls siteId={site.id} state={state} intent={intent} /></main>;
 }

@@ -6,10 +6,13 @@ export type PlaceholderTextMatch = {
 export type SensitiveClaimEvidenceKind = "proof" | "reviews" | "insurance" | "pricing" | "emergency";
 
 export type SensitiveClaimMatch = {
-  category: "credential" | "insurance" | "pricing" | "warranty" | "reviews" | "guarantee" | "emergency" | "regulated" | "marketing";
+  category: "credential" | "insurance" | "pricing" | "warranty" | "reviews" | "guarantee" | "emergency" | "regulated" | "marketing" | "longevity";
   label: string;
   severity: "block" | "warning";
   requiredEvidence: SensitiveClaimEvidenceKind;
+  matchedText: string;
+  start: number;
+  end: number;
 };
 
 const placeholderPatterns: PlaceholderTextMatch[] = [
@@ -36,18 +39,20 @@ const placeholderPatterns: PlaceholderTextMatch[] = [
   { pattern: /\b(Call-first|listed repair service available|listed service customers can ask)\b/i, reason: "Filler proof or service copy is visible." }
 ];
 
-const sensitiveClaimPatterns: Array<SensitiveClaimMatch & { pattern: RegExp }> = [
+const sensitiveClaimPatterns: Array<Omit<SensitiveClaimMatch, "matchedText" | "start" | "end"> & { pattern: RegExp }> = [
   { category: "credential", label: "licensed/certified credential", severity: "block", pattern: /\b(licensed|certified|board[-\s]?certified|accredited)\b/i, requiredEvidence: "proof" },
   { category: "insurance", label: "insurance or bonding claim", severity: "block", pattern: /\b(insured|bonded|insurance|insurer|deductible|rental cars?)\b/i, requiredEvidence: "insurance" },
+  { category: "warranty", label: "warranty claim", severity: "block", pattern: /\b(?:lifetime|limited|written|\d+[-\s]?(?:year|month))?\s*warrant(?:y|ies)\b/i, requiredEvidence: "proof" },
   { category: "guarantee", label: "guarantee", severity: "block", pattern: /\b(guaranteed|guarantee|risk[-\s]?free)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated approval", severity: "block", pattern: /\b(fda[-\s]?approved|hipaa[-\s]?compliant|irs[-\s]?certified)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated advice", severity: "block", pattern: /\b(medical advice|legal advice|financial advice|tax advice|case results?)\b/i, requiredEvidence: "proof" },
-  { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(diagnos(?:e|is)|medical treatment|(?:cures?|treats?) (?:a |the )?(?:disease|condition|symptoms?|illness|pain)|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
+  { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(medical diagnos(?:e|is)|diagnos(?:e|is) (?:a |the )?(?:disease|condition|symptoms?|illness)|medical treatment|(?:cures?|treats?) (?:a |the )?(?:disease|condition|symptoms?|illness|pain)|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
   { category: "pricing", label: "pricing claim", severity: "warning", pattern: /(?:\bbest prices?\b|\bfree\b.{0,24}\b(?:estimates?|quotes?)\b|\bno out of pocket\b|\baffordable\b)/i, requiredEvidence: "pricing" },
   { category: "reviews", label: "top-rated review claim", severity: "warning", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
   { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bbest\b(?!\s+(?:way|time|place)\b)|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
   { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
   { category: "marketing", label: "market leadership claim", severity: "warning", pattern: /\b(leading|most trusted|premier)\b/i, requiredEvidence: "proof" },
+  { category: "longevity", label: "business longevity claim", severity: "block", pattern: /\b(?:serving\s+(?:the\s+)?(?:[a-z][a-z .'-]+\s+)?for\s+)?\d{1,3}\+?\s+years?(?:\s+in\s+business)?\b/i, requiredEvidence: "proof" },
   { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" }
 ];
 
@@ -56,11 +61,16 @@ export function scanPlaceholderText(text: string): PlaceholderTextMatch[] {
 }
 
 export function scanSensitiveClaimText(text: string): SensitiveClaimMatch[] {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-  return sensitiveClaimPatterns
-    .filter((entry) => entry.pattern.test(normalized))
-    .map(({ pattern: _pattern, ...entry }) => entry);
+  if (!text.trim()) return [];
+  return sensitiveClaimPatterns.flatMap(({ pattern, ...entry }) => {
+    const matcher = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    return [...text.matchAll(matcher)].map((match) => ({
+      ...entry,
+      matchedText: match[0],
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length
+    }));
+  }).sort((left, right) => left.start - right.start || left.end - right.end || left.category.localeCompare(right.category));
 }
 
 export function gatedSensitiveClaims(text: string) {

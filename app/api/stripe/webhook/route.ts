@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import {
   asStripeInvoice,
   asStripeCheckoutSession,
@@ -54,21 +55,23 @@ export async function POST(request: Request) {
         (invoiceCustomerId && candidate.stripeCustomerId === invoiceCustomerId) ||
         (invoiceSubscriptionId && candidate.stripeSubscriptionId === invoiceSubscriptionId)
     );
-    const bundle = claim ? await repository.getSiteBundle(claim.siteId) : null;
+    const site = claim ? await sitePlatformRepository.getSite(claim.siteId) : undefined;
+    const business = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
     const notification =
-      bundle && claim
+      site && business && claim
         ? await sendOwnerOperationalEmail({
-            bundle,
+            site,
+            business,
             claims: [claim],
             kind: "payment_failure",
-            subject: `${bundle.businessProfile.name}: payment needs attention`,
+            subject: `${business.identity.name}: payment needs attention`,
             summaryLines: [
               "Stripe reported a failed subscription payment.",
               invoice.amount_due ? `Amount due: ${(invoice.amount_due / 100).toFixed(2)} ${invoice.currency?.toUpperCase() ?? ""}` : undefined,
               invoice.attempt_count ? `Attempt count: ${invoice.attempt_count}` : undefined,
               invoice.hosted_invoice_url ? `Invoice: ${invoice.hosted_invoice_url}` : undefined
             ].filter((line): line is string => Boolean(line)),
-            actionPath: `/dashboard/${bundle.siteModel.slug}`
+            actionPath: `/dashboard/${site.slug}`
           })
         : {
             kind: "payment_failure" as const,

@@ -1,38 +1,15 @@
-import { NextResponse } from "next/server";
-import { cachePolicyForPathname, cachePolicyHeaders } from "@/lib/cache-policy";
-import { repository } from "@/lib/repository";
-import { isIndexableSite } from "@/lib/site-publication";
-import { markdownCanonicalLinkHeader, markdownForPage } from "@/lib/public-site-markdown";
-import { recordAgentReadableRequest } from "@/lib/agent-readable-analytics";
-import { findPageBySlugV3 } from "@/lib/site-version-v3";
-import { loadPublicSiteVersion } from "@/lib/public-site-version";
+import { loadPublishedSiteContext, markdownForArtifactRoute } from "@/packages/site-platform";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ slug: string; path?: string[] }> }) {
   const { slug, path } = await params;
-  const bundle = await repository.getSiteBundleBySlug(slug);
-  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  const claims = await repository.listClaims(bundle.businessProfile.siteId);
-  if (!isIndexableSite(bundle, claims)) return NextResponse.json({ error: "Site is not indexable" }, { status: 404 });
-
-  const pageSlug = path?.join("/") ?? "";
-  const live = await loadPublicSiteVersion(repository, bundle);
-  if (!live) return NextResponse.json({ error: "Version is not public-renderable" }, { status: 404 });
-  const { version } = live;
-  const page = findPageBySlugV3(version, pageSlug);
-  if (!page) return NextResponse.json({ error: "Unknown page" }, { status: 404 });
-  await recordAgentReadableRequest({ bundle, request, resource: "markdown_alternate", pageId: page.id });
-
-  return new Response(markdownForPage(bundle, page, request.headers), {
-    headers: {
-      "Content-Type": "text/markdown; charset=utf-8",
-      Link: markdownCanonicalLinkHeader(bundle, page, request.headers),
-      ...cacheHeaders()
-    }
-  });
-}
-
-function cacheHeaders() {
-  return cachePolicyHeaders(cachePolicyForPathname("/md"));
+  const context = await loadPublishedSiteContext(slug);
+  if (!context) return new Response(null, { status: 404 });
+  const output = await markdownForArtifactRoute(context, path?.join("/") ?? "");
+  if (!output) return new Response(null, { status: 404 });
+  const customDomain = request.headers.get("x-lodesta-custom-domain-routed") === "1";
+  const base = customDomain ? "" : `/sites/${encodeURIComponent(slug)}`;
+  const canonical = `${new URL(request.url).origin}${base}${output.route.path === "/" ? "" : output.route.path}`;
+  return new Response(output.markdown, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "public, max-age=60, s-maxage=300", link: `<${canonical}>; rel=\"canonical\"`, "x-lodesta-site-version": context.version.id } });
 }

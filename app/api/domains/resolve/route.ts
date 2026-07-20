@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/repository";
-import { isIndexableSite } from "@/lib/site-publication";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { isResolvableCustomDomain } from "@/lib/domains";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,15 +12,13 @@ export async function GET(request: Request) {
   if (domain && !isResolvableDomain(domain)) return NextResponse.json({ resolved: false }, { status: 404 });
   if (!domain) return NextResponse.json({ resolved: false }, { status: 404 });
 
-  const bundle = await repository.getSiteBundle(domain.siteId);
-  if (!bundle) return NextResponse.json({ resolved: false }, { status: 404 });
-  const claims = await repository.listClaims(domain.siteId);
-  if (!isIndexableSite(bundle, claims)) return NextResponse.json({ resolved: false }, { status: 403 });
+  const site = await sitePlatformRepository.getSite(domain.siteId);
+  if (!site?.publishedVersionId || site.status !== "active") return NextResponse.json({ resolved: false }, { status: 403 });
 
   return NextResponse.json({
     resolved: true,
-    siteId: bundle.businessProfile.siteId,
-    slug: bundle.siteModel.slug,
+    siteId: site.id,
+    slug: site.slug,
     domainStatus: domain.status
   });
 }

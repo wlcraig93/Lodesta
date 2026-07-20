@@ -1,5 +1,5 @@
 import type { CrawlAssessment } from "./crawler";
-import type { StandardCheckResult, StandardCriterion, StandardEvaluation } from "./models";
+import type { StandardCheckResult, StandardCriterion, StandardEvaluation } from "./presence-contracts";
 import { getStandardCriterion } from "./standard";
 
 export function evaluateCrawlAgainstStandard(crawl: CrawlAssessment): StandardEvaluation {

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { publicInquiryEvent } from "@/lib/inquiries";
-import type { Inquiry, InquiryEvent } from "@/lib/models";
-import { repository } from "@/lib/repository";
+import type { Inquiry, InquiryEvent } from "@/packages/site-capabilities";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,11 +10,11 @@ export async function GET(request: Request) {
   const unauthorized = siteId ? await requireAdminOrSiteOwner(request, siteId) : await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
-  const inquiries = await repository.listInquiries(siteId);
+  const inquiries = await siteCapabilityRepository.listInquiries(siteId);
   const eventsByInquiry = new Map<string, InquiryEvent[]>();
   await Promise.all(
     inquiries.map(async (inquiry) => {
-      eventsByInquiry.set(inquiry.id, await repository.listInquiryEvents(inquiry.id));
+      eventsByInquiry.set(inquiry.id, await siteCapabilityRepository.listInquiryEvents(inquiry.id));
     })
   );
 

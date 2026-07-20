@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createBillingPortalSession } from "@/lib/billing";
-import { repository } from "@/lib/repository";
+import { sitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 import { requireAdminOrSiteOwner } from "@/lib/security";
-import { claimGateForBundle } from "@/lib/site-publication";
+import { claimGateForSite } from "@/lib/site-publication";
 
 export const runtime = "nodejs";
 
@@ -22,10 +23,10 @@ export async function POST(request: Request) {
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
 
-  const bundle = await repository.getSiteBundle(parsed.data.siteId);
-  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  const claims = await repository.listClaims(parsed.data.siteId);
-  const claimGate = claimGateForBundle(bundle, claims);
+  const site = await sitePlatformRepository.getSite(parsed.data.siteId);
+  if (!site) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  const claims = await platformOperationsRepository.listClaims(parsed.data.siteId);
+  const claimGate = claimGateForSite(site.id, claims);
   if (!claimGate.ok) {
     return NextResponse.json(
       {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
 
   const portal = await createBillingPortalSession({
     stripeCustomerId: claim?.stripeCustomerId,
-    returnPath: parsed.data.returnPath ?? `/dashboard/${bundle.siteModel.slug}`
+    returnPath: parsed.data.returnPath ?? `/dashboard/${site.slug}`
   });
 
   if (!portal.configured || !portal.url) {

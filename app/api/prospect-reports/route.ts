@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import {
   classifyProspectWebsite,
   consumeProspectBudget,
@@ -79,11 +79,7 @@ export async function POST(request: Request) {
     return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(concurrent), reused: true }), limit);
   }
 
-  const job = await repository.enqueueJob("prospect_presence_report", {
-    reportId: report.id,
-    placeId: details.placeId,
-    maxAttempts: 2
-  });
+  const job = await repository.enqueueProspectReportJob(report.id);
   report = (await repository.updateProspectReport({ reportId: report.id, jobId: job.id })) ?? report;
 
   return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(report), reused: false }, { status: 202 }), limit);

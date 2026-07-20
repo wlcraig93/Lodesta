@@ -1,4 +1,4 @@
-import type { Vertical } from "./models";
+import type { Vertical } from "./presence-contracts";
 
 export type VerticalClassificationInput = {
   url?: string;

@@ -1,36 +1,22 @@
 import type { MetadataRoute } from "next";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
-import { repository } from "@/lib/repository";
-import { getPublishedVersion } from "@/lib/sample-data";
-import { isIndexableSite } from "@/lib/site-publication";
-import { assertSiteVersionV3, publicSiteVersionV3Issue } from "@/lib/site-version-v3";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = configuredAppOriginOrDefault();
-  const bundles = await repository.listSiteBundles();
-  const claims = await repository.listClaims();
-  const now = new Date();
-  const platformPages: MetadataRoute.Sitemap = [
-    {
-      url: baseUrl,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.8
-    }
-  ];
-
-  const sitePages = bundles.filter((bundle) => isIndexableSite(bundle, claims)).flatMap((bundle) => {
-    const version = assertSiteVersionV3(getPublishedVersion(bundle.siteModel), "sitemap published version");
-    if (publicSiteVersionV3Issue(version)) return [];
-    return version.pageComposition.pages.map((page) => ({
-      url: `${baseUrl}/sites/${bundle.siteModel.slug}${page.slug ? `/${page.slug}` : ""}`,
-      lastModified: version.createdAt ? new Date(version.createdAt) : now,
+  const sites = (await sitePlatformRepository.listSites()).filter((site) => site.status === "active" && site.publishedVersionId);
+  const sitePages = (await Promise.all(sites.map(async (site) => {
+    const version = site.publishedVersionId ? await sitePlatformRepository.getSiteVersion(site.publishedVersionId) : undefined;
+    const artifact = version ? await sitePlatformRepository.getBuildArtifact(version.artifactId) : undefined;
+    if (!version || version.status !== "published" || !artifact || artifact.qa.hardGate !== "passed") return [];
+    return artifact.routes.map((route) => ({
+      url: `${baseUrl}/sites/${site.slug}${route.path === "/" ? "" : route.path}`,
+      lastModified: new Date(version.publishedAt ?? version.createdAt),
       changeFrequency: "weekly" as const,
-      priority: page.slug ? 0.7 : 1
+      priority: route.path === "/" ? 1 : 0.7
     }));
-  });
-
-  return [...platformPages, ...sitePages];
+  }))).flat();
+  return [{ url: baseUrl, lastModified: new Date(), changeFrequency: "monthly", priority: 0.8 }, ...sitePages];
 }

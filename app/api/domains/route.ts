@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { normalizeCustomHostname } from "@/lib/domains";
-import { claimGateForBundle } from "@/lib/site-publication";
 import { invalidateDomainResolution } from "@/lib/domain-resolution-cache";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 const activationNotice = "Domain activation may take up to 30 seconds to apply across all servers.";
 
@@ -23,8 +23,8 @@ export async function POST(request: Request) {
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
 
-  const bundle = await repository.getSiteBundle(parsed.data.siteId);
-  if (!bundle) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
+  const site = await sitePlatformRepository.getSite(parsed.data.siteId);
+  if (!site) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
   if (parsed.data.provider === "railway" && !manualCustomDomainsAllowed()) {
     return NextResponse.json(
       {
@@ -34,21 +34,6 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const claimGate = claimGateForBundle(bundle, await repository.listClaims(parsed.data.siteId));
-  if (!claimGate.ok) {
-    const verificationRequired = claimGate.code === "verification_required";
-    return NextResponse.json(
-      {
-        error: claimGate.reason,
-        claimGate: claimGate.code,
-        paymentRequired: !verificationRequired,
-        factVerificationRequired: verificationRequired,
-        missingRequiredFacts: claimGate.missingFacts
-      },
-      { status: verificationRequired ? 409 : 402 }
-    );
-  }
-
   let hostname: string;
   try {
     hostname = normalizeCustomHostname(parsed.data.hostname);

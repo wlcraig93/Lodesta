@@ -1,328 +1,88 @@
-import { repository } from "./repository";
+import { chromium } from "playwright";
 import { appOriginEnvName } from "./app-origin";
 import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
-import { getRenderInspectionRuntimeStatus } from "./render-inspection";
-import { ASSET_BUCKET_NAME } from "./asset-storage";
-import { getSupabaseAdminClient } from "./supabase/client";
-import { getOpenAiRuntimeSettings } from "./operator-settings";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export type HealthState = "ok" | "warning" | "error";
-
-export type HealthCheck = {
-  id: string;
-  label: string;
-  state: HealthState;
-  detail: string;
-};
-
-export type HealthReport = {
-  status: HealthState;
-  timestamp: string;
-  checks: HealthCheck[];
-};
+export type HealthCheck = { id: string; label: string; state: HealthState; detail: string };
+export type HealthReport = { status: HealthState; timestamp: string; checks: HealthCheck[] };
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
-  const assetStorageCheck = options.deep ? await checkAssetStorageReadiness() : checkAssetStorageConfig();
-  const openAiCheck = await checkOpenAiConfig({ deep: Boolean(options.deep) });
   const checks = [
-    checkAppUrl(),
-    checkRepositoryConfig(),
-    checkAdminToken(),
-    checkSupabaseAuthConfig(),
-    checkStripeConfig(),
-    checkCloudflareConfig(),
-    checkWorkflowEmailConfig(),
-    checkHashSecretConfig(),
-    checkClaimChallengeSecretConfig(),
-    checkGooglePlacesConfig(),
-    checkLocationMapConfig(),
-    assetStorageCheck,
-    openAiCheck
+    checkUrl(), checkRepository(), checkAuth(), checkAdmin(), checkStripe(), checkSandbox(),
+    checkArtifactBridge(), checkOpenAi(), checkHashSecret(), checkClaimSecret(), checkEmail(), checkPlaces()
   ];
-
-  if (options.deep) {
-    checks.push(await checkRepositoryReadiness(), await checkRenderBrowserReadiness());
-  }
-
-  return {
-    status: worstState(checks.map((check) => check.state)),
-    timestamp: new Date().toISOString(),
-    checks
-  };
+  if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
+  return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
 }
 
-function checkAppUrl(): HealthCheck {
-  const appUrl = process.env[appOriginEnvName];
-  if (!appUrl) {
-    if (requiresDeploymentConfig()) {
-      return error("app_url", "Application URL", `${appOriginEnvName} is required for deployed environments.`);
-    }
-    return warning("app_url", "Application URL", `${appOriginEnvName} is not set; generated links will fall back to the request origin.`);
-  }
+function checkUrl() {
+  const value = process.env[appOriginEnvName];
+  if (!value) return deployed() ? error("app_url", "Application URL", `${appOriginEnvName} is required.`) : warning("app_url", "Application URL", `${appOriginEnvName} is not set.`);
+  try { new URL(value); return ok("app_url", "Application URL", `${appOriginEnvName} is configured.`); }
+  catch { return error("app_url", "Application URL", `${appOriginEnvName} must be an absolute URL.`); }
+}
 
+function checkRepository() {
+  const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((name) => !process.env[name]);
+  return missing.length ? error("repository", "Repository", `Missing ${missing.join(", ")}.`) : ok("repository", "Repository", "Supabase repository is configured.");
+}
+
+function checkAuth() {
+  const configured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL) && Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY);
+  return configured ? ok("auth", "Owner authentication", "Supabase Auth is configured.") : (deployed() ? error : warning)("auth", "Owner authentication", "Supabase public URL and anonymous key are missing.");
+}
+
+function checkAdmin() {
+  return process.env.LODESTA_ADMIN_TOKEN ? ok("admin", "Admin authorization", "Admin token is configured.") : (deployed() ? error : warning)("admin", "Admin authorization", "LODESTA_ADMIN_TOKEN is not configured.");
+}
+
+function checkStripe() {
+  const values = [process.env.STRIPE_SECRET_KEY, process.env.STRIPE_PRICE_ID, process.env.STRIPE_WEBHOOK_SECRET];
+  if (values.every(Boolean)) return ok("stripe", "Stripe", "Checkout, portal, and webhook completion are configured.");
+  if (values.some(Boolean)) return error("stripe", "Stripe", "Stripe is partially configured.");
+  return warning("stripe", "Stripe", "Stripe is not configured.");
+}
+
+function checkSandbox() {
+  return process.env.LODESTA_SANDBOX_URL && process.env.LODESTA_SANDBOX_TOKEN
+    ? ok("sandbox", "Cloudflare Sandbox", "Sandbox bridge and authentication are configured.")
+    : error("sandbox", "Cloudflare Sandbox", "LODESTA_SANDBOX_URL and LODESTA_SANDBOX_TOKEN are required.");
+}
+
+function checkArtifactBridge() {
+  return process.env.LODESTA_R2_BRIDGE_URL && process.env.LODESTA_R2_BRIDGE_TOKEN
+    ? ok("artifacts", "Immutable artifact storage", "R2 artifact bridge is configured.")
+    : error("artifacts", "Immutable artifact storage", "LODESTA_R2_BRIDGE_URL and LODESTA_R2_BRIDGE_TOKEN are required.");
+}
+
+function checkOpenAi() { return process.env.OPENAI_API_KEY ? ok("openai", "Website manager model", "OpenAI is configured.") : error("openai", "Website manager model", "OPENAI_API_KEY is required for site construction and edits."); }
+function checkHashSecret() { if (hasConfiguredHashSecret()) return ok("hash_secret", "Privacy hash secret", "Stable visitor hashing uses a deployment secret."); return (deployed() ? error : warning)("hash_secret", "Privacy hash secret", usesDevelopmentHashSecret() ? "Using the development hash secret." : "LODESTA_HASH_SECRET is missing."); }
+function checkClaimSecret() { return process.env.LODESTA_CLAIM_CHALLENGE_SECRET || process.env.NEXTAUTH_SECRET ? ok("claim_secret", "Claim challenge secret", "Signed claim challenges are configured.") : (deployed() ? error : warning)("claim_secret", "Claim challenge secret", "LODESTA_CLAIM_CHALLENGE_SECRET is missing."); }
+function checkEmail() { return process.env.RESEND_API_KEY ? ok("email", "Operational email", "Resend is configured.") : warning("email", "Operational email", "Email notifications are disabled."); }
+function checkPlaces() { return process.env.GOOGLE_PLACES_API_KEY ? ok("places", "Google Places", "Places enrichment is configured.") : warning("places", "Google Places", "Places enrichment is disabled."); }
+
+async function checkRepositoryReadiness() {
+  try { const sites = await sitePlatformRepository.listSites(); return ok("repository_readiness", "Repository readiness", `V4 repository responded with ${sites.length} site(s).`); }
+  catch (caught) { return error("repository_readiness", "Repository readiness", message(caught)); }
+}
+
+async function checkSandboxReadiness() {
+  if (!process.env.LODESTA_SANDBOX_URL || !process.env.LODESTA_SANDBOX_TOKEN) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
   try {
-    new URL(appUrl);
-    return ok("app_url", "Application URL", `${appOriginEnvName} is configured.`);
-  } catch {
-    return error("app_url", "Application URL", `${appOriginEnvName} must be a valid absolute URL.`);
-  }
+    const response = await fetch(`${process.env.LODESTA_SANDBOX_URL.replace(/\/$/, "")}/health`, { headers: { authorization: `Bearer ${process.env.LODESTA_SANDBOX_TOKEN}` }, signal: AbortSignal.timeout(8_000) });
+    return response.ok ? ok("sandbox_readiness", "Sandbox readiness", "Cloudflare Sandbox responded.") : error("sandbox_readiness", "Sandbox readiness", `Sandbox returned ${response.status}.`);
+  } catch (caught) { return error("sandbox_readiness", "Sandbox readiness", message(caught)); }
 }
 
-function checkRepositoryConfig(): HealthCheck {
-  const missing = missingEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
-  if (missing.length) {
-    return error("repository", "Repository", `Supabase repository is missing ${missing.join(", ")}.`);
-  }
-
-  return ok("repository", "Repository", "Supabase repository environment is configured.");
+async function checkBrowserReadiness() {
+  try { const browser = await chromium.launch({ headless: true }); await browser.close(); return ok("browser", "Browser verification", "Playwright Chromium launched."); }
+  catch (caught) { return (deployed() ? error : warning)("browser", "Browser verification", `${message(caught)} Run npm run install:browsers.`); }
 }
 
-function checkAdminToken(): HealthCheck {
-  if (process.env.LODESTA_ADMIN_TOKEN) {
-    return ok("admin_token", "Admin token", "Admin token is configured.");
-  }
-
-  if (process.env.NODE_ENV === "production" || process.env.LODESTA_REQUIRE_AUTH === "true") {
-    return error("admin_token", "Admin token", "LODESTA_ADMIN_TOKEN is required when production auth enforcement is active.");
-  }
-
-  return warning("admin_token", "Admin token", "Admin APIs are open because LODESTA_ADMIN_TOKEN is not set.");
-}
-
-function checkSupabaseAuthConfig(): HealthCheck {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
-  if (url && anonKey) {
-    return ok("supabase_auth", "Supabase Auth", "Public Supabase Auth environment is configured.");
-  }
-
-  if (requiresDeploymentConfig()) {
-    return error(
-      "supabase_auth",
-      "Supabase Auth",
-      "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required for deployed owner login."
-    );
-  }
-
-  return warning(
-    "supabase_auth",
-    "Supabase Auth",
-    "Owner magic-link login is disabled until NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set."
-  );
-}
-
-function checkStripeConfig(): HealthCheck {
-  const hasSecret = Boolean(process.env.STRIPE_SECRET_KEY);
-  const hasPrice = Boolean(process.env.STRIPE_PRICE_ID);
-  const hasWebhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET);
-  if (hasSecret && hasPrice && hasWebhook) return ok("stripe", "Stripe", "Stripe checkout and webhook completion are configured.");
-  if (hasSecret && hasPrice && !hasWebhook) {
-    return error("stripe", "Stripe", "Stripe checkout is configured but STRIPE_WEBHOOK_SECRET is missing, so paid claims will not auto-complete.");
-  }
-  if (!hasSecret && !hasPrice) return warning("stripe", "Stripe", "Stripe checkout is not configured; claims will return local fallback checkout.");
-  return error("stripe", "Stripe", "Stripe is partially configured; set both STRIPE_SECRET_KEY and STRIPE_PRICE_ID.");
-}
-
-function checkCloudflareConfig(): HealthCheck {
-  const hasToken = Boolean(process.env.CLOUDFLARE_API_TOKEN);
-  const hasZone = Boolean(process.env.CLOUDFLARE_ZONE_ID);
-  if (hasToken && hasZone) return ok("cloudflare", "Cloudflare for SaaS", "Cloudflare custom-hostname environment is configured.");
-  if (!hasToken && !hasZone) {
-    return warning(
-      "cloudflare",
-      "Cloudflare for SaaS",
-      "Cloudflare for SaaS is not configured; custom domains will return fallback CNAME instructions."
-    );
-  }
-  return error("cloudflare", "Cloudflare for SaaS", "Cloudflare is partially configured; set both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID.");
-}
-
-function checkWorkflowEmailConfig(): HealthCheck {
-  if (process.env.RESEND_API_KEY) return ok("workflow_email", "Workflow email", "Resend workflow email is configured.");
-  return warning("workflow_email", "Workflow email", "RESEND_API_KEY is not set; email workflow deliveries are logged but not sent.");
-}
-
-function checkHashSecretConfig(): HealthCheck {
-  if (hasConfiguredHashSecret()) {
-    return ok("hash_secret", "Hash secret", "Stable visitor hashing and rate-limit fingerprints use a deployment secret.");
-  }
-  if (process.env.NODE_ENV === "production") {
-    return error("hash_secret", "Hash secret", "Set LODESTA_HASH_SECRET in production before recording visitor attribution hashes.");
-  }
-  if (usesDevelopmentHashSecret()) {
-    return warning("hash_secret", "Hash secret", "Using the development hash secret; set LODESTA_HASH_SECRET for deployed environments.");
-  }
-  return warning("hash_secret", "Hash secret", "Hash secret is not configured.");
-}
-
-function checkClaimChallengeSecretConfig(): HealthCheck {
-  if (process.env.LODESTA_CLAIM_CHALLENGE_SECRET || process.env.NEXTAUTH_SECRET) {
-    return ok("claim_challenge_secret", "Claim challenge secret", "Signed claim verification challenges use a deployment secret.");
-  }
-  if (process.env.NODE_ENV === "production") {
-    return error("claim_challenge_secret", "Claim challenge secret", "Set LODESTA_CLAIM_CHALLENGE_SECRET before enabling public claim verification.");
-  }
-  return warning("claim_challenge_secret", "Claim challenge secret", "Using the local claim challenge secret; set LODESTA_CLAIM_CHALLENGE_SECRET for deployed environments.");
-}
-
-function checkGooglePlacesConfig(): HealthCheck {
-  if (process.env.GOOGLE_PLACES_API_KEY) {
-    return ok("google_places", "Google Places", "Google Places Text Search enrichment is configured for permitted public presence signals.");
-  }
-  return warning(
-    "google_places",
-    "Google Places",
-    "GOOGLE_PLACES_API_KEY is not set; presence enrichment will use website-derived public links and schema facts only."
-  );
-}
-
-function checkLocationMapConfig(): HealthCheck {
-  const hasPublicMapKey = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY);
-  const mode = process.env.LODESTA_LOCATION_MAP_MODE || "auto";
-  if (mode === "auto") {
-    return ok(
-      "location_maps",
-      "Location maps",
-      hasPublicMapKey
-        ? "Location panels use the designed map fallback by default; explicit embed mode can use the configured public key."
-        : "Location panels use the designed map fallback by default."
-    );
-  }
-  if (mode === "classic_embed") {
-    return ok("location_maps", "Location maps", "Location panels use keyless embedded Google Maps with link fallbacks.");
-  }
-  if (mode === "embed") {
-    if (hasPublicMapKey) {
-      return ok(
-        "location_maps",
-        "Location maps",
-        "Embedded location maps are enabled. Confirm the public Google Maps key is HTTP-referrer restricted."
-      );
-    }
-    return warning(
-      "location_maps",
-      "Location maps",
-      "LODESTA_LOCATION_MAP_MODE=embed but no public Google Maps key is set; generated sites will use the designed map fallback."
-    );
-  }
-  if (mode === "off") {
-    return ok("location_maps", "Location maps", "Location map embeds are disabled; generated sites keep directions links.");
-  }
-  if (mode !== "link_only") {
-    return warning("location_maps", "Location maps", "Unknown LODESTA_LOCATION_MAP_MODE; generated sites will use automatic map panels.");
-  }
-  return ok("location_maps", "Location maps", "Location panels use link-only Google Maps actions.");
-}
-
-function checkAssetStorageConfig(): HealthCheck {
-  if (process.env.LODESTA_ASSET_STORAGE === "local") {
-    return ok("asset_storage", "Asset storage", "Generated asset bytes will use local development storage.");
-  }
-  return ok(
-    "asset_storage",
-    "Asset storage",
-    `Generated asset bytes will upload to Supabase Storage bucket ${ASSET_BUCKET_NAME}.`
-  );
-}
-
-async function checkAssetStorageReadiness(): Promise<HealthCheck> {
-  if (process.env.LODESTA_ASSET_STORAGE === "local") {
-    return ok("asset_storage", "Asset storage", "Local development asset storage is enabled.");
-  }
-  try {
-    const { data, error: bucketError } = await getSupabaseAdminClient().storage.getBucket(ASSET_BUCKET_NAME);
-    if (bucketError || !data) {
-      return error(
-        "asset_storage",
-        "Asset storage",
-        `Supabase Storage bucket ${ASSET_BUCKET_NAME} is missing or inaccessible: ${bucketError?.message ?? "bucket not found"}.`
-      );
-    }
-    if (data.public) {
-      return error(
-        "asset_storage",
-        "Asset storage",
-        `Supabase Storage bucket ${ASSET_BUCKET_NAME} must be private because it stores unconfirmed scraped media.`
-      );
-    }
-    return ok("asset_storage", "Asset storage", `Private Supabase Storage bucket ${ASSET_BUCKET_NAME} is accessible.`);
-  } catch (caught) {
-    const message = caught instanceof Error ? caught.message : String(caught);
-    return error("asset_storage", "Asset storage", `Supabase Storage bucket ${ASSET_BUCKET_NAME} check failed: ${message}`);
-  }
-}
-
-async function checkOpenAiConfig({ deep }: { deep: boolean }): Promise<HealthCheck> {
-  if (process.env.OPENAI_API_KEY) {
-    if (!deep) return ok("openai", "OpenAI", "OPENAI_API_KEY is configured; operator settings control model choices.");
-
-    const runtimeSettings = await getOpenAiRuntimeSettings();
-    const state = runtimeSettings.warning ? warning : ok;
-    return state(
-      "openai",
-      "OpenAI",
-      [
-        `OPENAI_API_KEY is configured with settings_source=${runtimeSettings.source}.`,
-        `Generation ${runtimeSettings.settings.generationModel}; final judge ${runtimeSettings.settings.generationJudgeModel}; mockups ${runtimeSettings.settings.imageModel}.`,
-        runtimeSettings.warning
-      ]
-        .filter(Boolean)
-        .join(" ")
-    );
-  }
-  return warning(
-    "openai",
-    "OpenAI",
-    "OPENAI_API_KEY is not set; deterministic generation and prompt-only mockup artifacts still work, but hosted AI calls are unavailable."
-  );
-}
-
-function requiresDeploymentConfig() {
-  return process.env.NODE_ENV === "production";
-}
-
-async function checkRepositoryReadiness(): Promise<HealthCheck> {
-  try {
-    const [sites, jobs] = await Promise.all([repository.listSiteBundles(), repository.listJobs("queued")]);
-    return ok("repository_readiness", "Repository readiness", `Repository responded with ${sites.length} site(s) and ${jobs.length} queued job(s).`);
-  } catch (caught) {
-    const message = caught instanceof Error ? caught.message : String(caught);
-    return error("repository_readiness", "Repository readiness", `Repository check failed: ${message}`);
-  }
-}
-
-async function checkRenderBrowserReadiness(): Promise<HealthCheck> {
-  const status = await getRenderInspectionRuntimeStatus({ launch: true });
-  if (status.browserLaunchable) {
-    return ok("render_browser_readiness", "Render browser readiness", status.message);
-  }
-
-  const state = process.env.NODE_ENV === "production" ? error : warning;
-  return state(
-    "render_browser_readiness",
-    "Render browser readiness",
-    `${status.message} Run npm run install:browsers.`
-  );
-}
-
-function missingEnv(names: string[]) {
-  return names.filter((name) => !process.env[name]);
-}
-
-function worstState(states: HealthState[]): HealthState {
-  if (states.includes("error")) return "error";
-  if (states.includes("warning")) return "warning";
-  return "ok";
-}
-
-function ok(id: string, label: string, detail: string): HealthCheck {
-  return { id, label, state: "ok", detail };
-}
-
-function warning(id: string, label: string, detail: string): HealthCheck {
-  return { id, label, state: "warning", detail };
-}
-
-function error(id: string, label: string, detail: string): HealthCheck {
-  return { id, label, state: "error", detail };
-}
+function deployed() { return process.env.NODE_ENV === "production"; }
+function message(value: unknown) { return value instanceof Error ? value.message : String(value); }
+function worst(states: HealthState[]): HealthState { return states.includes("error") ? "error" : states.includes("warning") ? "warning" : "ok"; }
+function ok(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "ok", detail }; }
+function warning(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "warning", detail }; }
+function error(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "error", detail }; }

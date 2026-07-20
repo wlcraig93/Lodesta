@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizedInquiryStatus, publicInquiry } from "@/lib/inquiries";
-import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
 
 const inquiryStatusSchema = z.object({
   siteId: z.string().min(1),
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   const unauthorized = await requireAdminOrSiteOwner(request, parsed.data.siteId);
   if (unauthorized) return unauthorized;
 
-  const inquiry = await repository.updateInquiryStatus({ ...parsed.data, status });
+  const inquiry = await siteCapabilityRepository.updateInquiryStatus({ ...parsed.data, status });
   if (!inquiry) return NextResponse.json({ error: "Inquiry not found" }, { status: 404 });
   return NextResponse.json({ ok: true, inquiry: publicInquiry(inquiry) });
 }

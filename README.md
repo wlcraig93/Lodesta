@@ -1,30 +1,27 @@
 # Lodesta
 
-SMB Presence Autopilot is an AI-first managed website and local-presence platform for US small businesses.
+Lodesta is an AI-first managed website and local-presence platform for US small businesses. The product is pre-launch and V1 currently supports auto-body businesses.
 
-This repository currently contains the launch foundation:
+The current website system uses canonical business data, one website manager agent, shared Lodesta capabilities, isolated Cloudflare builds, immutable site artifacts, and Railway/Next.js serving. It does not use presentation templates, copy slots, a planner/compiler design system, or per-vertical generator branches.
 
-- Next.js + TypeScript app shell
-- Structured canonical models
-- Typed repository boundary with local and Supabase implementations
-- Standard criteria registry
-- Dynamic public-site renderer
-- Tokenized noindex preview route
-- URL intake, canonical control-plane, versioned forms, analytics, and experiment APIs
-- Analytics summaries for traffic sources, click-map aggregates, section outcomes, funnels, experiments, Web Vitals, and Standard correlations
-- URL crawler that extracts technical SEO signals and owner-verifiable facts without copying protected site assets into previews
-- Stripe-ready claim checkout flow
-- Cloudflare for SaaS-ready custom-domain flow
-- Supabase Auth-ready owner login/account flow
-- Lead workflow delivery logging with optional Resend email and webhook notifications
-- Canonical business control plane with deterministic recompilation, objective QA, and immutable published inputs
-- Opt-in experiment runtime for content-neutral sticky CTA, CTA prominence, form length/order, and hero-layout testing
-- Explicit experiment holdout percentage so cohort-level lift can be compared against a persistent control
-- Experiment learning registry that can adopt directional winners into future generation defaults and roll them back
-- Supabase schema draft aligned to the structured site model
-- Railway worker scaffold
+The canonical architecture and implementation sequence are documented in [docs/agentic-site-workspace-v1-plan.md](docs/agentic-site-workspace-v1-plan.md).
 
-See `docs/launch-plan.md` for the formal product and architecture plan this implementation follows.
+## Architecture
+
+- `packages/business-data`: crawl ingestion, normalized business state, and public sandbox projection.
+- `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
+- `packages/site-agent`: the single manager agent, visual/task critic, and versioned prompt contract.
+- `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.
+- `workers/site-sandbox`: deny-by-default, prebaked Cloudflare build environment.
+- `packages/site-verification`: sanitizer, factual-claim validation, browser gate, contact sheets, and finalization.
+- `packages/site-artifacts`: content-addressed local or R2 artifact storage.
+- `packages/platform-data`: V4 repository contracts and Supabase implementation.
+- `packages/site-platform`: sessions, runs, bounded repair, immutable candidates, publishing, restore, and rollback.
+- `packages/site-capabilities`: managed forms, analytics, maps, safe links, and capability policy.
+- `packages/control-plane`: typed business-state and site-intent mutations.
+- `packages/trusted-runtime`: audited runtime-series patching and rollback.
+
+Public and authenticated previews serve the same finalized HTML/CSS bytes. Agent-authored code never runs in a visitor browser; public artifacts contain only static HTML/CSS and the platform-owned trusted runtime.
 
 ## Local Development
 
@@ -33,220 +30,71 @@ npm install
 npm run dev
 ```
 
-The default local app URL is `http://localhost:4330`. `npm run dev` starts both the Next.js app on `127.0.0.1:4330` and the Lodesta job worker, so queued site generations and maintenance jobs are processed in local development. The local supervisor keeps Next.js running if the worker exits and restarts only the worker with backoff; if the web process exits, the dev session shuts down. Local dev starts the worker with a 750 ms idle poll interval for faster job pickup. Override with `PORT=4331 npm run dev` only when you intentionally need another port. Use `npm run dev:web` when you intentionally want the web server without a worker. Set `LODESTA_APP_ORIGIN` when you need a canonical platform origin for generated links, OAuth callbacks, Stripe redirects, or custom-domain routing; local dev can fall back to the request origin.
+The app runs at `http://localhost:4330` by default. `npm run dev` starts the Next.js app and the platform worker; use `npm run dev:web` when only the web process is needed.
 
-To run the launch-flow smoke checks against a local dev server:
+Important surfaces:
+
+- `/dashboard`: operator dashboard.
+- `/admin/sites`: site inventory.
+- `/admin/site-queue`: candidate-version and operator-review queue.
+- `/settings`: agent and critic model settings.
+- `/editor/:slug`: owner website workspace with Discuss and Apply.
+- `/business/:slug`: canonical business data and site intent.
+- `/versions/:slug`: immutable version history, publish, restore, and rollback.
+- `/leads/:slug`: managed form inbox.
+- `/analytics/:slug`: first-party analytics.
+- `/sites/:slug/*`: published immutable site artifact.
+
+Copy `.env.example` to local environment configuration and provide real values outside git. Experimental generation requires OpenAI, Supabase, Cloudflare Sandbox, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
+
+## Verification
 
 ```bash
+npm run typecheck
+npm run verify:agentic-architecture
+npm run verify:agentic-site-platform-v1
+npm run verify:trusted-runtime
+npm run verify:render-browser
 npm run smoke:dev
 ```
 
-If a server is already running, use:
+Live integration checks require `.env.local`:
 
 ```bash
-npm run smoke
+npm run verify:supabase
+npm run verify:site-sandbox-v1
+npm run verify:agentic-site-walking-skeleton
 ```
 
-To verify the local Stripe webhook signature and claim-completion logic without calling Stripe:
+After the runtime release suite passes, promote the content-hashed trusted runtime through the audited series RPC:
 
 ```bash
-npm run verify:launch-boundaries
-npm run verify:stripe-webhook
+npm run runtime:promote -- --apply --verified-by=<operator-id>
 ```
 
-Open:
-
-- `http://localhost:4330` for the public Lodesta homepage
-- `http://localhost:4330/dashboard` for the operator dashboard
-- `http://localhost:4330/settings` for operator runtime settings
-- `http://localhost:4330/preview/demo-token` for the pre-claim preview
-- `http://localhost:4330/sites/austin-collision-works` for the public rendered site
-- `http://localhost:4330/editor/austin-collision-works` for curated owner editing
-- `http://localhost:4330/business/austin-collision-works` for canonical business facts
-- `http://localhost:4330/analytics/austin-collision-works` for first-party analytics
-- `http://localhost:4330/status/austin-collision-works` for managed publish, QA, and evidence status
-- `http://localhost:4330/experiments/austin-collision-works` for experiment opt-in, rollback, and assignment reporting
-- `http://localhost:4330/claim/austin-collision-works` for fact verification and checkout
-- `http://localhost:4330/domains/austin-collision-works` for custom-domain connection
-- `http://localhost:4330/leads/austin-collision-works` for form submissions and CSV export
-- `http://localhost:4330/versions/austin-collision-works` for version history and rollback
-- `http://localhost:4330/auth/login` for owner login
-- `http://localhost:4330/account` for the authenticated owner dashboard
-
-Useful API smoke routes:
-
-- `POST /api/intake`
-- `POST /api/preview-tokens`
-- `GET /api/preview-tokens?siteId=site_austin_collision_works`
-- `POST /api/presence/assess`
-- `GET /api/control-plane/changes?siteId=site_austin_collision_works`
-- `POST /api/control-plane/changes`
-- `POST /api/forms/submit`
-- `POST /api/analytics`
-- `POST /api/experiments/update`
-- `POST /api/experiments/learn`
-- `GET /api/experiments/learn?siteId=site_austin_collision_works`
-- `POST /api/experiments/assign`
-- `GET /api/experiments/analyze?siteId=site_austin_collision_works`
-- `POST /api/sites/qa`
-- `POST /api/sites/regenerate`
-- `GET /api/sites/versions?siteId=site_austin_collision_works`
-- `POST /api/sites/versions`
-- `POST /api/claim`
-- `POST /api/domains`
-- `POST /api/jobs`
-- `POST /api/jobs/process`
-- `GET /api/jobs`
-- `GET /api/sites`
-- `GET /api/inquiries?siteId=site_austin_collision_works`
-- `GET /api/inquiries/export?siteId=site_austin_collision_works`
-
-Admin CLI:
-
-Crawl and render smoke tests target public URLs only. Use `npm run verify:dev-crawl` against the dev deployment when exercising end-to-end crawler behavior.
+The current live check is a private, non-publishable experiment:
 
 ```bash
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- list-sites
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-site-from-url https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- import-batch https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza https://dev.lodesta.com/crawl-fixtures/<fixture-token>/menu
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-presence https://dev.lodesta.com/crawl-fixtures/<fixture-token>/joes-pizza
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- run-objective-qa site_austin_collision_works
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- regenerate-site site_austin_collision_works
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- create-preview site_austin_collision_works
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- connect-domain site_austin_collision_works www.austincollision.example
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- refresh-domain domain_id
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- request-control-plane-change site_austin_collision_works '{"kind":"set_contact","phone":"+15125550199"}'
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- schedule-maintenance launch_maintenance
-LODESTA_API_URL=http://127.0.0.1:4330 npm run cli -- health deep
+npm run verify:agentic-live-experiment
 ```
 
-The CLI calls the same HTTP API as the app. It is intended for operator/admin workflows from Codex, Claude Code, or a terminal.
-If `LODESTA_ADMIN_TOKEN` is set on the server, set the same variable in the CLI environment; the CLI sends it as a bearer token.
-Local Node entry points (`npm run cli`, `npm run worker`, and verification scripts) automatically load `.env` and `.env.local` from the repository root. Shell-provided variables still take precedence.
-The batch-import job generates structured sites and tokenized previews for outbound lists. Fresh intake always requires a website URL; optional prompt text is guidance, not a prompt-only generation path. `POST /api/jobs/schedule` or `npm run cli -- schedule-maintenance` is the cron-safe scheduler for recurring maintenance. Business and presentation changes go through the typed control plane; deterministic changes compile and pass objective QA before publication, while structural changes queue one coalesced regeneration from the exact immutable snapshot without recrawling.
+It creates one private candidate and exercises an observed patch-only edit. It is not a readiness evaluation or authorization for an owner pilot.
 
-## Deployment Readiness
+## Deployment
 
-Use `/api/health` as the Railway liveness endpoint. It returns a small public response without exposing configuration details.
+Railway hosts the Next.js web service and worker. Supabase stores canonical authorities and operational records. R2 stores immutable source archives, assets, screenshots, runtime patches, and finalized site bytes. Cloudflare Sandbox runs untrusted website builds; Cloudflare for SaaS remains the custom-domain integration.
 
-Use `/api/health?deep=1` or `npm run cli -- health deep` as the admin readiness check. When `LODESTA_ADMIN_TOKEN` is set, send it through the CLI environment or as a bearer token. The deep check verifies repository connectivity plus required and optional service configuration without returning secret values.
+Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
-Minimum Railway web service environment:
+Database changes are additive migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. The pre-launch V3 deletion was an explicit hard cutover; no compatibility readers or dual-write paths remain.
 
-- `LODESTA_APP_ORIGIN`
-- `LODESTA_ADMIN_TOKEN`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `LODESTA_HASH_SECRET`
+## Security Boundaries
 
-Optional launch integrations:
+- Sandbox input contains only `SitePublicBuildInputV1`; private evidence and secrets never enter the build environment.
+- Sandbox sessions perform no network installs and import only the prebaked Lodesta SDK and allowlisted toolchain.
+- HTML, CSS, routes, links, assets, forms, capabilities, structured data, and factual claims are validated before persistence.
+- Forms, analytics, maps, domains, internal redirects, publishing, runtime behavior, and all backend functions are platform-owned.
+- Preview forms remain disabled outside eligible published versions.
+- Public writes pass through server-side authorization, validation, rate limiting, and URL-safety boundaries.
 
-- `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` for checkout and claim completion
-- `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, and `CLOUDFLARE_FALLBACK_ORIGIN` for custom domains
-- `LODESTA_CRAWL_FIXTURE_TOKEN` for the protected dev-deployment crawler fixture used by `npm run verify:dev-crawl`
-- `RESEND_API_KEY` for lead notifications
-- `LODESTA_CLAIM_CHALLENGE_SECRET` for signed business-contact claim verification challenges
-- `LODESTA_WORKFLOW_TIMEOUT_MS` for external email/webhook workflow delivery timeout; default is 5000 ms
-- `LODESTA_WORKER_IDLE_MS` for deployed worker polling idle interval; recommended `1000` ms for the two-replica worker rollout after heartbeat verification
-- `GOOGLE_PLACES_API_KEY` for optional Google Places Text Search enrichment of matched identity, categories, hours, phone, website, location, and place ID with provenance; ratings, counts, and review text are not retained
-- `OPENAI_API_KEY` for business understanding, grounded copy, objective first-party image analysis, and the final screenshot visual judgment; model options are managed at `/settings`
-- `OPENAI_REQUEST_TIMEOUT_MS` for the universal model-call deadline; default is `300000` ms and valid range is `5000` to `600000`
-- `LODESTA_GENERATE_SITE_TIMEOUT_MS` for each `generate_site` attempt and each URL inside `import_batch`; default is `1200000` ms and valid range is `120000` to `1800000`
-- `LODESTA_ASSET_ANALYSIS_MAX_ASSETS` for the capped first-party image-analysis budget; default is `16` and valid range is `1` to `64`
-- `LODESTA_ASSET_ANALYSIS_CONCURRENCY` for bounded parallel image analysis; default is `4` and valid range is `1` to `8`
-- `LODESTA_ASSET_LIBRARY_IMAGE_ESTIMATE_USD` for the internal generated-asset CLI dry-run estimate; default is `0.08` per image if unset
-
-Recommended Railway services:
-
-- Web: use root [railway.toml](/Users/williamcraig/Documents/GitHub/Lodesta/railway.toml), which installs Chromium during build, starts `npm run start`, and health-checks `/api/health`.
-- Worker: create a second Railway service from the same repo and set its config path to [deploy/railway-worker.toml](/Users/williamcraig/Documents/GitHub/Lodesta/deploy/railway-worker.toml), which installs Chromium during build and runs `npm run worker -- work`. No worker ID environment variable is required; each worker process generates a readable lock owner automatically. Worker idle interval precedence is positional CLI arg, then `LODESTA_WORKER_IDLE_MS`, then the 5000 ms default; the Railway worker TOML does not pass an interval, so deployed workers keep the 5000 ms default unless explicitly configured. Before setting two worker replicas and `LODESTA_WORKER_IDLE_MS=1000`, size the Railway instances for two Chromium-capable processes and verify heartbeat/stale-lock behavior.
-- Cron: schedule a protected `POST /api/jobs/schedule` call with `{ "task": "launch_maintenance" }` for recurring maintenance, or call `npm run cli -- schedule-maintenance launch_maintenance` from a Railway cron command.
-- Run `npm run verify:deployment-config` before deploying after changing package scripts or Railway config.
-
-OpenAI runtime settings:
-
-- Use `/settings` to manage generation model, visual QA model, image model, image size, image quality, and mockup limit.
-- Use `npm run asset-library -- estimate --manifest asset-library/manifests/tire-auto-v2.json --candidates 4 --limit 10` before generated-asset batches. Generation requires an explicit `--limit` and `--confirm-cost`.
-- Run `npm run seed:openai-settings` before deploying a fresh Supabase environment. Override defaults with `--generation-model`, `--visual-qa-model`, `--image-model`, `--image-size`, `--image-quality`, and `--mockup-limit` when needed.
-
-Browser render inspection:
-
-- Lodesta supports Playwright-installed Chromium as the browser runtime.
-- The Railway web and worker configs install Chromium during build with `npm run install:browsers`.
-- Run `npm run verify:render-browser` locally after browser installation and before enabling high-volume intake or screenshot-dependent visual QA.
-- After deploy, run `LODESTA_API_URL=https://<deployed-app> LODESTA_ADMIN_TOKEN=<token> npm run cli -- health deep` and confirm `render_browser_readiness` is `ok`.
-- To smoke test public crawl/render behavior after deploy, run `LODESTA_API_URL=https://dev.lodesta.com LODESTA_ADMIN_TOKEN=<token> LODESTA_CRAWL_FIXTURE_TOKEN=<fixture-token> npm run verify:dev-crawl`.
-
-## Architecture Defaults
-
-- Use Next.js + TypeScript for launch.
-- Launch intake is US-only. Admin intake, presence assessment, and generation jobs reject explicit non-US prompts, unsupported country-code domains, and crawled/public-presence country facts that are not US/USA/United States.
-- Use Railway for the web service and job workers.
-- Use Supabase Auth/Postgres/Storage for persistence.
-- Use Cloudflare for SaaS later for scaled customer domains, SSL, and CDN.
-- Keep public sites structured and multi-tenant instead of generating one app/codebase per customer.
-- Treat scraped photos/logos/copy as source references before claim. Generated previews use extracted facts, licensed/generated assets, and owner-granted uploads only.
-- Serve speculative previews from random repository-backed tokens, not slugs. Preview routes are noindex and default generated tokens expire after 30 days.
-- Keep unclaimed generated sites out of `sitemap.xml` and render their slug routes with `noindex`; only completed `claimed` sites are indexable, and tokenized previews are the pre-claim surface.
-- Keep pre-claim previews and unclaimed public slug routes non-collecting: lead forms render inert, analytics ingestion returns an inactive non-storing response, and experiment assignment is disabled until the claim gate passes.
-- Custom domains resolve by host header through middleware: registered customer hostnames rewrite to the same structured `/sites/{slug}` renderer.
-- Middleware applies explicit CDN cache policy headers: public site HTML gets a short shared-cache TTL, stored generated assets are immutable, and dashboard/API/auth/form/analytics/preview/editing routes are `no-store`.
-
-## Persistence Boundary
-
-Application routes call `lib/repository.ts`, which now uses the Supabase-backed repository directly. Supabase-backed workers claim queued jobs with a Postgres `claim_next_job` function using `FOR UPDATE SKIP LOCKED`, retry failed attempts with backoff, and recover stale running locks.
-
-Supabase implementation path:
-
-1. Run `supabase/schema.sql` in the target Supabase project.
-2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` for server-side repository access.
-3. Keep `SUPABASE_ANON_KEY` available for the browser/auth layer when the dashboard auth screens are wired.
-4. Create the Supabase Storage bucket `lodesta-assets` for retained image bytes; `business_assets` is the mutable registry and immutable `asset_revisions` are the versioned source of truth.
-5. Run `npm run verify:supabase` against that environment. It creates a unique verification site, uploads and removes a probe image in `lodesta-assets`, verifies persistence flows, and deletes verification rows unless `-- --keep` is passed. Use `npm run verify:supabase -- --storage-only` to verify only the storage bucket path.
-6. Keep worker processing behind the same repository methods so Railway web and worker services share one persistence layer.
-
-The Supabase repository is server-only and is intended for local development, Railway web, and Railway worker services; do not expose the service role key to client components.
-The schema enables RLS and owner-read policies for claimed site data. Public writes such as analytics and form submissions still go through the Next.js API/repository boundary, which keeps spam checks, attribution capture, and workflow delivery in one place.
-
-Supabase verification examples:
-
-```bash
-SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run verify:supabase
-SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run verify:supabase -- --keep
-```
-
-The verifier disables Stripe and Cloudflare calls by default so it only tests database persistence. Pass `-- --live-integrations` only when you intentionally want to exercise configured third-party APIs.
-
-## Auth
-
-Owner login uses Supabase Google OAuth and magic links. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for browser login, enable the Google provider in Supabase, and configure Supabase Auth URL Configuration so the Site URL is the deployed app origin, such as `https://dev.lodesta.com`, not `http://localhost:3000`. Add exact redirect URLs for every app origin that signs users in, such as `https://dev.lodesta.com/auth/callback` and `http://localhost:4330/auth/callback`. Without those variables, the login and account pages render a clear setup state instead of failing.
-
-Operator/admin APIs are open only in local development when `LODESTA_ADMIN_TOKEN` is blank and `LODESTA_REQUIRE_AUTH` is not `true`. In deployed/production environments, set `LODESTA_ADMIN_TOKEN` for CLI bearer-token access to operator-only generation, jobs, site listing, preview token management, and cross-site exports; production route guards fail closed if neither a valid token nor the Supabase-authenticated user id in `LODESTA_ADMIN_USER_ID` is present. Admin-only pages such as `/dashboard` and `/outbound` use the same admin user-id setting. Owner-facing site APIs also accept the authenticated owner of a completed `claimed` site through Supabase Auth. Claim records store both the authenticated Supabase user id when present and the owner email, so owner access can be proven by user id or by a later magic-link login with the same email after Stripe completion. Public site analytics ingestion, experiment assignment, form submission, and claim POST remain available for visitor/customer flows.
-
-## Billing And Domains
-
-Claim checkout uses Stripe only when both `STRIPE_SECRET_KEY` and `STRIPE_PRICE_ID` are set. Without those variables, the claim API returns an explicit unconfigured checkout object so local demos can continue without live billing.
-Set Stripe's webhook endpoint to `https://YOUR_APP_URL/api/stripe/webhook` and configure `STRIPE_WEBHOOK_SECRET`. The webhook handles `checkout.session.completed` and marks the claim as `claimed`, persisting the Stripe customer, subscription, and checkout session ids.
-Use `npm run verify:stripe-webhook` for local signature/claim-completion verification before testing a live Stripe webhook.
-Verified facts selected during claim update canonical business-state provenance and create a public-eligible immutable snapshot. Publication, schema, forms, and later regeneration remain gated on that snapshot.
-Publishing through `/api/sites/publish` or `/api/sites/versions` is blocked until the site has a completed `claimed` record. A `checkout_required` claim still returns `402 Payment Required`.
-
-Custom-domain registration is also blocked until the site has a completed claim. Once claimed, it uses Cloudflare for SaaS only when both `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are set. Without those variables, the domain API returns the fallback CNAME target from `CLOUDFLARE_FALLBACK_ORIGIN`. Use `POST /api/domains/refresh` or `npm run cli -- refresh-domain <domainId>` to refresh provider status after DNS changes. Cloudflare-for-SaaS domains serve only after Cloudflare reports the hostname active. Railway/manual domains are for local or explicitly managed exceptions; deployed auth-enforced environments reject `provider: "railway"` unless `LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true` is set. Host-header domain resolution uses positive customer-domain lookup and serves only completed `claimed` sites, so pending checkout records do not expose customer domains. Unknown non-platform hostnames receive a bare `404`.
-
-## Inquiries And Lead Workflows
-
-Form submissions create canonical `Inquiry` records with a first `form_submission` event, then queued notification and AI triage jobs. V1 supports form-originated inquiries only; chat, bookings, inbound email, SMS, and phone transcripts are future source channels.
-
-- `email`: logs a skipped delivery locally unless `RESEND_API_KEY` is set, then sends through Resend from `Lodesta <notifications@mail.lodesta.com>`.
-- `webhook`: posts a sanitized `type: "inquiry_created"` payload to the configured workflow URL.
-- `crm_placeholder`: records a skipped delivery so CRM destinations can be added without changing the inquiry model.
-
-Notification delivery attempts are visible on the leads page and returned from `GET /api/inquiries?siteId=...`. Public form submit returns only `{ "accepted": true, "status": "received" }`.
-Inquiry events also capture source URL, session id, visitor id, landing path, referrer host, and UTM fields as metadata. The analytics summary rolls those session signals into source attribution, click-map aggregates, funnel/section outcomes, experiment attribution, and Standard correlations. Raw IP addresses are not stored; when proxy headers expose a client IP, Lodesta stores only a stable pseudonymous `v2` `ip_hash` derived with `LODESTA_HASH_SECRET`. Analytics events are retained for longitudinal site performance history while the site/account is active.
-
-AI triage uses Groq-hosted `openai/gpt-oss-120b` directly in V1. Customer inquiry content may include PII and may be sent to Groq; operational internals such as IP hash, visitor id, user agent, webhook URLs, workflow targets, and delivery metadata are excluded from prompts. Set `GROQ_API_KEY` to enable triage. In production, also set `LODESTA_GROQ_ZDR_CONFIRMED=true` only after Groq data controls/ZDR and privacy/terms disclosures have been verified.
-
-Public write routes have in-process abuse limits with hashed client fingerprints derived separately from `LODESTA_HASH_SECRET`. Defaults cover form submissions, analytics ingestion, experiment assignment, claim creation, site intake, presence assessment, and owner asset uploads. Route-specific thresholds are code defaults, not deployment environment variables.
-URL-based intake, presence assessment, and worker crawl/render jobs also enforce target URL safety before fetching. Private, localhost, link-local, reserved, and DNS-resolved private targets are always blocked to reduce SSRF risk. End-to-end crawler smoke tests use the protected public fixture on the dev deployment, and inquiry notification webhooks also keep private/internal targets blocked.
+See `AGENTS.md` for the repository's clean-break, stored-artifact, security, testing, and git rules.

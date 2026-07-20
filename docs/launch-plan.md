@@ -1,131 +1,65 @@
-# SMB Presence Autopilot Launch Plan
+# Lodesta V1 Launch Plan
 
-## Product Decision
+**Status:** Deferred product scope; the current builder milestone is private experimentation only
 
-Build an outcome-driven local-business website and presence platform, not a general website builder. The website is the acquisition wedge and first managed surface. The recurring product is a managed optimization loop that starts with review-mode recommendations and grows into broader presence management over time.
+**Architecture authority:** [Lodesta Agentic Website Platform V1](agentic-site-workspace-v1-plan.md)
 
-Explicit launch stance:
+## Product
 
-- Build the product first, then test the outbound mailer wedge with real businesses.
-- Start with review-mode suggestions and one-click apply, not broad autonomous edits.
-- Include the analytics and experiment data spine in launch because it powers the recursive improvement engine.
-- Use a structured-canonical site model, not one generated codebase per customer.
-- Use curated editing: owners edit content, facts, images, CTAs, colors, variants, and section order; the system owns layout, responsive behavior, conversion scaffolding, and QA gates.
-- Support code/custom components later as platform-authored extensions, not customer-authored arbitrary code in V1.
+Lodesta builds and manages high-quality websites for US local businesses. V1 starts with auto body, ingests verifiable business facts from an existing URL, produces a protected customer-ready draft, and gives the owner an AI website workspace for controlled visual and content changes.
 
-## Architecture Decisions
+The product is intentionally narrower than a general application builder. It owns the shared backend capabilities and refuses requests for arbitrary authentication, databases, payments, custom server code, dependencies, secrets, or unsupported embeds.
 
-- Product app: Next.js + TypeScript.
-- Launch market: US-only intake is enforced at admin generation, presence assessment, and worker/job boundaries for explicit non-US prompts, unsupported country-code domains, and extracted country facts.
-- Public sites: dynamic structured renderer backed by versioned site JSON.
-- Database/auth: Supabase Auth and Postgres.
-- Deployment: Railway for the app, API, and worker processes.
-- Custom domains: Cloudflare for SaaS for scaled customer domains, SSL, and CDN; Railway's Cloudflare integration is not a replacement for multi-tenant custom hostname management.
-- Assets: pre-claim previews use generated/licensed imagery and extracted facts. Scraped photos, logos, and marketing copy are reference-only until owner grant.
-- Workers: use the same repository/API contracts as the web app. Railway workers are acceptable for launch; crawler-heavy or browser-heavy jobs can move to dedicated worker infrastructure later if volume or anti-bot behavior requires it.
-- Cron orchestration: `/api/jobs/schedule` queues telemetry retention and other explicitly implemented maintenance jobs through the repository boundary.
-- Deployment readiness: `/api/health` is the Railway liveness endpoint, `/api/health?deep=1` is the admin readiness endpoint, and `npm run verify:supabase` proves the Supabase repository contract against a live project after `supabase/schema.sql` is applied.
-- Data lifecycle: analytics events are retained for longitudinal site performance history while the site/account is active; future retention, anonymization, or rollup work should be designed deliberately.
+## V1 Contract
 
-## Canonical Models
+- Canonical `BusinessStateV2` owns business truth and provenance.
+- `SiteIntentV2` owns presentation goals without templates or layout recipes.
+- One `WebsiteManagerAgent` authors a complete React/TypeScript/CSS workspace in Cloudflare Sandbox.
+- The trusted compiler surface is limited to Lodesta SDK hooks; no agent-authored JavaScript reaches visitors.
+- Forms/inbox, analytics, maps, links, domains, internal redirects, metadata, structured data, publishing, runtime interactions, and rollback are platform-owned.
+- Sanitization, claim grounding, capability authorization, browser QA, and immutable finalization are hard gates.
+- Candidate, preview, and production HTML/CSS bytes are identical.
+- Owners use Discuss and Apply, page/element selection, canonical-data controls, version comparison, publish, restore, and rollback.
+- Operators see failed objective gates and unresolved subjective findings in one queue.
 
-Core data layers:
+## Launch Sequence
 
-- `BusinessProfile`: owner-truth facts, provenance, verification state, services, hours, NAP, links, photos, reviews summary.
-- `SiteModel`: theme, pages, sections, field policies, versions, publish state.
-- `ExtensionModel`: forms, workflows, integrations, custom blocks.
-- `OptimizationModel`: audits, findings, apply history, experiments, analytics, QA.
+No pilot or launch sequence is currently authorized. The active implementation milestone is one private, technically non-publishable live experiment. Before a pilot, a separate planning decision must define the deferred pilot-entry target set, edit battery, independent review, quality and reliability thresholds, mandatory pre-publish operator review, pilot size, and exit review. Monetary caps follow demonstrated quality and workflow readiness.
 
-Every AI, UI, CLI, and worker action should mutate through the same repository boundary.
+## Initial Managed Surface
 
-## Launch Scope
+- URL ingestion and source retention.
+- Auto-body vertical context through the shared module boundary.
+- Multi-page customer website creation.
+- AI-guided visual/content edits.
+- Canonical fact and offering changes through typed control-plane requests.
+- Managed contact/estimate forms and owner inbox.
+- First-party analytics.
+- SEO/AEO metadata, JSON-LD, robots, sitemap, and text/markdown discovery routes.
+- Protected preview, claim, billing, custom domain, immutable publish, version history, and rollback.
 
-1. Foundation
-   - App shell, auth-ready owner pages, dashboard, local and Supabase repositories, schema.
-   - Structured public renderer with SEO metadata, LocalBusiness schema, sitemap, robots, preview noindex.
+Scheduling, customer auth, ecommerce, custom applications, extra production vertical modules, arbitrary plug-ins, and fleet-wide autonomous experimentation are deferred.
 
-2. Site Standard
-   - Codify measurable SEO, conversion, trust, accessibility, and vertical-specific criteria.
-   - Use the Standard for generation, audits, preview scoring, QA, and future optimization policy.
+## Infrastructure
 
-3. Generation and Import
-   - Prompt-to-site and URL-to-site.
-   - URL crawl extracts facts, links, schema, SEO signals, forms, image references, and presence notes without copying protected assets into public previews.
-   - Generated sites include service pages and local area pages where facts support them.
+- Next.js and Railway for product UI, APIs, public artifact serving, and workers.
+- Supabase Auth/Postgres for canonical and operational data.
+- R2 for content-addressed source archives, asset revisions, workspace backups, screenshots, runtime patches, and site artifacts.
+- Cloudflare Sandbox `standard-2` containers for isolated builds with a prebaked dependency tree and deny-by-default egress.
+- Cloudflare for SaaS for customer domains where configured.
 
-4. Preview Wedge
-   - Tokenized, private, noindex previews.
-   - Current-site score versus generated-draft score.
-   - Concrete failed checks with business consequences.
-   - Creative plan from visual/brand inspection prompts; generated mockups can be used as planning artifacts, not as final page output.
+Fresh databases are created by applying ordered files under `supabase/migrations`; there is no parallel monolithic schema file. Run `npm run verify:supabase`, `npm run verify:site-sandbox-v1`, and `npm run verify:agentic-site-walking-skeleton` before deployment.
 
-5. Curated Editor
-   - Inline approved text fields.
-   - Theme presets, section variants, section ordering.
-   - Responsive preview.
-   - AI chat dock that applies constrained mutations through tools.
-   - Field policies define what owners can edit, what experiments can vary, and what the system owns.
+## Decision Metrics
 
-6. Forms, Inquiries, and Lead Workflows
-   - Flexible form definitions.
-   - Canonical inquiry records with event-scoped submitted payloads.
-   - Spam guard with honeypot and submit-timing checks.
-   - Inquiry status operations: new, needs reply, replied, booked, won/lost, spam, archived.
-   - Queued notification deliveries for email, webhook, and CRM placeholders.
-   - GPT-OSS triage through Groq for advisory intent, urgency, and recommended status.
-   - CSV export.
+The canonical architecture plan records the launch gates that were deliberately deferred rather than treating experimental momentum as readiness. When a pilot plan is approved, measure:
 
-7. Analytics and Measurement
-   - First-party event capture: pageviews, clicks, tel clicks, outbound booking/order clicks, section views, form starts/submits, scroll depth, engagement time, web vitals, experiment assignment.
-   - Inquiry event metadata: source URL, session id, landing path, referrer host, UTM fields.
-   - Summaries by page, CTA role, section, experiment variant, and baseline window.
+- URL-to-candidate and edit completion/latency.
+- Objective and subjective first-pass rates.
+- Unsupported-claim and capability violations.
+- Operator intervention rate.
+- Preview-to-claim and claim-to-paid conversion.
+- Form completion, qualified inquiry volume, and owner retention.
+- Support burden and infrastructure/model cost after quality is established.
 
-8. Managed Site Status
-   - Owners see publish state, canonical objective-QA state, and pending evidence confirmations.
-   - Judge findings remain internal and do not become owner work items.
-   - Owner copy edits recompile the stored generation plan and require the same objective browser gate before publish.
-   - Structural changes queue explicit regeneration for operator review.
-   - Monthly improvements remain operator-managed until a telemetry-backed workflow is designed separately.
-
-9. Experiments
-   - Launch with narrow content-neutral experiments only.
-   - First surfaces: sticky CTA, CTA prominence, form length/order, and hero layout.
-   - Owner-truth content is never autonomously rewritten.
-   - Fleet/cohort learning matters more than per-site significance for low-traffic SMBs.
-
-10. Claim, Billing, and Domains
-   - Claim requires terms, management authority, and fact verification.
-   - Claims store the authenticated Supabase user id when available plus owner email, so later owner access can be authorized through Supabase Auth rather than an operator token.
-   - Verified claim facts update canonical provenance.
-   - Stripe checkout is used when configured; `checkout.session.completed` webhooks mark claims as paid/claimed.
-   - Publish and custom-domain APIs return `402 Payment Required` until checkout has completed and the site has a `claimed` record.
-   - Cloudflare for SaaS custom hostname registration persists DNS/verification instructions after claim.
-
-11. CLI and Workers
-   - CLI calls the same HTTP APIs as the app.
-   - Required launch commands: create from URL, batch import, run presence, run objective QA, regenerate a site, create preview, publish, inspect leads, connect domain, and process jobs.
-   - Worker runner processes durable queued jobs through the repository context.
-
-## Later Surfaces
-
-- Listings sync through buy/partner/build decision.
-- Review management.
-- Booking modules.
-- Inquiry auto-replies.
-- CRM integrations.
-- Paid ads and revenue-share attribution.
-- Platform-authored custom components.
-- Broader autopilot once enough QA, attribution, and owner trust exists.
-
-## Validation
-
-The initial outbound wedge is intentionally tested after the product surface exists. The test should measure:
-
-- Mailer to preview visit rate.
-- Preview visit to claim rate.
-- Claim to paid conversion.
-- Owner trust in the score.
-- Whether generated sites feel sufficiently specific to the business.
-- Which verticals produce the best response.
-
-Do not let Phase 0 demand validation block product implementation; this is an explicit strategic decision for this project.
+Do not add a runtime rule, template, URL-specific branch, new grader, or vertical-specific generator to make one evaluation site pass.

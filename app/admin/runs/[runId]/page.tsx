@@ -1,221 +1,35 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { AdminButtonLink, AdminButtonRow } from "@/components/admin/AdminButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
-import { RunNotesForm } from "@/components/admin/RunNotesForm";
 import { requireAdminPageAccess } from "@/lib/page-access";
-import { repository } from "@/lib/repository";
-import type { AgentModelCallRecord, AgentRunSpanRecord } from "@/lib/models";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = {
-  robots: {
-    index: false,
-    follow: false
-  }
-};
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function AdminRunDetailPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
   await requireAdminPageAccess(`/admin/runs/${runId}`);
-  const detail = await repository.getAgentRunDetail(runId);
-  if (!detail) notFound();
-
-  const generationUrl = typeof detail.run.metadata?.generationUrl === "string" ? detail.run.metadata.generationUrl : undefined;
-  const siteCandidateId = detail.run.targetType === "site_candidate" ? detail.run.targetId : undefined;
-
-  return (
-    <main className="admin-page">
-      <AdminPageHeader
-        eyebrow={<span className={`badge status-${detail.run.status}`}>{detail.run.status}</span>}
-        title="Activity inspector"
-        description={detail.run.outputSummary ?? detail.run.inputSummary ?? detail.run.id}
-        actions={
-          <AdminButtonRow>
-            <AdminButtonLink variant="secondary" href="/admin/runs">
-              Activity
-            </AdminButtonLink>
-            {generationUrl ? (
-              <AdminButtonLink variant="secondary" href={generationUrl}>
-                Candidate
-              </AdminButtonLink>
-            ) : null}
-          </AdminButtonRow>
-        }
-      />
-
-      <section className="run-inspector-identifiers" aria-label="Run identifiers">
-        <div>
-          <span>Run ID</span>
-          <code>{detail.run.id}</code>
-        </div>
-        {siteCandidateId ? (
-          <div>
-            <span>Generation ID</span>
-            <code>{siteCandidateId}</code>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="metric-row run-inspector-metrics">
-        <div className="metric-card">
-          <strong>{formatDate(detail.run.startedAt)}</strong>
-          <span>Started</span>
-        </div>
-        <div className="metric-card">
-          <strong>{detail.spans.length}</strong>
-          <span>Spans</span>
-        </div>
-        <div className="metric-card">
-          <strong>{detail.modelCalls.length}</strong>
-          <span>Model calls</span>
-        </div>
-        <div className="metric-card">
-          <strong>{detail.tokenTotals.totalTokens}</strong>
-          <span>Total tokens</span>
-        </div>
-        <div className="metric-card">
-          <strong>{formatDuration(detail.run.startedAt, detail.run.endedAt)}</strong>
-          <span>Duration</span>
-        </div>
-      </section>
-
-      <div className="admin-grid">
-        <section className="panel">
-          <h2>Timeline</h2>
-          <div className="timeline-list">
-            {detail.spans.map((span) => (
-              <article key={span.id} className="timeline-item">
-                <span className={`badge status-${span.status}`}>{span.status}</span>
-                <div>
-                  <strong>{span.name}</strong>
-                  <small>{span.spanType} / {formatDuration(span.startedAt, span.endedAt)}</small>
-                  {span.errorMessage ? <p className="error-text">{span.errorMessage}</p> : null}
-                </div>
-              </article>
-            ))}
-            {detail.spans.length === 0 ? <p className="muted">No spans were recorded for this run.</p> : null}
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>Notes</h2>
-          <RunNotesForm runId={detail.run.id} initialNotes={detail.run.notes} initialTags={detail.run.tags} />
-        </section>
-      </div>
-
-      <section className="panel admin-section">
-        <h2>Spans</h2>
-        <div className="finding-list">
-          {detail.spans.map((span) => (
-            <SpanCard key={span.id} span={span} />
-          ))}
-        </div>
-      </section>
-
-      <section className="panel admin-section">
-        <h2>Model Calls</h2>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Operation</th>
-              <th>Model</th>
-              <th>Duration</th>
-              <th>Tokens</th>
-              <th>Raw</th>
-            </tr>
-          </thead>
-          <tbody>
-            {detail.modelCalls.map((call) => (
-              <ModelCallRow key={call.id} call={call} />
-            ))}
-          </tbody>
-        </table>
-        {detail.modelCalls.length === 0 ? <p className="muted">No model calls were recorded for this run.</p> : null}
-      </section>
-
-      <section className="panel admin-section">
-        <h2>Activity JSON</h2>
-        <details>
-          <summary>Raw activity record</summary>
-          <pre className="json-block">{pretty(detail.run)}</pre>
-        </details>
-      </section>
-    </main>
-  );
+  const run = await sitePlatformRepository.getAgentRun(runId);
+  if (!run) notFound();
+  const [site, version] = await Promise.all([
+    sitePlatformRepository.getSite(run.siteId),
+    run.candidateVersionId ? sitePlatformRepository.getSiteVersion(run.candidateVersionId) : undefined
+  ]);
+  const contactSheets = run.attempts.flatMap((attempt) => attempt.screenshotKeys ?? []).filter((key) => key.endsWith("/contact-sheet.png"));
+  return <main className="admin-page">
+    <AdminPageHeader eyebrow={<span className={`badge status-${run.status}`}>{run.status}</span>} title={run.kind.replaceAll("_", " ")} description={run.id} actions={<div className="button-row"><Link className="button secondary" href="/admin/runs">Activity</Link>{site ? <Link className="button secondary" href={`/editor/${site.slug}`}>Workspace</Link> : null}{version ? <Link className="button primary" href={`/api/site-versions/${version.id}/artifact/`}>Candidate</Link> : null}</div>} />
+    <section className="metric-row"><Metric label="Stage" value={run.stage} /><Metric label="Attempt" value={run.attempt} /><Metric label="Model tokens" value={run.usage.inputTokens + run.usage.outputTokens} /><Metric label="Model time" value={`${Math.round(run.usage.durationMs / 1000)}s`} /></section>
+    <div className="admin-grid">
+      <section className="panel"><h2>Tool trace</h2><div className="timeline-list">{run.toolCalls.map((tool) => <article className="timeline-item" key={tool.id}><span className={`badge status-${tool.status}`}>{tool.status}</span><div><strong>{tool.name}</strong><small>{tool.inputHash.slice(0, 20)} · {tool.completedAt ? duration(tool.startedAt, tool.completedAt) : "running"}</small></div></article>)}{!run.toolCalls.length ? <p className="muted">No tool calls recorded.</p> : null}</div></section>
+      <aside className="panel"><h2>Result</h2><dl className="detail-list"><dt>Site</dt><dd>{site?.slug ?? run.siteId}</dd><dt>Parent revision</dt><dd>{run.exactParentRevisionId ?? "Initial"}</dd><dt>Output revision</dt><dd>{run.outputRevisionId ?? "None"}</dd><dt>Candidate</dt><dd>{run.candidateVersionId ?? "None"}</dd><dt>Failure</dt><dd>{run.failureReason ?? "None"}</dd></dl></aside>
+    </div>
+    {run.subjectiveReview ? <section className="panel"><h2>Visual review</h2><div className="button-row"><span className={`badge status-${run.subjectiveReview.verdict === "ship" ? "ready" : "warning"}`}>{run.subjectiveReview.verdict}</span><span>{run.subjectiveReview.modelId}</span></div><p>{run.subjectiveReview.summary}</p><div className="finding-list">{run.subjectiveReview.findings.map((finding, index) => <article className="finding-card" key={`${finding.route}-${index}`}><span className="badge">{finding.area} · {finding.severity}</span><h3>{finding.route}</h3><p>{finding.message}</p></article>)}</div></section> : null}
+    {contactSheets.length ? <section className="panel"><h2>Attempt captures</h2><div className="capture-grid">{contactSheets.map((key, index) => <figure key={key}><img src={`/api/admin/runs/${run.id}/captures?key=${encodeURIComponent(key)}`} alt={`Run attempt ${index + 1} contact sheet`} /><figcaption>Attempt {index + 1}</figcaption></figure>)}</div></section> : null}
+    <section className="panel"><h2>Run record</h2><details><summary>Raw JSON</summary><pre className="json-block">{JSON.stringify(run, null, 2)}</pre></details></section>
+  </main>;
 }
 
-function SpanCard({ span }: { span: AgentRunSpanRecord }) {
-  return (
-    <article className="finding-card">
-      <span className={`badge status-${span.status}`}>{span.status}</span>
-      <h3>{span.name}</h3>
-      <p className="muted">{span.spanType} / {formatDuration(span.startedAt, span.endedAt)}</p>
-      {span.errorMessage ? <p className="error-text">{span.errorMessage}</p> : null}
-      <details>
-        <summary>Input</summary>
-        <pre className="json-block">{pretty(span.inputJson)}</pre>
-      </details>
-      <details>
-        <summary>Output</summary>
-        <pre className="json-block">{pretty(span.outputJson)}</pre>
-      </details>
-      <details>
-        <summary>Metadata</summary>
-        <pre className="json-block">{pretty({ metadata: span.metadata, artifactRefs: span.artifactRefs })}</pre>
-      </details>
-    </article>
-  );
-}
-
-function ModelCallRow({ call }: { call: AgentModelCallRecord }) {
-  const tokens =
-    (call.inputTokens ?? 0) + (call.outputTokens ?? 0) + (call.cacheCreationTokens ?? 0) + (call.cacheReadTokens ?? 0);
-  return (
-    <tr>
-      <td><span className={`badge status-${call.status}`}>{call.status}</span></td>
-      <td>
-        {call.operation}
-        {call.errorMessage ? <small className="error-text">{call.errorMessage}</small> : null}
-      </td>
-      <td>
-        {call.provider}
-        <small>{call.model}</small>
-      </td>
-      <td>{formatDuration(call.startedAt, call.endedAt)}</td>
-      <td>{tokens}</td>
-      <td>
-        <details>
-          <summary>JSON</summary>
-          <pre className="json-block">{pretty({
-            request: call.requestJson,
-            response: call.responseJson,
-            usage: call.usageJson
-          })}</pre>
-        </details>
-      </td>
-    </tr>
-  );
-}
-
-function pretty(value: unknown) {
-  return JSON.stringify(value ?? {}, null, 2);
-}
-
-function formatDate(input: string) {
-  const date = new Date(input);
-  if (!Number.isFinite(date.getTime())) return "unknown";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
-}
-
-function formatDuration(startedAt: string, endedAt?: string) {
-  const start = new Date(startedAt).getTime();
-  const end = endedAt ? new Date(endedAt).getTime() : Date.now();
-  if (!Number.isFinite(start) || !Number.isFinite(end)) return "unknown";
-  const seconds = Math.max(0, Math.round((end - start) / 1000));
-  return `${seconds}s`;
-}
+function Metric({ label, value }: { label: string; value: string | number }) { return <div className="metric-card"><strong>{value}</strong><span>{label}</span></div>; }
+function duration(start: string, end: string) { return `${Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000))}s`; }

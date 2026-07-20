@@ -1,6 +1,6 @@
 import { AdminButtonAnchor, AdminButtonRow } from "@/components/admin/AdminButton";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
-import { repository } from "@/lib/repository";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { outboundComplianceStatus } from "@/lib/outbound";
 

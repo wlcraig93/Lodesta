@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { repository } from "@/lib/repository";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +11,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid Google place link request." }, { status: 400, headers: noindexHeaders() });
   }
 
-  const bundle = await repository.getSiteBundle(siteId);
-  if (!bundle) return NextResponse.json({ error: "Unknown site." }, { status: 404, headers: noindexHeaders() });
+  const site = await sitePlatformRepository.getSite(siteId);
+  const state = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
+  if (!site || !state) return NextResponse.json({ error: "Unknown site." }, { status: 404, headers: noindexHeaders() });
 
-  const allowed = bundle.presenceAssessment.publicPresenceSignals?.some((signal) => signal.placeId === placeId) ?? false;
+  const allowed = state.locations.some((location) => location.googlePlaceId === placeId);
   if (!allowed) return NextResponse.json({ error: "Place is not attached to this site." }, { status: 404, headers: noindexHeaders() });
 
   return NextResponse.redirect(googleMapsUrlForPlaceId(placeId), {

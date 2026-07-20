@@ -1,5 +1,6 @@
 import { configuredAppOriginOrDefault } from "./app-origin";
-import type { ClaimRecord, SiteBundle } from "./models";
+import type { BusinessStateV2, PlatformSiteRecord } from "@/packages/site-contracts";
+import type { ClaimRecord } from "@/packages/platform-operations";
 
 export type OwnerOperationalNotificationKind =
   | "proposal_ready"
@@ -19,18 +20,19 @@ export type OwnerOperationalNotificationResult = {
 };
 
 export async function sendOwnerOperationalEmail(input: {
-  bundle: SiteBundle;
+  site: PlatformSiteRecord;
+  business: BusinessStateV2;
   claims?: ClaimRecord[];
   kind: OwnerOperationalNotificationKind;
   subject: string;
   summaryLines: string[];
   actionPath?: string;
 }): Promise<OwnerOperationalNotificationResult> {
-  const target = ownerNotificationTarget(input.bundle, input.claims ?? []);
+  const target = ownerNotificationTarget(input.business, input.claims ?? []);
   if (!target) {
     return {
       kind: input.kind,
-      siteId: input.bundle.businessProfile.siteId,
+      siteId: input.site.id,
       status: "skipped",
       message: "Owner notification skipped because no owner or business email is available."
     };
@@ -40,7 +42,7 @@ export async function sendOwnerOperationalEmail(input: {
   if (!apiKey) {
     return {
       kind: input.kind,
-      siteId: input.bundle.businessProfile.siteId,
+      siteId: input.site.id,
       status: "skipped",
       target,
       message: "Owner notification logged only. Set RESEND_API_KEY to send operational emails."
@@ -65,7 +67,7 @@ export async function sendOwnerOperationalEmail(input: {
   const payload = (await response.json().catch(() => null)) as { id?: string } | null;
   return {
     kind: input.kind,
-    siteId: input.bundle.businessProfile.siteId,
+    siteId: input.site.id,
     status: response.ok ? "sent" : "failed",
     target,
     responseStatus: response.status,
@@ -75,24 +77,21 @@ export async function sendOwnerOperationalEmail(input: {
   };
 }
 
-export function ownerNotificationTarget(bundle: SiteBundle, claims: ClaimRecord[]) {
+export function ownerNotificationTarget(business: BusinessStateV2, claims: ClaimRecord[]) {
   return [
     ...claims
       .filter((claim) => claim.status === "claimed")
       .map((claim) => claim.ownerEmail)
       .filter((email): email is string => Boolean(email)),
-    ...bundle.extensionModel.workflows
-      .filter((workflow) => workflow.destination === "email")
-      .map((workflow) => workflow.config.to)
-      .filter((email): email is string => typeof email === "string" && email.includes("@")),
-    bundle.businessProfile.email
+    business.contacts.email
   ]
     .map((email) => email?.trim().toLowerCase())
     .find((email) => Boolean(email));
 }
 
 function ownerNotificationText(input: {
-  bundle: SiteBundle;
+  site: PlatformSiteRecord;
+  business: BusinessStateV2;
   kind: OwnerOperationalNotificationKind;
   subject: string;
   summaryLines: string[];
@@ -102,7 +101,7 @@ function ownerNotificationText(input: {
   return [
     input.subject,
     "",
-    `Site: ${input.bundle.businessProfile.name}`,
+    `Site: ${input.business.identity.name}`,
     `Notification: ${input.kind.replace(/_/g, " ")}`,
     "",
     ...input.summaryLines,

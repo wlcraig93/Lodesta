@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { claimGateForBundle } from "@/lib/site-publication";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 const analyticsEventSchema = z.object({
   siteId: z.string().min(1),
@@ -52,24 +52,24 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Invalid analytics event", issues: parsed.error.issues }, { status: 400 }), limit);
   }
+  if (parsed.data.pageId?.startsWith("/preview/")) {
+    return applyRateLimitHeaders(NextResponse.json({ accepted: false, status: "preview_ignored" }), limit);
+  }
 
-  const bundle = await repository.getSiteBundle(parsed.data.siteId);
-  if (!bundle) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
-
-  const claimGate = claimGateForBundle(bundle, await repository.listClaims(parsed.data.siteId));
-  if (!claimGate.ok) {
+  const site = await sitePlatformRepository.getSite(parsed.data.siteId);
+  if (!site) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
+  if (site.status !== "active" || !site.publishedVersionId) {
     return applyRateLimitHeaders(
       NextResponse.json({
         accepted: false,
         status: "inactive",
-        reason: "Site analytics collection starts after claim and publish.",
-        claimGate: claimGate.code
+        reason: "Site analytics collection starts after publish."
       }),
       limit
     );
   }
 
-  const event = await repository.recordAnalyticsEvent({
+  const event = await siteCapabilityRepository.recordAnalyticsEvent({
     ...parsed.data,
     timestamp: parsed.data.timestamp ?? new Date().toISOString()
   });
@@ -83,5 +83,5 @@ export async function GET(request: Request) {
   const unauthorized = await requireAdminOrSiteOwner(request, siteId);
   if (unauthorized) return unauthorized;
 
-  return NextResponse.json(await repository.analyticsSummary(siteId));
+  return NextResponse.json(await siteCapabilityRepository.analyticsSummary(siteId));
 }

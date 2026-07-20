@@ -1,5 +1,5 @@
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
-import type { FieldProvenance, PublicPresenceSignal } from "./models";
+import type { FieldProvenance, PublicPresenceSignal } from "./presence-contracts";
 
 export type PublicPresenceEnrichment = {
   provider: "google_places";

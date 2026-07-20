@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { repository } from "@/lib/repository";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import {
@@ -13,9 +12,10 @@ import {
 import { assertPublicFetchUrl, validatePublicHostname } from "@/lib/url-safety";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { createHash } from "node:crypto";
-import { submitControlPlaneChange } from "@/lib/control-plane-service";
-import type { AssetRevisionV1, BusinessAssetV1 } from "@/lib/control-plane-contracts";
-import { attestExistingBusinessAsset } from "@/lib/control-plane-assets";
+import { controlPlaneService } from "@/packages/control-plane";
+import { sitePlatformRepository } from "@/packages/platform-data";
+import type { AssetRevisionRefV1, AssetRevisionV1 } from "@/packages/site-contracts";
+import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 
 export const runtime = "nodejs";
 
@@ -75,45 +75,52 @@ export async function POST(request: Request) {
   const auth = await getCurrentUser();
   const attestedBy = auth.user?.email ?? auth.user?.id ?? "site_owner";
 
-  const controlPlane = await repository.getCanonicalControlPlane(parsed.data.siteId);
-  if (!controlPlane) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown canonical site" }, { status: 404 }), limit);
+  const site = await sitePlatformRepository.getSite(parsed.data.siteId);
+  const state = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
+  if (!site || !state) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown canonical site" }, { status: 404 }), limit);
   const retainedLogo = await retainOwnerAssets(parsed.data.siteId, [materialized.logo ?? parsed.data.logo].filter(isOwnerAssetRow));
   const retainedPhotos = await retainOwnerAssets(parsed.data.siteId, [...(parsed.data.photos ?? []), ...materialized.photos]);
   const requested = [
     ...assetRegistrations({
-      businessId: controlPlane.state.business.id,
+      businessId: state.businessId,
       kind: "logo",
       rows: retainedLogo,
       attestedBy
     }),
     ...assetRegistrations({
-      businessId: controlPlane.state.business.id,
+      businessId: state.businessId,
       kind: "photo",
       rows: retainedPhotos,
       attestedBy
     }),
-    ...attestedExistingAssets(controlPlane.state.assets, controlPlane.state.assetRevisions, parsed.data.scrapedAttestations ?? [], attestedBy)
+    ...(parsed.data.scrapedAttestations ?? [])
+      .filter((item) => item.rightsConfirmed)
+      .map((item) => ({
+        kind: "attest_asset_rights" as const,
+        assetRevisionId: state.assets.find((asset) => asset.assetId === item.assetId)?.revisionId ?? item.assetId,
+        statement: "Owner attests they own this image or hold rights to use it on the managed website."
+      }))
   ];
   if (!requested.length) {
     return applyRateLimitHeaders(NextResponse.json({ error: "No owner-approved assets were provided." }, { status: 400 }), limit);
   }
   try {
     for (const payload of requested) {
-      await submitControlPlaneChange({ repository, siteId: parsed.data.siteId, payload, requestedBy: attestedBy });
+      await controlPlaneService.submit({ siteId: parsed.data.siteId, payload, requestedBy: attestedBy });
     }
   } catch (error) {
     return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
   }
-  const updated = await repository.getCanonicalControlPlane(parsed.data.siteId);
-  const assets = updated?.latestSnapshot.assets ?? [];
-  const logoAsset = assets.find((asset) => asset.kind === "logo" && asset.revision.publicUrl);
-  const photoAssets = assets.filter((asset) => asset.kind === "photo" && asset.revision.publicUrl);
+  const updated = await sitePlatformRepository.getBusinessState(state.businessId);
+  const assets = updated?.assets ?? [];
+  const logoAsset = assets.find((asset) => asset.kind === "logo" && asset.publicUrl);
+  const photoAssets = assets.filter((asset) => asset.kind === "photo" && asset.publicUrl);
 
   return applyRateLimitHeaders(
     NextResponse.json({
       ok: true,
-      logo: logoAsset ? { url: logoAsset.revision.publicUrl, alt: logoAsset.alt, rightsConfirmed: true } : undefined,
-      photos: photoAssets.map((asset) => ({ url: asset.revision.publicUrl!, alt: asset.alt, rightsConfirmed: true })),
+      logo: logoAsset ? { url: logoAsset.publicUrl, alt: logoAsset.alt, rightsConfirmed: true } : undefined,
+      photos: photoAssets.map((asset) => ({ url: asset.publicUrl!, alt: asset.alt, rightsConfirmed: true })),
       assets
     }),
     limit
@@ -129,49 +136,39 @@ function assetRegistrations(input: {
   return input.rows.map((row) => {
     if (!row.rightsConfirmed) throw new Error(`Rights confirmation is required for ${row.alt}.`);
     const now = new Date().toISOString();
-    const contentHash = row.contentHash;
+    const contentHash = prefixedSha256(row.contentHash);
     const assetId = `asset_${crypto.randomUUID().replace(/-/g, "")}`;
     const revisionId = `assetrev_${crypto.randomUUID().replace(/-/g, "")}`;
+    const publicUrl = absolutePublicAssetUrl(row.url);
     const revision: AssetRevisionV1 = {
       schemaVersion: "asset-revision-v1",
       id: revisionId,
       assetId,
       businessId: input.businessId,
       contentHash,
-      storagePath: row.storagePath,
-      publicUrl: row.url,
+      storageKey: row.storagePath,
+      publicUrl,
       mimeType: row.mimeType,
       bytes: row.bytes,
       rightsStatus: "customer_granted",
       attestation: { attestedBy: input.attestedBy, attestedAt: now, statement: "Owner attests they own this image or hold rights to use it." },
       createdAt: now
     };
-    const asset: BusinessAssetV1 = {
-      id: assetId,
-      businessId: input.businessId,
+    const asset: AssetRevisionRefV1 = {
+      assetId,
+      revisionId,
       kind: input.kind,
       alt: row.alt,
-      source: "uploaded",
-      usageScope: "published_site",
-      ownerApproved: true,
-      active: true,
-      currentRevisionId: revisionId,
-      createdAt: now,
-      updatedAt: now
+      contentHash,
+      storageKey: row.storagePath,
+      publicUrl,
+      mimeType: row.mimeType,
+      rightsStatus: "customer_granted",
+      sourceFactIds: [],
+      activeForFutureBuilds: true
     };
     return { kind: "register_asset" as const, asset, revision };
   });
-}
-
-function attestedExistingAssets(
-  assets: BusinessAssetV1[],
-  revisions: AssetRevisionV1[],
-  attestations: Array<{ assetId: string; rightsConfirmed: boolean }>,
-  attestedBy: string
-) {
-  return attestations
-    .filter((item) => item.rightsConfirmed)
-    .map((item) => attestExistingBusinessAsset({ assets, revisions, assetId: item.assetId, attestedBy }));
 }
 
 type OwnerAssetRow = {
@@ -206,7 +203,7 @@ async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt:
         url: row.url,
         alt: row.alt,
         rightsConfirmed: true,
-        contentHash: createHash("sha256").update(stored.bytes).digest("hex"),
+        contentHash: `sha256:${createHash("sha256").update(stored.bytes).digest("hex")}`,
         storagePath: localPath,
         mimeType: stored.mimeType,
         bytes: stored.bytes.byteLength
@@ -226,7 +223,7 @@ async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt:
     if (!bytes.byteLength || bytes.byteLength > maxOwnerAssetBytes || !imageMimeTypeMatchesBytes(mimeType, bytes)) {
       throw new Error(`Owner asset ${row.alt} failed image validation.`);
     }
-    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const stored = await storeAssetBytes({
       siteId,
       assetId: `owner-retained-${contentHash.slice(0, 20)}`,
@@ -382,7 +379,7 @@ async function storeOwnerAssetUpload(input: {
     url: stored.url,
     alt: input.upload.alt,
     rightsConfirmed: input.upload.rightsConfirmed,
-    contentHash: createHash("sha256").update(bytes).digest("hex"),
+    contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
     storagePath: stored.storagePath,
     mimeType: input.upload.mimeType as AssetRevisionV1["mimeType"],
     bytes: stored.bytes
@@ -416,4 +413,12 @@ function isAllowedOwnerAssetUrl(value: string) {
   } catch {
     return false;
   }
+}
+
+function absolutePublicAssetUrl(value: string) {
+  return value.startsWith("/") ? new URL(value, configuredAppOriginOrDefault()).toString() : value;
+}
+
+function prefixedSha256(value: string) {
+  return value.startsWith("sha256:") ? value : `sha256:${value}`;
 }

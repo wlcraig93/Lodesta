@@ -16,6 +16,7 @@ import {
 const skippedPrefixes = [
   "/api/",
   "/_next/",
+  "/_lodesta/",
   "/auth/",
   "/preview/",
   "/crawl-fixtures/",
@@ -156,7 +157,7 @@ function routedRequestHeaders(request: NextRequest) {
 }
 
 function isPublicRuntimeSkippedPath(pathname: string) {
-  return pathname.startsWith("/api/") || pathname.startsWith("/_next/") || pathname === "/favicon.ico";
+  return pathname.startsWith("/api/") || pathname.startsWith("/_next/") || pathname.startsWith("/_lodesta/") || pathname === "/favicon.ico";
 }
 
 function notFound() {

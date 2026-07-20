@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { repository } from "./repository";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 import { getCurrentUser } from "./supabase/server";
 import { adminToken, authRequired, hasValidAdminToken, isAdminUserId } from "./auth-policy";
 
@@ -30,7 +30,7 @@ export async function requireAdminOrSiteOwner(request: Request, siteId: string) 
     return NextResponse.json({ error: "Site owner authorization required" }, { status: 401 });
   }
 
-  const claims = await repository.listClaims(siteId);
+  const claims = await platformOperationsRepository.listClaims(siteId);
   const ownsSite = claims.some(
     (claim) =>
       claim.status === "claimed" &&

@@ -1,4 +1,11 @@
-import type { OutboundCampaign, OutboundEvent, OutboundProspect, OutboundSummary, Vertical } from "./models";
+import type {
+  OutboundCampaign,
+  OutboundEvent,
+  OutboundProspect,
+  OutboundSummary
+} from "@/packages/platform-operations/contracts";
+
+type Vertical = string;
 
 export type CreateOutboundCampaignInput = {
   name: string;

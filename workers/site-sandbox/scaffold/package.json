@@ -1,0 +1,24 @@
+{
+  "name": "lodesta-static-site-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsx platform/build.tsx",
+    "validate-source": "tsx platform/validate-source.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.3",
+    "vite": "8.1.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tsx": "4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.11",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}

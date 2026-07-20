@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Inquiry } from "@/lib/models";
+import type { Inquiry } from "@/packages/site-capabilities";
 
 type LeadStatusControlsProps = {
   siteId: string;

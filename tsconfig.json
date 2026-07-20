@@ -36,6 +36,9 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "workers/site-sandbox/src",
+    "workers/site-sandbox/scaffold",
+    "workers/site-sandbox/worker-configuration.d.ts"
   ]
 }

@@ -9,11 +9,13 @@ import type {
   ProspectReportRecord,
   ProspectReportSignal,
   ProspectReportStage,
-  ProspectWebsiteKind,
+  ProspectWebsiteKind
+} from "@/packages/platform-operations";
+import type {
   RenderInspectionResult,
   StandardCheckResult,
   StandardCriterion
-} from "./models";
+} from "./presence-contracts";
 import { runUrlPresenceAssessment } from "./presence-assessment-runner";
 import { evaluateCrawlAgainstStandard } from "./standard-evaluation";
 import { getCriteriaForVertical, standardCriteria } from "./standard";

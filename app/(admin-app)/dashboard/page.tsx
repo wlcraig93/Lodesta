@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import { repository } from "@/lib/repository";
 import { requireAdminPageAccess } from "@/lib/page-access";
+import { sitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -13,6 +13,6 @@ export const metadata: Metadata = {
 
 export default async function DashboardPage() {
   await requireAdminPageAccess("/dashboard");
-  const bundles = await repository.listSiteBundles();
-  redirect(bundles.length ? "/admin/sites" : "/admin/site-candidates");
+  const sites = await sitePlatformRepository.listSites();
+  redirect(sites.length ? "/admin/sites" : "/admin/site-queue");
 }

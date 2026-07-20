@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import type { BusinessProfile, SiteBundle } from "./models";
+import type { BusinessStateV2 } from "@/packages/site-contracts";
 
 export type ClaimVerificationChannel = "email" | "phone";
 
@@ -22,10 +22,10 @@ type ChallengePayload = {
 
 const challengeTtlMs = 15 * 60_000;
 
-export function claimVerificationTargets(profile: BusinessProfile): ClaimVerificationTarget[] {
+export function claimVerificationTargets(state: BusinessStateV2): ClaimVerificationTarget[] {
   const targets: ClaimVerificationTarget[] = [];
-  if (profile.email && contactRecordCanReceiveChallenge(profile, "email")) {
-    const destination = profile.email.trim().toLowerCase();
+  if (state.contacts.email) {
+    const destination = state.contacts.email.trim().toLowerCase();
     targets.push({
       channel: "email",
       destination,
@@ -33,8 +33,8 @@ export function claimVerificationTargets(profile: BusinessProfile): ClaimVerific
       auditLabel: `email:${destination}`
     });
   }
-  if (profile.phone && contactRecordCanReceiveChallenge(profile, "phone")) {
-    const destination = normalizePhone(profile.phone);
+  if (state.contacts.phone) {
+    const destination = normalizePhone(state.contacts.phone);
     if (destination) {
       targets.push({
         channel: "phone",
@@ -48,12 +48,12 @@ export function claimVerificationTargets(profile: BusinessProfile): ClaimVerific
 }
 
 export function createClaimVerificationChallenge(input: {
-  bundle: SiteBundle;
+  state: BusinessStateV2;
   channel: ClaimVerificationChannel;
   now?: number;
   code?: string;
 }) {
-  const target = claimVerificationTargets(input.bundle.businessProfile).find((candidate) => candidate.channel === input.channel);
+  const target = claimVerificationTargets(input.state).find((candidate) => candidate.channel === input.channel);
   if (!target) return { ok: false as const, reason: "No independently sourced business contact is available for that channel." };
 
   const code = input.code ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
@@ -61,10 +61,10 @@ export function createClaimVerificationChallenge(input: {
   const exp = (input.now ?? Date.now()) + challengeTtlMs;
   const payload: ChallengePayload = {
     v: 1,
-    siteId: input.bundle.businessProfile.siteId,
+    siteId: input.state.siteId,
     channel: target.channel,
     destination: target.destination,
-    codeHash: challengeCodeHash(input.bundle.businessProfile.siteId, target.destination, code, nonce),
+    codeHash: challengeCodeHash(input.state.siteId, target.destination, code, nonce),
     nonce,
     exp
   };
@@ -79,19 +79,19 @@ export function createClaimVerificationChallenge(input: {
 }
 
 export function verifyClaimVerificationChallenge(input: {
-  bundle: SiteBundle;
+  state: BusinessStateV2;
   challengeId: string;
   code: string;
   now?: number;
 }) {
   const payload = parseChallengePayload(input.challengeId);
   if (!payload) return { ok: false as const, reason: "Invalid verification challenge." };
-  if (payload.siteId !== input.bundle.businessProfile.siteId) {
+  if (payload.siteId !== input.state.siteId) {
     return { ok: false as const, reason: "Verification challenge does not match this site." };
   }
   if ((input.now ?? Date.now()) > payload.exp) return { ok: false as const, reason: "Verification challenge expired." };
 
-  const target = claimVerificationTargets(input.bundle.businessProfile).find(
+  const target = claimVerificationTargets(input.state).find(
     (candidate) => candidate.channel === payload.channel && candidate.destination === payload.destination
   );
   if (!target) return { ok: false as const, reason: "Business contact no longer matches this verification challenge." };
@@ -105,11 +105,6 @@ export function verifyClaimVerificationChallenge(input: {
     verifiedBy: target.auditLabel,
     target
   };
-}
-
-function contactRecordCanReceiveChallenge(profile: BusinessProfile, key: "email" | "phone") {
-  const provenance = profile.provenance[key];
-  return provenance?.source !== "owner";
 }
 
 function challengeCodeHash(siteId: string, destination: string, code: string, nonce: string) {

@@ -1,12 +1,12 @@
 # Canonical Business Control Plane and Generation Architecture
 
-**Status:** Implemented
+**Status:** Historical V3 record; implementation deleted and superseded by [Lodesta Agentic Website Platform V1](agentic-site-workspace-v1-plan.md)
 
 **Approved:** 2026-07-16
 
 **Scope:** Pre-launch hard cutover
 
-This document supersedes every earlier generation-pipeline and fact-graph plan. It is the only canonical architecture for business ingestion, managed-site control, generation, owner edits, and published-site provenance. The cutover keeps no legacy generator, fact authority, dossier authority, migration shim, dual read/write path, or compatibility adapter.
+This document records the deleted V3 architecture for git archaeology only. It is not a source of current requirements. The agentic workspace plan is the sole authority; the V3 planner, compiler, templates, design systems, vertical pack, copy slots, renderer, editor, and judge stack have been removed from the active tree.
 
 ## Product Contract
 
@@ -160,7 +160,7 @@ The four sanitized source cases and their proposals exercise crawl parsing, obse
 
 `npm run verify:render-browser` writes screenshots, contact sheets, and a manifest to a unique ignored `.data/generation-review/<run-id>` directory. Verification runs never rewrite tracked design artifacts or delete an earlier local run.
 
-The future bakeoff has two separate experiments. The controlled design test gives both arms the exact same frozen canonical input without recrawling or mutating business state. The templated arm must run the current production planner, live model copy, and compiler; deterministic test copy and saved baselines are never contestants. A later URL-only test gives each arm the same URL and permits independent recrawling so it measures ingestion plus presentation rather than design alone. Neither bakeoff is part of this cleanup.
+The downstream generator experiment is now specified and executed as the three-arm protocol in [website-generation-bakeoff-v1.md](website-generation-bakeoff-v1.md). Its A-versus-B comparison isolates presentation using one canonical snapshot, while B-versus-C isolates canonical ingestion using one shared freeform prompt and an equal crawl budget. Deterministic fixture copy and saved fixture outputs remain harness inputs, never contestants.
 
 ## Launch Gates
 

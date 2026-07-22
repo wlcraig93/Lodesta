@@ -42,6 +42,29 @@ Lodesta-owned UI uses `--product-*` CSS custom properties from `app/product-toke
 - Elevation tokens describe use: card, soft card, preview, focus, and error.
 - Token names are mode-ready so future dark-mode overrides can be added without changing call sites.
 
+## Typography
+
+Lodesta uses two intentionally scoped sans-serif families. Inter is the product family for editor, admin, owner/account, authentication, forms, tables, navigation, and other application UI; it is exposed through `--product-font-sans` and is the root default. Figtree is the brand family for the marketing home surface, marketing header and footer, and brand-led marketing headings; it is exposed through `--brand-font-sans`. Both families are self-hosted as normal and italic variable WOFF2 files through `next/font/local`. The Lodesta wordmark remains independent outlined artwork and does not determine the application font.
+
+Use `--product-font-weight-regular` (400) for reading, `--product-font-weight-medium` (500) for most controls and headings, and `--product-font-weight-strong` (600) only for important metrics or urgent state emphasis. Font tokens must include an internal `ui-sans-serif` fallback so a missing Next.js font variable can never invalidate the complete declaration or expose the browser-default serif.
+
+| Role | Size | Weight | Line height |
+| --- | ---: | ---: | ---: |
+| Diagnostic microcopy and overlines | 12px | 500 | 1.3 |
+| Metadata, captions, and badges | 13px | 500 | 1.35 |
+| Compact controls and navigation | 14px | 500 | 1.3 |
+| Primary UI and chat text | 15px | 400 | 1.5 |
+| Inputs and reading copy | 16px | 400 | 1.55 |
+| Lede and supporting copy | 18px | 400 | 1.55 |
+| Panel heading | 20px | 500 | 1.25 |
+| Product page title | 30px desktop / 26px mobile | 500 | 1.15 |
+| Marketing section heading | 32–56px fluid | 500 | 1.05 |
+| Marketing hero heading | 48–84px fluid | 400 | 0.98 |
+
+Use size, spacing, text-color roles, borders, and selected surfaces before adding font weight. Uppercase and tracking are limited to short overlines, diagnostic labels, and compact status badges; buttons, navigation, headings, and ordinary labels use sentence or title case. Keep `--product-font-mono` for identifiers and code. The Google OAuth control may retain its vendor-specific typography.
+
+Generated customer websites and all content rendered inside preview iframes are explicitly outside this contract. They remain governed by immutable artifacts, the trusted runtime, and `--site-*`; never alter their typography as part of Lodesta product UI work.
+
 ## Recipes
 
 ### App Shell
@@ -99,6 +122,7 @@ Forward-looking pattern for structured agent edits and operator commands. It sho
 ## Implementation Rules
 
 - Add or update Lodesta-owned UI with `--product-*` tokens.
+- Keep application UI on `--product-font-sans`; reserve `--brand-font-sans` for the documented marketing boundary.
 - Keep generated customer websites on `--site-*`.
-- Do not introduce Tailwind, shadcn/ui, Radix, component libraries, external fonts, or a new icon set unless explicitly requested.
+- Do not introduce Tailwind, shadcn/ui, Radix, component libraries, remotely loaded fonts, or a new icon set unless explicitly requested.
 - Prefer existing global classes and local React components until repeated product UI patterns justify a component library.

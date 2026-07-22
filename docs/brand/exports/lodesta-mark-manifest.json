@@ -1,0 +1,47 @@
+{
+  "name": "Lodesta circle mark",
+  "source": "Lodesta Logo.png and selected circle-L concept",
+  "canvas": {
+    "aspectRatio": "1:1",
+    "svgViewBox": "0 0 512 512",
+    "pngPixels": "1024x1024"
+  },
+  "colors": {
+    "lodestaGreen": "#24493A",
+    "white": "#FFFFFF"
+  },
+  "exports": [
+    {
+      "file": "../../../public/brand/lodesta-mark.svg",
+      "format": "SVG",
+      "background": "transparent",
+      "letter": "white"
+    },
+    {
+      "file": "../../../public/brand/lodesta-mark.png",
+      "format": "PNG",
+      "background": "transparent",
+      "letter": "white"
+    },
+    {
+      "file": "../../../app/icon.png",
+      "format": "PNG",
+      "purpose": "Next.js application favicon",
+      "background": "transparent",
+      "letter": "white"
+    },
+    {
+      "file": "../../../public/brand/lodesta-mark-cutout.svg",
+      "format": "SVG",
+      "background": "transparent",
+      "letter": "transparent cutout"
+    },
+    {
+      "file": "../../../public/brand/lodesta-mark-cutout.png",
+      "format": "PNG",
+      "background": "transparent",
+      "letter": "transparent cutout"
+    }
+  ],
+  "provenance": "Vector geometry was rebuilt deterministically from the selected visual direction. PNG files are rasterized directly from the corresponding SVG files. No font dependency or embedded raster image is used."
+}

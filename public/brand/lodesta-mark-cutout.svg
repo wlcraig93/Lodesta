@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta cutout mark</title>
+  <desc id="desc">A dark Lodesta green circle with a transparent serif L cut out of its center.</desc>
+  <path
+    fill="#24493A"
+    fill-rule="evenodd"
+    d="M256 48A208 208 0 1 1 255.999 48ZM164 130H272V151H260C252 151 247 156 247 166V324C247 333 252 338 262 338H322C337 338 346 331 349 316L352 300H369V371H164V349H178C188 349 193 344 193 334V166C193 156 188 151 178 151H164V130Z"
+  />
+</svg>

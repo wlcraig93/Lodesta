@@ -140,6 +140,19 @@ export function canonicalizeUnderstandingEvidenceQuotes(understanding: ModelUnde
   const canonicalize = (reference: z.infer<typeof evidenceReferenceSchema>) => {
     const block = blocks.get(reference.sourceBlockId);
     if (!block) return reference;
+    const quoteStart = block.displayText.indexOf(reference.quote);
+    if (quoteStart >= 0 && quoteStart === block.displayText.lastIndexOf(reference.quote)) {
+      const quoteEnd = quoteStart + reference.quote.length;
+      const included = block.canonicalTokens
+        .map((token, index) => ({ token, index }))
+        .filter(({ token }) => token.displayStart >= quoteStart && token.displayEnd <= quoteEnd);
+      const first = included[0];
+      const last = included.at(-1);
+      if (first && last) {
+        const quote = reconstructSourceTokenSpan(block, first.index, last.index + 1);
+        if (quote !== undefined) return { ...reference, startToken: first.index, endToken: last.index + 1, quote };
+      }
+    }
     const quote = reconstructSourceTokenSpan(block, reference.startToken, reference.endToken);
     return quote === undefined ? reference : { ...reference, quote };
   };

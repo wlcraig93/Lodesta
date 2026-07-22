@@ -152,6 +152,13 @@ const canonicalized = canonicalizeUnderstandingEvidenceQuotes(
   fetched.ingestion
 );
 assert.equal(canonicalized.businessName.evidence[0].quote, evidence.quote, "valid token-span quote was not canonicalized from source text");
+const recoveredSpan = canonicalizeUnderstandingEvidenceQuotes(
+  { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, endToken: 999 }] } },
+  fetched.ingestion
+);
+assert.equal(recoveredSpan.businessName.evidence[0].startToken, evidence.startToken, "unique exact quote did not recover its source token start");
+assert.equal(recoveredSpan.businessName.evidence[0].endToken, evidence.endToken, "unique exact quote did not recover its source token end");
+assert.deepEqual(validateUnderstandingEvidence(recoveredSpan, fetched.ingestion), []);
 
 const understandingRequests: Array<Record<string, unknown>> = [];
 const priorApiKey = process.env.OPENAI_API_KEY;

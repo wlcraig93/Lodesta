@@ -25,6 +25,17 @@ if (await stat(metadataPath).then(() => true, () => false)) throw new Error(`Dat
 await mkdir(dirname(outputPath), { recursive: true });
 
 const pgDump = process.env.LODESTA_PG_DUMP_BIN ?? "pg_dump";
+const pgEnvironment = { ...process.env };
+delete pgEnvironment.LODESTA_CUTOVER_DATABASE_URL;
+pgEnvironment.PGHOST = databaseTarget.hostname;
+pgEnvironment.PGPORT = databaseTarget.port || "5432";
+pgEnvironment.PGUSER = decodeURIComponent(databaseTarget.username);
+pgEnvironment.PGPASSWORD = decodeURIComponent(databaseTarget.password);
+pgEnvironment.PGDATABASE = decodeURIComponent(databaseTarget.pathname.replace(/^\//, ""));
+pgEnvironment.PGSSLMODE = databaseTarget.searchParams.get("sslmode") ?? "require";
+if (!pgEnvironment.PGHOST || !pgEnvironment.PGUSER || !pgEnvironment.PGPASSWORD || !pgEnvironment.PGDATABASE) {
+  throw new Error("LODESTA_CUTOVER_DATABASE_URL must include host, user, password, and database name.");
+}
 await new Promise<void>((resolvePromise, reject) => {
   const child = spawn(pgDump, [
     "--format=custom",
@@ -34,7 +45,7 @@ await new Promise<void>((resolvePromise, reject) => {
     `--file=${outputPath}`
   ], {
     stdio: ["ignore", "inherit", "inherit"],
-    env: { ...process.env, PGDATABASE: databaseUrl }
+    env: pgEnvironment
   });
   child.once("error", reject);
   child.once("exit", (code, signal) => code === 0

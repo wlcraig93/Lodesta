@@ -67,6 +67,8 @@ for (const requirement of [
   "site-v3-database-snapshot-v1",
   '"--format=custom"',
   '"--schema=public"',
+  "PGHOST",
+  "PGPASSWORD",
   "PGDATABASE",
   '!== "PGDMP"'
 ]) {

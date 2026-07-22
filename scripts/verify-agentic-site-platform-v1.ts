@@ -55,6 +55,7 @@ import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { platformCapabilityStyles } from "../workers/site-sandbox/scaffold/platform/capability-styles";
 import { formatPhoneForDisplay, orderedLocationHours } from "../workers/site-sandbox/scaffold/platform/presentation";
 import { deriveSiteLifecycle, deriveSiteOwnership } from "../lib/site-admin-status";
+import { tracePayloadRetentionMs } from "../packages/site-platform/trace-recorder";
 
 const buildInput = buildSyntheticSiteInput();
 let retiredIntentAccepted = true;
@@ -76,6 +77,7 @@ assert(managerRuntimeBudget("qa_repair").builds === 3 && managerRuntimeBudget("q
 assert(managerRuntimeBudget("focused_edit").builds === 3 && managerRuntimeBudget("focused_edit").inspections === 3, "focused edit budget drifted from three matched cycles");
 assert(initialGenerationDeadlineMs === 60 * 60_000, "initial workflow deadline drifted from 60 minutes");
 assert(siteEditDeadlineMs === 25 * 60_000, "edit workflow deadline drifted from 25 minutes");
+assert(tracePayloadRetentionMs === 24 * 60 * 60_000, "trace payload database expiry drifted from the one-day R2 lifecycle");
 const retainedContentHash = `sha256:${"a".repeat(64)}`;
 assert(sourceSnapshotIdForBusiness("business_a", retainedContentHash) === sourceSnapshotIdForBusiness("business_a", retainedContentHash), "source snapshot IDs are not stable within one business");
 assert(sourceSnapshotIdForBusiness("business_a", retainedContentHash) !== sourceSnapshotIdForBusiness("business_b", retainedContentHash), "source snapshot IDs collide across business authorities");

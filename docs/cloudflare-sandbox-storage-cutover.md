@@ -129,7 +129,7 @@ npm run configure:r2-lifecycle
 npm run configure:r2-lifecycle -- --apply --confirm=set-r2-lifecycle:<reportHash>
 ```
 
-The rule expires `trace-payloads/` after one day. The application never deletes those blobs. It clears the database payload reference only after `HEAD` observes absence and creates an operator finding when an object remains 48 hours beyond its recorded expiry.
+The rule expires `trace-payloads/` after one day, and newly written database references carry the same one-day expiry. The application never deletes those blobs. It clears the database payload reference only after `HEAD` observes absence and creates an operator finding when an object remains 48 hours beyond its recorded expiry.
 
 ## Seven-Day Rollback Cleanup
 

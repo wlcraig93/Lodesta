@@ -5,7 +5,7 @@ import { siteAgentTraceSpanV1Schema, type SiteAgentTraceSpanV1 } from "@/package
 import type { SitePlatformRepository } from "@/packages/platform-data";
 import type { ManagerTraceEventV1 } from "@/packages/site-agent";
 
-const payloadRetentionMs = 30 * 24 * 60 * 60_000;
+export const tracePayloadRetentionMs = 24 * 60 * 60_000;
 const maxPayloadBytes = 256 * 1024;
 const secretKey = /authorization|cookie|password|secret|token|api[-_]?key/i;
 
@@ -109,7 +109,7 @@ export class SiteAgentTraceRecorderV1 {
     return {
       payloadRef,
       payloadHash,
-      payloadExpiresAt: new Date(Date.now() + payloadRetentionMs).toISOString()
+      payloadExpiresAt: new Date(Date.now() + tracePayloadRetentionMs).toISOString()
     };
   }
 }

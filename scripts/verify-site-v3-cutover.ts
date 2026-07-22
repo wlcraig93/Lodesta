@@ -7,12 +7,14 @@ const cutoverPath = "scripts/site-v3-cutover.ts";
 const snapshotPath = "scripts/snapshot-site-v3-database.ts";
 const reclassificationMigrationPath = "supabase/migrations/202607210000_prelaunch_site_v3_reclassification.sql";
 const reclassificationPath = "scripts/reclassify-prelaunch-site-v3.ts";
-const [migration, cutover, snapshot, reclassificationMigration, reclassification] = await Promise.all([
+const traceReconciliationPath = "scripts/reconcile-cutover-trace-payloads.ts";
+const [migration, cutover, snapshot, reclassificationMigration, reclassification, traceReconciliation] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(cutoverPath, "utf8"),
   readFile(snapshotPath, "utf8"),
   readFile(reclassificationMigrationPath, "utf8"),
-  readFile(reclassificationPath, "utf8")
+  readFile(reclassificationPath, "utf8"),
+  readFile(traceReconciliationPath, "utf8")
 ]);
 
 assert(!/\bdelete\s+from\b/i.test(migration), "the assert-empty migration must never delete retained data");
@@ -26,6 +28,19 @@ for (const authority of [
   "site_versions_v4"
 ]) {
   assert(migration.includes(`select 1 from ${authority}`), `migration does not assert that ${authority} is empty`);
+}
+for (const requirement of [
+  "reconcile-missing-trace-payloads:",
+  "site-v3-trace-reconciliation-request-v1",
+  "site-v3-trace-reconciliation-receipt-v1",
+  "startsWith(`trace-payloads/${options.agentRunId}/`)",
+  "span.exists",
+  "payload_ref: null",
+  "assertQuiescent()",
+  "original cutover database snapshot",
+  "report.json"
+]) {
+  assert(traceReconciliation.includes(requirement), `trace payload reconciliation operator is missing: ${requirement}`);
 }
 assert(migration.includes("alter table site_intents_v2 rename to site_intents_v3"));
 assert(migration.includes("schema_version = 'site-intent-v3'"));
@@ -145,6 +160,7 @@ console.log(JSON.stringify({
   recoverySnapshotBinding: "pass",
   databaseSnapshot: "pass",
   prelaunchReclassification: "pass",
+  tracePayloadReconciliation: "pass",
   sandboxFailClosed: "pass",
   cleanupOrder: "pass",
   assertEmptyMigration: "pass",

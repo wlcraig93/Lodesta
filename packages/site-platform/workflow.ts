@@ -722,6 +722,9 @@ export class SiteAuthoringWorkflow {
             sandboxImageDigest: configuredSandboxImageDigest(),
             inspectionHash,
             routes: finalized.artifact.routes,
+            findingCount: finalized.artifact.qa.findings.length,
+            blockerCount: errors.length,
+            advisoryCount: warnings.length,
             findings: finalized.artifact.qa.findings.slice(0, 100),
             blockers: errors.slice(0, 100),
             advisories: warnings.slice(0, 100)

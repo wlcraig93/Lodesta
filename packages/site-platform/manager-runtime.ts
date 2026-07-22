@@ -244,7 +244,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 }
 
 function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>, cached: boolean, error?: string): ManagerToolExecution {
-  const summary = { ...inspection.modelSummary, ok: inspection.passed, cached, ...(error ? { error } : {}) };
+  const summary = { ...compactInspectionSummary(inspection.modelSummary), ok: inspection.passed, cached, ...(error ? { error } : {}) };
   return {
     modelOutput: inspection.images?.length ? [{ type: "input_text", text: JSON.stringify(summary) }, ...inspection.images] : JSON.stringify(summary),
     diagnosticOutput: { ...inspection.diagnosticSummary, ok: inspection.passed, cached, ...(error ? { error } : {}) }
@@ -260,7 +260,27 @@ function sourceOutline(file: WorkspaceSourceFile) {
 }
 
 function summaryFindings(summary: Record<string, unknown>) {
-  return (Array.isArray(summary.findings) ? summary.findings : []).slice(0, 100);
+  return (Array.isArray(summary.blockers) ? summary.blockers : []).slice(0, 100);
+}
+
+function compactInspectionSummary(summary: Record<string, unknown>) {
+  const findings = Array.isArray(summary.findings) ? summary.findings : [];
+  const blockers = Array.isArray(summary.blockers) ? summary.blockers : [];
+  const advisories = Array.isArray(summary.advisories) ? summary.advisories : [];
+  const { findings: _findings, blockers: _blockers, advisories: _advisories, ...rest } = summary;
+  return {
+    ...rest,
+    findingCount: numericCount(summary.findingCount, findings.length),
+    blockerCount: numericCount(summary.blockerCount, blockers.length),
+    advisoryCount: numericCount(summary.advisoryCount, advisories.length),
+    blockers: blockers.slice(0, 100),
+    advisories: advisories.slice(0, 8),
+    advisoriesTruncated: numericCount(summary.advisoryCount, advisories.length) > 8
+  };
+}
+
+function numericCount(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
 function result(value: Record<string, unknown>): ManagerToolExecution {

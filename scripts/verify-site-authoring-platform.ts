@@ -249,6 +249,38 @@ const formattedSdkResult = claimValidator.validate({
 assert(formattedSdkResult.status === "pass", `formatted SDK bindings failed claim validation: ${formattedSdkResult.findings.map((finding) => finding.message).join("; ")}`);
 assert(formattedSdkResult.declarations.some((claim) => claim.sourceFactIds.includes(phone.id)), "formatted SDK phone did not produce a source-bound declaration");
 assert(formattedSdkResult.declarations.filter((claim) => claim.sourceFactIds.includes("fact_hours")).map((claim) => claim.text).sort().join("|") === "8:00 AM-5:30 PM|Closed|Evenings", "structured SDK hours did not declare every distinct rendered canonical value");
+const sourceBoundOfferInput = sitePublicBuildInputV3Schema.parse({
+  ...parityInput,
+  publicFacts: [
+    ...parityInput.publicFacts,
+    {
+      id: "fact_free_estimates", kind: "offering", label: "Offering", value: "Free estimates", publicEligible: true,
+      source: { factId: "fact_free_estimates", sourceSnapshotId: "source_owner", observedAt: "2026-07-20T00:00:00.000Z", confidence: 1, ownerConfirmed: true }
+    },
+    {
+      id: "fact_insurance_work", kind: "offering", label: "Offering", value: "Insurance work", publicEligible: true,
+      source: { factId: "fact_insurance_work", sourceSnapshotId: "source_owner", observedAt: "2026-07-20T00:00:00.000Z", confidence: 1, ownerConfirmed: true }
+    }
+  ]
+});
+const sourceBoundOffer = claimValidator.validate({
+  routes: [{ path: "/", html: '<main><p data-lodesta-fact-id="fact_free_estimates">Free estimates</p></main>' }],
+  declarations: [],
+  buildInput: sourceBoundOfferInput
+});
+assert(sourceBoundOffer.status === "pass", `source-bound canonical offer failed sensitive claim validation: ${sourceBoundOffer.findings.map((finding) => finding.message).join("; ")}`);
+const sourceBoundInsuranceOffer = claimValidator.validate({
+  routes: [{ path: "/", html: '<main><p data-lodesta-fact-id="fact_insurance_work">Insurance work</p></main>' }],
+  declarations: [],
+  buildInput: sourceBoundOfferInput
+});
+assert(sourceBoundInsuranceOffer.status === "pass", `source-bound offering name triggered a false insurance claim: ${sourceBoundInsuranceOffer.findings.map((finding) => finding.message).join("; ")}`);
+const unboundOffer = claimValidator.validate({
+  routes: [{ path: "/", html: "<main><p>Free estimates</p></main>" }],
+  declarations: [],
+  buildInput: sourceBoundOfferInput
+});
+assert(unboundOffer.status === "fail" && unboundOffer.findings.some((finding) => finding.id === "claim.sensitive_unsupported"), "unbound pricing language bypassed sensitive claim validation");
 for (const parityCase of claimParity.cases) {
   const result = claimValidator.validate({
     routes: [{ path: "/", html: parityCase.html }],

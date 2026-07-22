@@ -189,6 +189,11 @@ function sensitiveDeclarationMatches(
   buildInput: SitePublicBuildInputV3
 ) {
   if (!gatedSensitiveClaims(claim.text).some((candidate) => candidate.category === match.category)) return false;
+  if (buildInput.publicFacts.some((fact) => fact.kind === "offering"
+      && claim.sourceFactIds.includes(fact.id)
+      && factSupportsClaim(fact, claim.text, true))) {
+    return true;
+  }
   const compatibleKinds = proofKindsFor(match);
   return buildInput.business.proof.some((proof) => compatibleKinds.has(proof.kind)
     && proof.sourceFactIds.some((factId) => claim.sourceFactIds.includes(factId)));

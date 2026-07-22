@@ -87,6 +87,23 @@ await direct.execute(toolCall("inspect_1", "inspect_site", {}));
 await direct.execute(toolCall("inspect_2", "inspect_site", {}));
 assert.equal(inspectCalls, 1, "unchanged verification was rerun");
 
+const compactRuntime = runtime({
+  initialFiles: files,
+  inspectionSummary: {
+    ok: false,
+    findings: Array.from({ length: 14 }, (_, index) => ({ id: `finding_${index}`, severity: "warning", message: `Finding ${index}` })),
+    blockers: [{ id: "blocking_finding", severity: "error", message: "A hard blocker." }],
+    advisories: Array.from({ length: 12 }, (_, index) => ({ id: `advisory_${index}`, severity: "warning", message: `Advisory ${index}` }))
+  }
+});
+await compactRuntime.execute(toolCall("compact_build", "build_preview", {}));
+const compactInspection = output(await compactRuntime.execute(toolCall("compact_inspection", "inspect_site", {})));
+assert(!("findings" in compactInspection), "inspection repeated the full finding set in model context");
+assert.equal((compactInspection.blockers as unknown[]).length, 1, "inspection omitted a hard blocker");
+assert.equal((compactInspection.advisories as unknown[]).length, 8, "inspection did not bound advisory examples");
+assert.equal(compactInspection.advisoryCount, 12, "inspection lost the full advisory count");
+assert.equal(compactInspection.advisoriesTruncated, true, "inspection did not disclose truncated advisory examples");
+
 const exactEditCss = heroCss.replace("2rem", "2.25rem");
 await direct.execute(toolCall("exact_edit", "write_file", { path: "src/components/hero.css", content: exactEditCss }));
 assert.equal(direct.currentFiles().find((file) => file.path === "src/components/Hero.tsx")?.content, heroSource, "exact style edit broadened into unrelated source");
@@ -144,7 +161,7 @@ console.log(JSON.stringify({
   ,clarificationBeforeMutation: "pass"
 }));
 
-function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () => void; onInspect?: () => void } = {}) {
+function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () => void; onInspect?: () => void; inspectionSummary?: Record<string, unknown> } = {}) {
   let revision = 0;
   return new WorkspaceManagerRuntime<string>({
     kind: options.initialFiles ? "edit" : "initial_build",
@@ -160,7 +177,7 @@ function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () =
     },
     inspect: async () => {
       options.onInspect?.();
-      return { passed: true, inspectionHash, modelSummary: { ok: true, inspectionHash }, diagnosticSummary: { ok: true, inspectionHash }, checkpoint: "checkpoint_passed" };
+      return { passed: options.inspectionSummary ? false : true, inspectionHash, modelSummary: options.inspectionSummary ?? { ok: true, inspectionHash }, diagnosticSummary: { ok: true, inspectionHash }, checkpoint: options.inspectionSummary ? undefined : "checkpoint_passed" };
     }
   });
 }

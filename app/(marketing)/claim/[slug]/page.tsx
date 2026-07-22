@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ClaimSiteForm, type ClaimAssetRight, type ClaimFact } from "@/components/ClaimSiteForm";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
-import type { BusinessStateV2 } from "@/packages/site-contracts";
+import type { BusinessStateV3 } from "@/packages/site-contracts";
 import { claimVerificationTargets } from "@/lib/claim-verification-challenge";
 
 export const dynamic = "force-dynamic";
@@ -78,7 +78,7 @@ export default async function ClaimPage({
   );
 }
 
-function claimFacts(state: BusinessStateV2): ClaimFact[] {
+function claimFacts(state: BusinessStateV3): ClaimFact[] {
   return state.facts.map((fact) => ({
     id: fact.id,
     label: fact.label,
@@ -88,7 +88,7 @@ function claimFacts(state: BusinessStateV2): ClaimFact[] {
   }));
 }
 
-function claimAssetRights(state: BusinessStateV2): ClaimAssetRight[] {
+function claimAssetRights(state: BusinessStateV3): ClaimAssetRight[] {
   return state.assets
     .filter((asset) => asset.activeForFutureBuilds && asset.rightsStatus === "reference_only" && asset.publicUrl)
     .map((asset) => ({

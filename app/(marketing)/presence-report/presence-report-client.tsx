@@ -2,6 +2,8 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { z } from "zod";
+import { parseJsonResponse } from "@/lib/client-json";
 
 type Suggestion = {
   placeId: string;
@@ -54,6 +56,47 @@ type ReportResult = {
   };
 };
 
+const suggestionSchema = z.object({ placeId: z.string(), text: z.string() }).strict();
+const reportResultSchema: z.ZodType<ReportResult> = z.object({
+  generatedAt: z.string(),
+  websiteKind: z.enum(["owned_website", "no_website", "social_or_aggregator"]),
+  sourceUrl: z.string().optional(),
+  sourceHost: z.string().optional(),
+  overallScore: z.number(),
+  overallLabel: z.string(),
+  scoreSource: z.enum(["crawl_standard", "no_owned_website"]),
+  buckets: z.array(z.object({
+    id: z.string(), label: z.string(), score: z.number().optional(), scoredSignals: z.number(),
+    status: z.enum(["scored", "not_enough_signal"])
+  }).strict()),
+  findings: z.array(z.object({
+    id: z.string(), bucketLabel: z.string(), severity: z.enum(["fail", "warning"]), title: z.string(),
+    consequence: z.string(), evidence: z.string(), lodestaFix: z.string()
+  }).strict()),
+  stages: z.array(z.object({
+    id: z.string(), label: z.string(), status: z.enum(["queued", "running", "completed", "skipped", "failed"])
+  }).strict()),
+  gatedPlan: z.object({
+    summary: z.string(), priorities: z.array(z.object({ title: z.string(), detail: z.string() }).strict())
+  }).strict().optional()
+}).strict();
+const publicReportSchema: z.ZodType<PublicReport> = z.object({
+  id: z.string(),
+  status: z.enum(["queued", "running", "completed", "failed"]),
+  websiteKind: z.enum(["owned_website", "no_website", "social_or_aggregator"]),
+  sourceUrl: z.string().optional(),
+  sourceHost: z.string().optional(),
+  unlocked: z.boolean(),
+  error: z.string().optional(),
+  result: reportResultSchema.optional()
+}).strict();
+const searchResponseSchema = z.object({
+  error: z.string().optional(), suggestions: z.array(suggestionSchema).optional()
+}).passthrough();
+const reportResponseSchema = z.object({
+  error: z.string().optional(), report: publicReportSchema.optional(), reused: z.boolean().optional(), ignored: z.boolean().optional()
+}).passthrough();
+
 export function PresenceReportClient() {
   const [sessionToken] = useState(() => `prospect_${Math.random().toString(36).slice(2)}_${Date.now()}`);
   const [query, setQuery] = useState("");
@@ -85,7 +128,7 @@ export function PresenceReportClient() {
           body: JSON.stringify({ query, sessionToken }),
           signal: controller.signal
         });
-        const payload = await response.json();
+        const payload = await parseJsonResponse(response, searchResponseSchema);
         if (!response.ok) throw new Error(payload.error ?? "Search failed");
         setSuggestions(payload.suggestions ?? []);
         setSearchStatus(payload.suggestions?.length ? "" : "No matching businesses found.");
@@ -105,7 +148,7 @@ export function PresenceReportClient() {
     if (!report || (report.status !== "queued" && report.status !== "running")) return;
     const timer = window.setInterval(async () => {
       const response = await fetch(`/api/prospect-reports/${encodeURIComponent(report.id)}`);
-      const payload = await response.json();
+      const payload = await parseJsonResponse(response, reportResponseSchema);
       if (response.ok && payload.report) setReport(payload.report);
     }, 2000);
     return () => window.clearInterval(timer);
@@ -131,8 +174,9 @@ export function PresenceReportClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ placeId: selected.placeId, sessionToken })
       });
-      const payload = await response.json();
+      const payload = await parseJsonResponse(response, reportResponseSchema);
       if (!response.ok) throw new Error(payload.error ?? "Unable to start report");
+      if (!payload.report) throw new Error("The server returned an invalid report response.");
       setReport(payload.report);
       setReportStatus(payload.reused ? "Using a recent report." : "Scan queued.");
     } catch (error) {
@@ -159,7 +203,7 @@ export function PresenceReportClient() {
         }
       })
     });
-    const payload = await response.json();
+    const payload = await parseJsonResponse(response, reportResponseSchema);
     if (!response.ok) {
       setLeadStatus(payload.error ?? "Unable to unlock report.");
       return;

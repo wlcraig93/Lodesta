@@ -2,7 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { z } from "zod";
 import type { SiteRedirectRuleV1 } from "@/packages/platform-operations";
+import { parseJsonResponse } from "@/lib/client-json";
+
+const redirectResponseSchema = z.object({ error: z.string().optional() }).passthrough();
 
 export function RedirectRulesPanel({ siteId, redirects, routes }: {
   siteId: string;
@@ -23,7 +27,7 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "upsert", siteId, sourcePath, destinationPath })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, redirectResponseSchema);
     if (!response.ok) {
       setStatus(result.error ?? "Unable to save redirect.");
       return;
@@ -41,7 +45,7 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "set_status", siteId, redirectId: redirect.id, status: next })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, redirectResponseSchema);
     if (!response.ok) {
       setStatus(result.error ?? "Unable to update redirect.");
       return;

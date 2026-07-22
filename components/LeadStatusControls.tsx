@@ -1,12 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { z } from "zod";
 import type { Inquiry } from "@/packages/site-capabilities";
+import { parseJsonResponse } from "@/lib/client-json";
+
+const inquiryStatusResponseSchema = z.object({
+  error: z.string().optional(),
+  ok: z.boolean().optional(),
+  inquiry: z.object({
+    status: z.enum(["new", "needs_reply", "replied", "booked", "won", "spam", "archived"])
+  }).passthrough().optional()
+}).passthrough();
 
 type LeadStatusControlsProps = {
   siteId: string;
   inquiryId: string;
   initialStatus: Inquiry["status"];
+  onStatusChange?: (status: Inquiry["status"]) => void;
 };
 
 const ownerStatuses: Array<{ label: string; status: Inquiry["status"] }> = [
@@ -18,7 +29,7 @@ const ownerStatuses: Array<{ label: string; status: Inquiry["status"] }> = [
   { label: "Archive", status: "archived" }
 ];
 
-export function LeadStatusControls({ siteId, inquiryId, initialStatus }: LeadStatusControlsProps) {
+export function LeadStatusControls({ siteId, inquiryId, initialStatus, onStatusChange }: LeadStatusControlsProps) {
   const [status, setStatus] = useState(initialStatus);
   const [message, setMessage] = useState("");
 
@@ -29,12 +40,13 @@ export function LeadStatusControls({ siteId, inquiryId, initialStatus }: LeadSta
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ siteId, inquiryId, status: nextStatus })
     });
-    const result = await response.json();
-    if (!response.ok || !result.ok) {
+    const result = await parseJsonResponse(response, inquiryStatusResponseSchema);
+    if (!response.ok || !result.ok || !result.inquiry) {
       setMessage(result.error ?? "Unable to update inquiry.");
       return;
     }
     setStatus(result.inquiry.status);
+    onStatusChange?.(result.inquiry.status);
     setMessage("Saved.");
   }
 

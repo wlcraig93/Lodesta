@@ -1,5 +1,5 @@
 import { configuredAppOriginOrDefault } from "./app-origin";
-import type { BusinessStateV2, PlatformSiteRecord } from "@/packages/site-contracts";
+import type { BusinessStateV3, PlatformSiteRecord } from "@/packages/site-contracts";
 import type { ClaimRecord } from "@/packages/platform-operations";
 
 export type OwnerOperationalNotificationKind =
@@ -21,7 +21,7 @@ export type OwnerOperationalNotificationResult = {
 
 export async function sendOwnerOperationalEmail(input: {
   site: PlatformSiteRecord;
-  business: BusinessStateV2;
+  business: BusinessStateV3;
   claims?: ClaimRecord[];
   kind: OwnerOperationalNotificationKind;
   subject: string;
@@ -77,7 +77,7 @@ export async function sendOwnerOperationalEmail(input: {
   };
 }
 
-export function ownerNotificationTarget(business: BusinessStateV2, claims: ClaimRecord[]) {
+export function ownerNotificationTarget(business: BusinessStateV3, claims: ClaimRecord[]) {
   return [
     ...claims
       .filter((claim) => claim.status === "claimed")
@@ -91,7 +91,7 @@ export function ownerNotificationTarget(business: BusinessStateV2, claims: Claim
 
 function ownerNotificationText(input: {
   site: PlatformSiteRecord;
-  business: BusinessStateV2;
+  business: BusinessStateV3;
   kind: OwnerOperationalNotificationKind;
   subject: string;
   summaryLines: string[];

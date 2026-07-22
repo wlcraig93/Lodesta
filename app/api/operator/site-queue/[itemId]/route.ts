@@ -3,7 +3,7 @@ import { z } from "zod";
 import { authorizedOperator } from "@/app/api/site-agent/auth";
 import { sitePlatformRepository } from "@/packages/platform-data";
 
-const actionSchema = z.object({ action: z.enum(["resolve", "dismiss"]) }).strict();
+const actionSchema = z.object({ action: z.enum(["resolve", "dismiss"]), note: z.string().trim().min(1).max(2000) }).strict();
 
 export async function POST(request: Request, { params }: { params: Promise<{ itemId: string }> }) {
   const actor = await authorizedOperator(request);
@@ -14,6 +14,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ ite
   const item = (await sitePlatformRepository.listOperatorQueue()).find((candidate) => candidate.id === itemId);
   if (!item) return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
   const now = new Date().toISOString();
-  await sitePlatformRepository.saveOperatorQueueItem({ ...item, status: parsed.data.action === "resolve" ? "resolved" : "dismissed", resolvedBy: actor.actorId, resolvedAt: now, updatedAt: now });
+  await sitePlatformRepository.saveOperatorQueueItem({ ...item, status: parsed.data.action === "resolve" ? "resolved" : "dismissed", resolvedBy: actor.actorId, resolvedAt: now, resolutionNote: parsed.data.note, updatedAt: now });
   return NextResponse.json({ ok: true });
 }

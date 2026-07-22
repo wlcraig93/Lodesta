@@ -1,6 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { z } from "zod";
+import { parseJsonResponse } from "@/lib/client-json";
+
+const billingPortalResponseSchema = z.object({
+  error: z.string().optional(),
+  portal: z.object({ url: z.string().url().optional() }).passthrough().optional()
+}).passthrough();
 
 type BillingPortalButtonProps = {
   siteId: string;
@@ -25,7 +32,7 @@ export function BillingPortalButton({ siteId, returnPath, disabled, disabledReas
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ siteId, returnPath })
     });
-    const payload = await response.json();
+    const payload = await parseJsonResponse(response, billingPortalResponseSchema);
     setSubmitting(false);
     if (!response.ok || !payload.portal?.url) {
       setStatus(payload.error ?? "Billing portal is unavailable.");

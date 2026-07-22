@@ -20,15 +20,15 @@ export default async function AdminSiteCandidatesPage() {
   const open = queue.filter((item) => item.status === "open" || item.status === "in_review");
 
   return <main className="admin-page">
-    <AdminPageHeader eyebrow="Build" title="Website review" description={`${open.length} operator item${open.length === 1 ? "" : "s"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"} · ${verticalDemand.length} unsupported vertical request${verticalDemand.length === 1 ? "" : "s"}`} />
-    <section className="panel"><h2>Unsupported vertical demand</h2><div className="finding-list">
+    <AdminPageHeader eyebrow="Build" title="Website review" description={`${open.length} operator item${open.length === 1 ? "" : "s"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"} · ${verticalDemand.length} domain-context opportunit${verticalDemand.length === 1 ? "y" : "ies"}`} />
+    <section className="panel"><h2>Domain-context opportunities</h2><div className="finding-list">
       {verticalDemand.map((item) => <article key={item.id} className="finding-card">
         <div className="button-row"><span className="badge">{item.observedVertical ?? "unclassified"}</span><span className="badge">{new Date(item.createdAt).toLocaleDateString()}</span></div>
         <h3>{new URL(item.sourceUrl).hostname}</h3>
-        <p className="muted">This request was rejected before canonical site state was created.</p>
+        <p className="muted">The site continued with neutral context. This category may justify a future optional enrichment module.</p>
         <a className="button secondary" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source</a>
       </article>)}
-      {verticalDemand.length === 0 ? <p className="muted">No unsupported vertical requests have been recorded.</p> : null}
+      {verticalDemand.length === 0 ? <p className="muted">No unmatched domain-context opportunities have been recorded.</p> : null}
     </div></section>
     <section className="panel"><h2>Operator queue</h2><div className="finding-list">
       {open.map((item) => <article key={item.id} className="finding-card">

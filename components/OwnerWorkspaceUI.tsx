@@ -1,0 +1,29 @@
+import type { ReactNode } from "react";
+
+export function WorkspacePageHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: ReactNode }) {
+  return (
+    <header className="workspace-page-header">
+      <div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>
+      {actions ? <div className="workspace-page-actions">{actions}</div> : null}
+    </header>
+  );
+}
+
+export function WorkspaceMetric({ label, value, detail, tone = "default" }: { label: string; value: ReactNode; detail?: string; tone?: "default" | "positive" | "attention" }) {
+  return <article className={`workspace-metric is-${tone}`}><span>{label}</span><strong>{value}</strong>{detail ? <small>{detail}</small> : null}</article>;
+}
+
+export function WorkspaceStatus({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "success" | "attention" | "danger" | "info" }) {
+  return <span className={`workspace-status is-${tone}`}>{children}</span>;
+}
+
+export function humanize(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function formatWorkspaceDate(value: string, includeTime = true) {
+  return new Intl.DateTimeFormat("en", includeTime
+    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+    : { month: "short", day: "numeric", year: "numeric" }
+  ).format(new Date(value));
+}

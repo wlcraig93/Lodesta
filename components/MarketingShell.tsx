@@ -1,11 +1,11 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { lodestaBrandSans } from "@/app/fonts";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { isAdminUserId } from "@/lib/auth-policy";
 
 export async function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className="marketing-shell">
+    <div className={`${lodestaBrandSans.variable} marketing-shell`}>
       <MarketingHeader />
       {children}
       <MarketingFooter />
@@ -16,7 +16,7 @@ export async function MarketingShell({ children }: { children: ReactNode }) {
 async function MarketingHeader() {
   const auth = await getCurrentUser();
   const user = auth.user;
-  const appHref = user ? (isAdminUserId(user.id) ? "/admin/sites" : "/account") : "/auth/login";
+  const appHref = user ? "/account" : "/auth/login";
   const appLabel = user ? "Open app" : "Sign in";
 
   return (

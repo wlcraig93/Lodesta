@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import type { BusinessStateV2 } from "@/packages/site-contracts";
+import type { BusinessStateV3 } from "@/packages/site-contracts";
 
 export type ClaimVerificationChannel = "email" | "phone";
 
@@ -22,7 +22,7 @@ type ChallengePayload = {
 
 const challengeTtlMs = 15 * 60_000;
 
-export function claimVerificationTargets(state: BusinessStateV2): ClaimVerificationTarget[] {
+export function claimVerificationTargets(state: BusinessStateV3): ClaimVerificationTarget[] {
   const targets: ClaimVerificationTarget[] = [];
   if (state.contacts.email) {
     const destination = state.contacts.email.trim().toLowerCase();
@@ -48,7 +48,7 @@ export function claimVerificationTargets(state: BusinessStateV2): ClaimVerificat
 }
 
 export function createClaimVerificationChallenge(input: {
-  state: BusinessStateV2;
+  state: BusinessStateV3;
   channel: ClaimVerificationChannel;
   now?: number;
   code?: string;
@@ -79,7 +79,7 @@ export function createClaimVerificationChallenge(input: {
 }
 
 export function verifyClaimVerificationChallenge(input: {
-  state: BusinessStateV2;
+  state: BusinessStateV3;
   challengeId: string;
   code: string;
   now?: number;

@@ -3,12 +3,12 @@ import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { hasValidAdminToken } from "@/lib/auth-policy";
-import { AdminAccountMenu } from "@/components/admin/AdminAccountMenu";
+import { AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import { AdminNav, type AdminNavItem } from "@/components/admin/AdminNav";
 
 const primaryNavItems: AdminNavItem[] = [
-  { href: "/admin/site-queue", label: "Website Review" },
-  { href: "/admin/sites", label: "Managed Sites" }
+  { href: "/admin/sites", label: "Manage sites" },
+  { href: "/admin/site-queue", label: "Review Queue" }
 ];
 
 const operationsNavItems: AdminNavItem[] = [
@@ -24,13 +24,23 @@ export async function AdminShell({ children }: { children: ReactNode }) {
   const tokenAccess = hasValidAdminToken(await headers());
   const auth = tokenAccess ? { configured: true as const, user: null } : await getCurrentUser();
   const accountLabel = tokenAccess ? "Admin token" : auth.user?.email ?? "Local admin";
+  const sessionLabel = tokenAccess ? "Token session" : auth.user ? "Platform admin" : "Local development";
+  const accountActions: AccountAction[] = tokenAccess
+    ? [{ id: "session-note", kind: "note", label: "Authenticated by admin token.", section: "session" }]
+    : [
+        { id: "owner-workspace", kind: "link", label: "Owner workspace", href: "/account", section: "account", icon: "workspace" },
+        { id: "account-settings", kind: "link", label: "Account settings", href: "/account/settings", section: "account", icon: "account" },
+        ...(auth.user
+          ? [{ id: "sign-out", kind: "form", label: "Sign out", action: "/auth/logout", section: "session", icon: "sign-out" } satisfies AccountAction]
+          : [{ id: "session-note", kind: "note", label: "Local development access.", section: "session" } satisfies AccountAction])
+      ];
 
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <Link className="admin-brand" href="/admin/site-queue">
+        <Link className="admin-brand" href="/admin/sites">
           <img src="/lodesta-logo.png" alt="Lodesta" />
-          <span>Control plane</span>
+          <span>Admin</span>
         </Link>
         <div className="admin-nav-stack">
           <NavGroup label="Build">
@@ -43,11 +53,10 @@ export async function AdminShell({ children }: { children: ReactNode }) {
             <AdminNav items={debugNavItems} ariaLabel="Debug" />
           </NavGroup>
         </div>
-        <AdminAccountMenu
+        <AccountMenu
           label={accountLabel}
-          email={auth.user?.email ?? undefined}
-          tokenAccess={tokenAccess}
-          authConfigured={auth.configured}
+          sessionLabel={sessionLabel}
+          actions={accountActions}
         />
       </aside>
       <div className="admin-shell-main">{children}</div>

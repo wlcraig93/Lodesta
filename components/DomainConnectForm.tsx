@@ -1,6 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { z } from "zod";
+import { parseJsonResponse } from "@/lib/client-json";
+
+const domainResponseSchema = z.object({
+  error: z.string().optional(),
+  verification: z.object({ note: z.string().optional(), value: z.string().optional() }).passthrough().optional(),
+  activationNotice: z.string().optional()
+}).passthrough();
 
 type DomainConnectFormProps = {
   siteId: string;
@@ -28,7 +36,7 @@ export function DomainConnectForm({ siteId, disabled = false, disabledReason }: 
         provider: "cloudflare_for_saas"
       })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, domainResponseSchema);
     if (!response.ok) {
       setStatus(result.error ?? "Unable to register domain.");
       return;

@@ -1,4 +1,5 @@
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
+import { normalizeObservedBusinessHours } from "./business-fact-normalization";
 import type { FieldProvenance, PublicPresenceSignal } from "./presence-contracts";
 
 export type PublicPresenceEnrichment = {
@@ -403,7 +404,7 @@ function categoriesFromPlace(place: Record<string, unknown>) {
 function hoursFromPlace(value: unknown) {
   if (!isRecord(value) || !Array.isArray(value.weekdayDescriptions)) return undefined;
   const entries = value.weekdayDescriptions.filter((item): item is string => typeof item === "string");
-  return entries.length ? Object.fromEntries(entries.map((entry, index) => [`weekday_${index + 1}`, entry])) : undefined;
+  return normalizeObservedBusinessHours(entries);
 }
 
 function localizedText(value: unknown) {

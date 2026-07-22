@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import {
@@ -9,6 +9,7 @@ import {
   resolveGoogleProspectPlace
 } from "@/lib/prospect-reports";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
+import { processNextProspectReportJob } from "@/lib/prospect-report-jobs";
 
 export const runtime = "nodejs";
 
@@ -81,6 +82,18 @@ export async function POST(request: Request) {
 
   const job = await repository.enqueueProspectReportJob(report.id);
   report = (await repository.updateProspectReport({ reportId: report.id, jobId: job.id })) ?? report;
+
+  after(async () => {
+    try {
+      await processNextProspectReportJob({ workerId: `prospect-after-${job.id}` });
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "prospect_report_after_failed",
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  });
 
   return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(report), reused: false }, { status: 202 }), limit);
 }

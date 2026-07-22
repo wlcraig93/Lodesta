@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
   const portal = await createBillingPortalSession({
     stripeCustomerId: claim?.stripeCustomerId,
-    returnPath: parsed.data.returnPath ?? `/dashboard/${site.slug}`
+    returnPath: parsed.data.returnPath ?? "/account"
   });
 
   if (!portal.configured || !portal.url) {

@@ -1,6 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { z } from "zod";
+import { parseJsonResponse } from "@/lib/client-json";
+
+const claimVerificationResponseSchema = z.object({
+  error: z.string().optional(),
+  challengeId: z.string().optional(),
+  targetLabel: z.string().optional(),
+  developmentCode: z.string().optional(),
+  verification: z.object({ targetLabel: z.string().optional() }).passthrough().optional()
+}).passthrough();
+const claimResponseSchema = z.object({
+  error: z.string().optional(),
+  code: z.string().optional(),
+  checkout: z.object({ url: z.string().url().optional(), message: z.string().optional() }).passthrough().optional()
+}).passthrough();
 
 export type ClaimFact = {
   id: string;
@@ -56,9 +71,13 @@ export function ClaimSiteForm({ siteId, facts, assetRights, verificationTargets,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "start", siteId, channel: selectedChannel })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, claimVerificationResponseSchema);
     if (!response.ok) {
       setStatus(result.error ?? "Unable to start contact verification.");
+      return;
+    }
+    if (!result.challengeId) {
+      setStatus("Unable to start contact verification.");
       return;
     }
     setChallengeId(result.challengeId);
@@ -76,7 +95,7 @@ export function ClaimSiteForm({ siteId, facts, assetRights, verificationTargets,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "verify", siteId, challengeId, code: verificationCode })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, claimVerificationResponseSchema);
     if (!response.ok) {
       setContactVerified(false);
       setStatus(result.error ?? "Verification code was not accepted.");
@@ -106,7 +125,7 @@ export function ClaimSiteForm({ siteId, facts, assetRights, verificationTargets,
         previewToken: outboundContext?.previewToken
       })
     });
-    const result = await response.json();
+    const result = await parseJsonResponse(response, claimResponseSchema);
     if (!response.ok) {
       setStatus(
         result.code === "claim_verification_required"

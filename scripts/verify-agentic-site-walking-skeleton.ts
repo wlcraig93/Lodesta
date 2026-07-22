@@ -441,7 +441,6 @@ function workspaceFiles(input: SitePublicBuildInputV3, accent: string): Workspac
 import { Disclosure, Fact, ManagedForm, ManagedMap } from "../platform/sdk";
 export const siteDefinition = {
   siteName: ${JSON.stringify(input.business.name)},
-  designRationale: "An editorial collision-repair workspace with high-contrast service hierarchy and direct managed conversion.",
   claims: [
     { id: "collision_service_home", route: "/", text: "Collision Repair", kind: "free_text", sourceFactIds: [${JSON.stringify(offering)}], autoDeclared: false },
     { id: "collision_service_page", route: "/collision-repair", text: "Collision Repair", kind: "free_text", sourceFactIds: [${JSON.stringify(offering)}], autoDeclared: false }
@@ -488,7 +487,7 @@ function failureSummary(artifact: SiteBuildArtifactV1) {
 
 async function cleanupTestSite(testSiteId: string, testBusinessId: string) {
   const client = getSupabaseAdminClient();
-  const { error } = await client.rpc("cleanup_agentic_walking_skeleton_v1", {
+  const { error } = await client.rpc("cleanup_site_walking_skeleton", {
     target_site_id: testSiteId,
     target_business_id: testBusinessId
   });

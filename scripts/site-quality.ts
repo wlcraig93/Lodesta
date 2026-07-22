@@ -5,7 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import { configuredArtifactBlobStore } from "../packages/site-artifacts";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { AgenticSiteWorkflowV1 } from "../packages/site-platform";
+import { SiteAuthoringWorkflow } from "../packages/site-platform";
 import { siteQualityFailureStatus } from "./support/site-quality-failure";
 
 const root = join(".data", "site-quality");
@@ -94,9 +94,9 @@ async function runTarget() {
   const caseDir = join(root, cohort, `round-${round}`, target.id);
   await mkdir(caseDir, { recursive: true });
   const actorId = `quality_${cohort}_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
-  const workflow = new AgenticSiteWorkflowV1();
+  const workflow = new SiteAuthoringWorkflow();
   const blobStore = configuredArtifactBlobStore();
-  let bootstrapped: Awaited<ReturnType<AgenticSiteWorkflowV1["bootstrapFromUrl"]>> | undefined;
+  let bootstrapped: Awaited<ReturnType<SiteAuthoringWorkflow["bootstrapFromUrl"]>> | undefined;
   const startedAt = Date.now();
   try {
     progress(target.id, "bootstrap_started", { url: target.url });
@@ -221,9 +221,8 @@ async function evaluatePilotEntry() {
       findings.push(`${target.id} did not produce a successful objectively valid candidate.`);
       continue;
     }
-    const report = JSON.parse(await readFile(target.reportPath, "utf8")) as { elapsedMs?: number; frozenValidationEligible?: boolean; run?: { attempts?: Array<{ hardGate?: string; objectiveErrorCount?: number }>; failureReason?: string; usage?: { estimatedCostUsd?: number } } };
-    const attempt = report.run?.attempts?.at(-1);
-    if (attempt?.hardGate !== "passed" || attempt.objectiveErrorCount !== 0) findings.push(`${target.id} did not finish with zero objective errors.`);
+    const report = JSON.parse(await readFile(target.reportPath, "utf8")) as { elapsedMs?: number; frozenValidationEligible?: boolean; run?: { status?: string; candidateVersionId?: string; failureReason?: string; usage?: { estimatedCostUsd?: number } } };
+    if (report.run?.status !== "succeeded" || !report.run.candidateVersionId) findings.push(`${target.id} did not finish with a verified candidate.`);
     if (report.frozenValidationEligible !== true) findings.push(`${target.id} has incomplete ingestion coverage and is private-review-only.`);
     if ((report.elapsedMs ?? Number.POSITIVE_INFINITY) > 60 * 60_000) findings.push(`${target.id} exhausted the 60-minute initial workflow deadline.`);
     if (/limit_exhausted|deadline_exhausted|budget_exhausted/.test(JSON.stringify(report))) findings.push(`${target.id} exhausted a stage or orchestration safety budget.`);
@@ -323,7 +322,7 @@ function validEditBattery(input: unknown) {
   if (!isRecord(input) || input.schemaVersion !== "site-edit-battery-report-v1" || !Array.isArray(input.results)) return false;
   const expected = new Set(["element_restyle", "add_page", "move_form", "mobile_fix"]);
   for (const result of input.results) {
-    if (!isRecord(result) || typeof result.taskId !== "string" || result.status !== "succeeded" || result.objectiveGate !== "passed") return false;
+    if (!isRecord(result) || typeof result.taskId !== "string" || result.status !== "succeeded" || result.artifactGate !== "passed") return false;
     expected.delete(result.taskId);
   }
   return expected.size === 0;

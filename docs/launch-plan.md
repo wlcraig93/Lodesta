@@ -2,7 +2,7 @@
 
 **Status:** Pilot blocked pending the explicit V3 cutover and fresh frozen validation
 
-**Architecture authority:** [Lodesta Agentic Website Platform V1](agentic-site-workspace-v1-plan.md)
+**Architecture authority:** [Product-Path Simplification](product-path-simplification-plan.md)
 
 ## Product
 

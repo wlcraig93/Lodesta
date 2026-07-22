@@ -3295,7 +3295,7 @@ textarea {
   font-size: var(--product-font-size-ui);
 }
 
-.site-agent-plan-suggestion {
+.site-agent-discussion-suggestion {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3307,11 +3307,11 @@ textarea {
   color: var(--product-color-intelligence-text);
 }
 
-.site-agent-plan-suggestion strong {
+.site-agent-discussion-suggestion strong {
   font-size: var(--product-font-size-meta);
 }
 
-.site-agent-plan-suggestion > div {
+.site-agent-discussion-suggestion > div {
   display: flex;
   gap: var(--product-space-4);
 }
@@ -3441,7 +3441,7 @@ textarea {
   gap: var(--product-space-4);
 }
 
-.site-agent-plan-toggle {
+.site-agent-discuss-toggle {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -3454,14 +3454,14 @@ textarea {
   cursor: pointer;
 }
 
-.site-agent-plan-toggle input {
+.site-agent-discuss-toggle input {
   position: absolute;
   width: 1px;
   height: 1px;
   opacity: 0;
 }
 
-.site-agent-plan-toggle > span {
+.site-agent-discuss-toggle > span {
   position: relative;
   width: 18px;
   height: 18px;
@@ -3470,7 +3470,7 @@ textarea {
   background: var(--product-color-surface);
 }
 
-.site-agent-plan-toggle > span::after {
+.site-agent-discuss-toggle > span::after {
   position: absolute;
   top: 3px;
   left: 5px;
@@ -3483,21 +3483,21 @@ textarea {
   transform: rotate(45deg);
 }
 
-.site-agent-plan-toggle.is-active {
+.site-agent-discuss-toggle.is-active {
   background: var(--product-color-primary-surface);
   color: var(--product-color-primary);
 }
 
-.site-agent-plan-toggle.is-active > span {
+.site-agent-discuss-toggle.is-active > span {
   border-color: var(--product-color-primary);
   background: var(--product-color-primary);
 }
 
-.site-agent-plan-toggle.is-active > span::after {
+.site-agent-discuss-toggle.is-active > span::after {
   opacity: 1;
 }
 
-.site-agent-plan-toggle:has(input:focus-visible) {
+.site-agent-discuss-toggle:has(input:focus-visible) {
   box-shadow: var(--product-shadow-focus);
 }
 
@@ -3651,7 +3651,7 @@ textarea {
   .site-agent-history-menu button,
   .site-agent-tool-link,
   .site-agent-publish,
-  .site-agent-plan-toggle,
+  .site-agent-discuss-toggle,
   .site-agent-send-button {
     min-height: 44px;
   }

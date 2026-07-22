@@ -1,30 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { createPublicBuildInput, sha256, stableJson } from "@/packages/business-data";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
-import { agenticSiteWorkflow, type AgenticSiteWorkflowV1 } from "@/packages/site-platform";
+import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform";
 import {
   operatorQueueItemSchema,
   businessStateV3Schema,
   assetRevisionV1Schema,
-  controlPlaneChangeRequestV2Schema,
-  siteAgentSessionV1Schema,
+  controlPlaneChangeRequestSchema,
+  siteAgentSessionSchema,
   siteIntentV3Schema,
   sourceSnapshotV1Schema,
   type BusinessStateV3,
   type AssetRevisionV1,
-  type ControlPlaneChangePayloadV2,
-  type ControlPlaneChangeRequestV2,
+  type ControlPlaneChangePayload,
+  type ControlPlaneChangeRequest,
   type SiteIntentV3,
   type SourceSnapshotV1
 } from "@/packages/site-contracts";
 
-export class ControlPlaneServiceV2 {
+export class ControlPlaneService {
   constructor(
     private readonly repository: SitePlatformRepository = sitePlatformRepository,
-    private readonly workflow: AgenticSiteWorkflowV1 = agenticSiteWorkflow
+    private readonly workflow: SiteAuthoringWorkflow = siteAuthoringWorkflow
   ) {}
 
-  async submit(input: { siteId: string; payload: ControlPlaneChangePayloadV2; requestedBy: string }) {
+  async submit(input: { siteId: string; payload: ControlPlaneChangePayload; requestedBy: string }) {
     const [site, existingState, existingIntent] = await Promise.all([
       this.repository.getSite(input.siteId),
       this.stateForSite(input.siteId),
@@ -33,8 +33,8 @@ export class ControlPlaneServiceV2 {
     if (!site || !existingState || !existingIntent) throw new Error("Canonical site authorities were not found.");
     const policy = policyFor(input.payload.kind);
     const now = new Date().toISOString();
-    let request = controlPlaneChangeRequestV2Schema.parse({
-      schemaVersion: "control-plane-change-request-v2", id: id("change"), siteId: site.id, businessId: site.businessId,
+    let request = controlPlaneChangeRequestSchema.parse({
+      schemaVersion: "control-plane-change-request", id: id("change"), siteId: site.id, businessId: site.businessId,
       targetAuthority: policy.targetAuthority, payload: input.payload, impact: policy.impact, status: "pending",
       expectedBusinessRevision: existingState.revision, expectedIntentRevision: existingIntent.revision,
       requestedBy: input.requestedBy, requestedAt: now
@@ -50,22 +50,22 @@ export class ControlPlaneServiceV2 {
     if (current.status !== "pending") throw new Error("Control-plane change request is no longer pending.");
     const decidedAt = new Date().toISOString();
     if (input.decision === "reject") {
-      const rejected = controlPlaneChangeRequestV2Schema.parse({ ...current, status: "rejected", decidedBy: input.decidedBy, decidedAt });
+      const rejected = controlPlaneChangeRequestSchema.parse({ ...current, status: "rejected", decidedBy: input.decidedBy, decidedAt });
       await this.repository.saveControlPlaneChangeRequest(rejected);
       return { request: rejected, applied: false as const };
     }
-    const approved = controlPlaneChangeRequestV2Schema.parse({ ...current, status: "approved", decidedBy: input.decidedBy, decidedAt });
+    const approved = controlPlaneChangeRequestSchema.parse({ ...current, status: "approved", decidedBy: input.decidedBy, decidedAt });
     await this.repository.saveControlPlaneChangeRequest(approved);
     return this.applyRequest(approved, input.decidedBy);
   }
 
-  private async applyRequest(request: ControlPlaneChangeRequestV2, actorId: string) {
+  private async applyRequest(request: ControlPlaneChangeRequest, actorId: string) {
     const [site, state, intent] = await Promise.all([
       this.repository.getSite(request.siteId), this.stateForSite(request.siteId), this.repository.getSiteIntent(request.siteId)
     ]);
     if (!site || !state || !intent) throw new Error("Canonical site authorities were not found.");
     if (request.expectedBusinessRevision !== state.revision || request.expectedIntentRevision !== intent.revision) {
-      const superseded = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "superseded", failureReason: "Authority revision changed before apply." });
+      const superseded = controlPlaneChangeRequestSchema.parse({ ...request, status: "superseded", failureReason: "Authority revision changed before apply." });
       await this.repository.saveControlPlaneChangeRequest(superseded);
       throw new Error("stale_control_plane_change");
     }
@@ -74,11 +74,11 @@ export class ControlPlaneServiceV2 {
     try {
       if (request.payload.kind === "request_site_edit") {
         const session = await this.workflow.getOrCreateSession({ siteId: site.id, ownerId: actorId });
-        const { run } = await this.workflow.preflightAndEnqueueApply({
+        const { run } = await this.workflow.enqueueEdit({
           session, instruction: request.payload.instruction,
           selection: request.payload.selection, requestedBy: actorId
         });
-        const applied = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
+        const applied = controlPlaneChangeRequestSchema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
         await this.repository.saveControlPlaneChangeRequest(applied);
         return { request: applied, applied: true as const, run };
       }
@@ -118,6 +118,14 @@ export class ControlPlaneServiceV2 {
         nextIntent = mutateSiteIntent(intent, { agentAccessPolicy: request.payload.policy });
         await this.repository.saveSiteIntent(nextIntent);
         authorityApplied = true;
+        const applied = controlPlaneChangeRequestSchema.parse({
+          ...request,
+          status: "applied",
+          decidedBy: request.decidedBy ?? actorId,
+          decidedAt: request.decidedAt ?? new Date().toISOString()
+        });
+        await this.repository.saveControlPlaneChangeRequest(applied);
+        return { request: applied, applied: true as const, policyOnly: true as const };
       }
 
       const currentInput = site.currentPublicBuildInputId ? await this.repository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
@@ -131,15 +139,15 @@ export class ControlPlaneServiceV2 {
       await this.repository.savePublicBuildInput(buildInput);
       await this.repository.setCurrentPublicBuildInput(site.id, buildInput.id);
       let session = await this.workflow.getOrCreateSession({ siteId: site.id, ownerId: actorId, buildInput });
-      session = siteAgentSessionV1Schema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
+      session = siteAgentSessionSchema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
       await this.repository.saveAgentSession(session);
-      const kind = request.impact === "deterministic" ? "rebase" as const : "page_edit" as const;
+      const kind = request.impact === "deterministic" ? "rebase" as const : "edit" as const;
       const run = await this.workflow.enqueueRun({
         session, kind, instruction: instructionFor(request.payload), requestedBy: actorId,
         origin: "control_plane", deferBehindActive: true,
         publishAfterSuccess: false
       });
-      const applied = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
+      const applied = controlPlaneChangeRequestSchema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
       await this.repository.saveControlPlaneChangeRequest(applied);
       return {
         request: applied,
@@ -150,12 +158,12 @@ export class ControlPlaneServiceV2 {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const failed = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "failed", failureReason: message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]` });
+      const failed = controlPlaneChangeRequestSchema.parse({ ...request, status: "failed", failureReason: message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]` });
       await this.repository.saveControlPlaneChangeRequest(failed);
-      if (authorityApplied) {
+      if (authorityApplied && request.payload.kind !== "update_agent_access_policy") {
         const now = new Date().toISOString();
         await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
-          schemaVersion: "operator-queue-item-v2",
+          schemaVersion: "operator-queue-item",
           id: id("operator"), siteId: request.siteId, reason: "authority_publish_failure", severity: "urgent", status: "open",
           findings: [{
             requestId: request.id,
@@ -176,7 +184,7 @@ export class ControlPlaneServiceV2 {
     return site ? this.repository.getBusinessState(site.businessId) : undefined;
   }
 
-  private async ownerInputSnapshot(request: ControlPlaneChangeRequestV2): Promise<SourceSnapshotV1> {
+  private async ownerInputSnapshot(request: ControlPlaneChangeRequest): Promise<SourceSnapshotV1> {
     const now = new Date().toISOString();
     const payload = { requestId: request.id, requestedBy: request.requestedBy, change: request.payload };
     return sourceSnapshotV1Schema.parse({
@@ -186,11 +194,11 @@ export class ControlPlaneServiceV2 {
   }
 }
 
-export const controlPlaneService = new ControlPlaneServiceV2();
+export const controlPlaneService = new ControlPlaneService();
 
-function policyFor(kind: ControlPlaneChangePayloadV2["kind"]): {
-  targetAuthority: ControlPlaneChangeRequestV2["targetAuthority"];
-  impact: ControlPlaneChangeRequestV2["impact"];
+function policyFor(kind: ControlPlaneChangePayload["kind"]): {
+  targetAuthority: ControlPlaneChangeRequest["targetAuthority"];
+  impact: ControlPlaneChangeRequest["impact"];
   reviewRequired: boolean;
 } {
   switch (kind) {
@@ -210,7 +218,7 @@ function policyFor(kind: ControlPlaneChangePayloadV2["kind"]): {
   }
 }
 
-function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChangePayloadV2, source: SourceSnapshotV1, attestedAsset?: AssetRevisionV1) {
+function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChangePayload, source: SourceSnapshotV1, attestedAsset?: AssetRevisionV1) {
   const now = new Date().toISOString();
   const next = structuredClone(state);
   if (payload.kind === "confirm_facts") {
@@ -328,7 +336,7 @@ function mutateSiteIntent(intent: SiteIntentV3, patch: Partial<SiteIntentV3>) {
   return siteIntentV3Schema.parse(next);
 }
 
-function instructionFor(payload: ControlPlaneChangePayloadV2) {
+function instructionFor(payload: ControlPlaneChangePayload) {
   switch (payload.kind) {
     case "confirm_facts": return "Recompile the existing design against the owner-confirmed business facts.";
     case "update_contact": return "Recompile the existing design against the confirmed contact update.";
@@ -341,7 +349,7 @@ function instructionFor(payload: ControlPlaneChangePayloadV2) {
     case "attest_asset_rights": return "Recompile the existing design against the owner-attested asset revision.";
     case "update_external_link": return "Apply the approved external-link update.";
     case "update_site_intent": return "Update the website to reflect the approved site-intent change.";
-    case "update_agent_access_policy": return "Re-finalize the existing verified artifact with the owner-recorded agent access policy.";
+    case "update_agent_access_policy": return "Apply the owner-recorded agent access policy.";
     case "request_site_edit": return payload.instruction;
   }
 }

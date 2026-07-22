@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 
 export async function POST(request: Request, { params }: { params: Promise<{ versionId: string }> }) {
@@ -10,8 +10,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ver
   const actor = await authorizedSiteActor(request, version.siteId);
   if (!actor.ok) return actor.response;
   try {
-    const run = await agenticSiteWorkflow.restoreVersion(versionId, actor.actorId);
-    after(async () => { await agenticSiteWorkflow.executeRunAndFinalize(run.id); });
+    const run = await siteAuthoringWorkflow.restoreVersion(versionId, actor.actorId);
+    after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id); });
     return NextResponse.json({ run }, { status: 202 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });

@@ -1,32 +1,29 @@
 import { randomBytes } from "node:crypto";
 import { sha256, stableJson } from "@/packages/business-data";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts";
-import { siteAgentTraceSpanV1Schema, type SiteAgentTraceSpanV1 } from "@/packages/site-contracts";
+import { siteAgentRunEventSchema, type SiteAgentRunEvent } from "@/packages/site-contracts";
 import type { SitePlatformRepository } from "@/packages/platform-data";
-import type { ManagerTraceEventV1 } from "@/packages/site-agent";
+import type { ManagerRunEvent } from "@/packages/site-agent";
 
-export const tracePayloadRetentionMs = 24 * 60 * 60_000;
+export const runEventPayloadRetentionMs = 24 * 60 * 60_000;
 const maxPayloadBytes = 256 * 1024;
 const secretKey = /authorization|cookie|password|secret|token|api[-_]?key/i;
 
-export class SiteAgentTraceRecorderV1 {
+export class SiteAgentEventRecorder {
   constructor(
     private readonly repository: SitePlatformRepository,
     private readonly blobStore: ArtifactBlobStore,
-    readonly traceId: string,
-    private readonly linkage: { runId?: string; sessionId?: string; requestId?: string; attemptIndex?: number }
+    readonly runId: string
   ) {}
 
-  async recordManagerEvents(events: ManagerTraceEventV1[]) {
-    const spans: SiteAgentTraceSpanV1[] = [];
+  async recordManagerEvents(events: ManagerRunEvent[]) {
+    const runEvents: SiteAgentRunEvent[] = [];
     for (const event of events) {
       const payload = event.payload ? await this.persistPayload(event.id, event.payload) : {};
-      spans.push(siteAgentTraceSpanV1Schema.parse({
-        schemaVersion: "site-agent-trace-span-v1",
+      runEvents.push(siteAgentRunEventSchema.parse({
+        schemaVersion: "site-agent-run-event",
         id: event.id,
-        traceId: this.traceId,
-        ...this.linkage,
-        parentSpanId: event.parentSpanId,
+        runId: this.runId,
         sequence: 0,
         kind: event.kind,
         name: event.name,
@@ -43,23 +40,20 @@ export class SiteAgentTraceRecorderV1 {
         completedAt: event.completedAt
       }));
     }
-    return this.repository.saveTraceSpans(spans);
+    return this.repository.saveAgentRunEvents(runEvents);
   }
 
   async open(input: {
     id?: string;
-    parentSpanId?: string;
-    kind: SiteAgentTraceSpanV1["kind"];
+    kind: SiteAgentRunEvent["kind"];
     name: string;
     summary?: Record<string, unknown>;
     modelId?: string;
   }) {
-    const span = siteAgentTraceSpanV1Schema.parse({
-      schemaVersion: "site-agent-trace-span-v1",
-      id: input.id ?? traceSpanId(),
-      traceId: this.traceId,
-      ...this.linkage,
-      parentSpanId: input.parentSpanId,
+    const runEvent = siteAgentRunEventSchema.parse({
+      schemaVersion: "site-agent-run-event",
+      id: input.id ?? runEventId(),
+      runId: this.runId,
       sequence: 0,
       kind: input.kind,
       name: input.name,
@@ -68,10 +62,10 @@ export class SiteAgentTraceRecorderV1 {
       summary: boundedSummary(input.summary ?? {}),
       startedAt: new Date().toISOString()
     });
-    return (await this.repository.saveTraceSpans([span]))[0] ?? span;
+    return (await this.repository.saveAgentRunEvents([runEvent]))[0] ?? runEvent;
   }
 
-  async close(span: SiteAgentTraceSpanV1, input: {
+  async close(runEvent: SiteAgentRunEvent, input: {
     status: "succeeded" | "failed" | "cancelled";
     summary?: Record<string, unknown>;
     payload?: Record<string, unknown>;
@@ -81,42 +75,42 @@ export class SiteAgentTraceRecorderV1 {
     outputTokens?: number;
     modelId?: string;
   }) {
-    const payload = input.payload ? await this.persistPayload(span.id, input.payload) : {};
-    const completed = siteAgentTraceSpanV1Schema.parse({
-      ...span,
+    const payload = input.payload ? await this.persistPayload(runEvent.id, input.payload) : {};
+    const completed = siteAgentRunEventSchema.parse({
+      ...runEvent,
       status: input.status,
-      summary: boundedSummary(input.summary ?? span.summary),
+      summary: boundedSummary(input.summary ?? runEvent.summary),
       ...payload,
       errorCode: input.errorCode,
       inputTokens: input.inputTokens,
       cachedInputTokens: input.cachedInputTokens,
       outputTokens: input.outputTokens,
-      modelId: input.modelId ?? span.modelId,
+      modelId: input.modelId ?? runEvent.modelId,
       completedAt: new Date().toISOString()
     });
-    return (await this.repository.saveTraceSpans([completed]))[0] ?? completed;
+    return (await this.repository.saveAgentRunEvents([completed]))[0] ?? completed;
   }
 
-  private async persistPayload(spanId: string, value: Record<string, unknown>) {
+  private async persistPayload(eventId: string, value: Record<string, unknown>) {
     const sanitized = sanitize(value);
     let bytes = Buffer.from(stableJson(sanitized));
     if (bytes.length > maxPayloadBytes) {
       bytes = Buffer.from(stableJson({ truncated: true, bytes: bytes.length, preview: bytes.toString("utf8", 0, maxPayloadBytes - 256) }));
     }
     const payloadHash = sha256(bytes);
-    const payloadRef = `trace-payloads/${this.traceId}/${spanId}/${payloadHash.slice("sha256:".length)}.json`;
+    const payloadRef = `agent-run-events/${this.runId}/${eventId}/${payloadHash.slice("sha256:".length)}.json`;
     await this.blobStore.putImmutable({ key: payloadRef, bytes, contentType: "application/json", contentHash: payloadHash });
     return {
       payloadRef,
       payloadHash,
-      payloadExpiresAt: new Date(Date.now() + tracePayloadRetentionMs).toISOString()
+      payloadExpiresAt: new Date(Date.now() + runEventPayloadRetentionMs).toISOString()
     };
   }
 }
 
-export function traceSpanId() {
+export function runEventId() {
   const time = Date.now().toString(36).padStart(9, "0");
-  return `span_${time}${randomBytes(10).toString("hex")}`;
+  return `event_${time}${randomBytes(10).toString("hex")}`;
 }
 
 function boundedSummary(value: Record<string, unknown>) {

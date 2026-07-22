@@ -1,10 +1,10 @@
 import { processProspectReportJobs } from "@/lib/prospect-report-jobs";
-import { agenticSiteWorkflow, siteAgentRecoveryStaleAfterMs } from "@/packages/site-platform";
+import { siteAuthoringWorkflow, siteAgentRecoveryStaleAfterMs } from "@/packages/site-platform";
 
 export const automaticRecoveryLimit = 4;
 
 export async function processAutomaticRecovery(trigger: "startup" | "cloudflare_cron") {
-  const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({
+  const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({
     limit: automaticRecoveryLimit,
     staleAfterMs: siteAgentRecoveryStaleAfterMs
   });

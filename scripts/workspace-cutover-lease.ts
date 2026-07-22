@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { sha256 } from "../packages/business-data";
 import { sitePlatformRepository } from "../packages/platform-data";
 
-const task = "workspace_storage_cutover";
+const task = "site_authoring_maintenance";
 const leasePath = resolve(process.cwd(), ".data/maintenance/workspace-storage-cutover-lease.json");
 const command = process.argv[2];
 const minutes = parseMinutes(process.argv.slice(3));

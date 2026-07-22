@@ -1,5 +1,5 @@
 import { sitePublicBuildInputV3Schema, type SitePublicBuildInputV3 } from "@/packages/site-contracts";
-import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifactV1 } from "@/packages/site-verification";
+import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifact } from "@/packages/site-verification";
 import { assertWorkspaceSourcePolicy } from "@/packages/site-agent/source-policy";
 
 export type WorkspaceSourceFile = { path: string; content: string };
@@ -62,7 +62,7 @@ export class SiteSandboxClient {
     }>(sessionId, "rebase", "POST", { expectedRevision, publicBuildInput: value });
   }
 
-  async getArtifact(sessionId: string): Promise<AgentAuthoredArtifactV1> {
+  async getArtifact(sessionId: string): Promise<AgentAuthoredArtifact> {
     const artifact = await this.call<unknown>(sessionId, "artifact", "GET");
     return agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact(artifact));
   }
@@ -90,6 +90,7 @@ export class SiteSandboxClient {
         toolchain: string;
         managerPrompt: string;
         claimPolicy: string;
+        verificationPolicy: string;
         sourcePolicy: string;
         sandboxImageDigest: `sha256:${string}`;
       };

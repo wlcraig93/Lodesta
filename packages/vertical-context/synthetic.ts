@@ -17,5 +17,5 @@ export const syntheticContextModule: VerticalContextModuleV1 = {
   seoAeoOpportunities: ["Remain noindex."],
   structuredDataType: "LocalBusiness",
   skillRef: "packages/vertical-context/synthetic.ts",
-  evaluationRef: "scripts/verify-agentic-site-platform-v1.ts"
+  evaluationRef: "scripts/verify-agentic-site-platform.ts"
 };

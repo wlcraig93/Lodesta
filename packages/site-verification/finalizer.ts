@@ -6,11 +6,11 @@ import {
   type SitePublicBuildInputV3
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "@/packages/business-data";
-import { ArtifactClaimValidatorV1 } from "./artifact-claims";
+import { ArtifactClaimValidator } from "./artifact-claims";
 import {
   agentAuthoredArtifactSchema,
   normalizeRoutePath,
-  type AgentAuthoredArtifactV1,
+  type AgentAuthoredArtifact,
   type ArtifactGateFinding
 } from "./contracts";
 import { sanitizeAgentCss, sanitizeAgentHtml } from "./sanitizer";
@@ -22,12 +22,12 @@ export type PreparedArtifactFile = {
   bytes: Buffer;
 };
 
-export type PreparedSiteArtifactV1 = {
-  authored: AgentAuthoredArtifactV1;
+export type PreparedSiteArtifact = {
+  authored: AgentAuthoredArtifact;
   files: PreparedArtifactFile[];
   routes: Array<{ path: string; htmlFile: string; title: string; description: string; html: string }>;
   claims: ClaimDeclarationV1[];
-  capabilityBindings: AgentAuthoredArtifactV1["capabilityBindings"];
+  capabilityBindings: AgentAuthoredArtifact["capabilityBindings"];
   findings: ArtifactGateFinding[];
   qualityMetrics: {
     routeSimilarity: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
@@ -42,7 +42,7 @@ export type BrowserGateResult = {
 };
 
 export function prepareSiteArtifact(input: {
-  authoredArtifact: AgentAuthoredArtifactV1;
+  authoredArtifact: AgentAuthoredArtifact;
   buildInput: SitePublicBuildInputV3;
   runtimeSeriesId: string;
 }) {
@@ -57,7 +57,7 @@ export function prepareSiteArtifact(input: {
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
   for (const page of input.buildInput.intent.pageRequirements.filter((item) => item.required)) {
     const requiredRoute = normalizeRoutePath(page.slug ? `/${page.slug}` : "/");
-    if (!routes.has(requiredRoute)) findings.push(gateFinding("route.required", "route", `Required route ${requiredRoute} is missing.`, requiredRoute));
+    if (!routes.has(requiredRoute)) findings.push(gateFinding("route.required", "route", `Requested route ${requiredRoute} is missing.`, requiredRoute, "warning"));
   }
   for (const route of authored.routes) {
     if (/<(?:script|style)\b/i.test(route.bodyHtml)) {
@@ -81,7 +81,7 @@ export function prepareSiteArtifact(input: {
   });
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
-  const claims = new ArtifactClaimValidatorV1().validate({
+  const claims = new ArtifactClaimValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
     declarations: authored.claims,
     buildInput: input.buildInput
@@ -135,11 +135,11 @@ export function prepareSiteArtifact(input: {
     capabilityBindings,
     findings: dedupeFindings(findings),
     qualityMetrics
-  } satisfies PreparedSiteArtifactV1;
+  } satisfies PreparedSiteArtifact;
 }
 
 export function finalizePreparedArtifact(input: {
-  prepared: PreparedSiteArtifactV1;
+  prepared: PreparedSiteArtifact;
   buildInput: SitePublicBuildInputV3;
   artifactId: string;
   workspaceRevisionId: string;
@@ -150,7 +150,7 @@ export function finalizePreparedArtifact(input: {
   sandboxImageDigest: `sha256:${string}`;
   browserGate: BrowserGateResult;
   createdAt?: string;
-}): { artifact: SiteBuildArtifactV1; files: PreparedArtifactFile[]; qualityMetrics: PreparedSiteArtifactV1["qualityMetrics"] } {
+}): { artifact: SiteBuildArtifactV1; files: PreparedArtifactFile[]; qualityMetrics: PreparedSiteArtifact["qualityMetrics"] } {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const findings = dedupeFindings([...input.prepared.findings, ...input.browserGate.findings]);
   const fileRecords = input.prepared.files.map((file) => ({
@@ -209,14 +209,14 @@ function validateSiteStructure(input: {
     for (const [kind, value] of [["title", route.title], ["description", route.description]] as const) {
       const key = `${kind}:${normalizeText(value)}`;
       const prior = metadata.get(key);
-      if (prior) findings.push(gateFinding(`metadata.${kind}_duplicate`, "metadata", `${kind === "title" ? "Title" : "Description"} duplicates ${prior}.`, route.path));
+      if (prior) findings.push(gateFinding(`metadata.${kind}_duplicate`, "metadata", `${kind === "title" ? "Title" : "Description"} duplicates ${prior}.`, route.path, "warning"));
       else metadata.set(key, route.path);
     }
   }
   const linkedRoutes = new Set(input.routes.flatMap((route) => internalRouteLinks(route.bodyHtml)));
   for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.required)) {
     const route = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
-    if (route !== "/" && !linkedRoutes.has(route)) findings.push(gateFinding("route.required_not_navigable", "route", `Required route ${route} is not linked from the site.`, route));
+    if (route !== "/" && !linkedRoutes.has(route)) findings.push(gateFinding("route.required_not_navigable", "route", `Requested route ${route} is not linked from the site.`, route, "warning"));
   }
   for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.purpose === "service" && page.offeringId)) {
     const routePath = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
@@ -234,7 +234,8 @@ function validateSiteStructure(input: {
         "route.repetitive_content",
         "route",
         `Route content is too repetitive with ${similarity.left}: five-word-shingle Jaccard ${similarity.jaccard.toFixed(3)}, smaller-page containment ${similarity.smallerPageContainment.toFixed(3)}.`,
-        similarity.right
+        similarity.right,
+        "warning"
       ));
     }
   }
@@ -291,7 +292,7 @@ function normalizeText(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function validateCapabilityBindings(artifact: AgentAuthoredArtifactV1, buildInput: SitePublicBuildInputV3) {
+function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput: SitePublicBuildInputV3) {
   const findings: ArtifactGateFinding[] = [];
   const routes = new Set(artifact.routes.map((route) => normalizeRoutePath(route.path)));
   const forms = new Set(buildInput.forms.map((form) => form.id));
@@ -462,8 +463,14 @@ function escapeScript(value: string) {
   return value.replace(/<\//g, "<\\/");
 }
 
-function gateFinding(id: string, area: ArtifactGateFinding["area"], message: string, route?: string): ArtifactGateFinding {
-  return { id, severity: "error", area, message, ...(route ? { route } : {}) };
+function gateFinding(
+  id: string,
+  area: ArtifactGateFinding["area"],
+  message: string,
+  route?: string,
+  severity: ArtifactGateFinding["severity"] = "error"
+): ArtifactGateFinding {
+  return { id, severity, area, message, ...(route ? { route } : {}) };
 }
 
 function dedupeFindings(findings: ArtifactGateFinding[]) {

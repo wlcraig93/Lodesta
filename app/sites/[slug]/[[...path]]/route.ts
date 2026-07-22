@@ -12,8 +12,8 @@ export async function GET(
   const { slug, path } = await params;
   const context = await loadPublishedSiteContext(slug);
   if (!context) return new Response(null, { status: 404 });
-  const { site, version, artifact, input } = context;
-  const policy = input.intent.agentAccessPolicy;
+  const { site, version, artifact } = context;
+  const policy = context.intent.agentAccessPolicy;
   const requested = path?.join("/") ?? "";
   if (requested === "robots.txt") return siteRobots(request, slug, artifact.artifactHash, version.id, policy);
   if (requested === "sitemap.xml") return siteSitemap(request, slug, artifact.routes.map((route) => route.path), version.publishedAt ?? version.createdAt, artifact.artifactHash, version.id, policy);

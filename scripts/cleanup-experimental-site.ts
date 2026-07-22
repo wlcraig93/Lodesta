@@ -33,7 +33,7 @@ if (sandboxIds.length) {
   }
 }
 
-const { data, error } = await client.rpc("cleanup_experimental_site_v1", {
+const { data, error } = await client.rpc("cleanup_experimental_site", {
   target_site_id: options.siteId,
   target_business_id: options.businessId,
   confirmation_token: options.confirmation
@@ -76,7 +76,7 @@ async function residualCounts(siteId: string, businessId: string) {
     ["site_workspace_revisions", "site_id", siteId],
     ["site_public_build_inputs", "site_id", siteId],
     ["site_agent_sessions", "site_id", siteId],
-    ["site_agent_runs_v2", "site_id", siteId],
+    ["site_agent_runs", "site_id", siteId],
     ["site_operator_queue", "site_id", siteId],
     ["source_snapshots", "business_id", businessId],
     ["asset_revisions", "business_id", businessId]

@@ -13,6 +13,20 @@ import {
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "./hash";
 
+export function siteIntentBuildContent(intent: SiteIntentV3) {
+  const {
+    agentAccessPolicy: _agentAccessPolicy,
+    revision: _revision,
+    updatedAt: _updatedAt,
+    intentHash: _intentHash,
+    ...content
+  } = intent;
+  return content;
+}
+
+export function siteIntentMatchesBuildContent(current: SiteIntentV3, built: SiteIntentV3) {
+  return stableJson(siteIntentBuildContent(current)) === stableJson(siteIntentBuildContent(built));
+}
 export type CreatePublicBuildInput = {
   id: string;
   state: BusinessStateV3;

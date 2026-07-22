@@ -1,6 +1,6 @@
 import React, { type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LodestaSite } from "./sdk";
 import { platformCapabilityStyles } from "./capability-styles";
@@ -9,7 +9,11 @@ import { siteDefinition } from "../src/site";
 const root = process.cwd();
 const publicInputPath = process.env.LODESTA_PUBLIC_BUILD_INPUT_PATH ?? join(root, ".lodesta", "public-build-input.json");
 const publicInput = JSON.parse(await readFile(publicInputPath, "utf8"));
-const sharedCss = await readFile(join(root, "src", "styles.css"), "utf8");
+const sourceRoot = join(root, "src");
+const cssPaths = (await readdir(sourceRoot, { recursive: true }))
+  .filter((path) => path.endsWith(".css"))
+  .sort((left, right) => left === "styles.css" ? -1 : right === "styles.css" ? 1 : left.localeCompare(right));
+const sharedCss = (await Promise.all(cssPaths.map(async (path) => `/* ${path} */\n${await readFile(join(sourceRoot, path), "utf8")}`))).join("\n");
 const previewCss = `${platformCapabilityStyles}\n${sharedCss}`;
 const routes = siteDefinition.routes.map((route) => ({
   path: normalizeRoute(route.path),
@@ -20,7 +24,6 @@ const routes = siteDefinition.routes.map((route) => ({
 const artifact = {
   schemaVersion: "agent-authored-artifact-v1",
   siteName: siteDefinition.siteName,
-  designRationale: siteDefinition.designRationale,
   sharedCss,
   routes,
   claims: siteDefinition.claims ?? [],

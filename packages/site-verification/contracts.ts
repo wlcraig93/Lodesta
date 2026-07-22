@@ -13,7 +13,6 @@ export const agentAuthoredRouteSchema = z.object({
 export const agentAuthoredArtifactSchema = z.object({
   schemaVersion: z.literal("agent-authored-artifact-v1"),
   siteName: z.string().min(1).max(200),
-  designRationale: z.string().min(1).max(4000),
   sharedCss: z.string().min(1).max(200_000),
   routes: z.array(agentAuthoredRouteSchema).min(1).max(40),
   claims: z.array(claimDeclarationV1Schema).max(500),
@@ -37,7 +36,7 @@ export const agentAuthoredArtifactSchema = z.object({
   }
 });
 
-export type AgentAuthoredArtifactV1 = z.infer<typeof agentAuthoredArtifactSchema>;
+export type AgentAuthoredArtifact = z.infer<typeof agentAuthoredArtifactSchema>;
 
 export function normalizeAgentAuthoredArtifact(value: unknown) {
   if (!value || typeof value !== "object") return value;

@@ -16,6 +16,13 @@ const forbiddenFiles = [
   "lib/generation-judge.ts",
   "lib/vertical-packs.ts",
   "lib/v3-editor.ts",
+  "packages/site-capabilities/policy.ts",
+  "scripts/site-v3-cutover.ts",
+  "scripts/snapshot-site-v3-database.ts",
+  "scripts/verify-site-v3-cutover.ts",
+  "scripts/migrate-workspace-blobs.ts",
+  "scripts/cleanup-workspace-rollback-copies.ts",
+  "scripts/retire-workspace-rollback-after-site-v3.ts",
   "supabase/schema.sql"
 ];
 for (const file of forbiddenFiles) {
@@ -32,6 +39,8 @@ for (const path of [
   "docs/generation-pipeline-clean-break.md",
   "docs/website-generation-bakeoff-v1.md",
   "docs/agentic-site-v1-spike-results.md",
+  "docs/agentic-site-workspace-v1-plan.md",
+  "docs/cloudflare-sandbox-storage-cutover.md",
   "fixtures/generation-quality/austin-tireman-crawl.json",
   "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
   "public/fixture-assets/auto-repair-shop-hero-v1.png",
@@ -53,16 +62,20 @@ for (const path of [
 }
 
 const forbiddenArchitecture = /SiteVersionV3|GenerationInputSnapshotV1|site-renderer-v3|site-compiler|generation-pipeline|generation-judge|vertical-packs|modelFallbackPolicy|deterministic_fallback|\/admin\/site-candidates/;
-const forbiddenCutoverContracts = /\b(?:SiteAgentRunV1|siteAgentRunV1Schema|BusinessStateV2|businessStateV2Schema|SiteIntentV2|siteIntentV2Schema|SitePublicBuildInputV1|sitePublicBuildInputV1Schema|SitePublicBuildInputV2|sitePublicBuildInputV2Schema|ManagerRunRequestV2|ManagerToolRuntimeV2|ManagerCompletionV2)\b|\bunsupported_vertical\b/;
+const forbiddenCutoverContracts = /\b(?:SiteAgentRunV\d+|siteAgentRunV\d+Schema|SiteAgentSessionV\d+|SiteAgentTraceSpanV\d+|SiteEditObjectiveV\d+|ControlPlaneChangeRequestV\d+|OperatorQueueItemV\d+|VerticalDemandEventV\d+|ArtifactBlobAuditReportV\d+|ArtifactBlobOverlapV\d+|AgentModelSettingsSnapshotV\d+|Manager(?:RunRequest|ToolRuntime|Completion|Discussion|TraceEvent)V\d+|BusinessStateV2|businessStateV2Schema|SiteIntentV2|siteIntentV2Schema|SitePublicBuildInputV1|sitePublicBuildInputV1Schema|SitePublicBuildInputV2|sitePublicBuildInputV2Schema)\b|\bunsupported_vertical\b/;
+const forbiddenOperationalStorage = /\b(?:site_agent_runs_v2|site_agent_trace_spans_v1|site_edit_objectives_v1|control_plane_change_requests_v2|vertical_demand_events_v1|site_agent_maintenance_leases_v1|workspace_storage_cutover)\b/;
 for (const file of files) {
   if (file === "scripts/verify-agentic-architecture.ts") continue;
   const source = await readFile(file, "utf8");
   if (forbiddenArchitecture.test(source)) errors.push(`${file}: names deleted V3 generation architecture`);
   if (forbiddenCutoverContracts.test(source)) errors.push(`${file}: names a deleted pre-cutover agent or authority contract`);
+  if (file !== "scripts/verify-supabase.ts" && forbiddenOperationalStorage.test(source)) {
+    errors.push(`${file}: names deleted operational storage or maintenance state`);
+  }
 }
 
 const applyRoute = await readFile("app/api/site-agent/runs/route.ts", "utf8");
-if (/kind:\s*z\.|parsed\.data\.kind/.test(applyRoute)) errors.push("Apply API accepts a caller-selected task kind instead of server-side preflight classification");
+if (/kind:\s*z\.|parsed\.data\.kind/.test(applyRoute)) errors.push("Apply API accepts a caller-selected task kind instead of creating the single canonical edit run");
 
 const verticalNeutralRoots = [
   "packages/site-agent/",
@@ -90,6 +103,34 @@ const managerFiles = files.filter((file) => file.startsWith("packages/site-agent
 const managerSource = (await Promise.all(managerFiles.map((file) => readFile(file, "utf8")))).join("\n");
 if (!managerSource.includes("class WebsiteManagerAgent")) errors.push("WebsiteManagerAgent is missing");
 if ((managerSource.match(/class\s+\w+Agent\b/g) ?? []).length !== 1) errors.push("Exactly one authoring agent class must exist");
+if (/set_site_plan|inspect_candidate|SiteEditObjective|parentSpanId|attemptIndex|replacementCount|anchorBudget|convergence|visualThesis|contentArchitecture|designRationale/i.test(managerSource)) {
+  errors.push("Website manager retains deleted planner, objective, hierarchy, or convergence ceremony");
+}
+const simpleCutover = await readFile("supabase/migrations/202607220003_simple_site_authoring.sql", "utf8");
+if (!simpleCutover.includes("simple_site_authoring_cutover_requires_empty_operational_state")
+  || !simpleCutover.includes("drop table if exists site_edit_objectives_v1")
+  || !simpleCutover.includes("create table site_agent_runs")
+  || !simpleCutover.includes("create table site_agent_run_events")
+  || /alter\s+table\s+site_agent_(?:runs|trace_spans|sessions)\s+rename/i.test(simpleCutover)
+  || /update\s+site_agent_runs(?:_v2)?\s+set\s+(?:kind|schema_version|run)\b/i.test(simpleCutover)
+  || /retired_request_events|retired_20260722/i.test(simpleCutover)) {
+  errors.push("Simple-authoring migration must be an assert-empty clean cut without historical translation or archive tables");
+}
+const runEventRecorder = await readFile("packages/site-platform/run-events.ts", "utf8");
+const lifecyclePolicy = await readFile("scripts/r2-lifecycle-policy.ts", "utf8");
+if (!runEventRecorder.includes("agent-run-events/") || !lifecyclePolicy.includes("agent-run-events/") || !lifecyclePolicy.includes("lodesta-expire-agent-run-events-v1")) {
+  errors.push("Flat run-event payloads are not covered by the one-day object lifecycle");
+}
+const authoringWorkflow = await readFile("packages/site-platform/workflow.ts", "utf8");
+if (/expectedRoutes|route\.regression|currentWorkspaceRoutes/.test(authoringWorkflow)) {
+  errors.push("Owner edits retain a hidden route-preservation gate instead of allowing exact intentional removals");
+}
+if (/unsupportedCapabilityDemands|unsupportedCapabilityMessage|taskKindForInstruction|preflightAndEnqueue/.test(authoringWorkflow)) {
+  errors.push("Owner instructions pass through a deleted keyword classifier or preflight gate before reaching the model");
+}
+if (/reconcileExpiredRunEventPayloads|listExpiredAgentRunEventPayloads|clearAgentRunEventPayloads/.test(authoringWorkflow)) {
+  errors.push("Application code duplicates the R2 run-event payload lifecycle");
+}
 
 const sandboxPackage = JSON.parse(await readFile("workers/site-sandbox/scaffold/package.json", "utf8")) as {
   dependencies?: Record<string, string>;

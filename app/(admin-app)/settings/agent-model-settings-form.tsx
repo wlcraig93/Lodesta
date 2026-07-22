@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { AdminButton, AdminButtonRow } from "@/components/admin/AdminButton";
 
 type SettingsSnapshot = {
-  settings: { siteAgentModel: string; siteCriticModel: string; ingestionModel: string };
+  settings: { siteAgentModel: string; ingestionModel: string };
   version: number;
   source: string;
   updatedBy?: string;
@@ -46,10 +46,6 @@ export function AgentModelSettingsForm({ initialSnapshot }: { initialSnapshot: S
       <label>
         Website manager
         <input value={form.siteAgentModel} onChange={(event) => setForm({ ...form, siteAgentModel: event.target.value })} />
-      </label>
-      <label>
-        Independent critic
-        <input value={form.siteCriticModel} onChange={(event) => setForm({ ...form, siteCriticModel: event.target.value })} />
       </label>
       <label>
         Business ingestion

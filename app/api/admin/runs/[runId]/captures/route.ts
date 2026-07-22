@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ runI
   const run = await sitePlatformRepository.getAgentRun((await params).runId);
   if (!run) return NextResponse.json({ error: "Run not found" }, { status: 404 });
   const key = new URL(request.url).searchParams.get("key") ?? "";
-  const eligible = new Set(run.attempts.flatMap((attempt) => attempt.screenshotKeys ?? []));
+  const eligible = new Set(run.screenshotKeys ?? []);
   if (!eligible.has(key)) return NextResponse.json({ error: "Capture not found" }, { status: 404 });
   const blob = await configuredArtifactBlobStore().get(key);
   if (!blob) return NextResponse.json({ error: "Capture not found" }, { status: 404 });

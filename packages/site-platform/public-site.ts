@@ -10,12 +10,13 @@ export async function loadPublishedSiteContext(slug: string) {
   if (!site?.publishedVersionId || site.status !== "active") return undefined;
   const version = await sitePlatformRepository.getSiteVersion(site.publishedVersionId);
   if (!version || version.status !== "published") return undefined;
-  const [artifact, input] = await Promise.all([
+  const [artifact, input, intent] = await Promise.all([
     sitePlatformRepository.getBuildArtifact(version.artifactId),
-    sitePlatformRepository.getPublicBuildInput(version.publicBuildInputId)
+    sitePlatformRepository.getPublicBuildInput(version.publicBuildInputId),
+    sitePlatformRepository.getSiteIntent(site.id)
   ]);
-  if (!artifact || !input || artifact.qa.hardGate !== "passed" || artifact.artifactHash !== version.artifactHash) return undefined;
-  return { site, version, artifact, input };
+  if (!artifact || !input || !intent || artifact.qa.hardGate !== "passed" || artifact.artifactHash !== version.artifactHash) return undefined;
+  return { site, version, artifact, input, intent };
 }
 
 export function llmsTextForSite(input: Awaited<ReturnType<typeof loadPublishedSiteContext>> extends infer T ? NonNullable<T> : never, origin: string, customDomain = false) {

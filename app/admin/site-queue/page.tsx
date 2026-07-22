@@ -37,7 +37,7 @@ export default async function AdminSiteCandidatesPage() {
         <p>{item.findings[0] && typeof item.findings[0].message === "string" ? item.findings[0].message : `${item.findings.length} recorded finding${item.findings.length === 1 ? "" : "s"}`}</p>
         <Link className="button secondary" href={`/admin/site-queue/${item.id}`}>Review</Link>
       </article>)}
-      {open.length === 0 ? <p className="muted">No failed or subjective-review candidates need operator attention.</p> : null}
+      {open.length === 0 ? <p className="muted">No failed candidates or operational reviews need attention.</p> : null}
     </div></section>
     <section className="panel"><h2>Reviewable candidates</h2><div className="finding-list">
       {candidates.map((version) => <article key={version.id} className="finding-card">

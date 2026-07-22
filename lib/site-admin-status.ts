@@ -1,5 +1,5 @@
 import type { ClaimRecord } from "@/packages/platform-operations";
-import type { PlatformSiteRecord, SiteAgentRunV2, SiteVersionV4 } from "@/packages/site-contracts";
+import type { PlatformSiteRecord, SiteAgentRun, SiteVersionV4 } from "@/packages/site-contracts";
 
 export type SiteLifecycleStatus = "generating" | "needs_attention" | "ready_for_review" | "published" | "draft";
 export type SiteOwnershipStatus = "claimed" | "claim_pending" | "unclaimed";
@@ -21,10 +21,10 @@ export const siteOwnershipLabels: Record<SiteOwnershipStatus, string> = {
 export function deriveSiteLifecycle(
   site: Pick<PlatformSiteRecord, "publishedVersionId">,
   versions: Array<Pick<SiteVersionV4, "status">>,
-  latestRun?: Pick<SiteAgentRunV2, "status">
+  latestRun?: Pick<SiteAgentRun, "status">
 ): SiteLifecycleStatus {
   if (latestRun?.status === "queued" || latestRun?.status === "running") return "generating";
-  if (latestRun?.status === "failed") return "needs_attention";
+  if (latestRun?.status === "failed" || latestRun?.status === "needs_input") return "needs_attention";
   if (site.publishedVersionId) return "published";
   if (versions.some((version) => version.status === "candidate")) return "ready_for_review";
   return "draft";

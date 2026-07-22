@@ -1,7 +1,7 @@
 import "../scripts/load-env";
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { agenticSiteWorkflow } from "../packages/site-platform";
+import { siteAuthoringWorkflow } from "../packages/site-platform";
 import { sitePlatformRepository } from "../packages/platform-data";
 import { processNextProspectReportJob } from "../lib/prospect-report-jobs";
 
@@ -27,14 +27,14 @@ async function main() {
     return;
   }
   if (command === "process-once") {
-    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs });
+    const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs });
     const prospectReport = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length ? null : await processNextProspectReportJob();
     console.log(JSON.stringify({ agentRuns, prospectReport }, null, 2));
     return;
   }
   if (command === "process-all") {
     const limit = boundedLimit(process.argv[3]);
-    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
+    const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
     const prospectReports = [];
     for (let index = 0; index < limit; index += 1) {
       const result = await processNextProspectReportJob();
@@ -49,7 +49,7 @@ async function main() {
     const limit = boundedLimit(process.argv[4]);
     console.log(JSON.stringify({ event: "worker_started", pollMs: idleMs, batchLimit: limit }));
     while (!shuttingDown) {
-      const result = await agenticSiteWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
+      const result = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
       if (result.reaped.length || result.recovered.length || result.processed.length) {
         console.log(JSON.stringify({ event: "agent_runs_processed", reapedSessions: result.reaped, recovered: result.recovered, processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
         continue;

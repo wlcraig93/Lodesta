@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
-import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform";
 import { authorizedOperator } from "../auth";
 
 const bootstrapSchema = z.object({
@@ -17,8 +17,8 @@ export async function POST(request: Request) {
   const parsed = bootstrapSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "Invalid site bootstrap request", issues: parsed.error.issues }, { status: 400 });
   try {
-    const result = await agenticSiteWorkflow.bootstrapFromUrl({ ...parsed.data, ownerId: actor.actorId });
-    after(async () => { await agenticSiteWorkflow.executeRunAndFinalize(result.run.id); });
+    const result = await siteAuthoringWorkflow.bootstrapFromUrl({ ...parsed.data, ownerId: actor.actorId });
+    after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(result.run.id); });
     return NextResponse.json({ site: result.site, session: result.session, run: result.run }, { status: 202 });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;

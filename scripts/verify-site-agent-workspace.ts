@@ -12,12 +12,12 @@ await assertMissing("app/(owner)/editor/[slug]/page.tsx");
 await assertMissing("app/(admin-app)/dashboard/page.tsx");
 await assertMissing("app/(owner)/dashboard/[slug]/page.tsx");
 
-assert(component.includes('const [planMode, setPlanMode] = useState(false)'), "Build is not the default workspace mode");
-assert(component.includes('planMode ? "/api/site-agent/discuss" : "/api/site-agent/runs"'), "Plan and Build do not use their canonical endpoints");
-assert(component.includes("result.discussion.requiresApply && result.discussion.proposedAction"), "Plan suggestions are not captured from the discussion response");
-assert(component.includes("setInstruction(planSuggestion.action)"), "Use this plan does not place the proposed action in the composer");
-const usePlanBody = component.match(/function usePlan\(\) \{([\s\S]*?)\n  \}\n\n  function navigatePreview/)?.[1] ?? "";
-assert(usePlanBody.length > 0 && !usePlanBody.includes("submit("), "Use this plan auto-submits the Build request");
+assert(component.includes('const [discussMode, setDiscussMode] = useState(false)'), "Build is not the default workspace mode");
+assert(component.includes('discussMode ? "/api/site-agent/discuss" : "/api/site-agent/runs"'), "Discuss and Build do not use their canonical endpoints");
+assert(component.includes("result.discussion.requiresApply && result.discussion.proposedAction"), "Discussion suggestions are not captured from the response");
+assert(component.includes("setInstruction(discussionSuggestion.action)"), "Using a suggestion does not place the proposed action in the composer");
+const useSuggestionBody = component.match(/function useSuggestion\(\) \{([\s\S]*?)\n  \}\n\n  function navigatePreview/)?.[1] ?? "";
+assert(useSuggestionBody.length > 0 && !useSuggestionBody.includes("submit("), "Using a suggestion auto-submits the Build request");
 assert(component.includes("frameWindow.location.assign(target)"), "Page selection does not navigate the mounted preview iframe");
 assert(component.includes("setSelectedPagePath(route)"), "Iframe navigation does not synchronize the page picker");
 assert(component.includes("key={previewIdentity}"), "Preview remount identity is not isolated from the selected page path");

@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { OperatorQueueItemV2, SitePublicationReadinessV1, SiteVersionV4 } from "@/packages/site-contracts";
+import type { OperatorQueueItem, SitePublicationReadinessV1, SiteVersionV4 } from "@/packages/site-contracts";
 
 export function OperatorQueueActions({ queueItem, version, readiness }: {
-  queueItem?: OperatorQueueItemV2;
+  queueItem?: OperatorQueueItem;
   version?: SiteVersionV4;
   readiness?: SitePublicationReadinessV1;
 }) {

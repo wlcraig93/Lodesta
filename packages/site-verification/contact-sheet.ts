@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
-import type { BrowserGateCaptureV1 } from "./browser-gate";
+import type { BrowserGateCapture } from "./browser-gate";
 
-export async function createArtifactContactSheet(captures: BrowserGateCaptureV1[]) {
+export async function createArtifactContactSheet(captures: BrowserGateCapture[]) {
   const selected = captures.filter((capture) => capture.viewport !== "tablet");
   if (!selected.length) throw new Error("A visual review contact sheet requires browser captures.");
   const browser = await chromium.launch({ headless: true });

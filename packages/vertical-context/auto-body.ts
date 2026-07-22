@@ -59,5 +59,5 @@ export const autoBodyContextModule: VerticalContextModuleV1 = {
   ],
   structuredDataType: "AutoBodyShop",
   skillRef: "packages/vertical-context/auto-body.ts",
-  evaluationRef: "docs/agentic-site-workspace-v1-plan.md"
+  evaluationRef: "docs/product-path-simplification-plan.md"
 };

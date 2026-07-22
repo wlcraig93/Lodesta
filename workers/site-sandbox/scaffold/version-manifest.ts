@@ -1,1 +1,1 @@
-export const sandboxSourcePolicyVersion = "workspace-source-policy-v4";
+export const sandboxSourcePolicyVersion = "workspace-source-policy-v5";

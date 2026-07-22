@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { agenticSiteWorkflow, deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { siteAuthoringWorkflow, deriveSitePublicationReadiness } from "@/packages/site-platform";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 
 export async function POST(request: Request, { params }: { params: Promise<{ versionId: string }> }) {
@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ver
   try {
     const readiness = await deriveSitePublicationReadiness({ versionId, repository: sitePlatformRepository });
     if (readiness.status !== "ready") return NextResponse.json({ error: "Candidate is not ready to publish", readiness }, { status: 422 });
-    const promoted = await agenticSiteWorkflow.promoteVersion(versionId, actor.actorId);
+    const promoted = await siteAuthoringWorkflow.promoteVersion(versionId, actor.actorId);
     return NextResponse.json({ ok: true, version: promoted });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

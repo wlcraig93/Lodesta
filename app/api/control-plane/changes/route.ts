@@ -3,7 +3,7 @@ import { z } from "zod";
 import { controlPlaneChangePayloadSchema } from "@/packages/site-contracts";
 import { controlPlaneService } from "@/packages/control-plane";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   try {
     const result = await controlPlaneService.submit({ ...parsed.data, requestedBy: actor.actorId });
     if ("run" in result && result.run && result.deferred !== true) {
-      after(async () => { await agenticSiteWorkflow.executeRunAndFinalize(result.run.id); });
+      after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(result.run.id); });
     }
     return applyRateLimitHeaders(NextResponse.json({ ok: true, ...result }, { status: result.applied ? 202 : 202 }), limit);
   } catch (error) {

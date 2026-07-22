@@ -8,31 +8,31 @@ import type {
   PointerEvent as ReactPointerEvent
 } from "react";
 import type {
-  OperatorQueueItemV2,
+  OperatorQueueItem,
   PlatformSiteRecord,
-  SiteAgentRunV2,
-  SiteAgentSessionV1,
+  SiteAgentRun,
+  SiteAgentSession,
   SiteElementSelectionV1,
   SitePublicationReadinessV1,
   SitePublicBuildInputV3,
   SiteVersionV4
 } from "@/packages/site-contracts";
-import type { SiteAgentMessageV1 } from "@/packages/platform-data";
+import type { SiteAgentMessage } from "@/packages/platform-data";
 
 type WorkspacePayload = {
   site: PlatformSiteRecord;
-  session?: SiteAgentSessionV1;
+  session?: SiteAgentSession;
   input?: SitePublicBuildInputV3;
   versions: SiteVersionV4[];
   versionRoutes: Record<string, Array<{ path: string; title: string }>>;
-  messages: SiteAgentMessageV1[];
-  runs: SiteAgentRunV2[];
+  messages: SiteAgentMessage[];
+  runs: SiteAgentRun[];
   readiness?: SitePublicationReadinessV1;
-  openFindings?: OperatorQueueItemV2[];
+  openFindings?: OperatorQueueItem[];
   activeRunActivity?: string;
 };
 
-type PlanSuggestion = {
+type DiscussionSuggestion = {
   response: string;
   action: string;
 };
@@ -78,8 +78,8 @@ export function SiteAgentWorkspace({
     messages: [],
     runs: []
   });
-  const [planMode, setPlanMode] = useState(false);
-  const [planSuggestion, setPlanSuggestion] = useState<PlanSuggestion>();
+  const [discussMode, setDiscussMode] = useState(false);
+  const [discussionSuggestion, setDiscussionSuggestion] = useState<DiscussionSuggestion>();
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
   const [mobilePane, setMobilePane] = useState<"chat" | "preview">("chat");
   const [compactViewport, setCompactViewport] = useState(false);
@@ -111,6 +111,7 @@ export function SiteAgentWorkspace({
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
   const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
+  const waitingRun = !activeRun ? workspace.runs.find((run) => run.status === "needs_input") : undefined;
   const failedRun = !activeRun ? workspace.runs.find((run) => run.status === "failed") : undefined;
   const selectedVersion = workspace.versions.find((version) => version.id === selectedVersionId)
     ?? latestCandidate
@@ -289,7 +290,7 @@ export function SiteAgentWorkspace({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest" });
-  }, [workspace.messages.length, activeRun?.stage, planSuggestion?.action]);
+  }, [workspace.messages.length, activeRun?.stage, discussionSuggestion?.action]);
 
   useEffect(() => {
     selectionModeRef.current = selectionMode;
@@ -319,23 +320,23 @@ export function SiteAgentWorkspace({
     if (!message || !workspace.session || busy || activeRun) return;
     setBusy(true);
     setNotice(undefined);
-    setPlanSuggestion(undefined);
+    setDiscussionSuggestion(undefined);
     try {
-      const endpoint = planMode ? "/api/site-agent/discuss" : "/api/site-agent/runs";
+      const endpoint = discussMode ? "/api/site-agent/discuss" : "/api/site-agent/runs";
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: workspace.session.id,
           selection,
-          ...(planMode ? { message } : { instruction: message })
+          ...(discussMode ? { message } : { instruction: message, resumeRunId: waitingRun?.id })
         })
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      if (planMode) {
+      if (discussMode) {
         const result = await response.json() as DiscussionResult;
         if (result.discussion.requiresApply && result.discussion.proposedAction) {
-          setPlanSuggestion({ response: result.discussion.response, action: result.discussion.proposedAction });
+          setDiscussionSuggestion({ response: result.discussion.response, action: result.discussion.proposedAction });
         }
       }
       setInstruction("");
@@ -347,11 +348,11 @@ export function SiteAgentWorkspace({
     }
   }
 
-  function usePlan() {
-    if (!planSuggestion) return;
-    setPlanMode(false);
-    setInstruction(planSuggestion.action);
-    setPlanSuggestion(undefined);
+  function useSuggestion() {
+    if (!discussionSuggestion) return;
+    setDiscussMode(false);
+    setInstruction(discussionSuggestion.action);
+    setDiscussionSuggestion(undefined);
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -673,7 +674,7 @@ export function SiteAgentWorkspace({
             ) : workspace.messages.length === 0 ? (
               <div className="site-agent-empty-message">
                 <strong>What should we work on?</strong>
-                <span>Describe a change to the site or turn on Plan to discuss it first.</span>
+                <span>Describe a change to the site, or switch to Discuss when you only want advice.</span>
               </div>
             ) : null}
             {workspace.messages.map((message) => (
@@ -681,12 +682,12 @@ export function SiteAgentWorkspace({
                 <p>{message.content}</p>
               </article>
             ))}
-            {planSuggestion ? (
-              <article className="site-agent-plan-suggestion">
-                <strong>Plan ready</strong>
+            {discussionSuggestion ? (
+              <article className="site-agent-discussion-suggestion">
+                <strong>Suggested change ready</strong>
                 <div>
-                  <button className="button primary" type="button" onClick={usePlan}>Use this plan</button>
-                  <button className="button secondary" type="button" onClick={() => setPlanSuggestion(undefined)}>Dismiss</button>
+                  <button className="button primary" type="button" onClick={useSuggestion}>Use this suggestion</button>
+                  <button className="button secondary" type="button" onClick={() => setDiscussionSuggestion(undefined)}>Dismiss</button>
                 </div>
               </article>
             ) : null}
@@ -694,6 +695,12 @@ export function SiteAgentWorkspace({
               <div className="site-agent-runline">
                 <span />
                 <div><strong>{stageLabel(activeRun)}</strong><small>{elapsedLabel(clock - Date.parse(activeRun.startedAt))} · {workspace.activeRunActivity ?? "starting"}</small></div>
+              </div>
+            ) : null}
+            {waitingRun ? (
+              <div className="site-agent-runline">
+                <span />
+                <div><strong>Your answer is needed</strong><small>{waitingRun.inputQuestion ?? "Answer the latest Lodesta question to continue this edit."}</small></div>
               </div>
             ) : null}
             {failedRun ? (
@@ -712,23 +719,23 @@ export function SiteAgentWorkspace({
               ref={composerRef}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder={planMode ? "Ask Lodesta to plan the change..." : "Describe what you want to change..."}
+              placeholder={discussMode ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void submit();
               }}
               rows={1}
             />
             <div className="site-agent-compose-footer">
-              <label className={`site-agent-plan-toggle ${planMode ? "is-active" : ""}`}>
-                <input type="checkbox" checked={planMode} onChange={(event) => setPlanMode(event.target.checked)} />
+              <label className={`site-agent-discuss-toggle ${discussMode ? "is-active" : ""}`}>
+                <input type="checkbox" checked={discussMode} onChange={(event) => setDiscussMode(event.target.checked)} />
                 <span aria-hidden="true" />
-                Plan
+                Discuss
               </label>
               <button
                 className="site-agent-send-button"
                 type="button"
-                aria-label={busy ? "Working" : planMode ? "Send plan message" : "Build requested change"}
-                title={busy ? "Working" : planMode ? "Send plan message" : "Build requested change"}
+                aria-label={busy ? "Working" : discussMode ? "Send discussion message" : "Build requested change"}
+                title={busy ? "Working" : discussMode ? "Send discussion message" : "Build requested change"}
                 aria-busy={busy ? true : undefined}
                 disabled={!instruction.trim() || busy || Boolean(activeRun)}
                 onClick={() => void submit()}
@@ -839,7 +846,7 @@ function clampSplitWidth(width: number, workspaceWidth: number) {
   return Math.round(Math.min(maximum, Math.max(MIN_SPLIT_PANEL_WIDTH, Number.isFinite(width) ? width : defaultPanelWidth(workspaceWidth))));
 }
 
-function messageAuthorLabel(role: SiteAgentMessageV1["role"]) {
+function messageAuthorLabel(role: SiteAgentMessage["role"]) {
   if (role === "agent") return "Lodesta message";
   if (role === "owner") return "Your message";
   if (role === "operator") return "Operator message";
@@ -884,7 +891,7 @@ function workspaceStatus({
   readiness
 }: {
   site: PlatformSiteRecord;
-  activeRun?: SiteAgentRunV2;
+  activeRun?: SiteAgentRun;
   latestCandidate?: SiteVersionV4;
   readiness?: SitePublicationReadinessV1;
 }) {
@@ -894,13 +901,14 @@ function workspaceStatus({
   return { label: site.status.replaceAll("_", " "), tone: site.status };
 }
 
-function stageLabel(run: SiteAgentRunV2) {
+function stageLabel(run: SiteAgentRun) {
   return ({
     queued: "Queued",
     authoring: "Designing",
     building: "Building",
     fast_preview: "Preview ready",
     verifying: "Running QA",
+    needs_input: "Waiting for your answer",
     candidate_ready: "Candidate ready",
     failed: "Needs review"
   } as const)[run.stage];

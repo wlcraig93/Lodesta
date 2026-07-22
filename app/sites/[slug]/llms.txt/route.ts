@@ -11,7 +11,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
     headers: {
       "content-type": "text/plain; charset=utf-8",
       "cache-control": "public, max-age=60, s-maxage=300",
-      "x-robots-tag": context.input.intent.agentAccessPolicy.search === "allow" ? "index, follow" : "noindex, nofollow",
+      "x-robots-tag": context.intent.agentAccessPolicy.search === "allow" ? "index, follow" : "noindex, nofollow",
       "x-lodesta-site-version": context.version.id,
       "vary": "Accept, Host, X-Forwarded-Host"
     }

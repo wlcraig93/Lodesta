@@ -14,7 +14,7 @@ const publicRoute = readFileSync("app/sites/[slug]/[[...path]]/route.ts", "utf8"
 const publicSite = readFileSync("packages/site-platform/public-site.ts", "utf8");
 const architecture = readFileSync("scripts/verify-agentic-architecture.ts", "utf8");
 
-for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:agentic-site-platform-v1", "verify:agentic-site-walking-skeleton", "verify:site-v3-cutover", "verify:site-v3-walking-skeleton", "verify:agent-ready-sites", "verify:agentic-architecture"]) {
+for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:agentic-site-platform", "verify:agentic-site-walking-skeleton", "verify:site-walking-skeleton", "verify:agent-ready-sites", "verify:r2-lifecycle", "verify:agentic-architecture"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
 for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY="]) {
@@ -35,4 +35,4 @@ assert(publicRoute.includes("loadPublishedSiteContext") && publicSite.includes('
 assert(architecture.includes("forbiddenFiles") && architecture.includes("forbiddenArchitecture"), "Architecture ratchet must reject retired contracts.");
 assert(architecture.includes("site-build-artifact-v1"), "Architecture ratchet must enforce V4 artifact finalization.");
 
-process.stdout.write(`${JSON.stringify({ ok: true, web: "railway.toml", watchdog: "workers/recovery-watchdog/wrangler.jsonc", localWorker: "workers/runner.ts", generation: "agentic-v4" }, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify({ ok: true, web: "railway.toml", watchdog: "workers/recovery-watchdog/wrangler.jsonc", localWorker: "workers/runner.ts", generation: "site-authoring" }, null, 2)}\n`);

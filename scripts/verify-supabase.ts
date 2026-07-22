@@ -25,7 +25,10 @@ for (const migration of [
   "202607200019_site_edit_objectives_v1.sql",
   "202607200020_final_legacy_generation_cleanup.sql",
   "202607200021_cost_optimized_sandbox_cutover.sql",
-  "202607210001_site_v3_hard_cutover.sql"
+  "202607210001_site_v3_hard_cutover.sql",
+  "202607220001_policy_only_site_intent.sql",
+  "202607220002_site_agent_needs_input.sql",
+  "202607220003_simple_site_authoring.sql"
 ]) {
   const source = readFileSync(`supabase/migrations/${migration}`, "utf8");
   assert(source.trim().length > 40, `${migration} is missing or empty.`);
@@ -35,20 +38,30 @@ const client = getSupabaseAdminClient();
 const checks = await Promise.all([
   count("sites"), count("business_states_v3"), count("site_intents_v3"), count("site_public_build_inputs"),
   count("site_workspace_revisions"), count("site_build_artifacts"), count("site_versions_v4"),
-  count("site_agent_sessions"), count("site_agent_runs_v2"), count("site_agent_trace_spans_v1"), count("site_edit_objectives_v1"), count("site_agent_maintenance_leases_v1"), count("site_operator_queue"),
+  count("site_agent_sessions"), count("site_agent_runs"), count("site_agent_messages"), count("site_agent_run_events"), count("site_agent_maintenance_leases"),
+  count("control_plane_change_requests"), count("site_operator_queue"),
   count("trusted_runtime_patches"), count("trusted_runtime_series"), count("trusted_runtime_promotion_audits"),
-  count("vertical_demand_events_v1"), count("site_redirects_v1"), count("site_version_approvals_v1")
+  count("vertical_demand_events"), count("site_redirects_v1"), count("site_version_approvals_v1")
 ]);
-const legacyTablesAbsent = await Promise.all([assertMissingRelation("generation_artifacts"), assertMissingRelation("site_generations")]);
+const legacyTablesAbsent = await Promise.all([
+  assertMissingRelation("generation_artifacts"),
+  assertMissingRelation("site_generations"),
+  assertMissingRelation("site_agent_runs_v2"),
+  assertMissingRelation("site_agent_trace_spans_v1"),
+  assertMissingRelation("site_edit_objectives_v1"),
+  assertMissingRelation("site_agent_maintenance_leases_v1"),
+  assertMissingRelation("control_plane_change_requests_v2"),
+  assertMissingRelation("vertical_demand_events_v1")
+]);
 const { error: telemetryError } = await client.from("site_agent_sessions")
   .select("sandbox_last_started_at,sandbox_last_destroyed_at,sandbox_provisioned_ms,sandbox_destroy_attempts").limit(1);
 if (telemetryError) throw new Error(`site_agent_sessions telemetry: ${telemetryError.message}`);
-const { data: activeLease, error: leaseError } = await client.rpc("site_agent_maintenance_active_v1", { task_name: `verify-${crypto.randomUUID()}` });
-if (leaseError || activeLease !== false) throw new Error(`site_agent_maintenance_active_v1: ${leaseError?.message ?? "unexpected active result"}`);
+const { data: activeLease, error: leaseError } = await client.rpc("site_agent_maintenance_active", { task_name: `verify-${crypto.randomUUID()}` });
+if (leaseError || activeLease !== false) throw new Error(`site_agent_maintenance_active: ${leaseError?.message ?? "unexpected active result"}`);
 process.stdout.write(`${JSON.stringify({ ok: true, tables: Object.fromEntries(checks), legacyTablesAbsent, durableCutoverLease: true, sandboxCostTelemetry: true }, null, 2)}\n`);
 
 async function count(table: string): Promise<[string, number]> {
-  const column = table === "business_states_v3" ? "business_id" : table === "site_agent_maintenance_leases_v1" ? "task" : "id";
+  const column = table === "business_states_v3" ? "business_id" : table === "site_agent_maintenance_leases" ? "task" : "id";
   // PostgREST can return a misleading 204 for HEAD requests against a missing relation.
   // Fetch one row so schema-cache failures remain visible to this deployment check.
   const { count: value, error } = await client.from(table).select(column, { count: "exact" }).limit(1);

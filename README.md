@@ -4,20 +4,20 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 The current website system uses canonical business data, one website manager agent, shared Lodesta capabilities, isolated Cloudflare builds, immutable site artifacts, and Railway/Next.js serving. It does not use presentation templates, copy slots, a planner/compiler design system, or per-vertical generator branches.
 
-The canonical architecture and implementation sequence are documented in [docs/agentic-site-workspace-v1-plan.md](docs/agentic-site-workspace-v1-plan.md).
+The canonical architecture and implementation sequence are documented in [docs/product-path-simplification-plan.md](docs/product-path-simplification-plan.md).
 
 ## Architecture
 
 - `packages/business-data`: crawl ingestion, normalized business state, and public sandbox projection.
 - `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
-- `packages/site-agent`: the single manager agent, visual/task critic, and versioned prompt contract.
+- `packages/site-agent`: the single website-authoring agent, its tools, and knowledge skills.
 - `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.
 - `workers/site-sandbox`: deny-by-default, prebaked Cloudflare build environment.
 - `workers/recovery-watchdog`: stateless fifteen-minute recovery trigger for the Railway web service.
 - `packages/site-verification`: sanitizer, factual-claim validation, browser gate, contact sheets, and finalization.
 - `packages/site-artifacts`: content-addressed local or R2 artifact storage.
 - `packages/platform-data`: V4 repository contracts and Supabase implementation.
-- `packages/site-platform`: sessions, runs, bounded repair, immutable candidates, publishing, restore, and rollback.
+- `packages/site-platform`: sessions, runs, clarifications, immutable candidates, publishing, restore, and rollback.
 - `packages/site-capabilities`: managed forms, analytics, maps, safe links, and capability policy.
 - `packages/control-plane`: typed business-state and site-intent mutations.
 - `packages/trusted-runtime`: audited runtime-series patching and rollback.
@@ -88,7 +88,7 @@ Railway hosts the Next.js web service and worker. Supabase stores canonical auth
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
-Database changes are additive migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. The pre-launch V3 migration requires the explicit report/manifest/cleanup hard cutover before its assert-empty migration; the application has no compatibility readers or dual-write paths.
+Database changes are migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. Regenerable operational records use the single canonical unversioned site-authoring schema; the application has no compatibility readers or dual-write paths.
 
 ## Security Boundaries
 

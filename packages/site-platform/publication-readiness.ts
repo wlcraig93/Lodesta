@@ -1,6 +1,7 @@
 import type { SitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository, redirectsStrandedByRoutes, type PlatformOperationsRepository } from "@/packages/platform-operations";
 import { sitePublicationReadinessV1Schema, type SitePublicationReadinessV1 } from "@/packages/site-contracts";
+import { siteIntentMatchesBuildContent } from "@/packages/business-data";
 
 export async function deriveSitePublicationReadiness(input: {
   versionId: string;
@@ -10,12 +11,11 @@ export async function deriveSitePublicationReadiness(input: {
   const operations = input.operationsRepository ?? platformOperationsRepository;
   const version = await input.repository.getSiteVersion(input.versionId);
   if (!version) throw new Error("Site version not found.");
-  const [site, artifact, buildInput, approvals, queue, redirects] = await Promise.all([
+  const [site, artifact, buildInput, approvals, redirects] = await Promise.all([
     input.repository.getSite(version.siteId),
     input.repository.getBuildArtifact(version.artifactId),
     input.repository.getPublicBuildInput(version.publicBuildInputId),
     input.repository.listSiteVersionApprovals(version.id),
-    input.repository.listOperatorQueue(),
     operations.listRedirects(version.siteId)
   ]);
   if (!site) throw new Error("Site not found.");
@@ -26,7 +26,7 @@ export async function deriveSitePublicationReadiness(input: {
   ]);
   const blockers: SitePublicationReadinessV1["blockers"] = [];
   if (site.status === "experimental") blockers.push(blocker("experimental_site", "Experimental sites cannot be published.", site.id));
-  if (!buildInput || !state || !intent || buildInput.businessStateRevision !== state.revision || buildInput.siteIntentRevision !== intent.revision) {
+  if (!buildInput || !state || !intent || buildInput.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, buildInput.intent)) {
     blockers.push(blocker("stale_input", "This candidate predates the current verified business state or site intent.", version.publicBuildInputId));
   }
   if (!artifact || artifact.artifactHash !== version.artifactHash || artifact.qa.hardGate !== "passed") {
@@ -34,9 +34,6 @@ export async function deriveSitePublicationReadiness(input: {
   }
   if (buildInput?.business.assets.some((asset) => !["preclaim_safe", "customer_granted"].includes(asset.rightsStatus))) {
     blockers.push(blocker("asset_rights", "One or more rendered assets do not have publication rights.", version.publicBuildInputId));
-  }
-  for (const item of queue.filter((candidate) => candidate.siteId === site.id && candidate.reason === "subjective_finding" && ["open", "in_review"].includes(candidate.status))) {
-    blockers.push(blocker("subjective_finding", "An operator finding remains open for this site.", item.id));
   }
   const latestApproval = approvals.filter((approval) => approval.artifactHash === version.artifactHash)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0];

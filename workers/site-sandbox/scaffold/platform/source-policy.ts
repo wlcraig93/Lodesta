@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { sandboxSourcePolicyVersion } from "../version-manifest";
 
-export type WorkspaceSourcePolicyFindingV1 = {
+export type WorkspaceSourcePolicyFinding = {
   id: string;
   path: string;
   message: string;
@@ -9,10 +9,9 @@ export type WorkspaceSourcePolicyFindingV1 = {
 
 export const workspaceSourcePolicyVersion = sandboxSourcePolicyVersion;
 
-export type WorkspaceSourcePolicyFileV1 = { path: string; content: string };
+export type WorkspaceSourcePolicyFile = { path: string; content: string };
 
 const requiredPaths = new Set(["src/site.tsx", "src/styles.css"]);
-const allowedImports = new Set(["react", "../platform/sdk"]);
 const forbiddenReferences = new Map<string, string>([
   ["fetch", "network"], ["XMLHttpRequest", "network"], ["WebSocket", "network"], ["EventSource", "network"],
   ["process", "runtime_environment"], ["globalThis", "runtime_environment"], ["Deno", "runtime_environment"], ["Bun", "runtime_environment"],
@@ -31,30 +30,34 @@ const forbiddenCss: Array<[string, RegExp]> = [
   ["executable", /(?:expression|javascript\s*:|behavior\s*:|-moz-binding)\b/i]
 ];
 
-export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFileV1[]) {
-  const findings: WorkspaceSourcePolicyFindingV1[] = [];
+export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) {
+  const findings: WorkspaceSourcePolicyFinding[] = [];
   const paths = new Set(files.map((file) => file.path));
   for (const path of requiredPaths) {
     if (!paths.has(path)) findings.push({ id: "source.required_file", path, message: `Required source file ${path} is missing.` });
   }
   for (const file of files) {
-    if (!requiredPaths.has(file.path)) {
-      findings.push({ id: "source.path", path: file.path, message: "Generated source is outside the two-file workspace allowlist." });
+    if (!isAllowedSourcePath(file.path)) {
+      findings.push({ id: "source.path", path: file.path, message: "Source must be a safe .ts, .tsx, or .css file beneath src/." });
       continue;
     }
-    if (file.path === "src/styles.css") {
+    if (file.path.endsWith(".css")) {
       for (const [id, pattern] of forbiddenCss) {
         if (pattern.test(file.content)) findings.push({ id: `source.css_${id}`, path: file.path, message: `Generated CSS uses forbidden ${id.replaceAll("_", " ")} syntax.` });
       }
       continue;
     }
 
-    findings.push(...validateTsx(file));
+    findings.push(...validateTypeScript(file));
+  }
+  if (files.length > 80) findings.push({ id: "source.file_limit", path: "src", message: "A workspace may contain at most 80 source files." });
+  if (files.reduce((total, file) => total + new TextEncoder().encode(file.content).byteLength, 0) > 4_000_000) {
+    findings.push({ id: "source.byte_limit", path: "src", message: "Workspace source may contain at most 4 MB." });
   }
   return dedupe(findings);
 }
 
-export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFileV1[]) {
+export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) {
   const findings = validateWorkspaceSourcePolicy(files);
   if (!findings.length) return;
   const error = new Error(findings.map((finding) => `${finding.path}: ${finding.message}`).join("\n"));
@@ -62,24 +65,21 @@ export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFileV1[]
   throw error;
 }
 
-function validateTsx(file: WorkspaceSourcePolicyFileV1) {
-  const findings: WorkspaceSourcePolicyFindingV1[] = [];
-  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const imported = new Set<string>();
+function validateTypeScript(file: WorkspaceSourcePolicyFile) {
+  const findings: WorkspaceSourcePolicyFinding[] = [];
+  const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, file.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const add = (id: string, message: string) => findings.push({ id: `source.${id}`, path: file.path, message });
 
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       const moduleId = statement.moduleSpecifier.text;
-      imported.add(moduleId);
       if (!statement.importClause) add("import_syntax", "Only explicit static imports from the source allowlist are permitted.");
-      if (!allowedImports.has(moduleId)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
+      if (!allowedImport(file.path, moduleId)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
     } else if (ts.isImportEqualsDeclaration(statement) || (ts.isExportDeclaration(statement) && statement.moduleSpecifier)) {
-      add("import_syntax", "Only static imports from the source allowlist are permitted.");
+      if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
+        && allowedImport(file.path, statement.moduleSpecifier.text)) continue;
+      add("import_syntax", "Only static imports from React, the Lodesta SDK, and local src files are permitted.");
     }
-  }
-  if (!imported.has("react") || !imported.has("../platform/sdk")) {
-    add("import_required", "The workspace must import React and the Lodesta SDK explicitly.");
   }
 
   const visit = (node: ts.Node) => {
@@ -132,6 +132,34 @@ function validateTsx(file: WorkspaceSourcePolicyFileV1) {
   return findings;
 }
 
+function isAllowedSourcePath(path: string) {
+  return /^src\/[a-zA-Z0-9_.\/-]+\.(?:ts|tsx|css)$/.test(path)
+    && !path.split("/").some((part) => part === ".." || part === "." || part === "");
+}
+
+function allowedImport(fromPath: string, moduleId: string) {
+  if (moduleId === "react") return true;
+  if (!moduleId.startsWith(".")) return false;
+  const resolved = normalizePath(`${fromPath.slice(0, fromPath.lastIndexOf("/"))}/${moduleId}`);
+  if (!resolved) return false;
+  if (resolved === "platform/sdk") return true;
+  if (!resolved.startsWith("src/")) return false;
+  return true;
+}
+
+function normalizePath(value: string) {
+  const parts: string[] = [];
+  for (const part of value.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!parts.length) return undefined;
+      parts.pop();
+    }
+    else parts.push(part);
+  }
+  return parts.join("/").replace(/\.(?:ts|tsx|css)$/, "");
+}
+
 function staticString(node: ts.Expression): string | undefined {
   if (ts.isStringLiteralLike(node)) return node.text;
   if (ts.isParenthesizedExpression(node)) return staticString(node.expression);
@@ -158,7 +186,7 @@ function isPropertyName(node: ts.Identifier) {
     || ts.isExportSpecifier(parent);
 }
 
-function dedupe(findings: WorkspaceSourcePolicyFindingV1[]) {
+function dedupe(findings: WorkspaceSourcePolicyFinding[]) {
   const seen = new Set<string>();
   return findings.filter((finding) => {
     const key = `${finding.id}:${finding.path}:${finding.message}`;

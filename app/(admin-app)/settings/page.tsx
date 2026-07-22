@@ -14,7 +14,7 @@ export default async function SettingsPage() {
       <AdminPageHeader
         eyebrow="Operator settings"
         title="Runtime settings"
-        description="Manage the model policy used by ingestion, the website manager, and the independent critic."
+        description="Manage the model policy used by ingestion and the website manager."
       />
 
       <div className="admin-grid">

@@ -23,13 +23,13 @@ export default async function OperatorReviewPage({ params }: { params: Promise<{
   if (!site) notFound();
   const artifact = version ? await sitePlatformRepository.getBuildArtifact(version.artifactId) : undefined;
   const readiness = version ? await deriveSitePublicationReadiness({ versionId: version.id, repository: sitePlatformRepository }) : undefined;
-  const failedContactSheet = run?.attempts.flatMap((attempt) => attempt.screenshotKeys ?? []).filter((key) => key.endsWith("/contact-sheet.png")).at(-1);
+  const failedContactSheet = run?.screenshotKeys?.filter((key) => key.endsWith("/contact-sheet.png")).at(-1);
 
   return <main className="admin-page">
     <header className="admin-header"><div><span className="badge">Operator review</span><h1>{site.slug}</h1><p>{item?.reason.replaceAll("_", " ") ?? `Candidate version ${version?.number}`}</p></div>
       <div className="button-row"><Link className="button secondary" href="/admin/site-queue">Back to queue</Link><Link className="button secondary" href={`/workspace/${site.slug}/website`}>Open workspace</Link></div></header>
     <div className="admin-grid">
-      <section className="panel"><h2>Artifact</h2>{version ? <div className="admin-artifact-frame"><iframe title={`${site.slug} candidate`} src={`/api/site-versions/${version.id}/artifact/`} /></div> : failedContactSheet && run ? <figure><img className="operator-contact-sheet" src={`/api/admin/runs/${run.id}/captures?key=${encodeURIComponent(failedContactSheet)}`} alt="Failed candidate contact sheet" /><figcaption>Final failed attempt</figcaption></figure> : <p className="muted">This run did not produce a candidate artifact.</p>}</section>
+      <section className="panel"><h2>Artifact</h2>{version ? <div className="admin-artifact-frame"><iframe title={`${site.slug} candidate`} src={`/api/site-versions/${version.id}/artifact/`} /></div> : failedContactSheet && run ? <figure><img className="operator-contact-sheet" src={`/api/admin/runs/${run.id}/captures?key=${encodeURIComponent(failedContactSheet)}`} alt="Failed candidate contact sheet" /><figcaption>Final failed execution</figcaption></figure> : <p className="muted">This run did not produce a candidate artifact.</p>}</section>
       <aside className="panel"><h2>Decision</h2>
         {version ? <dl className="detail-list"><dt>Version</dt><dd>{version.number} · {version.status}</dd><dt>Hard gate</dt><dd>{artifact?.qa.hardGate ?? "unavailable"}</dd><dt>Routes checked</dt><dd>{artifact?.qa.routesChecked ?? "unavailable"}</dd></dl> : null}
         {run ? <><dl className="detail-list"><dt>Run</dt><dd>{run.status} · {run.stage}</dd><dt>Model</dt><dd>{run.modelId}</dd><dt>Failure</dt><dd>{run.failureReason ?? "None"}</dd></dl><Link className="button secondary" href={`/admin/runs/${run.id}`}>Run diagnostics</Link></> : null}

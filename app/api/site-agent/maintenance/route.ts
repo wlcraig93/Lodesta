@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/security";
 import { hasBearerToken, hasValidAdminToken, hasValidRecoveryWatchdogToken } from "@/lib/auth-policy";
 import { processAutomaticRecovery } from "@/lib/recovery-watchdog";
-import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform";
 
 export const runtime = "nodejs";
 
@@ -50,5 +50,5 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
   const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Invalid maintenance request", issues: parsed.error.issues }, { status: 400 });
-  return NextResponse.json({ ok: true, ...(await agenticSiteWorkflow.processRecoverableRuns(parsed.data)) });
+  return NextResponse.json({ ok: true, ...(await siteAuthoringWorkflow.processRecoverableRuns(parsed.data)) });
 }

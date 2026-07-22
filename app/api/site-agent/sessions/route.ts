@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform";
 import { deriveSitePublicationReadiness } from "@/packages/site-platform";
 import { authorizedSiteActor } from "../auth";
 
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const actor = await authorizedSiteActor(request, parsed.data.siteId);
   if (!actor.ok) return actor.response;
   try {
-    await agenticSiteWorkflow.getOrCreateSession({ siteId: parsed.data.siteId, ownerId: actor.actorId });
+    await siteAuthoringWorkflow.getOrCreateSession({ siteId: parsed.data.siteId, ownerId: actor.actorId });
     return NextResponse.json(await workspacePayload(parsed.data.siteId, actor.actorId));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });
@@ -41,13 +41,12 @@ async function workspacePayload(siteId: string, actorId: string) {
   ]);
   const artifacts = await Promise.all(versions.map((version) => sitePlatformRepository.getBuildArtifact(version.artifactId)));
   const activeRun = runs.find((run) => run.status === "queued" || run.status === "running");
-  const activeSpans = activeRun ? await sitePlatformRepository.listTraceSpans(activeRun.id, { limit: 500 }) : [];
+  const activeEvents = activeRun ? await sitePlatformRepository.listAgentRunEvents(activeRun.id, { limit: 500 }) : [];
   const candidate = versions.find((version) => version.status === "candidate");
   const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
-  const openFindings = (await sitePlatformRepository.listOperatorQueue()).filter((item) => item.siteId === siteId && item.reason === "subjective_finding" && ["open", "in_review"].includes(item.status));
   const versionRoutes = Object.fromEntries(versions.map((version, index) => [
     version.id,
     artifacts[index]?.routes.map((route) => ({ path: route.path, title: route.title })) ?? []
   ]));
-  return { site, session, input, versions, versionRoutes, messages, runs, readiness, openFindings, activeRunActivity: activeSpans.at(-1)?.name };
+  return { site, session, input, versions, versionRoutes, messages, runs, readiness, openFindings: [], activeRunActivity: activeEvents.at(-1)?.name };
 }

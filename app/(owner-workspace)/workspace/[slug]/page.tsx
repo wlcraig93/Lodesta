@@ -4,7 +4,7 @@ import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { WorkspaceMetric, WorkspacePageHeader, WorkspaceStatus, formatWorkspaceDate, humanize } from "@/components/OwnerWorkspaceUI";
-import type { SiteAgentRunV2, SitePublicationReadinessV1, SiteVersionV4 } from "@/packages/site-contracts";
+import type { SiteAgentRun, SitePublicationReadinessV1, SiteVersionV4 } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -80,13 +80,21 @@ function deriveNextAction(input: {
   slug: string;
   candidate?: SiteVersionV4;
   readiness?: SitePublicationReadinessV1;
-  runs: SiteAgentRunV2[];
+  runs: SiteAgentRun[];
   openQueue: number;
   pendingProof: number;
   pendingRights: number;
   replyInquiries: Awaited<ReturnType<typeof siteCapabilityRepository.listInquiries>>;
 }) {
   const base = `/workspace/${input.slug}`;
+  const waiting = input.runs.find((run) => run.status === "needs_input");
+  if (waiting) return {
+    tone: "attention",
+    title: "Your website update needs one answer",
+    description: waiting.inputQuestion ?? "Answer Lodesta's question to continue the paused website change.",
+    href: `${base}/website`,
+    label: "Answer question"
+  };
   if (input.readiness?.status === "blocked" || input.openQueue || input.pendingProof || input.pendingRights) return {
     tone: "attention", title: "Clear the items holding back your next publish", description: `${input.readiness?.blockers.length ?? input.openQueue + input.pendingProof + input.pendingRights} item${(input.readiness?.blockers.length ?? input.openQueue + input.pendingProof + input.pendingRights) === 1 ? " needs" : "s need"} a decision before the website can move forward.`, href: input.pendingProof || input.pendingRights ? `${base}/business` : `${base}/website`, label: "Review items"
   };

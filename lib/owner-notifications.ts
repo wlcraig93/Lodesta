@@ -5,6 +5,7 @@ import type { ClaimRecord } from "@/packages/platform-operations";
 export type OwnerOperationalNotificationKind =
   | "proposal_ready"
   | "draft_awaiting_publish"
+  | "website_input_needed"
   | "inquiry_digest"
   | "payment_failure";
 

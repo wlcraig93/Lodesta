@@ -21,7 +21,7 @@ export type ArtifactClaimValidationResult = {
   supportedClaimIds: string[];
 };
 
-export class ArtifactClaimValidatorV1 {
+export class ArtifactClaimValidator {
   validate(input: {
     routes: ClaimValidationRoute[];
     declarations: ClaimDeclarationV1[];
@@ -41,7 +41,7 @@ export class ArtifactClaimValidatorV1 {
       const routeDeclarations = declarations.filter((claim) => claim.route === route.path);
       for (const declaration of routeDeclarations) {
         const result = validateDeclaration(declaration, text, facts);
-        if (result) findings.push(claimFinding(`claim.${declaration.id}`, result, route.path));
+        if (result) findings.push(claimFinding(`claim.${declaration.id}`, result, route.path, claimSeverity(declaration, facts)));
         else supportedClaimIds.push(declaration.id);
       }
       findings.push(...undeclaredMarkerFindings(route.path, text, routeDeclarations, facts));
@@ -252,6 +252,18 @@ function isSensitive(declaration: ClaimDeclarationV1) {
   return declaration.kind === "structured_data" || gatedSensitiveClaims(declaration.text).length > 0;
 }
 
+function claimSeverity(declaration: ClaimDeclarationV1, facts: Map<string, PublicFactV1>): ArtifactGateFinding["severity"] {
+  const referenced = declaration.sourceFactIds.map((id) => facts.get(id));
+  if (referenced.some((fact) => !fact)) return "error";
+  if (isSensitive(declaration) || concreteVerifiableAssertion(declaration.text)) return "error";
+  if (referenced.some((fact) => fact && ["phone", "email", "address", "hours", "offering", "service_area", "proof"].includes(fact.kind))) return "error";
+  return "warning";
+}
+
+function concreteVerifiableAssertion(value: string) {
+  return /(?:\b(?:licensed|insured|certified|accredited|award(?:ed)?|family[- ]owned|since\s+\d{4}|serv(?:e|es|ing)\s+[A-Z]|warranty|guarantee|24\s*\/\s*7|open\s+\d|same[- ]day|free\s+(?:estimate|consultation))\b|\$\s?\d|\b\d+(?:\.\d+)?\s*(?:years?|stars?|miles?)\b|@|\b\d{3}[-.)\s]+\d{3}[-.\s]+\d{4}\b)/i.test(value);
+}
+
 function factDisplayValues(fact: PublicFactV1): string[] {
   return flattenDisplayValues(fact.value).filter(Boolean);
 }
@@ -299,8 +311,8 @@ function comparableDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
-function claimFinding(id: string, message: string, route?: string): ArtifactGateFinding {
-  return { id, severity: "error", area: "claim", message, ...(route ? { route } : {}) };
+function claimFinding(id: string, message: string, route?: string, severity: ArtifactGateFinding["severity"] = "error"): ArtifactGateFinding {
+  return { id, severity, area: "claim", message, ...(route ? { route } : {}) };
 }
 
 function dedupeDeclarations(declarations: ClaimDeclarationV1[]) {

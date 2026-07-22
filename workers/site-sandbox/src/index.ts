@@ -149,7 +149,7 @@ export default {
       }
 
       if (request.method === "GET" && action === "source") {
-        const listed = await sandbox.exec(`find ${workspaceRoot}/src -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' \\) -print | sort`);
+        const listed = await sandbox.exec(`find ${workspaceRoot}/src -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \\) -print | sort`);
         if (!listed.success) return json({ error: "source_unavailable" }, 404);
         const paths = listed.stdout.trim().split("\n").filter(Boolean);
         if (paths.length > maxFilesPerApply) return json({ error: "source_file_limit" }, 413);
@@ -250,7 +250,7 @@ function validateApply(value: unknown): ApplyRequest {
   const files = record.files.map((entry) => {
     if (!entry || typeof entry !== "object") throw new Error("Each file must be an object.");
     const file = entry as Record<string, unknown>;
-    if (typeof file.path !== "string" || !/^src\/[a-zA-Z0-9_./-]+\.(?:css|ts|tsx|json)$/.test(file.path) || file.path.includes("..")) throw new Error("File path is outside the source allowlist.");
+    if (typeof file.path !== "string" || !/^src\/[a-zA-Z0-9_./-]+\.(?:css|ts|tsx)$/.test(file.path) || file.path.includes("..")) throw new Error("File path is outside the source allowlist.");
     if (typeof file.content !== "string") throw new Error("File content must be a string.");
     return { path: file.path, content: file.content };
   });

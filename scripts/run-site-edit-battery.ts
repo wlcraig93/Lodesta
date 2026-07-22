@@ -3,10 +3,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { AgenticSiteWorkflowV1, candidateAttemptForRun } from "../packages/site-platform";
+import { SiteAuthoringWorkflow } from "../packages/site-platform";
 
 const editSchema = z.object({
-  schemaVersion: z.literal("site-edit-battery-v1"),
+  schemaVersion: z.literal("site-edit-battery"),
   targetId: z.string().min(1),
   actorId: z.string().min(1),
   siteId: z.string().min(1),
@@ -29,7 +29,7 @@ const site = await repository.getSite(plan.siteId);
 if (!site || site.status !== "experimental") throw new Error("Edit battery requires a retained experimental site.");
 const session = await repository.getActiveAgentSession(site.id, plan.actorId);
 if (!session) throw new Error("The retained quality-run session is unavailable for this actor.");
-const workflow = new AgenticSiteWorkflowV1();
+const workflow = new SiteAuthoringWorkflow();
 const reportPath = join(dirname(planPath), `${plan.targetId}-edit-battery-report.json`);
 const results: unknown[] = [];
 
@@ -38,7 +38,7 @@ for (const task of plan.tasks) {
   const currentSite = await repository.getSite(site.id);
   const versions = await repository.listSiteVersions(site.id);
   const currentVersion = versions.find((version) => version.workspaceRevisionId === currentSite?.currentWorkspaceRevisionId) ?? versions.at(-1);
-  const { run } = await workflow.preflightAndEnqueueApply({
+  const { run } = await workflow.enqueueEdit({
     session: { ...session, currentWorkspaceRevisionId: currentSite?.currentWorkspaceRevisionId },
     instruction: task.instruction,
     requestedBy: plan.actorId,
@@ -49,22 +49,21 @@ for (const task of plan.tasks) {
     } : undefined
   });
   const completed = await workflow.executeRunAndFinalize(run.id);
-  const spans = await repository.listTraceSpans(completed.id, { limit: 500 });
+  const events = await repository.listAgentRunEvents(completed.id, { limit: 500 });
   const result = {
     taskId: task.id,
     runId: completed.id,
     status: completed.status,
     candidateVersionId: completed.candidateVersionId,
-    objectiveGate: candidateAttemptForRun(completed)?.hardGate,
-    appliedPatches: spans.filter((span) => span.kind === "tool_call" && span.name === "apply_patch" && span.status === "succeeded").length,
-    writeFileCalls: spans.filter((span) => span.kind === "tool_call" && span.name === "write_file").length,
+    artifactGate: completed.candidateVersionId ? "passed" : "failed",
+    sourceMutations: events.filter((event) => event.kind === "tool_call" && ["apply_patch", "write_file", "delete_file"].includes(event.name) && event.status === "succeeded").length,
     usage: completed.usage,
     failure: completed.failureReason
   };
   results.push(result);
-  await writeFile(reportPath, `${JSON.stringify({ schemaVersion: "site-edit-battery-report-v1", targetId: plan.targetId, siteId: site.id, results }, null, 2)}\n`);
-  progress(task.id, "completed", { runId: completed.id, status: completed.status, objectiveGate: result.objectiveGate });
-  if (completed.status !== "succeeded" || result.objectiveGate !== "passed" || result.appliedPatches < 1 || result.writeFileCalls !== 0) {
+  await writeFile(reportPath, `${JSON.stringify({ schemaVersion: "site-edit-battery-report", targetId: plan.targetId, siteId: site.id, results }, null, 2)}\n`);
+  progress(task.id, "completed", { runId: completed.id, status: completed.status, artifactGate: result.artifactGate });
+  if (completed.status !== "succeeded" || result.artifactGate !== "passed" || result.sourceMutations < 1) {
     throw new Error(`Edit battery stopped at ${task.id}; see ${reportPath}.`);
   }
 }

@@ -16,7 +16,7 @@ async function main() {
       return print(get(`/api/site-agent/sessions?siteId=${encodeURIComponent(args[0])}`));
     case "apply-edit":
       requireArgs(command, args, 2);
-      return print(post("/api/site-agent/runs", { sessionId: args[0], instruction: args.slice(1).join(" "), kind: "focused_edit" }));
+      return print(post("/api/site-agent/runs", { sessionId: args[0], instruction: args.slice(1).join(" ") }));
     case "run-status":
       requireArgs(command, args, 1);
       return print(get(`/api/site-agent/runs/${encodeURIComponent(args[0])}`));

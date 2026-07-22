@@ -3,10 +3,9 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { getSupabaseAdminClient } from "./supabase/client";
 
-export const AGENT_MODEL_SETTING_KEY = "agentic_site_models_v1";
+export const AGENT_MODEL_SETTING_KEY = "agentic_site_models";
 export const AGENT_MODEL_DEFAULTS = {
   siteAgentModel: "gpt-5.6-sol",
-  siteCriticModel: "gpt-5.6-sol",
   ingestionModel: "gpt-5.6-sol"
 } as const;
 
@@ -16,15 +15,14 @@ const localSettingsFile = join(process.cwd(), ".data", "operator-settings.json")
 const modelSlugSchema = z.string().trim().min(1).regex(/^[A-Za-z0-9._:-]+$/, "Model must be a valid model slug.");
 const settingsSchema = z.object({
   siteAgentModel: modelSlugSchema,
-  siteCriticModel: modelSlugSchema,
   ingestionModel: modelSlugSchema
 }).strict();
 const updateSchema = settingsSchema.extend({ version: z.coerce.number().int().min(0) });
 
-export type AgentModelSettingsV1 = z.infer<typeof settingsSchema>;
+export type AgentModelSettings = z.infer<typeof settingsSchema>;
 export type AgentModelSettingsSource = "db" | "file" | "cache" | "lkg" | "default";
-export type AgentModelSettingsSnapshotV1 = {
-  settings: AgentModelSettingsV1;
+export type AgentModelSettingsSnapshot = {
+  settings: AgentModelSettings;
   version: number;
   source: AgentModelSettingsSource;
   updatedBy?: string;
@@ -33,7 +31,7 @@ export type AgentModelSettingsSnapshotV1 = {
 };
 
 type StoredSetting = {
-  value: AgentModelSettingsV1;
+  value: AgentModelSettings;
   version: number;
   updatedBy?: string;
   updatedAt?: string;
@@ -55,7 +53,7 @@ type LocalSettingsFile = {
 };
 
 const globalCache = globalThis as typeof globalThis & {
-  __lodestaAgentModelSettings?: { snapshot: AgentModelSettingsSnapshotV1; fetchedAt: number };
+  __lodestaAgentModelSettings?: { snapshot: AgentModelSettingsSnapshot; fetchedAt: number };
   __lodestaOperatorSettingsLocalFileForTests?: string;
 };
 
@@ -66,7 +64,7 @@ export class StaleOperatorSettingsError extends Error {
   }
 }
 
-export function defaultAgentModelSettings(): AgentModelSettingsV1 {
+export function defaultAgentModelSettings(): AgentModelSettings {
   return { ...AGENT_MODEL_DEFAULTS };
 }
 
@@ -87,7 +85,7 @@ export function validateAgentModelSettingsUpdate(input: unknown) {
   return { ok: true as const, settings, version };
 }
 
-export async function getAgentModelSettings(options: { bypassCache?: boolean } = {}): Promise<AgentModelSettingsSnapshotV1> {
+export async function getAgentModelSettings(options: { bypassCache?: boolean } = {}): Promise<AgentModelSettingsSnapshot> {
   const now = Date.now();
   const cached = globalCache.__lodestaAgentModelSettings;
   if (!options.bypassCache && cached && now - cached.fetchedAt <= cacheTtlMs) {
@@ -105,7 +103,7 @@ export async function getAgentModelSettings(options: { bypassCache?: boolean } =
 }
 
 export async function saveAgentModelSettings(input: {
-  settings: AgentModelSettingsV1;
+  settings: AgentModelSettings;
   expectedVersion: number;
   changedBy: string;
 }) {
@@ -123,8 +121,8 @@ export async function auditAgentModelSettingsRejection(input: { changedBy: strin
   await recordAudit({ status: "rejected", changedBy: input.changedBy, newValue: input.attemptedValue, error: input.error });
 }
 
-function cacheSnapshot(row: StoredSetting): AgentModelSettingsSnapshotV1 {
-  const snapshot: AgentModelSettingsSnapshotV1 = {
+function cacheSnapshot(row: StoredSetting): AgentModelSettingsSnapshot {
+  const snapshot: AgentModelSettingsSnapshot = {
     settings: row.value,
     version: row.version,
     source: row.source,
@@ -164,7 +162,7 @@ async function readStoredSetting(): Promise<StoredSetting> {
   return mapSupabaseRow(data);
 }
 
-async function writeStoredSetting(input: { settings: AgentModelSettingsV1; expectedVersion: number; changedBy: string }): Promise<StoredSetting> {
+async function writeStoredSetting(input: { settings: AgentModelSettings; expectedVersion: number; changedBy: string }): Promise<StoredSetting> {
   if (!useSupabase()) {
     const file = await readLocalFile();
     const currentVersion = file.settings?.[AGENT_MODEL_SETTING_KEY]?.version ?? 0;

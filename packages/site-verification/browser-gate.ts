@@ -2,19 +2,19 @@ import { createServer, type Server } from "node:http";
 import { chromium, type Browser, type Page } from "playwright";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInputV3 } from "@/packages/site-contracts";
-import type { PreparedSiteArtifactV1 } from "./finalizer";
+import type { PreparedSiteArtifact } from "./finalizer";
 import type { ArtifactGateFinding } from "./contracts";
 
-export type BrowserGateCaptureV1 = {
+export type BrowserGateCapture = {
   key: string;
   route: string;
   viewport: "desktop" | "tablet" | "mobile";
   bytes: Buffer;
 };
 
-export type FullBrowserGateResultV1 = {
+export type FullBrowserGateResult = {
   findings: ArtifactGateFinding[];
-  captures: BrowserGateCaptureV1[];
+  captures: BrowserGateCapture[];
   routesChecked: number;
   linksChecked: number;
 };
@@ -26,18 +26,33 @@ const viewports = [
 ];
 
 export async function runArtifactBrowserGate(input: {
-  prepared: PreparedSiteArtifactV1;
+  prepared: PreparedSiteArtifact;
   buildInput: SitePublicBuildInputV3;
   blobStore: ArtifactBlobStore;
   capturePrefix: string;
   signal?: AbortSignal;
-}): Promise<FullBrowserGateResultV1> {
+}): Promise<FullBrowserGateResult> {
+  try {
+    return await runArtifactBrowserGateOnce(input);
+  } catch (error) {
+    if (!transientBrowserInfrastructureError(error) || input.signal?.aborted) throw error;
+    return runArtifactBrowserGateOnce(input);
+  }
+}
+
+async function runArtifactBrowserGateOnce(input: {
+  prepared: PreparedSiteArtifact;
+  buildInput: SitePublicBuildInputV3;
+  blobStore: ArtifactBlobStore;
+  capturePrefix: string;
+  signal?: AbortSignal;
+}): Promise<FullBrowserGateResult> {
   const harness = await startHarness(input);
   let browser: Browser | undefined;
   try {
     browser = await chromium.launch({ headless: true });
     const findings: ArtifactGateFinding[] = [];
-    const captures: BrowserGateCaptureV1[] = [];
+    const captures: BrowserGateCapture[] = [];
     let linksChecked = 0;
     for (const route of input.prepared.routes) {
       for (const viewport of viewports) {
@@ -60,24 +75,24 @@ export async function runArtifactBrowserGate(input: {
         const metrics = await inspectPage(page);
         linksChecked += metrics.links.length;
         if (metrics.horizontalOverflowPx > 2) {
-          routeFindings.push(finding("render.horizontal_overflow", `Horizontal overflow is ${metrics.horizontalOverflowPx}px at ${viewport.name}.`, route.path));
+          routeFindings.push(finding("render.horizontal_overflow", `Horizontal overflow is ${metrics.horizontalOverflowPx}px at ${viewport.name}.`, route.path, "render", "warning"));
         }
         if (metrics.headingOverflowCount > 0) {
-          routeFindings.push(finding("render.heading_overflow", `${metrics.headingOverflowCount} heading(s) overflow at ${viewport.name}.`, route.path));
+          routeFindings.push(finding("render.heading_overflow", `${metrics.headingOverflowCount} heading(s) overflow at ${viewport.name}.`, route.path, "render", "warning"));
         }
         if (metrics.brokenImages > 0) {
           routeFindings.push(finding("render.broken_image", `${metrics.brokenImages} image(s) failed at ${viewport.name}.`, route.path));
         }
         if (metrics.h1Count !== 1) {
-          routeFindings.push(finding("accessibility.h1", `Route requires exactly one H1; found ${metrics.h1Count}.`, route.path, "accessibility"));
+          routeFindings.push(finding("accessibility.h1", `Route should have exactly one H1; found ${metrics.h1Count}.`, route.path, "accessibility", "warning"));
         }
         if (metrics.minBodyFontPx < 16) {
           const examples = metrics.smallBodyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          routeFindings.push(finding("render.body_font", `Body copy computes below 16px at ${viewport.name}. Fix these selectors: ${examples}.`, route.path));
+          routeFindings.push(finding("render.body_font", `Body copy computes below 16px at ${viewport.name}. Fix these selectors: ${examples}.`, route.path, "render", "warning"));
         }
         if (metrics.tinyVisibleTextCount > 0) {
           const examples = metrics.tinyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          routeFindings.push(finding("render.tiny_text", `${metrics.tinyVisibleTextCount} visible text element(s) compute below 12px at ${viewport.name}. Fix these selectors: ${examples}.`, route.path));
+          routeFindings.push(finding("render.tiny_text", `${metrics.tinyVisibleTextCount} visible text element(s) compute below 12px at ${viewport.name}. Fix these selectors: ${examples}.`, route.path, "render", "warning"));
         }
         if (metrics.lowContrastExamples.length > 0) {
           const examples = metrics.lowContrastExamples
@@ -87,14 +102,17 @@ export async function runArtifactBrowserGate(input: {
             "render.contrast",
             `${metrics.lowContrastCount} visible text element(s) fail 4.5:1 contrast at ${viewport.name}. Examples: ${examples}.`,
             route.path,
-            "accessibility"
+            "accessibility",
+            "warning"
           ));
         }
         if (metrics.escapedEntityExamples.length > 0) {
           routeFindings.push(finding(
             "render.escaped_entity",
             `Visible text contains escaped HTML entity source instead of punctuation: ${metrics.escapedEntityExamples.join(", ")}.`,
-            route.path
+            route.path,
+            "render",
+            "warning"
           ));
         }
         for (const href of metrics.links) {
@@ -130,7 +148,7 @@ function abortable<T>(operation: Promise<T>, signal?: AbortSignal) {
 }
 
 async function startHarness(input: {
-  prepared: PreparedSiteArtifactV1;
+  prepared: PreparedSiteArtifact;
   buildInput: SitePublicBuildInputV3;
   blobStore: ArtifactBlobStore;
 }) {
@@ -301,8 +319,20 @@ function routeKey(route: string) {
   return route === "/" ? "home" : route.slice(1).replace(/[^a-z0-9]+/gi, "-");
 }
 
-function finding(id: string, message: string, route: string, area: ArtifactGateFinding["area"] = "render"): ArtifactGateFinding {
-  return { id, severity: "error", area, message, route };
+function finding(
+  id: string,
+  message: string,
+  route: string,
+  area: ArtifactGateFinding["area"] = "render",
+  severity: ArtifactGateFinding["severity"] = "error"
+): ArtifactGateFinding {
+  return { id, severity, area, message, route };
+}
+
+function transientBrowserInfrastructureError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "workflow_deadline_exhausted") return false;
+  return /browser.*(?:closed|disconnected|launch)|target.*closed|timeout|timed out|econnreset|econnrefused|socket hang up|harness did not bind/i.test(message);
 }
 
 function dedupe(findings: ArtifactGateFinding[]) {

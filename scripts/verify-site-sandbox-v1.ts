@@ -13,17 +13,25 @@ const files = [
     path: "src/site.tsx",
     content: `import React from "react";
 import { Fact, ManagedForm, ManagedMap } from "../platform/sdk";
+import { VerificationIntro } from "./components/VerificationIntro";
 export const siteDefinition = {
   siteName: "Sandbox verification",
-  designRationale: "A deterministic synthetic case used only to verify the production sandbox bridge.",
   claims: [], capabilityBindings: [],
   routes: [{ path: "/", title: "Sandbox verification", description: "Production sandbox protocol verification",
-    element: <main><p>Production sandbox verification</p><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1><p><Fact id="${input.publicFacts.find((fact) => fact.kind === "phone")?.id}" /></p><ManagedMap locationId="${input.business.locations[0]?.id}" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
+    element: <main><VerificationIntro /><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1><p><Fact id="${input.publicFacts.find((fact) => fact.kind === "phone")?.id}" /></p><ManagedMap locationId="${input.business.locations[0]?.id}" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
 };`
   },
   {
     path: "src/styles.css",
     content: `:root{font-family:Arial,sans-serif;color:#17211b;background:#fff}body{margin:0}main{width:min(900px,calc(100% - 32px));margin:0 auto;padding:64px 0}h1{font-size:48px;letter-spacing:0}form{display:grid;gap:12px;max-width:520px}label{display:grid;gap:6px}input,textarea,select,button{min-height:44px;font:inherit}`
+  },
+  {
+    path: "src/components/VerificationIntro.tsx",
+    content: `import React from "react"; export function VerificationIntro(){ return <p className="verification-intro">Production sandbox verification</p>; }`
+  },
+  {
+    path: "src/components/verification.css",
+    content: `.verification-intro{font-weight:700;letter-spacing:.02em}`
   }
 ] as const;
 
@@ -54,7 +62,7 @@ try {
   const postBuildDiagnostics = await client.diagnostics(sessionId);
   assert(!postBuildDiagnostics.processes.some((process) => process.status === "running" && process.command.includes("--port 4173")), "successful build eagerly started Vite");
   const source = await client.getSource(sessionId);
-  assert(source.files.length === 2, "source endpoint did not return both allowlisted files");
+  assert(source.files.length === 4, "source endpoint did not return the complete multi-file workspace");
   const artifact = await client.getArtifact(sessionId);
   assert(artifact.routes.some((route) => route.path === "/"), "artifact did not include the home route");
   assert(!artifact.routes.some((route) => route.bodyHtml.includes("data-lodesta-rendered-at")), "build embedded a nondeterministic form timestamp");

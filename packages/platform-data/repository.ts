@@ -3,14 +3,14 @@ import { dirname, resolve } from "node:path";
 import {
   businessStateV3Schema,
   assetRevisionV1Schema,
-  controlPlaneChangeRequestV2Schema,
+  controlPlaneChangeRequestSchema,
   formDefinitionV2Schema,
   operatorQueueItemSchema,
   platformSiteRecordSchema,
-  siteAgentRunV2Schema,
-  siteAgentTraceSpanV1Schema,
-  siteAgentSessionV1Schema,
-  siteEditObjectiveV1Schema,
+  siteAgentRunSchema,
+  siteAgentRunEventSchema,
+  siteAgentMessageSchema,
+  siteAgentSessionSchema,
   siteBuildArtifactV1Schema,
   siteIntentV3Schema,
   sitePublicBuildInputV3Schema,
@@ -20,20 +20,19 @@ import {
   sourceSnapshotV1Schema,
   trustedRuntimePatchV1Schema,
   trustedRuntimeSeriesV1Schema,
-  verticalDemandEventV1Schema,
+  verticalDemandEventSchema,
   type BusinessStateV3,
   type AssetRevisionV1,
-  type ControlPlaneChangeRequestV2,
+  type ControlPlaneChangeRequest,
   type FormDefinitionV2,
-  type OperatorQueueItemV2,
+  type OperatorQueueItem,
   type PlatformSiteRecord,
-  type SiteAgentRunV2,
-  type SiteAgentTraceSpanV1,
-  type SiteAgentSessionV1,
-  type SiteEditObjectiveV1,
+  type SiteAgentRun,
+  type SiteAgentRunEvent,
+  type SiteAgentMessage,
+  type SiteAgentSession,
   type SiteBuildArtifactV1,
   type SiteIntentV3,
-  type SiteElementSelectionV1,
   type SitePublicBuildInputV3,
   type SiteVersionV4,
   type SiteVersionApprovalV1,
@@ -41,24 +40,17 @@ import {
   type SourceSnapshotV1,
   type TrustedRuntimePatchV1,
   type TrustedRuntimeSeriesV1,
-  type VerticalDemandEventV1
+  type VerticalDemandEvent
 } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
+import { siteIntentMatchesBuildContent } from "@/packages/business-data";
 
-export type SiteAgentMessageV1 = {
-  id: string;
-  sessionId: string;
-  runId?: string;
-  role: "owner" | "agent" | "operator" | "system";
-  content: string;
-  selection?: SiteElementSelectionV1;
-  createdAt: string;
-};
+export type { SiteAgentMessage } from "@/packages/site-contracts";
 
 export type SiteAgentRunAdminRecord = {
   id: string;
   schemaVersion?: string;
-  run?: SiteAgentRunV2;
+  run?: SiteAgentRun;
   issue?: string;
 };
 
@@ -108,39 +100,35 @@ export interface SitePlatformRepository {
   getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatchV1 | undefined>;
   saveRuntimeSeries(series: TrustedRuntimeSeriesV1): Promise<void>;
   getRuntimeSeries(id: string): Promise<TrustedRuntimeSeriesV1 | undefined>;
-  saveAgentSession(session: SiteAgentSessionV1): Promise<void>;
-  getAgentSession(id: string): Promise<SiteAgentSessionV1 | undefined>;
-  getActiveAgentSession(siteId: string, ownerId: string): Promise<SiteAgentSessionV1 | undefined>;
-  listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSessionV1[]>;
-  saveAgentRun(run: SiteAgentRunV2): Promise<void>;
-  claimAgentRun(runId: string): Promise<SiteAgentRunV2 | undefined>;
-  getAgentRun(id: string): Promise<SiteAgentRunV2 | undefined>;
+  saveAgentSession(session: SiteAgentSession): Promise<void>;
+  getAgentSession(id: string): Promise<SiteAgentSession | undefined>;
+  getActiveAgentSession(siteId: string, ownerId: string): Promise<SiteAgentSession | undefined>;
+  listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSession[]>;
+  saveAgentRun(run: SiteAgentRun): Promise<void>;
+  claimAgentRun(runId: string): Promise<SiteAgentRun | undefined>;
+  getAgentRun(id: string): Promise<SiteAgentRun | undefined>;
   getAgentRunAdminRecord(id: string): Promise<SiteAgentRunAdminRecord | undefined>;
-  listAgentRuns(sessionId: string): Promise<SiteAgentRunV2[]>;
-  listRecentAgentRuns(input?: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number }): Promise<SiteAgentRunV2[]>;
-  listRecentAgentRunAdminRecords(input?: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number }): Promise<SiteAgentRunAdminRecord[]>;
-  listQueuedAgentRuns(limit: number): Promise<SiteAgentRunV2[]>;
-  listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRunV2[]>;
-  saveTraceSpans(spans: SiteAgentTraceSpanV1[]): Promise<SiteAgentTraceSpanV1[]>;
-  listTraceSpans(traceId: string, input?: { afterSequence?: number; limit?: number }): Promise<SiteAgentTraceSpanV1[]>;
-  listExpiredTracePayloads(expiredBefore: string, limit: number): Promise<SiteAgentTraceSpanV1[]>;
-  clearTracePayloads(spanIds: string[]): Promise<void>;
-  failOpenTraceSpans(runId: string, completedAt: string, errorCode: string): Promise<void>;
+  listAgentRuns(sessionId: string): Promise<SiteAgentRun[]>;
+  listRecentAgentRuns(input?: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number }): Promise<SiteAgentRun[]>;
+  listRecentAgentRunAdminRecords(input?: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number }): Promise<SiteAgentRunAdminRecord[]>;
+  listQueuedAgentRuns(limit: number): Promise<SiteAgentRun[]>;
+  listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRun[]>;
+  saveAgentRunEvents(events: SiteAgentRunEvent[]): Promise<SiteAgentRunEvent[]>;
+  listAgentRunEvents(runId: string, input?: { afterSequence?: number; limit?: number }): Promise<SiteAgentRunEvent[]>;
+  failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string): Promise<void>;
   acquireMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
   renewMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
   releaseMaintenanceLease(task: string, leaseTokenHash: string): Promise<boolean>;
   isMaintenanceLeaseActive(task: string, now: string): Promise<boolean>;
-  saveEditObjective(objective: SiteEditObjectiveV1): Promise<void>;
-  getEditObjective(runId: string): Promise<SiteEditObjectiveV1 | undefined>;
-  appendAgentMessage(message: SiteAgentMessageV1): Promise<void>;
-  listAgentMessages(sessionId: string): Promise<SiteAgentMessageV1[]>;
-  saveControlPlaneChangeRequest(request: ControlPlaneChangeRequestV2): Promise<void>;
-  getControlPlaneChangeRequest(id: string): Promise<ControlPlaneChangeRequestV2 | undefined>;
-  listControlPlaneChangeRequests(siteId: string): Promise<ControlPlaneChangeRequestV2[]>;
-  saveOperatorQueueItem(item: OperatorQueueItemV2): Promise<void>;
-  listOperatorQueue(status?: OperatorQueueItemV2["status"]): Promise<OperatorQueueItemV2[]>;
-  saveVerticalDemandEvent(event: VerticalDemandEventV1): Promise<void>;
-  listVerticalDemandEvents(status?: VerticalDemandEventV1["status"]): Promise<VerticalDemandEventV1[]>;
+  appendAgentMessage(message: SiteAgentMessage): Promise<void>;
+  listAgentMessages(sessionId: string): Promise<SiteAgentMessage[]>;
+  saveControlPlaneChangeRequest(request: ControlPlaneChangeRequest): Promise<void>;
+  getControlPlaneChangeRequest(id: string): Promise<ControlPlaneChangeRequest | undefined>;
+  listControlPlaneChangeRequests(siteId: string): Promise<ControlPlaneChangeRequest[]>;
+  saveOperatorQueueItem(item: OperatorQueueItem): Promise<void>;
+  listOperatorQueue(status?: OperatorQueueItem["status"]): Promise<OperatorQueueItem[]>;
+  saveVerticalDemandEvent(event: VerticalDemandEvent): Promise<void>;
+  listVerticalDemandEvents(status?: VerticalDemandEvent["status"]): Promise<VerticalDemandEvent[]>;
 }
 
 type LocalState = {
@@ -157,20 +145,19 @@ type LocalState = {
   versionApprovals: Record<string, SiteVersionApprovalV1>;
   runtimePatches: Record<string, TrustedRuntimePatchV1>;
   runtimeSeries: Record<string, TrustedRuntimeSeriesV1>;
-  sessions: Record<string, SiteAgentSessionV1>;
-  runs: Record<string, SiteAgentRunV2>;
-  traceSpans: Record<string, SiteAgentTraceSpanV1>;
+  sessions: Record<string, SiteAgentSession>;
+  runs: Record<string, SiteAgentRun>;
+  runEvents: Record<string, SiteAgentRunEvent>;
   maintenanceLeases: Record<string, { leaseTokenHash: string; leaseUntil: string; claimedAt: string }>;
-  editObjectives: Record<string, SiteEditObjectiveV1>;
-  messages: Record<string, SiteAgentMessageV1>;
-  controlPlaneChanges: Record<string, ControlPlaneChangeRequestV2>;
-  operatorQueue: Record<string, OperatorQueueItemV2>;
-  verticalDemandEvents: Record<string, VerticalDemandEventV1>;
+  messages: Record<string, SiteAgentMessage>;
+  controlPlaneChanges: Record<string, ControlPlaneChangeRequest>;
+  operatorQueue: Record<string, OperatorQueueItem>;
+  verticalDemandEvents: Record<string, VerticalDemandEvent>;
 };
 
 const emptyLocalState = (): LocalState => ({
   sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {}, versionApprovals: {},
-  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, traceSpans: {}, maintenanceLeases: {}, editObjectives: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
+  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
 });
 
 export class LocalSitePlatformRepository implements SitePlatformRepository {
@@ -319,14 +306,12 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       const input = store.buildInputs[target.publicBuildInputId];
       const state = Object.values(store.businessStates).find((item) => item.siteId === target.siteId);
       const intent = Object.values(store.intents).find((item) => item.siteId === target.siteId);
-      if (!input || !state || !intent || input.businessStateRevision !== state.revision || input.siteIntentRevision !== intent.revision) {
+      if (!input || !state || !intent || input.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, input.intent)) {
         throw new Error("stale_candidate");
       }
       if (input.business.assets.some((asset) => !["preclaim_safe", "customer_granted"].includes(asset.rightsStatus))) {
         throw new Error("candidate_contains_unpublishable_media");
       }
-      const openSubjective = Object.values(store.operatorQueue ?? {}).find((item) => item.siteId === target.siteId && item.reason === "subjective_finding" && ["open", "in_review"].includes(item.status));
-      if (openSubjective) throw new Error("candidate_has_open_subjective_findings");
       const latestApproval = Object.values(store.versionApprovals ?? {}).filter((item) => item.versionId === target.id && item.artifactHash === target.artifactHash)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       if (latestApproval?.status !== "approved") throw new Error("candidate_requires_operator_approval");
@@ -357,8 +342,8 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return this.write((store) => { store.runtimeSeries[series.id] = trustedRuntimeSeriesV1Schema.parse(series); });
   }
   async getRuntimeSeries(id: string) { return clone((await this.read()).runtimeSeries[id]); }
-  saveAgentSession(session: SiteAgentSessionV1) {
-    return this.write((store) => { store.sessions[session.id] = siteAgentSessionV1Schema.parse(session); });
+  saveAgentSession(session: SiteAgentSession) {
+    return this.write((store) => { store.sessions[session.id] = siteAgentSessionSchema.parse(session); });
   }
   async getAgentSession(id: string) { return clone((await this.read()).sessions[id]); }
   async getActiveAgentSession(siteId: string, ownerId: string) {
@@ -371,18 +356,18 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         && session.leaseExpiresAt <= expiredBefore)
       .sort((left, right) => left.leaseExpiresAt.localeCompare(right.leaseExpiresAt))
       .slice(0, limit)
-      .map((session) => clone(session) as SiteAgentSessionV1);
+      .map((session) => clone(session) as SiteAgentSession);
   }
-  saveAgentRun(run: SiteAgentRunV2) { return this.write((store) => { store.runs[run.id] = siteAgentRunV2Schema.parse(run); }); }
+  saveAgentRun(run: SiteAgentRun) { return this.write((store) => { store.runs[run.id] = siteAgentRunSchema.parse(run); }); }
   async claimAgentRun(runId: string) {
-    let claimed: SiteAgentRunV2 | undefined;
+    let claimed: SiteAgentRun | undefined;
     await this.write((store) => {
       const current = store.runs[runId];
       if (!current || current.status !== "queued") return;
       const now = new Date().toISOString();
-      if (store.maintenanceLeases.workspace_storage_cutover?.leaseUntil > now) return;
+      if (store.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) return;
       if (Object.values(store.runs).filter((run) => run.status === "running").length >= 4) return;
-      claimed = siteAgentRunV2Schema.parse({ ...current, status: "running", stage: "authoring", attempt: current.attempt + 1, heartbeatAt: now });
+      claimed = siteAgentRunSchema.parse({ ...current, status: "running", stage: "authoring", executionNumber: current.executionNumber + 1, heartbeatAt: now });
       store.runs[runId] = claimed;
     });
     return clone(claimed);
@@ -393,61 +378,48 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return run ? { id: run.id, schemaVersion: run.schemaVersion, run } : undefined;
   }
   async listAgentRuns(sessionId: string) {
-    return Object.values((await this.read()).runs).filter((run) => run.sessionId === sessionId).sort((left, right) => right.startedAt.localeCompare(left.startedAt)).map((run) => clone(run) as SiteAgentRunV2);
+    return Object.values((await this.read()).runs).filter((run) => run.sessionId === sessionId).sort((left, right) => right.startedAt.localeCompare(left.startedAt)).map((run) => clone(run) as SiteAgentRun);
   }
-  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
+  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
     return Object.values((await this.read()).runs)
       .filter((run) => (!input.siteId || run.siteId === input.siteId) && (!input.status || run.status === input.status))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, Math.max(1, Math.min(input.limit ?? 100, 500)))
-      .map((run) => clone(run) as SiteAgentRunV2);
+      .map((run) => clone(run) as SiteAgentRun);
   }
-  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
+  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
     return (await this.listRecentAgentRuns(input)).map((run) => ({ id: run.id, schemaVersion: run.schemaVersion, run }));
   }
   async listQueuedAgentRuns(limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "queued")
-      .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV2);
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "running" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
-      .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV2);
+      .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
-  saveTraceSpans(spans: SiteAgentTraceSpanV1[]) {
+  saveAgentRunEvents(events: SiteAgentRunEvent[]) {
     return this.write((store) => {
-      let nextSequence = Math.max(0, ...Object.values(store.traceSpans ?? {}).map((span) => span.sequence)) + 1;
-      for (const input of spans) {
-        const existing = store.traceSpans[input.id];
-        const parsed = siteAgentTraceSpanV1Schema.parse({ ...input, sequence: existing?.sequence ?? nextSequence++ });
-        if (existing && (existing.traceId !== parsed.traceId || existing.parentSpanId !== parsed.parentSpanId || existing.startedAt !== parsed.startedAt)) {
-          throw new Error("Trace span identity fields are immutable.");
+      let nextSequence = Math.max(0, ...Object.values(store.runEvents ?? {}).map((span) => span.sequence)) + 1;
+      for (const input of events) {
+        const existing = store.runEvents[input.id];
+        const parsed = siteAgentRunEventSchema.parse({ ...input, sequence: existing?.sequence ?? nextSequence++ });
+        if (existing && (existing.runId !== parsed.runId || existing.startedAt !== parsed.startedAt)) {
+          throw new Error("Run event identity fields are immutable.");
         }
-        store.traceSpans[parsed.id] = parsed;
+        store.runEvents[parsed.id] = parsed;
       }
-    }).then(() => this.listTraceSpansForIds(spans.map((span) => span.id)));
+    }).then(() => this.listAgentRunEventsForIds(events.map((event) => event.id)));
   }
-  async listTraceSpans(traceId: string, input: { afterSequence?: number; limit?: number } = {}) {
-    return Object.values((await this.read()).traceSpans ?? {}).filter((span) => span.traceId === traceId && span.sequence > (input.afterSequence ?? -1))
+  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
+    return Object.values((await this.read()).runEvents ?? {}).filter((event) => event.runId === runId && event.sequence > (input.afterSequence ?? -1))
       .sort((left, right) => left.sequence - right.sequence).slice(0, Math.max(1, Math.min(input.limit ?? 500, 1000)))
-      .map((span) => clone(span) as SiteAgentTraceSpanV1);
+      .map((event) => clone(event) as SiteAgentRunEvent);
   }
-  async listExpiredTracePayloads(expiredBefore: string, limit: number) {
-    return Object.values((await this.read()).traceSpans ?? {}).filter((span) => span.payloadRef && span.payloadExpiresAt && span.payloadExpiresAt <= expiredBefore)
-      .sort((left, right) => (left.payloadExpiresAt ?? "").localeCompare(right.payloadExpiresAt ?? "")).slice(0, limit)
-      .map((span) => clone(span) as SiteAgentTraceSpanV1);
-  }
-  clearTracePayloads(spanIds: string[]) {
+  failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string) {
     return this.write((store) => {
-      for (const spanId of spanIds) {
-        const span = store.traceSpans[spanId];
-        if (span) store.traceSpans[spanId] = siteAgentTraceSpanV1Schema.parse({ ...span, payloadRef: undefined, payloadHash: undefined, payloadExpiresAt: undefined });
-      }
-    });
-  }
-  failOpenTraceSpans(runId: string, completedAt: string, errorCode: string) {
-    return this.write((store) => {
-      for (const span of Object.values(store.traceSpans ?? {})) {
+      for (const span of Object.values(store.runEvents ?? {})) {
         if (span.runId === runId && span.status === "running") {
-          store.traceSpans[span.id] = siteAgentTraceSpanV1Schema.parse({ ...span, status: "failed", completedAt, errorCode });
+          store.runEvents[span.id] = siteAgentRunEventSchema.parse({ ...span, status: "failed", completedAt, errorCode });
         }
       }
     });
@@ -484,47 +456,39 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async isMaintenanceLeaseActive(task: string, now: string) {
     return Boolean((await this.read()).maintenanceLeases[task]?.leaseUntil > now);
   }
-  saveEditObjective(objective: SiteEditObjectiveV1) {
-    return this.write((store) => {
-      const parsed = siteEditObjectiveV1Schema.parse(objective);
-      if (store.editObjectives[parsed.runId]) throw new Error("Edit objectives are immutable.");
-      store.editObjectives[parsed.runId] = parsed;
-    });
-  }
-  async getEditObjective(runId: string) { return clone((await this.read()).editObjectives[runId]); }
-  appendAgentMessage(message: SiteAgentMessageV1) {
+  appendAgentMessage(message: SiteAgentMessage) {
     return this.write((store) => {
       if (store.messages[message.id]) throw new Error("Agent messages are immutable.");
-      store.messages[message.id] = structuredClone(message);
+      store.messages[message.id] = siteAgentMessageSchema.parse(message);
     });
   }
   async listAgentMessages(sessionId: string) {
-    return Object.values((await this.read()).messages).filter((item) => item.sessionId === sessionId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as SiteAgentMessageV1);
+    return Object.values((await this.read()).messages).filter((item) => item.sessionId === sessionId).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as SiteAgentMessage);
   }
-  saveControlPlaneChangeRequest(request: ControlPlaneChangeRequestV2) {
-    return this.write((store) => { store.controlPlaneChanges[request.id] = controlPlaneChangeRequestV2Schema.parse(request); });
+  saveControlPlaneChangeRequest(request: ControlPlaneChangeRequest) {
+    return this.write((store) => { store.controlPlaneChanges[request.id] = controlPlaneChangeRequestSchema.parse(request); });
   }
   async getControlPlaneChangeRequest(id: string) { return clone((await this.read()).controlPlaneChanges?.[id]); }
   async listControlPlaneChangeRequests(siteId: string) {
     return Object.values((await this.read()).controlPlaneChanges ?? {}).filter((item) => item.siteId === siteId)
-      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).map((item) => clone(item) as ControlPlaneChangeRequestV2);
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).map((item) => clone(item) as ControlPlaneChangeRequest);
   }
-  saveOperatorQueueItem(item: OperatorQueueItemV2) {
+  saveOperatorQueueItem(item: OperatorQueueItem) {
     return this.write((store) => { store.operatorQueue[item.id] = operatorQueueItemSchema.parse(item); });
   }
-  async listOperatorQueue(status?: OperatorQueueItemV2["status"]) {
-    return Object.values((await this.read()).operatorQueue).filter((item) => !status || item.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as OperatorQueueItemV2);
+  async listOperatorQueue(status?: OperatorQueueItem["status"]) {
+    return Object.values((await this.read()).operatorQueue).filter((item) => !status || item.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as OperatorQueueItem);
   }
-  saveVerticalDemandEvent(event: VerticalDemandEventV1) {
+  saveVerticalDemandEvent(event: VerticalDemandEvent) {
     return this.write((store) => {
-      const value = verticalDemandEventV1Schema.parse(event);
+      const value = verticalDemandEventSchema.parse(event);
       if (store.verticalDemandEvents[value.id]) throw new Error("Vertical demand events are immutable.");
       store.verticalDemandEvents[value.id] = value;
     });
   }
-  async listVerticalDemandEvents(status?: VerticalDemandEventV1["status"]) {
+  async listVerticalDemandEvents(status?: VerticalDemandEvent["status"]) {
     return Object.values((await this.read()).verticalDemandEvents ?? {}).filter((item) => !status || item.status === status)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => clone(item) as VerticalDemandEventV1);
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => clone(item) as VerticalDemandEvent);
   }
 
   private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "versionApprovals" | "runtimePatches">>(
@@ -538,9 +502,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     });
   }
 
-  private async listTraceSpansForIds(ids: string[]) {
+  private async listAgentRunEventsForIds(ids: string[]) {
     const state = await this.read();
-    return ids.map((id) => state.traceSpans[id]).filter(Boolean).map((span) => clone(span) as SiteAgentTraceSpanV1);
+    return ids.map((id) => state.runEvents[id]).filter(Boolean).map((span) => clone(span) as SiteAgentRunEvent);
   }
 
   private async read() {
@@ -574,7 +538,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const assetRevisions = input.assetRevisions.map((revision) => assetRevisionV1Schema.parse(revision));
     const publicBuildInput = sitePublicBuildInputV3Schema.parse(input.publicBuildInput);
     assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
-    await requireData(this.client.rpc("bootstrap_agentic_site_v2", {
+    await requireData(this.client.rpc("bootstrap_site", {
       site_document: site,
       state_document: state,
       intent_document: intent,
@@ -582,7 +546,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       source_documents: sourceSnapshots,
       asset_documents: assetRevisions,
       public_input_document: publicBuildInput
-    }), "Bootstrap agentic site");
+    }), "Bootstrap site");
   }
 
   async createSite(site: PlatformSiteRecord) {
@@ -686,13 +650,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return row ? businessStateV3Schema.parse(row.state) : undefined;
   }
   async saveSiteIntent(intent: SiteIntentV3) {
-    const value = siteIntentV3Schema.parse(intent);
-    const current = await this.getSiteIntent(value.siteId);
-    assertRevisionAdvance(current?.revision, value.revision, "site intent");
-    await requireOk(this.client.from("site_intents_v3").upsert({
-      id: value.id, site_id: value.siteId, schema_version: value.schemaVersion, revision: value.revision,
-      intent_hash: value.intentHash, intent: value, created_at: current ? undefined : value.updatedAt, updated_at: value.updatedAt
-    }), "Save site intent");
+    return persistSiteIntentAuthority(this.client, intent);
   }
   async getSiteIntent(siteId: string) {
     const row = await requireData<{ intent: unknown } | null>(this.client.from("site_intents_v3").select("intent").eq("site_id", siteId).maybeSingle(), "Load site intent");
@@ -830,8 +788,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_series").select("*").eq("id", id).maybeSingle(), "Load runtime series");
     return row ? runtimeSeriesFromRow(row) : undefined;
   }
-  async saveAgentSession(session: SiteAgentSessionV1) {
-    const value = siteAgentSessionV1Schema.parse(session);
+  async saveAgentSession(session: SiteAgentSession) {
+    const value = siteAgentSessionSchema.parse(session);
     await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_sessions").upsert({
         id: value.id, site_id: value.siteId, owner_id: value.ownerId, schema_version: value.schemaVersion,
         status: value.status, current_workspace_revision_id: value.currentWorkspaceRevisionId ?? null,
@@ -867,9 +825,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(sessionFromRow);
   }
-  async saveAgentRun(run: SiteAgentRunV2) {
-    const value = siteAgentRunV2Schema.parse(run);
-    await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs_v2").upsert({
+  async saveAgentRun(run: SiteAgentRun) {
+    const value = siteAgentRunSchema.parse(run);
+    await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs").upsert({
         id: value.id, session_id: value.sessionId, site_id: value.siteId, schema_version: value.schemaVersion,
         kind: value.kind, status: value.status, exact_parent_revision_id: value.exactParentRevisionId,
         output_revision_id: value.outputRevisionId, model_id: value.modelId, run: value,
@@ -877,31 +835,31 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       }), "Save agent run"), "Save agent run");
   }
   async claimAgentRun(runId: string) {
-    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run_v2", { target_run_id: runId }), "Claim site agent run");
-    return value ? siteAgentRunV2Schema.parse(value) : undefined;
+    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", { target_run_id: runId }), "Claim site agent run");
+    return value ? siteAgentRunSchema.parse(value) : undefined;
   }
-  async getAgentRun(id: string) { return getJson(this.client, "site_agent_runs_v2", "run", id, siteAgentRunV2Schema); }
+  async getAgentRun(id: string) { return getJson(this.client, "site_agent_runs", "run", id, siteAgentRunSchema); }
   async getAgentRunAdminRecord(id: string) {
     const row = await requireData<{ id: string; schema_version: string; run: unknown } | null>(
-      this.client.from("site_agent_runs_v2").select("id,schema_version,run").eq("id", id).maybeSingle(),
+      this.client.from("site_agent_runs").select("id,schema_version,run").eq("id", id).maybeSingle(),
       "Load site-agent run for admin"
     );
     return row ? adminRunRecord(row) : undefined;
   }
   async listAgentRuns(sessionId: string) {
-    const rows = await requireData<Array<{ run: unknown }>>(this.client.from("site_agent_runs_v2").select("run").eq("session_id", sessionId).order("started_at", { ascending: false }), "List agent runs");
-    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
+    const rows = await requireData<Array<{ run: unknown }>>(this.client.from("site_agent_runs").select("run").eq("session_id", sessionId).order("started_at", { ascending: false }), "List agent runs");
+    return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
-  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
-    let query = this.client.from("site_agent_runs_v2").select("run").order("started_at", { ascending: false })
+  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
+    let query = this.client.from("site_agent_runs").select("run").order("started_at", { ascending: false })
       .limit(Math.max(1, Math.min(input.limit ?? 100, 500)));
     if (input.siteId) query = query.eq("site_id", input.siteId);
     if (input.status) query = query.eq("status", input.status);
     const rows = await requireData<Array<{ run: unknown }>>(query, "List recent site agent runs");
-    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
+    return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
-  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
-    let query = this.client.from("site_agent_runs_v2").select("id,schema_version,run").order("started_at", { ascending: false })
+  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
+    let query = this.client.from("site_agent_runs").select("id,schema_version,run").order("started_at", { ascending: false })
       .limit(Math.max(1, Math.min(input.limit ?? 100, 500)));
     if (input.siteId) query = query.eq("site_id", input.siteId);
     if (input.status) query = query.eq("status", input.status);
@@ -910,34 +868,29 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async listQueuedAgentRuns(limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs_v2").select("run").eq("status", "queued").order("started_at").limit(limit),
+      this.client.from("site_agent_runs").select("run").eq("status", "queued").order("started_at").limit(limit),
       "List queued site agent runs"
     );
-    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
+    return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs_v2").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
+      this.client.from("site_agent_runs").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
       "List running site agent runs"
     );
-    return rows.map((row) => siteAgentRunV2Schema.parse(row.run))
+    return rows.map((row) => siteAgentRunSchema.parse(row.run))
       .filter((run) => (run.heartbeatAt ?? run.startedAt) < staleBefore).slice(0, limit);
   }
-  async saveTraceSpans(spans: SiteAgentTraceSpanV1[]) {
-    if (!spans.length) return [];
-    const values = spans.map((span) => siteAgentTraceSpanV1Schema.parse(span));
-    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_trace_spans_v1").upsert(values.map((value) => ({
+  async saveAgentRunEvents(events: SiteAgentRunEvent[]) {
+    if (!events.length) return [];
+    const values = events.map((event) => siteAgentRunEventSchema.parse(event));
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_run_events").upsert(values.map((value) => ({
       id: value.id,
-      trace_id: value.traceId,
       run_id: value.runId,
-      session_id: value.sessionId,
-      request_id: value.requestId,
-      parent_span_id: value.parentSpanId,
       schema_version: value.schemaVersion,
       kind: value.kind,
       name: value.name,
       status: value.status,
-      attempt_index: value.attemptIndex,
       turn_index: value.turnIndex,
       model_id: value.modelId,
       input_tokens: value.inputTokens,
@@ -950,70 +903,51 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       error_code: value.errorCode,
       started_at: value.startedAt,
       completed_at: value.completedAt
-    })), { onConflict: "id" }).select("*"), "Save trace spans");
-    return rows.map(traceSpanFromRow).sort((left, right) => left.sequence - right.sequence);
+    })), { onConflict: "id" }).select("*"), "Save run events");
+    return rows.map(runEventFromRow).sort((left, right) => left.sequence - right.sequence);
   }
-  async listTraceSpans(traceId: string, input: { afterSequence?: number; limit?: number } = {}) {
-    let query = this.client.from("site_agent_trace_spans_v1").select("*").eq("trace_id", traceId).order("sequence")
+  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
+    let query = this.client.from("site_agent_run_events").select("*").eq("run_id", runId).order("sequence")
       .limit(Math.max(1, Math.min(input.limit ?? 500, 1000)));
     if (input.afterSequence !== undefined) query = query.gt("sequence", input.afterSequence);
-    return (await requireData<Record<string, unknown>[]>(query, "List trace spans")).map(traceSpanFromRow);
+    return (await requireData<Record<string, unknown>[]>(query, "List run events")).map(runEventFromRow);
   }
-  async listExpiredTracePayloads(expiredBefore: string, limit: number) {
-    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_trace_spans_v1").select("*")
-      .not("payload_ref", "is", null).lte("payload_expires_at", expiredBefore).order("payload_expires_at").limit(limit), "List expired trace payloads");
-    return rows.map(traceSpanFromRow);
-  }
-  async clearTracePayloads(spanIds: string[]) {
-    if (!spanIds.length) return;
-    await requireOk(this.client.from("site_agent_trace_spans_v1").update({ payload_ref: null, payload_hash: null, payload_expires_at: null }).in("id", spanIds), "Clear trace payloads");
-  }
-  async failOpenTraceSpans(runId: string, completedAt: string, errorCode: string) {
-    await requireOk(this.client.from("site_agent_trace_spans_v1").update({ status: "failed", completed_at: completedAt, error_code: errorCode })
-      .eq("run_id", runId).eq("status", "running"), "Fail open trace spans");
+  async failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string) {
+    await requireOk(this.client.from("site_agent_run_events").update({ status: "failed", completed_at: completedAt, error_code: errorCode })
+      .eq("run_id", runId).eq("status", "running"), "Fail open run events");
   }
   async acquireMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
-    return Boolean(await requireData<boolean>(this.client.rpc("acquire_site_agent_maintenance_v2", {
+    return Boolean(await requireData<boolean>(this.client.rpc("acquire_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
     }), "Acquire site-agent maintenance lease"));
   }
   async renewMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
-    return Boolean(await requireData<boolean>(this.client.rpc("renew_site_agent_maintenance_v2", {
+    return Boolean(await requireData<boolean>(this.client.rpc("renew_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
     }), "Renew site-agent maintenance lease"));
   }
   async releaseMaintenanceLease(task: string, leaseTokenHash: string) {
-    return Boolean(await requireData<boolean>(this.client.rpc("release_site_agent_maintenance_v2", {
+    return Boolean(await requireData<boolean>(this.client.rpc("release_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash
     }), "Release site-agent maintenance lease"));
   }
   async isMaintenanceLeaseActive(task: string, _now: string) {
-    return Boolean(await requireData<boolean>(this.client.rpc("site_agent_maintenance_active_v1", { task_name: task }), "Check site-agent maintenance lease"));
+    return Boolean(await requireData<boolean>(this.client.rpc("site_agent_maintenance_active", { task_name: task }), "Check site-agent maintenance lease"));
   }
-  async saveEditObjective(objective: SiteEditObjectiveV1) {
-    const value = siteEditObjectiveV1Schema.parse(objective);
-    await requireOk(this.client.from("site_edit_objectives_v1").insert({
-      id: value.id, run_id: value.runId, session_id: value.sessionId, site_id: value.siteId,
-      request_id: value.requestId, schema_version: value.schemaVersion, objective: value, created_at: value.createdAt
-    }), "Save edit objective");
-  }
-  async getEditObjective(runId: string) {
-    const row = await requireData<{ objective: unknown } | null>(this.client.from("site_edit_objectives_v1").select("objective").eq("run_id", runId).maybeSingle(), "Load edit objective");
-    return row ? siteEditObjectiveV1Schema.parse(row.objective) : undefined;
-  }
-  async appendAgentMessage(message: SiteAgentMessageV1) {
+  async appendAgentMessage(message: SiteAgentMessage) {
+    const value = siteAgentMessageSchema.parse(message);
     await requireOk(this.client.from("site_agent_messages").insert({
-      id: message.id, session_id: message.sessionId, run_id: message.runId, role: message.role,
-      content: message.content, selection: message.selection, created_at: message.createdAt
+      id: value.id, schema_version: value.schemaVersion, session_id: value.sessionId, run_id: value.runId, role: value.role,
+      content: value.content, selection: value.selection, created_at: value.createdAt
     }), "Append agent message");
   }
   async listAgentMessages(sessionId: string) {
     const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_messages").select("*").eq("session_id", sessionId).order("created_at"), "List agent messages");
     return rows.map(messageFromRow);
   }
-  async saveControlPlaneChangeRequest(request: ControlPlaneChangeRequestV2) {
-    const value = controlPlaneChangeRequestV2Schema.parse(request);
-    await requireOk(this.client.from("control_plane_change_requests_v2").upsert({
+  async saveControlPlaneChangeRequest(request: ControlPlaneChangeRequest) {
+    const value = controlPlaneChangeRequestSchema.parse(request);
+    await requireOk(this.client.from("control_plane_change_requests").upsert({
       id: value.id, business_id: value.businessId, site_id: value.siteId, schema_version: value.schemaVersion,
       target_authority: value.targetAuthority, change_kind: value.payload.kind, payload: value.payload,
       impact: value.impact, status: value.status, expected_business_revision: value.expectedBusinessRevision,
@@ -1023,14 +957,14 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     }), "Save control-plane change request");
   }
   async getControlPlaneChangeRequest(id: string) {
-    const row = await requireData<Record<string, unknown> | null>(this.client.from("control_plane_change_requests_v2").select("*").eq("id", id).maybeSingle(), "Load control-plane change request");
+    const row = await requireData<Record<string, unknown> | null>(this.client.from("control_plane_change_requests").select("*").eq("id", id).maybeSingle(), "Load control-plane change request");
     return row ? controlPlaneChangeFromRow(row) : undefined;
   }
   async listControlPlaneChangeRequests(siteId: string) {
-    const rows = await requireData<Record<string, unknown>[]>(this.client.from("control_plane_change_requests_v2").select("*").eq("site_id", siteId).order("requested_at", { ascending: false }), "List control-plane change requests");
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("control_plane_change_requests").select("*").eq("site_id", siteId).order("requested_at", { ascending: false }), "List control-plane change requests");
     return rows.map(controlPlaneChangeFromRow);
   }
-  async saveOperatorQueueItem(item: OperatorQueueItemV2) {
+  async saveOperatorQueueItem(item: OperatorQueueItem) {
     const value = operatorQueueItemSchema.parse(item);
     await requireOk(this.client.from("site_operator_queue").upsert({
       id: value.id, schema_version: value.schemaVersion, site_id: value.siteId, version_id: value.versionId, run_id: value.runId,
@@ -1039,26 +973,64 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       resolution_note: value.resolutionNote
     }), "Save operator queue item");
   }
-  async listOperatorQueue(status?: OperatorQueueItemV2["status"]) {
+  async listOperatorQueue(status?: OperatorQueueItem["status"]) {
     let query = this.client.from("site_operator_queue").select("*").order("created_at");
     if (status) query = query.eq("status", status);
     const rows = await requireData<Record<string, unknown>[]>(query, "List operator queue");
     return rows.map(operatorItemFromRow);
   }
-  async saveVerticalDemandEvent(event: VerticalDemandEventV1) {
-    const value = verticalDemandEventV1Schema.parse(event);
-    await requireOk(this.client.from("vertical_demand_events_v1").insert({
+  async saveVerticalDemandEvent(event: VerticalDemandEvent) {
+    const value = verticalDemandEventSchema.parse(event);
+    await requireOk(this.client.from("vertical_demand_events").insert({
       id: value.id, schema_version: value.schemaVersion, source_url: value.sourceUrl,
       observed_vertical: value.observedVertical, requested_by: value.requestedBy, status: value.status,
       created_at: value.createdAt, reviewed_at: value.reviewedAt, reviewed_by: value.reviewedBy
     }), "Save vertical demand event");
   }
-  async listVerticalDemandEvents(status?: VerticalDemandEventV1["status"]) {
-    let query = this.client.from("vertical_demand_events_v1").select("*").order("created_at", { ascending: false });
+  async listVerticalDemandEvents(status?: VerticalDemandEvent["status"]) {
+    let query = this.client.from("vertical_demand_events").select("*").order("created_at", { ascending: false });
     if (status) query = query.eq("status", status);
     const rows = await requireData<Record<string, unknown>[]>(query, "List vertical demand events");
     return rows.map(verticalDemandEventFromRow);
   }
+}
+
+export async function persistSiteIntentAuthority(
+  client: ReturnType<typeof getSupabaseAdminClient>,
+  intent: SiteIntentV3
+) {
+  const value = siteIntentV3Schema.parse(intent);
+  const currentRow = await requireData<{ intent: unknown } | null>(
+    client.from("site_intents_v3").select("intent").eq("site_id", value.siteId).maybeSingle(),
+    "Load site intent for write"
+  );
+  const current = currentRow ? siteIntentV3Schema.parse(currentRow.intent) : undefined;
+  assertRevisionAdvance(current?.revision, value.revision, "site intent");
+  if (!current) {
+    await requireOk(client.from("site_intents_v3").insert({
+      id: value.id,
+      site_id: value.siteId,
+      schema_version: value.schemaVersion,
+      revision: value.revision,
+      intent_hash: value.intentHash,
+      intent: value,
+      created_at: value.updatedAt,
+      updated_at: value.updatedAt
+    }), "Insert site intent");
+    return;
+  }
+  if (current.id !== value.id) throw new Error("site_intent_identity_mismatch");
+  const updated = await requireData<{ site_id: string } | null>(
+    client.from("site_intents_v3").update({
+      schema_version: value.schemaVersion,
+      revision: value.revision,
+      intent_hash: value.intentHash,
+      intent: value,
+      updated_at: value.updatedAt
+    }).eq("site_id", value.siteId).eq("revision", current.revision).select("site_id").maybeSingle(),
+    "Update site intent"
+  );
+  if (!updated) throw new Error("site_intent_revision_conflict");
 }
 
 export const sitePlatformRepository: SitePlatformRepository = process.env.LODESTA_REPOSITORY === "local"
@@ -1187,7 +1159,7 @@ function runtimeSeriesFromRow(row: Record<string, unknown>) {
 }
 
 function sessionFromRow(row: Record<string, unknown>) {
-  return siteAgentSessionV1Schema.parse({
+  return siteAgentSessionSchema.parse({
     schemaVersion: row.schema_version, id: row.id, siteId: row.site_id, ownerId: row.owner_id,
     status: row.status, currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     publicBuildInputId: row.public_build_input_id, sandboxProvider: row.sandbox_provider,
@@ -1201,23 +1173,23 @@ function sessionFromRow(row: Record<string, unknown>) {
   });
 }
 
-function messageFromRow(row: Record<string, unknown>): SiteAgentMessageV1 {
-  return {
-    id: String(row.id), sessionId: String(row.session_id), runId: row.run_id ? String(row.run_id) : undefined,
-    role: row.role as SiteAgentMessageV1["role"], content: String(row.content),
-    selection: row.selection as SiteAgentMessageV1["selection"], createdAt: String(row.created_at)
-  };
+function messageFromRow(row: Record<string, unknown>): SiteAgentMessage {
+  return siteAgentMessageSchema.parse({
+    schemaVersion: row.schema_version, id: row.id, sessionId: row.session_id,
+    runId: row.run_id ?? undefined, role: row.role, content: row.content,
+    selection: row.selection ?? undefined, createdAt: row.created_at
+  });
 }
 
 function adminRunRecord(row: { id: string; schema_version: string; run: unknown }): SiteAgentRunAdminRecord {
-  const parsed = siteAgentRunV2Schema.safeParse(row.run);
+  const parsed = siteAgentRunSchema.safeParse(row.run);
   return parsed.success
     ? { id: row.id, schemaVersion: row.schema_version, run: parsed.data }
     : { id: row.id, schemaVersion: row.schema_version, issue: "stale schema - rebuild" };
 }
 
 function controlPlaneChangeFromRow(row: Record<string, unknown>) {
-  return controlPlaneChangeRequestV2Schema.parse({
+  return controlPlaneChangeRequestSchema.parse({
     schemaVersion: row.schema_version, id: row.id, businessId: row.business_id, siteId: row.site_id,
     targetAuthority: row.target_authority, payload: row.payload, impact: row.impact, status: row.status,
     expectedBusinessRevision: row.expected_business_revision ?? undefined,
@@ -1238,20 +1210,15 @@ function operatorItemFromRow(row: Record<string, unknown>) {
   });
 }
 
-function traceSpanFromRow(row: Record<string, unknown>) {
-  return siteAgentTraceSpanV1Schema.parse({
+function runEventFromRow(row: Record<string, unknown>) {
+  return siteAgentRunEventSchema.parse({
     schemaVersion: row.schema_version,
     id: row.id,
-    traceId: row.trace_id,
-    runId: row.run_id ?? undefined,
-    sessionId: row.session_id ?? undefined,
-    requestId: row.request_id ?? undefined,
-    parentSpanId: row.parent_span_id ?? undefined,
+    runId: row.run_id,
     sequence: Number(row.sequence),
     kind: row.kind,
     name: row.name,
     status: row.status,
-    attemptIndex: row.attempt_index ?? undefined,
     turnIndex: row.turn_index ?? undefined,
     modelId: row.model_id ?? undefined,
     inputTokens: row.input_tokens ?? undefined,
@@ -1275,7 +1242,7 @@ function siteVersionApprovalFromRow(row: Record<string, unknown>) {
 }
 
 function verticalDemandEventFromRow(row: Record<string, unknown>) {
-  return verticalDemandEventV1Schema.parse({
+  return verticalDemandEventSchema.parse({
     schemaVersion: row.schema_version, id: row.id, sourceUrl: row.source_url,
     observedVertical: row.observed_vertical ?? undefined, requestedBy: row.requested_by,
     status: row.status, createdAt: row.created_at, reviewedAt: row.reviewed_at ?? undefined,

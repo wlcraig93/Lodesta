@@ -295,13 +295,13 @@ async function collectInventory(runId: string) {
     related("form_definitions_v2", "site_id", siteIds, "id,site_id,schema_version,revision,status,created_at"),
     related("site_versions_v4", "site_id", siteIds, "id,site_id,status,artifact_id,workspace_revision_id,public_build_input_id,created_at,published_at"),
     related("site_public_build_inputs", "site_id", siteIds, "id,site_id,business_id,schema_version,input_hash,created_at"),
-    related("source_snapshots", "business_id", businessIds, "id,business_id,schema_version,source_type,source_url,content_hash,captured_at"),
+    related("source_snapshots", "business_id", businessIds, "id,business_id,source_type,source_url,content_hash,captured_at"),
     related("site_build_artifacts", "site_id", siteIds, "id,site_id,workspace_revision_id,public_build_input_id,artifact_hash,storage_prefix,artifact,created_at"),
     related("business_assets", "business_id", businessIds, "id,business_id,kind,source,usage_scope,owner_approved,current_revision_id,active,created_at,updated_at"),
     related("asset_revisions", "business_id", businessIds, "id,asset_id,business_id,schema_version,content_hash,storage_path,rights_status,created_at"),
     related("site_workspace_revisions", "site_id", siteIds, "id,site_id,parent_revision_id,source_archive_key,source_hash,created_at"),
     related("site_agent_sessions", "site_id", siteIds, "id,site_id,owner_id,sandbox_id,status,public_build_input_id"),
-    related("site_agent_runs_v2", "site_id", siteIds, "id,session_id,site_id,status,stage,run"),
+    related("site_agent_runs_v2", "site_id", siteIds, "id,session_id,site_id,status,run"),
     related("domains", "site_id", siteIds, "id,site_id,hostname,status"),
     related("claims", "site_id", siteIds, "id,site_id,status")
   ]);

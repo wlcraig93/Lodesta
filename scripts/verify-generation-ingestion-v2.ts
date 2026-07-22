@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { crawlWebsiteForGeneration, generationIngestionLimits } from "../packages/business-data/generation-crawler";
+import { crawlWebsiteForGeneration, fetchGenerationPageWithBrowser, generationIngestionLimits } from "../packages/business-data/generation-crawler";
 import { understandWebsite, validateUnderstandingEvidence } from "../packages/business-data/understanding";
 
 const pageStarts: number[] = [];
@@ -115,6 +115,15 @@ assert.equal(browserCalls, 1, "browser fallback exceeded its page budget");
 assert.equal(browserBounded.ingestion.counts.browserRendered, 1);
 assert(browserBounded.ingestion.skipped.some((entry) => entry.reason === "browser_limit"));
 
+const browserLifecycleHtml = await fetchGenerationPageWithBrowser(
+  "data:text/html,<main><h1>Browser lifecycle</h1></main>",
+  AbortSignal.timeout(5_000),
+  5_000,
+  async (value) => value,
+  async (value) => value
+);
+assert(browserLifecycleHtml.includes("Browser lifecycle"), "browser closed before page content serialization completed");
+
 const block = fetched.ingestion.modelBlocks.find((candidate) => candidate.canonicalTokens.length > 0);
 assert(block, "generation crawl did not retain reconstructible source tokens");
 const token = block.canonicalTokens[0];
@@ -164,7 +173,7 @@ try {
   else process.env.OPENAI_API_KEY = priorApiKey;
 }
 
-console.log(JSON.stringify({ ok: true, completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", reconstructibleEvidence: "pass", understandingRetry: "pass" }));
+console.log(JSON.stringify({ ok: true, completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", reconstructibleEvidence: "pass", understandingRetry: "pass" }));
 
 function pageHtml(title: string, href: string, copy: string) {
   return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${copy}"></head><body><main><h1>${title}</h1><p>${copy} ${copy} ${copy}</p><a href="${href}">Continue</a><form><input type="tel" name="phone"><button>Request estimate</button></form></main></body></html>`;

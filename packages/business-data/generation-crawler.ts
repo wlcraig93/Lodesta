@@ -110,7 +110,7 @@ export async function crawlWebsiteForGeneration(input: {
   const signal = input.signal ? AbortSignal.any([input.signal, deadline]) : deadline;
   const fetchImpl = input.fetchImpl ?? fetch;
   const browserFetch = input.browserFetch
-    ?? ((url: string, browserSignal: AbortSignal) => defaultBrowserFetch(url, browserSignal, limits.requestTimeoutMs, baseValidator, validateSameSite));
+    ?? ((url: string, browserSignal: AbortSignal) => fetchGenerationPageWithBrowser(url, browserSignal, limits.requestTimeoutMs, baseValidator, validateSameSite));
   const scheduler = new OriginScheduler(limits.minimumStartSpacingMs, now);
   const inventory = new Map<string, { url: string; reason: string; score: number }>();
   const skipped: Array<{ url: string; reason: z.infer<typeof skipReasonSchema> }> = [];
@@ -414,7 +414,7 @@ function shouldBrowserRender(summary: CrawlPageSummary) {
   return text < 200 && (summary.internalLinkCount > 0 || summary.imageCount > 0 || summary.title !== undefined);
 }
 
-async function defaultBrowserFetch(url: string, signal: AbortSignal, requestTimeoutMs: number, validateUrl: UrlValidator, validateNavigation: UrlValidator) {
+export async function fetchGenerationPageWithBrowser(url: string, signal: AbortSignal, requestTimeoutMs: number, validateUrl: UrlValidator, validateNavigation: UrlValidator) {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
@@ -437,7 +437,9 @@ async function defaultBrowserFetch(url: string, signal: AbortSignal, requestTime
       signal.removeEventListener("abort", closeOnAbort);
     }
     if (signal.aborted) throw signal.reason;
-    return page.content();
+    // Await inside the try so the outer finally cannot close Chromium while
+    // Playwright is still serializing the document.
+    return await page.content();
   } finally { await browser.close(); }
 }
 

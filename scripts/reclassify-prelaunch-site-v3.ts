@@ -117,7 +117,7 @@ async function loadFootprint() {
 }
 
 async function count(table: string) {
-  const { count: value, error } = await client.from(table).select("id", { count: "exact", head: true }).eq("site_id", options.siteId);
+  const { count: value, error } = await client.from(table).select("*", { count: "exact", head: true }).eq("site_id", options.siteId);
   if (error) throw new Error(`Count ${table}: ${error.message}`);
   return value ?? 0;
 }

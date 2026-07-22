@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "site-v3-cutover-manifest-v1",
+  "runId": "20260722t1607z",
+  "environment": "cazqnqecftxkmsqmjgdd.supabase.co",
+  "createdAt": "2026-07-22T16:30:30.722Z",
+  "operator": "codex-on-behalf-of-william-craig",
+  "confirmationReason": "Authorized disposal of sole owner-operated pre-launch Mencia draft for V3 hard cutover",
+  "reportPath": ".data/cutovers/site-v3/20260722t1607z/report.json",
+  "reportHash": "sha256:58f0e82d7d6cfd2f43168fa070c9aa5a62d40dc2ce51f559044ef0513103b1c0",
+  "inventoryHash": "sha256:c5e911e3d0d11d826a3b2cb0581d6d92af631db663f21101216c2bbefe5739fa",
+  "recoverySnapshot": {
+    "database": {
+      "path": ".data/cutovers/site-v3/20260722t1607z/database.dump",
+      "metadataPath": ".data/cutovers/site-v3/20260722t1607z/database.dump.metadata.json",
+      "bytes": 10488676,
+      "hash": "sha256:9119632e4c0f508529682f8380ef45411178771bd8aa67ae609e3128b2374d21",
+      "metadataHash": "sha256:bf54a1d167c599c8e64f31764e52e337348440ffb01fecab80184b39b39aac62"
+    },
+    "r2Audit": {
+      "path": ".data/maintenance/site-v3-20260722t1607z-artifact-audit.json",
+      "bytes": 1151134,
+      "hash": "sha256:440a56dfb7b6099b9e18dad2a0df85c9fc22e20e6cfa1100c7a2d471f6897d6c",
+      "reportHash": "sha256:2ef25a440b90558f52ff289758d18d4ca5cfccb15b582f87bed0b4abb566cae9",
+      "counts": {
+        "inventory": 2034,
+        "inventoryBytes": 478952330,
+        "referenced": 81,
+        "missingReferenced": 0,
+        "orphanedManaged": 1707,
+        "orphanedManagedBytes": 438247778,
+        "unknownPrefix": 244,
+        "unknownPrefixBytes": 21757715,
+        "rollbackOverlap": 2,
+        "overlapMismatch": 0
+      }
+    }
+  },
+  "affectedSites": [
+    {
+      "id": "site_77f46e431cc24fb8a159d648",
+      "businessId": "business_1ecbf590eb6643f1bbfdd15f",
+      "status": "experimental"
+    }
+  ],
+  "counts": {
+    "sites": 1,
+    "businessStates": 1,
+    "intents": 1,
+    "forms": 1,
+    "versions": 1,
+    "inputs": 1,
+    "snapshots": 1,
+    "artifacts": 2,
+    "assets": 0,
+    "assetRevisions": 7,
+    "workspaceRevisions": 2,
+    "sessions": 2,
+    "runs": 1,
+    "traces": 89,
+    "domains": 0,
+    "claims": 0,
+    "blobs": 79,
+    "authorities": 18
+  },
+  "confirmation": "delete-site-v3-cutover:20260722t1607z:sha256:58f0e82d7d6cfd2f43168fa070c9aa5a62d40dc2ce51f559044ef0513103b1c0"
+}

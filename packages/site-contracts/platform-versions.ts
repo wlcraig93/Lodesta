@@ -5,7 +5,7 @@ export const artifactClaimPolicyVersion = "artifact-claim-validator-v1.3";
 export const siteVerificationPolicyVersion = "site-verification-policy-v2";
 
 // Updated only after the corresponding Cloudflare image is built and deployed.
-export const sandboxImageDigest = "sha256:a2e4e0aadb938397dfddded68f08b094d25505df4359af0568103caa82a7c30d" as const;
+export const sandboxImageDigest = "sha256:cfe3a3df7dba77d02b08346299909e7ff69f213da028d3e5d613cd48588f7d22" as const;
 
 export const sitePlatformVersionManifest = {
   platform: siteAuthoringPlatformVersion,

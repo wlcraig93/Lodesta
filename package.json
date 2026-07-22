@@ -27,6 +27,7 @@
     "snapshot:site-v3-database": "node --env-file=.env.local --import tsx scripts/snapshot-site-v3-database.ts",
     "migrate:workspace-blobs": "node --env-file=.env.local --import tsx scripts/migrate-workspace-blobs.ts",
     "cleanup:workspace-rollback-copies": "node --env-file=.env.local --import tsx scripts/cleanup-workspace-rollback-copies.ts",
+    "retire:workspace-rollback-after-site-v3": "node --env-file=.env.local --import tsx scripts/retire-workspace-rollback-after-site-v3.ts",
     "cleanup:experimental": "node --env-file=.env.local --import tsx scripts/cleanup-experimental-site.ts",
     "reclassify:site-v3": "node --env-file=.env.local --import tsx scripts/reclassify-prelaunch-site-v3.ts",
     "reconcile:site-v3-traces": "node --env-file=.env.local --import tsx scripts/reconcile-cutover-trace-payloads.ts",

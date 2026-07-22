@@ -8,13 +8,15 @@ const snapshotPath = "scripts/snapshot-site-v3-database.ts";
 const reclassificationMigrationPath = "supabase/migrations/202607210000_prelaunch_site_v3_reclassification.sql";
 const reclassificationPath = "scripts/reclassify-prelaunch-site-v3.ts";
 const traceReconciliationPath = "scripts/reconcile-cutover-trace-payloads.ts";
-const [migration, cutover, snapshot, reclassificationMigration, reclassification, traceReconciliation] = await Promise.all([
+const workspaceRollbackRetirementPath = "scripts/retire-workspace-rollback-after-site-v3.ts";
+const [migration, cutover, snapshot, reclassificationMigration, reclassification, traceReconciliation, workspaceRollbackRetirement] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(cutoverPath, "utf8"),
   readFile(snapshotPath, "utf8"),
   readFile(reclassificationMigrationPath, "utf8"),
   readFile(reclassificationPath, "utf8"),
-  readFile(traceReconciliationPath, "utf8")
+  readFile(traceReconciliationPath, "utf8"),
+  readFile(workspaceRollbackRetirementPath, "utf8")
 ]);
 
 assert(!/\bdelete\s+from\b/i.test(migration), "the assert-empty migration must never delete retained data");
@@ -41,6 +43,23 @@ for (const requirement of [
   "report.json"
 ]) {
   assert(traceReconciliation.includes(requirement), `trace payload reconciliation operator is missing: ${requirement}`);
+}
+for (const requirement of [
+  "retire-workspace-rollback-after-site-v3:",
+  "site-v3-workspace-rollback-retirement-request-v1",
+  "site-v3-workspace-rollback-retirement-receipt-v1",
+  "workspace-blob-cutover-cleanup-v1",
+  "retained_recovery_sources_after_authority_cutover",
+  "site-v3-cutover-cleanup-receipt-v1",
+  "deletedBlobs.has(`workspace:${copy.key}`)",
+  "workspaceSourceSidecarKey(copy.key)",
+  "assertQuiescentAndEmpty()",
+  'store.get("artifact", copy.key)',
+  'store.get("workspace", copy.key)',
+  "source.bytes.length !== copy.bytes",
+  '"site_intents_v3"'
+]) {
+  assert(workspaceRollbackRetirement.includes(requirement), `workspace rollback retirement operator is missing: ${requirement}`);
 }
 assert(migration.includes("alter table site_intents_v2 rename to site_intents_v3"));
 assert(migration.includes("schema_version = 'site-intent-v3'"));
@@ -161,6 +180,7 @@ console.log(JSON.stringify({
   databaseSnapshot: "pass",
   prelaunchReclassification: "pass",
   tracePayloadReconciliation: "pass",
+  workspaceRollbackRetirement: "pass",
   sandboxFailClosed: "pass",
   cleanupOrder: "pass",
   assertEmptyMigration: "pass",

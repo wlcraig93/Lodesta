@@ -142,6 +142,15 @@ npm run audit:artifact-blobs
 
 The cleanup deletes only manifest-declared old artifact-bucket archive copies. It first rechecks database retention, workspace destinations, source sidecars, bytes, and hashes; then it verifies old copies are absent and retained objects remain. The cleanup marker makes later audits stop expecting the overlap set.
 
+If an authorized pre-launch Site V3 hard cutover deletes every workspace revision before this seven-day window ends, do not weaken the overlap audit or use the normal cleanup command early. Under the active maintenance lease, use the exact retirement command after reviewing the completed Site V3 cleanup receipt:
+
+```bash
+npm run retire:workspace-rollback-after-site-v3 -- --cutover-run-id=<run-id> --manifest-hash=<manifestHash> --operator=<operator-id> --reason="<reason>" --confirm=retire-workspace-rollback-after-site-v3:<run-id>:<manifestHash>
+npm run audit:artifact-blobs
+```
+
+This exceptional command requires empty V3 authorities and zero active runs, proves that Site V3 cleanup enumerated each removed destination and sidecar, and verifies that every original artifact-bucket rollback source still matches the retained manifest. It writes a private request and receipt plus the standard cleanup marker. It does not delete the original sources; they remain auditable recovery orphans until a separately reviewed orphan cleanup.
+
 ## Rollback
 
 Before the seven-day cleanup, restore the previous Railway variables and previous sandbox Worker deployment, using the manifest-verified artifact-bucket archive copies. Do not delete or rewrite destination archives or sidecars. If the cutover lease is lost, an inventory changes, a retained blob is missing, copies mismatch, or any acceptance check fails, stop the cutover and retain both buckets for operator review.

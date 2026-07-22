@@ -10,4 +10,5 @@ dist
 coverage
 tsconfig.tsbuildinfo
 .data
+supabase/.temp/
 .gstack/

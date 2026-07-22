@@ -146,7 +146,7 @@ const report = {
   },
   policyOnlyIsolation: { before: countsBeforePolicy, after: countsAfterPolicy, intentRevision: intentAfterPolicy.revision },
   baseline: { versionId: resumedVersion.id, artifactId: resumedArtifact.id, screenshotKeys: resumedArtifact.qa.screenshotKeys },
-  retention: "Private and unpublished. This first fresh post-cutover candidate is the experiment baseline.",
+  retention: "Private and unpublished. Retained only for plumbing and safety inspection.",
   totalDurationMs: Date.now() - startedAt
 };
 const reportPath = join(".data", "experiments", `${targetLabel}-${suffix}.json`);

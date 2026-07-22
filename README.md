@@ -74,13 +74,21 @@ After the runtime release suite passes, promote the content-hashed trusted runti
 npm run runtime:promote -- --apply --verified-by=<operator-id>
 ```
 
-The current live check is a private, non-publishable experiment:
+The deployed end-to-end check creates a private, non-publishable site:
 
 ```bash
 npm run verify:site-authoring-live-experiment
 ```
 
-It creates one private baseline candidate and exercises exact editing, clarification and stale-base resume, and policy-only isolation. It is not a readiness evaluation or authorization for an owner pilot.
+It exercises initial generation, exact editing, clarification and stale-base resume, and policy-only isolation. This verifies deployed plumbing and safety boundaries; it does not score product quality.
+
+For ordinary product refinement, generate one traceable private site and continue editing it through the real workspace UI:
+
+```bash
+npm run experiment:site -- --url=https://business.example/
+```
+
+Every invocation creates a distinct experimental site. Reports, screenshots, provenance, and freeform notes are retained beneath `.data/site-experiments/`; the command prints the workspace, preview, and exact cleanup paths. Agent Ready checks remain available separately through `npm run verify:agent-ready-sites` when those technical surfaces are relevant.
 
 ## Deployment
 

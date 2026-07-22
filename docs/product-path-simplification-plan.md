@@ -168,7 +168,20 @@ The standing implementation checks are:
 
 The live walking skeleton remains the final environment-backed acceptance: ingest one
 real business, generate and inspect a multi-file candidate, perform an exact edit, prove
-policy-only isolation, and retain the private candidate for human comparison.
+policy-only isolation, and retain the private candidate for plumbing inspection.
+
+## Product refinement
+
+Private product experiments are deliberately rerunnable and unscored. Each invocation may
+create a distinct experimental site, retain objective findings and implementation
+provenance, and hand the candidate to the real workspace UI for continued editing.
+Subjective observations remain freeform notes. There are no frozen samples, fixed quality
+rubrics, mandatory edit batteries, or global admission verdicts. Those process structures
+may be designed later only from observed product behavior.
+
+This freedom ends at publication. Experimental sites cannot publish, and every real
+candidate still requires current canonical inputs, passing objective QA, usable assets,
+forms and redirects, and operator approval bound to the exact artifact.
 
 ## Coordinated rollout
 

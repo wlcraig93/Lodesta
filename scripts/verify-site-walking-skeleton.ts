@@ -81,7 +81,7 @@ try {
 }
 
 const retainedSite = await sitePlatformRepository.getSite(bootstrapped.site.id);
-assert(retainedSite?.status === "experimental" && !retainedSite.publishedVersionId, "Walking skeleton became public without an owner pilot.");
+assert(retainedSite?.status === "experimental" && !retainedSite.publishedVersionId, "Walking skeleton experimental site became public.");
 const report = {
   schemaVersion: "site-walking-skeleton-report",
   recordedAt: new Date().toISOString(),

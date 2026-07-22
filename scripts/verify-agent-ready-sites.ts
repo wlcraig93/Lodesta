@@ -51,8 +51,8 @@ const report = {
 const reportPath = process.env.AGENT_READY_REPORT_PATH;
 if (reportPath) {
   const absolute = resolve(reportPath);
-  const permittedRoot = resolve(".data/site-quality");
-  assert(absolute.startsWith(`${permittedRoot}/`), "Agent Ready reports must stay under .data/site-quality.");
+  const permittedRoot = resolve(".data/technical-checks/agent-ready");
+  assert(absolute.startsWith(`${permittedRoot}/`), "Agent Ready reports must stay under .data/technical-checks/agent-ready.");
   await mkdir(dirname(absolute), { recursive: true });
   await writeFile(absolute, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx" });
 }

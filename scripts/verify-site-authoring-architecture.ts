@@ -23,6 +23,9 @@ const forbiddenFiles = [
   "scripts/migrate-workspace-blobs.ts",
   "scripts/cleanup-workspace-rollback-copies.ts",
   "scripts/retire-workspace-rollback-after-site-v3.ts",
+  "scripts/site-quality.ts",
+  "scripts/run-site-edit-battery.ts",
+  "scripts/support/site-quality-failure.ts",
   "supabase/schema.sql"
 ];
 for (const file of forbiddenFiles) {
@@ -41,6 +44,10 @@ for (const path of [
   "docs/agentic-site-v1-spike-results.md",
   "docs/agentic-site-workspace-v1-plan.md",
   "docs/cloudflare-sandbox-storage-cutover.md",
+  "docs/credible-customer-draft-v1.md",
+  "docs/site-quality-runbook.md",
+  "docs/commercial-launch-slice.md",
+  "config/benchmark-targets/auto-body-pilot.txt",
   "fixtures/generation-quality/austin-tireman-crawl.json",
   "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
   "public/fixture-assets/auto-repair-shop-hero-v1.png",
@@ -142,6 +149,8 @@ for (const dependency of [...Object.keys(sandboxPackage.dependencies ?? {}), ...
 }
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { scripts?: Record<string, string> };
+if (!packageJson.scripts?.["experiment:site"]) errors.push("The traceable private site experiment command is missing");
+if (packageJson.scripts?.["quality:site"] || packageJson.scripts?.["quality:edit-battery"]) errors.push("Retired cohort or edit-battery commands remain exposed");
 for (const [name, command] of Object.entries(packageJson.scripts ?? {})) {
   for (const match of command.matchAll(/(?:^|\s)([A-Za-z0-9_./-]+\.(?:ts|tsx|js|mjs|sh))(?:\s|$)/g)) {
     if (!(await exists(match[1]))) errors.push(`package script ${name} references missing ${match[1]}`);

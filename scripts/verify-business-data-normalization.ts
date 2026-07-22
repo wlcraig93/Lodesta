@@ -5,10 +5,9 @@ import {
   preferBusinessNameCandidate
 } from "../lib/business-fact-normalization";
 import { canonicalOfferingCandidates } from "../packages/business-data/offering-normalization";
-import { deduplicateRetainedAssets, WebsiteCrawlError } from "../packages/business-data/website-ingestion";
+import { deduplicateRetainedAssets } from "../packages/business-data/website-ingestion";
 import { assetRevisionV1Schema } from "../packages/site-contracts";
 import { autoBodyContextModule } from "../packages/vertical-context/auto-body";
-import { siteQualityFailureStatus } from "./support/site-quality-failure";
 
 assert.deepEqual(normalizeObservedBusinessHours([
   "Mo-Fr 11:00-21:00",
@@ -60,10 +59,6 @@ assert.deepEqual(canonicalOfferingCandidates(["Landscape Design", "Lawn Maintena
   { sourceName: "Lawn Maintenance", name: "Lawn Maintenance" }
 ]);
 
-assert.equal(siteQualityFailureStatus(new WebsiteCrawlError("unreachable", true)), "crawl_failed");
-assert.equal(siteQualityFailureStatus(new WebsiteCrawlError("minimum knowledge missing")), "generation_failed");
-assert.equal(siteQualityFailureStatus(new Error("manager_response_limit_exhausted")), "generation_failed");
-
 const repeatedAssetRevision = assetRevisionV1Schema.parse({
   schemaVersion: "asset-revision-v1",
   id: "asset_revision_repeated_content",
@@ -90,6 +85,5 @@ console.log(JSON.stringify({
   canonicalHours: "pass",
   crossPageBusinessIdentity: "pass",
   verticalOfferingDeduplication: "pass",
-  spareEligibilityClassification: "pass",
   repeatedAssetContentDeduplication: "pass"
 }));

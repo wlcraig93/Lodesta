@@ -39,6 +39,12 @@ npm run audit:artifact-blobs -- --report=.data/maintenance/site-v3-<run-id>-arti
 npm run cutover:site-v3 -- --mode=report --run-id=<run-id> --operator=<operator-id> --reason="<reason>" --database-backup=.data/cutovers/site-v3/<run-id>/database.dump --r2-audit-report=.data/maintenance/site-v3-<run-id>-artifact-audit.json
 ```
 
+If report mode blocks one specifically authorized pre-launch `draft`, do not broaden the experimental guard. Apply the one-time reclassification migration, then use the exact operator command while the lease is active. It requires the original database snapshot, zero claims/domains/inquiries/preview tokens/published versions, no workspace, an exact confirmation token, and writes private request and receipt records. Regenerate report mode from scratch afterward:
+
+```bash
+npm run reclassify:site-v3 -- --run-id=<run-id> --site-id=<site-id> --business-id=<business-id> --operator=<operator-id> --reason="<reason>" --confirm=reclassify-prelaunch-draft:<run-id>:<site-id>:<business-id>
+```
+
 Report mode requires an active lease, zero queued/running runs, a PostgreSQL custom-format public-schema dump, and a passing R2 audit. It binds their paths and hashes plus the Supabase hostname into the private report and redacted manifest. Inspect the complete private report and commit/push the redacted manifest before using its exact cleanup token.
 
 Cleanup rechecks the environment, recovery hashes, lease, active-run count, and inventory hash. It destroys every enumerated sandbox first, deletes rows second, and deletes blobs last. An unknown sandbox disposition or partial row cleanup blocks the migration; a blob failure leaves auditable orphans rather than dangling retained references. The migration is assert-only and must encounter no retained pre-cutover site authorities. No cleanup is implicit in deployment or verification.

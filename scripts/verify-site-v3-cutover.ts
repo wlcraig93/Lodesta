@@ -5,10 +5,14 @@ import { isConfirmedSandboxAbsent, SiteSandboxClient, SiteSandboxRequestError } 
 const migrationPath = "supabase/migrations/202607210001_site_v3_hard_cutover.sql";
 const cutoverPath = "scripts/site-v3-cutover.ts";
 const snapshotPath = "scripts/snapshot-site-v3-database.ts";
-const [migration, cutover, snapshot] = await Promise.all([
+const reclassificationMigrationPath = "supabase/migrations/202607210000_prelaunch_site_v3_reclassification.sql";
+const reclassificationPath = "scripts/reclassify-prelaunch-site-v3.ts";
+const [migration, cutover, snapshot, reclassificationMigration, reclassification] = await Promise.all([
   readFile(migrationPath, "utf8"),
   readFile(cutoverPath, "utf8"),
-  readFile(snapshotPath, "utf8")
+  readFile(snapshotPath, "utf8"),
+  readFile(reclassificationMigrationPath, "utf8"),
+  readFile(reclassificationPath, "utf8")
 ]);
 
 assert(!/\bdelete\s+from\b/i.test(migration), "the assert-empty migration must never delete retained data");
@@ -27,6 +31,38 @@ assert(migration.includes("alter table site_intents_v2 rename to site_intents_v3
 assert(migration.includes("schema_version = 'site-intent-v3'"));
 assert(migration.includes("schema_version = 'site-public-build-input-v3'"));
 assert(migration.includes("pg_get_functiondef(p.oid) like '%site_intents_v2%'"), "stored database functions are not cut over to the V3 relation");
+assert(migration.includes("drop function if exists reclassify_prelaunch_draft_site_for_v3_cutover_v1"), "one-time reclassification authority survives the hard cutover");
+
+for (const requirement of [
+  "pg_advisory_xact_lock",
+  "workspace_storage_cutover",
+  "status in ('queued', 'running')",
+  "target.status <> 'draft'",
+  "target.workspace_id is not null",
+  "target.published_version_id is not null",
+  "exists (select 1 from domains",
+  "exists (select 1 from claims",
+  "exists (select 1 from inquiries",
+  "exists (select 1 from preview_tokens",
+  "status = 'published'",
+  "set status = 'experimental'",
+  "revoke all",
+  "grant execute"
+]) {
+  assert(reclassificationMigration.includes(requirement), `pre-launch reclassification migration is missing: ${requirement}`);
+}
+for (const requirement of [
+  "reclassify-prelaunch-draft:",
+  "site-v3-prelaunch-reclassification-request-v1",
+  "site-v3-prelaunch-reclassification-receipt-v1",
+  "original pre-reclassification database snapshot",
+  "assertQuiescent()",
+  "assertDisposableDraft(footprint)",
+  "report.json",
+  "docs/cutovers/site-v3-"
+]) {
+  assert(reclassification.includes(requirement), `pre-launch reclassification operator is missing: ${requirement}`);
+}
 
 for (const requirement of [
   ".data/cutovers/site-v3/",
@@ -108,6 +144,7 @@ console.log(JSON.stringify({
   environmentBinding: "pass",
   recoverySnapshotBinding: "pass",
   databaseSnapshot: "pass",
+  prelaunchReclassification: "pass",
   sandboxFailClosed: "pass",
   cleanupOrder: "pass",
   assertEmptyMigration: "pass",

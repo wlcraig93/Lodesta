@@ -28,6 +28,7 @@
     "migrate:workspace-blobs": "node --env-file=.env.local --import tsx scripts/migrate-workspace-blobs.ts",
     "cleanup:workspace-rollback-copies": "node --env-file=.env.local --import tsx scripts/cleanup-workspace-rollback-copies.ts",
     "cleanup:experimental": "node --env-file=.env.local --import tsx scripts/cleanup-experimental-site.ts",
+    "reclassify:site-v3": "node --env-file=.env.local --import tsx scripts/reclassify-prelaunch-site-v3.ts",
     "cutover:site-v3": "node --env-file=.env.local --import tsx scripts/site-v3-cutover.ts",
     "quality:site": "node --env-file=.env.local --import tsx scripts/site-quality.ts",
     "quality:edit-battery": "node --env-file=.env.local --import tsx scripts/run-site-edit-battery.ts",

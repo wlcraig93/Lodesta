@@ -17,6 +17,8 @@ begin
 end;
 $$;
 
+drop function if exists reclassify_prelaunch_draft_site_for_v3_cutover_v1(text, text, text, text);
+
 alter table site_intents_v2 rename to site_intents_v3;
 alter table site_intents_v3 drop constraint if exists site_intents_v2_schema_version_check;
 alter table site_intents_v3

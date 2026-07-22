@@ -38,9 +38,9 @@ Important surfaces:
 - `/admin/sites`: admin site creation and management.
 - `/account`: owner entry router and multi-site chooser.
 - `/admin/site-queue`: candidate-version and operator-review queue.
-- `/settings`: agent and critic model settings.
+- `/settings`: site-authoring and ingestion model settings.
 - `/workspace/:slug`: owner home, site status, and next action.
-- `/workspace/:slug/website`: agentic website manager, preview, history, and publishing.
+- `/workspace/:slug/website`: site-authoring manager, preview, history, and publishing.
 - `/workspace/:slug/inbox`: managed form inbox.
 - `/workspace/:slug/results`: owner-readable first-party analytics.
 - `/workspace/:slug/business`: canonical business data and site intent.
@@ -53,8 +53,8 @@ Copy `.env.example` to local environment configuration and provide real values o
 
 ```bash
 npm run typecheck
-npm run verify:agentic-architecture
-npm run verify:agentic-site-platform-v1
+npm run verify:site-authoring-architecture
+npm run verify:site-authoring-platform
 npm run verify:trusted-runtime
 npm run verify:render-browser
 npm run smoke:dev
@@ -65,7 +65,7 @@ Live integration checks require `.env.local`:
 ```bash
 npm run verify:supabase
 npm run verify:site-sandbox-v1
-npm run verify:agentic-site-walking-skeleton
+npm run verify:site-authoring-walking-skeleton
 ```
 
 After the runtime release suite passes, promote the content-hashed trusted runtime through the audited series RPC:
@@ -77,10 +77,10 @@ npm run runtime:promote -- --apply --verified-by=<operator-id>
 The current live check is a private, non-publishable experiment:
 
 ```bash
-npm run verify:agentic-live-experiment
+npm run verify:site-authoring-live-experiment
 ```
 
-It creates one private candidate and exercises an observed patch-only edit. It is not a readiness evaluation or authorization for an owner pilot.
+It creates one private baseline candidate and exercises exact editing, clarification and stale-base resume, and policy-only isolation. It is not a readiness evaluation or authorization for an owner pilot.
 
 ## Deployment
 

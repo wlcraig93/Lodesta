@@ -6,7 +6,7 @@ import { sha256 } from "../packages/business-data";
 import { sitePlatformRepository } from "../packages/platform-data";
 
 const task = "site_authoring_maintenance";
-const leasePath = resolve(process.cwd(), ".data/maintenance/workspace-storage-cutover-lease.json");
+const leasePath = resolve(process.cwd(), ".data/maintenance/site-authoring-maintenance.json");
 const command = process.argv[2];
 const minutes = parseMinutes(process.argv.slice(3));
 
@@ -16,12 +16,12 @@ if (command === "acquire") {
   const leaseTokenHash = sha256(randomBytes(32));
   const leaseUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
   if (!await sitePlatformRepository.acquireMaintenanceLease(task, leaseTokenHash, now.toISOString(), leaseUntil)) {
-    throw new Error("The workspace-storage cutover lease is already active.");
+    throw new Error("The site-authoring maintenance lease is already active.");
   }
   try {
     await assertDrained();
     await mkdir(dirname(leasePath), { recursive: true });
-    await writeFile(leasePath, `${JSON.stringify({ schemaVersion: "workspace-cutover-lease-v1", task, leaseTokenHash, leaseUntil }, null, 2)}\n`, { flag: "wx" });
+    await writeFile(leasePath, `${JSON.stringify({ schemaVersion: "site-authoring-maintenance", task, leaseTokenHash, leaseUntil }, null, 2)}\n`, { flag: "wx" });
   } catch (error) {
     await sitePlatformRepository.releaseMaintenanceLease(task, leaseTokenHash);
     throw error;
@@ -32,14 +32,14 @@ if (command === "acquire") {
   const now = new Date();
   const leaseUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
   if (!await sitePlatformRepository.renewMaintenanceLease(task, lease.leaseTokenHash, now.toISOString(), leaseUntil)) {
-    throw new Error("The workspace-storage cutover lease could not be renewed; abort the maintenance window.");
+    throw new Error("The site-authoring maintenance lease could not be renewed; abort the maintenance window.");
   }
   await writeFile(leasePath, `${JSON.stringify({ ...lease, leaseUntil }, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ ok: true, action: "renew", task, leaseUntil })}\n`);
 } else if (command === "release") {
   const lease = await readLease();
   if (!await sitePlatformRepository.releaseMaintenanceLease(task, lease.leaseTokenHash)) {
-    throw new Error("The workspace-storage cutover lease was not owned or had already expired/replaced; local lease state was retained.");
+    throw new Error("The site-authoring maintenance lease was not owned or had already expired/replaced; local lease state was retained.");
   }
   await unlink(leasePath);
   process.stdout.write(`${JSON.stringify({ ok: true, action: "release", task })}\n`);
@@ -49,25 +49,25 @@ if (command === "acquire") {
   process.stdout.write(`${JSON.stringify({ ok: active, action: "status", task, active, leaseUntil: lease?.leaseUntil, leasePath })}\n`);
   if (!active) process.exitCode = 2;
 } else {
-  throw new Error("Usage: maintenance:workspace-cutover -- <acquire|renew|status|release> [--minutes=30]");
+  throw new Error("Usage: maintenance:site-authoring -- <acquire|renew|status|release> [--minutes=30]");
 }
 
 async function assertDrained() {
   const running = await sitePlatformRepository.listRecentAgentRuns({ status: "running", limit: 5 });
   const queued = await sitePlatformRepository.listRecentAgentRuns({ status: "queued", limit: 5 });
   if (running.length || queued.length) {
-    throw new Error(`Workspace-storage cutover requires a drained platform; found ${running.length} running and ${queued.length} queued run(s).`);
+    throw new Error(`Site-authoring maintenance requires a drained platform; found ${running.length} running and ${queued.length} queued run(s).`);
   }
 }
 
 async function readLease() {
   const value = JSON.parse(await readFile(leasePath, "utf8")) as Record<string, unknown>;
-  if (value.schemaVersion !== "workspace-cutover-lease-v1" || value.task !== task
+  if (value.schemaVersion !== "site-authoring-maintenance" || value.task !== task
     || typeof value.leaseTokenHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(value.leaseTokenHash)
     || typeof value.leaseUntil !== "string" || !Number.isFinite(Date.parse(value.leaseUntil))) {
-    throw new Error("Local workspace cutover lease record is invalid.");
+    throw new Error("Local site-authoring maintenance record is invalid.");
   }
-  return value as { schemaVersion: "workspace-cutover-lease-v1"; task: string; leaseTokenHash: string; leaseUntil: string };
+  return value as { schemaVersion: "site-authoring-maintenance"; task: string; leaseTokenHash: string; leaseUntil: string };
 }
 
 function parseMinutes(args: string[]) {

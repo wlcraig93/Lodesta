@@ -45,12 +45,12 @@ const siteId = `site_walking_${suffix}`;
 const businessId = `business_walking_${suffix}`;
 const sourceId = `source_walking_${suffix}`;
 const formId = `form_walking_${suffix}`;
-const slug = `agentic-walking-${suffix}`;
+const slug = `site-authoring-walking-${suffix}`;
 const sandboxId = `walk-${suffix}`;
 const repository = new SupabaseSitePlatformRepository();
 const blobStore = configuredArtifactBlobStore();
 const sandbox = configuredSiteSandboxClient();
-const cleanup = process.env.KEEP_AGENTIC_WALKING_SKELETON !== "1";
+const cleanup = process.env.KEEP_SITE_AUTHORING_WALKING_SKELETON !== "1";
 
 const facts = syntheticInput.publicFacts.map((fact) => ({
   ...fact,
@@ -96,7 +96,7 @@ const sourceSnapshot = sourceSnapshotV1Schema.parse({
   sourceType: "owner_input",
   contentHash: sha256(stableJson({ syntheticCase: "walking-skeleton", facts })),
   capturedAt: now,
-  payload: { syntheticCase: "agentic-site-v1-walking-skeleton", retained: true }
+  payload: { syntheticCase: "site-authoring-walking-skeleton", retained: true }
 });
 const publicInput = createPublicBuildInput({
   id: `input_walking_${suffix}`,

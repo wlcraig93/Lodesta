@@ -8,7 +8,7 @@ The first fresh candidate produced after the clean site-authoring cutover is the
 
 Before starting a cohort:
 
-1. Run the deployed walking skeleton through the real HTTP APIs with `npm run verify:agentic-live-experiment`.
+1. Run the deployed walking skeleton through the real HTTP APIs with `npm run verify:site-authoring-live-experiment`.
 2. Require initial generation, an exact edit, an intervening structural edit, a real `needs_input` pause/resume against an advanced workspace head, and a policy-only change that creates no generation artifacts.
 3. Run `npm run verify:r2-lifecycle` and the environment-backed Supabase, sandbox, artifact, browser, recovery, and trusted-runtime checks.
 4. Inspect the retained baseline at desktop and mobile sizes. Keep captures and reports under `.data`; never commit generated website output.

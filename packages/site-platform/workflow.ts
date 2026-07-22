@@ -13,7 +13,7 @@ import {
 import { ManagerNeedsInputError, WebsiteManagerAgent, taskSkillFor, websiteManagerPromptVersion, workspaceSourceFileSchema, workspaceSourcePolicyVersion, type ManagerRunRequest, type WorkspaceSourceFile } from "@/packages/site-agent";
 import { configuredSiteSandboxClient, type SiteSandboxClient } from "@/packages/site-sandbox";
 import {
-  agenticSitePlatformVersion,
+  siteAuthoringPlatformVersion,
   operatorQueueItemSchema,
   siteAgentRunSchema,
   siteAgentSessionSchema,
@@ -43,7 +43,7 @@ import { SiteAgentEventRecorder } from "./run-events";
 import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 
 const runtimeSeriesId = "site-runtime-v1";
-export { agenticSitePlatformVersion, siteToolchainVersion };
+export { siteAuthoringPlatformVersion, siteToolchainVersion };
 const idleLeaseMs = 10 * 60_000;
 const rotationMs = 2 * 60 * 60_000;
 export const initialGenerationDeadlineMs = 60 * 60_000;

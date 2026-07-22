@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { hasValidAdminToken } from "@/lib/auth-policy";
 import {
-  auditAgentModelSettingsRejection,
-  getAgentModelSettings,
-  saveAgentModelSettings,
+  auditSiteAuthoringModelSettingsRejection,
+  getSiteAuthoringModelSettings,
+  saveSiteAuthoringModelSettings,
   StaleOperatorSettingsError,
-  validateAgentModelSettingsUpdate
+  validateSiteAuthoringModelSettingsUpdate
 } from "@/lib/operator-settings";
 import { requireAdmin } from "@/lib/security";
 import { getCurrentUser } from "@/lib/supabase/server";
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
 
-  return NextResponse.json(await getAgentModelSettings({ bypassCache: true }));
+  return NextResponse.json(await getSiteAuthoringModelSettings({ bypassCache: true }));
 }
 
 export async function POST(request: Request) {
@@ -27,9 +27,9 @@ export async function POST(request: Request) {
 
   const changedBy = await operatorActor(request);
   const body = await request.json().catch(() => undefined);
-  const parsed = validateAgentModelSettingsUpdate(body);
+  const parsed = validateSiteAuthoringModelSettingsUpdate(body);
   if (!parsed.ok) {
-    await auditAgentModelSettingsRejection({
+    await auditSiteAuthoringModelSettingsRejection({
       changedBy,
       attemptedValue: body,
       error: parsed.issues.join("; ")
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const snapshot = await saveAgentModelSettings({
+    const snapshot = await saveSiteAuthoringModelSettings({
       settings: parsed.settings,
       expectedVersion: parsed.version,
       changedBy

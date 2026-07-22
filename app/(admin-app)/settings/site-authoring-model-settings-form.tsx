@@ -14,7 +14,7 @@ type SettingsSnapshot = {
 
 const staleMessage = "Settings changed since this page loaded. Reload and apply your changes again.";
 
-export function AgentModelSettingsForm({ initialSnapshot }: { initialSnapshot: SettingsSnapshot }) {
+export function SiteAuthoringModelSettingsForm({ initialSnapshot }: { initialSnapshot: SettingsSnapshot }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [form, setForm] = useState(initialSnapshot.settings);
   const [status, setStatus] = useState("");

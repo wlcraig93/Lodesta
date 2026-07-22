@@ -14,7 +14,7 @@ process.once("SIGINT", () => { shuttingDown = true; });
 async function main() {
   const command = process.argv[2] ?? "demo";
   if (command === "demo") {
-    console.log(JSON.stringify({ command, workerRole: "Lodesta agentic site run worker", verticalSelection: "module_registry" }, null, 2));
+    console.log(JSON.stringify({ command, workerRole: "Lodesta site-authoring run worker", verticalSelection: "module_registry" }, null, 2));
     return;
   }
   if (command === "status") {

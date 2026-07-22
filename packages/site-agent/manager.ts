@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCall, ResponseInputItem, Tool } from "openai/resources/responses/responses";
-import { getAgentModelSettings } from "@/lib/operator-settings";
+import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { sha256, stableJson } from "@/packages/business-data";
 import type { SiteElementSelectionV1, SitePublicBuildInputV3 } from "@/packages/site-contracts";
 import {
@@ -50,7 +50,7 @@ export class WebsiteManagerAgent {
     toolRecords: ManagerToolRecord[];
     responses: number;
   }> {
-    const settings = await getAgentModelSettings();
+    const settings = await getSiteAuthoringModelSettings();
     const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? settings.settings.siteAgentModel;
     const client = this.injectedClient ?? configuredResponsesClient();
     const limits = limitsFor(input, input.limits);
@@ -204,7 +204,7 @@ export class WebsiteManagerAgent {
     selection?: SiteElementSelectionV1;
     signal?: AbortSignal;
   }) {
-    const settings = await getAgentModelSettings();
+    const settings = await getSiteAuthoringModelSettings();
     const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? settings.settings.siteAgentModel;
     const result = await structuredResponse({
       client: this.injectedClient ?? configuredResponsesClient(), modelId, name: "manager_discussion_v1", schema: managerDiscussionJsonSchema,

@@ -1,4 +1,4 @@
-export const agenticSitePlatformVersion = "agentic-site-platform-v1.21";
+export const siteAuthoringPlatformVersion = "site-authoring-platform-v1.21";
 export const siteToolchainVersion = "lodesta-static-site-workspace-v1.9";
 export const websiteManagerPromptVersion = "website-manager-simple-v1";
 export const artifactClaimPolicyVersion = "artifact-claim-validator-v1.3";
@@ -8,7 +8,7 @@ export const siteVerificationPolicyVersion = "site-verification-policy-v2";
 export const sandboxImageDigest = "sha256:a2e4e0aadb938397dfddded68f08b094d25505df4359af0568103caa82a7c30d" as const;
 
 export const sitePlatformVersionManifest = {
-  platform: agenticSitePlatformVersion,
+  platform: siteAuthoringPlatformVersion,
   toolchain: siteToolchainVersion,
   managerPrompt: websiteManagerPromptVersion,
   claimPolicy: artifactClaimPolicyVersion,

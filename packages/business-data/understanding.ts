@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { getAgentModelSettings } from "@/lib/operator-settings";
+import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import type { PublicPresenceEnrichment } from "@/lib/public-presence";
 import { reconstructSourceTokenSpan } from "@/lib/source-text-blocks";
 import type { WebsiteGenerationIngestionV2 } from "./generation-crawler";
@@ -70,7 +70,7 @@ export async function understandWebsite(input: {
 }): Promise<WebsiteUnderstandingV3> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required for production website ingestion.");
-  const settings = input.modelOverride ? undefined : await getAgentModelSettings();
+  const settings = input.modelOverride ? undefined : await getSiteAuthoringModelSettings();
   const model = input.modelOverride ?? process.env.LODESTA_INGESTION_MODEL ?? settings!.settings.ingestionModel;
   const modelInput = {
     sourceUrl: input.sourceUrl,

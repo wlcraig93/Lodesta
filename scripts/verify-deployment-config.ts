@@ -12,9 +12,9 @@ const maintenanceRoute = readFileSync("app/api/site-agent/maintenance/route.ts",
 const prospectRoute = readFileSync("app/api/prospect-reports/route.ts", "utf8");
 const publicRoute = readFileSync("app/sites/[slug]/[[...path]]/route.ts", "utf8");
 const publicSite = readFileSync("packages/site-platform/public-site.ts", "utf8");
-const architecture = readFileSync("scripts/verify-agentic-architecture.ts", "utf8");
+const architecture = readFileSync("scripts/verify-site-authoring-architecture.ts", "utf8");
 
-for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:agentic-site-platform", "verify:agentic-site-walking-skeleton", "verify:site-walking-skeleton", "verify:agent-ready-sites", "verify:r2-lifecycle", "verify:agentic-architecture"]) {
+for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:site-authoring-platform", "verify:site-authoring-walking-skeleton", "verify:site-walking-skeleton", "verify:agent-ready-sites", "verify:r2-lifecycle", "verify:site-authoring-architecture"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
 for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY="]) {

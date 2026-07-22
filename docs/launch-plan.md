@@ -56,7 +56,7 @@ Scheduling, customer auth, ecommerce, custom applications, extra production vert
 - Cloudflare Sandbox `standard-2` containers for isolated builds with a prebaked dependency tree and deny-by-default egress. Containers start only on the first build, Vite starts only for an authenticated live-preview request, successful or failed terminal runs explicitly destroy the container, and account capacity is capped at five instances with at most four runs claimed concurrently.
 - Cloudflare for SaaS for customer domains where configured.
 
-Fresh databases are created by applying ordered files under `supabase/migrations`; there is no parallel monolithic schema file. Run `npm run verify:supabase`, `npm run verify:site-sandbox-v1`, and `npm run verify:agentic-site-walking-skeleton` before deployment.
+Fresh databases are created by applying ordered files under `supabase/migrations`; there is no parallel monolithic schema file. Run `npm run verify:supabase`, `npm run verify:site-sandbox-v1`, and `npm run verify:site-authoring-walking-skeleton` before deployment.
 
 ## Decision Metrics
 

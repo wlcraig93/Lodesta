@@ -69,7 +69,7 @@ const browser = await runArtifactBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
-  capturePrefix: "verification/agentic-render"
+  capturePrefix: "verification/site-authoring-render"
 });
 const browserErrors = browser.findings.filter((finding) => finding.severity === "error");
 assert.equal(browserErrors.length, 0, browserErrors.map((finding) => `${finding.route ?? "/"} ${finding.id}: ${finding.message}`).join("\n"));
@@ -95,7 +95,7 @@ const lowContrastBrowser = await runArtifactBrowserGate({
   prepared: lowContrastPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
-  capturePrefix: "verification/agentic-render-low-contrast"
+  capturePrefix: "verification/site-authoring-render-low-contrast"
 });
 const contrastFinding = lowContrastBrowser.findings.find((finding) => finding.id === "render.contrast");
 assert(contrastFinding?.message.includes("Examples:") && contrastFinding.message.includes("rgb("), "contrast findings do not identify actionable elements and computed colors");

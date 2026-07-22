@@ -1,13 +1,13 @@
-import { getAgentModelSettings } from "@/lib/operator-settings";
+import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { requireAdminPageAccess } from "@/lib/page-access";
-import { AgentModelSettingsForm } from "./agent-model-settings-form";
+import { SiteAuthoringModelSettingsForm } from "./site-authoring-model-settings-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   await requireAdminPageAccess("/settings");
-  const snapshot = await getAgentModelSettings({ bypassCache: true });
+  const snapshot = await getSiteAuthoringModelSettings({ bypassCache: true });
 
   return (
     <main className="admin-page">
@@ -20,7 +20,7 @@ export default async function SettingsPage() {
       <div className="admin-grid">
         <section className="panel">
           <h2>Agent models</h2>
-          <AgentModelSettingsForm initialSnapshot={snapshot} />
+          <SiteAuthoringModelSettingsForm initialSnapshot={snapshot} />
         </section>
 
         <aside className="panel">

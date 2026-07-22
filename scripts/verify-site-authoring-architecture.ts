@@ -62,10 +62,10 @@ for (const path of [
 }
 
 const forbiddenArchitecture = /SiteVersionV3|GenerationInputSnapshotV1|site-renderer-v3|site-compiler|generation-pipeline|generation-judge|vertical-packs|modelFallbackPolicy|deterministic_fallback|\/admin\/site-candidates/;
-const forbiddenCutoverContracts = /\b(?:SiteAgentRunV\d+|siteAgentRunV\d+Schema|SiteAgentSessionV\d+|SiteAgentTraceSpanV\d+|SiteEditObjectiveV\d+|ControlPlaneChangeRequestV\d+|OperatorQueueItemV\d+|VerticalDemandEventV\d+|ArtifactBlobAuditReportV\d+|ArtifactBlobOverlapV\d+|AgentModelSettingsSnapshotV\d+|Manager(?:RunRequest|ToolRuntime|Completion|Discussion|TraceEvent)V\d+|BusinessStateV2|businessStateV2Schema|SiteIntentV2|siteIntentV2Schema|SitePublicBuildInputV1|sitePublicBuildInputV1Schema|SitePublicBuildInputV2|sitePublicBuildInputV2Schema)\b|\bunsupported_vertical\b/;
+const forbiddenCutoverContracts = /\b(?:SiteAgentRunV\d+|siteAgentRunV\d+Schema|SiteAgentSessionV\d+|SiteAgentTraceSpanV\d+|SiteEditObjectiveV\d+|ControlPlaneChangeRequestV\d+|OperatorQueueItemV\d+|VerticalDemandEventV\d+|ArtifactBlobAuditReportV\d+|ArtifactBlobOverlapV\d+|SiteAuthoringModelSettingsSnapshotV\d+|Manager(?:RunRequest|ToolRuntime|Completion|Discussion|TraceEvent)V\d+|BusinessStateV2|businessStateV2Schema|SiteIntentV2|siteIntentV2Schema|SitePublicBuildInputV1|sitePublicBuildInputV1Schema|SitePublicBuildInputV2|sitePublicBuildInputV2Schema)\b|\bunsupported_vertical\b/;
 const forbiddenOperationalStorage = /\b(?:site_agent_runs_v2|site_agent_trace_spans_v1|site_edit_objectives_v1|control_plane_change_requests_v2|vertical_demand_events_v1|site_agent_maintenance_leases_v1|workspace_storage_cutover)\b/;
 for (const file of files) {
-  if (file === "scripts/verify-agentic-architecture.ts") continue;
+  if (file === "scripts/verify-site-authoring-architecture.ts") continue;
   const source = await readFile(file, "utf8");
   if (forbiddenArchitecture.test(source)) errors.push(`${file}: names deleted V3 generation architecture`);
   if (forbiddenCutoverContracts.test(source)) errors.push(`${file}: names a deleted pre-cutover agent or authority contract`);
@@ -188,7 +188,7 @@ for (const file of files) {
   if (/LODESTA_R2_BRIDGE_(?:URL|TOKEN)/.test(source)) errors.push(`${file}: uses retired combined R2 bridge credentials`);
 }
 
-if (errors.length) throw new Error(`Agentic architecture verification failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
+if (errors.length) throw new Error(`Site-authoring architecture verification failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
 console.log(JSON.stringify({ ok: true, filesChecked: files.length, authoringAgents: 1, verticalNeutralRoots: verticalNeutralRoots.length }));
 
 async function exists(path: string) {

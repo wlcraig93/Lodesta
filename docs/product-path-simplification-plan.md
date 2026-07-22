@@ -157,11 +157,11 @@ The standing implementation checks are:
 - `npm run typecheck`
 - `npm run verify:site-intent-persistence`
 - `npm run verify:site-agent-manager`
-- `npm run verify:agentic-site-platform`
+- `npm run verify:site-authoring-platform`
 - `npm run verify:site-agent-workspace`
 - `npm run verify:site-sandbox-local`
 - `npm run verify:render-browser`
-- `npm run verify:agentic-architecture`
+- `npm run verify:site-authoring-architecture`
 - `npm run verify:artifact-storage-boundaries`
 - `npm run verify:trusted-runtime`
 - `npm run smoke:dev`

@@ -2,7 +2,7 @@
 
 **Status:** Historical commercial hypothesis; not an active launch or pricing authority.
 
-This document predates the V4 agentic platform and is retained only as business-context history. The current V4 milestone is private experimentation and does not authorize an owner pilot. Pricing, outreach volume, and the commands below must be re-approved before use.
+This document predates the current site-authoring platform and is retained only as business-context history. The current milestone is private experimentation and does not authorize an owner pilot. Pricing, outreach volume, and the commands below must be re-approved before use.
 
 ## Vertical
 

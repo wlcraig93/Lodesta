@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { getSupabaseAdminClient } from "./supabase/client";
 
-export const AGENT_MODEL_SETTING_KEY = "agentic_site_models";
-export const AGENT_MODEL_DEFAULTS = {
+export const SITE_AUTHORING_MODEL_SETTING_KEY = "site_authoring_models";
+export const SITE_AUTHORING_MODEL_DEFAULTS = {
   siteAgentModel: "gpt-5.6-sol",
   ingestionModel: "gpt-5.6-sol"
 } as const;
@@ -19,19 +19,19 @@ const settingsSchema = z.object({
 }).strict();
 const updateSchema = settingsSchema.extend({ version: z.coerce.number().int().min(0) });
 
-export type AgentModelSettings = z.infer<typeof settingsSchema>;
-export type AgentModelSettingsSource = "db" | "file" | "cache" | "lkg" | "default";
-export type AgentModelSettingsSnapshot = {
-  settings: AgentModelSettings;
+export type SiteAuthoringModelSettings = z.infer<typeof settingsSchema>;
+export type SiteAuthoringModelSettingsSource = "db" | "file" | "cache" | "lkg" | "default";
+export type SiteAuthoringModelSettingsSnapshot = {
+  settings: SiteAuthoringModelSettings;
   version: number;
-  source: AgentModelSettingsSource;
+  source: SiteAuthoringModelSettingsSource;
   updatedBy?: string;
   updatedAt?: string;
   warning?: string;
 };
 
 type StoredSetting = {
-  value: AgentModelSettings;
+  value: SiteAuthoringModelSettings;
   version: number;
   updatedBy?: string;
   updatedAt?: string;
@@ -53,7 +53,7 @@ type LocalSettingsFile = {
 };
 
 const globalCache = globalThis as typeof globalThis & {
-  __lodestaAgentModelSettings?: { snapshot: AgentModelSettingsSnapshot; fetchedAt: number };
+  __lodestaSiteAuthoringModelSettings?: { snapshot: SiteAuthoringModelSettingsSnapshot; fetchedAt: number };
   __lodestaOperatorSettingsLocalFileForTests?: string;
 };
 
@@ -64,30 +64,30 @@ export class StaleOperatorSettingsError extends Error {
   }
 }
 
-export function defaultAgentModelSettings(): AgentModelSettings {
-  return { ...AGENT_MODEL_DEFAULTS };
+export function defaultSiteAuthoringModelSettings(): SiteAuthoringModelSettings {
+  return { ...SITE_AUTHORING_MODEL_DEFAULTS };
 }
 
-export function resetAgentModelSettingsCacheForTests() {
-  delete globalCache.__lodestaAgentModelSettings;
+export function resetSiteAuthoringModelSettingsCacheForTests() {
+  delete globalCache.__lodestaSiteAuthoringModelSettings;
 }
 
 export function setOperatorSettingsLocalFileForTests(filePath: string | undefined) {
   if (filePath) globalCache.__lodestaOperatorSettingsLocalFileForTests = filePath;
   else delete globalCache.__lodestaOperatorSettingsLocalFileForTests;
-  resetAgentModelSettingsCacheForTests();
+  resetSiteAuthoringModelSettingsCacheForTests();
 }
 
-export function validateAgentModelSettingsUpdate(input: unknown) {
+export function validateSiteAuthoringModelSettingsUpdate(input: unknown) {
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, issues: parsed.error.issues.map((issue) => issue.message) };
   const { version, ...settings } = parsed.data;
   return { ok: true as const, settings, version };
 }
 
-export async function getAgentModelSettings(options: { bypassCache?: boolean } = {}): Promise<AgentModelSettingsSnapshot> {
+export async function getSiteAuthoringModelSettings(options: { bypassCache?: boolean } = {}): Promise<SiteAuthoringModelSettingsSnapshot> {
   const now = Date.now();
-  const cached = globalCache.__lodestaAgentModelSettings;
+  const cached = globalCache.__lodestaSiteAuthoringModelSettings;
   if (!options.bypassCache && cached && now - cached.fetchedAt <= cacheTtlMs) {
     return { ...cached.snapshot, source: "cache" };
   }
@@ -98,12 +98,12 @@ export async function getAgentModelSettings(options: { bypassCache?: boolean } =
     if (cached && now - cached.fetchedAt <= lkgMaxAgeMs) {
       return { ...cached.snapshot, source: "lkg", warning: `Model settings read failed; using last-known-good settings. ${message}` };
     }
-    return { settings: defaultAgentModelSettings(), version: 0, source: "default", warning: `Model settings read failed; using code defaults. ${message}` };
+    return { settings: defaultSiteAuthoringModelSettings(), version: 0, source: "default", warning: `Model settings read failed; using code defaults. ${message}` };
   }
 }
 
-export async function saveAgentModelSettings(input: {
-  settings: AgentModelSettings;
+export async function saveSiteAuthoringModelSettings(input: {
+  settings: SiteAuthoringModelSettings;
   expectedVersion: number;
   changedBy: string;
 }) {
@@ -117,25 +117,25 @@ export async function saveAgentModelSettings(input: {
   return cacheSnapshot(row);
 }
 
-export async function auditAgentModelSettingsRejection(input: { changedBy: string; attemptedValue?: unknown; error: string }) {
+export async function auditSiteAuthoringModelSettingsRejection(input: { changedBy: string; attemptedValue?: unknown; error: string }) {
   await recordAudit({ status: "rejected", changedBy: input.changedBy, newValue: input.attemptedValue, error: input.error });
 }
 
-function cacheSnapshot(row: StoredSetting): AgentModelSettingsSnapshot {
-  const snapshot: AgentModelSettingsSnapshot = {
+function cacheSnapshot(row: StoredSetting): SiteAuthoringModelSettingsSnapshot {
+  const snapshot: SiteAuthoringModelSettingsSnapshot = {
     settings: row.value,
     version: row.version,
     source: row.source,
     updatedBy: row.updatedBy,
     updatedAt: row.updatedAt
   };
-  globalCache.__lodestaAgentModelSettings = { snapshot, fetchedAt: Date.now() };
+  globalCache.__lodestaSiteAuthoringModelSettings = { snapshot, fetchedAt: Date.now() };
   return snapshot;
 }
 
 function parseValue(value: unknown) {
   const parsed = settingsSchema.safeParse(value);
-  if (!parsed.success) throw new Error(`Stored agent model settings are invalid: ${parsed.error.issues.map((issue) => issue.message).join(", ")}`);
+  if (!parsed.success) throw new Error(`Stored site-authoring model settings are invalid: ${parsed.error.issues.map((issue) => issue.message).join(", ")}`);
   return parsed.data;
 }
 
@@ -147,36 +147,36 @@ function useSupabase() {
 async function readStoredSetting(): Promise<StoredSetting> {
   if (!useSupabase()) {
     const file = await readLocalFile();
-    const row = file.settings?.[AGENT_MODEL_SETTING_KEY];
+    const row = file.settings?.[SITE_AUTHORING_MODEL_SETTING_KEY];
     return row
       ? { value: parseValue(row.value), version: row.version, updatedBy: row.updatedBy, updatedAt: row.updatedAt, source: "file" }
-      : { value: defaultAgentModelSettings(), version: 0, source: "default" };
+      : { value: defaultSiteAuthoringModelSettings(), version: 0, source: "default" };
   }
   const { data, error } = await getSupabaseAdminClient()
     .from("operator_settings")
     .select("value,version,updated_by,updated_at")
-    .eq("key", AGENT_MODEL_SETTING_KEY)
+    .eq("key", SITE_AUTHORING_MODEL_SETTING_KEY)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) return { value: defaultAgentModelSettings(), version: 0, source: "default" };
+  if (!data) return { value: defaultSiteAuthoringModelSettings(), version: 0, source: "default" };
   return mapSupabaseRow(data);
 }
 
-async function writeStoredSetting(input: { settings: AgentModelSettings; expectedVersion: number; changedBy: string }): Promise<StoredSetting> {
+async function writeStoredSetting(input: { settings: SiteAuthoringModelSettings; expectedVersion: number; changedBy: string }): Promise<StoredSetting> {
   if (!useSupabase()) {
     const file = await readLocalFile();
-    const currentVersion = file.settings?.[AGENT_MODEL_SETTING_KEY]?.version ?? 0;
+    const currentVersion = file.settings?.[SITE_AUTHORING_MODEL_SETTING_KEY]?.version ?? 0;
     if (currentVersion !== input.expectedVersion) throw new StaleOperatorSettingsError();
     const updatedAt = new Date().toISOString();
     const version = input.expectedVersion + 1;
-    file.settings = { ...(file.settings ?? {}), [AGENT_MODEL_SETTING_KEY]: { value: input.settings, version, updatedBy: input.changedBy, updatedAt } };
+    file.settings = { ...(file.settings ?? {}), [SITE_AUTHORING_MODEL_SETTING_KEY]: { value: input.settings, version, updatedBy: input.changedBy, updatedAt } };
     await writeLocalFile(file);
     return { value: input.settings, version, updatedBy: input.changedBy, updatedAt, source: "file" };
   }
   if (input.expectedVersion === 0) {
     const updatedAt = new Date().toISOString();
     const { data, error } = await getSupabaseAdminClient().from("operator_settings").insert({
-      key: AGENT_MODEL_SETTING_KEY,
+      key: SITE_AUTHORING_MODEL_SETTING_KEY,
       value: input.settings,
       version: 1,
       updated_by: input.changedBy,
@@ -191,7 +191,7 @@ async function writeStoredSetting(input: { settings: AgentModelSettings; expecte
     version: input.expectedVersion + 1,
     updated_by: input.changedBy,
     updated_at: new Date().toISOString()
-  }).eq("key", AGENT_MODEL_SETTING_KEY).eq("version", input.expectedVersion)
+  }).eq("key", SITE_AUTHORING_MODEL_SETTING_KEY).eq("version", input.expectedVersion)
     .select("value,version,updated_by,updated_at").maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new StaleOperatorSettingsError();
@@ -208,7 +208,7 @@ async function recordAudit(input: { status: "changed" | "rejected"; changedBy: s
   if (useSupabase()) {
     const { error } = await getSupabaseAdminClient().from("operator_setting_audits").insert({
       id: `operator_setting_audit_${crypto.randomUUID()}`,
-      setting_key: AGENT_MODEL_SETTING_KEY,
+      setting_key: SITE_AUTHORING_MODEL_SETTING_KEY,
       status: input.status,
       changed_by: input.changedBy,
       changed_at: changedAt,
@@ -220,7 +220,7 @@ async function recordAudit(input: { status: "changed" | "rejected"; changedBy: s
     return;
   }
   const file = await readLocalFile();
-  file.audits = [{ id: `operator_setting_audit_${crypto.randomUUID()}`, settingKey: AGENT_MODEL_SETTING_KEY, changedAt, ...input }, ...(file.audits ?? [])].slice(0, 500);
+  file.audits = [{ id: `operator_setting_audit_${crypto.randomUUID()}`, settingKey: SITE_AUTHORING_MODEL_SETTING_KEY, changedAt, ...input }, ...(file.audits ?? [])].slice(0, 500);
   await writeLocalFile(file);
 }
 

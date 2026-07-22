@@ -2,7 +2,7 @@
 
 ## Direction
 
-Lodesta-owned UI should feel like an agentic operations workspace: modern, dense, calm, precise, evidence-forward, and action-oriented. The useful reference set is Ramp, Linear, and Roadrunner-style SaaS, adapted to Lodesta's managed website and local-presence workflows.
+Lodesta-owned UI should feel like an AI operations workspace: modern, dense, calm, precise, evidence-forward, and action-oriented. The useful reference set is Ramp, Linear, and Roadrunner-style SaaS, adapted to Lodesta's managed website and local-presence workflows.
 
 This document applies to Lodesta product, marketing, admin, editor, account, settings, and internal review surfaces. It does not apply to generated customer websites, which remain governed by `--site-*`, the public site renderer, and theme presets.
 

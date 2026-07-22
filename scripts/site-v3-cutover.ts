@@ -302,7 +302,7 @@ async function collectInventory(runId: string) {
     related("site_workspace_revisions", "site_id", siteIds, "id,site_id,parent_revision_id,source_archive_key,source_hash,created_at"),
     related("site_agent_sessions", "site_id", siteIds, "id,site_id,owner_id,sandbox_id,status,public_build_input_id"),
     related("site_agent_runs_v2", "site_id", siteIds, "id,session_id,site_id,status,stage,run"),
-    related("domains", "site_id", siteIds, "id,site_id,domain,status"),
+    related("domains", "site_id", siteIds, "id,site_id,hostname,status"),
     related("claims", "site_id", siteIds, "id,site_id,status")
   ]);
   const runIds = runs.map((run) => String(run.id));

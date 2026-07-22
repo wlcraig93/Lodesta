@@ -54,6 +54,7 @@ for (const requirement of [
   "site-v3-cutover-cleanup-receipt-v1",
   "cleanup-receipt.json",
   "writeCleanupReceipt(cleanupReceiptPath, cleanupReceipt)",
+  '"id,site_id,hostname,status"',
   "cleanup_experimental_site_v1"
 ]) {
   assert(cutover.includes(requirement), `cutover operator is missing: ${requirement}`);

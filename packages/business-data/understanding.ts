@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getAgentModelSettings } from "@/lib/operator-settings";
 import type { PublicPresenceEnrichment } from "@/lib/public-presence";
+import { reconstructSourceTokenSpan } from "@/lib/source-text-blocks";
 import type { WebsiteGenerationIngestionV2 } from "./generation-crawler";
 
 const evidenceReferenceSchema = z.object({
@@ -45,7 +46,7 @@ export type WebsiteUnderstandingV3 = ModelUnderstandingV3 & {
   provenance: {
     producer: "website-understanding";
     model: string;
-    promptVersion: "website-understanding-v3.0";
+    promptVersion: "website-understanding-v3.1";
     inputHash: `sha256:${string}`;
     generatedAt: string;
     attempts: number;
@@ -90,7 +91,7 @@ export async function understandWebsite(input: {
         input: [
           {
             role: "system",
-            content: [{ type: "input_text", text: "Create conservative typed knowledge for a local-business website. Every output item must cite exact supplied source block token spans, quote the reconstructed display text exactly, preserve the supplied source URL and evidence class, and avoid third-party reviews as business claims. Public-presence context may help interpretation but is never valid evidence. Do not infer a palette color from prose; preferredHex must be null." }]
+            content: [{ type: "input_text", text: "Create conservative typed knowledge for a local-business website. Every output item must cite exact supplied source block token spans, quote the reconstructed display text exactly, preserve the supplied source URL and evidence class, and avoid third-party reviews as business claims. Token indexes are zero-based, endToken is exclusive, and endToken must never exceed canonicalTokens.length; punctuation outside the last token is not part of the quote. Public-presence context may help interpretation but is never valid evidence. Do not infer a palette color from prose; preferredHex must be null." }]
           },
           {
             role: "user",
@@ -110,7 +111,7 @@ export async function understandWebsite(input: {
     const text = responseText(payload);
     if (!text) throw new Error("Business understanding returned no structured output.");
     try {
-      const understanding = modelSchema.parse(JSON.parse(text));
+      const understanding = canonicalizeUnderstandingEvidenceQuotes(modelSchema.parse(JSON.parse(text)), input.ingestion);
       validationFailures = validateUnderstandingEvidence(understanding, input.ingestion);
       if (!validationFailures.length) {
         return {
@@ -118,7 +119,7 @@ export async function understandWebsite(input: {
           provenance: {
             producer: "website-understanding",
             model,
-            promptVersion: "website-understanding-v3.0",
+            promptVersion: "website-understanding-v3.1",
             inputHash,
             generatedAt: new Date().toISOString(),
             attempts: attempt
@@ -132,6 +133,29 @@ export async function understandWebsite(input: {
     }
   }
   throw new WebsiteUnderstandingValidationError(validationFailures);
+}
+
+export function canonicalizeUnderstandingEvidenceQuotes(understanding: ModelUnderstandingV3, ingestion: WebsiteGenerationIngestionV2) {
+  const blocks = new Map(ingestion.modelBlocks.map((block) => [block.id, block]));
+  const canonicalize = (reference: z.infer<typeof evidenceReferenceSchema>) => {
+    const block = blocks.get(reference.sourceBlockId);
+    if (!block) return reference;
+    const quote = reconstructSourceTokenSpan(block, reference.startToken, reference.endToken);
+    return quote === undefined ? reference : { ...reference, quote };
+  };
+  const evidence = (references: z.infer<typeof evidenceReferenceSchema>[]) => references.map(canonicalize);
+  return {
+    ...understanding,
+    businessName: { ...understanding.businessName, evidence: evidence(understanding.businessName.evidence) },
+    observedCategory: { ...understanding.observedCategory, evidence: evidence(understanding.observedCategory.evidence) },
+    cleanedServices: understanding.cleanedServices.map((service) => ({ ...service, evidence: evidence(service.evidence) })),
+    primaryConversion: { ...understanding.primaryConversion, evidence: evidence(understanding.primaryConversion.evidence) },
+    locationOrServiceArea: { ...understanding.locationOrServiceArea, evidence: evidence(understanding.locationOrServiceArea.evidence) },
+    businessStory: understanding.businessStory
+      ? { ...understanding.businessStory, evidence: evidence(understanding.businessStory.evidence) }
+      : null,
+    brandExpression: { ...understanding.brandExpression, evidence: evidence(understanding.brandExpression.evidence) }
+  } satisfies ModelUnderstandingV3;
 }
 
 export function validateUnderstandingEvidence(understanding: ModelUnderstandingV3, ingestion: WebsiteGenerationIngestionV2) {

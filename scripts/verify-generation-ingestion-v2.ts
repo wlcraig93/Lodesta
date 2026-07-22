@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { crawlWebsiteForGeneration, fetchGenerationPageWithBrowser, generationIngestionLimits } from "../packages/business-data/generation-crawler";
-import { understandWebsite, validateUnderstandingEvidence } from "../packages/business-data/understanding";
+import { canonicalizeUnderstandingEvidenceQuotes, understandWebsite, validateUnderstandingEvidence } from "../packages/business-data/understanding";
 
 const pageStarts: number[] = [];
 const site = new Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>([
@@ -147,6 +147,11 @@ const understanding = {
 };
 assert.deepEqual(validateUnderstandingEvidence(understanding, fetched.ingestion), []);
 assert(validateUnderstandingEvidence({ ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: "not reconstructible" }] } }, fetched.ingestion).some((failure) => failure.includes("quote is not reconstructible")), "invalid model evidence was not rejected");
+const canonicalized = canonicalizeUnderstandingEvidenceQuotes(
+  { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: `${evidence.quote}.` }] } },
+  fetched.ingestion
+);
+assert.equal(canonicalized.businessName.evidence[0].quote, evidence.quote, "valid token-span quote was not canonicalized from source text");
 
 const understandingRequests: Array<Record<string, unknown>> = [];
 const priorApiKey = process.env.OPENAI_API_KEY;
@@ -160,14 +165,16 @@ try {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       understandingRequests.push(body);
       const modelOutput = understandingRequests.length === 1
-        ? { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: "invalid first attempt" }] } }
-        : understanding;
+        ? { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, endToken: 999, quote: "invalid first attempt" }] } }
+        : { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: `${evidence.quote}.` }] } };
       return Response.json({ output: [{ content: [{ type: "output_text", text: JSON.stringify(modelOutput) }] }] });
     }
   });
   assert.equal(understood.provenance.attempts, 2, "understanding did not retry exactly once after evidence validation failed");
+  assert.equal(understood.provenance.promptVersion, "website-understanding-v3.1");
+  assert.equal(understood.businessName.evidence[0].quote, evidence.quote, "successful understanding did not retain the canonical source quote");
   const secondRequest = JSON.stringify(understandingRequests[1]);
-  assert(secondRequest.includes("quote is not reconstructible"), "understanding retry did not receive structured validation failures");
+  assert(secondRequest.includes("invalid token span"), "understanding retry did not receive structured validation failures");
 } finally {
   if (priorApiKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = priorApiKey;

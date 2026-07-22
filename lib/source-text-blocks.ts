@@ -88,7 +88,7 @@ export function canonicalSourceTokens(displayText: string): SourceTextToken[] {
   return tokens;
 }
 
-export function reconstructSourceTokenSpan(block: SourceTextBlock, startToken: number, endToken: number) {
+export function reconstructSourceTokenSpan(block: Pick<SourceTextBlock, "canonicalTokens" | "displayText">, startToken: number, endToken: number) {
   const first = block.canonicalTokens[startToken];
   const last = block.canonicalTokens[endToken - 1];
   if (!first || !last || startToken < 0 || endToken <= startToken) return undefined;

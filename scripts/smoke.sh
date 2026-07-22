@@ -29,7 +29,9 @@ cleanup() {
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
-  [[ -n "$SERVER_LOG" && -f "$SERVER_LOG" ]] && rm -f "$SERVER_LOG"
+  if [[ -n "$SERVER_LOG" && -f "$SERVER_LOG" ]]; then
+    rm -f "$SERVER_LOG"
+  fi
 }
 trap cleanup EXIT
 
@@ -77,6 +79,22 @@ expect_json() {
   BODY="$BODY" node -e "$expression" || { echo "Smoke check failed: $name returned unexpected JSON" >&2; echo "$BODY" >&2; exit 1; }
 }
 
+expect_empty_route_404() {
+  local name="$1" path="$2" body_file result status content_type
+  body_file="$(mktemp)"
+  result="$(curl -sS -L -o "$body_file" -w "%{http_code}|%{content_type}" -H "x-forwarded-for: 203.0.113.10" -H "x-lodesta-admin-token: ${LODESTA_ADMIN_TOKEN}" "${BASE_URL}${path}")"
+  status="${result%%|*}"
+  content_type="${result#*|}"
+  if [[ "$status" != "404" || -s "$body_file" || "$content_type" == text/html* ]]; then
+    echo "Smoke check failed: $name did not reach the registered route handler (status=$status, content-type=${content_type:-none})" >&2
+    [[ -s "$body_file" ]] && head -c 500 "$body_file" >&2
+    rm -f "$body_file"
+    exit 1
+  fi
+  rm -f "$body_file"
+  echo "ok - $name"
+}
+
 request GET "/"
 expect_status "marketing shell" "200"
 
@@ -88,7 +106,7 @@ request GET "/api/health?deep=1"
 expect_status "deep health" "200"
 expect_json "deep health" 'const x=JSON.parse(process.env.BODY); if (!["ok","warning"].includes(x.status)||!x.checks?.some(c=>c.id==="repository_readiness")) process.exit(1)'
 
-for path in "/admin/sites" "/admin/site-queue" "/admin/runs" "/settings"; do
+for path in "/admin/sites" "/admin/sites/new" "/admin/site-queue" "/admin/runs" "/settings"; do
   request GET "$path"
   [[ "$STATUS" =~ ^(200|307)$ ]] || { echo "Smoke check failed: operator surface $path returned $STATUS" >&2; exit 1; }
 done
@@ -99,6 +117,10 @@ expect_status "unknown public site fails closed" "404"
 request GET "/preview/smoke-missing"
 expect_status "unknown preview fails closed" "404"
 
+expect_empty_route_404 "missing V4 asset reaches encoded route" "/_lodesta/assets/asset_revision_smoke_missing"
+expect_empty_route_404 "missing runtime series reaches encoded route" "/_lodesta/runtime/smoke-missing.js"
+expect_empty_route_404 "missing runtime patch reaches encoded route" "/_lodesta/runtime/patches/0000000000000000000000000000000000000000000000000000000000000000.js"
+
 request POST "/api/forms/submit" '{"siteId":"site_missing","formId":"form_missing","payload":{"name":"Smoke"}}'
 expect_status "unreferenced form rejected" "404"
 request POST "/api/analytics" '{"siteId":"site_missing","sessionId":"smoke","pageId":"home","eventType":"pageview"}'
@@ -106,7 +128,7 @@ expect_status "unknown analytics site rejected" "404"
 
 request GET "/api/site-agent/runs/run_missing"
 expect_status "unknown agent run rejected" "404"
-request POST "/api/site-agent/runs" '{"sessionId":"session_missing","kind":"focused_edit","instruction":"Change the heading"}'
+request POST "/api/site-agent/runs" '{"sessionId":"session_missing","instruction":"Change the heading"}'
 expect_status "unknown agent session rejected" "404"
 
 for path in "/api/intake" "/api/sites/regenerate" "/api/sites/versions" "/api/preview-tokens"; do

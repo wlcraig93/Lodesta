@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { chromium, type Browser, type Page } from "playwright";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
-import type { SitePublicBuildInputV1 } from "@/packages/site-contracts";
+import type { SitePublicBuildInputV3 } from "@/packages/site-contracts";
 import type { PreparedSiteArtifactV1 } from "./finalizer";
 import type { ArtifactGateFinding } from "./contracts";
 
@@ -27,9 +27,10 @@ const viewports = [
 
 export async function runArtifactBrowserGate(input: {
   prepared: PreparedSiteArtifactV1;
-  buildInput: SitePublicBuildInputV1;
+  buildInput: SitePublicBuildInputV3;
   blobStore: ArtifactBlobStore;
   capturePrefix: string;
+  signal?: AbortSignal;
 }): Promise<FullBrowserGateResultV1> {
   const harness = await startHarness(input);
   let browser: Browser | undefined;
@@ -40,6 +41,7 @@ export async function runArtifactBrowserGate(input: {
     let linksChecked = 0;
     for (const route of input.prepared.routes) {
       for (const viewport of viewports) {
+        if (input.signal?.aborted) throw new Error("workflow_deadline_exhausted");
         const page = await browser.newPage({ viewport });
         const routeFindings: ArtifactGateFinding[] = [];
         page.on("console", (message) => {
@@ -52,7 +54,7 @@ export async function runArtifactBrowserGate(input: {
             routeFindings.push(finding("render.network", `Final artifact attempted an external request to ${requestUrl.origin}.`, route.path));
           }
         });
-        const response = await page.goto(`${harness.origin}${route.path === "/" ? "/" : `${route.path}/`}`, { waitUntil: "networkidle", timeout: 30_000 });
+        const response = await abortable(page.goto(`${harness.origin}${route.path === "/" ? "/" : `${route.path}/`}`, { waitUntil: "networkidle", timeout: 30_000 }), input.signal);
         if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
         await settleImages(page);
         const metrics = await inspectPage(page);
@@ -118,9 +120,18 @@ export async function runArtifactBrowserGate(input: {
   }
 }
 
+function abortable<T>(operation: Promise<T>, signal?: AbortSignal) {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(new Error("workflow_deadline_exhausted"));
+  return Promise.race([
+    operation,
+    new Promise<T>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("workflow_deadline_exhausted")), { once: true }))
+  ]);
+}
+
 async function startHarness(input: {
   prepared: PreparedSiteArtifactV1;
-  buildInput: SitePublicBuildInputV1;
+  buildInput: SitePublicBuildInputV3;
   blobStore: ArtifactBlobStore;
 }) {
   const routeFiles = new Map(input.prepared.routes.map((route) => [route.path, route.html]));

@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { GET as serveRuntimePatch } from "../app/_lodesta/runtime/patches/[file]/route";
-import { GET as resolveRuntimeSeries } from "../app/_lodesta/runtime/[file]/route";
 import { POST as recordAnalytics } from "../app/api/analytics/route";
 import { POST as submitForm } from "../app/api/forms/submit/route";
 import { GET as servePublicSite } from "../app/sites/[slug]/[[...path]]/route";
@@ -8,16 +6,19 @@ import { createPublicBuildInput, sha256, stableJson } from "../packages/business
 import { configuredArtifactBlobStore, persistFinalArtifact, readVerifiedArtifactFile } from "../packages/site-artifacts";
 import { siteCapabilityRepository } from "../packages/site-capabilities";
 import {
-  businessStateV2Schema,
+  businessStateV3Schema,
   platformSiteRecordSchema,
-  siteIntentV2Schema,
-  sitePublicBuildInputV1Schema,
+  sandboxImageDigest,
+  siteIntentV3Schema,
+  sitePublicBuildInputV3Schema,
+  siteToolchainVersion,
   siteVersionV4Schema,
+  siteVersionApprovalV1Schema,
   siteWorkspaceRevisionV1Schema,
   sourceSnapshotV1Schema,
   trustedRuntimeSeriesV1Schema,
   type SiteBuildArtifactV1,
-  type SitePublicBuildInputV1,
+  type SitePublicBuildInputV3,
   type SiteWorkspaceRevisionV1
 } from "../packages/site-contracts";
 import { SupabaseSitePlatformRepository } from "../packages/platform-data";
@@ -28,6 +29,14 @@ import { createSiteRuntimePatch, runtimePatchPath } from "../packages/trusted-ru
 import { autoBodyContextModule } from "../packages/vertical-context";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+
+const encodedLodestaRouteRoot = "../app/%255Flodesta";
+type RuntimeRouteHandler = (
+  request: Request,
+  context: { params: Promise<{ file: string }> }
+) => Promise<Response>;
+const { GET: serveRuntimePatch } = (await import(`${encodedLodestaRouteRoot}/runtime/patches/[file]/route`)) as { GET: RuntimeRouteHandler };
+const { GET: resolveRuntimeSeries } = (await import(`${encodedLodestaRouteRoot}/runtime/[file]/route`)) as { GET: RuntimeRouteHandler };
 
 const syntheticInput = buildSyntheticSiteInput();
 const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -48,12 +57,11 @@ const facts = syntheticInput.publicFacts.map((fact) => ({
   source: { ...fact.source, sourceSnapshotId: sourceId, observedAt: now }
 }));
 const stateWithoutHash = {
-  schemaVersion: "business-state-v2" as const,
+  schemaVersion: "business-state-v3" as const,
   businessId,
   siteId,
   revision: 1,
   updatedAt: now,
-  vertical: { id: "auto_body" as const, moduleVersion: autoBodyContextModule.version, status: "reviewed" as const },
   identity: { name: syntheticInput.business.name, description: syntheticInput.business.description, categories: ["Auto body shop"] },
   contacts: syntheticInput.business.contacts,
   locations: syntheticInput.business.locations,
@@ -64,14 +72,14 @@ const stateWithoutHash = {
   links: syntheticInput.business.links,
   facts
 };
-const state = businessStateV2Schema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
+const state = businessStateV3Schema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
 const intentWithoutHash = {
   ...syntheticInput.intent,
   id: `intent_walking_${suffix}`,
   siteId,
   updatedAt: now
 };
-const intent = siteIntentV2Schema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
+const intent = siteIntentV3Schema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
 const forms = syntheticInput.forms.map((form) => ({ ...form, id: formId, siteId, createdAt: now }));
 const site = platformSiteRecordSchema.parse({
   id: siteId,
@@ -95,7 +103,7 @@ const publicInput = createPublicBuildInput({
   state,
   intent,
   forms,
-  verticalModule: autoBodyContextModule,
+  domainContext: autoBodyContextModule,
   sourceSnapshotIds: [sourceId],
   createdAt: now,
   runtimeSeriesId: "site-runtime-v1"
@@ -141,6 +149,7 @@ try {
   assert(inactiveFormResponse.status === 403 && inactiveFormResult.accepted === false && inactiveFormResult.status === "inactive", "candidate-only form submission was not rejected before publish");
   assert((await siteCapabilityRepository.listInquiries(siteId)).length === 0, "candidate-only form rejection created an inquiry");
 
+  await approveVersion(firstVersion);
   await repository.promoteSiteVersion(firstVersion.id, "walking_skeleton_operator");
   const publishedFirst = await repository.getSiteVersion(firstVersion.id);
   assert(publishedFirst?.status === "published", "Supabase version read did not reflect published state");
@@ -150,10 +159,48 @@ try {
     params: Promise.resolve({ slug, path: undefined })
   });
   assert(publicResponse.status === 200, `public route returned ${publicResponse.status}`);
+  assert(publicResponse.headers.get("x-robots-tag") === "index, follow", "published site is not explicitly indexable");
+  assert(publicResponse.headers.get("vary") === "Accept, Host, X-Forwarded-Host", "published HTML cache variants do not include Accept and host routing");
+  assert(publicResponse.headers.get("link")?.includes('/index.md>') && publicResponse.headers.get("link")?.includes('rel="alternate"'), "published HTML does not advertise its Markdown alternate");
   const publicHtml = await publicResponse.text();
   const retainedHome = await readVerifiedArtifactFile({ artifact: firstArtifact, path: "index.html", store: blobStore });
   assert(retainedHome && publicHtml === retainedHome.bytes.toString("utf8"), "public route did not serve the exact retained artifact bytes");
   assert(publicHtml.includes('href="site.css"') && publicHtml.includes(`data-lodesta-site-id="${siteId}"`), "finalized artifact did not use portable relative paths");
+  for (const accept of ["text/markdown;q=0", "text/markdown;q=0.0", "text/markdown;q=0.000", "text/markdown;q=invalid"]) {
+    const response = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}`, { headers: { accept } }), {
+      params: Promise.resolve({ slug, path: undefined })
+    });
+    assert(response.headers.get("content-type")?.includes("text/html") && await response.text() === publicHtml, `${accept} did not retain the verified HTML response`);
+  }
+  const negotiatedMarkdown = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}`, { headers: { accept: "text/markdown" } }), {
+    params: Promise.resolve({ slug, path: undefined })
+  });
+  assert(negotiatedMarkdown.status === 200 && negotiatedMarkdown.headers.get("content-type")?.includes("text/markdown"), "Accept: text/markdown did not negotiate from the verified HTML artifact");
+  assert(negotiatedMarkdown.headers.get("link")?.includes('rel="canonical"'), "Markdown response does not link its HTML canonical");
+  const negotiatedText = await negotiatedMarkdown.text();
+  assert(negotiatedText.includes(syntheticInput.business.name), "derived Markdown lost visible business content from the verified HTML artifact");
+  const cleanMarkdown = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}/index.md`), {
+    params: Promise.resolve({ slug, path: ["index.md"] })
+  });
+  assert(cleanMarkdown.status === 200 && await cleanMarkdown.text() === negotiatedText, "clean /index.md and negotiated Markdown diverged");
+  const explicitMarkdownWithZeroQuality = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}/index.md`, { headers: { accept: "text/markdown;q=0" } }), {
+    params: Promise.resolve({ slug, path: ["index.md"] })
+  });
+  assert(explicitMarkdownWithZeroQuality.status === 200 && await explicitMarkdownWithZeroQuality.text() === negotiatedText, "explicit /index.md incorrectly honored Accept quality negotiation");
+  const customDomainMarkdown = await servePublicSite(new Request("https://customer.example/index.md", { headers: { "x-lodesta-custom-domain-routed": "1" } }), {
+    params: Promise.resolve({ slug, path: ["index.md"] })
+  });
+  assert(customDomainMarkdown.status === 200 && customDomainMarkdown.headers.get("link") === '<https://customer.example>; rel="canonical"', "custom-domain Markdown leaked the platform path");
+  const retiredMarkdownRoute = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}/md/index.md`), {
+    params: Promise.resolve({ slug, path: ["md", "index.md"] })
+  });
+  assert(retiredMarkdownRoute.status === 404, "retired /md/* compatibility route remains public");
+  const publicRobots = await servePublicSite(new Request(`http://127.0.0.1/sites/${slug}/robots.txt`), {
+    params: Promise.resolve({ slug, path: ["robots.txt"] })
+  });
+  const publicRobotsText = await publicRobots.text();
+  assert(publicRobots.status === 200 && publicRobotsText.includes("Allow: /"), "published site robots policy does not allow indexing");
+  assert(publicRobotsText.includes("Content-Signal: search=yes, ai-input=yes, ai-train=no"), "published default robots policy does not block training while allowing search and live AI input");
 
   const redirectInput = validateSiteRedirectInput({ siteId, sourcePath: "/old-collision-repair", destinationPath: "/collision-repair" }, firstArtifact.routes.map((route) => route.path));
   const redirect = await platformOperationsRepository.upsertRedirect(redirectInput);
@@ -209,6 +256,7 @@ try {
   });
   assert(secondArtifact.qa.hardGate === "passed", failureSummary(secondArtifact));
   const secondVersion = await createVersion(secondArtifact, secondRevision, 2);
+  await approveVersion(secondVersion);
   await platformOperationsRepository.upsertRedirect({ ...redirectInput, destinationPath: "/removed-destination" });
   let strandedRedirectRejected = false;
   try {
@@ -326,8 +374,8 @@ async function finalizeSandboxArtifact(input: { revision: SiteWorkspaceRevisionV
     runtimeSeriesId: "site-runtime-v1",
     runtimePatchId: input.runtimePatchId,
     storagePrefix: `site-artifacts/${siteId}/${input.artifactId}`,
-    toolchainVersion: "lodesta-static-site-workspace-v1",
-    sandboxImageDigest: "sha256:dba859f5974c29e57fa428ea8d98c2ca83165d5b1a8163f32f33164005d34f91",
+    toolchainVersion: siteToolchainVersion,
+    sandboxImageDigest,
     browserGate: {
       findings: browserGate.findings,
       screenshotKeys: browserGate.captures.map((capture) => capture.key),
@@ -363,8 +411,22 @@ async function createVersion(artifact: SiteBuildArtifactV1, revision: SiteWorksp
   return version;
 }
 
-function workspaceFiles(input: SitePublicBuildInputV1, accent: string): WorkspaceSourceFile[] {
-  const fact = (kind: SitePublicBuildInputV1["publicFacts"][number]["kind"]) => {
+async function approveVersion(version: ReturnType<typeof siteVersionV4Schema.parse>) {
+  await repository.saveSiteVersionApproval(siteVersionApprovalV1Schema.parse({
+    schemaVersion: "site-version-approval-v1",
+    id: `approval_walking_${suffix}_${version.number}`,
+    siteId,
+    versionId: version.id,
+    artifactHash: version.artifactHash,
+    status: "approved",
+    actorId: "walking_skeleton_operator",
+    note: "Walking-skeleton operator approval for the exact verified artifact.",
+    createdAt: new Date().toISOString()
+  }));
+}
+
+function workspaceFiles(input: SitePublicBuildInputV3, accent: string): WorkspaceSourceFile[] {
+  const fact = (kind: SitePublicBuildInputV3["publicFacts"][number]["kind"]) => {
     const match = input.publicFacts.find((item) => item.kind === kind);
     if (!match) throw new Error(`Walking skeleton requires ${kind}.`);
     return match.id;

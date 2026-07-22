@@ -32,6 +32,7 @@ export type CreateCapabilityInquiryResult = {
 export interface SiteCapabilityRepository {
   createInquiryFromForm(input: CreateCapabilityInquiryInput): Promise<CreateCapabilityInquiryResult>;
   listInquiries(siteId?: string): Promise<Inquiry[]>;
+  getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
   listInquiryEvents(inquiryId: string): Promise<InquiryEvent[]>;
   updateInquiryStatus(input: { siteId: string; inquiryId: string; status: InquiryStatus }): Promise<Inquiry | null>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<AnalyticsEvent>;
@@ -91,6 +92,10 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
 
   async listInquiries(siteId?: string) {
     return (await this.read()).inquiries.filter((inquiry) => !siteId || inquiry.siteId === siteId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getInquiry(siteId: string, inquiryId: string) {
+    return (await this.read()).inquiries.find((inquiry) => inquiry.siteId === siteId && inquiry.id === inquiryId) ?? null;
   }
 
   async listInquiryEvents(inquiryId: string) {
@@ -192,6 +197,14 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
     if (siteId) query = query.eq("site_id", siteId);
     const rows = await requireData<InquiryRow[]>(query, "List inquiries");
     return rows.map(rowToInquiry);
+  }
+
+  async getInquiry(siteId: string, inquiryId: string) {
+    const row = await requireData<InquiryRow | null>(
+      this.client.from("inquiries").select("*").eq("site_id", siteId).eq("id", inquiryId).maybeSingle(),
+      "Get inquiry"
+    );
+    return row ? rowToInquiry(row) : null;
   }
 
   async listInquiryEvents(inquiryId: string) {

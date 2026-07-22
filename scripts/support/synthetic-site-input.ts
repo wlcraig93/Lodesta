@@ -1,12 +1,12 @@
 import { sha256, stableJson } from "../../packages/business-data";
-import { siteIntentV2Schema, sitePublicBuildInputV1Schema } from "../../packages/site-contracts";
+import { siteIntentV3Schema, sitePublicBuildInputV3Schema } from "../../packages/site-contracts";
 import { autoBodyContextModule } from "../../packages/vertical-context";
 
 const createdAt = "2026-07-20T00:00:00.000Z";
 
 export function buildSyntheticSiteInput() {
   const intentWithoutHash = {
-    schemaVersion: "site-intent-v2" as const,
+    schemaVersion: "site-intent-v3" as const,
     id: "intent_synthetic_verification",
     siteId: "site_synthetic_verification",
     revision: 1,
@@ -18,32 +18,38 @@ export function buildSyntheticSiteInput() {
     pageRequirements: [{ id: "page_home", purpose: "home" as const, slug: "", title: "Home", required: true }],
     brandConstraints: { preferredColors: [], prohibitedColors: [], preserveLogo: true, notes: [] },
     enabledCapabilities: ["forms", "analytics", "maps", "disclosure"] as const,
+    agentAccessPolicy: {
+      search: "allow" as const,
+      aiInput: "allow" as const,
+      aiTrain: "disallow" as const,
+      trainingPermission: { status: "not_granted" as const }
+    },
     notes: []
   };
-  const intent = siteIntentV2Schema.parse({
+  const intent = siteIntentV3Schema.parse({
     ...intentWithoutHash,
     intentHash: sha256(stableJson(intentWithoutHash))
   });
   const publicFacts = [
     fact("business:name", "business_name", "Business name", "Northstar Collision Repair"),
-    fact("fact_phone", "phone", "Phone", "(512) 555-0142"),
+    fact("fact_phone", "phone", "Phone", "+15125550142"),
     fact("fact_address", "address", "Address", "1200 Main Street, Austin, TX 78701"),
-    fact("fact_hours", "hours", "Hours", "Monday-Friday 8:00 AM-5:30 PM"),
+    fact("fact_hours", "hours", "Hours", { fri: "8:00 AM-5:30 PM", Monday: "8:00 AM-5:30 PM", wed: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Thu: "8:00 AM-5:30 PM", Sunday: "Closed", sat: "Closed", "By appointment": "Evenings" }),
     fact("fact_service_collision", "offering", "Service", "Collision Repair")
   ];
   const valueWithoutHash = {
-    schemaVersion: "site-public-build-input-v1" as const,
+    schemaVersion: "site-public-build-input-v3" as const,
     id: "input_synthetic_verification",
     siteId: "site_synthetic_verification",
     businessId: "business_synthetic_verification",
     createdAt,
     businessStateRevision: 1,
     siteIntentRevision: 1,
-    verticalModule: autoBodyContextModule,
+    domainContext: autoBodyContextModule,
     business: {
       name: "Northstar Collision Repair",
       description: "Local collision and cosmetic vehicle repair.",
-      contacts: { phone: "(512) 555-0142" },
+      contacts: { phone: "+15125550142" },
       locations: [{
         id: "location_primary",
         label: "Main shop",
@@ -52,7 +58,8 @@ export function buildSyntheticSiteInput() {
         region: "TX",
         postalCode: "78701",
         country: "US",
-        hours: { "Monday-Friday": "8:00 AM-5:30 PM" },
+        googlePlaceId: "ChIJ-synthetic-location",
+        hours: { fri: "8:00 AM-5:30 PM", Monday: "8:00 AM-5:30 PM", wed: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Thu: "8:00 AM-5:30 PM", Sunday: "Closed", sat: "Closed", "By appointment": "Evenings" },
         sourceFactIds: ["fact_address", "fact_hours"]
       }],
       serviceAreas: [],
@@ -98,13 +105,13 @@ export function buildSyntheticSiteInput() {
     sourceSnapshotIds: ["source_owner"],
     assetRevisionIds: []
   };
-  return sitePublicBuildInputV1Schema.parse({
+  return sitePublicBuildInputV3Schema.parse({
     ...valueWithoutHash,
     inputHash: sha256(stableJson(valueWithoutHash))
   });
 }
 
-function fact(id: string, kind: "business_name" | "phone" | "address" | "hours" | "offering", label: string, value: string) {
+function fact(id: string, kind: "business_name" | "phone" | "address" | "hours" | "offering", label: string, value: unknown) {
   return {
     id,
     kind,

@@ -1,5 +1,5 @@
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
-import { authRequired, hasValidAdminToken, isAdminUserId } from "@/lib/auth-policy";
+import { authRequired, hasPlatformAdminRole, hasValidAdminToken } from "@/lib/auth-policy";
 import { getCurrentUser } from "@/lib/supabase/server";
 
 export async function authorizedSiteActor(request: Request, siteId: string) {
@@ -9,7 +9,7 @@ export async function authorizedSiteActor(request: Request, siteId: string) {
   return {
     ok: true as const,
     actorId: auth.user?.id ?? "authorized_operator",
-    isOperator: hasValidAdminToken(request.headers) || isAdminUserId(auth.user?.id) || (!auth.configured && !authRequired())
+    isOperator: hasValidAdminToken(request.headers) || hasPlatformAdminRole(auth.user) || (!auth.configured && !authRequired())
   };
 }
 

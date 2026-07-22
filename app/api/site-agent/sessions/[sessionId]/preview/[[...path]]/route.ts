@@ -9,10 +9,22 @@ export async function GET(
 ) {
   const { sessionId, path } = await params;
   const session = await sitePlatformRepository.getAgentSession(sessionId);
-  if (!session?.sandboxId) return new Response(null, { status: 404 });
+  if (!session) return new Response(null, { status: 404 });
   const actor = await authorizedSiteActor(request, session.siteId);
   if (!actor.ok) return actor.response;
   if (!canAccessAgentSession(actor, session.ownerId)) return new Response(null, { status: 404 });
+  const runs = await sitePlatformRepository.listAgentRuns(session.id);
+  const latest = [...runs].sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
+  if (!session.sandboxId) {
+    if (latest?.status === "queued" || latest?.status === "running") {
+      return Response.json({ error: "preview_not_ready" }, { status: 409, headers: { "cache-control": "private, no-store" } });
+    }
+    if (latest?.status === "succeeded" && latest.candidateVersionId) {
+      const route = path?.join("/") ?? "";
+      return Response.redirect(new URL(`/api/site-versions/${encodeURIComponent(latest.candidateVersionId)}/artifact/${route}`, request.url), 307);
+    }
+    return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
+  }
   const base = process.env.LODESTA_SANDBOX_URL;
   const token = process.env.LODESTA_SANDBOX_TOKEN;
   if (!base || !token) return new Response(null, { status: 503 });
@@ -21,6 +33,9 @@ export async function GET(
     headers: { authorization: `Bearer ${token}` },
     cache: "no-store"
   });
+  if (upstream.status === 409 && (latest?.stage === "fast_preview" || latest?.stage === "verifying")) {
+    return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
+  }
   const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
   const bytes = Buffer.from(await upstream.arrayBuffer());
   const body = contentType.startsWith("text/html") ? rewriteFastPreview(bytes.toString("utf8"), sessionId) : bytes;

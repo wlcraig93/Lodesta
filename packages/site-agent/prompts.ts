@@ -1,4 +1,4 @@
-import type { SiteElementSelectionV1, SitePublicBuildInputV1, VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { SiteEditObjectiveV1, SiteElementSelectionV1, SitePublicBuildInputV3, VerticalContextModuleV1 } from "@/packages/site-contracts";
 import { websiteManagerPromptVersion } from "@/packages/site-contracts/platform-versions";
 import { taskSkillFor, type ManagerTaskKind } from "./skills";
 
@@ -10,8 +10,10 @@ You write a complete React/TypeScript/CSS workspace. You are not filling a templ
 
 Tool protocol:
 - Work only through the supplied tools. Do not emit source code as a chat response.
+- Your first phase has only set_site_plan. Submit one complete evidence-bound plan; after it is accepted, it is frozen and the workspace tools become available.
 - For an initial empty workspace, write src/site.tsx and src/styles.css once with write_file. After the first successful build, all mutations use apply_patch.
 - For edits and repairs, inspect current source with read_workspace and use apply_patch only. Never rewrite a complete file.
+- Use search_workspace for literal source discovery before reading narrow source windows. Search and reads do not count as implementation progress.
 - build_preview validates and builds the current exact workspace. inspect_candidate runs the objective gate and returns actionable route, selector, typography, contrast, claim, link, and capability findings plus captures.
 - Any source mutation invalidates the prior build and inspection. Call finish only after an unchanged successful build and passing objective inspection.
 - Bundle all related exact replacements across either source file into one apply_patch call. The batch is atomic: every expected file hash and every anchor must match exactly or nothing changes.
@@ -32,6 +34,7 @@ Hard boundaries:
 - Use ordinary <a> navigation for internal routes; the platform owns stylesheet <link> elements and all document-head metadata.
 - Never invent ratings, review counts, testimonials, years, credentials, insurer relationships, guarantees, warranties, prices, timelines, or service details.
 - Reference-only assets are allowed for candidate design, but the platform will block publication until rights are resolved.
+- Treat supplied asset dimensions as hard visual evidence: never render a raster image above its intrinsic width or height, and reserve small assets for logos, marks, icons, or compact supporting media.
 - Use semantic HTML, one H1 per route, visible focus states, keyboard-safe controls, 44px touch targets, and body text of at least 16px.
 - Make mobile navigation explicit and non-overflowing. Avoid text overlap, horizontal overflow, clipped controls, low contrast, decorative blobs, generic gradient heroes, excessive rounded cards, and nested cards.
 - Do not expose source/research/meta language to customers. Do not describe the website-building process in customer-facing copy.
@@ -47,12 +50,13 @@ Design standard:
 - The output should be credible to send to the business without manual redesign.`;
 
 export function managerBuildContext(input: {
-  buildInput: SitePublicBuildInputV1;
-  verticalContext: VerticalContextModuleV1;
+  buildInput: SitePublicBuildInputV3;
+  verticalContext?: VerticalContextModuleV1;
   instruction: string;
   kind: ManagerTaskKind;
   selection?: SiteElementSelectionV1;
   objectiveFindings?: string[];
+  objective?: SiteEditObjectiveV1;
 }) {
   return {
     task: {
@@ -60,9 +64,10 @@ export function managerBuildContext(input: {
       instruction: input.instruction,
       selection: input.selection,
       objectiveFindings: input.objectiveFindings ?? [],
+      objective: input.objective,
       skill: taskSkillFor(input.kind)
     },
-    publicBuildInput: input.buildInput,
+    publicEvidencePacket: managerEvidencePacket(input.buildInput),
     verticalContext: input.verticalContext,
     workspace: {
       sourceIsAvailableThroughTools: true,
@@ -93,5 +98,19 @@ export function managerBuildContext(input: {
         Disclosure: "<Disclosure summary=\"Question\">Answer</Disclosure>"
       }
     }
+  };
+}
+
+export function managerEvidencePacket(input: SitePublicBuildInputV3) {
+  const { agentAccessPolicy: _servingPolicy, ...intent } = input.intent;
+  return {
+    schemaVersion: "manager-public-evidence-packet-v1" as const,
+    publicBuildInputId: input.id,
+    siteId: input.siteId,
+    business: input.business,
+    publicFacts: input.publicFacts,
+    intent,
+    forms: input.forms,
+    capabilityConfiguration: input.capabilityConfiguration
   };
 }

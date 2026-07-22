@@ -1,6 +1,11 @@
 import { getStandardCriterion } from "./standard";
 import { validatePublicFetchUrl } from "./url-safety";
 import { extractSourceTextBlocks, type SourceTextBlock } from "./source-text-blocks";
+import {
+  businessNameCandidateScore,
+  normalizeObservedBusinessHours,
+  preferBusinessNameCandidate
+} from "./business-fact-normalization";
 
 export type CrawlAssessment = {
   url: string;
@@ -396,7 +401,8 @@ function mergePageSummaryIntoAssessment(assessment: CrawlAssessment, summary: Cr
   assessment.internalLinkCount += summary.internalLinkCount;
   assessment.externalLinkCount += summary.externalLinkCount;
   assessment.jsonLdTypes = unique([...assessment.jsonLdTypes, ...summary.jsonLdTypes]);
-  assessment.extractedFacts = mergeExtractedBusinessFacts(assessment.extractedFacts, summary.extractedFacts);
+  const hostname = new URL(assessment.finalUrl ?? assessment.url).hostname;
+  assessment.extractedFacts = mergeExtractedBusinessFacts(assessment.extractedFacts, summary.extractedFacts, hostname);
   assessment.formReferences = uniqueBy([...assessment.formReferences, ...summary.formReferences], formReferenceKey).slice(0, 12);
   assessment.linkReferences = uniqueBy([...assessment.linkReferences, ...summary.linkReferences], (reference) => `${reference.kind}:${reference.href}`).slice(0, 40);
   assessment.assetReferences = capAssetReferences(
@@ -1076,8 +1082,7 @@ function extractHours(node: Record<string, unknown>) {
     ...toArray(node.openingHours).map((value) => String(value)),
     ...toArray(node.openingHoursSpecification).flatMap(openingHoursSpecificationEntries)
   ].map((value) => value.replace(/\s+/g, " ").trim()).filter(Boolean));
-  if (values.length === 0) return undefined;
-  return Object.fromEntries(values.map((value, index) => [`hours_${index + 1}`, value]));
+  return normalizeObservedBusinessHours(values);
 }
 
 function extractServices(node: Record<string, unknown>) {
@@ -1176,7 +1181,7 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
 
 function extractVisibleHours(html: string): Record<string, string> | undefined {
   const lines = htmlToTextLines(html);
-  const entries: Array<[string, string]> = [];
+  const entries: string[] = [];
   const seen = new Set<string>();
   const pushEntry = (value: string) => {
     const compact = value.replace(/\s+/g, " ").trim();
@@ -1184,7 +1189,7 @@ function extractVisibleHours(html: string): Record<string, string> | undefined {
     const key = compact.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    entries.push([`hours_${entries.length + 1}`, compact]);
+    entries.push(compact);
   };
 
   for (const line of lines) {
@@ -1203,7 +1208,7 @@ function extractVisibleHours(html: string): Record<string, string> | undefined {
     if (!next || !timeOnlyPattern.test(next)) continue;
     pushEntry(`${dayMatch[0]} ${next}`);
   }
-  return entries.length ? Object.fromEntries(entries) : undefined;
+  return normalizeObservedBusinessHours(entries);
 }
 
 function extractVisibleAddress(html: string): ExtractedBusinessFacts["address"] | undefined {
@@ -1510,18 +1515,11 @@ function normalizeBusinessNameCandidate(value: string | undefined, hostname: str
 }
 
 function titleNameScore(candidate: string, hostname: string, lastSegment: boolean) {
-  let score = lastSegment ? 1 : 0;
-  const hostTokens = safeTextId(hostname.replace(/^www\./, "").split(".")[0]);
-  const candidateTokens = safeTextId(candidate);
-  if (hostTokens && (candidateTokens.includes(hostTokens) || hostTokens.includes(candidateTokens))) score += 4;
+  let score = businessNameCandidateScore(candidate, hostname) + (lastSegment ? 1 : 0);
   const hostWords = new Set(hostname.replace(/^www\./, "").split(".")[0]?.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3) ?? []);
   const candidateWords = new Set(candidate.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3));
   const overlap = Array.from(hostWords).filter((word) => candidateWords.has(word)).length;
   score += Math.min(overlap * 2, 4);
-  if (/\b(auto|automotive|body|paint|collision|repair|restaurant|cafe|taco|dental|law|salon|spa|clinic|plumbing|hvac|landscap|studio|shop|company|co\.?|llc|inc\.?)\b/i.test(candidate)) score += 2;
-  if (/\b(done right|welcome|official|quality|best|affordable|professional)\b/i.test(candidate)) score -= 3;
-  if (/[!?]/.test(candidate)) score -= 2;
-  if (candidate.split(/\s+/).length < 2) score -= 1;
   return score;
 }
 
@@ -1608,15 +1606,15 @@ function selectInternalCrawlTargets(urls: string[], sourceUrl: string, limit: nu
     .slice(0, limit);
 }
 
-function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts): ExtractedBusinessFacts {
+function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts, hostname: string): ExtractedBusinessFacts {
   return {
-    name: left.name ?? right.name,
+    name: preferBusinessNameCandidate(left.name, right.name, hostname),
     description: left.description ?? right.description,
     phone: left.phone ?? right.phone,
     email: left.email ?? right.email,
     address: mergeAddress(left.address, right.address),
     geo: left.geo ?? right.geo,
-    hours: left.hours ?? right.hours,
+    hours: mergeHours(left.hours, right.hours),
     categories: unique([...left.categories, ...right.categories]).slice(0, 8),
     services: unique([...left.services, ...right.services]).slice(0, 12),
     serviceHighlights: unique([...(left.serviceHighlights ?? []), ...(right.serviceHighlights ?? [])]).slice(0, 8),
@@ -1627,6 +1625,11 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
     pressLinks: unique([...left.pressLinks, ...right.pressLinks]).slice(0, 8),
     reviewsSummary: left.reviewsSummary ?? right.reviewsSummary
   };
+}
+
+function mergeHours(left: Record<string, string> | undefined, right: Record<string, string> | undefined) {
+  if (!left && !right) return undefined;
+  return { ...right, ...left };
 }
 
 function mergeAddress(left: ExtractedBusinessFacts["address"], right: ExtractedBusinessFacts["address"]) {

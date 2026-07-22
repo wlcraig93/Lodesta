@@ -1,0 +1,9 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "lodesta-recovery-watchdog-v1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-21",
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  }
+}

@@ -11,17 +11,9 @@ const testModules = new Map<string, VerticalContextModuleV1>([
   [syntheticContextModule.id, verticalContextModuleV1Schema.parse(syntheticContextModule)]
 ]);
 
-export class UnsupportedVerticalError extends Error {
-  readonly code = "unsupported_vertical";
-
-  constructor(readonly verticalId: string) {
-    super(`Vertical ${verticalId} is not supported by the V1 site agent.`);
-  }
-}
-
 export function verticalContextFor(verticalId: string, options: { includeTestModules?: boolean } = {}) {
   const module = (options.includeTestModules ? testModules : productionModules).get(verticalId);
-  if (!module) throw new UnsupportedVerticalError(verticalId);
+  if (!module) throw new Error(`Domain context ${verticalId} is not registered.`);
   return structuredClone(module);
 }
 
@@ -51,17 +43,6 @@ export function matchVerticalContext(
 
   if (!matches[0] || (matches[1] && matches[0].score === matches[1].score)) return undefined;
   return structuredClone(matches[0].module);
-}
-
-export function resolveProductionVerticalContext(input: {
-  observedVertical: string;
-  evidenceText: string;
-}) {
-  const evidenceMatch = matchVerticalContext(input.evidenceText);
-  if (!evidenceMatch) return undefined;
-  if (input.observedVertical === "unsupported") return evidenceMatch;
-  if (input.observedVertical !== evidenceMatch.id) return undefined;
-  return evidenceMatch;
 }
 
 function includesPhrase(source: string, value: string) {

@@ -1,36 +1,42 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
-  businessStateV2Schema,
+  businessStateV3Schema,
   assetRevisionV1Schema,
   controlPlaneChangeRequestV2Schema,
   formDefinitionV2Schema,
   operatorQueueItemSchema,
   platformSiteRecordSchema,
-  siteAgentRunV1Schema,
+  siteAgentRunV2Schema,
+  siteAgentTraceSpanV1Schema,
   siteAgentSessionV1Schema,
+  siteEditObjectiveV1Schema,
   siteBuildArtifactV1Schema,
-  siteIntentV2Schema,
-  sitePublicBuildInputV1Schema,
+  siteIntentV3Schema,
+  sitePublicBuildInputV3Schema,
   siteVersionV4Schema,
+  siteVersionApprovalV1Schema,
   siteWorkspaceRevisionV1Schema,
   sourceSnapshotV1Schema,
   trustedRuntimePatchV1Schema,
   trustedRuntimeSeriesV1Schema,
   verticalDemandEventV1Schema,
-  type BusinessStateV2,
+  type BusinessStateV3,
   type AssetRevisionV1,
   type ControlPlaneChangeRequestV2,
   type FormDefinitionV2,
-  type OperatorQueueItemV1,
+  type OperatorQueueItemV2,
   type PlatformSiteRecord,
-  type SiteAgentRunV1,
+  type SiteAgentRunV2,
+  type SiteAgentTraceSpanV1,
   type SiteAgentSessionV1,
+  type SiteEditObjectiveV1,
   type SiteBuildArtifactV1,
-  type SiteIntentV2,
+  type SiteIntentV3,
   type SiteElementSelectionV1,
-  type SitePublicBuildInputV1,
+  type SitePublicBuildInputV3,
   type SiteVersionV4,
+  type SiteVersionApprovalV1,
   type SiteWorkspaceRevisionV1,
   type SourceSnapshotV1,
   type TrustedRuntimePatchV1,
@@ -49,14 +55,21 @@ export type SiteAgentMessageV1 = {
   createdAt: string;
 };
 
+export type SiteAgentRunAdminRecord = {
+  id: string;
+  schemaVersion?: string;
+  run?: SiteAgentRunV2;
+  issue?: string;
+};
+
 export type BootstrapSiteV1Input = {
   site: PlatformSiteRecord;
-  state: BusinessStateV2;
-  intent: SiteIntentV2;
+  state: BusinessStateV3;
+  intent: SiteIntentV3;
   forms: FormDefinitionV2[];
   sourceSnapshots: SourceSnapshotV1[];
   assetRevisions: AssetRevisionV1[];
-  publicBuildInput: SitePublicBuildInputV1;
+  publicBuildInput: SitePublicBuildInputV3;
 };
 
 export interface SitePlatformRepository {
@@ -72,21 +85,23 @@ export interface SitePlatformRepository {
   getAssetRevision(id: string): Promise<AssetRevisionV1 | undefined>;
   getAssetRevisionByStorageKey(storageKey: string): Promise<AssetRevisionV1 | undefined>;
   isAssetRevisionPublic(id: string): Promise<boolean>;
-  saveBusinessState(state: BusinessStateV2): Promise<void>;
-  getBusinessState(businessId: string): Promise<BusinessStateV2 | undefined>;
-  saveSiteIntent(intent: SiteIntentV2): Promise<void>;
-  getSiteIntent(siteId: string): Promise<SiteIntentV2 | undefined>;
+  saveBusinessState(state: BusinessStateV3): Promise<void>;
+  getBusinessState(businessId: string): Promise<BusinessStateV3 | undefined>;
+  saveSiteIntent(intent: SiteIntentV3): Promise<void>;
+  getSiteIntent(siteId: string): Promise<SiteIntentV3 | undefined>;
   saveFormDefinition(form: FormDefinitionV2): Promise<void>;
   getFormDefinition(formId: string): Promise<FormDefinitionV2 | undefined>;
   getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinitionV2 | undefined>;
-  savePublicBuildInput(input: SitePublicBuildInputV1): Promise<void>;
-  getPublicBuildInput(id: string): Promise<SitePublicBuildInputV1 | undefined>;
+  savePublicBuildInput(input: SitePublicBuildInputV3): Promise<void>;
+  getPublicBuildInput(id: string): Promise<SitePublicBuildInputV3 | undefined>;
   commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }): Promise<void>;
   getWorkspaceRevision(id: string): Promise<SiteWorkspaceRevisionV1 | undefined>;
   getBuildArtifact(id: string): Promise<SiteBuildArtifactV1 | undefined>;
   createSiteVersion(version: SiteVersionV4): Promise<void>;
   getSiteVersion(id: string): Promise<SiteVersionV4 | undefined>;
   listSiteVersions(siteId: string): Promise<SiteVersionV4[]>;
+  saveSiteVersionApproval(approval: SiteVersionApprovalV1): Promise<void>;
+  listSiteVersionApprovals(versionId: string): Promise<SiteVersionApprovalV1[]>;
   promoteSiteVersion(versionId: string, actorId: string): Promise<void>;
   saveRuntimePatch(patch: TrustedRuntimePatchV1): Promise<void>;
   getRuntimePatch(id: string): Promise<TrustedRuntimePatchV1 | undefined>;
@@ -97,20 +112,33 @@ export interface SitePlatformRepository {
   getAgentSession(id: string): Promise<SiteAgentSessionV1 | undefined>;
   getActiveAgentSession(siteId: string, ownerId: string): Promise<SiteAgentSessionV1 | undefined>;
   listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSessionV1[]>;
-  saveAgentRun(run: SiteAgentRunV1): Promise<void>;
-  claimAgentRun(runId: string): Promise<SiteAgentRunV1 | undefined>;
-  getAgentRun(id: string): Promise<SiteAgentRunV1 | undefined>;
-  listAgentRuns(sessionId: string): Promise<SiteAgentRunV1[]>;
-  listRecentAgentRuns(input?: { siteId?: string; status?: SiteAgentRunV1["status"]; limit?: number }): Promise<SiteAgentRunV1[]>;
-  listQueuedAgentRuns(limit: number): Promise<SiteAgentRunV1[]>;
-  listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRunV1[]>;
+  saveAgentRun(run: SiteAgentRunV2): Promise<void>;
+  claimAgentRun(runId: string): Promise<SiteAgentRunV2 | undefined>;
+  getAgentRun(id: string): Promise<SiteAgentRunV2 | undefined>;
+  getAgentRunAdminRecord(id: string): Promise<SiteAgentRunAdminRecord | undefined>;
+  listAgentRuns(sessionId: string): Promise<SiteAgentRunV2[]>;
+  listRecentAgentRuns(input?: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number }): Promise<SiteAgentRunV2[]>;
+  listRecentAgentRunAdminRecords(input?: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number }): Promise<SiteAgentRunAdminRecord[]>;
+  listQueuedAgentRuns(limit: number): Promise<SiteAgentRunV2[]>;
+  listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRunV2[]>;
+  saveTraceSpans(spans: SiteAgentTraceSpanV1[]): Promise<SiteAgentTraceSpanV1[]>;
+  listTraceSpans(traceId: string, input?: { afterSequence?: number; limit?: number }): Promise<SiteAgentTraceSpanV1[]>;
+  listExpiredTracePayloads(expiredBefore: string, limit: number): Promise<SiteAgentTraceSpanV1[]>;
+  clearTracePayloads(spanIds: string[]): Promise<void>;
+  failOpenTraceSpans(runId: string, completedAt: string, errorCode: string): Promise<void>;
+  acquireMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
+  renewMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
+  releaseMaintenanceLease(task: string, leaseTokenHash: string): Promise<boolean>;
+  isMaintenanceLeaseActive(task: string, now: string): Promise<boolean>;
+  saveEditObjective(objective: SiteEditObjectiveV1): Promise<void>;
+  getEditObjective(runId: string): Promise<SiteEditObjectiveV1 | undefined>;
   appendAgentMessage(message: SiteAgentMessageV1): Promise<void>;
   listAgentMessages(sessionId: string): Promise<SiteAgentMessageV1[]>;
   saveControlPlaneChangeRequest(request: ControlPlaneChangeRequestV2): Promise<void>;
   getControlPlaneChangeRequest(id: string): Promise<ControlPlaneChangeRequestV2 | undefined>;
   listControlPlaneChangeRequests(siteId: string): Promise<ControlPlaneChangeRequestV2[]>;
-  saveOperatorQueueItem(item: OperatorQueueItemV1): Promise<void>;
-  listOperatorQueue(status?: OperatorQueueItemV1["status"]): Promise<OperatorQueueItemV1[]>;
+  saveOperatorQueueItem(item: OperatorQueueItemV2): Promise<void>;
+  listOperatorQueue(status?: OperatorQueueItemV2["status"]): Promise<OperatorQueueItemV2[]>;
   saveVerticalDemandEvent(event: VerticalDemandEventV1): Promise<void>;
   listVerticalDemandEvents(status?: VerticalDemandEventV1["status"]): Promise<VerticalDemandEventV1[]>;
 }
@@ -119,26 +147,30 @@ type LocalState = {
   sites: Record<string, PlatformSiteRecord>;
   sourceSnapshots: Record<string, SourceSnapshotV1>;
   assetRevisions: Record<string, AssetRevisionV1>;
-  businessStates: Record<string, BusinessStateV2>;
-  intents: Record<string, SiteIntentV2>;
+  businessStates: Record<string, BusinessStateV3>;
+  intents: Record<string, SiteIntentV3>;
   forms: Record<string, FormDefinitionV2>;
-  buildInputs: Record<string, SitePublicBuildInputV1>;
+  buildInputs: Record<string, SitePublicBuildInputV3>;
   workspaceRevisions: Record<string, SiteWorkspaceRevisionV1>;
   artifacts: Record<string, SiteBuildArtifactV1>;
   versions: Record<string, SiteVersionV4>;
+  versionApprovals: Record<string, SiteVersionApprovalV1>;
   runtimePatches: Record<string, TrustedRuntimePatchV1>;
   runtimeSeries: Record<string, TrustedRuntimeSeriesV1>;
   sessions: Record<string, SiteAgentSessionV1>;
-  runs: Record<string, SiteAgentRunV1>;
+  runs: Record<string, SiteAgentRunV2>;
+  traceSpans: Record<string, SiteAgentTraceSpanV1>;
+  maintenanceLeases: Record<string, { leaseTokenHash: string; leaseUntil: string; claimedAt: string }>;
+  editObjectives: Record<string, SiteEditObjectiveV1>;
   messages: Record<string, SiteAgentMessageV1>;
   controlPlaneChanges: Record<string, ControlPlaneChangeRequestV2>;
-  operatorQueue: Record<string, OperatorQueueItemV1>;
+  operatorQueue: Record<string, OperatorQueueItemV2>;
   verticalDemandEvents: Record<string, VerticalDemandEventV1>;
 };
 
 const emptyLocalState = (): LocalState => ({
-  sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {},
-  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
+  sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {}, versionApprovals: {},
+  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, traceSpans: {}, maintenanceLeases: {}, editObjectives: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
 });
 
 export class LocalSitePlatformRepository implements SitePlatformRepository {
@@ -149,12 +181,12 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   bootstrapSite(input: BootstrapSiteV1Input) {
     return this.write((store) => {
       const site = platformSiteRecordSchema.parse(input.site);
-      const state = businessStateV2Schema.parse(input.state);
-      const intent = siteIntentV2Schema.parse(input.intent);
+      const state = businessStateV3Schema.parse(input.state);
+      const intent = siteIntentV3Schema.parse(input.intent);
       const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
       const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotV1Schema.parse(snapshot));
       const assetRevisions = input.assetRevisions.map((revision) => assetRevisionV1Schema.parse(revision));
-      const publicBuildInput = sitePublicBuildInputV1Schema.parse(input.publicBuildInput);
+      const publicBuildInput = sitePublicBuildInputV3Schema.parse(input.publicBuildInput);
       if (site.id !== state.siteId || site.businessId !== state.businessId || intent.siteId !== site.id || forms.some((form) => form.siteId !== site.id)) {
         throw new Error("Bootstrap authorities do not belong to the same site.");
       }
@@ -199,9 +231,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return Object.values((await this.read()).versions).some((version) => version.status === "published" && version.assetRevisionIds.includes(id));
   }
 
-  saveBusinessState(state: BusinessStateV2) {
+  saveBusinessState(state: BusinessStateV3) {
     return this.write((store) => {
-      const parsed = businessStateV2Schema.parse(state);
+      const parsed = businessStateV3Schema.parse(state);
       const current = store.businessStates[parsed.businessId];
       assertRevisionAdvance(current?.revision, parsed.revision, "business state");
       store.businessStates[parsed.businessId] = parsed;
@@ -209,9 +241,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
   async getBusinessState(id: string) { return clone((await this.read()).businessStates[id]); }
 
-  saveSiteIntent(intent: SiteIntentV2) {
+  saveSiteIntent(intent: SiteIntentV3) {
     return this.write((store) => {
-      const parsed = siteIntentV2Schema.parse(intent);
+      const parsed = siteIntentV3Schema.parse(intent);
       const current = Object.values(store.intents).find((item) => item.siteId === parsed.siteId);
       assertRevisionAdvance(current?.revision, parsed.revision, "site intent");
       store.intents[parsed.id] = parsed;
@@ -235,7 +267,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return referenced ? clone(form) : undefined;
   }
 
-  savePublicBuildInput(input: SitePublicBuildInputV1) { return this.insertImmutable("buildInputs", sitePublicBuildInputV1Schema.parse(input)); }
+  savePublicBuildInput(input: SitePublicBuildInputV3) { return this.insertImmutable("buildInputs", sitePublicBuildInputV3Schema.parse(input)); }
   async getPublicBuildInput(id: string) { return clone((await this.read()).buildInputs[id]); }
 
   commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }) {
@@ -270,6 +302,13 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async listSiteVersions(siteId: string) {
     return Object.values((await this.read()).versions).filter((item) => item.siteId === siteId).sort((a, b) => b.number - a.number).map((item) => clone(item) as SiteVersionV4);
   }
+  saveSiteVersionApproval(approval: SiteVersionApprovalV1) {
+    return this.insertImmutable("versionApprovals", siteVersionApprovalV1Schema.parse(approval));
+  }
+  async listSiteVersionApprovals(versionId: string) {
+    return Object.values((await this.read()).versionApprovals ?? {}).filter((item) => item.versionId === versionId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt)).map((item) => clone(item) as SiteVersionApprovalV1);
+  }
   promoteSiteVersion(versionId: string, actorId: string) {
     return this.write((store) => {
       const target = store.versions[versionId];
@@ -286,6 +325,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       if (input.business.assets.some((asset) => !["preclaim_safe", "customer_granted"].includes(asset.rightsStatus))) {
         throw new Error("candidate_contains_unpublishable_media");
       }
+      const openSubjective = Object.values(store.operatorQueue ?? {}).find((item) => item.siteId === target.siteId && item.reason === "subjective_finding" && ["open", "in_review"].includes(item.status));
+      if (openSubjective) throw new Error("candidate_has_open_subjective_findings");
+      const latestApproval = Object.values(store.versionApprovals ?? {}).filter((item) => item.versionId === target.id && item.artifactHash === target.artifactHash)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+      if (latestApproval?.status !== "approved") throw new Error("candidate_requires_operator_approval");
       const prior = Object.values(store.versions).find((item) => item.siteId === target.siteId && item.status === "published");
       if (prior) prior.status = "superseded";
       target.status = "published";
@@ -322,41 +366,132 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
   async listExpiredAgentSessions(expiredBefore: string, limit: number) {
     return Object.values((await this.read()).sessions)
-      .filter((session) => ["active", "rotating"].includes(session.status) && session.leaseExpiresAt <= expiredBefore)
+      .filter((session) => Boolean(session.sandboxId)
+        && ["active", "checkpointed", "rotating"].includes(session.status)
+        && session.leaseExpiresAt <= expiredBefore)
       .sort((left, right) => left.leaseExpiresAt.localeCompare(right.leaseExpiresAt))
       .slice(0, limit)
       .map((session) => clone(session) as SiteAgentSessionV1);
   }
-  saveAgentRun(run: SiteAgentRunV1) { return this.write((store) => { store.runs[run.id] = siteAgentRunV1Schema.parse(run); }); }
+  saveAgentRun(run: SiteAgentRunV2) { return this.write((store) => { store.runs[run.id] = siteAgentRunV2Schema.parse(run); }); }
   async claimAgentRun(runId: string) {
-    let claimed: SiteAgentRunV1 | undefined;
+    let claimed: SiteAgentRunV2 | undefined;
     await this.write((store) => {
       const current = store.runs[runId];
       if (!current || current.status !== "queued") return;
       const now = new Date().toISOString();
-      claimed = siteAgentRunV1Schema.parse({ ...current, status: "running", stage: "authoring", attempt: current.attempt + 1, heartbeatAt: now });
+      if (store.maintenanceLeases.workspace_storage_cutover?.leaseUntil > now) return;
+      if (Object.values(store.runs).filter((run) => run.status === "running").length >= 4) return;
+      claimed = siteAgentRunV2Schema.parse({ ...current, status: "running", stage: "authoring", attempt: current.attempt + 1, heartbeatAt: now });
       store.runs[runId] = claimed;
     });
     return clone(claimed);
   }
   async getAgentRun(id: string) { return clone((await this.read()).runs[id]); }
-  async listAgentRuns(sessionId: string) {
-    return Object.values((await this.read()).runs).filter((run) => run.sessionId === sessionId).sort((left, right) => right.startedAt.localeCompare(left.startedAt)).map((run) => clone(run) as SiteAgentRunV1);
+  async getAgentRunAdminRecord(id: string) {
+    const run = await this.getAgentRun(id);
+    return run ? { id: run.id, schemaVersion: run.schemaVersion, run } : undefined;
   }
-  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV1["status"]; limit?: number } = {}) {
+  async listAgentRuns(sessionId: string) {
+    return Object.values((await this.read()).runs).filter((run) => run.sessionId === sessionId).sort((left, right) => right.startedAt.localeCompare(left.startedAt)).map((run) => clone(run) as SiteAgentRunV2);
+  }
+  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
     return Object.values((await this.read()).runs)
       .filter((run) => (!input.siteId || run.siteId === input.siteId) && (!input.status || run.status === input.status))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, Math.max(1, Math.min(input.limit ?? 100, 500)))
-      .map((run) => clone(run) as SiteAgentRunV1);
+      .map((run) => clone(run) as SiteAgentRunV2);
+  }
+  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
+    return (await this.listRecentAgentRuns(input)).map((run) => ({ id: run.id, schemaVersion: run.schemaVersion, run }));
   }
   async listQueuedAgentRuns(limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "queued")
-      .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV1);
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV2);
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "running" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
-      .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV1);
+      .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRunV2);
   }
+  saveTraceSpans(spans: SiteAgentTraceSpanV1[]) {
+    return this.write((store) => {
+      let nextSequence = Math.max(0, ...Object.values(store.traceSpans ?? {}).map((span) => span.sequence)) + 1;
+      for (const input of spans) {
+        const existing = store.traceSpans[input.id];
+        const parsed = siteAgentTraceSpanV1Schema.parse({ ...input, sequence: existing?.sequence ?? nextSequence++ });
+        if (existing && (existing.traceId !== parsed.traceId || existing.parentSpanId !== parsed.parentSpanId || existing.startedAt !== parsed.startedAt)) {
+          throw new Error("Trace span identity fields are immutable.");
+        }
+        store.traceSpans[parsed.id] = parsed;
+      }
+    }).then(() => this.listTraceSpansForIds(spans.map((span) => span.id)));
+  }
+  async listTraceSpans(traceId: string, input: { afterSequence?: number; limit?: number } = {}) {
+    return Object.values((await this.read()).traceSpans ?? {}).filter((span) => span.traceId === traceId && span.sequence > (input.afterSequence ?? -1))
+      .sort((left, right) => left.sequence - right.sequence).slice(0, Math.max(1, Math.min(input.limit ?? 500, 1000)))
+      .map((span) => clone(span) as SiteAgentTraceSpanV1);
+  }
+  async listExpiredTracePayloads(expiredBefore: string, limit: number) {
+    return Object.values((await this.read()).traceSpans ?? {}).filter((span) => span.payloadRef && span.payloadExpiresAt && span.payloadExpiresAt <= expiredBefore)
+      .sort((left, right) => (left.payloadExpiresAt ?? "").localeCompare(right.payloadExpiresAt ?? "")).slice(0, limit)
+      .map((span) => clone(span) as SiteAgentTraceSpanV1);
+  }
+  clearTracePayloads(spanIds: string[]) {
+    return this.write((store) => {
+      for (const spanId of spanIds) {
+        const span = store.traceSpans[spanId];
+        if (span) store.traceSpans[spanId] = siteAgentTraceSpanV1Schema.parse({ ...span, payloadRef: undefined, payloadHash: undefined, payloadExpiresAt: undefined });
+      }
+    });
+  }
+  failOpenTraceSpans(runId: string, completedAt: string, errorCode: string) {
+    return this.write((store) => {
+      for (const span of Object.values(store.traceSpans ?? {})) {
+        if (span.runId === runId && span.status === "running") {
+          store.traceSpans[span.id] = siteAgentTraceSpanV1Schema.parse({ ...span, status: "failed", completedAt, errorCode });
+        }
+      }
+    });
+  }
+  async acquireMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string) {
+    let claimed = false;
+    await this.write((store) => {
+      const current = store.maintenanceLeases[task];
+      if (current && current.leaseUntil > now) return;
+      store.maintenanceLeases[task] = { leaseTokenHash, leaseUntil, claimedAt: now };
+      claimed = true;
+    });
+    return claimed;
+  }
+  async renewMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string) {
+    let renewed = false;
+    await this.write((store) => {
+      const current = store.maintenanceLeases[task];
+      if (!current || current.leaseTokenHash !== leaseTokenHash || current.leaseUntil <= now) return;
+      store.maintenanceLeases[task] = { ...current, leaseUntil };
+      renewed = true;
+    });
+    return renewed;
+  }
+  async releaseMaintenanceLease(task: string, leaseTokenHash: string) {
+    let released = false;
+    await this.write((store) => {
+      if (store.maintenanceLeases[task]?.leaseTokenHash !== leaseTokenHash) return;
+      delete store.maintenanceLeases[task];
+      released = true;
+    });
+    return released;
+  }
+  async isMaintenanceLeaseActive(task: string, now: string) {
+    return Boolean((await this.read()).maintenanceLeases[task]?.leaseUntil > now);
+  }
+  saveEditObjective(objective: SiteEditObjectiveV1) {
+    return this.write((store) => {
+      const parsed = siteEditObjectiveV1Schema.parse(objective);
+      if (store.editObjectives[parsed.runId]) throw new Error("Edit objectives are immutable.");
+      store.editObjectives[parsed.runId] = parsed;
+    });
+  }
+  async getEditObjective(runId: string) { return clone((await this.read()).editObjectives[runId]); }
   appendAgentMessage(message: SiteAgentMessageV1) {
     return this.write((store) => {
       if (store.messages[message.id]) throw new Error("Agent messages are immutable.");
@@ -374,11 +509,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return Object.values((await this.read()).controlPlaneChanges ?? {}).filter((item) => item.siteId === siteId)
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).map((item) => clone(item) as ControlPlaneChangeRequestV2);
   }
-  saveOperatorQueueItem(item: OperatorQueueItemV1) {
+  saveOperatorQueueItem(item: OperatorQueueItemV2) {
     return this.write((store) => { store.operatorQueue[item.id] = operatorQueueItemSchema.parse(item); });
   }
-  async listOperatorQueue(status?: OperatorQueueItemV1["status"]) {
-    return Object.values((await this.read()).operatorQueue).filter((item) => !status || item.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as OperatorQueueItemV1);
+  async listOperatorQueue(status?: OperatorQueueItemV2["status"]) {
+    return Object.values((await this.read()).operatorQueue).filter((item) => !status || item.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as OperatorQueueItemV2);
   }
   saveVerticalDemandEvent(event: VerticalDemandEventV1) {
     return this.write((store) => {
@@ -392,7 +527,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => clone(item) as VerticalDemandEventV1);
   }
 
-  private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "runtimePatches">>(
+  private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "versionApprovals" | "runtimePatches">>(
     key: K,
     value: LocalState[K][string]
   ) {
@@ -401,6 +536,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       if (record[value.id]) throw new Error(`${String(key)} are immutable.`);
       record[value.id] = value;
     });
+  }
+
+  private async listTraceSpansForIds(ids: string[]) {
+    const state = await this.read();
+    return ids.map((id) => state.traceSpans[id]).filter(Boolean).map((span) => clone(span) as SiteAgentTraceSpanV1);
   }
 
   private async read() {
@@ -427,14 +567,14 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
 
   async bootstrapSite(input: BootstrapSiteV1Input) {
     const site = platformSiteRecordSchema.parse(input.site);
-    const state = businessStateV2Schema.parse(input.state);
-    const intent = siteIntentV2Schema.parse(input.intent);
+    const state = businessStateV3Schema.parse(input.state);
+    const intent = siteIntentV3Schema.parse(input.intent);
     const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
     const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotV1Schema.parse(snapshot));
     const assetRevisions = input.assetRevisions.map((revision) => assetRevisionV1Schema.parse(revision));
-    const publicBuildInput = sitePublicBuildInputV1Schema.parse(input.publicBuildInput);
+    const publicBuildInput = sitePublicBuildInputV3Schema.parse(input.publicBuildInput);
     assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
-    await requireData(this.client.rpc("bootstrap_agentic_site_v1", {
+    await requireData(this.client.rpc("bootstrap_agentic_site_v2", {
       site_document: site,
       state_document: state,
       intent_document: intent,
@@ -532,31 +672,31 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return row ? siteFromRow(row) : undefined;
   }
 
-  async saveBusinessState(state: BusinessStateV2) {
-    const value = businessStateV2Schema.parse(state);
+  async saveBusinessState(state: BusinessStateV3) {
+    const value = businessStateV3Schema.parse(state);
     const current = await this.getBusinessState(value.businessId);
     assertRevisionAdvance(current?.revision, value.revision, "business state");
-    await requireOk(this.client.from("business_states_v2").upsert({
+    await requireOk(this.client.from("business_states_v3").upsert({
       business_id: value.businessId, site_id: value.siteId, schema_version: value.schemaVersion,
       revision: value.revision, state_hash: value.stateHash, state: value, updated_at: value.updatedAt
     }), "Save business state");
   }
   async getBusinessState(businessId: string) {
-    const row = await requireData<{ state: unknown } | null>(this.client.from("business_states_v2").select("state").eq("business_id", businessId).maybeSingle(), "Load business state");
-    return row ? businessStateV2Schema.parse(row.state) : undefined;
+    const row = await requireData<{ state: unknown } | null>(this.client.from("business_states_v3").select("state").eq("business_id", businessId).maybeSingle(), "Load business state");
+    return row ? businessStateV3Schema.parse(row.state) : undefined;
   }
-  async saveSiteIntent(intent: SiteIntentV2) {
-    const value = siteIntentV2Schema.parse(intent);
+  async saveSiteIntent(intent: SiteIntentV3) {
+    const value = siteIntentV3Schema.parse(intent);
     const current = await this.getSiteIntent(value.siteId);
     assertRevisionAdvance(current?.revision, value.revision, "site intent");
-    await requireOk(this.client.from("site_intents_v2").upsert({
+    await requireOk(this.client.from("site_intents_v3").upsert({
       id: value.id, site_id: value.siteId, schema_version: value.schemaVersion, revision: value.revision,
       intent_hash: value.intentHash, intent: value, created_at: current ? undefined : value.updatedAt, updated_at: value.updatedAt
     }), "Save site intent");
   }
   async getSiteIntent(siteId: string) {
-    const row = await requireData<{ intent: unknown } | null>(this.client.from("site_intents_v2").select("intent").eq("site_id", siteId).maybeSingle(), "Load site intent");
-    return row ? siteIntentV2Schema.parse(row.intent) : undefined;
+    const row = await requireData<{ intent: unknown } | null>(this.client.from("site_intents_v3").select("intent").eq("site_id", siteId).maybeSingle(), "Load site intent");
+    return row ? siteIntentV3Schema.parse(row.intent) : undefined;
   }
   async saveFormDefinition(form: FormDefinitionV2) {
     const value = formDefinitionV2Schema.parse(form);
@@ -586,19 +726,19 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const form = await this.getFormDefinition(formId);
     return form?.siteId === siteId && form.status === "published" ? form : undefined;
   }
-  async savePublicBuildInput(input: SitePublicBuildInputV1) {
-    const value = sitePublicBuildInputV1Schema.parse(input);
+  async savePublicBuildInput(input: SitePublicBuildInputV3) {
+    const value = sitePublicBuildInputV3Schema.parse(input);
     await requireOk(this.client.from("site_public_build_inputs").insert({
       id: value.id, site_id: value.siteId, business_id: value.businessId, schema_version: value.schemaVersion,
       business_state_revision: value.businessStateRevision, site_intent_revision: value.siteIntentRevision,
-      vertical_module_id: value.verticalModule.id, vertical_module_version: value.verticalModule.version,
+      domain_context_id: value.domainContext?.id, domain_context_version: value.domainContext?.version,
       input_hash: value.inputHash, input: value, created_at: value.createdAt
     }), "Save public build input");
     await insertRefs(this.client, "site_public_build_input_sources", "input_id", value.id, "source_snapshot_id", value.sourceSnapshotIds);
     await insertRefs(this.client, "site_public_build_input_assets", "input_id", value.id, "asset_revision_id", value.assetRevisionIds);
     await insertRefs(this.client, "site_public_build_input_forms", "input_id", value.id, "form_definition_id", value.forms.map((form) => form.id));
   }
-  async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputV1Schema); }
+  async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputV3Schema); }
   async commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }) {
     const revision = siteWorkspaceRevisionV1Schema.parse(input.revision);
     const artifact = siteBuildArtifactV1Schema.parse(input.artifact);
@@ -648,6 +788,20 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(siteVersionFromRow);
   }
+  async saveSiteVersionApproval(approval: SiteVersionApprovalV1) {
+    const value = siteVersionApprovalV1Schema.parse(approval);
+    await requireOk(this.client.from("site_version_approvals_v1").insert({
+      id: value.id, schema_version: value.schemaVersion, site_id: value.siteId, version_id: value.versionId,
+      artifact_hash: value.artifactHash, status: value.status, actor_id: value.actorId, note: value.note, created_at: value.createdAt
+    }), "Save site version approval");
+  }
+  async listSiteVersionApprovals(versionId: string) {
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("site_version_approvals_v1").select("*").eq("version_id", versionId).order("created_at"),
+      "List site version approvals"
+    );
+    return rows.map(siteVersionApprovalFromRow);
+  }
   async promoteSiteVersion(versionId: string, actorId: string) {
     await requireData(this.client.rpc("promote_site_version_v4", { target_version_id: versionId, actor_id: actorId }), "Promote site version");
   }
@@ -680,9 +834,11 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const value = siteAgentSessionV1Schema.parse(session);
     await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_sessions").upsert({
         id: value.id, site_id: value.siteId, owner_id: value.ownerId, schema_version: value.schemaVersion,
-        status: value.status, current_workspace_revision_id: value.currentWorkspaceRevisionId,
+        status: value.status, current_workspace_revision_id: value.currentWorkspaceRevisionId ?? null,
         public_build_input_id: value.publicBuildInputId, sandbox_provider: value.sandboxProvider,
-        sandbox_id: value.sandboxId, lease_token_hash: value.leaseTokenHash,
+        sandbox_id: value.sandboxId ?? null, lease_token_hash: value.leaseTokenHash,
+        sandbox_last_started_at: value.sandboxLastStartedAt ?? null, sandbox_last_destroyed_at: value.sandboxLastDestroyedAt ?? null,
+        sandbox_provisioned_ms: value.sandboxProvisionedMs, sandbox_destroy_attempts: value.sandboxDestroyAttempts,
         lease_expires_at: value.leaseExpiresAt, rotate_at: value.rotateAt,
         created_at: value.createdAt, updated_at: value.updatedAt
       }), "Save agent session"), "Save agent session");
@@ -702,7 +858,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   async listExpiredAgentSessions(expiredBefore: string, limit: number) {
     const rows = await requireData<Record<string, unknown>[]>(
       this.client.from("site_agent_sessions").select("*")
-        .in("status", ["active", "rotating"])
+        .in("status", ["active", "checkpointed", "rotating"])
+        .not("sandbox_id", "is", null)
         .lte("lease_expires_at", expiredBefore)
         .order("lease_expires_at", { ascending: true })
         .limit(limit),
@@ -710,9 +867,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(sessionFromRow);
   }
-  async saveAgentRun(run: SiteAgentRunV1) {
-    const value = siteAgentRunV1Schema.parse(run);
-    await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs_v1").upsert({
+  async saveAgentRun(run: SiteAgentRunV2) {
+    const value = siteAgentRunV2Schema.parse(run);
+    await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs_v2").upsert({
         id: value.id, session_id: value.sessionId, site_id: value.siteId, schema_version: value.schemaVersion,
         kind: value.kind, status: value.status, exact_parent_revision_id: value.exactParentRevisionId,
         output_revision_id: value.outputRevisionId, model_id: value.modelId, run: value,
@@ -720,36 +877,129 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       }), "Save agent run"), "Save agent run");
   }
   async claimAgentRun(runId: string) {
-    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run_v1", { target_run_id: runId }), "Claim site agent run");
-    return value ? siteAgentRunV1Schema.parse(value) : undefined;
+    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run_v2", { target_run_id: runId }), "Claim site agent run");
+    return value ? siteAgentRunV2Schema.parse(value) : undefined;
   }
-  async getAgentRun(id: string) { return getJson(this.client, "site_agent_runs_v1", "run", id, siteAgentRunV1Schema); }
+  async getAgentRun(id: string) { return getJson(this.client, "site_agent_runs_v2", "run", id, siteAgentRunV2Schema); }
+  async getAgentRunAdminRecord(id: string) {
+    const row = await requireData<{ id: string; schema_version: string; run: unknown } | null>(
+      this.client.from("site_agent_runs_v2").select("id,schema_version,run").eq("id", id).maybeSingle(),
+      "Load site-agent run for admin"
+    );
+    return row ? adminRunRecord(row) : undefined;
+  }
   async listAgentRuns(sessionId: string) {
-    const rows = await requireData<Array<{ run: unknown }>>(this.client.from("site_agent_runs_v1").select("run").eq("session_id", sessionId).order("started_at", { ascending: false }), "List agent runs");
-    return rows.map((row) => siteAgentRunV1Schema.parse(row.run));
+    const rows = await requireData<Array<{ run: unknown }>>(this.client.from("site_agent_runs_v2").select("run").eq("session_id", sessionId).order("started_at", { ascending: false }), "List agent runs");
+    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
   }
-  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV1["status"]; limit?: number } = {}) {
-    let query = this.client.from("site_agent_runs_v1").select("run").order("started_at", { ascending: false })
+  async listRecentAgentRuns(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
+    let query = this.client.from("site_agent_runs_v2").select("run").order("started_at", { ascending: false })
       .limit(Math.max(1, Math.min(input.limit ?? 100, 500)));
     if (input.siteId) query = query.eq("site_id", input.siteId);
     if (input.status) query = query.eq("status", input.status);
     const rows = await requireData<Array<{ run: unknown }>>(query, "List recent site agent runs");
-    return rows.map((row) => siteAgentRunV1Schema.parse(row.run));
+    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
+  }
+  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRunV2["status"]; limit?: number } = {}) {
+    let query = this.client.from("site_agent_runs_v2").select("id,schema_version,run").order("started_at", { ascending: false })
+      .limit(Math.max(1, Math.min(input.limit ?? 100, 500)));
+    if (input.siteId) query = query.eq("site_id", input.siteId);
+    if (input.status) query = query.eq("status", input.status);
+    const rows = await requireData<Array<{ id: string; schema_version: string; run: unknown }>>(query, "List site-agent runs for admin");
+    return rows.map(adminRunRecord);
   }
   async listQueuedAgentRuns(limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs_v1").select("run").eq("status", "queued").order("started_at").limit(limit),
+      this.client.from("site_agent_runs_v2").select("run").eq("status", "queued").order("started_at").limit(limit),
       "List queued site agent runs"
     );
-    return rows.map((row) => siteAgentRunV1Schema.parse(row.run));
+    return rows.map((row) => siteAgentRunV2Schema.parse(row.run));
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs_v1").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
+      this.client.from("site_agent_runs_v2").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
       "List running site agent runs"
     );
-    return rows.map((row) => siteAgentRunV1Schema.parse(row.run))
+    return rows.map((row) => siteAgentRunV2Schema.parse(row.run))
       .filter((run) => (run.heartbeatAt ?? run.startedAt) < staleBefore).slice(0, limit);
+  }
+  async saveTraceSpans(spans: SiteAgentTraceSpanV1[]) {
+    if (!spans.length) return [];
+    const values = spans.map((span) => siteAgentTraceSpanV1Schema.parse(span));
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_trace_spans_v1").upsert(values.map((value) => ({
+      id: value.id,
+      trace_id: value.traceId,
+      run_id: value.runId,
+      session_id: value.sessionId,
+      request_id: value.requestId,
+      parent_span_id: value.parentSpanId,
+      schema_version: value.schemaVersion,
+      kind: value.kind,
+      name: value.name,
+      status: value.status,
+      attempt_index: value.attemptIndex,
+      turn_index: value.turnIndex,
+      model_id: value.modelId,
+      input_tokens: value.inputTokens,
+      cached_input_tokens: value.cachedInputTokens,
+      output_tokens: value.outputTokens,
+      summary: value.summary,
+      payload_ref: value.payloadRef,
+      payload_hash: value.payloadHash,
+      payload_expires_at: value.payloadExpiresAt,
+      error_code: value.errorCode,
+      started_at: value.startedAt,
+      completed_at: value.completedAt
+    })), { onConflict: "id" }).select("*"), "Save trace spans");
+    return rows.map(traceSpanFromRow).sort((left, right) => left.sequence - right.sequence);
+  }
+  async listTraceSpans(traceId: string, input: { afterSequence?: number; limit?: number } = {}) {
+    let query = this.client.from("site_agent_trace_spans_v1").select("*").eq("trace_id", traceId).order("sequence")
+      .limit(Math.max(1, Math.min(input.limit ?? 500, 1000)));
+    if (input.afterSequence !== undefined) query = query.gt("sequence", input.afterSequence);
+    return (await requireData<Record<string, unknown>[]>(query, "List trace spans")).map(traceSpanFromRow);
+  }
+  async listExpiredTracePayloads(expiredBefore: string, limit: number) {
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_agent_trace_spans_v1").select("*")
+      .not("payload_ref", "is", null).lte("payload_expires_at", expiredBefore).order("payload_expires_at").limit(limit), "List expired trace payloads");
+    return rows.map(traceSpanFromRow);
+  }
+  async clearTracePayloads(spanIds: string[]) {
+    if (!spanIds.length) return;
+    await requireOk(this.client.from("site_agent_trace_spans_v1").update({ payload_ref: null, payload_hash: null, payload_expires_at: null }).in("id", spanIds), "Clear trace payloads");
+  }
+  async failOpenTraceSpans(runId: string, completedAt: string, errorCode: string) {
+    await requireOk(this.client.from("site_agent_trace_spans_v1").update({ status: "failed", completed_at: completedAt, error_code: errorCode })
+      .eq("run_id", runId).eq("status", "running"), "Fail open trace spans");
+  }
+  async acquireMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
+    return Boolean(await requireData<boolean>(this.client.rpc("acquire_site_agent_maintenance_v2", {
+      task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
+    }), "Acquire site-agent maintenance lease"));
+  }
+  async renewMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
+    return Boolean(await requireData<boolean>(this.client.rpc("renew_site_agent_maintenance_v2", {
+      task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
+    }), "Renew site-agent maintenance lease"));
+  }
+  async releaseMaintenanceLease(task: string, leaseTokenHash: string) {
+    return Boolean(await requireData<boolean>(this.client.rpc("release_site_agent_maintenance_v2", {
+      task_name: task, lease_token_hash_value: leaseTokenHash
+    }), "Release site-agent maintenance lease"));
+  }
+  async isMaintenanceLeaseActive(task: string, _now: string) {
+    return Boolean(await requireData<boolean>(this.client.rpc("site_agent_maintenance_active_v1", { task_name: task }), "Check site-agent maintenance lease"));
+  }
+  async saveEditObjective(objective: SiteEditObjectiveV1) {
+    const value = siteEditObjectiveV1Schema.parse(objective);
+    await requireOk(this.client.from("site_edit_objectives_v1").insert({
+      id: value.id, run_id: value.runId, session_id: value.sessionId, site_id: value.siteId,
+      request_id: value.requestId, schema_version: value.schemaVersion, objective: value, created_at: value.createdAt
+    }), "Save edit objective");
+  }
+  async getEditObjective(runId: string) {
+    const row = await requireData<{ objective: unknown } | null>(this.client.from("site_edit_objectives_v1").select("objective").eq("run_id", runId).maybeSingle(), "Load edit objective");
+    return row ? siteEditObjectiveV1Schema.parse(row.objective) : undefined;
   }
   async appendAgentMessage(message: SiteAgentMessageV1) {
     await requireOk(this.client.from("site_agent_messages").insert({
@@ -780,15 +1030,16 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Record<string, unknown>[]>(this.client.from("control_plane_change_requests_v2").select("*").eq("site_id", siteId).order("requested_at", { ascending: false }), "List control-plane change requests");
     return rows.map(controlPlaneChangeFromRow);
   }
-  async saveOperatorQueueItem(item: OperatorQueueItemV1) {
+  async saveOperatorQueueItem(item: OperatorQueueItemV2) {
     const value = operatorQueueItemSchema.parse(item);
     await requireOk(this.client.from("site_operator_queue").upsert({
-      id: value.id, site_id: value.siteId, version_id: value.versionId, run_id: value.runId,
+      id: value.id, schema_version: value.schemaVersion, site_id: value.siteId, version_id: value.versionId, run_id: value.runId,
       reason: value.reason, severity: value.severity, status: value.status, findings: value.findings,
-      created_at: value.createdAt, updated_at: value.updatedAt, resolved_by: value.resolvedBy, resolved_at: value.resolvedAt
+      created_at: value.createdAt, updated_at: value.updatedAt, resolved_by: value.resolvedBy, resolved_at: value.resolvedAt,
+      resolution_note: value.resolutionNote
     }), "Save operator queue item");
   }
-  async listOperatorQueue(status?: OperatorQueueItemV1["status"]) {
+  async listOperatorQueue(status?: OperatorQueueItemV2["status"]) {
     let query = this.client.from("site_operator_queue").select("*").order("created_at");
     if (status) query = query.eq("status", status);
     const rows = await requireData<Record<string, unknown>[]>(query, "List operator queue");
@@ -821,6 +1072,9 @@ function assertRevisionAdvance(current: number | undefined, next: number, label:
 
 function assertBootstrapReferences(input: BootstrapSiteV1Input) {
   const { site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput } = input;
+  assertUniqueBootstrapIds(sourceSnapshots, "source snapshot");
+  assertUniqueBootstrapIds(assetRevisions, "asset revision");
+  assertUniqueBootstrapIds(forms, "form definition");
   if (publicBuildInput.siteId !== site.id || publicBuildInput.businessId !== site.businessId ||
       publicBuildInput.businessStateRevision !== state.revision || publicBuildInput.siteIntentRevision !== intent.revision) {
     throw new Error("Bootstrap public input does not match its canonical authorities.");
@@ -836,6 +1090,14 @@ function assertBootstrapReferences(input: BootstrapSiteV1Input) {
       publicBuildInput.assetRevisionIds.some((id) => !assetIds.has(id)) ||
       publicBuildInput.forms.some((form) => !formIds.has(form.id))) {
     throw new Error("Bootstrap public input references unretained evidence, assets, or forms.");
+  }
+}
+
+function assertUniqueBootstrapIds(values: Array<{ id: string }>, label: string) {
+  const ids = new Set<string>();
+  for (const value of values) {
+    if (ids.has(value.id)) throw new Error(`Bootstrap contains duplicate ${label} ID: ${value.id}.`);
+    ids.add(value.id);
   }
 }
 
@@ -929,7 +1191,12 @@ function sessionFromRow(row: Record<string, unknown>) {
     schemaVersion: row.schema_version, id: row.id, siteId: row.site_id, ownerId: row.owner_id,
     status: row.status, currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     publicBuildInputId: row.public_build_input_id, sandboxProvider: row.sandbox_provider,
-    sandboxId: row.sandbox_id ?? undefined, leaseTokenHash: row.lease_token_hash,
+    sandboxId: row.sandbox_id ?? undefined,
+    sandboxLastStartedAt: row.sandbox_last_started_at ?? undefined,
+    sandboxLastDestroyedAt: row.sandbox_last_destroyed_at ?? undefined,
+    sandboxProvisionedMs: row.sandbox_provisioned_ms ?? 0,
+    sandboxDestroyAttempts: row.sandbox_destroy_attempts ?? 0,
+    leaseTokenHash: row.lease_token_hash,
     leaseExpiresAt: row.lease_expires_at, rotateAt: row.rotate_at, createdAt: row.created_at, updatedAt: row.updated_at
   });
 }
@@ -940,6 +1207,13 @@ function messageFromRow(row: Record<string, unknown>): SiteAgentMessageV1 {
     role: row.role as SiteAgentMessageV1["role"], content: String(row.content),
     selection: row.selection as SiteAgentMessageV1["selection"], createdAt: String(row.created_at)
   };
+}
+
+function adminRunRecord(row: { id: string; schema_version: string; run: unknown }): SiteAgentRunAdminRecord {
+  const parsed = siteAgentRunV2Schema.safeParse(row.run);
+  return parsed.success
+    ? { id: row.id, schemaVersion: row.schema_version, run: parsed.data }
+    : { id: row.id, schemaVersion: row.schema_version, issue: "stale schema - rebuild" };
 }
 
 function controlPlaneChangeFromRow(row: Record<string, unknown>) {
@@ -956,10 +1230,47 @@ function controlPlaneChangeFromRow(row: Record<string, unknown>) {
 
 function operatorItemFromRow(row: Record<string, unknown>) {
   return operatorQueueItemSchema.parse({
+    schemaVersion: row.schema_version,
     id: row.id, siteId: row.site_id, versionId: row.version_id ?? undefined, runId: row.run_id ?? undefined,
     reason: row.reason, severity: row.severity, status: row.status, findings: row.findings,
     createdAt: row.created_at, updatedAt: row.updated_at, resolvedBy: row.resolved_by ?? undefined,
-    resolvedAt: row.resolved_at ?? undefined
+    resolvedAt: row.resolved_at ?? undefined, resolutionNote: row.resolution_note ?? undefined
+  });
+}
+
+function traceSpanFromRow(row: Record<string, unknown>) {
+  return siteAgentTraceSpanV1Schema.parse({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    traceId: row.trace_id,
+    runId: row.run_id ?? undefined,
+    sessionId: row.session_id ?? undefined,
+    requestId: row.request_id ?? undefined,
+    parentSpanId: row.parent_span_id ?? undefined,
+    sequence: Number(row.sequence),
+    kind: row.kind,
+    name: row.name,
+    status: row.status,
+    attemptIndex: row.attempt_index ?? undefined,
+    turnIndex: row.turn_index ?? undefined,
+    modelId: row.model_id ?? undefined,
+    inputTokens: row.input_tokens ?? undefined,
+    cachedInputTokens: row.cached_input_tokens ?? undefined,
+    outputTokens: row.output_tokens ?? undefined,
+    summary: row.summary ?? {},
+    payloadRef: row.payload_ref ?? undefined,
+    payloadHash: row.payload_hash ?? undefined,
+    payloadExpiresAt: row.payload_expires_at ?? undefined,
+    errorCode: row.error_code ?? undefined,
+    startedAt: row.started_at,
+    completedAt: row.completed_at ?? undefined
+  });
+}
+
+function siteVersionApprovalFromRow(row: Record<string, unknown>) {
+  return siteVersionApprovalV1Schema.parse({
+    schemaVersion: row.schema_version, id: row.id, siteId: row.site_id, versionId: row.version_id,
+    artifactHash: row.artifact_hash, status: row.status, actorId: row.actor_id, note: row.note, createdAt: row.created_at
   });
 }
 

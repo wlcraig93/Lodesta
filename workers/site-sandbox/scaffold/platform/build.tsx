@@ -3,12 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LodestaSite } from "./sdk";
+import { platformCapabilityStyles } from "./capability-styles";
 import { siteDefinition } from "../src/site";
 
 const root = process.cwd();
 const publicInputPath = process.env.LODESTA_PUBLIC_BUILD_INPUT_PATH ?? join(root, ".lodesta", "public-build-input.json");
 const publicInput = JSON.parse(await readFile(publicInputPath, "utf8"));
 const sharedCss = await readFile(join(root, "src", "styles.css"), "utf8");
+const previewCss = `${platformCapabilityStyles}\n${sharedCss}`;
 const routes = siteDefinition.routes.map((route) => ({
   path: normalizeRoute(route.path),
   title: route.title,
@@ -30,7 +32,7 @@ await writeFile(join(root, "dist", "lodesta-artifact.json"), JSON.stringify(arti
 for (const route of routes) {
   const path = route.path === "/" ? join(root, "dist", "index.html") : join(root, "dist", route.path.slice(1), "index.html");
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, previewHtml(route.title, route.description, previewBindings(route.bodyHtml, publicInput), sharedCss));
+  await writeFile(path, previewHtml(route.title, route.description, previewBindings(route.bodyHtml, publicInput), previewCss));
 }
 
 function normalizeRoute(value: string) { const route = `/${value.trim().replace(/^\/+|\/+$/g, "")}`; return route === "/" ? route : route.replace(/\/$/, ""); }

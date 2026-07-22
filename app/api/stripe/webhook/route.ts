@@ -71,7 +71,7 @@ export async function POST(request: Request) {
               invoice.attempt_count ? `Attempt count: ${invoice.attempt_count}` : undefined,
               invoice.hosted_invoice_url ? `Invoice: ${invoice.hosted_invoice_url}` : undefined
             ].filter((line): line is string => Boolean(line)),
-            actionPath: `/dashboard/${site.slug}`
+            actionPath: `/account`
           })
         : {
             kind: "payment_failure" as const,

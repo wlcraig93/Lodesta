@@ -1,6 +1,7 @@
-import { sitePlatformRepository } from "@/packages/platform-data";
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { platformOperationsRepository } from "@/packages/platform-operations";
+import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite } from "@/packages/site-platform";
+import type { AgentAccessPolicyV1 } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -9,18 +10,23 @@ export async function GET(
   { params }: { params: Promise<{ slug: string; path?: string[] }> }
 ) {
   const { slug, path } = await params;
-  const site = await sitePlatformRepository.getSiteBySlug(slug);
-  if (!site?.publishedVersionId || site.status !== "active") return new Response(null, { status: 404 });
-  const version = await sitePlatformRepository.getSiteVersion(site.publishedVersionId);
-  if (!version || version.status !== "published") return new Response(null, { status: 404 });
-  const artifact = await sitePlatformRepository.getBuildArtifact(version.artifactId);
-  if (!artifact || artifact.artifactHash !== version.artifactHash || artifact.qa.hardGate !== "passed") {
-    return new Response(null, { status: 503 });
-  }
+  const context = await loadPublishedSiteContext(slug);
+  if (!context) return new Response(null, { status: 404 });
+  const { site, version, artifact, input } = context;
+  const policy = input.intent.agentAccessPolicy;
   const requested = path?.join("/") ?? "";
-  if (requested === "robots.txt") return siteRobots(request, slug, artifact.artifactHash, version.id);
-  if (requested === "sitemap.xml") return siteSitemap(request, slug, artifact.routes.map((route) => route.path), version.publishedAt ?? version.createdAt, artifact.artifactHash, version.id);
-  const requestedRoute = normalizeRoute(requested);
+  if (requested === "robots.txt") return siteRobots(request, slug, artifact.artifactHash, version.id, policy);
+  if (requested === "sitemap.xml") return siteSitemap(request, slug, artifact.routes.map((route) => route.path), version.publishedAt ?? version.createdAt, artifact.artifactHash, version.id, policy);
+  const markdownRoute = markdownRouteForRequest(requested);
+  const requestedRoute = markdownRoute ?? normalizeRoute(requested);
+  if (markdownRoute !== undefined || requestAcceptsMarkdown(request)) {
+    const output = await markdownForArtifactRoute(context, requestedRoute);
+    if (!output) return new Response(null, { status: 404 });
+    const canonical = publicRouteUrl(request, slug, output.route.path);
+    return new Response(output.markdown, {
+      headers: siteHeaders("text/markdown; charset=utf-8", artifact.artifactHash, version.id, policy, `<${canonical}>; rel="canonical"`)
+    });
+  }
   const artifactPath = requested === "site.css"
     ? "site.css"
     : artifact.routes.find((route) => requestedRoute === route.path)?.htmlFile;
@@ -40,24 +46,30 @@ export async function GET(
   const blob = await readVerifiedArtifactFile({ artifact, path: artifactPath, store: configuredArtifactBlobStore() });
   if (!blob) return new Response(null, { status: 404 });
   return new Response(new Uint8Array(blob.bytes), {
-    headers: siteHeaders(blob.contentType, artifact.artifactHash, version.id)
+    headers: siteHeaders(
+      blob.contentType,
+      artifact.artifactHash,
+      version.id,
+      policy,
+      blob.contentType.startsWith("text/html") ? `<${markdownRouteUrl(request, slug, requestedRoute)}>; rel="alternate"; type="text/markdown"` : undefined
+    )
   });
 }
 
-function siteRobots(request: Request, slug: string, artifactHash: string, versionId: string) {
+function siteRobots(request: Request, slug: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1) {
   const origin = new URL(request.url).origin;
   const basePath = siteBasePath(request, slug);
-  return new Response(`User-agent: *\nAllow: /\nSitemap: ${origin}${basePath}/sitemap.xml\n`, {
-    headers: siteHeaders("text/plain; charset=utf-8", artifactHash, versionId)
+  return new Response(robotsTextForSite(policy, `${origin}${basePath}/sitemap.xml`), {
+    headers: siteHeaders("text/plain; charset=utf-8", artifactHash, versionId, policy)
   });
 }
 
-function siteSitemap(request: Request, slug: string, routes: string[], lastModified: string, artifactHash: string, versionId: string) {
+function siteSitemap(request: Request, slug: string, routes: string[], lastModified: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1) {
   const origin = new URL(request.url).origin;
   const basePath = siteBasePath(request, slug);
   const urls = routes.map((route) => `<url><loc>${escapeXml(`${origin}${basePath}${route === "/" ? "" : route}`)}</loc><lastmod>${escapeXml(lastModified)}</lastmod></url>`).join("");
   return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`, {
-    headers: siteHeaders("application/xml; charset=utf-8", artifactHash, versionId)
+    headers: siteHeaders("application/xml; charset=utf-8", artifactHash, versionId, policy)
   });
 }
 
@@ -72,15 +84,33 @@ function normalizeRoute(value: string) {
   return clean ? `/${clean}` : "/";
 }
 
-function siteHeaders(contentType: string, artifactHash: string, versionId: string) {
+function markdownRouteForRequest(value: string) {
+  if (value === "index.md") return "/";
+  if (!value.endsWith("/index.md")) return undefined;
+  return normalizeRoute(value.slice(0, -"/index.md".length));
+}
+
+function publicRouteUrl(request: Request, slug: string, route: string) {
+  return `${new URL(request.url).origin}${siteBasePath(request, slug)}${route === "/" ? "" : route}`;
+}
+
+function markdownRouteUrl(request: Request, slug: string, route: string) {
+  const base = `${new URL(request.url).origin}${siteBasePath(request, slug)}`;
+  return route === "/" ? `${base}/index.md` : `${base}${route}/index.md`;
+}
+
+function siteHeaders(contentType: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1, link?: string) {
   const headers = new Headers({
     "content-type": contentType,
     "cache-control": "public, max-age=60, s-maxage=300, stale-while-revalidate=60",
     "x-content-type-options": "nosniff",
     "referrer-policy": "strict-origin-when-cross-origin",
+    "x-robots-tag": policy.search === "allow" ? "index, follow" : "noindex, nofollow",
     "x-lodesta-artifact-hash": artifactHash,
-    "x-lodesta-site-version": versionId
+    "x-lodesta-site-version": versionId,
+    "vary": "Accept, Host, X-Forwarded-Host"
   });
+  if (link) headers.set("link", link);
   if (contentType.startsWith("text/html")) {
     headers.set("content-security-policy", "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'");
   }

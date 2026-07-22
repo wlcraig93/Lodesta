@@ -6,7 +6,7 @@ import {
   claimDeclarationV1Schema,
   type ClaimDeclarationV1,
   type PublicFactV1,
-  type SitePublicBuildInputV1
+  type SitePublicBuildInputV3
 } from "@/packages/site-contracts";
 import type { ArtifactGateFinding } from "./contracts";
 import { artifactClaimPolicyVersion } from "@/packages/site-contracts/platform-versions";
@@ -25,7 +25,7 @@ export class ArtifactClaimValidatorV1 {
   validate(input: {
     routes: ClaimValidationRoute[];
     declarations: ClaimDeclarationV1[];
-    buildInput: SitePublicBuildInputV1;
+    buildInput: SitePublicBuildInputV3;
   }): ArtifactClaimValidationResult {
     const findings: ArtifactGateFinding[] = [];
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
@@ -44,7 +44,7 @@ export class ArtifactClaimValidatorV1 {
         if (result) findings.push(claimFinding(`claim.${declaration.id}`, result, route.path));
         else supportedClaimIds.push(declaration.id);
       }
-      findings.push(...undeclaredMarkerFindings(route.path, text, routeDeclarations));
+      findings.push(...undeclaredMarkerFindings(route.path, text, routeDeclarations, facts));
       findings.push(...sensitiveClaimFindings(route.path, text, routeDeclarations, supportedClaimIds, input.buildInput));
     }
 
@@ -84,18 +84,21 @@ function autoDeclarationsForRoute(
       continue;
     }
     const rendered = DomUtils.textContent(element).replace(/\s+/g, " ").trim();
-    const displayValue = factDisplayValues(fact).find((value) => sameClaimValue(value, rendered, fact.kind));
-    if (!displayValue) {
+    const displayValues = [...new Set(factDisplayValues(fact)
+      .filter((value) => sameClaimValue(value, rendered, fact.kind)))];
+    if (!displayValues.length) {
       findings.push(claimFinding("claim.sdk_value_mismatch", `SDK binding ${fact.id} does not render its canonical value.`, route.path));
       continue;
     }
-    declarations.push({
-      id: `sdk:${route.path.replace(/[^a-z0-9]+/gi, "_") || "home"}:${fact.id}`.slice(0, 160),
-      route: route.path,
-      text: displayValue,
-      kind: "sdk_bound",
-      sourceFactIds: [fact.id],
-      autoDeclared: true
+    displayValues.forEach((displayValue, index) => {
+      declarations.push({
+        id: `sdk:${route.path.replace(/[^a-z0-9]+/gi, "_") || "home"}:${fact.id}:${index + 1}`.slice(0, 160),
+        route: route.path,
+        text: displayValue,
+        kind: "sdk_bound",
+        sourceFactIds: [fact.id],
+        autoDeclared: true
+      });
     });
   }
   return declarations;
@@ -138,7 +141,12 @@ function sameCompleteClaim(source: string, claim: string) {
     && sourceTokens.every((token, index) => claimTokens[index] === token);
 }
 
-function undeclaredMarkerFindings(route: string, text: string, declarations: ClaimDeclarationV1[]) {
+function undeclaredMarkerFindings(
+  route: string,
+  text: string,
+  declarations: ClaimDeclarationV1[],
+  facts: Map<string, PublicFactV1>
+) {
   const markers = new Set<string>();
   for (const pattern of [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
@@ -150,7 +158,7 @@ function undeclaredMarkerFindings(route: string, text: string, declarations: Cla
     for (const match of text.matchAll(pattern)) markers.add(match[0]);
   }
   return [...markers].flatMap((marker) => {
-    const declared = declarations.some((claim) => sameClaimValue(marker, claim.text, marker.includes("@") ? "email" : "other"));
+    const declared = declarations.some((claim) => sameClaimValue(marker, claim.text, inferredKind(claim, facts)));
     return declared ? [] : [claimFinding("claim.undeclared_marker", `Factual marker ${JSON.stringify(marker)} is not covered by a claim declaration.`, route)];
   });
 }
@@ -160,7 +168,7 @@ function sensitiveClaimFindings(
   text: string,
   declarations: ClaimDeclarationV1[],
   supportedIds: string[],
-  buildInput: SitePublicBuildInputV1
+  buildInput: SitePublicBuildInputV3
 ) {
   const supported = new Set(supportedIds);
   return scanSensitiveClaimText(text).flatMap((match) => {
@@ -178,7 +186,7 @@ function sensitiveClaimFindings(
 function sensitiveDeclarationMatches(
   match: ReturnType<typeof scanSensitiveClaimText>[number],
   claim: ClaimDeclarationV1,
-  buildInput: SitePublicBuildInputV1
+  buildInput: SitePublicBuildInputV3
 ) {
   if (!gatedSensitiveClaims(claim.text).some((candidate) => candidate.category === match.category)) return false;
   const compatibleKinds = proofKindsFor(match);

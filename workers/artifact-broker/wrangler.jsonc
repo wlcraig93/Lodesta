@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "lodesta-artifact-broker-v1",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-20",
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACT_BUCKET",
+      "bucket_name": "lodesta-agentic-sites-v1"
+    }
+  ]
+}

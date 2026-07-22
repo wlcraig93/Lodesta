@@ -1,0 +1,15 @@
+{
+  "version": "2026-07-21",
+  "bots": [
+    { "userAgent": "Googlebot", "categories": ["search"] },
+    { "userAgent": "Bingbot", "categories": ["search"] },
+    { "userAgent": "OAI-SearchBot", "categories": ["search"] },
+    { "userAgent": "ChatGPT-User", "categories": ["ai_input"] },
+    { "userAgent": "GPTBot", "categories": ["ai_train"] },
+    { "userAgent": "Claude-SearchBot", "categories": ["search"] },
+    { "userAgent": "Claude-User", "categories": ["ai_input"] },
+    { "userAgent": "ClaudeBot", "categories": ["ai_train"] },
+    { "userAgent": "PerplexityBot", "categories": ["search"] },
+    { "userAgent": "Perplexity-User", "categories": ["ai_input"] }
+  ]
+}

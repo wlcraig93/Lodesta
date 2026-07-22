@@ -1,19 +1,19 @@
 # Lodesta V1 Launch Plan
 
-**Status:** Deferred product scope; the current builder milestone is private experimentation only
+**Status:** Pilot blocked pending the explicit V3 cutover and fresh frozen validation
 
 **Architecture authority:** [Lodesta Agentic Website Platform V1](agentic-site-workspace-v1-plan.md)
 
 ## Product
 
-Lodesta builds and manages high-quality websites for US local businesses. V1 starts with auto body, ingests verifiable business facts from an existing URL, produces a protected customer-ready draft, and gives the owner an AI website workspace for controlled visual and content changes.
+Lodesta builds and manages high-quality websites for US local businesses. V1 ingests verifiable business facts from an existing URL, produces a protected customer-ready draft, and gives the owner an AI website workspace for controlled visual and content changes. Auto body supplies the first optional domain-context module but is not an eligibility gate.
 
 The product is intentionally narrower than a general application builder. It owns the shared backend capabilities and refuses requests for arbitrary authentication, databases, payments, custom server code, dependencies, secrets, or unsupported embeds.
 
 ## V1 Contract
 
-- Canonical `BusinessStateV2` owns business truth and provenance.
-- `SiteIntentV2` owns presentation goals without templates or layout recipes.
+- Canonical `BusinessStateV3` owns business truth and provenance.
+- `SiteIntentV3` owns presentation goals without templates or layout recipes.
 - One `WebsiteManagerAgent` authors a complete React/TypeScript/CSS workspace in Cloudflare Sandbox.
 - The trusted compiler surface is limited to Lodesta SDK hooks; no agent-authored JavaScript reaches visitors.
 - Forms/inbox, analytics, maps, links, domains, internal redirects, metadata, structured data, publishing, runtime interactions, and rollback are platform-owned.
@@ -24,12 +24,20 @@ The product is intentionally narrower than a general application builder. It own
 
 ## Launch Sequence
 
-No pilot or launch sequence is currently authorized. The active implementation milestone is one private, technically non-publishable live experiment. Before a pilot, a separate planning decision must define the deferred pilot-entry target set, edit battery, independent review, quality and reliability thresholds, mandatory pre-publish operator review, pilot size, and exit review. Monetary caps follow demonstrated quality and workflow readiness.
+1. Deploy the shared phone/location presentation fixes, exact-version approvals, derived readiness, owner/operator workflow, and response-level diagnostics.
+2. Run four frozen discovery URLs once, fix shared causes only, and deploy the coordinated release.
+3. Run three untouched validation URLs once. All must pass objective QA and the fixed customer-draft rubric with product-owner and independent review. At most one fresh cohort may follow a general platform fix.
+4. Prove element restyle, page addition, form movement, and mobile repair through patch-only edits on a retained validation site.
+5. Pass relevant Agent Ready checks, including generated-site Markdown, robots policy, cache separation, JSON-LD, custom-domain behavior, and external scans.
+6. Delete disposable quality data, then admit at most three manually selected local-business owners to a concierge pilot.
+7. Require exact operator approval before every publish and hold an explicit exit review before expansion.
+
+The operational procedure is [Private Site Quality Runbook](site-quality-runbook.md). Generated quality outputs remain ignored under `.data`; they are evidence for the immediate decision, never product fixtures or visual baselines. Monetary caps follow demonstrated quality and workflow readiness.
 
 ## Initial Managed Surface
 
 - URL ingestion and source retention.
-- Auto-body vertical context through the shared module boundary.
+- Optional auto-body domain context through the shared module boundary; unmatched suitable local businesses use the same manager with neutral context.
 - Multi-page customer website creation.
 - AI-guided visual/content edits.
 - Canonical fact and offering changes through typed control-plane requests.
@@ -44,8 +52,8 @@ Scheduling, customer auth, ecommerce, custom applications, extra production vert
 
 - Next.js and Railway for product UI, APIs, public artifact serving, and workers.
 - Supabase Auth/Postgres for canonical and operational data.
-- R2 for content-addressed source archives, asset revisions, workspace backups, screenshots, runtime patches, and site artifacts.
-- Cloudflare Sandbox `standard-2` containers for isolated builds with a prebaked dependency tree and deny-by-default egress.
+- R2 with separate artifact and workspace buckets: Railway accesses immutable exact artifact keys through a least-privilege broker, while the sandbox Worker can access only opaque workspace archives. Inventory and deletion require separate operator-scoped credentials.
+- Cloudflare Sandbox `standard-2` containers for isolated builds with a prebaked dependency tree and deny-by-default egress. Containers start only on the first build, Vite starts only for an authenticated live-preview request, successful or failed terminal runs explicitly destroy the container, and account capacity is capped at five instances with at most four runs claimed concurrently.
 - Cloudflare for SaaS for customer domains where configured.
 
 Fresh databases are created by applying ordered files under `supabase/migrations`; there is no parallel monolithic schema file. Run `npm run verify:supabase`, `npm run verify:site-sandbox-v1`, and `npm run verify:agentic-site-walking-skeleton` before deployment.

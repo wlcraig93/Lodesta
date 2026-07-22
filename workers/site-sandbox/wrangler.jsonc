@@ -9,9 +9,9 @@
     "class_name": "Sandbox",
     "image": "./Dockerfile",
     "instance_type": "standard-2",
-    "max_instances": 100
+    "max_instances": 5
   }],
   "durable_objects": { "bindings": [{ "name": "Sandbox", "class_name": "Sandbox" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Sandbox"] }],
-  "r2_buckets": [{ "binding": "ARTIFACT_BUCKET", "bucket_name": "lodesta-agentic-sites-v1" }]
+  "r2_buckets": [{ "binding": "WORKSPACE_BUCKET", "bucket_name": "lodesta-workspace-backups-v1" }]
 }

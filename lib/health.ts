@@ -10,7 +10,7 @@ export type HealthReport = { status: HealthState; timestamp: string; checks: Hea
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
     checkUrl(), checkRepository(), checkAuth(), checkAdmin(), checkStripe(), checkSandbox(),
-    checkArtifactBridge(), checkOpenAi(), checkHashSecret(), checkClaimSecret(), checkEmail(), checkPlaces()
+    checkArtifactBroker(), checkOpenAi(), checkHashSecret(), checkClaimSecret(), checkEmail(), checkPlaces()
   ];
   if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
   return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
@@ -50,10 +50,13 @@ function checkSandbox() {
     : error("sandbox", "Cloudflare Sandbox", "LODESTA_SANDBOX_URL and LODESTA_SANDBOX_TOKEN are required.");
 }
 
-function checkArtifactBridge() {
-  return process.env.LODESTA_R2_BRIDGE_URL && process.env.LODESTA_R2_BRIDGE_TOKEN
-    ? ok("artifacts", "Immutable artifact storage", "R2 artifact bridge is configured.")
-    : error("artifacts", "Immutable artifact storage", "LODESTA_R2_BRIDGE_URL and LODESTA_R2_BRIDGE_TOKEN are required.");
+function checkArtifactBroker() {
+  if (process.env.LODESTA_ARTIFACT_STORAGE !== "r2") {
+    return ok("artifacts", "Immutable artifact storage", "Local immutable artifact storage is configured.");
+  }
+  return process.env.LODESTA_ARTIFACT_BROKER_URL && process.env.LODESTA_ARTIFACT_BROKER_TOKEN
+    ? ok("artifacts", "Immutable artifact storage", "Exact-object artifact broker is configured.")
+    : error("artifacts", "Immutable artifact storage", "LODESTA_ARTIFACT_BROKER_URL and LODESTA_ARTIFACT_BROKER_TOKEN are required.");
 }
 
 function checkOpenAi() { return process.env.OPENAI_API_KEY ? ok("openai", "Website manager model", "OpenAI is configured.") : error("openai", "Website manager model", "OPENAI_API_KEY is required for site construction and edits."); }

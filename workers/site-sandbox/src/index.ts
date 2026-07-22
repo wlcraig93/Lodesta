@@ -16,9 +16,9 @@ export class Sandbox extends CloudflareSandbox {
 
 interface Env {
   Sandbox: DurableObjectNamespace<SandboxDurableObject>;
-  ARTIFACT_BUCKET: R2Bucket;
+  WORKSPACE_BUCKET: R2Bucket;
   SANDBOX_TRANSPORT: "rpc";
-  PLATFORM_TOKEN?: string;
+  SANDBOX_TOKEN?: string;
 }
 
 type ApplyRequest = {
@@ -32,6 +32,7 @@ const publicInputPath = `${workspaceRoot}/.lodesta/public-build-input.json`;
 const previewPort = 4173;
 const maxFilesPerApply = 80;
 const maxApplyBytes = 4_000_000;
+const previewStarts = new Map<string, Promise<void>>();
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -39,12 +40,16 @@ export default {
     if (url.pathname === "/health") return json({ ok: true, provider: "cloudflare-sandbox", transport: env.SANDBOX_TRANSPORT });
     if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
 
-    const blobMatch = url.pathname.match(/^\/v1\/blobs\/(.+)$/);
-    if (blobMatch) return blobRequest(request, env.ARTIFACT_BUCKET, decodeBlobKey(blobMatch[1]));
-
     const previewMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9-]{1,80})\/preview(\/.*)?$/);
     if (request.method === "GET" && previewMatch) {
       const sandbox = sandboxFor(env, previewMatch[1]);
+      const built = await sandbox.exists(`${workspaceRoot}/dist/index.html`);
+      if (!built.exists) return json({ error: "preview_not_ready" }, 409);
+      try {
+        await ensurePreviewServer(previewMatch[1], sandbox);
+      } catch (error) {
+        return json({ error: "preview_expired", detail: error instanceof Error ? error.message : String(error) }, 409);
+      }
       const upstream = new URL(request.url);
       upstream.pathname = previewMatch[2] || "/";
       const response = await sandbox.containerFetch(new Request(upstream, request), previewPort);
@@ -103,8 +108,6 @@ export default {
         const revision = await digest(`${currentRevision}:${JSON.stringify(body.files)}`);
         await sandbox.writeFile(revisionPath, revision);
         await sandbox.killAllProcesses();
-        const server = await sandbox.startProcess(`npm run preview -- --host 0.0.0.0 --port ${previewPort}`, { cwd: workspaceRoot });
-        await server.waitForPort(previewPort, { path: "/", status: 200, timeout: 30_000 });
         return json({
           ok: true,
           revision,
@@ -128,8 +131,6 @@ export default {
         const revision = await digest(`${currentRevision}:rebase:${JSON.stringify(body.publicBuildInput)}`);
         await sandbox.writeFile(revisionPath, revision);
         await sandbox.killAllProcesses();
-        const server = await sandbox.startProcess(`npm run preview -- --host 0.0.0.0 --port ${previewPort}`, { cwd: workspaceRoot });
-        await server.waitForPort(previewPort, { path: "/", status: 200, timeout: 30_000 });
         return json({
           ok: true,
           revision,
@@ -172,27 +173,37 @@ export default {
         const archived = await sandbox.exec(`tar --exclude=node_modules --exclude=dist -czf ${archivePath} -C ${workspaceRoot} .`, { timeout: 30_000 });
         if (!archived.success) return json({ error: "backup_failed", stderr: archived.stderr.slice(-8_000) }, 422);
         const archive = await sandbox.readFile(archivePath, { encoding: "none" });
-        const fixed = new FixedLengthStream(archive.size);
-        const upload = archive.content.pipeTo(fixed.writable);
-        await env.ARTIFACT_BUCKET.put(workspaceBackupKey(id), fixed.readable, {
+        const archiveBytes = await new Response(archive.content).arrayBuffer();
+        const archiveHash = `sha256:${await digestBytes(archiveBytes)}` as const;
+        await env.WORKSPACE_BUCKET.put(workspaceBackupKey(id), archiveBytes, {
           httpMetadata: { contentType: "application/gzip" },
-          customMetadata: { sessionId, revision, createdAt: new Date().toISOString() }
+          customMetadata: { sessionId, revision, archiveHash, createdAt: new Date().toISOString() }
         });
-        await upload;
+        const verified = await env.WORKSPACE_BUCKET.head(workspaceBackupKey(id));
+        if (!verified || verified.size !== archive.size || verified.customMetadata?.archiveHash !== archiveHash) {
+          return json({ error: "backup_verification_failed" }, 500);
+        }
         await sandbox.deleteFile(archivePath);
-        return json({ ok: true, backup: { id, revision, size: archive.size, key: workspaceBackupKey(id) } });
+        return json({ ok: true, backup: { id, revision, size: archive.size, key: workspaceBackupKey(id), contentHash: archiveHash } });
       }
 
       if (request.method === "POST" && action === "restore") {
-        const body = await request.json() as { backupId?: string; expectedRevision?: string };
-        if (!body.backupId || !/^[a-f0-9]{64}$/.test(body.backupId) || !body.expectedRevision) return json({ error: "invalid_restore" }, 400);
+        const body = await request.json() as { backupId?: string; expectedRevision?: string; expectedArchiveHash?: string };
+        if (!body.backupId || !/^[a-f0-9]{64}$/.test(body.backupId) || !body.expectedRevision || !body.expectedArchiveHash
+          || !/^sha256:[a-f0-9]{64}$/.test(body.expectedArchiveHash)) return json({ error: "invalid_restore" }, 400);
         const current = await readRevision(sandbox);
         if (current !== body.expectedRevision) return json({ error: "revision_conflict", currentRevision: current }, 409);
-        const backup = await env.ARTIFACT_BUCKET.get(workspaceBackupKey(body.backupId));
+        const backup = await env.WORKSPACE_BUCKET.get(workspaceBackupKey(body.backupId));
         if (!backup) return json({ error: "backup_not_found" }, 404);
+        const archiveBytes = await backup.arrayBuffer();
+        const actualArchiveHash = `sha256:${await digestBytes(archiveBytes)}`;
+        const metadataArchiveHash = backup.customMetadata?.archiveHash ?? backup.customMetadata?.archivehash;
+        if (metadataArchiveHash !== body.expectedArchiveHash || actualArchiveHash !== body.expectedArchiveHash) {
+          return json({ error: "backup_hash_mismatch" }, 409);
+        }
         await sandbox.killAllProcesses();
         const archivePath = `/tmp/${body.backupId}.tar.gz`;
-        await sandbox.writeFile(archivePath, backup.body);
+        await sandbox.writeFile(archivePath, new Response(archiveBytes).body!);
         const restored = await sandbox.exec(`rm -rf ${workspaceRoot} && mkdir -p ${workspaceRoot} && tar -xzf ${archivePath} -C ${workspaceRoot} && rm -f ${archivePath} && rm -rf ${workspaceRoot}/node_modules && ln -s /opt/lodesta-site-scaffold/node_modules ${workspaceRoot}/node_modules`, { timeout: 30_000 });
         if (!restored.success) return json({ error: "restore_failed", stderr: restored.stderr.slice(-8_000) }, 422);
         return json({ ok: true, revision: await readRevision(sandbox) });
@@ -228,7 +239,7 @@ function sandboxFor(env: Env, sessionId: string) {
 }
 
 function authorized(request: Request, env: Env) {
-  return Boolean(env.PLATFORM_TOKEN && request.headers.get("authorization") === `Bearer ${env.PLATFORM_TOKEN}`);
+  return Boolean(env.SANDBOX_TOKEN && request.headers.get("authorization") === `Bearer ${env.SANDBOX_TOKEN}`);
 }
 
 function validateApply(value: unknown): ApplyRequest {
@@ -258,39 +269,9 @@ function parseSourcePolicyResult(stdout: string) {
   }
 }
 
-async function blobRequest(request: Request, bucket: R2Bucket, key: string) {
-  if (request.method === "PUT") {
-    const expected = request.headers.get("x-lodesta-content-sha256");
-    if (!expected || !/^sha256:[a-f0-9]{64}$/.test(expected)) return json({ error: "content_hash_required" }, 400);
-    const bytes = await request.arrayBuffer();
-    if (`sha256:${await digestBytes(bytes)}` !== expected) return json({ error: "content_hash_mismatch" }, 400);
-    const current = await bucket.head(key);
-    if (current) return current.customMetadata?.contentHash === expected ? new Response(null, { status: 204 }) : json({ error: "immutable_key_collision" }, 409);
-    await bucket.put(key, bytes, {
-      httpMetadata: { contentType: request.headers.get("content-type") ?? "application/octet-stream" },
-      customMetadata: { contentHash: expected, createdAt: new Date().toISOString() }
-    });
-    return new Response(null, { status: 201 });
-  }
-  const object = request.method === "HEAD" ? await bucket.head(key) : await bucket.get(key);
-  if (!object) return new Response(null, { status: 404 });
-  const headers = new Headers({
-    "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
-    "x-lodesta-content-sha256": object.customMetadata?.contentHash ?? "",
-    "cache-control": "private, no-store"
-  });
-  return request.method === "HEAD" ? new Response(null, { headers }) : new Response((object as R2ObjectBody).body, { headers });
-}
-
 async function readRevision(sandbox: ReturnType<typeof getSandbox>) {
   const exists = await sandbox.exists(revisionPath);
   return exists.exists ? (await sandbox.readFile(revisionPath, { encoding: "utf8" })).content.trim() : "uninitialized";
-}
-
-function decodeBlobKey(value: string) {
-  const key = value.split("/").map(decodeURIComponent).join("/");
-  if (!key || key.includes("..") || !/^[a-zA-Z0-9_./:-]+$/.test(key)) throw new Error("Invalid blob key.");
-  return key;
 }
 
 function workspaceBackupKey(id: string) { return `workspace-backups/${id}.tar.gz`; }
@@ -305,4 +286,54 @@ function applyPreviewHeaders(headers: Headers) {
   headers.set("content-security-policy", "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'none'; script-src 'none'; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "no-referrer");
+}
+
+async function ensurePreviewServer(sessionId: string, sandbox: ReturnType<typeof getSandbox>) {
+  const current = previewStarts.get(sessionId);
+  if (current) return current;
+  const start = (async () => {
+    const lockPath = `${workspaceRoot}/.lodesta/preview-start.lock`;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      if (await previewServerReady(sandbox)) return;
+      const processes = await sandbox.listProcesses();
+      const running = processes.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+      if (!running) {
+        const lock = await sandbox.exec(`mkdir ${lockPath}`);
+        if (lock.success) {
+          try {
+            if (await previewServerReady(sandbox)) return;
+            const afterLock = await sandbox.listProcesses();
+            const alreadyRunning = afterLock.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+            if (!alreadyRunning) {
+              const server = await sandbox.startProcess(`npm run preview -- --host 0.0.0.0 --port ${previewPort}`, { cwd: workspaceRoot });
+              await server.waitForPort(previewPort, { path: "/", status: 200, timeout: 30_000 });
+            }
+            if (!await previewServerReady(sandbox)) throw new Error("Preview process started without becoming reachable.");
+            return;
+          } finally {
+            await sandbox.exec(`rmdir ${lockPath}`).catch(() => undefined);
+          }
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error("Concurrent preview start did not become ready.");
+  })();
+  previewStarts.set(sessionId, start);
+  try {
+    await start;
+  } finally {
+    if (previewStarts.get(sessionId) === start) previewStarts.delete(sessionId);
+  }
+}
+
+async function previewServerReady(sandbox: ReturnType<typeof getSandbox>) {
+  try {
+    const response = await sandbox.containerFetch(new Request("http://lodesta-preview.local/"), previewPort);
+    const ready = response.status === 200;
+    await response.body?.cancel();
+    return ready;
+  } catch {
+    return false;
+  }
 }

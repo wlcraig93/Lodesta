@@ -3,8 +3,9 @@ import "../scripts/load-env";
 import { setTimeout as sleep } from "node:timers/promises";
 import { agenticSiteWorkflow } from "../packages/site-platform";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { platformOperationsRepository } from "../packages/platform-operations";
-import { runProspectPresenceReport } from "../lib/prospect-reports";
+import { processNextProspectReportJob } from "../lib/prospect-report-jobs";
+
+const localRecoveryStaleAfterMs = 15 * 60_000;
 
 let shuttingDown = false;
 process.once("SIGTERM", () => { shuttingDown = true; });
@@ -26,17 +27,17 @@ async function main() {
     return;
   }
   if (command === "process-once") {
-    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit: 1 });
-    const prospectReport = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length ? null : await processProspectReportJob();
+    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs });
+    const prospectReport = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length ? null : await processNextProspectReportJob();
     console.log(JSON.stringify({ agentRuns, prospectReport }, null, 2));
     return;
   }
   if (command === "process-all") {
     const limit = boundedLimit(process.argv[3]);
-    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit });
+    const agentRuns = await agenticSiteWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
     const prospectReports = [];
     for (let index = 0; index < limit; index += 1) {
-      const result = await processProspectReportJob();
+      const result = await processNextProspectReportJob();
       if (!result) break;
       prospectReports.push(result);
     }
@@ -48,12 +49,12 @@ async function main() {
     const limit = boundedLimit(process.argv[4]);
     console.log(JSON.stringify({ event: "worker_started", pollMs: idleMs, batchLimit: limit }));
     while (!shuttingDown) {
-      const result = await agenticSiteWorkflow.processRecoverableRuns({ limit });
+      const result = await agenticSiteWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
       if (result.reaped.length || result.recovered.length || result.processed.length) {
         console.log(JSON.stringify({ event: "agent_runs_processed", reapedSessions: result.reaped, recovered: result.recovered, processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
         continue;
       }
-      const prospect = await processProspectReportJob();
+      const prospect = await processNextProspectReportJob();
       if (prospect) {
         console.log(JSON.stringify({ event: "prospect_report_processed", ...prospect }));
         continue;
@@ -64,26 +65,6 @@ async function main() {
     return;
   }
   throw new Error(`Unknown worker command: ${command}`);
-}
-
-async function processProspectReportJob() {
-  const workerId = `site-worker-${process.pid}`;
-  const job = await platformOperationsRepository.claimNextProspectReportJob(workerId);
-  if (!job) return null;
-  try {
-    const report = await platformOperationsRepository.getProspectReport(job.reportId);
-    if (!report) throw new Error("Prospect report record not found.");
-    await platformOperationsRepository.updateProspectReport({ reportId: report.id, status: "running", jobId: job.id });
-    const result = await runProspectPresenceReport(report);
-    await platformOperationsRepository.updateProspectReport({ reportId: report.id, status: "completed", result, completedAt: new Date().toISOString() });
-    await platformOperationsRepository.completeProspectReportJob(job.id);
-    return { jobId: job.id, reportId: report.id, status: "completed" };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await platformOperationsRepository.updateProspectReport({ reportId: job.reportId, status: job.attempts < job.maxAttempts ? "queued" : "failed", errorCode: message.slice(0, 160) });
-    await platformOperationsRepository.failProspectReportJob(job.id, message);
-    return { jobId: job.id, reportId: job.reportId, status: job.attempts < job.maxAttempts ? "queued" : "failed", error: message };
-  }
 }
 
 function boundedLimit(value: string | undefined) {

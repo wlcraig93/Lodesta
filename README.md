@@ -1,6 +1,6 @@
 # Lodesta
 
-Lodesta is an AI-first managed website and local-presence platform for US small businesses. The product is pre-launch and V1 currently supports auto-body businesses.
+Lodesta is an AI-first managed website and local-presence platform for US small businesses. The product is pre-launch. Suitable local businesses can generate sites without a configured domain module; auto body currently has the only optional production context enrichment.
 
 The current website system uses canonical business data, one website manager agent, shared Lodesta capabilities, isolated Cloudflare builds, immutable site artifacts, and Railway/Next.js serving. It does not use presentation templates, copy slots, a planner/compiler design system, or per-vertical generator branches.
 
@@ -13,6 +13,7 @@ The canonical architecture and implementation sequence are documented in [docs/a
 - `packages/site-agent`: the single manager agent, visual/task critic, and versioned prompt contract.
 - `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.
 - `workers/site-sandbox`: deny-by-default, prebaked Cloudflare build environment.
+- `workers/recovery-watchdog`: stateless fifteen-minute recovery trigger for the Railway web service.
 - `packages/site-verification`: sanitizer, factual-claim validation, browser gate, contact sheets, and finalization.
 - `packages/site-artifacts`: content-addressed local or R2 artifact storage.
 - `packages/platform-data`: V4 repository contracts and Supabase implementation.
@@ -30,19 +31,20 @@ npm install
 npm run dev
 ```
 
-The app runs at `http://localhost:4330` by default. `npm run dev` starts the Next.js app and the platform worker; use `npm run dev:web` when only the web process is needed.
+The app runs at `http://localhost:4330` by default. `npm run dev` starts the Next.js app and a local-only fast recovery worker; use `npm run dev:web` when only the web process is needed. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
 
 Important surfaces:
 
-- `/dashboard`: operator dashboard.
-- `/admin/sites`: site inventory.
+- `/admin/sites`: admin site creation and management.
+- `/account`: owner entry router and multi-site chooser.
 - `/admin/site-queue`: candidate-version and operator-review queue.
 - `/settings`: agent and critic model settings.
-- `/editor/:slug`: owner website workspace with Discuss and Apply.
-- `/business/:slug`: canonical business data and site intent.
-- `/versions/:slug`: immutable version history, publish, restore, and rollback.
-- `/leads/:slug`: managed form inbox.
-- `/analytics/:slug`: first-party analytics.
+- `/workspace/:slug`: owner home, site status, and next action.
+- `/workspace/:slug/website`: agentic website manager, preview, history, and publishing.
+- `/workspace/:slug/inbox`: managed form inbox.
+- `/workspace/:slug/results`: owner-readable first-party analytics.
+- `/workspace/:slug/business`: canonical business data and site intent.
+- `/workspace/:slug/settings`: domains, redirects, billing, and access.
 - `/sites/:slug/*`: published immutable site artifact.
 
 Copy `.env.example` to local environment configuration and provide real values outside git. Experimental generation requires OpenAI, Supabase, Cloudflare Sandbox, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
@@ -86,11 +88,11 @@ Railway hosts the Next.js web service and worker. Supabase stores canonical auth
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
-Database changes are additive migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. The pre-launch V3 deletion was an explicit hard cutover; no compatibility readers or dual-write paths remain.
+Database changes are additive migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. The pre-launch V3 migration requires the explicit report/manifest/cleanup hard cutover before its assert-empty migration; the application has no compatibility readers or dual-write paths.
 
 ## Security Boundaries
 
-- Sandbox input contains only `SitePublicBuildInputV1`; private evidence and secrets never enter the build environment.
+- Sandbox input contains only `SitePublicBuildInputV3`; private evidence and secrets never enter the build environment.
 - Sandbox sessions perform no network installs and import only the prebaked Lodesta SDK and allowlisted toolchain.
 - HTML, CSS, routes, links, assets, forms, capabilities, structured data, and factual claims are validated before persistence.
 - Forms, analytics, maps, domains, internal redirects, publishing, runtime behavior, and all backend functions are platform-owned.

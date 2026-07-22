@@ -1,4 +1,5 @@
 import React, { createContext, useContext, type ReactNode } from "react";
+import { formatPhoneForDisplay, orderedLocationHours } from "./presentation";
 
 type PublicInput = {
   siteId: string;
@@ -6,7 +7,7 @@ type PublicInput = {
   business: {
     assets: Array<{ assetId: string; alt: string }>;
     links: Array<{ id: string; url: string }>;
-    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; googlePlaceId?: string; sourceFactIds?: string[] }>;
+    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; googlePlaceId?: string; hours?: Record<string, string>; sourceFactIds?: string[] }>;
   };
   forms: Array<{ id: string; fields: Array<{ id: string; label: string; type: string; required: boolean; options?: string[] }>; submitLabel: string; successMessage: string }>;
 };
@@ -20,7 +21,7 @@ function useInput() { const input = useContext(InputContext); if (!input) throw 
 export function Fact({ id, as: Tag = "span", className }: { id: string; as?: keyof React.JSX.IntrinsicElements; className?: string }) {
   const fact = useInput().publicFacts.find((item) => item.id === id);
   if (!fact) throw new Error(`Unknown public fact ${id}.`);
-  return <Tag className={className} data-lodesta-fact-id={id}>{displayValue(fact.value)}</Tag>;
+  return <Tag className={className} data-lodesta-fact-id={id}>{displayFactValue(fact)}</Tag>;
 }
 
 export function Asset({ id, className, alt }: { id: string; className?: string; alt?: string }) {
@@ -56,9 +57,15 @@ export function ManagedMap({ locationId, className }: { locationId: string; clas
   const query = location.googlePlaceId ? `place_id:${location.googlePlaceId}` : address || location.label;
   const href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   const addressFact = input.publicFacts.find((fact) => fact.kind === "address" && location.sourceFactIds?.includes(fact.id));
+  const hoursFact = input.publicFacts.find((fact) => fact.kind === "hours" && location.sourceFactIds?.includes(fact.id));
+  const hours = orderedLocationHours(location.hours);
   return <section className={className} data-lodesta-map={locationId} data-lodesta-place-id={location.googlePlaceId}>
-    <div data-lodesta-map-surface aria-label={`Map for ${location.label}`}><span>{location.label}</span>{addressFact ? <address data-lodesta-fact-id={addressFact.id}>{displayValue(addressFact.value)}</address> : null}</div>
-    <a href={href} target="_blank" rel="noopener noreferrer" data-lodesta-map-fallback>Open directions</a>
+    <div data-lodesta-map-surface aria-label={`Location details for ${location.label}`}>
+      <div data-lodesta-location-heading><span data-lodesta-location-verified>Verified location</span><strong data-lodesta-location-name>{location.label}</strong></div>
+      {addressFact ? <address data-lodesta-location-address data-lodesta-fact-id={addressFact.id}>{displayValue(addressFact.value)}</address> : null}
+      {hours.length ? <dl data-lodesta-location-hours {...(hoursFact ? { "data-lodesta-fact-id": hoursFact.id } : {})}>{hours.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl> : null}
+    </div>
+    <a href={href} target="_blank" rel="noopener noreferrer" data-lodesta-map-fallback>Get directions</a>
   </section>;
 }
 
@@ -72,6 +79,11 @@ export function Disclosure({ summary, children, className }: { summary: string; 
 }
 
 function stableId(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "item"; }
+
+function displayFactValue(fact: PublicInput["publicFacts"][number]) {
+  if (fact.kind === "phone" && typeof fact.value === "string") return formatPhoneForDisplay(fact.value);
+  return displayValue(fact.value);
+}
 
 function displayValue(value: unknown): string {
   if (typeof value === "string" || typeof value === "number") return String(value);

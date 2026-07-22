@@ -15,17 +15,10 @@ export default function robots(): MetadataRoute.Robots {
           "/account",
           "/crawl-fixtures/",
           "/preview/",
-          "/editor/",
-          "/analytics/",
-          "/status/",
+          "/workspace/",
           "/experiments/",
-          "/business/",
-          "/leads/",
-          "/versions/",
           "/claim/",
-          "/domains/",
           "/outbound",
-          "/dashboard",
           "/admin"
         ]
       }

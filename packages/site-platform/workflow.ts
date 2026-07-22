@@ -1,48 +1,64 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { createPublicBuildInput, assertNoPrivateBuildInputFields, ingestWebsite, sha256, stableJson, UnsupportedWebsiteVerticalError } from "@/packages/business-data";
+import { createPublicBuildInput, assertNoPrivateBuildInputFields, ingestWebsite, sha256, stableJson } from "@/packages/business-data";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
-import { configuredArtifactBlobStore, persistFinalArtifact, type ArtifactBlobStore } from "@/packages/site-artifacts";
-import { WebsiteManagerAgent, taskSkillFor, websiteManagerPromptVersion, workspaceSourceFileSchema, type ManagerRunRequestV2, type WorkspaceSourceFile } from "@/packages/site-agent";
+import {
+  configuredArtifactBlobStore,
+  persistFinalArtifact,
+  serializeWorkspaceSourceSidecar,
+  workspaceSourceSidecarKey,
+  workspaceSourceSidecarV1Schema,
+  type ArtifactBlobStore,
+  type WorkspaceSourceSidecarV1
+} from "@/packages/site-artifacts";
+import { WebsiteManagerAgent, taskSkillFor, websiteManagerPromptVersion, workspaceSourceFileSchema, type ManagerRunRequestV3, type WorkspaceSourceFile } from "@/packages/site-agent";
 import { configuredSiteSandboxClient, type SiteSandboxClient } from "@/packages/site-sandbox";
 import { unsupportedCapabilityDemands, unsupportedCapabilityMessage } from "@/packages/site-capabilities";
-import { platformOperationsRepository, redirectsStrandedByRoutes } from "@/packages/platform-operations";
 import {
   agenticSitePlatformVersion,
   operatorQueueItemSchema,
-  siteAgentRunV1Schema,
+  siteAgentRunV2Schema,
   siteAgentSessionV1Schema,
+  siteEditObjectiveV1Schema,
   siteVersionV4Schema,
   siteWorkspaceRevisionV1Schema,
   verticalDemandEventV1Schema,
-  type SiteAgentRunV1,
+  type SiteAgentRunV2,
   type SiteAgentSessionV1,
   type SiteBuildArtifactV1,
   type SiteElementSelectionV1,
-  type SitePublicBuildInputV1,
-  type SiteVersionV4
+  type SiteEditObjectiveV1,
+  type SitePublicBuildInputV3,
+  type SiteVersionV4,
+  type SiteWorkspaceRevisionV1
 } from "@/packages/site-contracts";
 import { sandboxImageDigest, siteToolchainVersion } from "@/packages/site-contracts/platform-versions";
 import {
   finalizePreparedArtifact,
+  applyEditObjective,
   createArtifactContactSheet,
   prepareSiteArtifact,
   runArtifactBrowserGate
 } from "@/packages/site-verification";
 import { createSiteRuntimePatch } from "@/packages/trusted-runtime";
-import { verticalContextFor } from "@/packages/vertical-context";
-import { WorkspaceManagerRuntimeV2, type RuntimeInspectionV2 } from "./manager-runtime";
+import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
+import { WorkspaceManagerRuntimeV3, type RuntimeInspectionV3 } from "./manager-runtime";
+import { deriveSitePublicationReadiness } from "./publication-readiness";
+import { SiteAgentTraceRecorderV1 } from "./trace-recorder";
 
 const runtimeSeriesId = "site-runtime-v1";
 export { agenticSitePlatformVersion, siteToolchainVersion };
 const idleLeaseMs = 10 * 60_000;
 const rotationMs = 2 * 60 * 60_000;
+export const initialGenerationDeadlineMs = 60 * 60_000;
+export const siteEditDeadlineMs = 25 * 60_000;
 
 export class AgenticSiteWorkflowV1 {
   constructor(
     private readonly repository: SitePlatformRepository = sitePlatformRepository,
     private readonly blobStore: ArtifactBlobStore = lazyExternalClient(configuredArtifactBlobStore),
     private readonly sandbox: SiteSandboxClient = lazyExternalClient(configuredSiteSandboxClient),
-    private readonly manager = new WebsiteManagerAgent()
+    private readonly manager = new WebsiteManagerAgent(),
+    private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository
   ) {}
 
   async bootstrapFromUrl(input: {
@@ -53,33 +69,36 @@ export class AgenticSiteWorkflowV1 {
     slug?: string;
     signal?: AbortSignal;
   }) {
+    const workflowStartedAt = new Date().toISOString();
+    const workflowSignal = input.signal
+      ? AbortSignal.any([input.signal, AbortSignal.timeout(initialGenerationDeadlineMs)])
+      : AbortSignal.timeout(initialGenerationDeadlineMs);
     const existing = await this.findExistingBootstrap(input);
     if (existing) return existing;
     const ingested = await ingestWebsite({
       url: input.url,
       slug: input.slug,
       workspaceId: input.workspaceId,
-      signal: input.signal
-    }).catch(async (error: unknown) => {
-      if (error instanceof UnsupportedWebsiteVerticalError) {
-        await this.repository.saveVerticalDemandEvent(verticalDemandEventV1Schema.parse({
-          schemaVersion: "vertical-demand-event-v1",
-          id: id("vertical_demand"),
-          sourceUrl: input.url,
-          observedVertical: error.observedVertical,
-          requestedBy: input.ownerId,
-          status: "open",
-          createdAt: new Date().toISOString()
-        }));
-      }
-      throw error;
+      signal: workflowSignal
     });
+    if (!ingested.domainContext) {
+      const understanding = ingested.sourceSnapshots[0]?.payload.understanding as { observedCategory?: { value?: string } } | undefined;
+      await this.repository.saveVerticalDemandEvent(verticalDemandEventV1Schema.parse({
+        schemaVersion: "vertical-demand-event-v1",
+        id: id("vertical_demand"),
+        sourceUrl: input.url,
+        observedVertical: understanding?.observedCategory?.value,
+        requestedBy: input.ownerId,
+        status: "open",
+        createdAt: new Date().toISOString()
+      }));
+    }
     const buildInput = createPublicBuildInput({
       id: id("input"),
       state: ingested.state,
       intent: ingested.intent,
       forms: ingested.forms,
-      verticalModule: verticalContextFor(ingested.state.vertical.id),
+      domainContext: ingested.domainContext,
       sourceSnapshotIds: ingested.sourceSnapshots.map((source) => source.id),
       runtimeSeriesId
     });
@@ -108,12 +127,13 @@ export class AgenticSiteWorkflowV1 {
       session,
       kind: "initial_build",
       instruction: "Create the complete initial customer website from the canonical public business input.",
-      requestedBy: input.ownerId
+      requestedBy: input.ownerId,
+      workflowStartedAt
     });
     return { site, session, run, buildInput };
   }
 
-  async getOrCreateSession(input: { siteId: string; ownerId: string; buildInput?: SitePublicBuildInputV1 }) {
+  async getOrCreateSession(input: { siteId: string; ownerId: string; buildInput?: SitePublicBuildInputV3 }) {
     const existing = await this.repository.getActiveAgentSession(input.siteId, input.ownerId);
     if (existing) return existing;
     const site = await this.repository.getSite(input.siteId);
@@ -131,7 +151,7 @@ export class AgenticSiteWorkflowV1 {
       currentWorkspaceRevisionId: site.currentWorkspaceRevisionId,
       publicBuildInputId: buildInput.id,
       sandboxProvider: "cloudflare",
-      sandboxId: sandboxId(),
+      sandboxId: undefined,
       leaseTokenHash: sha256(randomBytes(32)),
       leaseExpiresAt: new Date(now.getTime() + idleLeaseMs).toISOString(),
       rotateAt: new Date(now.getTime() + rotationMs).toISOString(),
@@ -144,14 +164,18 @@ export class AgenticSiteWorkflowV1 {
 
   async enqueueRun(input: {
     session: SiteAgentSessionV1;
-    kind: SiteAgentRunV1["kind"];
+    kind: SiteAgentRunV2["kind"];
     instruction: string;
     requestedBy: string;
     selection?: SiteElementSelectionV1;
-    origin?: SiteAgentRunV1["origin"];
+    origin?: SiteAgentRunV2["origin"];
     deferBehindActive?: boolean;
     publishAfterSuccess?: boolean;
+    workflowStartedAt?: string;
   }) {
+    if (await this.repository.isMaintenanceLeaseActive("workspace_storage_cutover", new Date().toISOString())) {
+      throw new Error("workspace_storage_cutover_active");
+    }
     const unsupported = unsupportedCapabilityDemands(input.instruction);
     if (unsupported.length) {
       const now = new Date().toISOString();
@@ -165,6 +189,7 @@ export class AgenticSiteWorkflowV1 {
         id: id("message"), sessionId: input.session.id, role: "system", content: message, createdAt: now
       });
       await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+        schemaVersion: "operator-queue-item-v2",
         id: id("operator"), siteId: input.session.siteId, reason: "unsupported_capability", severity: "normal", status: "open",
         findings: unsupported.map((finding) => ({ ...finding, instruction: input.instruction })), createdAt: now, updatedAt: now
       }));
@@ -197,7 +222,7 @@ export class AgenticSiteWorkflowV1 {
         publishAfterSuccess: coalesced.publishAfterSuccess && Boolean(input.publishAfterSuccess) && kind === "rebase",
         skillVersions: {
           manager: websiteManagerPromptVersion,
-          vertical: buildInput.verticalModule.version,
+          domainContext: buildInput.domainContext?.version ?? "none",
           [mergedSkill.id]: mergedSkill.version
         }
       });
@@ -208,8 +233,8 @@ export class AgenticSiteWorkflowV1 {
       });
       return updated;
     }
-    const run = siteAgentRunV1Schema.parse({
-      schemaVersion: "site-agent-run-v1",
+    const run = siteAgentRunV2Schema.parse({
+      schemaVersion: "site-agent-run-v2",
       id: id("run"),
       sessionId: input.session.id,
       siteId: input.session.siteId,
@@ -226,13 +251,12 @@ export class AgenticSiteWorkflowV1 {
       attempt: 0,
       skillVersions: {
         manager: websiteManagerPromptVersion,
-        vertical: buildInput.verticalModule.version,
+        domainContext: buildInput.domainContext?.version ?? "none",
         [taskSkill.id]: taskSkill.version
       },
-      toolCalls: [],
       attempts: [],
       usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
-      startedAt: now
+      startedAt: input.workflowStartedAt ?? now
     });
     await this.repository.saveAgentRun(run);
     await this.repository.appendAgentMessage({
@@ -245,6 +269,97 @@ export class AgenticSiteWorkflowV1 {
       createdAt: now
     });
     return run;
+  }
+
+  async preflightAndEnqueueApply(input: {
+    session: SiteAgentSessionV1;
+    instruction: string;
+    requestedBy: string;
+    selection?: SiteElementSelectionV1;
+    signal?: AbortSignal;
+  }) {
+    const unsupported = unsupportedCapabilityDemands(input.instruction);
+    if (unsupported.length) throw new Error(unsupportedCapabilityMessage(unsupported)!);
+    const site = await this.repository.getSite(input.session.siteId);
+    if (!site) throw new Error("Site not found.");
+    if (input.selection?.workspaceRevisionId && input.selection.workspaceRevisionId !== site.currentWorkspaceRevisionId) throw new Error("stale_selection");
+    const versions = await this.repository.listSiteVersions(site.id);
+    const currentVersion = versions.find((version) => version.workspaceRevisionId === site.currentWorkspaceRevisionId) ?? versions.find((version) => version.status === "candidate" || version.status === "published");
+    const artifact = currentVersion ? await this.repository.getBuildArtifact(currentVersion.artifactId) : undefined;
+    const baselineRoutes = artifact?.routes.map((route) => route.path) ?? [];
+    const baselineCapabilityBindings = artifact?.capabilityBindings.map(({ id: bindingId, kind, route }) => ({ id: bindingId, kind, route })) ?? [];
+    const baselineCapabilities = baselineCapabilityBindings.map((binding) => binding.id);
+    const formBindings = artifact?.capabilityBindings.filter((binding) => binding.kind === "form").map((binding) => ({ id: binding.id, route: binding.route })) ?? [];
+    const requestId = id("apply_request");
+    const recorder = new SiteAgentTraceRecorderV1(this.repository, this.blobStore, requestId, { sessionId: input.session.id, requestId });
+    const span = await recorder.open({ kind: "preflight", name: "edit_objective_preflight", summary: { routeCount: baselineRoutes.length, hasSelection: Boolean(input.selection) } });
+    let result;
+    try {
+      result = await this.manager.preflightEdit({
+        instruction: input.instruction,
+        selection: input.selection,
+        routes: baselineRoutes,
+        capabilityIds: baselineCapabilities,
+        formBindings,
+        signal: input.signal
+      });
+      await recorder.close(span, {
+        status: "succeeded",
+        modelId: result.modelId,
+        inputTokens: result.usage.inputTokens,
+        cachedInputTokens: result.usage.cachedInputTokens,
+        outputTokens: result.usage.outputTokens,
+        summary: { decision: result.preflight.decision, taskKind: result.preflight.taskKind, operation: result.preflight.operation },
+        payload: { instruction: input.instruction, selection: input.selection, result: result.preflight }
+      });
+    } catch (error) {
+      await recorder.close(span, { status: "failed", errorCode: failureCode(error), summary: { error: failureMessage(error) } });
+      throw new EditPreflightFailedError(failureMessage(error));
+    }
+    if (result.preflight.decision === "clarification_required") {
+      throw new EditClarificationRequiredError(result.preflight.clarificationQuestion!);
+    }
+    if (result.preflight.operation === "move_form" && formBindings.length === 0) {
+      throw new EditClarificationRequiredError("This site does not currently have a form to move. Which form should be added, and where should it go?");
+    }
+    const taskKind = result.preflight.taskKind!;
+    const run = await this.enqueueRun({ session: input.session, kind: taskKind, instruction: input.instruction, requestedBy: input.requestedBy, selection: input.selection });
+    const ownerSpecifiedRoutes = exactRoutesIn(input.instruction);
+    const checks: SiteEditObjectiveV1["checks"] = [
+      ...baselineRoutes.map((route): SiteEditObjectiveV1["checks"][number] => ({ kind: "preserve_route", route })),
+      ...baselineCapabilities.map((capabilityId): SiteEditObjectiveV1["checks"][number] => ({ kind: "preserve_capability", capabilityId }))
+    ];
+    if (result.preflight.operation === "add_page") {
+      if (ownerSpecifiedRoutes.length) {
+        for (const route of ownerSpecifiedRoutes) checks.push({ kind: "route_present", route });
+      } else {
+        checks.push({ kind: "new_route_count", minimum: 1 });
+      }
+      checks.push({ kind: "new_routes_navigable" });
+    }
+    if (result.preflight.operation === "move_form") checks.push({ kind: "form_binding_moved" });
+    await this.repository.saveEditObjective(siteEditObjectiveV1Schema.parse({
+      schemaVersion: "site-edit-objective-v1",
+      id: id("objective"),
+      runId: run.id,
+      sessionId: input.session.id,
+      siteId: site.id,
+      requestId,
+      instruction: input.instruction,
+      taskKind,
+      operation: result.preflight.operation!,
+      requestedOutcome: result.preflight.requestedOutcome,
+      selection: input.selection,
+      baselineRoutes,
+      baselineCapabilities,
+      baselineCapabilityBindings,
+      ownerSpecifiedRoutes,
+      checks,
+      producerVersion: "edit-objective-preflight-v1",
+      modelId: result.modelId,
+      createdAt: new Date().toISOString()
+    }));
+    return { run, objective: await this.repository.getEditObjective(run.id) };
   }
 
   async executeRun(runId: string, selection?: SiteElementSelectionV1) {
@@ -262,38 +377,46 @@ export class AgenticSiteWorkflowV1 {
     }
     const claimed = await this.repository.claimAgentRun(runId);
     if (!claimed) return this.requireRun(runId);
-    let run: SiteAgentRunV1 = claimed;
+    let run: SiteAgentRunV2 = claimed;
+    const deadlineAt = Date.parse(run.startedAt) + (run.kind === "initial_build" ? initialGenerationDeadlineMs : siteEditDeadlineMs);
+    const remainingMs = deadlineAt - Date.now();
     try {
+      if (remainingMs <= 0) throw new Error("workflow_deadline_exhausted");
+      const workflowSignal = AbortSignal.timeout(remainingMs);
       const session = await this.requireSession(run.sessionId);
       const buildInput = await this.requireBuildInput(run.publicBuildInputId);
       const site = await this.repository.getSite(run.siteId);
       if (!site) throw new Error("Site not found.");
       if ((site.currentWorkspaceRevisionId ?? undefined) !== (run.exactParentRevisionId ?? undefined)) throw new Error("stale_parent_revision");
-      const sandboxState = await this.ensureSandbox(session, buildInput);
       if (run.kind === "rebase") {
-        return await this.executeDeterministicRebase({ run, session: sandboxState.session, buildInput, sandboxRevision: sandboxState.revision });
+        const sandboxState = await this.ensureSandbox(session, buildInput);
+        return await this.executeDeterministicRebase({ run, session: sandboxState.session, buildInput, sandboxRevision: sandboxState.revision, signal: workflowSignal });
       }
       const currentFiles = run.kind === "initial_build"
         ? undefined
-        : (await this.sandbox.getSource(sandboxState.session.sandboxId!)).files.map((file) => workspaceSourceFileSchema.parse(file));
+        : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId);
       const expectedRoutes = run.kind === "initial_build" ? undefined : await this.currentWorkspaceRoutes(run.siteId, site.currentWorkspaceRevisionId);
+      const objective = await this.repository.getEditObjective(run.id);
       const requestMessages = (await this.repository.listAgentMessages(session.id)).filter((message) => message.runId === run.id && (message.role === "owner" || message.role === "operator"));
       const ownerMessage = requestMessages.map((message) => message.content).join("\n\n")
         || "Apply the requested site change.";
       let repairUsed = false;
+      let subjectiveRepairFailure: string | undefined;
       let outcome;
       const firstStartedAt = new Date().toISOString();
       try {
         outcome = await this.runAttempt({
           run,
-          session: sandboxState.session,
+          session,
           buildInput,
-          sandboxRevision: sandboxState.revision,
+          sandboxRevision: "deferred",
           currentFiles,
           instruction: ownerMessage,
           selection: selection ?? requestMessages.find((message) => message.selection)?.selection,
           kind: run.kind,
-          expectedRoutes
+          objective,
+          expectedRoutes,
+          signal: workflowSignal
         });
         run = outcome.run;
       } catch (error) {
@@ -301,9 +424,10 @@ export class AgenticSiteWorkflowV1 {
         if (!isRepairableWorkspaceFailure(error, latest.stage)) throw error;
         run = latest;
         repairUsed = true;
+        const failedSession = await this.requireSession(run.sessionId);
         const failedAttempt = await this.captureFailedAttempt({
           runId: run.id,
-          session: sandboxState.session,
+          session: failedSession,
           kind: run.kind,
           startedAt: firstStartedAt,
           error
@@ -313,23 +437,26 @@ export class AgenticSiteWorkflowV1 {
         try {
           outcome = await this.runAttempt({
             run,
-            session: sandboxState.session,
+            session: failedSession,
             buildInput,
             sandboxRevision: failedAttempt.sandboxRevision,
             currentFiles: failedAttempt.files,
             instruction: "Repair the workspace validation or build failure without changing supported facts, route intent, or unrelated design decisions.",
             objectiveFindings: [failedAttempt.diagnostic],
             kind: "qa_repair",
-            expectedRoutes
+            objective,
+            expectedRoutes,
+            signal: workflowSignal
           });
           run = outcome.run;
         } catch (repairError) {
           const latest = await this.requireRun(run.id);
           run = latest;
           if (isRepairableWorkspaceFailure(repairError, latest.stage)) {
+            const repairSession = await this.requireSession(run.sessionId);
             await this.captureFailedAttempt({
               runId: run.id,
-              session: sandboxState.session,
+              session: repairSession,
               kind: "qa_repair",
               startedAt: repairStartedAt,
               error: repairError
@@ -349,26 +476,50 @@ export class AgenticSiteWorkflowV1 {
           instruction: "Repair the objective gate failures without changing supported facts, route intent, or unrelated design decisions.",
           objectiveFindings: outcome.artifact.qa.findings.filter((finding) => finding.severity === "error").map((finding) => `${finding.route ?? "/"}: ${finding.message}`),
           kind: "qa_repair",
-          expectedRoutes: outcome.artifact.routes.map((route) => route.path)
+          objective,
+          expectedRoutes: outcome.artifact.routes.map((route) => route.path),
+          signal: workflowSignal
         });
         run = outcome.run;
       } else if (!repairUsed && outcome.criticAvailable && outcome.subjectiveReview.verdict === "revise") {
         repairUsed = true;
-        outcome = await this.runAttempt({
-          run,
-          session: outcome.session,
-          buildInput,
-          sandboxRevision: outcome.sandboxRevision,
-          currentFiles: outcome.files,
-          instruction: "Resolve the read-only visual critic's concrete findings without changing verified facts, supported capabilities, or unrelated design decisions.",
-          objectiveFindings: outcome.subjectiveReview.findings.map((finding) => `${finding.route}: ${finding.message}`),
-          kind: "qa_repair",
-          expectedRoutes: outcome.artifact.routes.map((route) => route.path)
-        });
-        run = outcome.run;
+        const passingOutcome = outcome;
+        const repairStartedAt = new Date().toISOString();
+        try {
+          outcome = await this.runAttempt({
+            run,
+            session: passingOutcome.session,
+            buildInput,
+            sandboxRevision: passingOutcome.sandboxRevision,
+            currentFiles: passingOutcome.files,
+            instruction: "Resolve the read-only visual critic's concrete findings without changing verified facts, supported capabilities, or unrelated design decisions.",
+            objectiveFindings: passingOutcome.subjectiveReview.findings.map((finding) => `${finding.route}: ${finding.message}`),
+            kind: "qa_repair",
+            objective,
+            expectedRoutes: passingOutcome.artifact.routes.map((route) => route.path),
+            signal: workflowSignal
+          });
+          run = outcome.run;
+        } catch (repairError) {
+          subjectiveRepairFailure = failureMessage(repairError);
+          const latest = await this.requireRun(run.id);
+          const failedAttempt = await this.captureFailedAttempt({
+            runId: run.id,
+            session: passingOutcome.session,
+            kind: "qa_repair",
+            startedAt: repairStartedAt,
+            error: repairError
+          }).catch(() => undefined);
+          run = failedAttempt?.run ?? latest;
+          outcome = await this.restorePassingOutcome({
+            outcome: { ...passingOutcome, run },
+            currentSandboxRevision: failedAttempt?.sandboxRevision
+          });
+        }
       }
       if (outcome.artifact.qa.hardGate === "failed") {
         await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
           id: id("operator"), siteId: run.siteId, runId: run.id,
           reason: "objective_failure", severity: "high", status: "open",
           findings: outcome.artifact.qa.findings,
@@ -379,15 +530,17 @@ export class AgenticSiteWorkflowV1 {
       const version = await this.createCandidateVersion(outcome.artifact, outcome.revision.id, buildInput, run);
       if (outcome.subjectiveReview.verdict === "revise") {
         await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
           id: id("operator"), siteId: run.siteId, runId: run.id, versionId: version.id,
           reason: "subjective_finding", severity: outcome.criticAvailable ? "normal" : "high", status: "open",
-          findings: [{ message: outcome.subjectiveReview.summary, repairUsed }, ...outcome.subjectiveReview.findings],
+          findings: [{ message: outcome.subjectiveReview.summary, repairUsed, subjectiveRepairFailure }, ...outcome.subjectiveReview.findings],
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
         }));
       }
       run = await this.updateRun(run, {
         status: "succeeded",
         stage: "candidate_ready",
+        fastPreviewPath: undefined,
         outputRevisionId: outcome.revision.id,
         candidateVersionId: version.id,
         completedAt: new Date().toISOString()
@@ -396,9 +549,15 @@ export class AgenticSiteWorkflowV1 {
         id: id("message"), sessionId: run.sessionId, runId: run.id, role: "agent",
         content: outcome.ownerMessage, createdAt: new Date().toISOString()
       });
+      await this.destroySessionSandbox(outcome.session, {
+        reason: "terminal_run_success",
+        currentWorkspaceRevisionId: outcome.revision.id
+      });
       return run;
     } catch (error) {
+      if (Date.now() >= deadlineAt) error = new Error("workflow_deadline_exhausted");
       const latest = await this.repository.getAgentRun(run.id) ?? run;
+      await this.repository.failOpenTraceSpans(run.id, new Date().toISOString(), failureCode(error)).catch(() => undefined);
       await this.checkpointAfterRunFailure(latest).catch(() => undefined);
       await this.queueTerminalRunFailure(latest, error).catch(() => undefined);
       const failed = await this.updateRun(latest, {
@@ -422,6 +581,7 @@ export class AgenticSiteWorkflowV1 {
     } catch (error) {
       const now = new Date().toISOString();
       await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+        schemaVersion: "operator-queue-item-v2",
         id: id("operator"), siteId: run.siteId, versionId: run.candidateVersionId, runId: run.id,
         reason: "stale_candidate", severity: "urgent", status: "open",
         findings: [{ message: error instanceof Error ? error.message : String(error) }],
@@ -441,8 +601,7 @@ export class AgenticSiteWorkflowV1 {
     const session = await this.requireSession(input.sessionId);
     if (session.ownerId !== input.ownerId) throw new Error("Session owner mismatch.");
     const buildInput = await this.requireBuildInput(session.publicBuildInputId);
-    const sandboxState = await this.ensureSandbox(session, buildInput);
-    const source = session.currentWorkspaceRevisionId ? await this.sandbox.getSource(sandboxState.session.sandboxId!) : undefined;
+    const source = session.currentWorkspaceRevisionId ? await this.loadWorkspaceSource(session.currentWorkspaceRevisionId) : undefined;
     await this.repository.appendAgentMessage({
       id: id("message"), sessionId: session.id, role: "owner", content: input.message,
       selection: input.selection, createdAt: new Date().toISOString()
@@ -450,7 +609,7 @@ export class AgenticSiteWorkflowV1 {
     const result = await this.manager.discuss({
       buildInput,
       message: input.message,
-      currentFiles: source?.files.map((file) => workspaceSourceFileSchema.parse(file)),
+      currentFiles: source,
       selection: input.selection,
       signal: input.signal
     });
@@ -464,13 +623,74 @@ export class AgenticSiteWorkflowV1 {
   async processRecoverableRuns(input: { limit?: number; staleAfterMs?: number } = {}) {
     const limit = Math.max(1, Math.min(input.limit ?? 4, 20));
     const reaped = await this.reapExpiredSessions({ limit });
-    const staleBefore = new Date(Date.now() - (input.staleAfterMs ?? 15 * 60_000)).toISOString();
+    const staleAfterMs = input.staleAfterMs ?? siteAgentRecoveryStaleAfterMs;
+    const staleBefore = new Date(Date.now() - staleAfterMs).toISOString();
     const stale = await this.repository.listStaleRunningAgentRuns(staleBefore, limit);
-    for (const run of stale) await this.recoverInterruptedRun(run);
+    const recovered: string[] = [];
+    for (const run of stale) {
+      const result = await this.recoverRunIfStale(run.id, staleAfterMs);
+      if (result.status !== "running") recovered.push(run.id);
+    }
     const queued = await this.repository.listQueuedAgentRuns(limit);
-    const processed: SiteAgentRunV1[] = [];
+    const processed: SiteAgentRunV2[] = [];
     for (const run of queued) processed.push(await this.executeRunAndFinalize(run.id));
-    return { reaped, recovered: stale.map((run) => run.id), processed };
+    const maintenanceNow = new Date();
+    const maintenanceToken = sha256(randomBytes(32));
+    const ownsTraceCleanup = await this.repository.acquireMaintenanceLease(
+      "trace_payload_cleanup",
+      maintenanceToken,
+      maintenanceNow.toISOString(),
+      new Date(maintenanceNow.getTime() + 60 * 60_000).toISOString()
+    );
+    let expiredTracePayloads: string[] = [];
+    if (ownsTraceCleanup) {
+      try {
+        expiredTracePayloads = await this.sweepExpiredTracePayloads(limit * 25);
+      } finally {
+        await this.repository.releaseMaintenanceLease("trace_payload_cleanup", maintenanceToken);
+      }
+    }
+    return { reaped, recovered, processed, expiredTracePayloads };
+  }
+
+  async sweepExpiredTracePayloads(limit = 100) {
+    const now = new Date();
+    const expired = await this.repository.listExpiredTracePayloads(now.toISOString(), Math.max(1, Math.min(limit, 500)));
+    const cleared: string[] = [];
+    for (const span of expired) {
+      if (!span.payloadRef) continue;
+      if (!(await this.blobStore.exists(span.payloadRef))) {
+        cleared.push(span.id);
+        continue;
+      }
+      if (!span.payloadExpiresAt || Date.parse(span.payloadExpiresAt) > now.getTime() - 48 * 60 * 60_000 || !span.runId) continue;
+      const run = await this.repository.getAgentRun(span.runId);
+      if (!run) continue;
+      const existing = (await this.repository.listOperatorQueue()).some((item) =>
+        item.reason === "maintenance_failure"
+        && item.runId === run.id
+        && item.status !== "resolved"
+        && item.status !== "dismissed"
+        && item.findings.some((finding) => finding.payloadRef === span.payloadRef)
+      );
+      if (!existing) {
+        const timestamp = now.toISOString();
+        await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
+          id: id("operator"),
+          siteId: run.siteId,
+          runId: run.id,
+          reason: "maintenance_failure",
+          severity: "normal",
+          status: "open",
+          findings: [{ kind: "trace_payload_lifecycle_delay", spanId: span.id, payloadRef: span.payloadRef, payloadExpiresAt: span.payloadExpiresAt }],
+          createdAt: timestamp,
+          updatedAt: timestamp
+        }));
+      }
+    }
+    await this.repository.clearTracePayloads(cleared);
+    return cleared;
   }
 
   async reapExpiredSessions(input: { limit?: number; now?: string } = {}) {
@@ -480,22 +700,19 @@ export class AgenticSiteWorkflowV1 {
     for (const session of sessions) {
       const activeRun = (await this.repository.listAgentRuns(session.id)).some((run) => run.status === "queued" || run.status === "running");
       if (activeRun) continue;
-      if (session.sandboxId) await this.sandbox.destroy(session.sandboxId).catch(() => undefined);
       const site = await this.repository.getSite(session.siteId);
-      await this.repository.saveAgentSession(siteAgentSessionV1Schema.parse({
-        ...session,
-        status: "checkpointed",
-        sandboxId: undefined,
+      const destroyed = await this.destroySessionSandbox(session, {
+        reason: "expired_session_reaper",
         currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId,
-        leaseExpiresAt: now,
-        updatedAt: now
-      }));
+        now
+      });
+      if (!destroyed.destroyed) continue;
       reaped.push(session.id);
     }
     return reaped;
   }
 
-  async recoverRunIfStale(runId: string, staleAfterMs = 15 * 60_000) {
+  async recoverRunIfStale(runId: string, staleAfterMs = siteAgentRecoveryStaleAfterMs) {
     const run = await this.requireRun(runId);
     if (run.status !== "running") return run;
     const heartbeat = Date.parse(run.heartbeatAt ?? run.startedAt);
@@ -503,18 +720,52 @@ export class AgenticSiteWorkflowV1 {
     return this.recoverInterruptedRun(run);
   }
 
-  async promoteVersion(versionId: string, actorId: string) {
-    const version = await this.repository.getSiteVersion(versionId);
-    if (!version) throw new Error("Site version not found.");
-    const site = await this.repository.getSite(version.siteId);
-    if (site?.status === "experimental") throw new Error("experimental_site_not_publishable");
-    const [artifact, redirects] = await Promise.all([
-      this.repository.getBuildArtifact(version.artifactId),
-      platformOperationsRepository.listRedirects(version.siteId)
+  async retryFailedRun(input: { runId: string; actorId: string }) {
+    const failed = await this.requireRun(input.runId);
+    if (failed.status !== "failed") throw new Error("Only failed runs can be retried.");
+    const [session, site, runs, messages] = await Promise.all([
+      this.requireSession(failed.sessionId),
+      this.repository.getSite(failed.siteId),
+      this.repository.listAgentRuns(failed.sessionId),
+      this.repository.listAgentMessages(failed.sessionId)
     ]);
-    if (!artifact) throw new Error("Site version artifact not found.");
-    const stranded = redirectsStrandedByRoutes(redirects, artifact.routes.map((route) => route.path));
-    if (stranded.length) throw new Error(`active_redirect_destination_missing:${stranded.map((redirect) => redirect.sourcePath).join(",")}`);
+    if (!site || site.currentPublicBuildInputId !== failed.publicBuildInputId || session.publicBuildInputId !== failed.publicBuildInputId) {
+      throw new Error("stale_failed_run");
+    }
+    if (runs.some((run) => run.id !== failed.id && (run.status === "queued" || run.status === "running"))) {
+      throw new Error("session_has_active_run");
+    }
+    const request = messages.filter((message) => message.runId === failed.id && (message.role === "owner" || message.role === "operator")).at(-1);
+    if (!request) throw new Error("Failed run request is unavailable.");
+    const retried = await this.enqueueRun({
+      session,
+      kind: failed.kind,
+      instruction: request.content,
+      requestedBy: input.actorId,
+      selection: request.selection,
+      origin: failed.origin,
+      publishAfterSuccess: false
+    });
+    const objective = await this.repository.getEditObjective(failed.id);
+    if (objective) {
+      await this.repository.saveEditObjective(siteEditObjectiveV1Schema.parse({
+        ...objective,
+        id: id("objective"),
+        runId: retried.id,
+        requestId: id("retry_request"),
+        createdAt: new Date().toISOString()
+      }));
+    }
+    return retried;
+  }
+
+  async promoteVersion(versionId: string, actorId: string) {
+    const readiness = await deriveSitePublicationReadiness({
+      versionId,
+      repository: this.repository,
+      operationsRepository: this.operationsRepository
+    });
+    if (readiness.status !== "ready") throw new Error(`publication_blocked:${readiness.blockers.map((blocker) => blocker.code).join(",")}`);
     await this.repository.promoteSiteVersion(versionId, actorId);
     return this.repository.getSiteVersion(versionId);
   }
@@ -535,7 +786,8 @@ export class AgenticSiteWorkflowV1 {
     session = siteAgentSessionV1Schema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
     await this.repository.saveAgentSession(session);
     const sandbox = await this.ensureSandbox(session, buildInput);
-    await this.sandbox.restore(sandbox.session.sandboxId!, backupId, sandbox.revision);
+    const sidecar = await this.loadWorkspaceSidecar(targetRevision);
+    await this.sandbox.restore(sandbox.session.sandboxId!, backupId, sandbox.revision, sidecar.archiveHash);
     return this.enqueueRun({
       session: sandbox.session,
       kind: "rebase",
@@ -545,26 +797,46 @@ export class AgenticSiteWorkflowV1 {
   }
 
   private async runAttempt(input: {
-    run: SiteAgentRunV1;
+    run: SiteAgentRunV2;
     session: SiteAgentSessionV1;
-    buildInput: SitePublicBuildInputV1;
+    buildInput: SitePublicBuildInputV3;
     sandboxRevision: string;
     currentFiles?: WorkspaceSourceFile[];
     instruction: string;
     selection?: SiteElementSelectionV1;
     objectiveFindings?: string[];
-    kind: ManagerRunRequestV2["kind"];
+    objective?: SiteEditObjectiveV1;
+    kind: ManagerRunRequestV3["kind"];
     expectedRoutes?: string[];
+    signal?: AbortSignal;
   }) {
     let run = await this.updateRun(input.run, { stage: "authoring" });
+    const recorder = new SiteAgentTraceRecorderV1(this.repository, this.blobStore, run.id, {
+      runId: run.id,
+      sessionId: run.sessionId,
+      attemptIndex: run.attempts.length + 1
+    });
+    const attemptSpan = await recorder.open({
+      kind: "attempt",
+      name: input.kind,
+      summary: { kind: input.kind, publicBuildInputId: input.buildInput.id, repair: input.kind === "qa_repair" }
+    });
     const modelStarted = new Date().toISOString();
     const fastPreviewPath = `/api/site-agent/sessions/${input.session.id}/preview`;
     const baseUsage = { ...run.usage };
+    let activeSession = input.session;
+    let activeSandboxRevision = input.sandboxRevision;
+    const ensureBuildSandbox = async () => {
+      if (activeSession.sandboxId && activeSandboxRevision !== "deferred") return;
+      const state = await this.ensureSandbox(activeSession, input.buildInput);
+      activeSession = state.session;
+      activeSandboxRevision = state.revision;
+    };
     type Checkpoint = Awaited<ReturnType<AgenticSiteWorkflowV1["verifySandboxArtifact"]>> & {
       revision: ReturnType<typeof siteWorkspaceRevisionV1Schema.parse>;
     };
     const runtimeBudget = managerRuntimeBudget(input.kind);
-    const runtime = new WorkspaceManagerRuntimeV2<Checkpoint>({
+    const runtime = new WorkspaceManagerRuntimeV3<Checkpoint>({
       kind: input.kind,
       publicBuildInputId: input.buildInput.id,
       toolchainVersion: siteToolchainVersion,
@@ -575,7 +847,10 @@ export class AgenticSiteWorkflowV1 {
       maxInspections: runtimeBudget.inspections,
       applyBuild: async (files, expectedRevision) => {
         run = await this.updateRun(run, { stage: "building" });
-        const applied = await this.sandbox.apply(input.session.sandboxId!, expectedRevision, files);
+        await ensureBuildSandbox();
+        const revision = expectedRevision === "deferred" ? activeSandboxRevision : expectedRevision;
+        const applied = await this.sandbox.apply(activeSession.sandboxId!, revision, files);
+        activeSandboxRevision = applied.revision;
         run = await this.updateRun(run, { stage: "fast_preview", fastPreviewPath });
         return { ...applied, previewPath: fastPreviewPath };
       },
@@ -586,10 +861,10 @@ export class AgenticSiteWorkflowV1 {
         await this.blobStore.putImmutable({ key, bytes, contentType: "text/plain; charset=utf-8", contentHash });
         return { key, contentHash, bytes: bytes.length };
       },
-      inspect: async (files, sandboxRevision): Promise<RuntimeInspectionV2<Checkpoint>> => {
+      inspect: async (files, sandboxRevision): Promise<RuntimeInspectionV3<Checkpoint>> => {
         run = await this.updateRun(run, { stage: "verifying" });
         const [backup, site] = await Promise.all([
-          this.sandbox.backup(input.session.sandboxId!),
+          this.sandbox.backup(activeSession.sandboxId!),
           this.repository.getSite(run.siteId)
         ]);
         if (!site) throw new Error("Site not found.");
@@ -606,15 +881,18 @@ export class AgenticSiteWorkflowV1 {
           createdAt: new Date().toISOString(),
           createdBy: { kind: "agent", id: run.id }
         });
+        await this.persistWorkspaceSourceSidecar(revision, files, backup.backup);
         const finalized = await this.verifySandboxArtifact({
           run,
-          session: input.session,
+          session: activeSession,
           buildInput: input.buildInput,
           workspaceRevisionId: revision.id,
           expectedRoutes: input.expectedRoutes,
+          objective: input.objective,
           taskInstruction: input.instruction,
           taskKind: input.kind,
-          runSubjectiveCritic: false
+          runSubjectiveCritic: false,
+          signal: input.signal
         });
         const errors = finalized.artifact.qa.findings.filter((finding) => finding.severity === "error");
         const inspectionHash = sha256(stableJson({
@@ -628,6 +906,8 @@ export class AgenticSiteWorkflowV1 {
         return {
           passed: finalized.artifact.qa.hardGate === "passed",
           inspectionHash,
+          findingFingerprints: errors.map(findingFingerprint),
+          objectiveChecks: finalized.objectiveChecks,
           modelSummary: {
             ok: finalized.artifact.qa.hardGate === "passed",
             workspaceHash: revision.sourceHash,
@@ -637,7 +917,7 @@ export class AgenticSiteWorkflowV1 {
             sandboxImageDigest: configuredSandboxImageDigest(),
             inspectionHash,
             routes: finalized.artifact.routes,
-            findings: errors.slice(0, 100)
+            findings: errors.slice(0, 100).map((finding) => ({ ...finding, fingerprint: findingFingerprint(finding) }))
           },
           traceSummary: {
             ok: finalized.artifact.qa.hardGate === "passed",
@@ -647,6 +927,7 @@ export class AgenticSiteWorkflowV1 {
             artifactHash: finalized.artifact.artifactHash,
             findingCount: finalized.artifact.qa.findings.length,
             errorCount: errors.length,
+            routeSimilarity: finalized.qualityMetrics.routeSimilarity,
             screenshotKeys: finalized.artifact.qa.screenshotKeys
           },
           images: finalized.contactSheet ? [{ type: "input_image", image_url: `data:image/png;base64,${finalized.contactSheet.toString("base64")}`, detail: "high" }] : undefined,
@@ -660,8 +941,15 @@ export class AgenticSiteWorkflowV1 {
       kind: input.kind,
       selection: input.selection,
       objectiveFindings: input.objectiveFindings,
+      objective: input.objective,
+      signal: input.signal,
       runtime,
-      onProgress: async ({ trace, usage, modelId }) => {
+      traceParentSpanId: attemptSpan.id,
+      onTrace: async (events) => { await recorder.recordManagerEvents(events); },
+      onPlanAccepted: async (sitePlan) => {
+        run = await this.updateRun(run, { sitePlan });
+      },
+      onProgress: async ({ usage, modelId }) => {
         run = await this.updateRun(run, {
           modelId,
           usage: {
@@ -670,22 +958,13 @@ export class AgenticSiteWorkflowV1 {
             estimatedCostUsd: baseUsage.estimatedCostUsd + usage.estimatedCostUsd,
             costEstimateStatus: baseUsage.costEstimateStatus === "configured" && usage.costEstimateStatus === "configured" ? "configured" : usage.costEstimateStatus,
             durationMs: baseUsage.durationMs + usage.durationMs
-          },
-          toolCalls: [...run.toolCalls, {
-            id: id("tool"),
-            callId: trace.callId,
-            name: `manager.${trace.name}`,
-            inputHash: trace.inputHash,
-            outputHash: trace.outputHash,
-            startedAt: trace.startedAt,
-            completedAt: trace.completedAt,
-            status: trace.status
-          }]
+          }
         });
       }
     });
     const checkpoint = runtime.finalCheckpoint();
     const { revision } = checkpoint;
+    const criticSpan = await recorder.open({ kind: "critic", name: "visual_critic", parentSpanId: attemptSpan.id, summary: { routeCount: checkpoint.artifact.routes.length } });
     const critic = await this.manager.critiqueCandidate({
       buildInput: input.buildInput,
       visualThesis: managerResult.completion.visualThesis,
@@ -695,8 +974,32 @@ export class AgenticSiteWorkflowV1 {
       routes: checkpoint.artifact.routes.map(({ path, title, description }) => ({ path, title, description })),
       contactSheet: checkpoint.contactSheet,
       homepageDesktop: checkpoint.browserCaptures.find((capture) => capture.route === "/" && capture.viewport === "desktop")?.bytes,
-      homepageMobile: checkpoint.browserCaptures.find((capture) => capture.route === "/" && capture.viewport === "mobile")?.bytes
-    }).then((value) => ({ ...value, available: true as const }), (error) => ({
+      homepageMobile: checkpoint.browserCaptures.find((capture) => capture.route === "/" && capture.viewport === "mobile")?.bytes,
+      signal: input.signal
+    }).then(async (value) => {
+      await recorder.close(criticSpan, {
+        status: "succeeded",
+        modelId: value.modelId,
+        inputTokens: value.usage.inputTokens,
+        cachedInputTokens: value.usage.cachedInputTokens,
+        outputTokens: value.usage.outputTokens,
+        summary: { verdict: value.critique.verdict, findingCount: value.critique.findings.length },
+        payload: {
+          request: {
+            taskInstruction: input.instruction,
+            taskKind: input.kind,
+            visualThesis: managerResult.completion.visualThesis,
+            contentArchitecture: managerResult.completion.contentArchitecture,
+            routes: checkpoint.artifact.routes.map(({ path, title, description }) => ({ path, title, description })),
+            contactSheetIncluded: Boolean(checkpoint.contactSheet)
+          },
+          critique: value.critique
+        }
+      });
+      return { ...value, available: true as const };
+    }, async (error) => {
+      await recorder.close(criticSpan, { status: "failed", errorCode: failureCode(error), summary: { error: failureMessage(error) } });
+      return {
       critique: {
         schemaVersion: "manager-candidate-critique-v1" as const,
         verdict: "revise" as const,
@@ -705,9 +1008,9 @@ export class AgenticSiteWorkflowV1 {
       },
       modelId: "unavailable",
       promptVersion: "manager-visual-critic-v1",
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
+      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
       available: false as const
-    }));
+    }; });
     const subjectiveReview = {
       verdict: critic.critique.verdict,
       summary: critic.critique.summary,
@@ -727,6 +1030,7 @@ export class AgenticSiteWorkflowV1 {
       },
       visualThesis: managerResult.completion.visualThesis,
       contentArchitecture: managerResult.completion.contentArchitecture,
+      sitePlan: managerResult.sitePlan,
       subjectiveReview,
       attempts: [...run.attempts, {
         number: run.attempts.length + 1,
@@ -746,12 +1050,24 @@ export class AgenticSiteWorkflowV1 {
         completedAt: new Date().toISOString()
       }]
     });
-    let session = input.session;
+    await recorder.close(attemptSpan, {
+      status: "succeeded",
+      inputTokens: managerResult.usage.inputTokens + critic.usage.inputTokens,
+      cachedInputTokens: managerResult.usage.cachedInputTokens + critic.usage.cachedInputTokens,
+      outputTokens: managerResult.usage.outputTokens + critic.usage.outputTokens,
+      summary: {
+        hardGate: finalized.artifact.qa.hardGate,
+        subjectiveVerdict: subjectiveReview.verdict,
+        workspaceRevisionId: revision.id,
+        artifactId: finalized.artifact.id
+      }
+    });
+    let session = activeSession;
     if (finalized.artifact.qa.hardGate === "passed") {
       await persistFinalArtifact({ artifact: finalized.artifact, files: finalized.files, store: this.blobStore });
       await this.repository.commitVerifiedBuild({ revision, artifact: finalized.artifact });
       session = siteAgentSessionV1Schema.parse({
-        ...input.session,
+        ...activeSession,
         status: "active",
         currentWorkspaceRevisionId: revision.id,
         leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
@@ -775,7 +1091,7 @@ export class AgenticSiteWorkflowV1 {
   private async captureFailedAttempt(input: {
     runId: string;
     session: SiteAgentSessionV1;
-    kind: ManagerRunRequestV2["kind"];
+    kind: ManagerRunRequestV3["kind"];
     startedAt: string;
     error: unknown;
   }) {
@@ -803,24 +1119,59 @@ export class AgenticSiteWorkflowV1 {
     return { run, files, sandboxRevision: source.revision, diagnostic };
   }
 
-  private async executeDeterministicRebase(input: {
-    run: SiteAgentRunV1;
+  private async restorePassingOutcome<T extends {
     session: SiteAgentSessionV1;
-    buildInput: SitePublicBuildInputV1;
     sandboxRevision: string;
+    files: WorkspaceSourceFile[];
+    revision: ReturnType<typeof siteWorkspaceRevisionV1Schema.parse>;
+  }>(input: { outcome: T; currentSandboxRevision?: string }): Promise<T> {
+    const sandboxId = input.outcome.session.sandboxId;
+    const backupId = input.outcome.revision.sourceArchiveKey.match(/^workspace-backups\/([a-f0-9]{64})\.tar\.gz$/)?.[1];
+    if (sandboxId && backupId && input.currentSandboxRevision) {
+      try {
+        const sidecar = await this.loadWorkspaceSidecar(input.outcome.revision);
+        const restored = await this.sandbox.restore(sandboxId, backupId, input.currentSandboxRevision, sidecar.archiveHash);
+        const source = await this.sandbox.getSource(sandboxId);
+        return { ...input.outcome, sandboxRevision: restored.revision, files: source.files.map((file) => workspaceSourceFileSchema.parse(file)) };
+      } catch {
+        const result = await this.destroySessionSandbox(input.outcome.session, {
+          reason: "passing_outcome_restore_failed",
+          currentWorkspaceRevisionId: input.outcome.revision.id
+        });
+        return { ...input.outcome, session: result.session };
+      }
+    }
+    const result = await this.destroySessionSandbox(input.outcome.session, {
+      reason: "passing_outcome_checkpoint",
+      currentWorkspaceRevisionId: input.outcome.revision.id
+    });
+    return { ...input.outcome, session: result.session };
+  }
+
+  private async executeDeterministicRebase(input: {
+    run: SiteAgentRunV2;
+    session: SiteAgentSessionV1;
+    buildInput: SitePublicBuildInputV3;
+    sandboxRevision: string;
+    signal: AbortSignal;
   }) {
     let run = await this.updateRun(input.run, { stage: "building" });
+    const recorder = new SiteAgentTraceRecorderV1(this.repository, this.blobStore, run.id, { runId: run.id, sessionId: run.sessionId, attemptIndex: run.attempts.length + 1 });
+    const attemptSpan = await recorder.open({ kind: "attempt", name: "rebase", summary: { publicBuildInputId: input.buildInput.id } });
+    const assertWithinDeadline = () => {
+      if (input.signal.aborted) throw new Error("workflow_deadline_exhausted");
+    };
     try {
-      const startedAt = new Date().toISOString();
+      assertWithinDeadline();
+      const toolSpan = await recorder.open({ kind: "tool_call", name: "rebase_public_input", parentSpanId: attemptSpan.id, summary: { inputHash: input.buildInput.inputHash } });
       const rebased = await this.sandbox.rebase(input.session.sandboxId!, input.sandboxRevision, input.buildInput);
-      run = await this.updateRun(run, {
-        stage: "fast_preview",
-        fastPreviewPath: `/api/site-agent/sessions/${input.session.id}/preview`,
-        toolCalls: [...run.toolCalls, toolCall("sandbox.rebase_public_input", { expectedRevision: input.sandboxRevision, inputHash: input.buildInput.inputHash }, rebased, startedAt)]
-      });
+      assertWithinDeadline();
+      await recorder.close(toolSpan, { status: "succeeded", summary: { revision: rebased.revision }, payload: { input: { expectedRevision: input.sandboxRevision, inputHash: input.buildInput.inputHash }, output: rebased } });
+      run = await this.updateRun(run, { stage: "fast_preview", fastPreviewPath: `/api/site-agent/sessions/${input.session.id}/preview` });
       const [source, backup, site] = await Promise.all([
         this.sandbox.getSource(input.session.sandboxId!), this.sandbox.backup(input.session.sandboxId!), this.repository.getSite(run.siteId)
       ]);
+      assertWithinDeadline();
       if (!site) throw new Error("Site not found.");
       const parent = site.currentWorkspaceRevisionId ? await this.repository.getWorkspaceRevision(site.currentWorkspaceRevisionId) : undefined;
       const files = source.files.map((file) => workspaceSourceFileSchema.parse(file));
@@ -831,13 +1182,18 @@ export class AgenticSiteWorkflowV1 {
         files: files.map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content) })),
         createdAt: new Date().toISOString(), createdBy: { kind: "system", id: run.id }
       });
+      await this.persistWorkspaceSourceSidecar(revision, files, backup.backup);
       run = await this.updateRun(run, { stage: "verifying" });
+      const inspectionSpan = await recorder.open({ kind: "inspection", name: "deterministic_rebase_verification", parentSpanId: attemptSpan.id, summary: { workspaceRevisionId: revision.id } });
       const finalized = await this.verifySandboxArtifact({
-        run, session: input.session, buildInput: input.buildInput, workspaceRevisionId: revision.id, runSubjectiveCritic: false
+        run, session: input.session, buildInput: input.buildInput, workspaceRevisionId: revision.id, runSubjectiveCritic: false, signal: input.signal
       });
+      assertWithinDeadline();
+      await recorder.close(inspectionSpan, { status: finalized.artifact.qa.hardGate === "passed" ? "succeeded" : "failed", summary: { hardGate: finalized.artifact.qa.hardGate, findingCount: finalized.artifact.qa.findings.length }, payload: { findings: finalized.artifact.qa.findings }, errorCode: finalized.artifact.qa.hardGate === "failed" ? "objective_gate_failed" : undefined });
       run = await this.updateRun(run, { subjectiveReview: finalized.subjectiveReview });
       if (finalized.artifact.qa.hardGate === "failed") {
         await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
           id: id("operator"), siteId: run.siteId, runId: run.id, reason: "objective_failure", severity: "high", status: "open",
           findings: finalized.artifact.qa.findings, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
         }));
@@ -845,6 +1201,7 @@ export class AgenticSiteWorkflowV1 {
       }
       await persistFinalArtifact({ artifact: finalized.artifact, files: finalized.files, store: this.blobStore });
       await this.repository.commitVerifiedBuild({ revision, artifact: finalized.artifact });
+      assertWithinDeadline();
       const session = siteAgentSessionV1Schema.parse({
         ...input.session, status: "active", currentWorkspaceRevisionId: revision.id,
         leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(), updatedAt: new Date().toISOString()
@@ -852,33 +1209,40 @@ export class AgenticSiteWorkflowV1 {
       await this.repository.saveAgentSession(session);
       const version = await this.createCandidateVersion(finalized.artifact, revision.id, input.buildInput, run);
       run = await this.updateRun(run, {
-        status: "succeeded", stage: "candidate_ready", outputRevisionId: revision.id,
+        status: "succeeded", stage: "candidate_ready", fastPreviewPath: undefined, outputRevisionId: revision.id,
         candidateVersionId: version.id, completedAt: new Date().toISOString()
       });
+      await recorder.close(attemptSpan, { status: "succeeded", summary: { workspaceRevisionId: revision.id, artifactId: finalized.artifact.id, candidateVersionId: version.id } });
       await this.repository.appendAgentMessage({
         id: id("message"), sessionId: run.sessionId, runId: run.id, role: "agent",
         content: "Recompiled the existing design against the updated verified business data. No model redesign was used.",
         createdAt: new Date().toISOString()
       });
+      await this.destroySessionSandbox(session, { reason: "terminal_rebase_success", currentWorkspaceRevisionId: revision.id });
       return run;
     } catch (error) {
+      const failure = input.signal.aborted ? new Error("workflow_deadline_exhausted") : error;
+      await this.repository.failOpenTraceSpans(run.id, new Date().toISOString(), failureCode(failure)).catch(() => undefined);
       await this.checkpointAfterRunFailure(run).catch(() => undefined);
+      await this.queueTerminalRunFailure(run, failure).catch(() => undefined);
       return this.updateRun(run, {
-        status: "failed", stage: "failed", fastPreviewPath: undefined, failureReason: failureMessage(error),
+        status: "failed", stage: "failed", fastPreviewPath: undefined, failureReason: failureMessage(failure),
         completedAt: new Date().toISOString()
       });
     }
   }
 
   private async verifySandboxArtifact(input: {
-    run: SiteAgentRunV1;
+    run: SiteAgentRunV2;
     session: SiteAgentSessionV1;
-    buildInput: SitePublicBuildInputV1;
+    buildInput: SitePublicBuildInputV3;
     workspaceRevisionId: string;
     runSubjectiveCritic?: boolean;
     expectedRoutes?: string[];
+    objective?: SiteEditObjectiveV1;
     taskInstruction?: string;
-    taskKind?: ManagerRunRequestV2["kind"];
+    taskKind?: ManagerRunRequestV3["kind"];
+    signal?: AbortSignal;
   }) {
     const authored = await this.sandbox.getArtifact(input.session.sandboxId!);
     const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
@@ -887,10 +1251,11 @@ export class AgenticSiteWorkflowV1 {
         prepared.findings.push({ id: "route.regression", severity: "error", area: "route", route, message: `Existing route ${route} was removed by the edit.` });
       }
     }
+    const objectiveChecks = input.objective ? applyEditObjective(prepared, input.objective) : [];
     const runtime = await this.ensureRuntime();
     const artifactId = id("artifact");
     const capturePrefix = `site-captures/${input.run.siteId}/${artifactId}`;
-    const browserGate = await runArtifactBrowserGate({ prepared, buildInput: input.buildInput, blobStore: this.blobStore, capturePrefix });
+    const browserGate = await runArtifactBrowserGate({ prepared, buildInput: input.buildInput, blobStore: this.blobStore, capturePrefix, signal: input.signal });
     const contactSheet = await createArtifactContactSheet(browserGate.captures);
     const contactSheetKey = `${capturePrefix}/contact-sheet.png`;
     for (const capture of browserGate.captures) {
@@ -914,7 +1279,8 @@ export class AgenticSiteWorkflowV1 {
           routes: prepared.routes.map(({ path, title, description }) => ({ path, title, description })),
           contactSheet,
           homepageDesktop: browserGate.captures.find((capture) => capture.route === "/" && capture.viewport === "desktop")?.bytes,
-          homepageMobile: browserGate.captures.find((capture) => capture.route === "/" && capture.viewport === "mobile")?.bytes
+          homepageMobile: browserGate.captures.find((capture) => capture.route === "/" && capture.viewport === "mobile")?.bytes,
+          signal: input.signal
         }).then((result) => ({ ...result, available: true as const }), (error) => ({
           critique: {
             schemaVersion: "manager-candidate-critique-v1" as const,
@@ -924,7 +1290,7 @@ export class AgenticSiteWorkflowV1 {
           },
           modelId: "unavailable",
           promptVersion: "manager-visual-critic-v1",
-          usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
+          usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
           available: false as const
         }))
       : finalized.artifact.qa.hardGate === "passed"
@@ -936,13 +1302,13 @@ export class AgenticSiteWorkflowV1 {
             findings: []
           },
           modelId: "not_run_deterministic_rebase", promptVersion: "deterministic-rebase-v1",
-          usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
+          usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
           available: false as const
         }
         : {
           critique: { schemaVersion: "manager-candidate-critique-v1" as const, verdict: "revise" as const, summary: "Objective QA failed before visual review.", findings: [] },
           modelId: "not_run", promptVersion: "manager-visual-critic-v1",
-          usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
+          usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable" as const, durationMs: 0 },
           available: false as const
         };
     return {
@@ -957,6 +1323,7 @@ export class AgenticSiteWorkflowV1 {
       },
       criticUsage: critic.usage,
       criticAvailable: critic.available,
+      objectiveChecks,
       contactSheet,
       browserCaptures: browserGate.captures
     };
@@ -965,8 +1332,8 @@ export class AgenticSiteWorkflowV1 {
   private async createCandidateVersion(
     artifact: SiteBuildArtifactV1,
     workspaceRevisionId: string,
-    buildInput: SitePublicBuildInputV1,
-    run: SiteAgentRunV1
+    buildInput: SitePublicBuildInputV3,
+    run: SiteAgentRunV2
   ) {
     const versions = await this.repository.listSiteVersions(run.siteId);
     const version = siteVersionV4Schema.parse({
@@ -1024,28 +1391,148 @@ export class AgenticSiteWorkflowV1 {
     return undefined;
   }
 
-  private async ensureSandbox(session: SiteAgentSessionV1, buildInput: SitePublicBuildInputV1) {
+  private async persistWorkspaceSourceSidecar(
+    revision: SiteWorkspaceRevisionV1,
+    files: WorkspaceSourceFile[],
+    backup: { id: string; revision: string; size: number; key: string; contentHash: `sha256:${string}` }
+  ) {
+    const sidecar = workspaceSourceSidecarV1Schema.parse({
+      schemaVersion: "workspace-source-sidecar-v1",
+      backupId: backup.id,
+      archiveKey: backup.key,
+      archiveHash: backup.contentHash,
+      sandboxRevision: backup.revision,
+      sourceHash: revision.sourceHash,
+      files: files.map((file) => ({
+        path: file.path,
+        content: file.content,
+        contentHash: sha256(file.content),
+        bytes: Buffer.byteLength(file.content)
+      })),
+      createdAt: revision.createdAt
+    });
+    if (sidecar.archiveKey !== revision.sourceArchiveKey) throw new Error("Workspace sidecar archive key does not match its revision.");
+    const bytes = serializeWorkspaceSourceSidecar(sidecar);
+    const key = workspaceSourceSidecarKey(revision.sourceArchiveKey);
+    const contentHash = sha256(bytes);
+    await this.blobStore.putImmutable({ key, bytes, contentType: "application/json; charset=utf-8", contentHash });
+    const retained = await this.blobStore.get(key);
+    if (!retained || retained.contentHash !== contentHash) throw new Error(`Workspace source sidecar verification failed at ${key}.`);
+    this.assertWorkspaceSidecarMatchesRevision(workspaceSourceSidecarV1Schema.parse(JSON.parse(retained.bytes.toString("utf8"))), revision);
+  }
+
+  private async loadWorkspaceSource(revisionId: string | undefined): Promise<WorkspaceSourceFile[]> {
+    if (!revisionId) throw new Error("Site does not have a retained workspace revision.");
+    const revision = await this.repository.getWorkspaceRevision(revisionId);
+    if (!revision) throw new Error("Retained workspace revision is unavailable.");
+    const sidecar = await this.loadWorkspaceSidecar(revision);
+    return sidecar.files.map(({ path, content }) => workspaceSourceFileSchema.parse({ path, content }));
+  }
+
+  private async loadWorkspaceSidecar(revision: SiteWorkspaceRevisionV1): Promise<WorkspaceSourceSidecarV1> {
+    const key = workspaceSourceSidecarKey(revision.sourceArchiveKey);
+    const blob = await this.blobStore.get(key);
+    if (!blob) throw new Error(`Retained workspace source sidecar is missing at ${key}.`);
+    const sidecar = workspaceSourceSidecarV1Schema.parse(JSON.parse(blob.bytes.toString("utf8")));
+    this.assertWorkspaceSidecarMatchesRevision(sidecar, revision);
+    return sidecar;
+  }
+
+  private assertWorkspaceSidecarMatchesRevision(sidecar: WorkspaceSourceSidecarV1, revision: SiteWorkspaceRevisionV1) {
+    if (sidecar.archiveKey !== revision.sourceArchiveKey || sidecar.sourceHash !== revision.sourceHash) {
+      throw new Error(`Workspace sidecar does not match retained revision ${revision.id}.`);
+    }
+    const sidecarFiles = sidecar.files.map(({ path, contentHash, bytes }) => ({ path, contentHash, bytes }));
+    if (stableJson(sidecarFiles) !== stableJson(revision.files)) {
+      throw new Error(`Workspace sidecar file manifest does not match retained revision ${revision.id}.`);
+    }
+  }
+
+  private async destroySessionSandbox(session: SiteAgentSessionV1, input: {
+    reason: string;
+    currentWorkspaceRevisionId?: string;
+    now?: string;
+  }) {
+    const now = input.now ?? new Date().toISOString();
+    if (!session.sandboxId) {
+      const checkpointed = siteAgentSessionV1Schema.parse({
+        ...session,
+        status: "checkpointed",
+        currentWorkspaceRevisionId: input.currentWorkspaceRevisionId ?? session.currentWorkspaceRevisionId,
+        leaseExpiresAt: now,
+        updatedAt: now
+      });
+      await this.repository.saveAgentSession(checkpointed);
+      return { destroyed: true as const, session: checkpointed };
+    }
+    try {
+      await this.sandbox.destroy(session.sandboxId);
+    } catch (error) {
+      const rotating = siteAgentSessionV1Schema.parse({
+        ...session,
+        status: "rotating",
+        sandboxDestroyAttempts: session.sandboxDestroyAttempts + 1,
+        currentWorkspaceRevisionId: input.currentWorkspaceRevisionId ?? session.currentWorkspaceRevisionId,
+        leaseExpiresAt: now,
+        updatedAt: now
+      });
+      await this.repository.saveAgentSession(rotating);
+      const existing = (await this.repository.listOperatorQueue()).some((item) =>
+        item.reason === "maintenance_failure"
+        && item.siteId === session.siteId
+        && item.status !== "resolved"
+        && item.status !== "dismissed"
+        && item.findings.some((finding) => finding.sandboxId === session.sandboxId)
+      );
+      if (!existing) {
+        await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
+          id: id("operator"),
+          siteId: session.siteId,
+          reason: "maintenance_failure",
+          severity: "high",
+          status: "open",
+          findings: [{ kind: "sandbox_destroy_failed", sandboxId: session.sandboxId, reason: input.reason, message: failureMessage(error) }],
+          createdAt: now,
+          updatedAt: now
+        }));
+      }
+      return { destroyed: false as const, session: rotating };
+    }
+    const checkpointed = siteAgentSessionV1Schema.parse({
+      ...session,
+      status: "checkpointed",
+      sandboxId: undefined,
+      sandboxLastDestroyedAt: now,
+      sandboxProvisionedMs: session.sandboxProvisionedMs + provisionedDurationMs(session.sandboxLastStartedAt, now),
+      sandboxDestroyAttempts: session.sandboxDestroyAttempts + 1,
+      currentWorkspaceRevisionId: input.currentWorkspaceRevisionId ?? session.currentWorkspaceRevisionId,
+      leaseExpiresAt: now,
+      updatedAt: now
+    });
+    await this.repository.saveAgentSession(checkpointed);
+    return { destroyed: true as const, session: checkpointed };
+  }
+
+  private async ensureSandbox(session: SiteAgentSessionV1, buildInput: SitePublicBuildInputV3) {
     let current = session;
     if (session.status === "closed" || session.status === "failed") throw new Error("Agent session is not reusable.");
     const leaseExpired = Date.parse(session.leaseExpiresAt) <= Date.now();
     if (leaseExpired && session.sandboxId) {
-      await this.sandbox.destroy(session.sandboxId).catch(() => undefined);
       const site = await this.repository.getSite(session.siteId);
-      current = siteAgentSessionV1Schema.parse({
-        ...session,
-        status: "checkpointed",
-        sandboxId: undefined,
-        currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId,
-        leaseExpiresAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+      const result = await this.destroySessionSandbox(session, {
+        reason: "expired_before_sandbox_start",
+        currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId
       });
-      await this.repository.saveAgentSession(current);
+      if (!result.destroyed) throw new Error("sandbox_destroy_retry_required");
+      current = result.session;
     }
     const shouldRotate = Date.parse(current.rotateAt) <= Date.now();
     if (shouldRotate && current.sandboxId) {
-      await this.sandbox.destroy(current.sandboxId).catch(() => undefined);
+      const result = await this.destroySessionSandbox(current, { reason: "scheduled_rotation" });
+      if (!result.destroyed) throw new Error("sandbox_destroy_retry_required");
       current = siteAgentSessionV1Schema.parse({
-        ...current,
+        ...result.session,
         status: "rotating",
         sandboxId: sandboxId(),
         leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
@@ -1058,17 +1545,36 @@ export class AgenticSiteWorkflowV1 {
       const diagnostics = await this.sandbox.diagnostics(current.sandboxId).catch(() => undefined);
       if (diagnostics?.ok && diagnostics.revision !== "uninitialized") return { session: current, revision: diagnostics.revision };
     }
-    const next = current.sandboxId ? current : siteAgentSessionV1Schema.parse({ ...current, sandboxId: sandboxId() });
-    const bootstrapped = await this.sandbox.bootstrap(next.sandboxId!, buildInput);
-    let revision = bootstrapped.revision;
-    if (next.currentWorkspaceRevisionId) {
-      const workspace = await this.repository.getWorkspaceRevision(next.currentWorkspaceRevisionId);
-      const backupId = workspace?.sourceArchiveKey.match(/^workspace-backups\/([a-f0-9]{64})\.tar\.gz$/)?.[1];
-      if (!backupId) throw new Error("Retained workspace backup is unavailable for restore.");
-      revision = (await this.sandbox.restore(next.sandboxId!, backupId, revision)).revision;
+    const startedAt = new Date().toISOString();
+    const starting = siteAgentSessionV1Schema.parse({
+      ...current,
+      status: "active",
+      sandboxId: current.sandboxId ?? sandboxId(),
+      sandboxLastStartedAt: current.sandboxLastStartedAt ?? startedAt,
+      leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
+      updatedAt: startedAt
+    });
+    await this.repository.saveAgentSession(starting);
+    let revision: string;
+    try {
+      const bootstrapped = await this.sandbox.bootstrap(starting.sandboxId!, buildInput);
+      revision = bootstrapped.revision;
+      if (starting.currentWorkspaceRevisionId) {
+        const workspace = await this.repository.getWorkspaceRevision(starting.currentWorkspaceRevisionId);
+        const backupId = workspace?.sourceArchiveKey.match(/^workspace-backups\/([a-f0-9]{64})\.tar\.gz$/)?.[1];
+        if (!backupId) throw new Error("Retained workspace backup is unavailable for restore.");
+        const sidecar = await this.loadWorkspaceSidecar(workspace);
+        revision = (await this.sandbox.restore(starting.sandboxId!, backupId, revision, sidecar.archiveHash)).revision;
+      }
+    } catch (error) {
+      await this.destroySessionSandbox(starting, {
+        reason: "sandbox_start_failed",
+        currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
+      });
+      throw error;
     }
     const active = siteAgentSessionV1Schema.parse({
-      ...next,
+      ...starting,
       status: "active",
       leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
       rotateAt: new Date(Date.now() + rotationMs).toISOString(),
@@ -1078,29 +1584,24 @@ export class AgenticSiteWorkflowV1 {
     return { session: active, revision };
   }
 
-  private async checkpointAfterRunFailure(run: SiteAgentRunV1) {
+  private async checkpointAfterRunFailure(run: SiteAgentRunV2) {
     const [session, site] = await Promise.all([
       this.repository.getAgentSession(run.sessionId),
       this.repository.getSite(run.siteId)
     ]);
     if (!session) return;
-    if (session.sandboxId) await this.sandbox.destroy(session.sandboxId).catch(() => undefined);
-    const now = new Date().toISOString();
-    await this.repository.saveAgentSession(siteAgentSessionV1Schema.parse({
-      ...session,
-      status: "checkpointed",
-      sandboxId: undefined,
-      currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId,
-      leaseExpiresAt: now,
-      updatedAt: now
-    }));
+    await this.destroySessionSandbox(session, {
+      reason: "terminal_run_failure",
+      currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId
+    });
   }
 
-  private async queueTerminalRunFailure(run: SiteAgentRunV1, error: unknown) {
+  private async queueTerminalRunFailure(run: SiteAgentRunV2, error: unknown) {
     const existing = (await this.repository.listOperatorQueue()).some((item) => item.runId === run.id && item.status !== "resolved" && item.status !== "dismissed");
     if (existing) return;
     const now = new Date().toISOString();
     await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+      schemaVersion: "operator-queue-item-v2",
       id: id("operator"),
       siteId: run.siteId,
       runId: run.id,
@@ -1170,18 +1671,23 @@ export class AgenticSiteWorkflowV1 {
     return input;
   }
 
-  private async updateRun(run: SiteAgentRunV1, patch: Partial<SiteAgentRunV1>) {
-    const updated = siteAgentRunV1Schema.parse({ ...run, ...patch, heartbeatAt: new Date().toISOString() });
+  private async updateRun(run: SiteAgentRunV2, patch: Partial<SiteAgentRunV2>) {
+    const updated = siteAgentRunV2Schema.parse({ ...run, ...patch, heartbeatAt: new Date().toISOString() });
     await this.repository.saveAgentRun(updated);
     return updated;
   }
 
-  private async recoverInterruptedRun(run: SiteAgentRunV1) {
+  private async recoverInterruptedRun(run: SiteAgentRunV2) {
+    const current = await this.requireRun(run.id);
+    if (current.status !== "running" || current.attempt !== run.attempt) return current;
+    run = current;
     await this.checkpointAfterRunFailure(run).catch(() => undefined);
     const retained = (await this.repository.listSiteVersions(run.siteId))
       .find((version) => version.createdBy.kind === "agent" && version.createdBy.id === run.id);
+    const latest = await this.requireRun(run.id);
+    if (latest.status !== "running" || latest.attempt !== run.attempt) return latest;
     if (retained) {
-      return this.updateRun(run, {
+      return this.updateRun(latest, {
         status: "succeeded",
         stage: "candidate_ready",
         outputRevisionId: retained.workspaceRevisionId,
@@ -1191,8 +1697,8 @@ export class AgenticSiteWorkflowV1 {
         completedAt: new Date().toISOString()
       });
     }
-    if (run.attempt < 2) {
-      return this.updateRun(run, {
+    if (latest.attempt < 2) {
+      return this.updateRun(latest, {
         status: "queued",
         stage: "queued",
         fastPreviewPath: undefined,
@@ -1200,7 +1706,7 @@ export class AgenticSiteWorkflowV1 {
         completedAt: undefined
       });
     }
-    return this.updateRun(run, {
+    return this.updateRun(latest, {
       status: "failed",
       stage: "failed",
       fastPreviewPath: undefined,
@@ -1212,18 +1718,22 @@ export class AgenticSiteWorkflowV1 {
 
 export const agenticSiteWorkflow = new AgenticSiteWorkflowV1();
 
-function toolCall(name: string, input: unknown, output: unknown, startedAt: string): SiteAgentRunV1["toolCalls"][number] {
-  return {
-    id: id("tool"), name, inputHash: sha256(stableJson(input)), outputHash: sha256(stableJson(output)),
-    startedAt, completedAt: new Date().toISOString(), status: "succeeded"
-  };
+export const siteAgentRecoveryStaleAfterMs = 45 * 60_000;
+
+export class EditClarificationRequiredError extends Error {
+  readonly code = "clarification_required";
+  constructor(readonly question: string) { super(question); }
+}
+
+export class EditPreflightFailedError extends Error {
+  readonly code = "objective_preflight_failed";
 }
 
 export function configuredSandboxImageDigest() {
   return sandboxImageDigest;
 }
 
-export function managerRuntimeBudget(kind: ManagerRunRequestV2["kind"]) {
+export function managerRuntimeBudget(kind: ManagerRunRequestV3["kind"]) {
   const cycles = kind === "initial_build" ? 4 : 3;
   return { builds: cycles, inspections: cycles } as const;
 }
@@ -1237,8 +1747,33 @@ function sandboxId() {
   return `site-${randomUUID().replace(/-/g, "")}`;
 }
 
+function provisionedDurationMs(startedAt: string | undefined, destroyedAt: string) {
+  if (!startedAt) return 0;
+  const started = Date.parse(startedAt);
+  const destroyed = Date.parse(destroyedAt);
+  return Number.isFinite(started) && Number.isFinite(destroyed) ? Math.max(0, destroyed - started) : 0;
+}
+
 function id(prefix: string) {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function failureCode(error: unknown) {
+  const value = failureMessage(error).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return (value || "unknown_failure").slice(0, 160);
+}
+
+function findingFingerprint(finding: { id: string; area: string; route?: string; message: string }) {
+  return sha256(stableJson({
+    id: finding.id,
+    area: finding.area,
+    route: finding.route ?? "/",
+    message: finding.message.toLowerCase().replace(/\s+/g, " ").trim()
+  }));
+}
+
+function exactRoutesIn(instruction: string) {
+  return [...new Set([...instruction.matchAll(/(?:^|\s)(\/[a-z0-9][a-z0-9\-\/]*)\b/gi)].map((match) => match[1].replace(/\/$/, "") || "/"))];
 }
 
 function lazyExternalClient<T extends object>(factory: () => T): T {
@@ -1257,7 +1792,7 @@ function failureMessage(error: unknown) {
   return message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]`;
 }
 
-function isRepairableWorkspaceFailure(error: unknown, stage?: SiteAgentRunV1["stage"]) {
+function isRepairableWorkspaceFailure(error: unknown, stage?: SiteAgentRunV2["stage"]) {
   if (error && typeof error === "object" && (error as { name?: unknown }).name === "ZodError") return true;
   if (!(error instanceof Error)) return false;
   if (/^manager_(?:response|tool)_limit_exhausted$/.test(error.message)) {
@@ -1268,7 +1803,7 @@ function isRepairableWorkspaceFailure(error: unknown, stage?: SiteAgentRunV1["st
   return false;
 }
 
-function repairFailureStage(stage: SiteAgentRunV1["stage"]): "authoring" | "building" | "fast_preview" | "verifying" {
+function repairFailureStage(stage: SiteAgentRunV2["stage"]): "authoring" | "building" | "fast_preview" | "verifying" {
   return stage === "building" || stage === "fast_preview" || stage === "verifying" ? stage : "authoring";
 }
 

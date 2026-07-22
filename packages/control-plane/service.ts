@@ -4,20 +4,19 @@ import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/
 import { agenticSiteWorkflow, type AgenticSiteWorkflowV1 } from "@/packages/site-platform";
 import {
   operatorQueueItemSchema,
-  businessStateV2Schema,
+  businessStateV3Schema,
   assetRevisionV1Schema,
   controlPlaneChangeRequestV2Schema,
   siteAgentSessionV1Schema,
-  siteIntentV2Schema,
+  siteIntentV3Schema,
   sourceSnapshotV1Schema,
-  type BusinessStateV2,
+  type BusinessStateV3,
   type AssetRevisionV1,
   type ControlPlaneChangePayloadV2,
   type ControlPlaneChangeRequestV2,
-  type SiteIntentV2,
+  type SiteIntentV3,
   type SourceSnapshotV1
 } from "@/packages/site-contracts";
-import { verticalContextFor } from "@/packages/vertical-context";
 
 export class ControlPlaneServiceV2 {
   constructor(
@@ -75,8 +74,8 @@ export class ControlPlaneServiceV2 {
     try {
       if (request.payload.kind === "request_site_edit") {
         const session = await this.workflow.getOrCreateSession({ siteId: site.id, ownerId: actorId });
-        const run = await this.workflow.enqueueRun({
-          session, kind: "focused_edit", instruction: request.payload.instruction,
+        const { run } = await this.workflow.preflightAndEnqueueApply({
+          session, instruction: request.payload.instruction,
           selection: request.payload.selection, requestedBy: actorId
         });
         const applied = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
@@ -115,13 +114,17 @@ export class ControlPlaneServiceV2 {
         nextIntent = mutateSiteIntent(intent, request.payload.patch);
         await this.repository.saveSiteIntent(nextIntent);
         authorityApplied = true;
+      } else if (request.targetAuthority === "site_intent" && request.payload.kind === "update_agent_access_policy") {
+        nextIntent = mutateSiteIntent(intent, { agentAccessPolicy: request.payload.policy });
+        await this.repository.saveSiteIntent(nextIntent);
+        authorityApplied = true;
       }
 
       const currentInput = site.currentPublicBuildInputId ? await this.repository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
       if (!currentInput) throw new Error("Current public build input was not found.");
       const buildInput = createPublicBuildInput({
         id: id("input"), state: nextState, intent: nextIntent, forms: currentInput.forms,
-        verticalModule: verticalContextFor(nextState.vertical.id),
+        domainContext: currentInput.domainContext,
         sourceSnapshotIds: [...currentInput.sourceSnapshotIds, ...(request.targetAuthority === "business_state" ? [ownerSnapshot.id] : [])],
         runtimeSeriesId: currentInput.capabilityConfiguration.trustedRuntimeSeries
       });
@@ -134,7 +137,7 @@ export class ControlPlaneServiceV2 {
       const run = await this.workflow.enqueueRun({
         session, kind, instruction: instructionFor(request.payload), requestedBy: actorId,
         origin: "control_plane", deferBehindActive: true,
-        publishAfterSuccess: request.impact === "deterministic"
+        publishAfterSuccess: false
       });
       const applied = controlPlaneChangeRequestV2Schema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
       await this.repository.saveControlPlaneChangeRequest(applied);
@@ -142,7 +145,7 @@ export class ControlPlaneServiceV2 {
         request: applied,
         applied: true as const,
         run,
-        autoPublish: run.publishAfterSuccess,
+        autoPublish: false,
         deferred: Boolean(run.deferredUntilRunId)
       };
     } catch (error) {
@@ -152,6 +155,7 @@ export class ControlPlaneServiceV2 {
       if (authorityApplied) {
         const now = new Date().toISOString();
         await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
+          schemaVersion: "operator-queue-item-v2",
           id: id("operator"), siteId: request.siteId, reason: "authority_publish_failure", severity: "urgent", status: "open",
           findings: [{
             requestId: request.id,
@@ -201,11 +205,12 @@ function policyFor(kind: ControlPlaneChangePayloadV2["kind"]): {
     case "set_proof":
     case "update_external_link": return { targetAuthority: "business_state", impact: "reviewable", reviewRequired: true };
     case "update_site_intent": return { targetAuthority: "site_intent", impact: "structural", reviewRequired: false };
+    case "update_agent_access_policy": return { targetAuthority: "site_intent", impact: "deterministic", reviewRequired: false };
     case "request_site_edit": return { targetAuthority: "workspace", impact: "structural", reviewRequired: false };
   }
 }
 
-function mutateBusinessState(state: BusinessStateV2, payload: ControlPlaneChangePayloadV2, source: SourceSnapshotV1, attestedAsset?: AssetRevisionV1) {
+function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChangePayloadV2, source: SourceSnapshotV1, attestedAsset?: AssetRevisionV1) {
   const now = new Date().toISOString();
   const next = structuredClone(state);
   if (payload.kind === "confirm_facts") {
@@ -231,20 +236,16 @@ function mutateBusinessState(state: BusinessStateV2, payload: ControlPlaneChange
     if (next.offerings.some((offering) => normalizedText(offering.name) === normalizedText(name))) {
       throw new Error("This service already exists.");
     }
-    const module = verticalContextFor(next.vertical.id);
-    const catalog = module.offeringCatalog.find((entry) =>
-      [entry.name, ...entry.aliases].some((value) => normalizedText(value) === normalizedText(name))
-    );
     const factId = id("fact");
     next.facts.push({
-      id: factId, kind: "offering", label: "Owner-confirmed service", value: catalog?.name ?? name,
+      id: factId, kind: "offering", label: "Owner-confirmed service", value: name,
       source: { factId, sourceSnapshotId: source.id, observedAt: now, confidence: 1, ownerConfirmed: true },
       publicEligible: true
     });
     next.offerings.push({
       id: id("offering"),
-      ...(catalog ? { catalogId: catalog.id } : { customName: name }),
-      name: catalog?.name ?? name,
+      customName: name,
+      name,
       status: "confirmed",
       visibility: "public",
       pageMode: payload.pageMode,
@@ -300,12 +301,12 @@ function mutateBusinessState(state: BusinessStateV2, payload: ControlPlaneChange
   next.updatedAt = now;
   const { stateHash: _oldHash, ...withoutHash } = next;
   next.stateHash = sha256(stableJson(withoutHash));
-  return businessStateV2Schema.parse(next);
+  return businessStateV3Schema.parse(next);
 }
 
 function upsertFact(
-  state: BusinessStateV2,
-  kind: BusinessStateV2["facts"][number]["kind"],
+  state: BusinessStateV3,
+  kind: BusinessStateV3["facts"][number]["kind"],
   label: string,
   value: unknown,
   source: SourceSnapshotV1,
@@ -320,11 +321,11 @@ function upsertFact(
   }
 }
 
-function mutateSiteIntent(intent: SiteIntentV2, patch: Partial<SiteIntentV2>) {
+function mutateSiteIntent(intent: SiteIntentV3, patch: Partial<SiteIntentV3>) {
   const next = { ...intent, ...patch, revision: intent.revision + 1, updatedAt: new Date().toISOString() };
   const { intentHash: _oldHash, ...withoutHash } = next;
   next.intentHash = sha256(stableJson(withoutHash));
-  return siteIntentV2Schema.parse(next);
+  return siteIntentV3Schema.parse(next);
 }
 
 function instructionFor(payload: ControlPlaneChangePayloadV2) {
@@ -340,6 +341,7 @@ function instructionFor(payload: ControlPlaneChangePayloadV2) {
     case "attest_asset_rights": return "Recompile the existing design against the owner-attested asset revision.";
     case "update_external_link": return "Apply the approved external-link update.";
     case "update_site_intent": return "Update the website to reflect the approved site-intent change.";
+    case "update_agent_access_policy": return "Re-finalize the existing verified artifact with the owner-recorded agent access policy.";
     case "request_site_edit": return payload.instruction;
   }
 }

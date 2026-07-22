@@ -1,61 +1,173 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getAgentModelSettings } from "@/lib/operator-settings";
-import type { CrawlAssessment } from "@/lib/crawler";
 import type { PublicPresenceEnrichment } from "@/lib/public-presence";
-import type { VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { WebsiteGenerationIngestionV2 } from "./generation-crawler";
 
-const schema = z.object({
-  schemaVersion: z.literal("website-understanding-v1"),
-  vertical: z.string().min(1).max(80),
-  verticalConfidence: z.number().min(0).max(1),
-  cleanedServices: z.array(z.object({ name: z.string().min(2).max(100) }).strict()).max(24),
-  primaryConversionGoal: z.enum(["call_first", "form_first", "visit_first"]),
-  businessStory: z.object({ summary: z.string().min(20).max(600), distinctives: z.array(z.string().min(2).max(180)).max(8) }).strict().nullable(),
+const evidenceReferenceSchema = z.object({
+  sourceBlockId: z.string().min(1).max(200),
+  sourceUrl: z.string().url(),
+  startToken: z.number().int().nonnegative(),
+  endToken: z.number().int().positive(),
+  quote: z.string().min(1).max(1200),
+  evidenceClass: z.enum(["first_party", "third_party", "unknown"])
+}).strict();
+
+const evidencedText = (maximum: number) => z.object({
+  value: z.string().min(1).max(maximum),
+  evidence: z.array(evidenceReferenceSchema).min(1).max(8)
+}).strict();
+
+const modelSchema = z.object({
+  schemaVersion: z.literal("website-understanding-v3"),
+  businessName: evidencedText(200),
+  observedCategory: evidencedText(120).extend({ confidence: z.number().min(0).max(1) }).strict(),
+  cleanedServices: z.array(evidencedText(160)).max(24),
+  primaryConversion: z.object({
+    goal: z.enum(["call_first", "form_first", "booking_first", "visit_first"]),
+    evidence: z.array(evidenceReferenceSchema).min(1).max(8)
+  }).strict(),
+  locationOrServiceArea: evidencedText(240),
+  businessStory: z.object({
+    summary: z.string().min(20).max(600),
+    distinctives: z.array(z.string().min(2).max(180)).max(8),
+    evidence: z.array(evidenceReferenceSchema).min(1).max(8)
+  }).strict().nullable(),
   brandExpression: z.object({
     voiceRegister: z.enum(["direct", "warm", "premium", "technical", "plainspoken"]),
-    paletteSeed: z.object({ preferredHex: z.string().regex(/^#[0-9a-f]{6}$/i).nullable() }).strict()
+    evidence: z.array(evidenceReferenceSchema).min(1).max(8),
+    paletteSeed: z.object({ preferredHex: z.null() }).strict()
   }).strict()
 }).strict();
 
-export type WebsiteUnderstandingV1 = z.infer<typeof schema>;
+type ModelUnderstandingV3 = z.infer<typeof modelSchema>;
+export type WebsiteUnderstandingV3 = ModelUnderstandingV3 & {
+  provenance: {
+    producer: "website-understanding";
+    model: string;
+    promptVersion: "website-understanding-v3.0";
+    inputHash: `sha256:${string}`;
+    generatedAt: string;
+    attempts: number;
+  };
+};
+
+export class WebsiteUnderstandingValidationError extends Error {
+  readonly code = "website_understanding_validation_failed";
+  constructor(readonly failures: string[]) {
+    super(`Website understanding could not establish minimum reconstructible knowledge: ${failures.join("; ")}`);
+  }
+}
 
 export async function understandWebsite(input: {
   sourceUrl: string;
-  crawl: CrawlAssessment;
-  supportedVerticals: VerticalContextModuleV1[];
+  ingestion: WebsiteGenerationIngestionV2;
   publicPresence?: PublicPresenceEnrichment;
   signal?: AbortSignal;
-}): Promise<WebsiteUnderstandingV1> {
+  fetchImpl?: typeof fetch;
+  modelOverride?: string;
+}): Promise<WebsiteUnderstandingV3> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required for production website ingestion.");
-  const supportedVerticalIds = input.supportedVerticals.filter((module) => module.status === "active").map((module) => module.id);
-  if (!supportedVerticalIds.length) throw new Error("Website ingestion requires at least one active vertical context module.");
-  const settings = await getAgentModelSettings();
-  const model = process.env.LODESTA_INGESTION_MODEL ?? settings.settings.ingestionModel;
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model,
-      reasoning: { effort: "medium" },
-      max_output_tokens: 5_000,
-      input: [
-        { role: "system", content: [{ type: "input_text", text: `Extract a conservative business understanding for Lodesta. Classify only to one of the supplied active vertical IDs when the source clearly matches that module's aliases and classification signals. Never invent services, proof, history, or brand facts. Return unsupported for every other vertical.\n\nActive vertical modules:\n${JSON.stringify(input.supportedVerticals.map((module) => ({ id: module.id, aliases: module.aliases, classificationSignals: module.classificationSignals })))}` }] },
-        { role: "user", content: [{ type: "input_text", text: JSON.stringify({ sourceUrl: input.sourceUrl, extractedFacts: input.crawl.extractedFacts, pageSummaries: input.crawl.pageSummaries.map((page) => ({ url: page.url, title: page.title, purposeTags: page.purposeTags, text: page.sourceTextBlocks.map((block) => block.displayText).join("\n").slice(0, 12_000) })), publicPresence: input.publicPresence }) }] }
-      ],
-      text: { verbosity: "low", format: { type: "json_schema", name: "website_understanding_v1", strict: true, schema: jsonSchema(supportedVerticalIds) } }
-    }),
-    signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000)
-  });
-  const payload = await response.json().catch(() => undefined) as Record<string, unknown> | undefined;
-  if (!response.ok) throw new Error(openAiError(payload) ?? `Business understanding failed with HTTP ${response.status}.`);
-  const text = responseText(payload);
-  if (!text) throw new Error("Business understanding returned no structured output.");
-  const understanding = schema.parse(JSON.parse(text));
-  if (understanding.vertical !== "unsupported" && !supportedVerticalIds.includes(understanding.vertical)) {
-    throw new Error(`Business understanding returned an unregistered vertical: ${understanding.vertical}.`);
+  const settings = input.modelOverride ? undefined : await getAgentModelSettings();
+  const model = input.modelOverride ?? process.env.LODESTA_INGESTION_MODEL ?? settings!.settings.ingestionModel;
+  const modelInput = {
+    sourceUrl: input.sourceUrl,
+    coverage: input.ingestion.coverage,
+    sourceBlocks: input.ingestion.modelBlocks,
+    publicPresenceContext: input.publicPresence
+  };
+  const inputHash = sha256(JSON.stringify(modelInput));
+  let validationFailures: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const response = await (input.fetchImpl ?? fetch)("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        reasoning: { effort: "medium" },
+        max_output_tokens: 8_000,
+        input: [
+          {
+            role: "system",
+            content: [{ type: "input_text", text: "Create conservative typed knowledge for a local-business website. Every output item must cite exact supplied source block token spans, quote the reconstructed display text exactly, preserve the supplied source URL and evidence class, and avoid third-party reviews as business claims. Public-presence context may help interpretation but is never valid evidence. Do not infer a palette color from prose; preferredHex must be null." }]
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: JSON.stringify({
+              ...modelInput,
+              priorValidationFailures: validationFailures,
+              requiredKnowledge: ["businessName", "offering or category", "conversion path", "location or service area"]
+            }) }]
+          }
+        ],
+        text: { verbosity: "low", format: { type: "json_schema", name: "website_understanding_v3", strict: true, schema: jsonSchema() } }
+      }),
+      signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000)
+    });
+    const payload = await response.json().catch(() => undefined) as Record<string, unknown> | undefined;
+    if (!response.ok) throw new Error(openAiError(payload) ?? `Business understanding failed with HTTP ${response.status}.`);
+    const text = responseText(payload);
+    if (!text) throw new Error("Business understanding returned no structured output.");
+    try {
+      const understanding = modelSchema.parse(JSON.parse(text));
+      validationFailures = validateUnderstandingEvidence(understanding, input.ingestion);
+      if (!validationFailures.length) {
+        return {
+          ...understanding,
+          provenance: {
+            producer: "website-understanding",
+            model,
+            promptVersion: "website-understanding-v3.0",
+            inputHash,
+            generatedAt: new Date().toISOString(),
+            attempts: attempt
+          }
+        };
+      }
+    } catch (error) {
+      validationFailures = error instanceof z.ZodError
+        ? error.issues.map((issue) => `${issue.path.join(".") || "response"}: ${issue.message}`).slice(0, 40)
+        : [error instanceof Error ? error.message : String(error)];
+    }
   }
-  return understanding;
+  throw new WebsiteUnderstandingValidationError(validationFailures);
+}
+
+export function validateUnderstandingEvidence(understanding: ModelUnderstandingV3, ingestion: WebsiteGenerationIngestionV2) {
+  const failures: string[] = [];
+  const blocks = new Map(ingestion.modelBlocks.map((block) => [block.id, block]));
+  const groups: Array<[string, z.infer<typeof evidenceReferenceSchema>[]]> = [
+    ["businessName", understanding.businessName.evidence],
+    ["observedCategory", understanding.observedCategory.evidence],
+    ...understanding.cleanedServices.map((service, index) => [`cleanedServices.${index}`, service.evidence] as [string, z.infer<typeof evidenceReferenceSchema>[]]),
+    ["primaryConversion", understanding.primaryConversion.evidence],
+    ["locationOrServiceArea", understanding.locationOrServiceArea.evidence],
+    ["brandExpression", understanding.brandExpression.evidence],
+    ...(understanding.businessStory ? [["businessStory", understanding.businessStory.evidence] as [string, z.infer<typeof evidenceReferenceSchema>[]]] : [])
+  ];
+  for (const [label, references] of groups) {
+    for (const [index, reference] of references.entries()) {
+      const block = blocks.get(reference.sourceBlockId);
+      if (!block) { failures.push(`${label}.evidence.${index}: unknown source block`); continue; }
+      if (block.sourceUrl !== reference.sourceUrl) failures.push(`${label}.evidence.${index}: source URL mismatch`);
+      if (block.evidenceClass !== reference.evidenceClass) failures.push(`${label}.evidence.${index}: evidence class mismatch`);
+      const first = block.canonicalTokens[reference.startToken];
+      const last = block.canonicalTokens[reference.endToken - 1];
+      if (!first || !last || reference.endToken <= reference.startToken) {
+        failures.push(`${label}.evidence.${index}: invalid token span`);
+        continue;
+      }
+      const reconstructed = block.displayText.slice(first.displayStart, last.displayEnd);
+      if (reconstructed !== reference.quote) failures.push(`${label}.evidence.${index}: quote is not reconstructible`);
+    }
+  }
+  const firstParty = (references: z.infer<typeof evidenceReferenceSchema>[]) => references.some((reference) => reference.evidenceClass === "first_party");
+  if (!firstParty(understanding.businessName.evidence)) failures.push("businessName: first-party evidence required");
+  if (!understanding.cleanedServices.some((service) => firstParty(service.evidence)) && !firstParty(understanding.observedCategory.evidence)) failures.push("offeringOrCategory: first-party evidence required");
+  if (!firstParty(understanding.primaryConversion.evidence)) failures.push("primaryConversion: first-party evidence required");
+  if (!firstParty(understanding.locationOrServiceArea.evidence)) failures.push("locationOrServiceArea: first-party evidence required");
+  return [...new Set(failures)];
 }
 
 function responseText(payload: Record<string, unknown> | undefined) {
@@ -78,18 +190,29 @@ function openAiError(payload: Record<string, unknown> | undefined) {
     : undefined;
 }
 
-function jsonSchema(supportedVerticalIds: string[]) {
+function jsonSchema() {
+  const evidence = {
+    type: "object", additionalProperties: false,
+    required: ["sourceBlockId", "sourceUrl", "startToken", "endToken", "quote", "evidenceClass"],
+    properties: {
+      sourceBlockId: { type: "string" }, sourceUrl: { type: "string" }, startToken: { type: "integer", minimum: 0 }, endToken: { type: "integer", minimum: 1 }, quote: { type: "string" }, evidenceClass: { type: "string", enum: ["first_party", "third_party", "unknown"] }
+    }
+  };
+  const text = { type: "object", additionalProperties: false, required: ["value", "evidence"], properties: { value: { type: "string" }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence } } };
   return {
-  type: "object", additionalProperties: false,
-  required: ["schemaVersion", "vertical", "verticalConfidence", "cleanedServices", "primaryConversionGoal", "businessStory", "brandExpression"],
-  properties: {
-    schemaVersion: { type: "string", const: "website-understanding-v1" },
-    vertical: { type: "string", enum: [...supportedVerticalIds, "unsupported"] },
-    verticalConfidence: { type: "number", minimum: 0, maximum: 1 },
-    cleanedServices: { type: "array", maxItems: 24, items: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string" } } } },
-    primaryConversionGoal: { type: "string", enum: ["call_first", "form_first", "visit_first"] },
-    businessStory: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["summary", "distinctives"], properties: { summary: { type: "string" }, distinctives: { type: "array", maxItems: 8, items: { type: "string" } } } }] },
-    brandExpression: { type: "object", additionalProperties: false, required: ["voiceRegister", "paletteSeed"], properties: { voiceRegister: { type: "string", enum: ["direct", "warm", "premium", "technical", "plainspoken"] }, paletteSeed: { type: "object", additionalProperties: false, required: ["preferredHex"], properties: { preferredHex: { type: ["string", "null"] } } } } }
-  }
+    type: "object", additionalProperties: false,
+    required: ["schemaVersion", "businessName", "observedCategory", "cleanedServices", "primaryConversion", "locationOrServiceArea", "businessStory", "brandExpression"],
+    properties: {
+      schemaVersion: { type: "string", const: "website-understanding-v3" },
+      businessName: text,
+      observedCategory: { type: "object", additionalProperties: false, required: ["value", "confidence", "evidence"], properties: { value: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence } } },
+      cleanedServices: { type: "array", maxItems: 24, items: text },
+      primaryConversion: { type: "object", additionalProperties: false, required: ["goal", "evidence"], properties: { goal: { type: "string", enum: ["call_first", "form_first", "booking_first", "visit_first"] }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence } } },
+      locationOrServiceArea: text,
+      businessStory: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["summary", "distinctives", "evidence"], properties: { summary: { type: "string" }, distinctives: { type: "array", maxItems: 8, items: { type: "string" } }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence } } }] },
+      brandExpression: { type: "object", additionalProperties: false, required: ["voiceRegister", "evidence", "paletteSeed"], properties: { voiceRegister: { type: "string", enum: ["direct", "warm", "premium", "technical", "plainspoken"] }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence }, paletteSeed: { type: "object", additionalProperties: false, required: ["preferredHex"], properties: { preferredHex: { type: "null" } } } } }
+    }
   };
 }
+
+function sha256(value: string) { return `sha256:${createHash("sha256").update(value).digest("hex")}` as const; }

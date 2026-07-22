@@ -21,16 +21,48 @@ const forbiddenFiles = [
 for (const file of forbiddenFiles) {
   if (await exists(file)) errors.push(`${file}: deleted V3 module exists`);
 }
-for (const path of ["fixtures/generation-pipeline", "fixtures/market-benchmark", "app/admin/site-candidates"]) {
+for (const path of [
+  "fixtures/generation-pipeline",
+  "fixtures/market-benchmark",
+  "app/admin/site-candidates",
+  ".design/generated-site-v3",
+  ".design/generated-site-quality",
+  ".design/admin-generation-portal",
+  ".design/design-system-gate-review",
+  "docs/generation-pipeline-clean-break.md",
+  "docs/website-generation-bakeoff-v1.md",
+  "docs/agentic-site-v1-spike-results.md",
+  "fixtures/generation-quality/austin-tireman-crawl.json",
+  "public/fixture-assets/auto-repair-shop-hero-v1.jpg",
+  "public/fixture-assets/auto-repair-shop-hero-v1.png",
+  "app/sites/[slug]/md",
+  "deploy/railway-worker.toml"
+]) {
   if (await existsPath(path)) errors.push(`${path}: retired V3 path exists`);
 }
 
+if (await existsPath("app/_lodesta")) {
+  errors.push("app/_lodesta is a private Next.js folder and cannot register the public /_lodesta route segment");
+}
+for (const path of [
+  "app/%5Flodesta/assets/[revisionId]/route.ts",
+  "app/%5Flodesta/runtime/[file]/route.ts",
+  "app/%5Flodesta/runtime/patches/[file]/route.ts"
+]) {
+  if (!(await exists(path))) errors.push(`${path}: required encoded /_lodesta route handler is missing`);
+}
+
 const forbiddenArchitecture = /SiteVersionV3|GenerationInputSnapshotV1|site-renderer-v3|site-compiler|generation-pipeline|generation-judge|vertical-packs|modelFallbackPolicy|deterministic_fallback|\/admin\/site-candidates/;
+const forbiddenCutoverContracts = /\b(?:SiteAgentRunV1|siteAgentRunV1Schema|BusinessStateV2|businessStateV2Schema|SiteIntentV2|siteIntentV2Schema|SitePublicBuildInputV1|sitePublicBuildInputV1Schema|SitePublicBuildInputV2|sitePublicBuildInputV2Schema|ManagerRunRequestV2|ManagerToolRuntimeV2|ManagerCompletionV2)\b|\bunsupported_vertical\b/;
 for (const file of files) {
   if (file === "scripts/verify-agentic-architecture.ts") continue;
   const source = await readFile(file, "utf8");
   if (forbiddenArchitecture.test(source)) errors.push(`${file}: names deleted V3 generation architecture`);
+  if (forbiddenCutoverContracts.test(source)) errors.push(`${file}: names a deleted pre-cutover agent or authority contract`);
 }
+
+const applyRoute = await readFile("app/api/site-agent/runs/route.ts", "utf8");
+if (/kind:\s*z\.|parsed\.data\.kind/.test(applyRoute)) errors.push("Apply API accepts a caller-selected task kind instead of server-side preflight classification");
 
 const verticalNeutralRoots = [
   "packages/site-agent/",
@@ -85,6 +117,35 @@ if (/\.public-site-v3\b|\.site-header-v3\b|\[data-section-template=|\.generation
 const publicRoute = await readFile("app/sites/[slug]/[[...path]]/route.ts", "utf8");
 const previewRoute = await readFile("app/preview/[token]/[[...path]]/route.ts", "utf8");
 if (/rewrite.*Paths/.test(`${publicRoute}\n${previewRoute}`)) errors.push("Finalized preview or public serving mutates retained artifact bytes");
+
+const sandboxWorker = await readFile("workers/site-sandbox/src/index.ts", "utf8");
+const sandboxConfig = await readFile("workers/site-sandbox/wrangler.jsonc", "utf8");
+const artifactBroker = await readFile("workers/artifact-broker/src/index.ts", "utf8");
+const artifactBrokerConfig = await readFile("workers/artifact-broker/wrangler.jsonc", "utf8");
+const recoveryWatchdog = await readFile("workers/recovery-watchdog/src/index.ts", "utf8");
+const recoveryWatchdogConfig = await readFile("workers/recovery-watchdog/wrangler.jsonc", "utf8");
+const blobStore = await readFile("packages/site-artifacts/blob-store.ts", "utf8");
+const maintenanceStore = await readFile("packages/site-artifacts/maintenance-store.ts", "utf8");
+const platformRepository = await readFile("packages/platform-data/repository.ts", "utf8");
+if (/\/v1\/blobs|ARTIFACT_BUCKET|WORKSPACE_BUCKET\.delete|bucket\.delete|bucket\.list/.test(sandboxWorker)) errors.push("Sandbox Worker exposes artifact-bucket blob authority");
+if (!sandboxWorker.includes("WORKSPACE_BUCKET") || !sandboxWorker.includes('sleepAfter: "10m"')) errors.push("Sandbox Worker must use only the workspace bucket and retain the ten-minute sleep safety net");
+if (!sandboxConfig.includes('"max_instances": 5') || !sandboxConfig.includes('"instance_type": "standard-2"') || !sandboxConfig.includes('"binding": "WORKSPACE_BUCKET"')) errors.push("Sandbox deployment must cap standard-2 containers at five against the workspace bucket");
+if (!artifactBroker.includes('["PUT", "GET", "HEAD"]') || /request\.method === "DELETE"|bucket\.delete|bucket\.list/.test(artifactBroker)) errors.push("Artifact broker must expose exact immutable read/write/head only");
+if (!artifactBrokerConfig.includes('"binding": "ARTIFACT_BUCKET"')) errors.push("Artifact broker is not bound to the artifact bucket");
+if (!recoveryWatchdog.includes("scheduled(") || !recoveryWatchdogConfig.includes('"*/15 * * * *"')) errors.push("Recovery watchdog is missing its fifteen-minute scheduled handler");
+if (/R2Bucket|DurableObject|Container|Queue/.test(`${recoveryWatchdog}\n${recoveryWatchdogConfig}`)) errors.push("Recovery watchdog must remain stateless and container-free");
+const appStoreInterface = blobStore.match(/export interface ArtifactBlobStore \{([\s\S]*?)\n\}/)?.[1] ?? "";
+if (/delete|listPage/.test(appStoreInterface)) errors.push("Application artifact store exposes maintenance deletion or inventory");
+if (!maintenanceStore.includes("R2S3MaintenanceStore") || !maintenanceStore.includes('"LODESTA_R2_MAINTENANCE"') || !maintenanceStore.includes('"LODESTA_R2_AUDIT"')) errors.push("R2 audit and mutation credentials are not isolated in the Node-only maintenance client");
+if (!platformRepository.includes("sandbox_id: value.sandboxId ?? null")
+  || !platformRepository.includes("sandbox_last_started_at: value.sandboxLastStartedAt ?? null")) {
+  errors.push("Supabase session persistence does not explicitly clear destroyed sandbox lifecycle fields");
+}
+if (await existsPath("workers/site-sandbox/src/blob-inventory.ts")) errors.push("Retired sandbox inventory route exists");
+for (const file of files) {
+  const source = await readFile(file, "utf8");
+  if (/LODESTA_R2_BRIDGE_(?:URL|TOKEN)/.test(source)) errors.push(`${file}: uses retired combined R2 bridge credentials`);
+}
 
 if (errors.length) throw new Error(`Agentic architecture verification failed:\n${errors.map((error) => `- ${error}`).join("\n")}`);
 console.log(JSON.stringify({ ok: true, filesChecked: files.length, authoringAgents: 1, verticalNeutralRoots: verticalNeutralRoots.length }));

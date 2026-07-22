@@ -1,8 +1,28 @@
-import { sitePublicBuildInputV1Schema, type SitePublicBuildInputV1 } from "@/packages/site-contracts";
+import { sitePublicBuildInputV3Schema, type SitePublicBuildInputV3 } from "@/packages/site-contracts";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifactV1 } from "@/packages/site-verification";
 import { assertWorkspaceSourcePolicy } from "@/packages/site-agent/source-policy";
 
 export type WorkspaceSourceFile = { path: string; content: string };
+
+export class SiteSandboxRequestError extends Error {
+  readonly name = "SiteSandboxRequestError";
+
+  constructor(
+    readonly action: string,
+    readonly sessionId: string,
+    readonly status: number,
+    readonly providerCode: string | undefined,
+    diagnostics: string
+  ) {
+    super(`${action} failed (${status}): ${providerCode ?? "unknown"}${diagnostics ? `:\n${diagnostics}` : ""}`);
+  }
+}
+
+export function isConfirmedSandboxAbsent(error: unknown) {
+  return error instanceof SiteSandboxRequestError
+    && error.status === 404
+    && (error.providerCode === "session_not_found" || error.providerCode === "sandbox_not_found");
+}
 
 export class SiteSandboxClient {
   constructor(
@@ -15,8 +35,8 @@ export class SiteSandboxClient {
     if (!token) throw new Error("Sandbox bridge token is required.");
   }
 
-  async bootstrap(sessionId: string, buildInput: SitePublicBuildInputV1) {
-    const value = sitePublicBuildInputV1Schema.parse(buildInput);
+  async bootstrap(sessionId: string, buildInput: SitePublicBuildInputV3) {
+    const value = sitePublicBuildInputV3Schema.parse(buildInput);
     return this.call<{ ok: true; revision: string }>(sessionId, "bootstrap", "POST", { publicBuildInput: value });
   }
 
@@ -31,8 +51,8 @@ export class SiteSandboxClient {
     }>(sessionId, "apply", "POST", { expectedRevision, files });
   }
 
-  async rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInputV1) {
-    const value = sitePublicBuildInputV1Schema.parse(buildInput);
+  async rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInputV3) {
+    const value = sitePublicBuildInputV3Schema.parse(buildInput);
     return this.call<{
       ok: true;
       revision: string;
@@ -52,11 +72,11 @@ export class SiteSandboxClient {
   }
 
   async backup(sessionId: string) {
-    return this.call<{ ok: true; backup: { id: string; revision: string; size: number; key: string } }>(sessionId, "backup", "POST");
+    return this.call<{ ok: true; backup: { id: string; revision: string; size: number; key: string; contentHash: `sha256:${string}` } }>(sessionId, "backup", "POST");
   }
 
-  async restore(sessionId: string, backupId: string, expectedRevision: string) {
-    return this.call<{ ok: true; revision: string }>(sessionId, "restore", "POST", { backupId, expectedRevision });
+  async restore(sessionId: string, backupId: string, expectedRevision: string, expectedArchiveHash: `sha256:${string}`) {
+    return this.call<{ ok: true; revision: string }>(sessionId, "restore", "POST", { backupId, expectedRevision, expectedArchiveHash });
   }
 
   async diagnostics(sessionId: string) {
@@ -73,6 +93,7 @@ export class SiteSandboxClient {
         sourcePolicy: string;
         sandboxImageDigest: `sha256:${string}`;
       };
+      processes: Array<{ id: string; command: string; status: string }>;
     }>(sessionId, "diagnostics", "GET");
   }
 
@@ -94,12 +115,15 @@ export class SiteSandboxClient {
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
-    const payload = await response.json().catch(() => undefined) as (T & { error?: string; detail?: string; stdout?: string; stderr?: string }) | undefined;
+    const payload = await response.json().catch(() => undefined) as (T & { error?: string; detail?: string; stdout?: string; stderr?: string; currentRevision?: string }) | undefined;
     if (!response.ok) {
-      const diagnostics = [payload?.detail, payload?.stderr, payload?.stdout].filter(Boolean).join("\n").slice(-12_000);
-      const error = new Error(`${action} failed (${response.status}): ${payload?.error ?? "unknown"}${diagnostics ? `:\n${diagnostics}` : ""}`);
-      Object.assign(error, { status: response.status, code: payload?.error });
-      throw error;
+      const diagnostics = [
+        payload?.currentRevision ? `currentRevision=${payload.currentRevision}` : undefined,
+        payload?.detail,
+        payload?.stderr,
+        payload?.stdout
+      ].filter(Boolean).join("\n").slice(-12_000);
+      throw new SiteSandboxRequestError(action, sessionId, response.status, payload?.error, diagnostics);
     }
     return payload as T;
   }

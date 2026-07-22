@@ -1,46 +1,49 @@
 import {
-  businessStateV2Schema,
+  businessStateV3Schema,
   formDefinitionV2Schema,
   publicFactSchema,
-  siteIntentV2Schema,
-  sitePublicBuildInputV1Schema,
+  siteIntentV3Schema,
+  sitePublicBuildInputV3Schema,
   verticalContextModuleV1Schema,
-  type BusinessStateV2,
+  type BusinessStateV3,
   type FormDefinitionV2,
-  type SiteIntentV2,
-  type SitePublicBuildInputV1,
+  type SiteIntentV3,
+  type SitePublicBuildInputV3,
   type VerticalContextModuleV1
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "./hash";
 
 export type CreatePublicBuildInput = {
   id: string;
-  state: BusinessStateV2;
-  intent: SiteIntentV2;
+  state: BusinessStateV3;
+  intent: SiteIntentV3;
   forms: FormDefinitionV2[];
-  verticalModule: VerticalContextModuleV1;
+  domainContext?: VerticalContextModuleV1;
   sourceSnapshotIds: string[];
   createdAt?: string;
   runtimeSeriesId?: string;
 };
 
-export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInputV1 {
-  const state = businessStateV2Schema.parse(input.state);
-  const intent = siteIntentV2Schema.parse(input.intent);
-  const verticalModule = verticalContextModuleV1Schema.parse(input.verticalModule);
+export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInputV3 {
+  const state = businessStateV3Schema.parse(input.state);
+  const intent = siteIntentV3Schema.parse(input.intent);
+  const domainContext = input.domainContext ? verticalContextModuleV1Schema.parse(input.domainContext) : undefined;
   const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
 
   if (state.siteId !== intent.siteId || forms.some((form) => form.siteId !== state.siteId)) {
     throw new Error("Public build input authorities must belong to the same site.");
   }
-  if (state.vertical.id !== verticalModule.id || state.vertical.moduleVersion !== verticalModule.version) {
-    throw new Error("Business state must pin the selected vertical module exactly.");
-  }
-
-  const proof = state.proof.filter((item) => item.status === "confirmed" && !isExpired(item.expiresAt));
+  const eligibleFactIds = new Set(state.facts
+    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"))
+    .map((fact) => fact.id));
+  const proof = state.proof.filter((item) => item.status === "confirmed"
+    && !isExpired(item.expiresAt)
+    && item.sourceFactIds.length > 0
+    && item.sourceFactIds.every((factId) => eligibleFactIds.has(factId)));
   const confirmedProofFactIds = new Set(proof.flatMap((item) => item.sourceFactIds));
   const publicFacts = state.facts
-    .filter((fact) => fact.publicEligible && (fact.kind !== "proof" || confirmedProofFactIds.has(fact.id)))
+    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"))
+    .filter((fact) => fact.kind !== "proof" || confirmedProofFactIds.has(fact.id))
     .map((fact) => publicFactSchema.parse(fact));
   const publicFactById = new Map(publicFacts.map((fact) => [fact.id, fact]));
   const eligibleSource = (ids: string[]) => ids.some((id) => publicFactById.has(id));
@@ -67,6 +70,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
         country: location.country
       } : { country: location.country }),
       ...(hours ? { hours: location.hours } : {}),
+      ...(location.googlePlaceId ? { googlePlaceId: location.googlePlaceId } : {}),
       sourceFactIds: location.sourceFactIds.filter((id) => publicFactById.has(id))
     }];
   });
@@ -94,14 +98,14 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
   const createdAt = input.createdAt ?? new Date().toISOString();
 
   const withoutHash = {
-    schemaVersion: "site-public-build-input-v1" as const,
+    schemaVersion: "site-public-build-input-v3" as const,
     id: input.id,
     siteId: state.siteId,
     businessId: state.businessId,
     createdAt,
     businessStateRevision: state.revision,
     siteIntentRevision: intent.revision,
-    verticalModule,
+    domainContext,
     business: {
       name: state.identity.name,
       description: descriptionFact ? state.identity.description : undefined,
@@ -129,7 +133,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     assetRevisionIds
   };
 
-  return sitePublicBuildInputV1Schema.parse({
+  return sitePublicBuildInputV3Schema.parse({
     ...withoutHash,
     inputHash: sha256(stableJson(withoutHash))
   });

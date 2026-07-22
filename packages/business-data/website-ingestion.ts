@@ -1,50 +1,56 @@
 import { randomUUID } from "node:crypto";
-import { crawlUrl, type CrawlAssessment, type ExtractedBusinessFacts } from "@/lib/crawler";
+import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
+import { type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { gatherPublicPresenceSignals, type PublicPresenceEnrichment } from "@/lib/public-presence";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
   assetRevisionV1Schema,
-  businessStateV2Schema,
+  businessStateV3Schema,
   formDefinitionV2Schema,
   platformSiteRecordSchema,
-  siteIntentV2Schema,
+  siteIntentV3Schema,
   sourceSnapshotV1Schema,
   type AssetRevisionRefV1,
   type AssetRevisionV1,
   type BusinessOfferingV2,
-  type BusinessStateV2,
+  type BusinessStateV3,
   type FormDefinitionV2,
   type PlatformSiteRecord,
   type BusinessFactV2,
-  type SiteIntentV2,
+  type SiteIntentV3,
   type SourceSnapshotV1,
   type VerticalContextModuleV1
 } from "@/packages/site-contracts";
-import { listProductionVerticalContexts, resolveProductionVerticalContext } from "@/packages/vertical-context";
+import { matchVerticalContext } from "@/packages/vertical-context";
 import { sha256, stableJson } from "./hash";
+import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestionV2 } from "./generation-crawler";
 import { understandWebsite } from "./understanding";
+import { canonicalOfferingCandidates, type CanonicalOfferingCandidate } from "./offering-normalization";
 
 export type RetainedAssetBinaryV1 = {
   revision: AssetRevisionV1;
   bytes: Buffer;
 };
 
-export type WebsiteIngestionResultV1 = {
+export type WebsiteIngestionResultV2 = {
   site: PlatformSiteRecord;
-  state: BusinessStateV2;
-  intent: SiteIntentV2;
+  state: BusinessStateV3;
+  intent: SiteIntentV3;
   forms: FormDefinitionV2[];
   sourceSnapshots: SourceSnapshotV1[];
   retainedAssets: RetainedAssetBinaryV1[];
   sourceUrl: string;
   crawl: CrawlAssessment;
+  generationIngestion: WebsiteGenerationIngestionV2;
+  validationEligibility: "frozen_validation" | "private_review_only";
+  domainContext?: VerticalContextModuleV1;
 };
 
-export class UnsupportedWebsiteVerticalError extends Error {
-  readonly code = "unsupported_vertical";
-  constructor(readonly observedVertical: string | undefined) {
-    super(`Lodesta V1 does not support ${observedVertical ?? "this unclassified business vertical"}.`);
+export class WebsiteCrawlError extends Error {
+  readonly code = "website_crawl_failed";
+  constructor(message: string, readonly replacementEligible = false) {
+    super(message);
   }
 }
 
@@ -56,33 +62,38 @@ export async function ingestWebsite(input: {
   workspaceId?: string;
   now?: string;
   signal?: AbortSignal;
-}): Promise<WebsiteIngestionResultV1> {
-  const sourceUrl = await assertPublicFetchUrl(input.url);
+}): Promise<WebsiteIngestionResultV2> {
+  let sourceUrl: string;
+  try {
+    sourceUrl = await assertPublicFetchUrl(input.url);
+  } catch (error) {
+    throw new WebsiteCrawlError(error instanceof Error ? error.message : String(error), true);
+  }
   const now = input.now ?? new Date().toISOString();
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
-  const crawl = await crawlUrl(sourceUrl, { maxInternalPages: 12 });
-  if (!crawl.fetched) throw new Error(crawl.error ?? "The source website could not be crawled.");
+  const { ingestion: generationIngestion, crawl } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
+  if (!crawl.fetched) throw new WebsiteCrawlError(crawl.error ?? "The source website could not be crawled.", true);
 
   const presence = await gatherPublicPresenceSignals({ url: sourceUrl, crawl });
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required for production website ingestion; deterministic understanding is test-only.");
   }
-  const supportedVerticals = listProductionVerticalContexts();
   const understanding = await understandWebsite({
     sourceUrl,
-    crawl,
-    supportedVerticals,
+    ingestion: generationIngestion,
     publicPresence: presence,
     signal: input.signal
   });
 
-  const facts = mergeFacts(crawl.extractedFacts, presence);
-  const verticalModule = resolveVerticalModule(understanding.vertical, crawl.extractedFacts);
-  if (!verticalModule) throw new UnsupportedWebsiteVerticalError(understanding.vertical);
-  const name = clean(facts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
+  const facts = mergeFacts(crawl.extractedFacts, presence, sourceUrl);
+  const domainContext = resolveDomainContext(crawl.extractedFacts);
+  const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
+  const understoodName = clean(understanding.businessName.value);
+  const sourceBackedName = preferBusinessNameCandidate(crawlName, understoodName, new URL(sourceUrl).hostname);
+  const name = clean(sourceBackedName) ?? clean(facts.name);
   if (!name) throw new Error("The source website did not expose a business name.");
-  const sourceContentHash = sha256(stableJson(crawl));
+  const sourceContentHash = sha256(stableJson({ generationIngestion, crawl }));
   const sourceSnapshotId = sourceSnapshotIdForBusiness(businessId, sourceContentHash);
   const sourceSnapshot = sourceSnapshotV1Schema.parse({
     schemaVersion: "source-snapshot-v1",
@@ -93,31 +104,34 @@ export async function ingestWebsite(input: {
     contentHash: sourceContentHash,
     capturedAt: now,
     payload: {
-      crawl,
+      ingestion: generationIngestion,
       publicPresence: presence,
-      understanding: {
-        vertical: understanding.vertical,
-        verticalConfidence: understanding.verticalConfidence,
-        cleanedServices: understanding.cleanedServices,
-        primaryConversionGoal: understanding.primaryConversionGoal,
-        brandExpression: understanding.brandExpression
-      }
+      understanding
     }
   });
 
   const blockIndex = crawl.pageSummaries.flatMap((page) => page.sourceTextBlocks);
+  const evidenceClassByUrl = new Map(generationIngestion.pages.flatMap((page) => [
+    [page.url, page.evidenceClass] as const,
+    [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
+  ]));
   const publicFacts: BusinessFactV2[] = [];
   const addFact = (
     kind: BusinessFactV2["kind"],
     label: string,
     value: unknown,
     confidence = 0.78,
-    publicEligible = true
+    publicEligible = true,
+    evidence?: { sourceBlockId: string; sourceUrl: string; evidenceClass: EvidenceClass }
   ) => {
     if (value === undefined || value === null || value === "") return undefined;
     const text = displayValue(value);
     const id = `fact_${kind}_${sha256(text).slice(7, 19)}`;
-    const block = supportingBlock(blockIndex, text);
+    const block = evidence
+      ? blockIndex.find((candidate) => candidate.id === evidence.sourceBlockId && candidate.sourceUrl === evidence.sourceUrl)
+      : supportingBlock(blockIndex, text);
+    const evidenceClass: EvidenceClass = evidence?.evidenceClass ?? (block ? evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" : "first_party");
+    const automaticallyEligible = publicEligible && evidenceClass === "first_party";
     publicFacts.push({
       id,
       kind,
@@ -127,17 +141,20 @@ export async function ingestWebsite(input: {
         factId: id,
         sourceSnapshotId,
         ...(block ? { sourceBlockId: block.id, sourceUrl: block.sourceUrl } : publicEligible ? { sourceUrl } : {}),
+        evidenceClass,
         observedAt: now,
         confidence,
         ownerConfirmed: false
       },
-      publicEligible
+      publicEligible: automaticallyEligible
     });
     return id;
   };
 
-  const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
-  const nameFactId = addFact("business_name", "Business name", name, 0.9, sameValue(name, crawlName))!;
+  const understoodNameEvidence = sameValue(name, understoodName)
+    ? understanding.businessName.evidence.find((reference) => reference.evidenceClass === "first_party")
+    : undefined;
+  const nameFactId = addFact("business_name", "Business name", name, 0.9, sameValue(name, crawlName) || Boolean(understoodNameEvidence), understoodNameEvidence)!;
   addFact("description", "Business description", clean(facts.description), 0.7, sameValue(facts.description, crawl.extractedFacts.description));
   const phoneFactId = addFact("phone", "Phone", clean(facts.phone), 0.82, sameValue(facts.phone, crawl.extractedFacts.phone));
   addFact("email", "Email", clean(facts.email), 0.78, sameValue(facts.email, crawl.extractedFacts.email));
@@ -152,12 +169,21 @@ export async function ingestWebsite(input: {
   );
 
   const serviceNames = unique([
-    ...understanding.cleanedServices.map((service) => service.name),
+    ...understanding.cleanedServices.filter((service) => service.evidence.some((reference) => reference.evidenceClass === "first_party")).map((service) => service.value),
     ...facts.services
   ]).filter((service) => serviceIsSourceBacked(service, crawl)).slice(0, 24);
-  const offerings = serviceNames.map((service, index) => offeringFromService(service, index, verticalModule, addFact));
-  const serviceAreas = unique(facts.serviceAreas).slice(0, 50).map((label, index) => {
-    const factId = addFact("service_area", "Service area", label, 0.7)!;
+  const offerings = canonicalOfferingCandidates(serviceNames, domainContext)
+    .slice(0, 24)
+    .map((service, index) => offeringFromService(service, index, addFact));
+  const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
+  const crawlServiceAreas = unique(crawl.extractedFacts.serviceAreas);
+  const modelLocationFallback = !eligibleAddress && !crawlServiceAreas.length ? understanding.locationOrServiceArea : undefined;
+  const observedServiceAreas = unique([...crawlServiceAreas, ...(modelLocationFallback ? [modelLocationFallback.value] : [])]);
+  const serviceAreas = observedServiceAreas.slice(0, 50).map((label, index) => {
+    const reference = modelLocationFallback && label === modelLocationFallback.value
+      ? modelLocationFallback.evidence.find((candidate) => candidate.evidenceClass === "first_party")
+      : undefined;
+    const factId = addFact("service_area", "Service area", label, 0.7, true, reference)!;
     return { id: `service_area_${index + 1}`, label, sourceFactIds: [factId] };
   });
 
@@ -205,16 +231,15 @@ export async function ingestWebsite(input: {
   }] : [];
 
   const stateWithoutHash = {
-    schemaVersion: "business-state-v2" as const,
+    schemaVersion: "business-state-v3" as const,
     businessId,
     siteId,
     revision: 1,
     updatedAt: now,
-    vertical: { id: verticalModule.id, moduleVersion: verticalModule.version, status: "reviewed" as const },
     identity: {
       name,
       description: clean(facts.description),
-      categories: unique([preferredBusinessTerm(verticalModule), ...facts.categories]).slice(0, 20)
+      categories: unique([understanding.observedCategory.value, preferredBusinessTerm(domainContext), ...facts.categories]).slice(0, 20)
     },
     contacts: { phone: clean(facts.phone), email: clean(facts.email) },
     locations,
@@ -225,7 +250,7 @@ export async function ingestWebsite(input: {
     links,
     facts: publicFacts
   };
-  const state = businessStateV2Schema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
+  const state = businessStateV3Schema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
   const slug = input.slug ?? safeSlug(name);
   const form = formDefinitionV2Schema.parse({
     schemaVersion: "form-definition-v2",
@@ -238,10 +263,10 @@ export async function ingestWebsite(input: {
       { id: "name", label: "Name", type: "text", required: true },
       { id: "phone", label: "Phone", type: "phone", required: true },
       { id: "email", label: "Email", type: "email", required: false },
-      { id: "message", label: `How can the ${preferredBusinessTerm(verticalModule)} help?`, type: "textarea", required: false }
+      { id: "message", label: `How can this ${preferredBusinessTerm(domainContext)} help?`, type: "textarea", required: false }
     ],
     submitLabel: "Request an estimate",
-    successMessage: `Thanks. The ${preferredBusinessTerm(verticalModule)} will follow up soon.`,
+    successMessage: "Thanks. The business will follow up soon.",
     createdAt: now
   });
   const pageRequirements = [
@@ -257,26 +282,32 @@ export async function ingestWebsite(input: {
     { id: "page_contact", purpose: "contact" as const, slug: "contact", title: "Contact", required: true }
   ];
   const intentWithoutHash = {
-    schemaVersion: "site-intent-v2" as const,
+    schemaVersion: "site-intent-v3" as const,
     id: `intent_${idPart(randomUUID())}`,
     siteId,
     revision: 1,
     updatedAt: now,
-    audience: verticalModule.customerJourneys[0],
+    audience: domainContext?.customerJourneys[0],
     positioning: understanding.businessStory?.summary ?? clean(facts.description),
     voice: unique([understanding.brandExpression.voiceRegister, "clear", "capable"]).filter(Boolean) as string[],
-    primaryConversion: conversionGoal(understanding.primaryConversionGoal),
+    primaryConversion: conversionGoal(understanding.primaryConversion.goal),
     pageRequirements,
     brandConstraints: {
-      preferredColors: understanding.brandExpression.paletteSeed.preferredHex ? [understanding.brandExpression.paletteSeed.preferredHex] : [],
+      preferredColors: [],
       prohibitedColors: [],
       preserveLogo: true,
       notes: []
     },
     enabledCapabilities: ["forms", "analytics", "maps", "gallery", "disclosure"] as const,
+    agentAccessPolicy: {
+      search: "allow" as const,
+      aiInput: "allow" as const,
+      aiTrain: "disallow" as const,
+      trainingPermission: { status: "not_granted" as const }
+    },
     notes: []
   };
-  const intent = siteIntentV2Schema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
+  const intent = siteIntentV3Schema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
   const site = platformSiteRecordSchema.parse({
     id: siteId,
     workspaceId: input.workspaceId,
@@ -287,7 +318,30 @@ export async function ingestWebsite(input: {
     updatedAt: now
   });
   void phoneFactId;
-  return { site, state, intent, forms: [form], sourceSnapshots: [sourceSnapshot], retainedAssets, sourceUrl, crawl };
+  const minimumKnowledgeFailures = [
+    !state.identity.name ? "business_name" : undefined,
+    !state.offerings.length && !state.identity.categories.length ? "offering_or_category" : undefined,
+    !understanding.primaryConversion ? "conversion_path" : undefined,
+    !state.serviceAreas.some((area) => area.sourceFactIds.some((factId) => state.facts.some((fact) => fact.id === factId && fact.publicEligible)))
+      && !state.locations.some((location) => location.sourceFactIds.some((factId) => state.facts.some((fact) => fact.id === factId && fact.publicEligible)))
+      ? "location_or_service_area" : undefined
+  ].filter(Boolean);
+  if (minimumKnowledgeFailures.length) {
+    throw new WebsiteCrawlError(`Minimum business knowledge was not established: ${minimumKnowledgeFailures.join(", ")}.`);
+  }
+  return {
+    site,
+    state,
+    intent,
+    forms: [form],
+    sourceSnapshots: [sourceSnapshot],
+    retainedAssets,
+    sourceUrl,
+    crawl,
+    generationIngestion,
+    validationEligibility: generationIngestion.coverage === "incomplete" ? "private_review_only" : "frozen_validation",
+    domainContext
+  };
 }
 
 async function retainReferenceAssets(input: {
@@ -336,7 +390,25 @@ async function retainReferenceAssets(input: {
       // Individual media failures do not invalidate otherwise usable business evidence.
     }
   }
-  return results;
+  return deduplicateRetainedAssets(results);
+}
+
+export function deduplicateRetainedAssets(assets: RetainedAssetBinaryV1[]) {
+  const retained = new Map<string, RetainedAssetBinaryV1>();
+  for (const asset of assets) {
+    const existing = retained.get(asset.revision.id);
+    if (!existing) {
+      retained.set(asset.revision.id, asset);
+      continue;
+    }
+    if (
+      existing.revision.businessId !== asset.revision.businessId ||
+      existing.revision.contentHash !== asset.revision.contentHash
+    ) {
+      throw new Error(`Immutable asset revision collision for ${asset.revision.id}.`);
+    }
+  }
+  return [...retained.values()];
 }
 
 export function sourceSnapshotIdForBusiness(businessId: string, contentHash: string) {
@@ -368,12 +440,12 @@ async function readBodyWithLimit(response: Response, maximumBytes: number) {
   }
 }
 
-function mergeFacts(crawl: ExtractedBusinessFacts, presence: PublicPresenceEnrichment | undefined): ExtractedBusinessFacts {
+function mergeFacts(crawl: ExtractedBusinessFacts, presence: PublicPresenceEnrichment | undefined, sourceUrl: string): ExtractedBusinessFacts {
   const enriched = presence?.facts ?? {};
   return {
     ...enriched,
     ...crawl,
-    name: crawl.name ?? enriched.name,
+    name: preferBusinessNameCandidate(crawl.name, enriched.name, new URL(sourceUrl).hostname),
     description: crawl.description ?? enriched.description,
     phone: crawl.phone ?? enriched.phone,
     email: crawl.email ?? enriched.email,
@@ -401,20 +473,15 @@ function serviceIsSourceBacked(service: string, crawl: CrawlAssessment) {
 }
 
 function offeringFromService(
-  service: string,
+  service: CanonicalOfferingCandidate,
   index: number,
-  verticalModule: VerticalContextModuleV1,
   addFact: (kind: BusinessFactV2["kind"], label: string, value: unknown, confidence?: number) => string | undefined
 ): BusinessOfferingV2 {
-  const normalized = normalizedText(service);
-  const catalog = verticalModule.offeringCatalog.find((entry) =>
-    [entry.name, ...entry.aliases].some((value) => normalized.includes(normalizedText(value)) || normalizedText(value).includes(normalized))
-  );
-  const factId = addFact("offering", "Service", service, 0.72)!;
+  const factId = addFact("offering", "Service", service.sourceName, 0.72)!;
   return {
-    id: `offering_${index + 1}_${safeSlug(service).slice(0, 60)}`,
-    ...(catalog ? { catalogId: catalog.id } : { customName: service }),
-    name: catalog?.name ?? service,
+    id: `offering_${index + 1}_${safeSlug(service.name).slice(0, 60)}`,
+    ...(service.catalogId ? { catalogId: service.catalogId } : { customName: service.name }),
+    name: service.name,
     status: "observed",
     visibility: "preview",
     pageMode: index < 6 ? "dedicated" : "shared",
@@ -428,7 +495,7 @@ function observedProof(
   sourceSnapshotId: string,
   facts: BusinessFactV2[],
   now: string
-): BusinessStateV2["proof"] {
+): BusinessStateV3["proof"] {
   const candidates = crawl.pageSummaries
     .filter((page) => page.purposeTags.includes("reviews"))
     .flatMap((page) => page.sourceTextBlocks)
@@ -447,6 +514,7 @@ function observedProof(
         sourceSnapshotId,
         sourceBlockId: block.id,
         sourceUrl: block.sourceUrl,
+        evidenceClass: "third_party",
         observedAt: now,
         confidence: 0.65,
         ownerConfirmed: false
@@ -482,19 +550,12 @@ function supportingBlock(blocks: SourceTextBlock[], value: string) {
   });
 }
 
-function resolveVerticalModule(observedVertical: string, facts: ExtractedBusinessFacts) {
-  return resolveProductionVerticalContext({
-    observedVertical,
-    evidenceText: [
-      ...facts.categories,
-      ...facts.services,
-      facts.description ?? ""
-    ].join(" ")
-  });
+function resolveDomainContext(facts: ExtractedBusinessFacts) {
+  return matchVerticalContext([...facts.categories, ...facts.services, facts.description ?? ""].join(" "));
 }
 
-function preferredBusinessTerm(verticalModule: VerticalContextModuleV1) {
-  return verticalModule.terminology.business?.[0] ?? "business";
+function preferredBusinessTerm(domainContext?: VerticalContextModuleV1) {
+  return domainContext?.terminology.business?.[0] ?? "business";
 }
 
 function formatAddress(address: ExtractedBusinessFacts["address"]) {

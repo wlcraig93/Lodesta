@@ -8,7 +8,7 @@ export type CachePolicy = {
 };
 
 const noStore = "no-store, no-cache, must-revalidate, proxy-revalidate";
-export const publicHostVary = "Host, X-Forwarded-Host";
+export const publicHostVary = "Accept, Host, X-Forwarded-Host";
 
 export function cachePolicyForPathname(pathname: string, options: { customDomain?: boolean } = {}): CachePolicy {
   if (pathname.startsWith("/_next/static/") || pathname.startsWith("/_next/image")) return { kind: "static_next" };

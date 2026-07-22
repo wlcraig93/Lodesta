@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { agenticSiteWorkflow } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform";
 import { authorizedSiteActor } from "../auth";
 
 const sessionSchema = z.object({ siteId: z.string().min(1) }).strict();
@@ -39,9 +40,14 @@ async function workspacePayload(siteId: string, actorId: string) {
     session ? sitePlatformRepository.listAgentRuns(session.id) : []
   ]);
   const artifacts = await Promise.all(versions.map((version) => sitePlatformRepository.getBuildArtifact(version.artifactId)));
+  const activeRun = runs.find((run) => run.status === "queued" || run.status === "running");
+  const activeSpans = activeRun ? await sitePlatformRepository.listTraceSpans(activeRun.id, { limit: 500 }) : [];
+  const candidate = versions.find((version) => version.status === "candidate");
+  const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
+  const openFindings = (await sitePlatformRepository.listOperatorQueue()).filter((item) => item.siteId === siteId && item.reason === "subjective_finding" && ["open", "in_review"].includes(item.status));
   const versionRoutes = Object.fromEntries(versions.map((version, index) => [
     version.id,
     artifacts[index]?.routes.map((route) => ({ path: route.path, title: route.title })) ?? []
   ]));
-  return { site, session, input, versions, versionRoutes, messages, runs };
+  return { site, session, input, versions, versionRoutes, messages, runs, readiness, openFindings, activeRunActivity: activeSpans.at(-1)?.name };
 }

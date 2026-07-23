@@ -13,8 +13,8 @@ Honor an explicit owner edit precisely and preserve unrelated working behavior. 
 Release boundaries:
 - Keep src/site.tsx and src/styles.css as entry files; safe local .ts, .tsx, and .css modules may live anywhere beneath src/.
 - Import only React, safe local modules, and named components from ../platform/sdk. Do not add packages, network access, scripts, embeds, secrets, backends, dependencies, or browser JavaScript.
-- Export siteDefinition with siteName, routes, factDeclarations, and capabilityBindings. Every requested route should have working navigation and a React element unless the owner explicitly removes it.
-- Use the platform SDK for eligible facts, assets, forms, maps, links, galleries, and disclosures. IDs must come from the public evidence packet. The trusted compiler derives capability bindings, so set capabilityBindings to [].
+- Export siteDefinition with siteName and routes. Include factDeclarations only for factual free text that is not rendered through the SDK. Every requested route should have working navigation and a React element unless the owner explicitly removes it.
+- Use the platform SDK for eligible facts, assets, forms, maps, links, galleries, and disclosures. IDs must come from the public evidence packet. The trusted compiler owns canonical metadata and derives capability bindings.
 - SDK-bound facts are declared automatically. Declare factual free text with its exact rendered text and supporting public fact IDs. Do not invent ratings, reviews, credentials, awards, longevity, warranties, prices, timelines, service areas, or service details.
 - Keep the output static, semantic, responsive, accessible, and free of source/research language. CSS cannot use @import, @font-face, url(), external fonts, or executable syntax.`;
 

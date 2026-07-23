@@ -5,9 +5,14 @@ import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 
 const migrationDirectory = "supabase/migrations";
-const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith(".sql"));
-assert.deepEqual(migrations, ["202607230001_canonical_baseline.sql"], "The public schema must have exactly one canonical migration.");
+const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith(".sql")).sort();
+assert.deepEqual(
+  migrations,
+  ["202607230001_canonical_baseline.sql", "202607230002_typed_website_setup_failures.sql"],
+  "The public schema must use the canonical baseline followed by the reviewed forward migrations."
+);
 const baseline = await readFile(`${migrationDirectory}/${migrations[0]}`, "utf8");
+const typedFailures = await readFile(`${migrationDirectory}/${migrations[1]}`, "utf8");
 
 const requiredTables = [
   "businesses", "sites", "business_states", "site_intents", "source_snapshots", "asset_revisions",
@@ -49,6 +54,11 @@ assert(baseline.includes("pg_advisory_xact_lock") && baseline.includes("private_
 assert(baseline.includes("hashtextextended('site-agent-global-capacity', 0)"), "Global authoring capacity is not claimed atomically.");
 assert(baseline.includes("enable row level security") && baseline.includes("revoke all on table %I from public, anon, authenticated"), "Server-only RLS posture is missing.");
 assert(baseline.includes("revoke all on schema public from public, anon, authenticated"), "Browser roles retain public-schema privileges.");
+assert(
+  typedFailures.includes("failure_code = 'crawl_temporarily_unavailable'")
+    && !baseline.includes("'website_crawl_failed'"),
+  "Legacy website crawl failures must be remapped to the canonical typed failure set."
+);
 const businessesBody = baseline.match(/create table businesses\s*\((.*?)\n\);/s)?.[1] ?? "";
 const businessColumns = [...businessesBody.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((match) => match[1]);
 assert.deepEqual(
@@ -75,7 +85,7 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
 
 console.log(JSON.stringify({
   ok: true,
-  migration: migrations[0],
+  migrations,
   tables: declaredTables.length,
   functions: declaredFunctions.length,
   live: process.env.LODESTA_VERIFY_LIVE_DATABASE === "true"

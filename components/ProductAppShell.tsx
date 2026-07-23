@@ -47,6 +47,9 @@ export function ProductAppShell({
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const base = site ? `/workspace/${site.slug}` : "/account";
+  const websiteHref = site ? `${base}/website` : undefined;
+  const focusedEditor = Boolean(websiteHref && (pathname === websiteHref || pathname.startsWith(`${websiteHref}/`)));
+  const compactNavigation = focusedEditor || (ready && collapsed);
   const adminPreview = accessMode === "platform_admin_preview";
   const sessionLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : "Owner account";
   const accountActions = productAccountActions({ base, siteSlug: site?.slug, canAccessAdmin, tokenAccess, authConfigured, accountEmail });
@@ -102,15 +105,39 @@ export function ProductAppShell({
   }
 
   return (
-    <div className="owner-workspace-shell product-app-shell" data-collapsed={ready && collapsed ? "true" : undefined} data-ready={ready ? "true" : undefined} data-has-site={site ? "true" : "false"}>
+    <div
+      className="owner-workspace-shell product-app-shell"
+      data-collapsed={compactNavigation ? "true" : undefined}
+      data-shell-mode={focusedEditor ? "focused-editor" : undefined}
+      data-ready={ready ? "true" : undefined}
+      data-has-site={site ? "true" : "false"}
+    >
       <a className="owner-workspace-skip" href="#product-app-main">Skip to content</a>
       <aside className="owner-workspace-sidebar">
         <div className="owner-workspace-brand-row">
-          <Link className="owner-workspace-brand" href="/account" aria-label="Lodesta account"><img src="/brand/lodesta-mark.svg" alt="" /><span>Lodesta</span></Link>
-          <button className="owner-workspace-collapse" type="button" aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} onClick={toggleCollapsed}><CollapseIcon collapsed={collapsed} /></button>
+          <Link
+            className="owner-workspace-brand"
+            href="/account"
+            aria-label={focusedEditor ? "All websites" : "Lodesta account"}
+            data-sidebar-tooltip={focusedEditor ? "All websites" : undefined}
+          >
+            <img src="/brand/lodesta-mark.svg" alt="" />
+            <span>Lodesta</span>
+          </Link>
+          {!focusedEditor ? (
+            <button
+              className="owner-workspace-collapse"
+              type="button"
+              aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+              data-sidebar-tooltip={collapsed ? "Expand navigation" : undefined}
+              onClick={toggleCollapsed}
+            >
+              <CollapseIcon collapsed={collapsed} />
+            </button>
+          ) : null}
         </div>
 
-        <WebsiteSwitcher site={site} sites={sites} compact={collapsed} adminPreview={adminPreview} />
+        <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} />
 
         {site ? (
           <nav className="owner-workspace-nav" aria-label="Website workspace">
@@ -118,14 +145,36 @@ export function ProductAppShell({
               const href = `${base}${item.suffix}`;
               const active = item.key === "overview" ? pathname === base : pathname === href || pathname.startsWith(`${href}/`);
               const Icon = item.icon;
-              return <Link key={item.key} href={href} aria-current={active ? "page" : undefined} title={collapsed ? item.label : undefined}><Icon /><span>{item.label}</span></Link>;
+              return (
+                <Link
+                  key={item.key}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={compactNavigation ? item.label : undefined}
+                  data-sidebar-tooltip={compactNavigation ? item.label : undefined}
+                >
+                  <Icon />
+                  <span>{item.label}</span>
+                </Link>
+              );
             })}
           </nav>
         ) : null}
 
         <div className="owner-workspace-sidebar-bottom">
-          {site ? <Link className="owner-workspace-settings-link" href={`${base}/settings`} aria-current={pathname.startsWith(`${base}/settings`) ? "page" : undefined} title={collapsed ? "Website settings" : undefined}><SettingsIcon /><span>Website settings</span></Link> : null}
-          <AccountMenu label={accountLabel} sessionLabel={sessionLabel} actions={accountActions} />
+          {site ? (
+            <Link
+              className="owner-workspace-settings-link"
+              href={`${base}/settings`}
+              aria-current={pathname.startsWith(`${base}/settings`) ? "page" : undefined}
+              aria-label={compactNavigation ? "Website settings" : undefined}
+              data-sidebar-tooltip={compactNavigation ? "Website settings" : undefined}
+            >
+              <SettingsIcon />
+              <span>Website settings</span>
+            </Link>
+          ) : null}
+          <AccountMenu label={accountLabel} sessionLabel={sessionLabel} actions={accountActions} compact={compactNavigation} />
         </div>
       </aside>
 
@@ -183,7 +232,13 @@ function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerW
     : <><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span className="owner-workspace-site-copy"><strong>All websites</strong><small>{sites.length ? `${sites.length} connected` : "Start with your first site"}</small></span></>;
   return (
     <details className="owner-workspace-site-switcher product-website-switcher" data-admin-preview={adminPreview ? "true" : undefined}>
-      <summary title={compact ? site?.name ?? "All websites" : undefined}>{content}<ChevronIcon /></summary>
+      <summary
+        aria-label={compact ? `Switch website. Current: ${site?.name ?? "All websites"}` : undefined}
+        data-sidebar-tooltip={compact ? site?.name ?? "All websites" : undefined}
+      >
+        {content}
+        <ChevronIcon />
+      </summary>
       <div>
         <span>Websites</span>
         <Link href="/account" aria-current={!site ? "page" : undefined}><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span><strong>All websites</strong><small>Account overview</small></span></Link>

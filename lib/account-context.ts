@@ -56,15 +56,13 @@ export async function getAccountContext() {
 
 function hostnameLabel(value: string) { try { return new URL(value).hostname.replace(/^www\./, ""); } catch { return "New website"; } }
 function setupStatusLabel(view: WebsiteSetupView) {
-  if (view.phase === "review_draft") return "Draft ready";
   if (view.phase === "needs_attention") return "Needs attention";
   if (view.phase === "building") return "Building";
   return "Queued";
 }
-function setupNextLabel(view: WebsiteSetupView) { return view.phase === "review_draft" ? "Review draft" : view.phase === "needs_attention" ? "View next step" : "View progress"; }
+function setupNextLabel(view: WebsiteSetupView) { return view.phase === "needs_attention" ? "View next step" : "View progress"; }
 function setupDetail(view: WebsiteSetupView) {
-  if (view.phase === "review_draft") return "Your private website draft is ready to review.";
-  if (view.phase === "needs_attention") return view.setup.failureReason ?? view.run?.failureReason ?? "This setup needs your attention.";
-  if (view.phase === "building") return "Lodesta is building a private draft from your existing website.";
+  if (view.phase === "needs_attention") return view.message ?? "This setup needs your attention.";
+  if (view.phase === "building") return "Lodesta is reading your website and building the first version.";
   return "Your website is waiting for the setup worker.";
 }

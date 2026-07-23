@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
 import { deriveSitePublicationReadiness } from "@/packages/site-platform";
 import { authorizedSiteActor } from "../auth";
 
@@ -48,5 +48,16 @@ async function workspacePayload(siteId: string, actorId: string) {
     version.id,
     artifacts[index]?.routes.map((route) => ({ path: route.path, title: route.title })) ?? []
   ]));
-  return { site, session, input, versions, versionRoutes, messages, runs, readiness, openFindings: [], activeRunActivity: activeEvents.at(-1)?.name };
+  return {
+    site,
+    session,
+    input,
+    versions,
+    versionRoutes,
+    messages,
+    runs: runs.map(ownerSiteAgentRun),
+    readiness,
+    openFindings: [],
+    activeRunActivity: activeEvents.at(-1)?.name
+  };
 }

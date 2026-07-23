@@ -14,11 +14,13 @@ export type AccountAction =
 export function AccountMenu({
   label,
   sessionLabel,
-  actions
+  actions,
+  compact = false
 }: {
   label: string;
   sessionLabel: string;
   actions: AccountAction[];
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -55,6 +57,8 @@ export function AccountMenu({
         aria-haspopup="true"
         aria-controls={popoverId}
         aria-expanded={open}
+        aria-label={compact ? `Open account menu for ${label}` : undefined}
+        data-sidebar-tooltip={compact ? "Account" : undefined}
         onClick={() => setOpen((current) => !current)}
       >
         <AccountAvatar label={label} />

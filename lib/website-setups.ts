@@ -1,15 +1,16 @@
 import { validatePublicFetchUrl } from "@/lib/url-safety";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import type { WebsiteSetup } from "@/packages/platform-operations";
+import type { WebsiteSetup, WebsiteSetupFailureCode } from "@/packages/platform-operations";
 import { normalizeBootstrapSourceUrl } from "@/packages/site-platform/source-url";
 
 export type WebsiteSetupView = {
-  setup: WebsiteSetup;
-  phase: "queued" | "building" | "review_draft" | "needs_attention" | "canceled";
+  setup: Omit<WebsiteSetup, "failureReason">;
+  phase: "queued" | "building" | "needs_attention" | "canceled";
   site?: { id: string; slug: string };
-  run?: { id: string; status: "queued" | "running" | "needs_input" | "succeeded" | "failed" | "cancelled"; candidateVersionId?: string; failureReason?: string };
+  run?: { id: string; status: "queued" | "running" | "needs_input" | "succeeded" | "failed" | "cancelled"; candidateVersionId?: string };
   canRetry: boolean;
   canCancel: boolean;
+  message?: string;
   openPath?: string;
 };
 
@@ -28,10 +29,20 @@ export async function validateWebsiteSetupSource(value: string) {
 
 export function isRetriableWebsiteSetupFailure(setup: WebsiteSetup) {
   return setup.status === "failed" && (
-    setup.failureCode === "website_crawl_failed"
+    setup.failureCode === "crawl_temporarily_unavailable"
     || setup.failureCode === "bootstrap_failed"
     || setup.failureCode === "worker_interrupted"
   );
+}
+
+export function websiteSetupOwnerMessage(code?: WebsiteSetupFailureCode) {
+  if (code === "source_invalid") return "This address is no longer a valid public website. Use a different URL.";
+  if (code === "crawl_temporarily_unavailable") return "We couldn’t read this website right now. Try again.";
+  if (code === "crawl_robots_disallowed") return "This website doesn’t allow automated reading. Try a different website.";
+  if (code === "crawl_unsupported_content" || code === "crawl_primary_unavailable") {
+    return "This address didn’t return a readable website. Try a different URL.";
+  }
+  return "We couldn’t finish creating this website. Try again.";
 }
 
 export async function getWebsiteSetupView(setup: WebsiteSetup): Promise<WebsiteSetupView> {
@@ -44,22 +55,21 @@ export async function getWebsiteSetupView(setup: WebsiteSetup): Promise<WebsiteS
   if (setup.status === "canceled") phase = "canceled";
   else if (setup.status === "failed") phase = "needs_attention";
   else if (setup.status === "queued" || setup.status === "processing") phase = setup.status === "queued" ? "queued" : "building";
-  else if (run?.status === "succeeded" && run.candidateVersionId) phase = "review_draft";
-  else if (run?.status === "failed" || run?.status === "cancelled" || run?.status === "needs_input") phase = "needs_attention";
   else phase = "building";
 
+  const { failureReason: _failureReason, ...ownerSetup } = setup;
   return {
-    setup,
+    setup: ownerSetup,
     phase,
     site: site ? { id: site.id, slug: site.slug } : undefined,
     run: run ? {
       id: run.id,
       status: run.status,
-      candidateVersionId: run.candidateVersionId,
-      failureReason: run.failureReason
+      candidateVersionId: run.candidateVersionId
     } : undefined,
     canRetry: isRetriableWebsiteSetupFailure(setup),
     canCancel: setup.status !== "canceled" && !site?.publishedVersionId,
-    openPath: site ? `/workspace/${site.slug}` : undefined
+    message: setup.status === "failed" ? websiteSetupOwnerMessage(setup.failureCode) : undefined,
+    openPath: site ? `/workspace/${site.slug}/website` : undefined
   };
 }

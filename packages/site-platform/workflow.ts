@@ -10,8 +10,26 @@ import {
   type ArtifactBlobStore,
   type WorkspaceSourceSidecar
 } from "@/packages/site-artifacts";
-import { ManagerNeedsInputError, WebsiteManagerAgent, taskSkillFor, websiteManagerPromptVersion, workspaceSourceFileSchema, workspaceSourcePolicyVersion, type ManagerRunRequest, type WorkspaceSourceFile } from "@/packages/site-agent";
-import { configuredSiteSandboxClient, type SiteSandboxClient } from "@/packages/site-sandbox";
+import {
+  classifySiteAuthoringFailure,
+  isSiteAuthoringTerminalError,
+  managerLimitsForKind,
+  ManagerNeedsInputError,
+  SiteAuthoringTerminalError,
+  WebsiteManagerAgent,
+  taskSkillFor,
+  websiteManagerPromptVersion,
+  workspaceSourceFileSchema,
+  workspaceSourcePolicyVersion,
+  type ManagerRunRequest,
+  type WorkspaceSourceFile
+} from "@/packages/site-agent";
+import {
+  configuredSiteSandboxClient,
+  SiteSandboxArtifactContractError,
+  SiteSandboxRequestError,
+  type SiteSandboxClient
+} from "@/packages/site-sandbox";
 import {
   siteAuthoringPlatformVersion,
   operatorQueueItemSchema,
@@ -30,7 +48,12 @@ import {
   type SiteVersion,
   type SiteWorkspaceRevision
 } from "@/packages/site-contracts";
-import { sandboxImageDigest, siteToolchainVersion, siteVerificationPolicyVersion } from "@/packages/site-contracts/platform-versions";
+import {
+  expectedSiteSandboxManifest,
+  sandboxImageDigest,
+  siteToolchainVersion,
+  siteVerificationPolicyVersion
+} from "@/packages/site-contracts/platform-versions";
 import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
@@ -206,6 +229,7 @@ export class SiteAuthoringWorkflow {
       const updated = await this.updateRun(coalesced, {
         publicBuildInputId: buildInput.id,
         kind,
+        limits: managerLimitsForKind(kind),
         exactParentRevisionId: current.currentWorkspaceRevisionId,
         deferredUntilRunId: runningRun?.id ?? coalesced.deferredUntilRunId,
         publishAfterSuccess: coalesced.publishAfterSuccess && Boolean(input.publishAfterSuccess) && kind === "rebase",
@@ -243,7 +267,8 @@ export class SiteAuthoringWorkflow {
         domainContext: buildInput.domainContext?.version ?? "none",
         [taskSkill.id]: taskSkill.version
       },
-      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
+      limits: managerLimitsForKind(input.kind),
+      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
       startedAt: input.workflowStartedAt ?? now
     });
     await this.repository.enqueueAgentRun(run);
@@ -305,6 +330,7 @@ export class SiteAuthoringWorkflow {
         const sandboxState = await this.ensureSandbox(session, buildInput);
         return await this.executeDeterministicRebase({ run, session: sandboxState.session, buildInput, sandboxRevision: sandboxState.revision, signal: workflowSignal });
       }
+      const sandboxState = await this.ensureSandbox(session, buildInput);
       const currentFiles = run.kind === "initial_build"
         ? undefined
         : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId);
@@ -313,9 +339,9 @@ export class SiteAuthoringWorkflow {
         || "Apply the requested site change.";
       const outcome = await this.runAuthoring({
         run,
-        session,
+        session: sandboxState.session,
         buildInput,
-        sandboxRevision: "deferred",
+        sandboxRevision: sandboxState.revision,
         currentFiles,
         instruction: ownerMessage,
         selection: selection ?? requestMessages.find((message) => message.selection)?.selection,
@@ -331,7 +357,12 @@ export class SiteAuthoringWorkflow {
           findings: outcome.artifact.qa.findings,
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
         }));
-        throw new Error("Candidate failed the release hard gate.");
+        throw new SiteAuthoringTerminalError(
+          "authoring_unresolved",
+          "authoring",
+          false,
+          "Candidate failed the release hard gate."
+        );
       }
       const version = await this.createCandidateVersion(outcome.artifact, outcome.revision.id, buildInput, run);
       run = await this.updateRun(run, {
@@ -380,16 +411,22 @@ export class SiteAuthoringWorkflow {
         }
         return waiting;
       }
-      if (Date.now() >= deadlineAt) error = new Error("workflow_deadline_exhausted");
+      if (Date.now() >= deadlineAt) {
+        error = new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "workflow_deadline_exhausted");
+      }
+      const failure = classifySiteAuthoringFailure(error);
       const latest = await this.repository.getAgentRun(run.id) ?? run;
-      await this.repository.failOpenAgentRunEvents(run.id, new Date().toISOString(), failureCode(error)).catch(() => undefined);
+      await this.repository.failOpenAgentRunEvents(run.id, new Date().toISOString(), failure.code).catch(() => undefined);
       await this.checkpointAfterRunFailure(latest).catch(() => undefined);
-      await this.queueTerminalRunFailure(latest, error).catch(() => undefined);
+      await this.queueTerminalRunFailure(latest, failure).catch(() => undefined);
       const failed = await this.updateRun(latest, {
         status: "failed",
         stage: "failed",
         fastPreviewPath: undefined,
-        failureReason: failureMessage(error),
+        failureCode: failure.code,
+        failureCategory: failure.category,
+        retryableByOwner: failure.retryableByOwner,
+        failureReason: failure.message,
         completedAt: new Date().toISOString()
       });
       return failed;
@@ -552,6 +589,7 @@ export class SiteAuthoringWorkflow {
   async retryFailedRun(input: { runId: string; actorId: string }) {
     const failed = await this.requireRun(input.runId);
     if (failed.status !== "failed") throw new Error("Only failed runs can be retried.");
+    if (!failed.retryableByOwner) throw new Error("run_not_retryable");
     const [session, site, runs, messages] = await Promise.all([
       this.requireSession(failed.sessionId),
       this.repository.getSite(failed.siteId),
@@ -656,7 +694,13 @@ export class SiteAuthoringWorkflow {
         run = await this.updateRun(run, { stage: "building" });
         await ensureBuildSandbox();
         const revision = expectedRevision === "deferred" ? activeSandboxRevision : expectedRevision;
-        const applied = await this.sandbox.apply(activeSession.sandboxId!, revision, files);
+        let applied: Awaited<ReturnType<SiteSandboxClient["apply"]>>;
+        try {
+          applied = await this.sandbox.apply(activeSession.sandboxId!, revision, files);
+        } catch (error) {
+          if (isRepairableSandboxBuildError(error)) throw error;
+          throw platformTerminalError(error);
+        }
         activeSandboxRevision = applied.revision;
         run = await this.updateRun(run, { stage: "fast_preview", fastPreviewPath });
         return { ...applied, previewPath: fastPreviewPath };
@@ -752,15 +796,34 @@ export class SiteAuthoringWorkflow {
       buildInput: input.buildInput,
       instruction: input.instruction,
       kind: input.kind,
+      limits: run.limits ?? managerLimitsForKind(input.kind),
       selection: input.selection,
       signal: input.signal,
       runtime,
-      onEvents: async (events) => { await recorder.recordManagerEvents(events); },
+      onEvents: async (events) => {
+        const selectedModel = events.find((event) => event.kind === "model_request" && event.modelId)?.modelId;
+        if (selectedModel && run.modelId !== selectedModel) run = await this.updateRun(run, { modelId: selectedModel });
+        await recorder.recordManagerEvents(events);
+      },
+      onUsage: async ({ usage, modelId }) => {
+        run = await this.updateRun(run, {
+          modelId,
+          usage: {
+            inputTokens: baseUsage.inputTokens + usage.inputTokens,
+            cachedInputTokens: baseUsage.cachedInputTokens + usage.cachedInputTokens,
+            outputTokens: baseUsage.outputTokens + usage.outputTokens,
+            estimatedCostUsd: baseUsage.estimatedCostUsd + usage.estimatedCostUsd,
+            costEstimateStatus: baseUsage.costEstimateStatus === "configured" && usage.costEstimateStatus === "configured" ? "configured" : usage.costEstimateStatus,
+            durationMs: baseUsage.durationMs + usage.durationMs
+          }
+        });
+      },
       onProgress: async ({ usage, modelId }) => {
         run = await this.updateRun(run, {
           modelId,
           usage: {
             inputTokens: baseUsage.inputTokens + usage.inputTokens,
+            cachedInputTokens: baseUsage.cachedInputTokens + usage.cachedInputTokens,
             outputTokens: baseUsage.outputTokens + usage.outputTokens,
             estimatedCostUsd: baseUsage.estimatedCostUsd + usage.estimatedCostUsd,
             costEstimateStatus: baseUsage.costEstimateStatus === "configured" && usage.costEstimateStatus === "configured" ? "configured" : usage.costEstimateStatus,
@@ -827,7 +890,12 @@ export class SiteAuthoringWorkflow {
     try {
       assertWithinDeadline();
       const toolSpan = await recorder.open({ kind: "tool_call", name: "rebase_public_input", summary: { inputHash: input.buildInput.inputHash } });
-      const rebased = await this.sandbox.rebase(input.session.sandboxId!, input.sandboxRevision, input.buildInput);
+      let rebased: Awaited<ReturnType<SiteSandboxClient["rebase"]>>;
+      try {
+        rebased = await this.sandbox.rebase(input.session.sandboxId!, input.sandboxRevision, input.buildInput);
+      } catch (error) {
+        throw platformTerminalError(error);
+      }
       assertWithinDeadline();
       await recorder.close(toolSpan, { status: "succeeded", summary: { revision: rebased.revision }, payload: { input: { expectedRevision: input.sandboxRevision, inputHash: input.buildInput.inputHash }, output: rebased } });
       run = await this.updateRun(run, { stage: "fast_preview", fastPreviewPath: `/api/site-agent/sessions/${input.session.id}/preview` });
@@ -853,7 +921,12 @@ export class SiteAuthoringWorkflow {
           id: id("operator"), siteId: run.siteId, runId: run.id, reason: "verification_failure", severity: "high", status: "open",
           findings: finalized.artifact.qa.findings, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
         }));
-        throw new Error("Deterministic recompile failed the release hard gate.");
+        throw new SiteAuthoringTerminalError(
+          "authoring_unresolved",
+          "authoring",
+          false,
+          "Deterministic recompile failed the release hard gate."
+        );
       }
       const backup = await this.sandbox.backup(input.session.sandboxId!);
       const revision = siteWorkspaceRevisionSchema.parse({
@@ -888,12 +961,21 @@ export class SiteAuthoringWorkflow {
       await this.destroySessionSandbox(session, { reason: "terminal_rebase_success", currentWorkspaceRevisionId: revision.id });
       return run;
     } catch (error) {
-      const failure = input.signal.aborted ? new Error("workflow_deadline_exhausted") : error;
-      await this.repository.failOpenAgentRunEvents(run.id, new Date().toISOString(), failureCode(failure)).catch(() => undefined);
+      const cause = input.signal.aborted
+        ? new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "workflow_deadline_exhausted")
+        : error;
+      const failure = classifySiteAuthoringFailure(cause);
+      await this.repository.failOpenAgentRunEvents(run.id, new Date().toISOString(), failure.code).catch(() => undefined);
       await this.checkpointAfterRunFailure(run).catch(() => undefined);
       await this.queueTerminalRunFailure(run, failure).catch(() => undefined);
       return this.updateRun(run, {
-        status: "failed", stage: "failed", fastPreviewPath: undefined, failureReason: failureMessage(failure),
+        status: "failed",
+        stage: "failed",
+        fastPreviewPath: undefined,
+        failureCode: failure.code,
+        failureCategory: failure.category,
+        retryableByOwner: failure.retryableByOwner,
+        failureReason: failure.message,
         completedAt: new Date().toISOString()
       });
     }
@@ -906,27 +988,39 @@ export class SiteAuthoringWorkflow {
     workspaceRevisionId: string;
     signal?: AbortSignal;
   }) {
-    const authored = await this.sandbox.getArtifact(input.session.sandboxId!);
-    const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
-    const runtime = await this.ensureRuntime();
-    const artifactId = id("artifact");
-    const capturePrefix = `site-captures/${input.run.siteId}/${artifactId}`;
-    const browserGate = await runArtifactBrowserGate({ prepared, buildInput: input.buildInput, blobStore: this.blobStore, capturePrefix, signal: input.signal });
-    const contactSheet = await createArtifactContactSheet(browserGate.captures);
-    const contactSheetKey = `${capturePrefix}/contact-sheet.png`;
-    const finalized = finalizePreparedArtifact({
-      prepared, buildInput: input.buildInput, artifactId, workspaceRevisionId: input.workspaceRevisionId,
-      runtimeSeriesId, runtimePatchId: runtime.patch.id, storagePrefix: `site-artifacts/${input.run.siteId}/${artifactId}`,
-      toolchainVersion: siteToolchainVersion, sandboxImageDigest: configuredSandboxImageDigest(),
-      browserGate: { findings: browserGate.findings, screenshotKeys: [...browserGate.captures.map((capture) => capture.key), contactSheetKey],
-        routesChecked: browserGate.routesChecked, linksChecked: browserGate.linksChecked }
-    });
-    return {
-      ...finalized,
-      contactSheet,
-      contactSheetKey,
-      browserCaptures: browserGate.captures
-    };
+    try {
+      const authored = await this.sandbox.getArtifact(input.session.sandboxId!);
+      if (!sandboxManifestMatches(authored.compilerManifest)) {
+        throw new SiteAuthoringTerminalError(
+          "platform_version_mismatch",
+          "platform",
+          false,
+          `Artifact compiler manifest does not match the controller contract. Expected ${stableJson(expectedSiteSandboxManifest)}; received ${stableJson(authored.compilerManifest)}.`
+        );
+      }
+      const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
+      const runtime = await this.ensureRuntime();
+      const artifactId = id("artifact");
+      const capturePrefix = `site-captures/${input.run.siteId}/${artifactId}`;
+      const browserGate = await runArtifactBrowserGate({ prepared, buildInput: input.buildInput, blobStore: this.blobStore, capturePrefix, signal: input.signal });
+      const contactSheet = await createArtifactContactSheet(browserGate.captures);
+      const contactSheetKey = `${capturePrefix}/contact-sheet.png`;
+      const finalized = finalizePreparedArtifact({
+        prepared, buildInput: input.buildInput, artifactId, workspaceRevisionId: input.workspaceRevisionId,
+        runtimeSeriesId, runtimePatchId: runtime.patch.id, storagePrefix: `site-artifacts/${input.run.siteId}/${artifactId}`,
+        toolchainVersion: siteToolchainVersion, sandboxImageDigest: configuredSandboxImageDigest(),
+        browserGate: { findings: browserGate.findings, screenshotKeys: [...browserGate.captures.map((capture) => capture.key), contactSheetKey],
+          routesChecked: browserGate.routesChecked, linksChecked: browserGate.linksChecked }
+      });
+      return {
+        ...finalized,
+        contactSheet,
+        contactSheetKey,
+        browserCaptures: browserGate.captures
+      };
+    } catch (error) {
+      throw platformTerminalError(error);
+    }
   }
 
   private async createCandidateVersion(
@@ -1129,7 +1223,22 @@ export class SiteAuthoringWorkflow {
     }
     if (current.sandboxId) {
       const diagnostics = await this.sandbox.diagnostics(current.sandboxId).catch(() => undefined);
-      if (diagnostics?.ok && diagnostics.revision !== "uninitialized") return { session: current, revision: diagnostics.revision };
+      if (diagnostics?.ok && diagnostics.revision !== "uninitialized" && sandboxManifestMatches(diagnostics.sandboxManifest)) {
+        return { session: current, revision: diagnostics.revision };
+      }
+      const result = await this.destroySessionSandbox(current, {
+        reason: diagnostics?.ok ? "sandbox_manifest_mismatch" : "sandbox_diagnostics_unavailable",
+        currentWorkspaceRevisionId: current.currentWorkspaceRevisionId
+      });
+      if (!result.destroyed) {
+        throw new SiteAuthoringTerminalError(
+          "sandbox_unavailable",
+          "platform",
+          false,
+          "Existing sandbox could not be recycled before authoring."
+        );
+      }
+      current = result.session;
     }
     const startedAt = new Date().toISOString();
     const starting = siteAgentSessionSchema.parse({
@@ -1157,7 +1266,27 @@ export class SiteAuthoringWorkflow {
         reason: "sandbox_start_failed",
         currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
       });
-      throw error;
+      if (isSiteAuthoringTerminalError(error)) throw error;
+      throw new SiteAuthoringTerminalError(
+        "sandbox_unavailable",
+        "platform",
+        false,
+        failureMessage(error),
+        { cause: error }
+      );
+    }
+    const diagnostics = await this.sandbox.diagnostics(starting.sandboxId!).catch(() => undefined);
+    if (!diagnostics?.ok || !sandboxManifestMatches(diagnostics.sandboxManifest)) {
+      await this.destroySessionSandbox(starting, {
+        reason: "fresh_sandbox_manifest_mismatch",
+        currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
+      }).catch(() => undefined);
+      throw new SiteAuthoringTerminalError(
+        "platform_version_mismatch",
+        "platform",
+        false,
+        `Sandbox manifest does not match the controller contract. Expected ${stableJson(expectedSiteSandboxManifest)}; received ${stableJson(diagnostics?.sandboxManifest ?? null)}.`
+      );
     }
     const active = siteAgentSessionSchema.parse({
       ...starting,
@@ -1182,7 +1311,10 @@ export class SiteAuthoringWorkflow {
     });
   }
 
-  private async queueTerminalRunFailure(run: SiteAgentRun, error: unknown) {
+  private async queueTerminalRunFailure(
+    run: SiteAgentRun,
+    failure: ReturnType<typeof classifySiteAuthoringFailure>
+  ) {
     const existing = (await this.repository.listOperatorQueue()).some((item) => item.runId === run.id && item.status !== "resolved" && item.status !== "dismissed");
     if (existing) return;
     const now = new Date().toISOString();
@@ -1191,10 +1323,16 @@ export class SiteAuthoringWorkflow {
       id: id("operator"),
       siteId: run.siteId,
       runId: run.id,
-      reason: "verification_failure",
+      reason: "authoring_runtime_failure",
       severity: "high",
       status: "open",
-      findings: [{ stage: run.stage, message: failureMessage(error) }],
+      findings: [{
+        stage: run.stage,
+        failureCode: failure.code,
+        failureCategory: failure.category,
+        retryableByOwner: failure.retryableByOwner,
+        message: failure.message
+      }],
       createdAt: now,
       updatedAt: now
     }));
@@ -1302,6 +1440,9 @@ export class SiteAuthoringWorkflow {
         outputRevisionId: retained.workspaceRevisionId,
         candidateVersionId: retained.id,
         fastPreviewPath: undefined,
+        failureCode: undefined,
+        failureCategory: undefined,
+        retryableByOwner: false,
         failureReason: undefined,
         completedAt: new Date().toISOString()
       });
@@ -1311,6 +1452,9 @@ export class SiteAuthoringWorkflow {
         status: "queued",
         stage: "queued",
         fastPreviewPath: undefined,
+        failureCode: undefined,
+        failureCategory: undefined,
+        retryableByOwner: false,
         failureReason: "interrupted_run_restarting_from_last_verified_checkpoint",
         completedAt: undefined
       });
@@ -1319,6 +1463,9 @@ export class SiteAuthoringWorkflow {
       status: "failed",
       stage: "failed",
       fastPreviewPath: undefined,
+      failureCode: "worker_interrupted",
+      failureCategory: "worker",
+      retryableByOwner: true,
       failureReason: "interrupted_run_recovered_from_checkpoint",
       completedAt: new Date().toISOString()
     });
@@ -1353,9 +1500,43 @@ function id(prefix: string) {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
 }
 
-function failureCode(error: unknown) {
-  const value = failureMessage(error).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return (value || "unknown_failure").slice(0, 160);
+function sandboxManifestMatches(value: unknown) {
+  return stableJson(value) === stableJson(expectedSiteSandboxManifest);
+}
+
+function isRepairableSandboxBuildError(error: unknown) {
+  return error instanceof SiteSandboxRequestError
+    && error.status === 422
+    && (error.providerCode === "build_failed" || error.providerCode === "source_policy_violation");
+}
+
+function platformTerminalError(error: unknown): SiteAuthoringTerminalError {
+  if (isSiteAuthoringTerminalError(error)) return error;
+  if (error instanceof SiteSandboxArtifactContractError) {
+    return new SiteAuthoringTerminalError(
+      "artifact_contract_invalid",
+      "platform",
+      false,
+      error.message,
+      { cause: error }
+    );
+  }
+  if (error instanceof SiteSandboxRequestError) {
+    const code = error.providerCode === "artifact_not_built"
+      ? "artifact_contract_invalid" as const
+      : "sandbox_unavailable" as const;
+    return new SiteAuthoringTerminalError(code, "platform", false, error.message, { cause: error });
+  }
+  if (/abort|deadline|timed out/i.test(failureMessage(error))) {
+    return new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, failureMessage(error), { cause: error });
+  }
+  return new SiteAuthoringTerminalError(
+    "unknown_internal_failure",
+    "platform",
+    false,
+    failureMessage(error),
+    { cause: error }
+  );
 }
 
 function lazyExternalClient<T extends object>(factory: () => T): T {

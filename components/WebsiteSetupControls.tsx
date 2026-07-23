@@ -18,7 +18,7 @@ export function WebsiteSetupAction({ setupId, action, label, tone = "secondary" 
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
   async function run() {
-    if (action === "cancel" && !window.confirm("Cancel this website setup? Its private draft will no longer be available.")) return;
+    if (action === "cancel" && !window.confirm("Cancel this website setup?")) return;
     setPending(true);
     const response = await fetch(`/api/website-setups/${setupId}/${action}`, { method: "POST" });
     const result = await response.json().catch(() => ({})) as { error?: string };
@@ -40,7 +40,7 @@ export function WebsiteSetupSourceForm({ setupId, sourceUrl }: { setupId: string
     const response = await fetch(`/api/website-setups/${setupId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceUrl: form.get("sourceUrl") }) });
     const result = await response.json().catch(() => ({})) as { error?: string };
     if (!response.ok) { setStatus(result.error ?? "The website address could not be changed."); setPending(false); return; }
-    setStatus("Website changed. Your setup is queued again.");
+    setStatus("Website changed. We’ll try again now.");
     router.refresh();
   }
   return (

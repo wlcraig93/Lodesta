@@ -1,8 +1,67 @@
 import assert from "node:assert/strict";
 import { crawlWebsiteForGeneration, fetchGenerationPageWithBrowser, generationIngestionLimits } from "../packages/business-data/generation-crawler";
+import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "../packages/business-data/crawl-errors";
+import {
+  generationCrawlerProductToken,
+  generationCrawlerUserAgent,
+  parseRobotsPolicy,
+  robotsAllows
+} from "../packages/business-data/robots-policy";
+import { PublicFetchUrlError } from "../lib/url-safety";
 import { canonicalizeUnderstandingEvidenceQuotes, understandWebsite, validateUnderstandingEvidence } from "../packages/business-data/understanding";
 
+const squarespaceRules = parseRobotsPolicy("User-agent: *\nDisallow: /*?author=*\n");
+assert.equal(robotsAllows("https://fixture.example/", squarespaceRules.rules), true, "Squarespace query rules blocked the homepage.");
+assert.equal(robotsAllows("https://fixture.example/?author=123", squarespaceRules.rules), false, "Squarespace author query was not blocked.");
+assert.equal(robotsAllows("https://fixture.example/about?author=123", squarespaceRules.rules), false, "Wildcard query matching omitted non-home routes.");
+
+const exactAgent = parseRobotsPolicy(`
+User-agent: *
+Disallow: /
+
+User-agent: Lodesta
+Disallow: /prefix-only
+
+User-agent: lodestagenerationcrawler
+Allow: /
+`);
+assert.equal(robotsAllows("https://fixture.example/", exactAgent.rules), true, "Exact crawler group did not outrank prefix and wildcard groups.");
+const prefixAgent = parseRobotsPolicy(`
+User-agent: *
+Disallow: /
+
+User-agent: Lodesta
+Allow: /
+`);
+assert.equal(robotsAllows("https://fixture.example/", prefixAgent.rules), true, "Product-token prefix did not outrank wildcard.");
+const stackedAndTied = parseRobotsPolicy(`
+User-agent: unrelated
+User-agent: LodestaGenerationCrawler
+Disallow: /stacked
+
+User-agent: LodestaGenerationCrawler
+Disallow: /second
+`);
+assert.equal(robotsAllows("https://fixture.example/stacked", stackedAndTied.rules), false, "Stacked user-agent lines were not treated as one group.");
+assert.equal(robotsAllows("https://fixture.example/second", stackedAndTied.rules), false, "Tied most-specific groups were not combined.");
+const precedence = parseRobotsPolicy(`
+User-agent: *
+Disallow: /private/*
+Allow: /private/public$
+Disallow: /same
+Allow: /same
+`);
+assert.equal(robotsAllows("https://fixture.example/private/other", precedence.rules), false, "Wildcard disallow did not match.");
+assert.equal(robotsAllows("https://fixture.example/private/public", precedence.rules), true, "Longer terminal Allow did not win.");
+assert.equal(robotsAllows("https://fixture.example/private/public/more", precedence.rules), false, "Terminal $ rule matched beyond the end.");
+assert.equal(robotsAllows("https://fixture.example/same", precedence.rules), true, "Allow did not win an equal-length tie.");
+const homepageOnly = parseRobotsPolicy("User-agent: *\nDisallow: /$\n");
+assert.equal(robotsAllows("https://fixture.example/", homepageOnly.rules), false);
+assert.equal(robotsAllows("https://fixture.example/about", homepageOnly.rules), true);
+assert.equal(generationCrawlerProductToken, "LodestaGenerationCrawler");
+
 const pageStarts: number[] = [];
+const observedUserAgents: string[] = [];
 const site = new Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>([
   ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\nSitemap: https://fixture.example/sitemap.xml\n" }],
   ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://fixture.example/</loc></url><url><loc>https://fixture.example/contact</loc></url></urlset>" }],
@@ -12,7 +71,10 @@ const site = new Map<string, { status?: number; type: string; body: string; head
 const fetched = await crawlWebsiteForGeneration({
   url: "https://fixture.example/",
   validateUrl: async (value) => value,
-  fetchImpl: mockFetch(site, (url) => { if (!["/robots.txt", "/sitemap.xml"].includes(url.pathname)) pageStarts.push(Date.now()); }),
+  fetchImpl: mockFetch(site, (url, init) => {
+    observedUserAgents.push(new Headers(init?.headers).get("user-agent") ?? "");
+    if (!["/robots.txt", "/sitemap.xml"].includes(url.pathname)) pageStarts.push(Date.now());
+  }),
   browserFetch: async () => { throw new Error("browser should not be required"); },
   limits: { minimumStartSpacingMs: 20, totalMs: 10_000, requestTimeoutMs: 1_000 }
 });
@@ -23,6 +85,81 @@ assert.equal(fetched.ingestion.counts.selected, 2);
 assert.equal(fetched.ingestion.counts.fetched, 2);
 assert(pageStarts.length === 2 && pageStarts[1] - pageStarts[0] >= 15, "request starts were not politely spaced across concurrent workers");
 assert(fetched.ingestion.counts.modelTextCharacters <= generationIngestionLimits.modelTextCharacters, "model text budget was exceeded");
+assert(observedUserAgents.length > 0 && observedUserAgents.every((value) => value === generationCrawlerUserAgent), "Generation requests used the wrong User-Agent.");
+
+const oddContentTypeSite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "application/octet-stream", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://odd.example/</loc></url></urlset>" }],
+  ["/", { type: "text/html", body: pageHtml("Odd Robots Repair", "/", "Austin repair service with phone support and online estimate requests.") }]
+]);
+const oddContentType = await crawlWebsiteForGeneration({
+  url: "https://odd.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(oddContentTypeSite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+});
+assert.equal(oddContentType.crawl.robotsFound, true, "Successful robots text with an unusual content type was ignored.");
+
+const missingRobotsSite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { status: 404, type: "text/plain", body: "not found" }],
+  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
+  ["/", { type: "text/html", body: pageHtml("No Robots Repair", "/", "Austin repair service with phone support and online estimate requests.") }]
+]);
+const missingRobots = await crawlWebsiteForGeneration({
+  url: "https://no-robots.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(missingRobotsSite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+});
+assert.equal(missingRobots.crawl.robotsFound, false, "A 404 robots response was reported as parsed.");
+
+for (const status of [408, 429, 500, 503]) {
+  await expectCrawlFailure(crawlWebsiteForGeneration({
+    url: `https://robots-${status}.example/`,
+    validateUrl: async (value) => value,
+    fetchImpl: async () => new Response("temporary", { status }),
+    limits: { transientRetries: 0, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+  }), "crawl_temporarily_unavailable");
+}
+await expectCrawlFailure(crawlWebsiteForGeneration({
+  url: "https://robots-network.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: async () => { throw new Error("network unavailable"); },
+  limits: { transientRetries: 0, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+}), "crawl_temporarily_unavailable");
+
+await expectCrawlFailure(crawlWebsiteForGeneration({
+  url: "https://blocked.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(new Map([
+    ["/robots.txt", { type: "text/plain", body: "User-agent: *\nDisallow: /$\n" }]
+  ])),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+}), "crawl_robots_disallowed");
+
+const missingPrimarySite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
+  ["/", { status: 404, type: "text/plain", body: "not found" }]
+]);
+await expectCrawlFailure(crawlWebsiteForGeneration({
+  url: "https://missing-primary.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(missingPrimarySite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+}), "crawl_primary_unavailable");
+
+const unsupportedPrimarySite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
+  ["/", { type: "application/pdf", body: "%PDF synthetic" }]
+]);
+await expectCrawlFailure(crawlWebsiteForGeneration({
+  url: "https://unsupported-primary.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(unsupportedPrimarySite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+}), "crawl_unsupported_content");
 
 const manyUrls = Array.from({ length: 75 }, (_, index) => `https://many.example/services/service-${index + 1}`);
 const manySite = new Map<string, { type: string; body: string }>([
@@ -72,14 +209,12 @@ const oversizedSite = new Map<string, { type: string; body: string; headers?: Re
   ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://large.example/</loc></url></urlset>" }],
   ["/", { type: "text/html", body: "x".repeat(200), headers: { "content-length": "200" } }]
 ]);
-const oversized = await crawlWebsiteForGeneration({
+await expectCrawlFailure(crawlWebsiteForGeneration({
   url: "https://large.example/",
   validateUrl: async (value) => value,
   fetchImpl: mockFetch(oversizedSite),
   limits: { maximumHtmlBytes: 100, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.equal(oversized.ingestion.coverage, "incomplete");
-assert(oversized.ingestion.failures.some((failure) => failure.reason === "response_too_large"), "2 MB-equivalent response cap did not fail closed");
+}), "crawl_unsupported_content");
 
 let unsafeRedirectRequests = 0;
 const redirectFetch: typeof fetch = async (value) => {
@@ -89,14 +224,16 @@ const redirectFetch: typeof fetch = async (value) => {
   if (url.pathname === "/sitemap.xml") return new Response('<urlset><url><loc>https://redirect.example/</loc></url></urlset>', { headers: { "content-type": "application/xml" } });
   return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/private", "content-type": "text/html" } });
 };
-const redirected = await crawlWebsiteForGeneration({
+await expectCrawlFailure(crawlWebsiteForGeneration({
   url: "https://redirect.example/",
-  validateUrl: async (value) => value,
+  validateUrl: async (value) => {
+    if (new URL(value).hostname !== "redirect.example") throw new PublicFetchUrlError("private_address", "private redirect rejected");
+    return value;
+  },
   fetchImpl: redirectFetch,
   limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
+}), "source_invalid");
 assert.equal(unsafeRedirectRequests, 0, "generation crawl followed a cross-site or private redirect");
-assert.equal(redirected.ingestion.coverage, "incomplete");
 
 const shellSite = new Map<string, { type: string; body: string }>([
   ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /" }],
@@ -189,18 +326,31 @@ try {
   else process.env.OPENAI_API_KEY = priorApiKey;
 }
 
-console.log(JSON.stringify({ ok: true, completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", reconstructibleEvidence: "pass", understandingRetry: "pass" }));
+console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", reconstructibleEvidence: "pass", understandingRetry: "pass" }));
 
 function pageHtml(title: string, href: string, copy: string) {
   return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${copy}"></head><body><main><h1>${title}</h1><p>${copy} ${copy} ${copy}</p><a href="${href}">Continue</a><form><input type="tel" name="phone"><button>Request estimate</button></form></main></body></html>`;
 }
 
-function mockFetch(entries: Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>, onRequest?: (url: URL) => void): typeof fetch {
-  return async (value) => {
+function mockFetch(entries: Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>, onRequest?: (url: URL, init?: RequestInit) => void): typeof fetch {
+  return async (value, init) => {
     const url = new URL(typeof value === "string" ? value : value instanceof URL ? value.href : value.url);
-    onRequest?.(url);
+    onRequest?.(url, init);
     const entry = entries.get(url.pathname);
     if (!entry) return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
     return new Response(entry.body, { status: entry.status ?? 200, headers: { "content-type": entry.type, ...entry.headers } });
   };
+}
+
+async function expectCrawlFailure(
+  promise: Promise<unknown>,
+  code: WebsiteCrawlFailureCode
+) {
+  try {
+    await promise;
+    assert.fail(`Expected crawl failure ${code}.`);
+  } catch (error) {
+    assert(error instanceof WebsiteCrawlError, `Expected WebsiteCrawlError, received ${String(error)}.`);
+    assert.equal(error.code, code);
+  }
 }

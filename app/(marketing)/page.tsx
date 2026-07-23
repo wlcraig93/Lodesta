@@ -1,10 +1,25 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+const homepageUrl = "https://dev.lodesta.com/";
+const homepageTitle = "Lodesta | AI-managed websites for local businesses";
+const homepageDescription =
+  "Lodesta is an AI-powered website and local-presence platform for U.S. small businesses.";
+
 export const metadata: Metadata = {
-  title: "Lodesta | Managed websites for local businesses",
-  description:
-    "Lodesta builds, manages, and keeps local business websites found on Google — so customers reach you first. Nothing for you to maintain."
+  title: homepageTitle,
+  description: homepageDescription,
+  applicationName: "Lodesta",
+  alternates: {
+    canonical: homepageUrl
+  },
+  openGraph: {
+    type: "website",
+    url: homepageUrl,
+    siteName: "Lodesta",
+    title: homepageTitle,
+    description: homepageDescription
+  }
 };
 
 const WORKFLOW_STEPS = [
@@ -48,11 +63,14 @@ export default async function HomePage({
         <div className="marketing-hero-grid">
           <div className="marketing-hero-copy">
             <p className="eyebrow">AI-managed websites for local business</p>
-            <h1>A website that works while you do.</h1>
+            <h1>Lodesta runs your website. You run your business.</h1>
             <p className="marketing-hero-kicker">
-              Lodesta builds, manages, and continuously optimizes the website for your local business.
+              Lodesta is an AI-powered website and local-presence platform for U.S. small businesses.
             </p>
-            <p className="marketing-hero-body">We run your website. You run your business.</p>
+            <p className="marketing-hero-body">
+              Sign in to create, customize, publish, and manage your website, customer inquiries, analytics, and local
+              presence.
+            </p>
             <div className="marketing-closing-actions">
               <a className="button primary" href="/presence-report">
                 Get your free presence report

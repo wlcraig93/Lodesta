@@ -474,7 +474,7 @@ export const operatorQueueItemSchema = z.object({
   siteId: identifier,
   versionId: identifier.optional(),
   runId: identifier.optional(),
-  reason: z.enum(["verification_failure", "subjective_finding", "stale_candidate", "authority_publish_failure", "maintenance_failure"]),
+  reason: z.enum(["verification_failure", "authoring_runtime_failure", "subjective_finding", "stale_candidate", "authority_publish_failure", "maintenance_failure"]),
   severity: z.enum(["urgent", "high", "normal", "low"]),
   status: z.enum(["open", "in_review", "resolved", "dismissed"]),
   findings: z.array(z.record(z.string(), z.unknown())),
@@ -569,6 +569,24 @@ export const siteAgentRunEventSchema = z.object({
 });
 export type SiteAgentRunEvent = z.infer<typeof siteAgentRunEventSchema>;
 
+export const siteAgentFailureCodeSchema = z.enum([
+  "platform_version_mismatch",
+  "artifact_contract_invalid",
+  "sandbox_unavailable",
+  "provider_quota_exhausted",
+  "provider_temporarily_unavailable",
+  "input_budget_exhausted",
+  "output_budget_exhausted",
+  "deadline_exhausted",
+  "worker_interrupted",
+  "authoring_unresolved",
+  "unknown_internal_failure"
+]);
+export type SiteAgentFailureCode = z.infer<typeof siteAgentFailureCodeSchema>;
+
+export const siteAgentFailureCategorySchema = z.enum(["platform", "provider", "budget", "authoring", "worker"]);
+export type SiteAgentFailureCategory = z.infer<typeof siteAgentFailureCategorySchema>;
+
 export const siteAgentRunSchema = z.object({
   schemaVersion: z.literal("site-agent-run"),
   id: identifier,
@@ -592,8 +610,14 @@ export const siteAgentRunSchema = z.object({
   executionNumber: z.number().int().nonnegative().default(0),
   heartbeatAt: isoTimestamp.optional(),
   skillVersions: z.record(z.string(), z.string()),
+  limits: z.object({
+    maxInputTokens: z.number().int().positive(),
+    maxOutputTokens: z.number().int().positive(),
+    maxDurationMs: z.number().int().positive()
+  }).strict().optional(),
   usage: z.object({
     inputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative().default(0),
     outputTokens: z.number().int().nonnegative(),
     estimatedCostUsd: z.number().nonnegative(),
     costEstimateStatus: z.enum(["configured", "unavailable"]),
@@ -601,6 +625,9 @@ export const siteAgentRunSchema = z.object({
   }).strict(),
   inputQuestion: z.string().min(1).max(600).optional(),
   inputExpiresAt: isoTimestamp.optional(),
+  failureCode: siteAgentFailureCodeSchema.optional(),
+  failureCategory: siteAgentFailureCategorySchema.optional(),
+  retryableByOwner: z.boolean().default(false),
   failureReason: z.string().max(2000).optional(),
   startedAt: isoTimestamp,
   completedAt: isoTimestamp.optional()

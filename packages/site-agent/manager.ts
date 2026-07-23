@@ -19,7 +19,13 @@ import {
   type ManagerRunEvent,
   type WorkspaceSourceFile
 } from "./contracts";
+import {
+  classifyModelProviderError,
+  isSiteAuthoringTerminalError,
+  SiteAuthoringTerminalError
+} from "./failures";
 import { managerBuildContext, managerEvidencePacket, websiteManagerPromptVersion, websiteManagerSystemPrompt } from "./prompts";
+import { isSupportedSiteAgentModel, managerLimitsForKind, usageForModel } from "./run-policy";
 
 export type { ManagerRunRequest } from "./contracts";
 
@@ -29,17 +35,12 @@ export interface ManagerResponsesClient {
   create(params: ResponseCreateParamsNonStreaming, options?: { signal?: AbortSignal }): Promise<ManagerResponse>;
 }
 
-const defaultLimits: ManagerRunLimits = {
-  maxInputTokens: 2_000_000,
-  maxOutputTokens: 200_000,
-  maxDurationMs: 20 * 60_000
-};
-
 export class WebsiteManagerAgent {
   constructor(private readonly injectedClient?: ManagerResponsesClient) {}
 
   async run(input: ManagerRunRequest & {
     runtime: ManagerToolRuntime;
+    onUsage?: (progress: { usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; modelId: string }) => Promise<void>;
     onProgress?: (progress: { toolRecord: ManagerToolRecord; usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; modelId: string }) => Promise<void>;
     onEvents?: (events: ManagerRunEvent[]) => Promise<void>;
   }): Promise<{
@@ -51,7 +52,7 @@ export class WebsiteManagerAgent {
     responses: number;
   }> {
     const settings = await getSiteAuthoringModelSettings();
-    const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? settings.settings.siteAgentModel;
+    const modelId = selectedSiteAgentModel(settings.settings.siteAgentModel);
     const client = this.injectedClient ?? configuredResponsesClient();
     const limits = limitsFor(input, input.limits);
     const startedAt = Date.now();
@@ -106,12 +107,11 @@ export class WebsiteManagerAgent {
           runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "failed", turnIndex, modelId, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode }, payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptVersion) }),
           runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "failed", turnIndex, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode } })
         ]);
-        throw error;
+        throw classifyModelProviderError(error);
       }
       responseCount += 1;
-      const responseUsage = usageFor(response.usage, Date.now() - responseStartedAt);
-      mergeUsage(usage, response.usage, startedAt);
-      assertWithinLimits({ limits, usage, startedAt });
+      const responseUsage = usageForModel(modelId, response.usage, Date.now() - responseStartedAt);
+      mergeUsage(usage, response.usage, startedAt, modelId);
       const calls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
       const modelCompletedAt = new Date().toISOString();
       await input.onEvents?.([runEvent({
@@ -120,6 +120,8 @@ export class WebsiteManagerAgent {
         summary: { outputItems: response.output.length, functionCalls: calls.length }, payload: modelTurnPayload(requestHistory, response, websiteManagerPromptVersion)
       })]);
       history.push(...response.output as ResponseInputItem[]);
+      await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, modelId });
+      assertWithinLimits({ limits, usage, startedAt });
 
       if (!calls.length) {
         history.push({ role: "user", type: "message", content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }] });
@@ -133,6 +135,7 @@ export class WebsiteManagerAgent {
         let parsedArguments: Record<string, unknown> = {};
         let execution: ManagerToolExecution;
         let status: "succeeded" | "failed" = "succeeded";
+        let terminalError: SiteAuthoringTerminalError | undefined;
         try {
           name = managerToolNameSchema.parse(rawCall.name);
           parsedArguments = managerToolArguments[name].parse(JSON.parse(rawCall.arguments)) as Record<string, unknown>;
@@ -149,6 +152,7 @@ export class WebsiteManagerAgent {
             } catch (error) {
               status = "failed";
               execution = toolError(error);
+              if (isSiteAuthoringTerminalError(error)) terminalError = error;
             }
             replayedCalls.set(rawCall.call_id, { inputHash, result: execution, status });
           }
@@ -180,6 +184,7 @@ export class WebsiteManagerAgent {
         })]);
         history.push({ type: "function_call_output", call_id: rawCall.call_id, output: execution.modelOutput as never });
         await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, modelId });
+        if (terminalError) throw terminalError;
         if (execution.needsInput) throw new ManagerNeedsInputError(execution.needsInput.question);
         if (execution.completion) {
           await input.onEvents?.([runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "succeeded", turnIndex, startedAt: turnStartedAt, completedAt: new Date().toISOString(), summary: { toolName, completed: true } })]);
@@ -205,7 +210,7 @@ export class WebsiteManagerAgent {
     signal?: AbortSignal;
   }) {
     const settings = await getSiteAuthoringModelSettings();
-    const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? settings.settings.siteAgentModel;
+    const modelId = selectedSiteAgentModel(settings.settings.siteAgentModel);
     const result = await structuredResponse({
       client: this.injectedClient ?? configuredResponsesClient(), modelId, name: "manager_discussion_v1", schema: managerDiscussionJsonSchema,
       system: websiteManagerSystemPrompt,
@@ -246,7 +251,7 @@ async function structuredResponse(input: {
     max_output_tokens: input.maxOutputTokens
   }, boundedSignal(input.signal, 10 * 60_000));
   if (!response.output_text) throw new Error("Website manager response did not contain structured output text.");
-  return { value: JSON.parse(response.output_text) as unknown, usage: usageFor(response.usage, Date.now() - startedAt) };
+  return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.modelId, response.usage, Date.now() - startedAt) };
 }
 
 function configuredResponsesClient(): ManagerResponsesClient {
@@ -254,6 +259,19 @@ function configuredResponsesClient(): ManagerResponsesClient {
   if (!apiKey) throw new Error("OPENAI_API_KEY is required for website manager runs.");
   const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 10 * 60_000 });
   return { create: (params, options) => client.responses.create(params, options) };
+}
+
+function selectedSiteAgentModel(configuredModelId: string) {
+  const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? configuredModelId;
+  if (!isSupportedSiteAgentModel(modelId)) {
+    throw new SiteAuthoringTerminalError(
+      "unknown_internal_failure",
+      "platform",
+      false,
+      `site_agent_model_pricing_missing:${modelId}`
+    );
+  }
+  return modelId;
 }
 
 async function createWithOneTransportRetry(client: ManagerResponsesClient, params: ResponseCreateParamsNonStreaming, signal: AbortSignal) {
@@ -280,13 +298,19 @@ function transientTransportError(error: unknown) {
 }
 
 function limitsFor(input: ManagerRunRequest, override?: Partial<ManagerRunLimits>): ManagerRunLimits {
-  return { ...defaultLimits, maxDurationMs: input.kind === "initial_build" ? 20 * 60_000 : 10 * 60_000, ...override };
+  return { ...managerLimitsForKind(input.kind), ...override };
 }
 
 function assertWithinLimits(input: { limits: ManagerRunLimits; usage: ManagerModelUsage; startedAt: number }) {
-  if (input.usage.inputTokens >= input.limits.maxInputTokens) throw new Error("manager_input_token_limit_exhausted");
-  if (input.usage.outputTokens >= input.limits.maxOutputTokens) throw new Error("manager_output_token_limit_exhausted");
-  if (Date.now() - input.startedAt >= input.limits.maxDurationMs) throw new Error("manager_duration_limit_exhausted");
+  if (input.usage.inputTokens >= input.limits.maxInputTokens) {
+    throw new SiteAuthoringTerminalError("input_budget_exhausted", "budget", false, "manager_input_token_limit_exhausted");
+  }
+  if (input.usage.outputTokens >= input.limits.maxOutputTokens) {
+    throw new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, "manager_output_token_limit_exhausted");
+  }
+  if (Date.now() - input.startedAt >= input.limits.maxDurationMs) {
+    throw new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "manager_duration_limit_exhausted");
+  }
 }
 
 function boundedSignal(signal: AbortSignal | undefined, durationMs: number) {
@@ -298,28 +322,14 @@ function emptyUsage(): ManagerModelUsage {
   return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 };
 }
 
-function mergeUsage(target: ManagerModelUsage, value: Response["usage"], startedAt: number) {
-  const next = usageFor(value, Date.now() - startedAt);
+function mergeUsage(target: ManagerModelUsage, value: Response["usage"], startedAt: number, modelId: string) {
+  const next = usageForModel(modelId, value, Date.now() - startedAt);
   target.inputTokens += next.inputTokens;
   target.cachedInputTokens += next.cachedInputTokens;
   target.outputTokens += next.outputTokens;
   target.estimatedCostUsd += next.estimatedCostUsd;
   target.costEstimateStatus = target.costEstimateStatus === "configured" && next.costEstimateStatus === "configured" ? "configured" : next.costEstimateStatus;
   target.durationMs = Date.now() - startedAt;
-}
-
-function usageFor(value: Response["usage"], durationMs: number): ManagerModelUsage {
-  const inputTokens = value?.input_tokens ?? 0;
-  const cachedInputTokens = value?.input_tokens_details?.cached_tokens ?? 0;
-  const outputTokens = value?.output_tokens ?? 0;
-  const inputPrice = Number(process.env.LODESTA_MODEL_INPUT_USD_PER_MILLION);
-  const outputPrice = Number(process.env.LODESTA_MODEL_OUTPUT_USD_PER_MILLION);
-  const configured = Number.isFinite(inputPrice) && inputPrice > 0 && Number.isFinite(outputPrice) && outputPrice > 0;
-  return {
-    inputTokens, cachedInputTokens, outputTokens,
-    estimatedCostUsd: configured ? (inputTokens * inputPrice + outputTokens * outputPrice) / 1_000_000 : 0,
-    costEstimateStatus: configured ? "configured" : "unavailable", durationMs
-  };
 }
 
 function runEvent(event: ManagerRunEvent) { return event; }

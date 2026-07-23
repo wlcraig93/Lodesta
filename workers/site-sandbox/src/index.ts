@@ -6,8 +6,6 @@ import {
   Sandbox as CloudflareSandbox,
   type Sandbox as SandboxDurableObject
 } from "@cloudflare/sandbox";
-import { sitePlatformVersionManifest } from "../../../packages/site-contracts/platform-versions";
-import { sandboxSourcePolicyVersion } from "../scaffold/version-manifest";
 export { ContainerProxy };
 
 export class Sandbox extends CloudflareSandbox {
@@ -216,11 +214,13 @@ export default {
 
       if (request.method === "GET" && action === "diagnostics") {
         const versions = await sandbox.exec("node --version && npm --version && npm exec --offline tsx -- --version && npm exec --offline vite -- --version", { cwd: workspaceRoot });
+        const manifestFile = await sandbox.readFile("/opt/lodesta-site-scaffold/lodesta-manifest.json", { encoding: "utf8" });
+        const sandboxManifest = JSON.parse(manifestFile.content);
         return json({
           ok: versions.success,
           revision: await readRevision(sandbox),
           versions: versions.stdout.trim().split("\n"),
-          lodestaVersions: { ...sitePlatformVersionManifest, sourcePolicy: sandboxSourcePolicyVersion },
+          sandboxManifest,
           placementId: await sandbox.getContainerPlacementId(),
           processes: (await sandbox.listProcesses()).map((process) => ({ id: process.id, command: process.command, status: process.status }))
         });

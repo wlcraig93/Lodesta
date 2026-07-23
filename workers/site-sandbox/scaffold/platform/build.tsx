@@ -9,6 +9,7 @@ import { siteDefinition } from "../src/site";
 const root = process.cwd();
 const publicInputPath = process.env.LODESTA_PUBLIC_BUILD_INPUT_PATH ?? join(root, ".lodesta", "public-build-input.json");
 const publicInput = JSON.parse(await readFile(publicInputPath, "utf8"));
+const compilerManifest = JSON.parse(await readFile(join(root, "lodesta-manifest.json"), "utf8"));
 const sourceRoot = join(root, "src");
 const cssPaths = (await readdir(sourceRoot, { recursive: true }))
   .filter((path) => path.endsWith(".css"))
@@ -21,13 +22,17 @@ const routes = siteDefinition.routes.map((route) => ({
   description: route.description,
   bodyHtml: removeReactImagePreloads(renderToStaticMarkup(<LodestaSite input={publicInput}>{route.element as ReactElement}</LodestaSite>))
 }));
+if ("claims" in siteDefinition) {
+  throw new Error("siteDefinition.claims is retired. Use optional free-text factDeclarations instead.");
+}
 const artifact = {
-  schemaVersion: "agent-authored-artifact-v1",
+  schemaVersion: "agent-authored-artifact-v2",
+  compilerManifest,
   siteName: siteDefinition.siteName,
   sharedCss,
   routes,
   factDeclarations: siteDefinition.factDeclarations ?? [],
-  capabilityBindings: siteDefinition.capabilityBindings ?? []
+  capabilityBindings: deriveCapabilityBindings(routes)
 };
 
 await mkdir(join(root, "dist"), { recursive: true });
@@ -43,6 +48,37 @@ function normalizeRoute(value: string) { const route = `/${value.trim().replace(
 // document metadata, so these toolchain-generated nodes cannot enter body HTML.
 function removeReactImagePreloads(value: string) {
   return value.replace(/<link\s+rel="preload"\s+as="image"\s+href="asset:\/\/[^"<>]+"\s*\/?\s*>/gi, "");
+}
+function deriveCapabilityBindings(renderedRoutes: Array<{ path: string; bodyHtml: string }>) {
+  const attributes = {
+    "form-id": { kind: "form", configKey: "formId" },
+    map: { kind: "map", configKey: "locationId" },
+    gallery: { kind: "gallery", configKey: "galleryId" },
+    disclosure: { kind: "disclosure", configKey: "disclosureId" }
+  } as const;
+  return renderedRoutes.flatMap((route) => {
+    const bindings: Array<{ id: string; kind: "form" | "map" | "gallery" | "disclosure"; route: string; config: Record<string, string> }> = [];
+    const matcher = /data-lodesta-(form-id|map|gallery|disclosure)="([^"]*)"/g;
+    for (const match of route.bodyHtml.matchAll(matcher)) {
+      const attribute = attributes[match[1] as keyof typeof attributes];
+      const index = bindings.length + 1;
+      bindings.push({
+        id: `capability_${attribute.kind}_${route.path.replace(/[^a-z0-9]+/gi, "_") || "home"}_${index}`,
+        kind: attribute.kind,
+        route: route.path,
+        config: { [attribute.configKey]: decodeHtmlAttribute(match[2]) }
+      });
+    }
+    return bindings;
+  });
+}
+function decodeHtmlAttribute(value: string) {
+  const named: Record<string, string> = { amp: "&", quot: "\"", apos: "'", lt: "<", gt: ">" };
+  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|quot|apos|lt|gt);/gi, (match, entity: string) => {
+    if (entity.startsWith("#x")) return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
+    if (entity.startsWith("#")) return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
+    return named[entity.toLowerCase()] ?? match;
+  });
 }
 function previewHtml(title: string, description: string, body: string, css: string) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><style>${css.replace(/<\/style/gi, "<\\/style")}</style></head><body>${body}</body></html>`;

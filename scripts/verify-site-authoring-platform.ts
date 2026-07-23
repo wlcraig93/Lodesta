@@ -19,6 +19,7 @@ import {
   siteWorkspaceRevisionSchema,
   sourceSnapshotSchema,
   verticalDemandEventSchema,
+  expectedSiteSandboxManifest,
   type TrustedRuntimePatch,
   type TrustedRuntimeSeries
 } from "../packages/site-contracts";
@@ -71,7 +72,8 @@ assert(sourceSnapshotIdForBusiness("business_a", retainedContentHash) === source
 assert(sourceSnapshotIdForBusiness("business_a", retainedContentHash) !== sourceSnapshotIdForBusiness("business_b", retainedContentHash), "source snapshot IDs collide across business authorities");
 assert(assetRevisionIdForBusiness("business_a", retainedContentHash) !== assetRevisionIdForBusiness("business_b", retainedContentHash), "asset revision IDs collide across business authorities");
 const hostile = agentAuthoredArtifactSchema.parse({
-  schemaVersion: "agent-authored-artifact-v1",
+  schemaVersion: "agent-authored-artifact-v2",
+  compilerManifest: expectedSiteSandboxManifest,
   siteName: "Hostile verification input",
   sharedCss: "@import url('https://evil.example/theme.css'); body{background-image:url('https://evil.example/track.png')} .hidden{behavior:url(x)}",
   routes: [{
@@ -111,7 +113,8 @@ const address = buildInput.publicFacts.find((fact) => fact.kind === "address");
 const offering = buildInput.publicFacts.find((fact) => fact.kind === "offering");
 assert(businessName && phone && address && offering, "walking skeleton lacks required facts");
 const safe = agentAuthoredArtifactSchema.parse({
-  schemaVersion: "agent-authored-artifact-v1",
+  schemaVersion: "agent-authored-artifact-v2",
+  compilerManifest: expectedSiteSandboxManifest,
   siteName: buildInput.business.name,
   sharedCss: "body{margin:0;color:#17211b;background:#fff;font-family:Arial,sans-serif}main{width:min(900px,calc(100% - 32px));margin:auto;padding:64px 0}h1{font-size:48px;letter-spacing:0}a,button,input,textarea{min-height:44px;font:inherit}",
   routes: [{
@@ -132,6 +135,11 @@ assertThrows(
   () => agentAuthoredArtifactSchema.parse({ ...safe, factDeclarations: undefined, claims: safe.factDeclarations }),
   "The clean artifact contract accepted the retired claims field."
 );
+const normalizedMissingDeclarations = agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+  ...safe,
+  factDeclarations: undefined
+}));
+assert(normalizedMissingDeclarations.factDeclarations.length === 0, "The compiler boundary did not normalize omitted fact declarations.");
 assertThrows(
   () => agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({ ...safe, factDeclarations: undefined, claims: safe.factDeclarations })),
   "The authored-artifact normalizer retained a claims compatibility reader."
@@ -198,7 +206,8 @@ assert(
 const containedCopy = "careful vehicle surface inspection documents visible damage before the repair plan is prepared for the customer";
 const asymmetricRepetition = prepareSiteArtifact({
   authoredArtifact: agentAuthoredArtifactSchema.parse({
-    schemaVersion: "agent-authored-artifact-v1",
+    schemaVersion: "agent-authored-artifact-v2",
+    compilerManifest: expectedSiteSandboxManifest,
     siteName: "Similarity verification",
     sharedCss: "body{font:16px Arial}main{padding:40px}",
     routes: [
@@ -498,7 +507,8 @@ assert(partialProofRejected, "partial testimonial text was accepted as verbatim 
 
 const syntheticPrepared = prepareSiteArtifact({
   authoredArtifact: agentAuthoredArtifactSchema.parse({
-    schemaVersion: "agent-authored-artifact-v1",
+    schemaVersion: "agent-authored-artifact-v2",
+    compilerManifest: expectedSiteSandboxManifest,
     siteName: syntheticProjection.business.name,
     sharedCss: "body{margin:0;color:#111;background:#fff;font:18px/1.5 Arial,sans-serif}main{padding:48px}",
     routes: [{ path: "/", title: syntheticProjection.business.name, description: "Synthetic module test", bodyHtml: `<main><h1 data-lodesta-fact-id="${syntheticState.facts[0].id}">${syntheticProjection.business.name}</h1></main>` }],
@@ -905,8 +915,17 @@ try {
   await repository.saveAgentRun(deadlineRun);
   const deadlineFailure = await workflow.executeRun(deadlineRun.id);
   assert(deadlineFailure.status === "failed" && deadlineFailure.failureReason === "workflow_deadline_exhausted", "expired edit workflow did not fail closed at its orchestration deadline");
+  assert(deadlineFailure.failureCode === "deadline_exhausted" && deadlineFailure.failureCategory === "budget" && !deadlineFailure.retryableByOwner,
+    "expired edit workflow did not persist a non-retryable budget classification");
   assert((await repository.getAgentSession(deadlineSession.id))?.status === "checkpointed", "deadline failure did not clean up its leased session resources");
-  assert((await repository.listOperatorQueue()).some((item) => item.runId === deadlineRun.id && item.findings.some((finding) => finding.message === "workflow_deadline_exhausted")), "deadline failure did not persist its terminal diagnostic");
+  assert((await repository.listOperatorQueue()).some((item) => item.runId === deadlineRun.id && item.reason === "authoring_runtime_failure" && item.findings.some((finding) => finding.message === "workflow_deadline_exhausted")), "deadline failure did not persist its terminal diagnostic");
+  let deadlineRetryRejected = false;
+  try {
+    await workflow.retryFailedRun({ runId: deadlineRun.id, actorId: deadlineSession.ownerId });
+  } catch (error) {
+    deadlineRetryRejected = error instanceof Error && error.message === "run_not_retryable";
+  }
+  assert(deadlineRetryRejected, "non-retryable budget failure could be resubmitted by an owner");
   const startFailureSession = siteAgentSessionSchema.parse({
     ...coalesceSession,
     id: "session_start_failure_test",
@@ -944,6 +963,61 @@ try {
     "sandbox bootstrap failure did not destroy the durably recorded provider instance");
   assert(afterStartFailure?.status === "checkpointed" && !afterStartFailure.sandboxId,
     "sandbox bootstrap failure did not clear its durable provider ID after destruction");
+  const staleManifestSession = siteAgentSessionSchema.parse({
+    ...coalesceSession,
+    id: "session_stale_manifest_test",
+    ownerId: "owner_stale_manifest_test",
+    sandboxId: "sandbox-stale-manifest-test",
+    leaseExpiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    rotateAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+  });
+  await repository.saveAgentSession(staleManifestSession);
+  const staleManifestRun = siteAgentRunSchema.parse({
+    schemaVersion: "site-agent-run",
+    id: "run_stale_manifest_test",
+    sessionId: staleManifestSession.id,
+    siteId: coalesceSite.id,
+    publicBuildInputId: buildInput.id,
+    origin: "system",
+    requestedBy: staleManifestSession.ownerId,
+    publishAfterSuccess: false,
+    kind: "initial_build",
+    status: "queued",
+    stage: "queued",
+    modelId: "verification",
+    executionNumber: 0,
+    skillVersions: {},
+    usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
+    startedAt: new Date().toISOString()
+  });
+  await repository.saveAgentRun(staleManifestRun);
+  let staleManifestManagerCalls = 0;
+  const staleManifestWorkflow = new SiteAuthoringWorkflow(
+    repository,
+    {} as never,
+    {
+      diagnostics: async () => ({
+        ok: true,
+        revision: "stale-manifest-revision",
+        versions: [],
+        sandboxManifest: {
+          ...expectedSiteSandboxManifest,
+          artifactContractVersion: "agent-authored-artifact-v1"
+        },
+        placementId: "stale-placement",
+        processes: []
+      }),
+      bootstrap: async () => ({ ok: true, revision: "fresh-stale-manifest-revision" }),
+      destroy: async () => ({ ok: true })
+    } as never,
+    { run: async () => { staleManifestManagerCalls += 1; throw new Error("manager_must_not_run"); } } as never,
+    operations
+  );
+  const staleManifestFailure = await staleManifestWorkflow.executeRun(staleManifestRun.id);
+  assert(staleManifestFailure.failureCode === "platform_version_mismatch" && staleManifestFailure.failureCategory === "platform",
+    "fresh stale sandbox did not fail with a typed platform mismatch");
+  assert(staleManifestManagerCalls === 0 && staleManifestFailure.usage.inputTokens === 0,
+    "sandbox manifest mismatch consumed a model request");
   await Promise.all([
     workflow.recoverRunIfStale(queuedRun.id, -1),
     workflow.recoverRunIfStale(queuedRun.id, -1)
@@ -1008,6 +1082,9 @@ try {
     executionNumber: 2,
     skillVersions: {},
     usage: { inputTokens: 10, outputTokens: 2, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 50 },
+    failureCode: "provider_temporarily_unavailable",
+    failureCategory: "provider",
+    retryableByOwner: true,
     failureReason: "Synthetic retry source.",
     startedAt: "2026-07-20T00:07:00.000Z",
     completedAt: "2026-07-20T00:08:00.000Z"

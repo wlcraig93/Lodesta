@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -10,13 +10,13 @@ import type {
 import type {
   OperatorQueueItem,
   PlatformSiteRecord,
-  SiteAgentRun,
   SiteAgentSession,
   SiteElementSelection,
   SitePublicationReadiness,
   SitePublicBuildInput,
   SiteVersion
 } from "@/packages/site-contracts";
+import type { OwnerSiteAgentRun } from "@/packages/site-platform";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 
 type WorkspacePayload = {
@@ -26,7 +26,7 @@ type WorkspacePayload = {
   versions: SiteVersion[];
   versionRoutes: Record<string, Array<{ path: string; title: string }>>;
   messages: SiteAgentMessage[];
-  runs: SiteAgentRun[];
+  runs: OwnerSiteAgentRun[];
   readiness?: SitePublicationReadiness;
   openFindings?: OperatorQueueItem[];
   activeRunActivity?: string;
@@ -100,10 +100,14 @@ export function SiteAgentWorkspace({
   const [isResizing, setIsResizing] = useState(false);
   const [panelLayoutReady, setPanelLayoutReady] = useState(false);
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
+  const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
+  const previewMoreId = useId();
   const workspaceRef = useRef<HTMLElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
+  const previewMoreRef = useRef<HTMLDivElement>(null);
+  const previewMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
@@ -144,6 +148,8 @@ export function SiteAgentWorkspace({
   const selectedPageValue = selectedPageExists ? selectedPagePath : "/";
   const status = workspaceStatus({ site: workspace.site, activeRun, latestCandidate, readiness: workspace.readiness });
   const diagnosticRuns = workspace.runs.slice(0, 4);
+  const businessName = workspace.input?.business.name ?? initialInput.business.name;
+  const compareDisabled = !publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id);
   const desktopPanelActive = workspaceWidth >= DESKTOP_BREAKPOINT;
   const desktopPanelCollapsed = desktopPanelActive && panelMode === "collapsed";
   const desktopFullChat = desktopPanelActive && panelMode === "full-chat";
@@ -219,6 +225,29 @@ export function SiteAgentWorkspace({
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => {
+    if (!previewMoreOpen) return;
+
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (previewMoreRef.current?.contains(target) || previewMoreTriggerRef.current?.contains(target)) return;
+      setPreviewMoreOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setPreviewMoreOpen(false);
+      previewMoreTriggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [previewMoreOpen]);
 
   useEffect(() => {
     const element = workspaceRef.current;
@@ -585,7 +614,10 @@ export function SiteAgentWorkspace({
           <button className="site-agent-collapsed-toggle" type="button" aria-label="Expand chat panel" title="Expand chat panel" onClick={restoreSplitPanel}>
             <ChatIcon />
           </button>
-          <div className="site-agent-command-title"><strong>Website manager</strong><small className={`is-${status.tone}`}>{status.label}</small></div>
+          <div className="site-agent-command-title">
+            <strong><span className="site-agent-command-title-desktop">{businessName}</span><span className="site-agent-command-title-mobile">Website</span></strong>
+            <small className={`is-${status.tone}`}><span className="site-agent-command-title-desktop">Website · </span>{status.label}</small>
+          </div>
           <div className="site-agent-panel-controls" aria-label="Chat panel controls">
             {panelMode === "full-chat" ? (
               <button type="button" aria-label="Return to split view" title="Return to split view" onClick={restoreSplitPanel}>
@@ -609,48 +641,78 @@ export function SiteAgentWorkspace({
         </div>
 
         <div className="site-agent-preview-bar">
-          <span className="site-agent-preview-tab" aria-current="page">Preview</span>
-          <label className="site-agent-page-picker">
-            <span className="site-agent-visually-hidden">Website page</span>
-            <select value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
-              {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
-            </select>
-          </label>
-          <div className="site-agent-preview-controls" aria-label="Preview viewport">
-            <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
-            <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
-          </div>
-          <button className={`site-agent-tool-button ${selectionMode ? "is-active" : ""}`} type="button" aria-pressed={selectionMode} onClick={() => setSelectionMode((value) => !value)}>Select</button>
-          <button className={`site-agent-tool-button ${compare ? "is-active" : ""}`} type="button" aria-pressed={compare} disabled={!publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id)} onClick={() => setCompare((value) => !value)}>Compare</button>
-          <details className="site-agent-history-menu">
-            <summary>History</summary>
-            <div>
-              {workspace.versions.map((version) => (
-                <button key={version.id} className={version.id === selectedVersion?.id ? "is-selected" : ""} type="button" onClick={() => {
-                  setSelectedVersionId(version.id);
-                  setCompare(false);
-                  setSelection(undefined);
-                }}>
-                  <span>Version {version.number}</span>
-                  <small>{version.status}</small>
-                </button>
-              ))}
-              {selectedVersion ? <button type="button" disabled={busy || Boolean(activeRun)} onClick={() => void restore(selectedVersion.id)}><span>Restore selected</span><small>New candidate</small></button> : null}
+          <div className="site-agent-preview-primary">
+            <span className="site-agent-preview-tab" aria-current="page">Preview</span>
+            <label className="site-agent-page-picker">
+              <span className="site-agent-visually-hidden">Website page</span>
+              <select value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+                {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
+              </select>
+            </label>
+            <div className="site-agent-preview-controls" aria-label="Preview viewport">
+              <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
+              <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
             </div>
-          </details>
-          {isAdmin ? (
-            <details className="site-agent-diagnostics-menu">
-              <summary aria-label="Open admin diagnostics" title="Admin diagnostics">Admin</summary>
-              <section className="site-agent-diagnostics" aria-labelledby="site-agent-diagnostics-title">
-                <div className="site-agent-diagnostics-heading"><span id="site-agent-diagnostics-title">Admin diagnostics</span><Link href={`/admin/sites/${workspace.site.slug}`}>Manage site</Link></div>
-                <div className="site-agent-identifier-row"><div><span>Site ID</span><code title={workspace.site.id}>{workspace.site.id}</code></div><button type="button" onClick={() => void copyIdentifier(workspace.site.id, "site")}>{copiedIdentifier === "site" ? "Copied" : "Copy"}</button></div>
-                <div className="site-agent-diagnostic-runs"><span className="site-agent-diagnostic-label">Recent runs</span>{diagnosticRuns.map((run) => <div className="site-agent-run-identifier" key={run.id}><div><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><code title={run.id}>{run.id}</code><small>{run.status} · {run.stage}</small></div><button type="button" onClick={() => void copyIdentifier(run.id, run.id)}>{copiedIdentifier === run.id ? "Copied" : "Copy"}</button></div>)}{!diagnosticRuns.length ? <small className="site-agent-no-runs">No runs in this workspace yet.</small> : null}</div>
-                <Link className="site-agent-all-activity" href={`/admin/runs?siteId=${encodeURIComponent(workspace.site.id)}`}>View all activity</Link>
-              </section>
-            </details>
-          ) : null}
-          {workspace.site.publishedVersionId ? <Link className="site-agent-tool-link" href={`/sites/${workspace.site.slug}`} target="_blank">Open live</Link> : null}
-          <button className="button primary site-agent-publish" type="button" disabled={!latestCandidate || workspace.readiness?.status !== "ready" || busy || Boolean(activeRun)} onClick={() => void publish()}>Publish</button>
+            <button className={`site-agent-tool-button ${selectionMode ? "is-active" : ""}`} type="button" aria-pressed={selectionMode} onClick={() => setSelectionMode((value) => !value)}>Select</button>
+          </div>
+          <div className="site-agent-preview-outcome">
+            <div className="site-agent-more-menu">
+              <button
+                ref={previewMoreTriggerRef}
+                className={`site-agent-tool-button site-agent-more-trigger ${previewMoreOpen || compare ? "is-active" : ""}`}
+                type="button"
+                aria-haspopup="dialog"
+                aria-controls={previewMoreId}
+                aria-expanded={previewMoreOpen}
+                onClick={() => setPreviewMoreOpen((current) => !current)}
+              >
+                More
+              </button>
+              {previewMoreOpen ? (
+                <div ref={previewMoreRef} className="site-agent-more-popover" id={previewMoreId} role="dialog" aria-label="More preview actions">
+                  <section className="site-agent-more-section">
+                    <span className="site-agent-more-heading">Preview</span>
+                    <button
+                      className={`site-agent-more-action ${compare ? "is-selected" : ""}`}
+                      type="button"
+                      aria-pressed={compare}
+                      disabled={compareDisabled}
+                      onClick={() => setCompare((value) => !value)}
+                    >
+                      <span><strong>Compare with live</strong><small>{!publishedPreviewUrl ? "Available after the first publish" : compareDisabled ? "Choose a draft version first" : "Show the draft and live site side by side"}</small></span>
+                      <small>{compare ? "On" : "Off"}</small>
+                    </button>
+                    {workspace.site.publishedVersionId ? <Link className="site-agent-more-action" href={`/sites/${workspace.site.slug}`} target="_blank" rel="noreferrer"><span><strong>Open live site</strong><small>View the published website in a new tab</small></span></Link> : null}
+                  </section>
+                  <section className="site-agent-more-section">
+                    <span className="site-agent-more-heading">Version history</span>
+                    <div className="site-agent-version-list">
+                      {workspace.versions.map((version) => (
+                        <button key={version.id} className={version.id === selectedVersion?.id ? "is-selected" : ""} type="button" aria-pressed={version.id === selectedVersion?.id} onClick={() => {
+                          setSelectedVersionId(version.id);
+                          setCompare(false);
+                          setSelection(undefined);
+                        }}>
+                          <span>Version {version.number}</span>
+                          <small>{version.status}</small>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedVersion ? <button className="site-agent-restore-action" type="button" disabled={busy || Boolean(activeRun)} onClick={() => void restore(selectedVersion.id)}><span>Restore selected</span><small>Create a new candidate</small></button> : null}
+                  </section>
+                  {isAdmin ? (
+                    <section className="site-agent-diagnostics" aria-labelledby="site-agent-diagnostics-title">
+                      <div className="site-agent-diagnostics-heading"><span id="site-agent-diagnostics-title">Admin diagnostics</span><Link href={`/admin/sites/${workspace.site.slug}`}>Manage site</Link></div>
+                      <div className="site-agent-identifier-row"><div><span>Site ID</span><code title={workspace.site.id}>{workspace.site.id}</code></div><button type="button" onClick={() => void copyIdentifier(workspace.site.id, "site")}>{copiedIdentifier === "site" ? "Copied" : "Copy"}</button></div>
+                      <div className="site-agent-diagnostic-runs"><span className="site-agent-diagnostic-label">Recent runs</span>{diagnosticRuns.map((run) => <div className="site-agent-run-identifier" key={run.id}><div><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><code title={run.id}>{run.id}</code><small>{run.status} · {run.stage}</small></div><button type="button" onClick={() => void copyIdentifier(run.id, run.id)}>{copiedIdentifier === run.id ? "Copied" : "Copy"}</button></div>)}{!diagnosticRuns.length ? <small className="site-agent-no-runs">No runs in this workspace yet.</small> : null}</div>
+                      <Link className="site-agent-all-activity" href={`/admin/runs?siteId=${encodeURIComponent(workspace.site.id)}`}>View all activity</Link>
+                    </section>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <button className="button primary site-agent-publish" type="button" disabled={!latestCandidate || workspace.readiness?.status !== "ready" || busy || Boolean(activeRun)} onClick={() => void publish()}>Publish</button>
+          </div>
         </div>
       </header>
 
@@ -706,7 +768,15 @@ export function SiteAgentWorkspace({
             {failedRun ? (
               <div className="site-agent-runline is-error">
                 <span />
-                <div><strong>Change needs attention</strong><small>{failedRun.failureReason ?? "The run did not complete."}</small><button className="button secondary" type="button" disabled={busy} onClick={() => void retry()}>Retry change</button></div>
+                <div>
+                  <strong>{failedRun.kind === "initial_build" ? "Website build needs attention" : "Website change needs attention"}</strong>
+                  <small>{failedRun.retryableByOwner
+                    ? "The build was interrupted before it finished. You can try again."
+                    : "Lodesta hit an internal build problem. We’ve flagged it for review. You don’t need to keep retrying."}</small>
+                  {failedRun.retryableByOwner
+                    ? <button className="button secondary" type="button" disabled={busy} onClick={() => void retry()}>Retry {failedRun.kind === "initial_build" ? "build" : "change"}</button>
+                    : null}
+                </div>
               </div>
             ) : null}
             {notice ? <div className="site-agent-inline-notice" role="status">{notice}</div> : null}
@@ -891,7 +961,7 @@ function workspaceStatus({
   readiness
 }: {
   site: PlatformSiteRecord;
-  activeRun?: SiteAgentRun;
+  activeRun?: OwnerSiteAgentRun;
   latestCandidate?: SiteVersion;
   readiness?: SitePublicationReadiness;
 }) {
@@ -901,7 +971,7 @@ function workspaceStatus({
   return { label: site.status.replaceAll("_", " "), tone: site.status };
 }
 
-function stageLabel(run: SiteAgentRun) {
+function stageLabel(run: OwnerSiteAgentRun) {
   return ({
     queued: "Queued",
     authoring: "Designing",

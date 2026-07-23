@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { isSupportedSiteAgentModel } from "@/packages/site-agent/run-policy";
 import { getSupabaseAdminClient } from "./supabase/client";
 
 export const SITE_AUTHORING_MODEL_SETTING_KEY = "site_authoring_models";
@@ -14,7 +15,7 @@ const lkgMaxAgeMs = 10 * 60_000;
 const localSettingsFile = join(process.cwd(), ".data", "operator-settings.json");
 const modelSlugSchema = z.string().trim().min(1).regex(/^[A-Za-z0-9._:-]+$/, "Model must be a valid model slug.");
 const settingsSchema = z.object({
-  siteAgentModel: modelSlugSchema,
+  siteAgentModel: modelSlugSchema.refine(isSupportedSiteAgentModel, "Site agent model must have a configured pricing entry."),
   ingestionModel: modelSlugSchema
 }).strict();
 const updateSchema = settingsSchema.extend({ version: z.coerce.number().int().min(0) });

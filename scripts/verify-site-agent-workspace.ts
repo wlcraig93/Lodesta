@@ -31,6 +31,14 @@ assert(component.includes('href={`/admin/runs/${run.id}`}') && component.include
 assert(editorRoute.includes("requireOwnerWorkspace") && editorRoute.includes("isAdmin={context.canAccessAdmin}"), "The workspace route does not pass canonical verified admin access to diagnostics");
 assert(!component.includes("manageSitesHref") && !component.includes("site-agent-site-menu"), "Workspace retains duplicate global navigation instead of using the owner shell");
 assert(!component.includes("Dashboard") && !component.includes("/dashboard"), "Workspace restores the retired dashboard concept");
+assert(component.includes("workspace.input?.business.name ?? initialInput.business.name"), "Editor identity does not use the canonical public build input business name");
+assert(component.includes("site-agent-command-title-desktop") && component.includes("Website · "), "Desktop editor header does not identify the active website and task");
+assert(component.includes('className="site-agent-preview-primary"') && component.includes('className="site-agent-preview-outcome"'), "Preview toolbar does not separate context/tools from the outcome actions");
+assert(component.includes("site-agent-more-popover") && component.includes('aria-haspopup="dialog"') && component.includes('event.key !== "Escape"'), "Preview More menu is not keyboard-operable");
+for (const label of ["Compare with live", "Version history", "Restore selected", "Open live site", "Admin diagnostics"]) {
+  assert(component.includes(label), `Preview More menu is missing ${label}`);
+}
+assert(!component.includes("site-agent-history-menu") && !component.includes("site-agent-diagnostics-menu") && !component.includes("site-agent-tool-link"), "Retired peer-level preview actions remain in the toolbar");
 assert(adminShell.includes('label: "Manage sites"') && adminShell.includes("<span>Admin</span>"), "Admin navigation and identity are not explicit");
 assert(adminSites.includes('title="Manage sites"'), "The admin inventory is not named Manage sites");
 
@@ -69,6 +77,10 @@ assert(css.includes("background: var(--product-color-primary-surface)"), "Owner 
 assert(css.includes('.site-agent-workspace[data-mobile-pane="chat"] .site-agent-preview-column'), "Mobile Chat mode does not hide the mounted preview pane");
 assert(css.includes('.site-agent-workspace[data-mobile-pane="preview"] .site-agent-command'), "Mobile Preview mode does not hide the mounted chat pane");
 assert(!css.includes(".site-agent-rail"), "Retired rail CSS remains after the clean workspace cutover");
+const previewBarCss = css.match(/\.site-agent-preview-bar \{([\s\S]*?)\n\}/)?.[1] ?? "";
+assert(previewBarCss.includes("grid-template-columns: minmax(0, 1fr) auto") && previewBarCss.includes("overflow: visible") && !previewBarCss.includes("overflow-x"), "Preview toolbar can still scroll Publish out of view");
+assert(css.includes(".site-agent-preview-outcome") && css.includes(".site-agent-more-popover") && css.includes("right: 0"), "Preview outcome actions and More menu are not pinned to the toolbar edge");
+assert(css.includes("grid-column: 1 / -1") && css.includes("grid-row: 2") && css.includes("max-height: calc(100dvh - 306px - env(safe-area-inset-bottom))"), "Mobile Preview does not use the two-row page/tools contract");
 
 console.log("Site agent workspace verification passed.");
 

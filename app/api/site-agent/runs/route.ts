@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
 import { authorizedSiteActor, canAccessAgentSession } from "../auth";
 
 const runRequestSchema = z.object({
@@ -30,11 +30,11 @@ export async function POST(request: Request) {
         actorId: actor.actorId
       });
       after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id); });
-      return NextResponse.json({ run }, { status: 202 });
+      return NextResponse.json({ run: ownerSiteAgentRun(run) }, { status: 202 });
     }
     const { run } = await siteAuthoringWorkflow.enqueueEdit({ session, ...parsed.data, requestedBy: actor.actorId, signal: request.signal });
     after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id, parsed.data.selection); });
-    return NextResponse.json({ run }, { status: 202 });
+    return NextResponse.json({ run: ownerSiteAgentRun(run) }, { status: 202 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
   }

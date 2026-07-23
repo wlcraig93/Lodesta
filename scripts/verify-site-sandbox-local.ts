@@ -3,6 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const scaffold = resolve("workers/site-sandbox/scaffold");
@@ -12,13 +13,12 @@ const files = [
   {
     path: "src/site.tsx",
     content: `import React from "react";
-import { Fact } from "../platform/sdk";
+import { Fact, ManagedForm } from "../platform/sdk";
 import { LocalIntro } from "./components/LocalIntro";
 export const siteDefinition = {
   siteName: "Multi-file sandbox verification",
-  factDeclarations: [], capabilityBindings: [],
   routes: [{ path: "/", title: "Multi-file sandbox verification", description: "Multi-file verification",
-    element: <main><LocalIntro /><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1></main> }]
+    element: <main><LocalIntro /><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1><ManagedForm id="${input.forms[0]?.id}" /></main> }]
 };`
   },
   { path: "src/styles.css", content: "body{margin:0;font:16px Arial,sans-serif}" },
@@ -31,7 +31,8 @@ try {
     cp(join(scaffold, "platform"), join(workspace, "platform"), { recursive: true }),
     cp(join(scaffold, "package.json"), join(workspace, "package.json")),
     cp(join(scaffold, "vite.config.ts"), join(workspace, "vite.config.ts")),
-    cp(join(scaffold, "version-manifest.ts"), join(workspace, "version-manifest.ts"))
+    cp(join(scaffold, "version-manifest.ts"), join(workspace, "version-manifest.ts")),
+    cp(join(scaffold, "lodesta-manifest.json"), join(workspace, "lodesta-manifest.json"))
   ]);
   await symlink(join(scaffold, "node_modules"), join(workspace, "node_modules"), "dir");
   await mkdir(join(workspace, ".lodesta"), { recursive: true });
@@ -46,9 +47,22 @@ try {
   }
   await execute(join(workspace, "node_modules", ".bin", "tsx"), ["platform/build.tsx"], workspace);
   const artifact = JSON.parse(await readFile(join(workspace, "dist", "lodesta-artifact.json"), "utf8")) as {
+    schemaVersion?: string;
+    compilerManifest?: Record<string, unknown>;
     sharedCss?: string;
     routes?: Array<{ path?: string; bodyHtml?: string }>;
+    factDeclarations?: unknown[];
+    capabilityBindings?: unknown[];
   };
+  assert.equal(artifact.schemaVersion, "agent-authored-artifact-v2", "sandbox emitted the retired artifact contract");
+  assert.deepEqual(artifact.compilerManifest, expectedSiteSandboxManifest, "artifact omitted or drifted from the actual compiler manifest");
+  assert.deepEqual(artifact.factDeclarations, [], "omitted fact declarations were not compiler-normalized");
+  assert.deepEqual(artifact.capabilityBindings, [{
+    id: "capability_form___1",
+    kind: "form",
+    route: "/",
+    config: { formId: "form_estimate" }
+  }], "compiler did not derive SDK capabilities from rendered markup");
   assert(artifact.sharedCss?.includes(".intro{font-weight:700"), "nested CSS module was not included in the artifact");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered."), "local TSX module was not rendered");
   process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, localImports: "pass", nestedCss: "pass" })}\n`);

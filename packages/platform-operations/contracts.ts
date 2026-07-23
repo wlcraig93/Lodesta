@@ -1,7 +1,11 @@
 export type WebsiteSetupStatus = "queued" | "processing" | "linked" | "failed" | "canceled";
 
 export type WebsiteSetupFailureCode =
-  | "website_crawl_failed"
+  | "source_invalid"
+  | "crawl_temporarily_unavailable"
+  | "crawl_robots_disallowed"
+  | "crawl_unsupported_content"
+  | "crawl_primary_unavailable"
   | "bootstrap_failed"
   | "worker_interrupted";
 

@@ -13,6 +13,11 @@ const prospectRoute = readFileSync("app/api/prospect-reports/route.ts", "utf8");
 const publicRoute = readFileSync("app/sites/[slug]/[[...path]]/route.ts", "utf8");
 const publicSite = readFileSync("packages/site-platform/public-site.ts", "utf8");
 const architecture = readFileSync("scripts/verify-site-authoring-architecture.ts", "utf8");
+const marketingHome = readFileSync("app/(marketing)/page.tsx", "utf8");
+const marketingShell = readFileSync("components/MarketingShell.tsx", "utf8");
+const privacyPage = readFileSync("app/(marketing)/privacy/page.tsx", "utf8");
+const termsPage = readFileSync("app/(marketing)/terms/page.tsx", "utf8");
+const sitemap = readFileSync("app/sitemap.ts", "utf8");
 
 for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
@@ -32,6 +37,35 @@ assert(maintenanceRoute.includes("hasValidRecoveryWatchdogToken") && maintenance
 assert(prospectRoute.includes("after(async") && prospectRoute.includes("processNextProspectReportJob"), "Prospect reports must schedule immediate processing.");
 assert(publicRoute.includes("readVerifiedArtifactFile"), "Public serving must verify immutable artifact bytes.");
 assert(publicRoute.includes("loadPublishedSiteContext") && publicSite.includes('artifact.qa.hardGate !== "passed"'), "Public serving must reject unverified artifacts.");
-assert(architecture.includes("locallyDeclaredVersioned") && architecture.includes("canonicalMigration"), "Architecture ratchet must enforce canonical local contracts and the baseline.");
+assert(
+  architecture.includes("platformSiteSchema")
+    && architecture.includes("publicBuildInputSchema")
+    && architecture.includes("canonicalMigration"),
+  "Architecture ratchet must enforce canonical local contracts and the baseline."
+);
+assert(marketingHome.includes("Lodesta runs your website. You run your business."), "OAuth homepage must name Lodesta in its primary heading.");
+assert(
+  marketingHome.includes("Lodesta is an AI-powered website and local-presence platform for U.S. small businesses.")
+    && marketingHome.includes("Sign in to create, customize, publish, and manage your website"),
+  "OAuth homepage must clearly explain Lodesta's purpose and authenticated capabilities."
+);
+for (const value of ['applicationName: "Lodesta"', 'canonical: homepageUrl', 'siteName: "Lodesta"']) {
+  assert(marketingHome.includes(value), `OAuth homepage metadata must include ${value}.`);
+}
+for (const value of ['href="/privacy/"', 'href="/terms/"', 'href="mailto:willie@lodesta.com"']) {
+  assert(marketingShell.includes(value), `Marketing footer must include ${value}.`);
+}
+assert(!/placeholder/i.test(`${privacyPage}\n${termsPage}`), "Public legal pages must not contain placeholder language.");
+assert(!/\bGroq\b/.test(privacyPage), "Privacy policy must not retain the obsolete Groq disclosure.");
+for (const value of ["Google sign-in", "Supabase", "Railway", "Cloudflare", "OpenAI", "Google Places", "Resend", "willie@lodesta.com"]) {
+  assert(privacyPage.includes(value), `Privacy policy must disclose ${value}.`);
+}
+for (const [name, page] of [["Privacy", privacyPage], ["Terms", termsPage]] as const) {
+  assert(page.includes("index: true") && page.includes("follow: true"), `${name} page must be indexable and crawlable.`);
+  assert(page.includes("willie@lodesta.com"), `${name} page must include the monitored support address.`);
+}
+assert(termsPage.includes("does not offer a paid plan"), "Terms must disclose the current pre-launch commercial status.");
+assert(termsPage.includes("must be reviewed by qualified legal counsel"), "Terms must require counsel review before a paid launch.");
+assert(sitemap.includes('`${baseUrl}/privacy/`') && sitemap.includes('`${baseUrl}/terms/`'), "Sitemap must include the canonical public legal pages.");
 
 process.stdout.write(`${JSON.stringify({ ok: true, web: "railway.toml", watchdog: "workers/recovery-watchdog/wrangler.jsonc", localWorker: "workers/runner.ts", generation: "site-authoring" }, null, 2)}\n`);

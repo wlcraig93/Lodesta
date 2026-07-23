@@ -110,7 +110,15 @@ function deriveNextAction(input: {
     tone: "attention", title: "Clear the items holding back your next publish", description: `${input.readiness?.blockers.length ?? input.openQueue + input.pendingProof + input.pendingRights} item${(input.readiness?.blockers.length ?? input.openQueue + input.pendingProof + input.pendingRights) === 1 ? " needs" : "s need"} a decision before the website can move forward.`, href: input.pendingProof || input.pendingRights ? `${base}/business` : `${base}/website`, label: "Review items"
   };
   const failed = input.runs.find((run) => run.status === "failed");
-  if (failed) return { tone: "danger", title: "A website change needs another look", description: failed.failureReason ?? "The latest managed change did not finish verification.", href: `${base}/website`, label: "Review change" };
+  if (failed) return {
+    tone: "danger",
+    title: failed.kind === "initial_build" ? "Your website build needs attention" : "A website change needs attention",
+    description: failed.retryableByOwner
+      ? "The build was interrupted before it finished. You can try it again from the website workspace."
+      : "Lodesta hit an internal build problem and flagged it for review. You don’t need to keep retrying.",
+    href: `${base}/website`,
+    label: "Review website"
+  };
   if (input.candidate && input.readiness?.status === "ready") return { tone: "ready", title: "Your verified website update is ready", description: `Version ${input.candidate.number} passed its publication checks and is waiting for your approval.`, href: `${base}/website`, label: "Review and publish" };
   if (input.replyInquiries.length) {
     const inquiry = input.replyInquiries[0];

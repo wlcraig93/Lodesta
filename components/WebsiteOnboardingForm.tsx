@@ -86,15 +86,15 @@ export function WebsiteOnboardingForm() {
 
   return (
     <form className="onboarding-url-form" onSubmit={submit}>
-      <label htmlFor="sourceUrl">Current website address</label>
-      <div className="onboarding-url-field"><span aria-hidden="true">https://</span><input ref={sourceInputRef} id="sourceUrl" name="sourceUrl" type="text" inputMode="url" autoComplete="url" placeholder="yourbusiness.com" required maxLength={2048} /></div>
-      <label className="onboarding-confirmation"><input type="checkbox" required /><span>This is the public website for the business I want Lodesta to rebuild.</span></label>
-      <button className="button primary" type="submit" disabled={submitting}>{submitting ? "Starting…" : "Create my website draft"}</button>
+      <label className="product-visually-hidden" htmlFor="sourceUrl">Website URL</label>
+      <div className="onboarding-url-composer">
+        <input ref={sourceInputRef} id="sourceUrl" name="sourceUrl" type="text" inputMode="url" autoComplete="url" placeholder="Paste a website URL" required maxLength={2048} />
+        <button className="button primary" type="submit" disabled={submitting}>{submitting ? "Creating…" : "Create website"}</button>
+      </div>
       <p className="form-status" role="status" aria-live="polite">{status}</p>
       {duplicateProjects.length ? (
         <div ref={duplicateDialogRef} className="onboarding-duplicate-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-source-title">
           <div>
-            <span>Existing project</span>
             <h2 id="duplicate-source-title">Create another website?</h2>
             <p>It looks like you already have a project based on this source URL. Create another?</p>
             <ul>{duplicateProjects.map((project) => <li key={project.id}><Link href={project.href}>{project.name}</Link><span>{project.status.replaceAll("_", " ")}</span></li>)}</ul>

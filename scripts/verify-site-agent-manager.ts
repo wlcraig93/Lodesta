@@ -3,6 +3,11 @@ import { sha256, stableJson } from "../packages/business-data";
 import {
   WebsiteManagerAgent,
   assertCompleteWorkspace,
+  classifyModelProviderError,
+  managerLimitsForKind,
+  maximumRunCostUsd,
+  SiteAuthoringTerminalError,
+  usageForModel,
   type ManagerResponsesClient,
   type ManagerToolCall,
   type ManagerToolRuntime,
@@ -18,7 +23,6 @@ import { Fact } from "../platform/sdk";
 import { Hero } from "./components/Hero";
 export const siteDefinition = {
   siteName: "Northstar Collision Repair",
-  factDeclarations: [], capabilityBindings: [],
   routes: [{ path: "/", title: "Northstar Collision Repair", description: "Collision repair", element: <main><Hero /><h1><Fact id="business:name" /></h1></main> }]
 };`;
 const heroSource = `import React from "react";
@@ -147,6 +151,90 @@ const recovery = await new WebsiteManagerAgent(queueClient([
 ])).run({ buildInput, instruction: "Recover from a malformed tool call.", kind: "initial_build", runtime: recoveryRuntime });
 assert(recovery.completion, "a correctable tool argument error terminated the manager run");
 
+const initialLimits = managerLimitsForKind("initial_build");
+const editLimits = managerLimitsForKind("edit");
+assert.deepEqual(initialLimits, { maxInputTokens: 500_000, maxOutputTokens: 50_000, maxDurationMs: 12 * 60_000 });
+assert.deepEqual(editLimits, { maxInputTokens: 250_000, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 });
+assert.equal(maximumRunCostUsd("gpt-5.6-sol", initialLimits), 4, "initial Sol cost ceiling drifted");
+assert.equal(maximumRunCostUsd("gpt-5.6-sol", editLimits), 2, "edit Sol cost ceiling drifted");
+assert.equal(usageForModel("gpt-5.6-sol", {
+  input_tokens: 1_000,
+  input_tokens_details: { cached_tokens: 800 },
+  output_tokens: 100
+}, 25).estimatedCostUsd, 0.0044, "cached input was charged at the full input rate");
+const quotaFailure = classifyModelProviderError({ status: 429, error: { code: "insufficient_quota" } });
+assert(quotaFailure.code === "provider_quota_exhausted" && !quotaFailure.retryableByOwner, "quota exhaustion was exposed as owner-retryable");
+const transientProviderFailure = classifyModelProviderError({ status: 429, error: { code: "rate_limit_exceeded" } });
+assert(transientProviderFailure.code === "provider_temporarily_unavailable" && transientProviderFailure.retryableByOwner, "temporary provider rate limit was not retryable");
+
+const previousModelOverride = process.env.LODESTA_SITE_AGENT_MODEL;
+let unpricedModelRequests = 0;
+let unpricedModelFailure: unknown;
+process.env.LODESTA_SITE_AGENT_MODEL = "unpriced-site-agent-model";
+try {
+  await new WebsiteManagerAgent(queueClient([
+    call("must_not_run_unpriced", "list_files", {})
+  ], () => { unpricedModelRequests += 1; })).run({
+    buildInput,
+    instruction: "Reject an unpriced operator model before requesting it.",
+    kind: "edit",
+    runtime: runtime({ initialFiles: files })
+  });
+} catch (error) {
+  unpricedModelFailure = error;
+} finally {
+  if (previousModelOverride === undefined) delete process.env.LODESTA_SITE_AGENT_MODEL;
+  else process.env.LODESTA_SITE_AGENT_MODEL = previousModelOverride;
+}
+assert(unpricedModelFailure instanceof SiteAuthoringTerminalError && unpricedModelFailure.message.startsWith("site_agent_model_pricing_missing:"), "unpriced operator model was not rejected");
+assert.equal(unpricedModelRequests, 0, "an unpriced operator model reached the provider");
+
+const terminalRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
+let terminalFailure: unknown;
+try {
+  await new WebsiteManagerAgent(queueClient([
+    call("terminal_build", "build_preview", {}),
+    call("terminal_inspect", "inspect_site", {}),
+    call("must_not_run", "list_files", {})
+  ], (params) => terminalRequests.push(params))).run({
+    buildInput,
+    instruction: "Stop on a platform contract failure.",
+    kind: "edit",
+    runtime: runtime({
+      initialFiles: files,
+      inspectError: new SiteAuthoringTerminalError(
+        "artifact_contract_invalid",
+        "platform",
+        false,
+        "synthetic_artifact_contract_invalid"
+      )
+    })
+  });
+} catch (error) {
+  terminalFailure = error;
+}
+assert(terminalFailure instanceof SiteAuthoringTerminalError && terminalFailure.code === "artifact_contract_invalid", "platform contract failure lost its terminal classification");
+assert.equal(terminalRequests.length, 2, "platform contract failure consumed another model request");
+
+let persistedLimitUsage = 0;
+let limitFailure: unknown;
+try {
+  await new WebsiteManagerAgent(queueClient([
+    call("over_budget", "list_files", {})
+  ])).run({
+    buildInput,
+    instruction: "Stop after recording the response that exhausts the input budget.",
+    kind: "edit",
+    limits: { maxInputTokens: 5, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 },
+    runtime: runtime({ initialFiles: files }),
+    onUsage: async ({ usage }) => { persistedLimitUsage = usage.inputTokens; }
+  });
+} catch (error) {
+  limitFailure = error;
+}
+assert(limitFailure instanceof SiteAuthoringTerminalError && limitFailure.code === "input_budget_exhausted", "input budget exhaustion lost its terminal classification");
+assert.equal(persistedLimitUsage, 10, "the response that exhausted the input budget was not persisted before termination");
+
 console.log(JSON.stringify({
   ok: true,
   multiFileWorkspace: "pass",
@@ -158,10 +246,14 @@ console.log(JSON.stringify({
   atomicFilePatch: "pass",
   fullConversationHistory: "pass",
   correctableToolErrors: "pass"
-  ,clarificationBeforeMutation: "pass"
+  ,clarificationBeforeMutation: "pass",
+  pricedModelEnforcement: "pass",
+  terminalPlatformErrors: "pass",
+  exhaustedUsagePersistence: "pass",
+  boundedCost: "pass"
 }));
 
-function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () => void; onInspect?: () => void; inspectionSummary?: Record<string, unknown> } = {}) {
+function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () => void; onInspect?: () => void; inspectionSummary?: Record<string, unknown>; inspectError?: Error } = {}) {
   let revision = 0;
   return new WorkspaceManagerRuntime<string>({
     kind: options.initialFiles ? "edit" : "initial_build",
@@ -177,6 +269,7 @@ function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () =
     },
     inspect: async () => {
       options.onInspect?.();
+      if (options.inspectError) throw options.inspectError;
       return { passed: options.inspectionSummary ? false : true, inspectionHash, modelSummary: options.inspectionSummary ?? { ok: true, inspectionHash }, diagnosticSummary: { ok: true, inspectionHash }, checkpoint: options.inspectionSummary ? undefined : "checkpoint_passed" };
     }
   });

@@ -310,7 +310,7 @@ create table website_setups (
   creation_request_hash text not null,
   locked_by text,
   locked_at timestamptz,
-  failure_code text check (failure_code is null or failure_code in ('website_crawl_failed', 'bootstrap_failed', 'worker_interrupted')),
+  failure_code text check (failure_code is null or failure_code in ('source_invalid', 'crawl_temporarily_unavailable', 'crawl_robots_disallowed', 'crawl_unsupported_content', 'crawl_primary_unavailable', 'bootstrap_failed', 'worker_interrupted')),
   failure_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -767,7 +767,7 @@ begin
   perform 1 from website_setups
     where id = target_setup_id and owner_user_id = target_owner_user_id
       and status = 'failed'
-      and failure_code in ('website_crawl_failed', 'bootstrap_failed', 'worker_interrupted')
+      and failure_code in ('crawl_temporarily_unavailable', 'bootstrap_failed', 'worker_interrupted')
     for update;
   if not found then return; end if;
   if private_user_active_operation_count(target_owner_user_id) >= 3 then

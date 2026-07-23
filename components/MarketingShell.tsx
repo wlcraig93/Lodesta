@@ -40,6 +40,11 @@ function MarketingFooter() {
         <img src="/lodesta-logo.png" alt="Lodesta" />
       </Link>
       <p>Managed website optimization for local businesses.</p>
+      <nav aria-label="Legal and support">
+        <Link href="/privacy/">Privacy Policy</Link>
+        <Link href="/terms/">Terms of Service</Link>
+        <a href="mailto:willie@lodesta.com">willie@lodesta.com</a>
+      </nav>
     </footer>
   );
 }

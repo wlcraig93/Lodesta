@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "site-sandbox-manifest-v1",
+  "artifactContractVersion": "agent-authored-artifact-v2",
+  "toolchainVersion": "lodesta-static-site-workspace-v1.10",
+  "sourcePolicyVersion": "workspace-source-policy-v5"
+}

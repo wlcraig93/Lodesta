@@ -11,7 +11,13 @@ export const agentAuthoredRouteSchema = z.object({
 }).strict();
 
 export const agentAuthoredArtifactSchema = z.object({
-  schemaVersion: z.literal("agent-authored-artifact-v1"),
+  schemaVersion: z.literal("agent-authored-artifact-v2"),
+  compilerManifest: z.object({
+    schemaVersion: z.literal("site-sandbox-manifest-v1"),
+    artifactContractVersion: z.literal("agent-authored-artifact-v2"),
+    toolchainVersion: z.string().min(1).max(120),
+    sourcePolicyVersion: z.string().min(1).max(120)
+  }).strict(),
   siteName: z.string().min(1).max(200),
   sharedCss: z.string().min(1).max(200_000),
   routes: z.array(agentAuthoredRouteSchema).min(1).max(40),
@@ -46,7 +52,7 @@ export function normalizeAgentAuthoredArtifact(value: unknown) {
     : [];
   const factDeclarations = Array.isArray(artifact.factDeclarations)
     ? artifact.factDeclarations.flatMap((declaration, declarationIndex) => normalizeFactDeclaration(declaration, declarationIndex, routes))
-    : artifact.factDeclarations;
+    : [];
   return {
     ...artifact,
     factDeclarations,

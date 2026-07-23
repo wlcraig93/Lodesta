@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { summarizeCrawlHtml, type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
-import { assertPublicFetchUrl } from "@/lib/url-safety";
+import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
+import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
+import {
+  generationCrawlerUserAgent,
+  parseRobotsPolicy,
+  robotsAllows,
+  type RobotsRule
+} from "./robots-policy";
 
 export const generationIngestionLimits = {
   inventoryUrls: 1_000,
@@ -122,16 +129,17 @@ export async function crawlWebsiteForGeneration(input: {
   let browserRendered = 0;
   let browserFallbackAttempts = 0;
 
-  const robots = await readRobots(source, fetchImpl, scheduler, signal, limits, validateSameSite).catch(() => ({ disallowed: [] as string[], sitemaps: [] as string[] }));
+  const robots = await readRobots(source, fetchImpl, scheduler, signal, limits, validateSameSite);
   const addInventory = (candidate: string, reason: string) => {
     const normalized = normalizeSameSite(candidate, source);
+    const robotsCandidate = normalizeSameSite(candidate, source, true);
     if (!normalized) return;
     if (inventory.has(normalized)) return;
     if (!meaningfulUrl(normalized)) {
       skipped.push({ url: normalized, reason: "non_meaningful" });
       return;
     }
-    if (robotsDisallow(normalized, robots.disallowed)) {
+    if (robotsCandidate && !robotsAllows(robotsCandidate, robots.rules)) {
       restricted = true;
       skipped.push({ url: normalized, reason: "robots_disallowed" });
       return;
@@ -145,6 +153,12 @@ export async function crawlWebsiteForGeneration(input: {
   };
 
   addInventory(source.href, "source_home");
+  if (!inventory.has(normalizeSameSite(source.href, source) ?? "")) {
+    throw new WebsiteCrawlError(
+      "crawl_robots_disallowed",
+      "The primary page is disallowed by the selected robots policy."
+    );
+  }
   const sitemapQueue = unique([...robots.sitemaps, new URL("/sitemap.xml", source).href]);
   for (let sitemapIndex = 0; sitemapIndex < sitemapQueue.length && sitemapIndex < 12; sitemapIndex += 1) {
     const sitemapUrl = normalizeSameSite(sitemapQueue[sitemapIndex], source);
@@ -249,7 +263,12 @@ export async function crawlWebsiteForGeneration(input: {
     completedAt: new Date(completed).toISOString(),
     elapsedMs: Math.max(0, completed - started)
   });
-  return { ingestion, crawl: assessmentFromPages(sourceUrl, summaries, ingestion) };
+  const crawl = assessmentFromPages(sourceUrl, summaries, ingestion, robots.found);
+  if (!crawl.fetched) {
+    const failureCode = primaryFailureCode(sourceUrl, ingestion);
+    throw new WebsiteCrawlError(failureCode, primaryFailureDiagnostic(sourceUrl, ingestion));
+  }
+  return { ingestion, crawl };
 }
 
 class OriginScheduler {
@@ -269,7 +288,7 @@ class OriginScheduler {
   }
 }
 
-async function fetchHtml(url: string, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, acceptedTypes: string[], validateUrl: UrlValidator) {
+async function fetchHtml(url: string, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, acceptedTypes: string[] | undefined, validateUrl: UrlValidator) {
   let last: { ok: false; reason: z.infer<typeof failureReasonSchema>; status?: number; message: string } = { ok: false, reason: "network", message: "request_failed" };
   for (let attempt = 1; attempt <= limits.transientRetries + 1; attempt += 1) {
     try {
@@ -281,12 +300,15 @@ async function fetchHtml(url: string, fetchImpl: FetchLike, scheduler: OriginSch
         continue;
       }
       const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
-      if (contentType && !acceptedTypes.some((type) => contentType.includes(type))) {
+      if (acceptedTypes?.length && contentType && !acceptedTypes.some((type) => contentType.includes(type))) {
         return { ok: false, reason: "unsupported_content", status: response.status, message: contentType, attempts: attempt } as const;
       }
       const text = await responseTextWithin(response, limits.maximumHtmlBytes);
       return { ok: true, text, attempts: attempt, finalUrl: fetched.finalUrl } as const;
     } catch (error) {
+      if (error instanceof PublicFetchUrlError) {
+        throw new WebsiteCrawlError("source_invalid", error.message);
+      }
       const message = boundedMessage(error);
       const reason = /too_large/i.test(message) ? "response_too_large" as const : /abort|timeout/i.test(message) ? "timeout" as const : "network" as const;
       last = { ok: false, reason, message };
@@ -296,12 +318,15 @@ async function fetchHtml(url: string, fetchImpl: FetchLike, scheduler: OriginSch
   return { ...last, attempts: limits.transientRetries + 1 } as const;
 }
 
-async function fetchFollowingSafeRedirects(url: string, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, acceptedTypes: string[], validateUrl: UrlValidator) {
+async function fetchFollowingSafeRedirects(url: string, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, acceptedTypes: string[] | undefined, validateUrl: UrlValidator) {
   let current = await validateUrl(url);
   for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
     const response = await scheduler.schedule(() => fetchImpl(current, {
       redirect: "manual",
-      headers: { accept: `${acceptedTypes.join(", ")};q=0.9, */*;q=0.1`, "user-agent": "LodestaGenerationCrawler/2.0 (+https://lodesta.com)" },
+      headers: {
+        accept: acceptedTypes?.length ? `${acceptedTypes.join(", ")};q=0.9, */*;q=0.1` : "text/plain, */*;q=0.1",
+        "user-agent": generationCrawlerUserAgent
+      },
       signal: AbortSignal.any([signal, AbortSignal.timeout(limits.requestTimeoutMs)])
     }));
     if (![301, 302, 303, 307, 308].includes(response.status)) return { response, finalUrl: response.url || current };
@@ -332,23 +357,25 @@ async function responseTextWithin(response: Response, maximumBytes: number) {
 }
 
 async function readRobots(source: URL, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, validateUrl: UrlValidator) {
-  const response = await fetchHtml(new URL("/robots.txt", source).href, fetchImpl, scheduler, signal, limits, ["text/plain"], validateUrl);
-  if (!response.ok) return { disallowed: [] as string[], sitemaps: [] as string[] };
-  const disallowed: string[] = [];
-  const sitemaps: string[] = [];
-  let applies = false;
-  for (const raw of response.text.split(/\r?\n/)) {
-    const line = raw.replace(/#.*$/, "").trim();
-    const [field, ...rest] = line.split(":");
-    const value = rest.join(":").trim();
-    if (field?.toLowerCase() === "user-agent") applies = value === "*" || /lodesta/i.test(value);
-    else if (applies && field?.toLowerCase() === "disallow" && value) disallowed.push(value);
-    else if (field?.toLowerCase() === "sitemap" && value) sitemaps.push(value);
+  const response = await fetchHtml(new URL("/robots.txt", source).href, fetchImpl, scheduler, signal, limits, undefined, validateUrl);
+  if (response.ok) return { found: true, ...parseRobotsPolicy(response.text) };
+  if (
+    response.reason === "http"
+    && response.status !== undefined
+    && response.status >= 400
+    && response.status < 500
+    && response.status !== 408
+    && response.status !== 429
+  ) {
+    return { found: false, rules: [] as RobotsRule[], sitemaps: [] as string[] };
   }
-  return { disallowed, sitemaps };
+  throw new WebsiteCrawlError(
+    "crawl_temporarily_unavailable",
+    `robots.txt was temporarily unavailable: ${response.message}`
+  );
 }
 
-function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], ingestion: WebsiteGenerationIngestion): CrawlAssessment {
+function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], ingestion: WebsiteGenerationIngestion, robotsFound: boolean): CrawlAssessment {
   const source = new URL(sourceUrl);
   const primary = pages.find((page) => normalizeSameSite(page.url, source) === normalizeSameSite(sourceUrl, source)) ?? pages[0];
   const orderedPages = primary ? [primary, ...pages.filter((page) => page !== primary)] : pages;
@@ -364,7 +391,7 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
     hasViewportMeta: orderedPages.some((page) => page.hasViewportMeta),
     hasLocalBusinessSchema: orderedPages.some((page) => page.hasLocalBusinessSchema),
     hasTelLink: orderedPages.some((page) => page.hasTelLink),
-    robotsFound: true,
+    robotsFound,
     sitemapFound: ingestion.pages.some((page) => page.selectedReason === "sitemap"),
     formCount: orderedPages.reduce((total, page) => total + page.formCount, 0),
     imageCount: orderedPages.reduce((total, page) => total + page.imageCount, 0),
@@ -380,7 +407,7 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
     pageSummaries: orderedPages,
     score: { overall: 0, max: 0, percent: 0, grade: "needs_work", checks: [] },
     findings: ingestion.coverage === "complete" ? [] : [`Generation crawl coverage: ${ingestion.coverage}.`],
-    error: ingestion.coverage === "incomplete" ? "Generation crawl did not retain a usable primary page." : undefined
+    error: ingestion.coverage === "incomplete" ? "Website crawl coverage was incomplete." : undefined
   };
 }
 
@@ -468,8 +495,7 @@ function mergeExtractedFacts(left: ExtractedBusinessFacts, right: ExtractedBusin
 function emptyFacts(): ExtractedBusinessFacts { return { categories: [], services: [], serviceAreas: [], socialLinks: [], bookingLinks: [], orderingLinks: [], pressLinks: [] }; }
 function sitemapLocations(xml: string) { return [...xml.matchAll(/<loc\b[^>]*>([\s\S]*?)<\/loc>/gi)].map((match) => decodeXml(match[1].trim())); }
 function decodeXml(value: string) { return value.replaceAll("&amp;", "&").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#39;", "'"); }
-function robotsDisallow(url: string, rules: string[]) { const path = new URL(url).pathname; return rules.some((rule) => rule === "/" || (rule && path.startsWith(rule.replace(/\*.*$/, "")))); }
-function normalizeSameSite(value: string, source: URL) { try { const url = new URL(value, source); if (!sameSite(url.hostname, source.hostname) || !["http:", "https:"].includes(url.protocol)) return undefined; url.hash = ""; url.search = ""; url.pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/"; return url.href; } catch { return undefined; } }
+function normalizeSameSite(value: string, source: URL, preserveSearch = false) { try { const url = new URL(value, source); if (!sameSite(url.hostname, source.hostname) || !["http:", "https:"].includes(url.protocol)) return undefined; url.hash = ""; if (!preserveSearch) url.search = ""; url.pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/"; return url.href; } catch { return undefined; } }
 function sameSite(left: string, right: string) { const clean = (value: string) => value.toLowerCase().replace(/^www\./, ""); return clean(left) === clean(right); }
 function meaningfulUrl(value: string) { const path = new URL(value).pathname.toLowerCase(); return !/\.(?:jpg|jpeg|png|gif|webp|svg|pdf|zip|xml|json|css|js|ico|woff2?)$/.test(path) && !/(?:^|\/)(?:wp-admin|wp-json|feed|tag|author|cart|checkout|login)(?:\/|$)/.test(path); }
 function businessPriority(value: string) { const path = new URL(value).pathname.toLowerCase(); if (path === "/") return 1_000; if (/contact|book|estimate|quote|appointment/.test(path)) return 900; if (/services?|repairs?|treatments?|solutions?/.test(path)) return 850; if (/about|team|location|areas?/.test(path)) return 700; if (/gallery|portfolio|projects?|faq/.test(path)) return 600; if (/reviews?|testimonials?/.test(path)) return 300; if (/blog|news|privacy|terms/.test(path)) return 100; return 500 - Math.min(200, path.split("/").length * 20); }
@@ -478,3 +504,27 @@ function transientStatus(status: number) { return status === 408 || status === 4
 function boundedMessage(error: unknown) { const message = error instanceof Error ? error.message : String(error); return message.slice(0, 1000); }
 function unique<T>(values: T[]) { return [...new Set(values)]; }
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function primaryFailureCode(sourceUrl: string, ingestion: WebsiteGenerationIngestion): WebsiteCrawlFailureCode {
+  const source = new URL(sourceUrl);
+  const failure = ingestion.failures.find((entry) =>
+    normalizeSameSite(entry.url, source) === normalizeSameSite(sourceUrl, source)
+  ) ?? ingestion.failures[0];
+  if (!failure) return "crawl_temporarily_unavailable";
+  if (failure.reason === "response_too_large" || failure.reason === "unsupported_content") return "crawl_unsupported_content";
+  if (
+    failure.reason === "timeout"
+    || failure.reason === "network"
+    || (failure.status !== undefined && transientStatus(failure.status))
+  ) return "crawl_temporarily_unavailable";
+  return "crawl_primary_unavailable";
+}
+
+function primaryFailureDiagnostic(sourceUrl: string, ingestion: WebsiteGenerationIngestion) {
+  const source = new URL(sourceUrl);
+  const failure = ingestion.failures.find((entry) =>
+    normalizeSameSite(entry.url, source) === normalizeSameSite(sourceUrl, source)
+  ) ?? ingestion.failures[0];
+  if (failure) return `Primary page failed (${failure.reason}${failure.status ? ` ${failure.status}` : ""}): ${failure.message}`;
+  return "The crawl completed without retaining a primary page.";
+}

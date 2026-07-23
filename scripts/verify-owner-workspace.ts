@@ -14,7 +14,7 @@ for (const retired of [
   "app/(owner)/status/[slug]/page.tsx"
 ]) await assertMissing(retired);
 
-const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware] = await Promise.all([
+const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware, agentWorkspace, agentSessionRoute, agentRetryRoute] = await Promise.all([
   readFile("components/ProductAppShell.tsx", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("lib/owner-workspace.ts", "utf8"),
@@ -26,7 +26,10 @@ const [shell, css, context, home, inbox, results, business, settings, account, r
   readFile("app/(owner)/account/page.tsx", "utf8"),
   readFile("packages/site-capabilities/repository.ts", "utf8"),
   readFile("app/robots.ts", "utf8"),
-  readFile("middleware.ts", "utf8")
+  readFile("middleware.ts", "utf8"),
+  readFile("components/SiteAgentWorkspace.tsx", "utf8"),
+  readFile("app/api/site-agent/sessions/route.ts", "utf8"),
+  readFile("app/api/site-agent/runs/[runId]/retry/route.ts", "utf8")
 ]);
 
 for (const label of ["Overview", "Website", "Inbox", "Results", "Business info", "Website settings"]) assert(shell.includes(label), `Workspace navigation is missing ${label}`);
@@ -36,6 +39,14 @@ assert(shell.includes("AccountActionList") && shell.includes("owner-workspace-mo
 assert(shell.includes("owner-workspace-mobile-nav") && shell.includes("owner-workspace-mobile-sheet"), "Mobile navigation does not use the bottom-tab and More-sheet contract");
 assert(css.includes("grid-template-columns: 220px") && css.includes("grid-template-columns: 64px"), "Desktop shell does not implement the 220px/64px navigation contract");
 assert(css.includes("@media (min-width: 900px)") && css.includes("min-height: 56px"), "Responsive shell and mobile targets are missing");
+assert(shell.includes("data-sidebar-tooltip") && css.includes("content: attr(data-sidebar-tooltip)"), "Collapsed navigation does not expose visible hover and focus labels");
+assert(css.includes(".owner-workspace-sidebar { position: relative; z-index: 80;") && css.includes("overflow: visible"), "Desktop sidebar overlays are still clipped by the navigation rail");
+assert(css.includes(".owner-workspace-sidebar .account-menu-popover { z-index: 100;") && css.includes("left: calc(100% + 18px)"), "Desktop account options do not overlay the page");
+assert(shell.includes('pathname.startsWith(`${websiteHref}/`)') && shell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Website routes do not opt into the focused editor shell");
+assert(shell.includes("const compactNavigation = focusedEditor || (ready && collapsed)") && shell.includes("{!focusedEditor ? ("), "Focused editor navigation does not stay compact independently of the saved dashboard preference");
+assert(shell.includes("compact={compactNavigation}") && shell.includes('data-sidebar-tooltip={focusedEditor ? "All websites"'), "Focused editor rail does not retain compact site, account, and account-home access");
+assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] .owner-workspace-brand') && css.includes("grid-template-columns: 44px minmax(0, 1fr)"), "Focused editor shell does not expose the compact Lodesta rail or simplified mobile header");
+assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] .owner-workspace-mobile-header > .owner-workspace-draft-label'), "Mobile editor status still competes with the active site identity");
 
 assert(context.includes("requirePlatformSiteOwnerAccess") && context.includes("getOwnerSiteInventory"), "Workspace access and visible-site calculation are not canonicalized");
 assert(home.includes("deriveNextAction") && home.indexOf("readiness") < home.indexOf("replyInquiries"), "Home does not derive a deterministic managed next action");
@@ -48,6 +59,10 @@ assert(account.includes("relationships.length === 1") && account.includes("relat
 assert(repository.includes("getInquiry(siteId: string, inquiryId: string)") && repository.includes('.eq("site_id", siteId).eq("id", inquiryId)'), "Inquiry detail lookup is not site-scoped");
 assert(robots.includes('"/workspace/"'), "Workspace routes are not excluded from indexing");
 assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not protect workspace routes");
+assert(agentSessionRoute.includes("runs: runs.map(ownerSiteAgentRun)"), "Owner workspace API exposes raw agent-run telemetry.");
+assert(!agentRetryRoute.includes("failureCode"), "Owner retry API exposes internal failure diagnostics.");
+assert(!agentWorkspace.includes("failureReason") && !agentWorkspace.includes("estimatedCostUsd"), "Owner website workspace exposes internal failure or cost diagnostics.");
+assert(agentWorkspace.includes("failedRun.retryableByOwner") && agentWorkspace.includes("You don’t need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
 
 console.log("Owner workspace verification passed.");
 

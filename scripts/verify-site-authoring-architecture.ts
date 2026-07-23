@@ -42,6 +42,11 @@ assert(accessSource.includes("site.ownerUserId === userId") && !accessSource.inc
 const publication = await readFile("packages/site-platform/publication-readiness.ts", "utf8");
 assert(publication.includes('"asset_rights"') && publication.includes("platform_cleared") && publication.includes("owner_attested"), "Asset licensing was removed from the objective publication boundary.");
 assert(!publication.includes("checkout") && !publication.includes("verificationLevel"), "Claims-era publication gates remain.");
+const siteContracts = await readFile("packages/site-contracts/index.ts", "utf8");
+const platformSiteSchema = siteContracts.match(/export const platformSiteRecordSchema = z\.object\(\{([\s\S]*?)\n\}\)\.strict\(\);/)?.[1] ?? "";
+const publicBuildInputSchema = siteContracts.match(/export const sitePublicBuildInputSchema = z\.object\(\{([\s\S]*?)\n\}\)\.strict\(\);/)?.[1] ?? "";
+assert(platformSiteSchema.includes("sourceUrl: publicUrl.optional()"), "Canonical site records made URL input mandatory.");
+assert(publicBuildInputSchema.includes("sourceSnapshotIds: z.array(identifier)") && !publicBuildInputSchema.includes("sourceSnapshotIds: z.array(identifier).min("), "Canonical public build input requires a source snapshot.");
 const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { scripts?: Record<string, string> };
 for (const suite of ["architecture", "database", "authoring", "runtime", "account-setup-domain", "acquisition"]) {
   assert(packageJson.scripts?.[`verify:${suite}`], `Consolidated ${suite} verification suite is missing.`);

@@ -36,7 +36,7 @@ The repository intentionally contains one from-zero application migration. Never
 3. Create an annotated pre-reset Git tag and retain runnable web, worker, and sandbox artifacts with exact image digests.
 4. Snapshot the public schema, migration ledger, row counts, referenced blobs, blob hashes, and a manifest hash.
 5. Restore that snapshot into an isolated Supabase environment and verify rows, `auth.users` foreign keys, blobs, and hashes.
-6. Apply the sole baseline to a separate empty Supabase environment and run the full suite with `LODESTA_VERIFY_LIVE_DATABASE=true`.
+6. Apply the canonical migration chain from zero in a separate empty Supabase environment and run the full suite with `LODESTA_VERIFY_LIVE_DATABASE=true`.
 7. Require the exact operator confirmation `reset-prelaunch:<manifest-hash>`.
 8. Preserve Supabase Auth, reset only application-owned public schema and managed artifact storage, and apply the baseline.
 9. Seed the trusted runtime and operator defaults.

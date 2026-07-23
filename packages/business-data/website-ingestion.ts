@@ -23,6 +23,7 @@ import {
   type VerticalContextModule
 } from "@/packages/site-contracts";
 import { matchVerticalContext } from "@/packages/vertical-context";
+import { WebsiteCrawlError } from "./crawl-errors";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
 import { understandWebsite } from "./understanding";
@@ -47,13 +48,6 @@ export type WebsiteIngestionResult = {
   domainContext?: VerticalContextModule;
 };
 
-export class WebsiteCrawlError extends Error {
-  readonly code = "website_crawl_failed";
-  constructor(message: string, readonly replacementEligible = false) {
-    super(message);
-  }
-}
-
 export async function ingestWebsite(input: {
   url: string;
   slug?: string;
@@ -66,13 +60,15 @@ export async function ingestWebsite(input: {
   try {
     sourceUrl = await assertPublicFetchUrl(input.url);
   } catch (error) {
-    throw new WebsiteCrawlError(error instanceof Error ? error.message : String(error), true);
+    throw new WebsiteCrawlError(
+      "source_invalid",
+      error instanceof Error ? error.message : String(error)
+    );
   }
   const now = input.now ?? new Date().toISOString();
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
   const { ingestion: generationIngestion, crawl } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
-  if (!crawl.fetched) throw new WebsiteCrawlError(crawl.error ?? "The source website could not be crawled.", true);
 
   const presence = await gatherPublicPresenceSignals({ url: sourceUrl, crawl });
   if (!process.env.OPENAI_API_KEY) {
@@ -325,7 +321,10 @@ export async function ingestWebsite(input: {
       ? "location_or_service_area" : undefined
   ].filter(Boolean);
   if (minimumKnowledgeFailures.length) {
-    throw new WebsiteCrawlError(`Minimum business knowledge was not established: ${minimumKnowledgeFailures.join(", ")}.`);
+    throw new WebsiteCrawlError(
+      "crawl_primary_unavailable",
+      `Minimum business knowledge was not established: ${minimumKnowledgeFailures.join(", ")}.`
+    );
   }
   return {
     site,

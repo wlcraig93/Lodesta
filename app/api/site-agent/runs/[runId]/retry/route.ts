@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
 import { authorizedSiteActor, canAccessAgentSession } from "../../../auth";
 
 export async function POST(request: Request, { params }: { params: Promise<{ runId: string }> }) {
@@ -14,8 +14,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
   try {
     const run = await siteAuthoringWorkflow.retryFailedRun({ runId, actorId: actor.actorId });
     after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id); });
-    return NextResponse.json({ run }, { status: 202 });
+    return NextResponse.json({ run: ownerSiteAgentRun(run) }, { status: 202 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: message }, { status: 409 });
   }
 }

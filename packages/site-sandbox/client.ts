@@ -18,6 +18,14 @@ export class SiteSandboxRequestError extends Error {
   }
 }
 
+export class SiteSandboxArtifactContractError extends Error {
+  readonly name = "SiteSandboxArtifactContractError";
+
+  constructor(readonly diagnostics: string) {
+    super(`Sandbox artifact contract is invalid: ${diagnostics}`);
+  }
+}
+
 export function isConfirmedSandboxAbsent(error: unknown) {
   return error instanceof SiteSandboxRequestError
     && error.status === 404
@@ -64,7 +72,14 @@ export class SiteSandboxClient {
 
   async getArtifact(sessionId: string): Promise<AgentAuthoredArtifact> {
     const artifact = await this.call<unknown>(sessionId, "artifact", "GET");
-    return agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact(artifact));
+    const parsed = agentAuthoredArtifactSchema.safeParse(normalizeAgentAuthoredArtifact(artifact));
+    if (!parsed.success) {
+      throw new SiteSandboxArtifactContractError(parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "artifact"}: ${issue.message}`)
+        .join("; ")
+        .slice(0, 4000));
+    }
+    return parsed.data;
   }
 
   async getSource(sessionId: string) {
@@ -84,16 +99,13 @@ export class SiteSandboxClient {
       ok: boolean;
       revision: string;
       versions: string[];
-      placementId: string;
-      lodestaVersions: {
-        platform: string;
-        toolchain: string;
-        managerPrompt: string;
-        factDeclarationPolicy: string;
-        verificationPolicy: string;
-        sourcePolicy: string;
-        sandboxImageDigest: `sha256:${string}`;
+      sandboxManifest: {
+        schemaVersion: "site-sandbox-manifest-v1";
+        artifactContractVersion: string;
+        toolchainVersion: string;
+        sourcePolicyVersion: string;
       };
+      placementId: string;
       processes: Array<{ id: string; command: string; status: string }>;
     }>(sessionId, "diagnostics", "GET");
   }

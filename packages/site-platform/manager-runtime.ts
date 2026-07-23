@@ -1,6 +1,7 @@
 import { sha256, stableJson } from "@/packages/business-data";
 import {
   assertCompleteWorkspace,
+  isSiteAuthoringTerminalError,
   managerCompletionSchema,
   workspaceSourceFileSchema,
   type ManagerRunRequest,
@@ -181,6 +182,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       this.inspection = undefined;
       return result({ ok: true, cached: false, workspaceHash: this.workspaceHash, sandboxRevision: built.revision, previewPath: built.previewPath, buildDurationMs: built.buildDurationMs, placementId: built.placementId });
     } catch (error) {
+      if (isSiteAuthoringTerminalError(error)) throw error;
       const diagnostic = boundedError(error);
       const retained = await this.options.retainDiagnostic?.("build_failure", diagnostic);
       return {

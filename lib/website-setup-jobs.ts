@@ -1,5 +1,7 @@
+import type { PublicFetchUrlValidation } from "@/lib/url-safety";
 import { validateWebsiteSetupSource } from "@/lib/website-setups";
-import { platformOperationsRepository } from "@/packages/platform-operations";
+import { WebsiteCrawlError } from "@/packages/business-data";
+import { platformOperationsRepository, type WebsiteSetupFailureCode } from "@/packages/platform-operations";
 import { siteAuthoringWorkflow } from "@/packages/site-platform";
 
 export async function processNextWebsiteSetup(workerId = `website_setup_worker_${process.pid}`) {
@@ -13,7 +15,7 @@ export async function processNextWebsiteSetup(workerId = `website_setup_worker_$
       const failed = await platformOperationsRepository.failWebsiteSetup({
         setupId: setup.id,
         sourceRevision,
-        failureCode: "website_crawl_failed",
+        failureCode: websiteSetupSourceFailureCode(source.code),
         failureReason: source.error
       });
       return failed ? { setupId: failed.id, status: failed.status, failureCode: failed.failureCode } : { setupId: setup.id, status: "stale" as const };
@@ -38,15 +40,20 @@ export async function processNextWebsiteSetup(workerId = `website_setup_worker_$
     return linked ? { setupId: linked.id, status: linked.status, siteId: linked.siteId, runId: linked.runId } : { setupId: setup.id, status: "stale" as const };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const failureCode = /crawl|fetch|redirect|dns|resolve|website|source url/i.test(message) ? "website_crawl_failed" as const : "bootstrap_failed" as const;
     const failed = await platformOperationsRepository.failWebsiteSetup({
       setupId: setup.id,
       sourceRevision,
-      failureCode,
+      failureCode: error instanceof WebsiteCrawlError ? error.code : "bootstrap_failed",
       failureReason: safeFailureMessage(message)
     });
     return failed ? { setupId: failed.id, status: failed.status, failureCode: failed.failureCode } : { setupId: setup.id, status: "stale" as const };
   }
+}
+
+export function websiteSetupSourceFailureCode(
+  code: Extract<PublicFetchUrlValidation, { ok: false }>["code"]
+): WebsiteSetupFailureCode {
+  return code === "dns_unavailable" ? "crawl_temporarily_unavailable" : "source_invalid";
 }
 
 function safeFailureMessage(message: string) {

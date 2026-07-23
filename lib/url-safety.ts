@@ -3,7 +3,28 @@ import { isIP } from "node:net";
 
 export type PublicFetchUrlValidation =
   | { ok: true; url: string; hostname: string }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      code:
+        | "invalid_url"
+        | "unsupported_protocol"
+        | "credentials_forbidden"
+        | "hostname_missing"
+        | "private_hostname"
+        | "private_address"
+        | "dns_unavailable";
+      error: string;
+    };
+
+export class PublicFetchUrlError extends Error {
+  constructor(
+    readonly code: Extract<PublicFetchUrlValidation, { ok: false }>["code"],
+    message: string
+  ) {
+    super(message);
+    this.name = "PublicFetchUrlError";
+  }
+}
 
 export function normalizePublicFetchUrlInput(value: string) {
   const trimmed = value.trim();
@@ -21,18 +42,18 @@ export async function validatePublicFetchUrl(
   try {
     parsed = new URL(normalizePublicFetchUrlInput(value));
   } catch {
-    return { ok: false, error: "URL must be a valid public website address." };
+    return { ok: false, code: "invalid_url", error: "URL must be a valid public website address." };
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return { ok: false, error: "URL must use http or https." };
+    return { ok: false, code: "unsupported_protocol", error: "URL must use http or https." };
   }
   if (parsed.username || parsed.password) {
-    return { ok: false, error: "URL credentials are not allowed." };
+    return { ok: false, code: "credentials_forbidden", error: "URL credentials are not allowed." };
   }
 
   const hostname = normalizeHostname(parsed.hostname);
-  if (!hostname) return { ok: false, error: "URL must include a hostname." };
+  if (!hostname) return { ok: false, code: "hostname_missing", error: "URL must include a hostname." };
 
   const hostnameCheck = validatePublicHostname(hostname);
   if (!hostnameCheck.ok) return hostnameCheck;
@@ -42,10 +63,10 @@ export async function validatePublicFetchUrl(
       const addresses = await lookup(hostname, { all: true, verbatim: true });
       const blocked = addresses.find((address) => isPrivateOrReservedIp(address.address));
       if (blocked) {
-        return { ok: false, error: "URL host resolves to a private or reserved network address." };
+        return { ok: false, code: "private_address", error: "URL host resolves to a private or reserved network address." };
       }
     } catch {
-      return { ok: false, error: "URL host could not be resolved for safety checks." };
+      return { ok: false, code: "dns_unavailable", error: "URL host could not be resolved for safety checks." };
     }
   }
 
@@ -54,26 +75,26 @@ export async function validatePublicFetchUrl(
 
 export async function assertPublicFetchUrl(value: string) {
   const validation = await validatePublicFetchUrl(value);
-  if (!validation.ok) throw new Error(validation.error);
+  if (!validation.ok) throw new PublicFetchUrlError(validation.code, validation.error);
   return validation.url;
 }
 
 export function validatePublicHostname(hostname: string): PublicFetchUrlValidation {
   const normalized = normalizeHostname(hostname);
-  if (!normalized) return { ok: false, error: "URL must include a hostname." };
+  if (!normalized) return { ok: false, code: "hostname_missing", error: "URL must include a hostname." };
 
   const localNames = ["localhost", "localhost.localdomain"];
   if (localNames.includes(normalized) || normalized.endsWith(".localhost")) {
-    return { ok: false, error: "Localhost URLs are not allowed for crawl jobs." };
+    return { ok: false, code: "private_hostname", error: "Localhost URLs are not allowed for crawl jobs." };
   }
   if (normalized.endsWith(".local") || normalized.endsWith(".internal") || normalized.endsWith(".lan")) {
-    return { ok: false, error: "Private network hostnames are not allowed for crawl jobs." };
+    return { ok: false, code: "private_hostname", error: "Private network hostnames are not allowed for crawl jobs." };
   }
   if (!normalized.includes(".") && isIP(normalized) === 0) {
-    return { ok: false, error: "Public crawl URLs must use a fully qualified public hostname." };
+    return { ok: false, code: "hostname_missing", error: "Public crawl URLs must use a fully qualified public hostname." };
   }
   if (isPrivateOrReservedIp(normalized)) {
-    return { ok: false, error: "Private or reserved IP addresses are not allowed for crawl jobs." };
+    return { ok: false, code: "private_address", error: "Private or reserved IP addresses are not allowed for crawl jobs." };
   }
 
   return { ok: true, url: "", hostname: normalized };

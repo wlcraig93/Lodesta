@@ -26,7 +26,7 @@ const artifact = {
   siteName: siteDefinition.siteName,
   sharedCss,
   routes,
-  claims: siteDefinition.claims ?? [],
+  factDeclarations: siteDefinition.factDeclarations ?? [],
   capabilityBindings: siteDefinition.capabilityBindings ?? []
 };
 

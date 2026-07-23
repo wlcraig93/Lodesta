@@ -2,7 +2,7 @@ import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import type { AgentAccessPolicyV1 } from "@/packages/site-contracts";
+import type { AgentAccessPolicy } from "@/packages/site-contracts";
 import botMappings from "./agent-bot-mappings.json";
 
 export async function loadPublishedSiteContext(slug: string) {
@@ -35,7 +35,7 @@ export function llmsTextForSite(input: Awaited<ReturnType<typeof loadPublishedSi
   return `${lines.filter(Boolean).join("\n")}\n`;
 }
 
-export function robotsTextForSite(policy: AgentAccessPolicyV1, sitemapUrl: string) {
+export function robotsTextForSite(policy: AgentAccessPolicy, sitemapUrl: string) {
   const contentSignal = `search=${policy.search === "allow" ? "yes" : "no"}, ai-input=${policy.aiInput === "allow" ? "yes" : "no"}, ai-train=${policy.aiTrain === "allow" ? "yes" : "no"}`;
   const disallowed = new Set([
     ...(policy.search === "disallow" ? ["search"] : []),

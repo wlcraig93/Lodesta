@@ -12,11 +12,12 @@ assert.equal(
   false
 );
 
-const [accountRoute, callbackRoute, marketingShell, accessPolicy, ownerWorkspace, accountMenu, adminShell] = await Promise.all([
+const [accountRoute, callbackRoute, marketingShell, accessPolicy, security, ownerWorkspace, accountMenu, adminShell] = await Promise.all([
   readFile("app/(owner)/account/page.tsx", "utf8"),
-  readFile("app/(marketing)/auth/callback/route.ts", "utf8"),
+  readFile("app/(auth)/auth/callback/route.ts", "utf8"),
   readFile("components/MarketingShell.tsx", "utf8"),
   readFile("lib/page-access.ts", "utf8"),
+  readFile("lib/security.ts", "utf8"),
   readFile("lib/owner-workspace.ts", "utf8"),
   readFile("components/AccountMenu.tsx", "utf8"),
   readFile("components/admin/AdminShell.tsx", "utf8")
@@ -26,6 +27,7 @@ assert(!accountRoute.includes('redirect("/admin/sites")'), "Admin users are stil
 assert(!callbackRoute.includes("/admin/sites"), "The auth callback still forces an admin-console landing.");
 assert(marketingShell.includes('user ? "/account"'), "Authenticated marketing navigation does not enter through the owner account.");
 assert(accessPolicy.includes('mode: "owner"') && accessPolicy.includes('mode: "platform_admin_preview"'), "Workspace access modes are incomplete.");
+assert(security.match(/\["GET", "HEAD"\]\.includes\(request\.method\.toUpperCase\(\)\)/g)?.length === 2, "Local-open authorization still permits a product mutation.");
 assert(ownerWorkspace.includes('access.mode === "platform_admin_preview" ? [currentOption]'), "Admin previews can leak the all-sites switcher.");
 assert(accountMenu.includes("aria-controls") && !accountMenu.includes('role="menu"'), "The account popover accessibility contract regressed.");
 assert(adminShell.includes('label: "Owner workspace"') && adminShell.includes('auth.user ? "Platform admin"'), "The admin account menu cannot return to owner mode.");

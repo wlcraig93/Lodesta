@@ -1,10 +1,10 @@
-import type { SiteBuildArtifactV1 } from "@/packages/site-contracts";
+import type { SiteBuildArtifact } from "@/packages/site-contracts";
 import { sha256 } from "@/packages/business-data";
 import type { PreparedArtifactFile } from "@/packages/site-verification";
 import type { ArtifactBlobStore } from "./blob-store";
 
 export async function persistFinalArtifact(input: {
-  artifact: SiteBuildArtifactV1;
+  artifact: SiteBuildArtifact;
   files: PreparedArtifactFile[];
   store: ArtifactBlobStore;
 }) {
@@ -27,7 +27,7 @@ export async function persistFinalArtifact(input: {
 }
 
 export async function readVerifiedArtifactFile(input: {
-  artifact: SiteBuildArtifactV1;
+  artifact: SiteBuildArtifact;
   path: string;
   store: ArtifactBlobStore;
 }) {

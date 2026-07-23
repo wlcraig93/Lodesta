@@ -1,84 +1,90 @@
-import type { CheckoutSessionResult } from "@/lib/billing";
-import type { ClaimVerificationLevel } from "@/lib/owner-access";
+export type WebsiteSetupStatus = "queued" | "processing" | "linked" | "failed" | "canceled";
 
-export type ClaimRecord = {
+export type WebsiteSetupFailureCode =
+  | "website_crawl_failed"
+  | "bootstrap_failed"
+  | "worker_interrupted";
+
+export type WebsiteSetup = {
+  id: string;
+  ownerUserId: string;
+  sourceUrl: string;
+  normalizedSource: string;
+  sourceRevision: number;
+  status: WebsiteSetupStatus;
+  siteId?: string;
+  sessionId?: string;
+  runId?: string;
+  attempts: number;
+  maxAttempts: number;
+  idempotencyKey: string;
+  creationRequestHash: string;
+  lockedBy?: string;
+  lockedAt?: string;
+  failureCode?: WebsiteSetupFailureCode;
+  failureReason?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateWebsiteSetupInput = {
+  ownerUserId: string;
+  sourceUrl: string;
+  normalizedSource: string;
+  idempotencyKey: string;
+  creationRequestHash: string;
+};
+
+export type WebsiteSetupSourceUpdate = {
+  setupId: string;
+  ownerUserId: string;
+  sourceUrl: string;
+  normalizedSource: string;
+};
+
+export type AdoptionInvitation = {
   id: string;
   siteId: string;
-  status: "preview" | "checkout_required" | "claimed";
-  ownerUserId?: string;
-  ownerEmail?: string;
-  verificationLevel?: ClaimVerificationLevel;
-  verificationMethod?: string;
-  verifiedBy?: string;
-  verifiedAt?: string;
-  outboundCampaignId?: string;
-  outboundProspectId?: string;
-  verifiedFacts: string[];
-  acceptedTermsAt?: string;
-  acceptedManagementAt?: string;
-  assetRightsAcceptedAt?: string;
-  attestedAssetIds?: string[];
-  claimedAt?: string;
+  tokenHash: string;
+  expiresAt: string;
   createdAt: string;
-  stripeCustomerId?: string;
-  stripeSubscriptionId?: string;
-  stripeCheckoutSessionId?: string;
-};
-
-export type CreateClaimInput = {
-  siteId: string;
-  ownerUserId?: string;
-  ownerEmail?: string;
-  verificationLevel?: ClaimVerificationLevel;
-  verificationMethod?: string;
-  verifiedBy?: string;
-  verifiedAt?: string;
-  outboundCampaignId?: string;
-  outboundProspectId?: string;
-  verifiedFacts?: string[];
-  acceptedTerms: boolean;
-  acceptedManagement: boolean;
-  acceptedAssetRights?: boolean;
-  attestedAssetIds?: string[];
-};
-
-export type ClaimWithCheckout = ClaimRecord & { checkout: CheckoutSessionResult };
-
-export type CompleteClaimCheckoutInput = {
-  claimId?: string;
-  siteId?: string;
-  checkoutSessionId?: string;
-  stripeCustomerId?: string;
-  stripeSubscriptionId?: string;
-  completedAt?: string;
+  consumedAt?: string;
+  consumedByUserId?: string;
 };
 
 export type DomainRecord = {
   id: string;
   siteId: string;
   hostname: string;
-  kind: "preview" | "platform_slug" | "custom";
-  status: "pending" | "active" | "failed";
-  provider: "railway" | "cloudflare_for_saas";
+  status: "pending_verification" | "provisioning" | "active" | "attention_required" | "expired" | "conflict";
+  ownershipProofStatus: "pending" | "verified";
+  routingStatus: "pending" | "active";
+  providerStatus: "pending" | "active" | "invalid";
+  certificateStatus: "pending" | "active" | "invalid";
+  verificationName: string;
+  verificationValue: string;
+  routingName: string;
+  routingTarget: string;
+  expiresAt: string;
   createdAt: string;
+  updatedAt: string;
   providerHostnameId?: string;
-  verification?: {
-    type: "cname" | "txt" | "http";
-    value: string;
-    note: string;
-    configured: boolean;
-    providerHostnameId?: string;
-  };
+  ownershipVerifiedAt?: string;
+  activatedAt?: string;
+  attentionRequiredAt?: string;
+  providerInvalidCount: number;
+  firstProviderInvalidAt?: string;
+  lastProviderInvalidAt?: string;
+  executionFailureCount: number;
+  lastExecutionError?: string;
 };
 
 export type RegisterDomainInput = {
   siteId: string;
   hostname: string;
-  provider?: DomainRecord["provider"];
-  providerHostnameId?: string;
 };
 
-export type SiteRedirectRuleV1 = {
+export type SiteRedirectRule = {
   id: string;
   siteId: string;
   sourcePath: string;
@@ -118,12 +124,12 @@ export function normalizeSiteRedirectPath(input: string) {
   return normalized;
 }
 
-export function redirectsStrandedByRoutes(redirects: SiteRedirectRuleV1[], publishedRoutes: string[]) {
+export function redirectsStrandedByRoutes(redirects: SiteRedirectRule[], publishedRoutes: string[]) {
   const routes = new Set(publishedRoutes.map(normalizeSiteRedirectPath));
   return redirects.filter((redirect) => redirect.status === "active" && !routes.has(redirect.sourcePath) && !routes.has(redirect.destinationPath));
 }
 
-export type SitePreviewTokenV1 = {
+export type SitePreviewToken = {
   token: string;
   siteId: string;
   siteVersionId: string;
@@ -151,12 +157,12 @@ export type OutboundProspect = {
   sourceUrl?: string;
   previewToken?: string;
   mailingCode?: string;
-  status: "queued" | "mailed" | "preview_viewed" | "claim_started" | "claimed" | "published" | "disqualified";
+  status: "queued" | "mailed" | "preview_viewed" | "adoption_started" | "adopted" | "published" | "disqualified";
   createdAt: string;
   mailedAt?: string;
   firstPreviewViewedAt?: string;
-  claimStartedAt?: string;
-  claimedAt?: string;
+  adoptionStartedAt?: string;
+  adoptedAt?: string;
   publishedAt?: string;
   disqualifiedAt?: string;
   metadata?: Record<string, string | number | boolean>;
@@ -169,13 +175,11 @@ export type OutboundEvent = {
   siteId?: string;
   type:
     | "mailer_sent"
-    | "claim_link_opened"
+    | "invitation_opened"
     | "preview_viewed"
     | "picker_interaction"
-    | "claim_started"
-    | "checkout_started"
-    | "claim_completed"
-    | "paid"
+    | "adoption_started"
+    | "adoption_completed"
     | "published"
     | "support_contact"
     | "disqualified"
@@ -190,36 +194,29 @@ export type OutboundSummary = {
   campaigns: number;
   prospects: number;
   mailed: number;
-  claimLinkOpened: number;
+  invitationOpened: number;
   previewViewed: number;
   pickerInteractions: number;
-  claimsStarted: number;
-  checkoutStarted: number;
-  claimed: number;
-  paid: number;
+  adoptionsStarted: number;
+  adopted: number;
   published: number;
   disqualified: number;
   supportContacts: number;
   credibilityFeedbackCount: number;
   avgCredibilityScore?: number;
   mailerToPreviewRate: number;
-  mailerToClaimRate: number;
-  claimLinkToCheckoutRate: number;
-  checkoutToPaidRate: number;
-  claimLinkToPaidRate: number;
-  claimToPublishRate: number;
+  mailerToAdoptionRate: number;
+  invitationToAdoptionRate: number;
+  adoptionToPublishRate: number;
   supportBurdenRate: number;
   verticalBreakdown: Array<{
     vertical: string;
     prospects: number;
-    claimLinkOpened: number;
-    checkoutStarted: number;
-    claimed: number;
-    paid: number;
+    invitationOpened: number;
+    adopted: number;
     published: number;
-    claimLinkToCheckoutRate: number;
-    checkoutToPaidRate: number;
-    mailerToClaimRate: number;
+    invitationToAdoptionRate: number;
+    mailerToAdoptionRate: number;
   }>;
 };
 
@@ -296,7 +293,7 @@ export type CreateProspectReportInput = { id?: string; placeId: string; sourceUr
 export type UpdateProspectReportInput = { reportId: string; status?: ProspectReportRecord["status"]; jobId?: string; sourceUrl?: string; sourceHost?: string; websiteKind?: ProspectWebsiteKind; result?: ProspectPresenceReportResult; unlockedAt?: string; leadId?: string; errorCode?: string; completedAt?: string };
 export type CreateProspectReportLeadInput = { reportId: string; email: string; contactName?: string; phone?: string; ipHash?: string; metadata?: Record<string, string | number | boolean> };
 
-export type ProspectReportJobV1 = {
+export type ProspectReportJob = {
   id: string;
   reportId: string;
   status: "queued" | "running" | "completed" | "failed";

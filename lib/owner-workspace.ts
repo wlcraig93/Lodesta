@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { authRequired, hasPlatformAdminRole } from "@/lib/auth-policy";
 import { requirePlatformSiteOwnerAccess, type OwnerWorkspaceAccessMode } from "@/lib/page-access";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { platformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import type { PlatformSiteRecord } from "@/packages/site-contracts";
 
@@ -15,23 +14,16 @@ export type OwnerWorkspaceSiteOption = {
 };
 
 export async function getOwnerSiteInventory() {
-  const [auth, sites, claims] = await Promise.all([
-    getCurrentUser(),
-    sitePlatformRepository.listSites(),
-    platformOperationsRepository.listClaims()
-  ]);
+  const auth = await getCurrentUser();
   const localOpenMode = !auth.configured && !authRequired();
-  const email = auth.user?.email?.toLowerCase();
   const canAccessAdmin = localOpenMode || hasPlatformAdminRole(auth.user);
   const visibleSites = localOpenMode
-    ? sites
-    : sites.filter((site) => claims.some((claim) =>
-      claim.siteId === site.id &&
-      claim.status === "claimed" &&
-      ((auth.user?.id && claim.ownerUserId === auth.user.id) || (email && claim.ownerEmail?.toLowerCase() === email))
-    ));
+    ? await sitePlatformRepository.listSites()
+    : auth.user?.id
+      ? await sitePlatformRepository.getSitesByOwnerUserId(auth.user.id)
+      : [];
   const options = await siteOptions(visibleSites);
-  return { auth, claims, localOpenMode, canAccessAdmin, sites: visibleSites, options };
+  return { auth, localOpenMode, canAccessAdmin, sites: visibleSites, options };
 }
 
 export async function requireOwnerWorkspace(slug: string, nextPath: string) {
@@ -66,8 +58,10 @@ export async function requireOwnerWorkspace(slug: string, nextPath: string) {
 }
 
 async function siteOptions(sites: PlatformSiteRecord[]): Promise<OwnerWorkspaceSiteOption[]> {
-  return Promise.all(sites.map(async (site) => {
-    const state = await sitePlatformRepository.getBusinessState(site.businessId);
+  const states = await sitePlatformRepository.getBusinessStatesByIds(sites.map((site) => site.businessId));
+  const statesByBusinessId = new Map(states.map((state) => [state.businessId, state]));
+  return sites.map((site) => {
+    const state = statesByBusinessId.get(site.businessId);
     return {
       id: site.id,
       slug: site.slug,
@@ -75,5 +69,5 @@ async function siteOptions(sites: PlatformSiteRecord[]): Promise<OwnerWorkspaceS
       status: site.status,
       published: Boolean(site.publishedVersionId)
     };
-  }));
+  });
 }

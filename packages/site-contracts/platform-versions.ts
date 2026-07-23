@@ -1,7 +1,7 @@
 export const siteAuthoringPlatformVersion = "site-authoring-platform-v1.21";
 export const siteToolchainVersion = "lodesta-static-site-workspace-v1.9";
 export const websiteManagerPromptVersion = "website-manager-simple-v1";
-export const artifactClaimPolicyVersion = "artifact-claim-validator-v1.3";
+export const factDeclarationPolicyVersion = "fact-declaration-validator-v1";
 export const siteVerificationPolicyVersion = "site-verification-policy-v2";
 
 // Updated only after the corresponding Cloudflare image is built and deployed.
@@ -11,7 +11,7 @@ export const sitePlatformVersionManifest = {
   platform: siteAuthoringPlatformVersion,
   toolchain: siteToolchainVersion,
   managerPrompt: websiteManagerPromptVersion,
-  claimPolicy: artifactClaimPolicyVersion,
+  factDeclarationPolicy: factDeclarationPolicyVersion,
   verificationPolicy: siteVerificationPolicyVersion,
   sandboxImageDigest
 } as const;

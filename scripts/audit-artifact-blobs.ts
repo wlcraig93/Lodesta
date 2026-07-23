@@ -16,7 +16,7 @@ import {
   type LocatedBlobInventoryObject
 } from "../packages/site-artifacts/blob-store";
 import { configuredArtifactBlobMaintenanceStore } from "../packages/site-artifacts/maintenance-store";
-import { siteBuildArtifactV1Schema } from "../packages/site-contracts";
+import { siteBuildArtifactSchema } from "../packages/site-contracts";
 
 const options = parseArgs(process.argv.slice(2));
 const client = getSupabaseAdminClient();
@@ -112,7 +112,7 @@ async function collectReferencedObjects() {
   }
   for (const row of runtimeRows) addObject(objects, "artifact", row.storage_key, "trusted_runtime_patches.storage_key");
   for (const row of artifactRows) {
-    const artifact = siteBuildArtifactV1Schema.parse(row.artifact);
+    const artifact = siteBuildArtifactSchema.parse(row.artifact);
     for (const file of artifact.files) addObject(objects, "artifact", file.storageKey, "site_build_artifacts.artifact.files.storageKey");
     for (const screenshotKey of artifact.qa.screenshotKeys) addObject(objects, "artifact", screenshotKey, "site_build_artifacts.artifact.qa.screenshotKeys");
   }

@@ -1,4 +1,4 @@
-import type { SiteElementSelectionV1, SitePublicBuildInputV3, VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { SiteElementSelection, SitePublicBuildInput, VerticalContextModule } from "@/packages/site-contracts";
 import { websiteManagerPromptVersion } from "@/packages/site-contracts/platform-versions";
 import { taskSkillFor, type ManagerTaskKind } from "./skills";
 
@@ -13,17 +13,17 @@ Honor an explicit owner edit precisely and preserve unrelated working behavior. 
 Release boundaries:
 - Keep src/site.tsx and src/styles.css as entry files; safe local .ts, .tsx, and .css modules may live anywhere beneath src/.
 - Import only React, safe local modules, and named components from ../platform/sdk. Do not add packages, network access, scripts, embeds, secrets, backends, dependencies, or browser JavaScript.
-- Export siteDefinition with siteName, routes, claims, and capabilityBindings. Every requested route should have working navigation and a React element unless the owner explicitly removes it.
+- Export siteDefinition with siteName, routes, factDeclarations, and capabilityBindings. Every requested route should have working navigation and a React element unless the owner explicitly removes it.
 - Use the platform SDK for eligible facts, assets, forms, maps, links, galleries, and disclosures. IDs must come from the public evidence packet. The trusted compiler derives capability bindings, so set capabilityBindings to [].
 - SDK-bound facts are declared automatically. Declare factual free text with its exact rendered text and supporting public fact IDs. Do not invent ratings, reviews, credentials, awards, longevity, warranties, prices, timelines, service areas, or service details.
 - Keep the output static, semantic, responsive, accessible, and free of source/research language. CSS cannot use @import, @font-face, url(), external fonts, or executable syntax.`;
 
 export function managerBuildContext(input: {
-  buildInput: SitePublicBuildInputV3;
-  verticalContext?: VerticalContextModuleV1;
+  buildInput: SitePublicBuildInput;
+  verticalContext?: VerticalContextModule;
   instruction: string;
   kind: ManagerTaskKind;
-  selection?: SiteElementSelectionV1;
+  selection?: SiteElementSelection;
 }) {
   return {
     schemaVersion: "authoring-context" as const,
@@ -47,11 +47,11 @@ export function managerBuildContext(input: {
     },
     sdk: {
       import: "import { Fact, Asset, ManagedForm, ManagedMap, SafeLink, Gallery, Disclosure } from '../platform/sdk';",
-      authoredClaimContract: {
+      factDeclarationContract: {
         rule: "Only free-text factual assertions belong here. SDK-bound canonical values are auto-declared by the platform.",
         exactShape: "{ id: string; route: string; text: string; kind: 'free_text'; sourceFactIds: string[]; autoDeclared: false }",
         example: {
-          id: "claim_collision_repair",
+          id: "fact_declaration_collision_repair",
           route: "/services/collision-repair",
           text: "Collision repair",
           kind: "free_text",
@@ -72,7 +72,7 @@ export function managerBuildContext(input: {
   };
 }
 
-export function managerEvidencePacket(input: SitePublicBuildInputV3) {
+export function managerEvidencePacket(input: SitePublicBuildInput) {
   const { agentAccessPolicy: _servingPolicy, ...intent } = input.intent;
   return {
     schemaVersion: "manager-public-evidence-packet" as const,

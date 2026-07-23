@@ -35,8 +35,9 @@ export function normalizeObservedBusinessHours(values: Iterable<string>): Record
     const compact = rawValue.replace(/\s+/g, " ").trim();
     if (!compact) continue;
     const parsed = parseObservedBusinessHoursLine(compact);
-    const label = parsed?.label ?? "Hours";
-    const value = parsed?.value ?? compact.replace(/^hours?\s*:?\s*/i, "").trim();
+    if (!parsed) continue;
+    const label = parsed.label;
+    const value = parsed.value;
     if (!value) continue;
     if (!result[label]) result[label] = value;
     else if (!result[label].split(/\s*;\s*/).includes(value)) result[label] = `${result[label]}; ${value}`;

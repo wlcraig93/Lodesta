@@ -6,9 +6,9 @@ import {
   persistFinalArtifact,
   serializeWorkspaceSourceSidecar,
   workspaceSourceSidecarKey,
-  workspaceSourceSidecarV1Schema,
+  workspaceSourceSidecarSchema,
   type ArtifactBlobStore,
-  type WorkspaceSourceSidecarV1
+  type WorkspaceSourceSidecar
 } from "@/packages/site-artifacts";
 import { ManagerNeedsInputError, WebsiteManagerAgent, taskSkillFor, websiteManagerPromptVersion, workspaceSourceFileSchema, workspaceSourcePolicyVersion, type ManagerRunRequest, type WorkspaceSourceFile } from "@/packages/site-agent";
 import { configuredSiteSandboxClient, type SiteSandboxClient } from "@/packages/site-sandbox";
@@ -17,16 +17,18 @@ import {
   operatorQueueItemSchema,
   siteAgentRunSchema,
   siteAgentSessionSchema,
-  siteVersionV4Schema,
-  siteWorkspaceRevisionV1Schema,
+  platformSiteRecordSchema,
+  siteVersionSchema,
+  siteWorkspaceRevisionSchema,
   verticalDemandEventSchema,
   type SiteAgentRun,
   type SiteAgentSession,
-  type SiteBuildArtifactV1,
-  type SiteElementSelectionV1,
-  type SitePublicBuildInputV3,
-  type SiteVersionV4,
-  type SiteWorkspaceRevisionV1
+  type SiteBuildArtifact,
+  type SiteElementSelection,
+  type PlatformSiteRecord,
+  type SitePublicBuildInput,
+  type SiteVersion,
+  type SiteWorkspaceRevision
 } from "@/packages/site-contracts";
 import { sandboxImageDigest, siteToolchainVersion, siteVerificationPolicyVersion } from "@/packages/site-contracts/platform-versions";
 import {
@@ -40,6 +42,7 @@ import { platformOperationsRepository, type PlatformOperationsRepository } from 
 import { WorkspaceManagerRuntime, type RuntimeInspection } from "./manager-runtime";
 import { deriveSitePublicationReadiness } from "./publication-readiness";
 import { SiteAgentEventRecorder } from "./run-events";
+import { normalizeBootstrapSourceUrl } from "./source-url";
 import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 
 const runtimeSeriesId = "site-runtime-v1";
@@ -61,8 +64,6 @@ export class SiteAuthoringWorkflow {
   async bootstrapFromUrl(input: {
     url: string;
     ownerId: string;
-    mode?: "draft" | "experimental";
-    workspaceId?: string;
     slug?: string;
     signal?: AbortSignal;
   }) {
@@ -70,12 +71,9 @@ export class SiteAuthoringWorkflow {
     const workflowSignal = input.signal
       ? AbortSignal.any([input.signal, AbortSignal.timeout(initialGenerationDeadlineMs)])
       : AbortSignal.timeout(initialGenerationDeadlineMs);
-    const existing = await this.findExistingBootstrap(input);
-    if (existing) return existing;
     const ingested = await ingestWebsite({
       url: input.url,
       slug: input.slug,
-      workspaceId: input.workspaceId,
       signal: workflowSignal
     });
     if (!ingested.domainContext) {
@@ -108,8 +106,12 @@ export class SiteAuthoringWorkflow {
         contentHash: asContentHash(asset.revision.contentHash)
       });
     }
-    const site = { ...ingested.site, status: input.mode === "experimental" ? "experimental" as const : ingested.site.status };
-    await this.repository.bootstrapSite({
+    const site = {
+      ...ingested.site,
+      sourceUrl: input.url,
+      normalizedSource: normalizeBootstrapSourceUrl(input.url)
+    };
+    const persistedSite = await this.bootstrapWithUniqueSlug({
       site,
       state: ingested.state,
       intent: ingested.intent,
@@ -119,7 +121,7 @@ export class SiteAuthoringWorkflow {
       publicBuildInput: buildInput
     });
     await this.ensureRuntime();
-    const session = await this.getOrCreateSession({ siteId: site.id, ownerId: input.ownerId, buildInput });
+    const session = await this.getOrCreateSession({ siteId: persistedSite.id, ownerId: input.ownerId, buildInput });
     const run = await this.enqueueRun({
       session,
       kind: "initial_build",
@@ -127,10 +129,10 @@ export class SiteAuthoringWorkflow {
       requestedBy: input.ownerId,
       workflowStartedAt
     });
-    return { site, session, run, buildInput };
+    return { site: persistedSite, session, run, buildInput };
   }
 
-  async getOrCreateSession(input: { siteId: string; ownerId: string; buildInput?: SitePublicBuildInputV3 }) {
+  async getOrCreateSession(input: { siteId: string; ownerId: string; buildInput?: SitePublicBuildInput }) {
     const existing = await this.repository.getActiveAgentSession(input.siteId, input.ownerId);
     if (existing) return existing;
     const site = await this.repository.getSite(input.siteId);
@@ -164,7 +166,7 @@ export class SiteAuthoringWorkflow {
     kind: SiteAgentRun["kind"];
     instruction: string;
     requestedBy: string;
-    selection?: SiteElementSelectionV1;
+    selection?: SiteElementSelection;
     origin?: SiteAgentRun["origin"];
     deferBehindActive?: boolean;
     publishAfterSuccess?: boolean;
@@ -244,7 +246,7 @@ export class SiteAuthoringWorkflow {
       usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
       startedAt: input.workflowStartedAt ?? now
     });
-    await this.repository.saveAgentRun(run);
+    await this.repository.enqueueAgentRun(run);
     await this.repository.appendAgentMessage({
       schemaVersion: "site-agent-message",
       id: id("message"),
@@ -262,7 +264,7 @@ export class SiteAuthoringWorkflow {
     session: SiteAgentSession;
     instruction: string;
     requestedBy: string;
-    selection?: SiteElementSelectionV1;
+    selection?: SiteElementSelection;
     signal?: AbortSignal;
   }) {
     const site = await this.repository.getSite(input.session.siteId);
@@ -272,7 +274,7 @@ export class SiteAuthoringWorkflow {
     return { run };
   }
 
-  async executeRun(runId: string, selection?: SiteElementSelectionV1) {
+  async executeRun(runId: string, selection?: SiteElementSelection) {
     let current = await this.requireRun(runId);
     if (current.status !== "queued") return current;
     if (current.deferredUntilRunId) {
@@ -394,7 +396,7 @@ export class SiteAuthoringWorkflow {
     }
   }
 
-  async executeRunAndFinalize(runId: string, selection?: SiteElementSelectionV1) {
+  async executeRunAndFinalize(runId: string, selection?: SiteElementSelection) {
     const run = await this.executeRun(runId, selection);
     if (!run.publishAfterSuccess || run.status !== "succeeded" || !run.candidateVersionId) return run;
     const site = await this.repository.getSite(run.siteId);
@@ -473,7 +475,7 @@ export class SiteAuthoringWorkflow {
     sessionId: string;
     ownerId: string;
     message: string;
-    selection?: SiteElementSelectionV1;
+    selection?: SiteElementSelection;
     signal?: AbortSignal;
   }) {
     const session = await this.requireSession(input.sessionId);
@@ -616,11 +618,11 @@ export class SiteAuthoringWorkflow {
   private async runAuthoring(input: {
     run: SiteAgentRun;
     session: SiteAgentSession;
-    buildInput: SitePublicBuildInputV3;
+    buildInput: SitePublicBuildInput;
     sandboxRevision: string;
     currentFiles?: WorkspaceSourceFile[];
     instruction: string;
-    selection?: SiteElementSelectionV1;
+    selection?: SiteElementSelection;
     kind: ManagerRunRequest["kind"];
     signal?: AbortSignal;
   }) {
@@ -641,7 +643,7 @@ export class SiteAuthoringWorkflow {
       activeSession = state.session;
       activeSandboxRevision = state.revision;
     };
-    type RevisionDraft = Omit<SiteWorkspaceRevisionV1, "sourceArchiveKey">;
+    type RevisionDraft = Omit<SiteWorkspaceRevision, "sourceArchiveKey">;
     type Checkpoint = Awaited<ReturnType<SiteAuthoringWorkflow["verifySandboxArtifact"]>> & { revisionDraft: RevisionDraft };
     const runtime = new WorkspaceManagerRuntime<Checkpoint>({
       kind: input.kind,
@@ -685,7 +687,7 @@ export class SiteAuthoringWorkflow {
         let checkpoint: Checkpoint | undefined;
         if (finalized.artifact.qa.hardGate === "passed") {
           const revisionDraft = {
-            schemaVersion: "site-workspace-revision-v1",
+            schemaVersion: 1,
             id: workspaceRevisionId,
             siteId: run.siteId,
             parentRevisionId: site.currentWorkspaceRevisionId,
@@ -769,7 +771,7 @@ export class SiteAuthoringWorkflow {
     });
     const checkpoint = runtime.finalCheckpoint();
     const backup = await this.sandbox.backup(activeSession.sandboxId!);
-    const revision = siteWorkspaceRevisionV1Schema.parse({ ...checkpoint.revisionDraft, sourceArchiveKey: backup.backup.key });
+    const revision = siteWorkspaceRevisionSchema.parse({ ...checkpoint.revisionDraft, sourceArchiveKey: backup.backup.key });
     const finalized = checkpoint;
     await this.persistVerificationCaptures(finalized);
     await this.persistWorkspaceSourceSidecar(revision, runtime.currentFiles(), backup.backup);
@@ -812,7 +814,7 @@ export class SiteAuthoringWorkflow {
   private async executeDeterministicRebase(input: {
     run: SiteAgentRun;
     session: SiteAgentSession;
-    buildInput: SitePublicBuildInputV3;
+    buildInput: SitePublicBuildInput;
     sandboxRevision: string;
     signal: AbortSignal;
   }) {
@@ -854,8 +856,8 @@ export class SiteAuthoringWorkflow {
         throw new Error("Deterministic recompile failed the release hard gate.");
       }
       const backup = await this.sandbox.backup(input.session.sandboxId!);
-      const revision = siteWorkspaceRevisionV1Schema.parse({
-        schemaVersion: "site-workspace-revision-v1", id: workspaceRevisionId, siteId: run.siteId,
+      const revision = siteWorkspaceRevisionSchema.parse({
+        schemaVersion: 1, id: workspaceRevisionId, siteId: run.siteId,
         parentRevisionId: site.currentWorkspaceRevisionId, revisionNumber: (parent?.revisionNumber ?? 0) + 1,
         sourceHash, sourceArchiveKey: backup.backup.key,
         files: files.map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content) })),
@@ -900,7 +902,7 @@ export class SiteAuthoringWorkflow {
   private async verifySandboxArtifact(input: {
     run: SiteAgentRun;
     session: SiteAgentSession;
-    buildInput: SitePublicBuildInputV3;
+    buildInput: SitePublicBuildInput;
     workspaceRevisionId: string;
     signal?: AbortSignal;
   }) {
@@ -928,14 +930,14 @@ export class SiteAuthoringWorkflow {
   }
 
   private async createCandidateVersion(
-    artifact: SiteBuildArtifactV1,
+    artifact: SiteBuildArtifact,
     workspaceRevisionId: string,
-    buildInput: SitePublicBuildInputV3,
+    buildInput: SitePublicBuildInput,
     run: SiteAgentRun
   ) {
     const versions = await this.repository.listSiteVersions(run.siteId);
-    const version = siteVersionV4Schema.parse({
-      schemaVersion: "site-version-v4",
+    const version = siteVersionSchema.parse({
+      schemaVersion: 1,
       id: id("version"),
       siteId: run.siteId,
       number: (versions[0]?.number ?? 0) + 1,
@@ -954,38 +956,13 @@ export class SiteAuthoringWorkflow {
     return version;
   }
 
-  private async findExistingBootstrap(input: { url: string; ownerId: string; mode?: "draft" | "experimental"; workspaceId?: string; slug?: string }) {
-    const source = normalizedSourceUrl(input.url);
-    for (const site of await this.repository.listSites()) {
-      if (input.mode === "experimental" && site.status !== "experimental") continue;
-      if (input.mode !== "experimental" && site.status === "experimental") continue;
-      if (input.slug && site.slug !== input.slug) continue;
-      if (input.workspaceId && site.workspaceId !== input.workspaceId) continue;
-      if (!site.currentPublicBuildInputId) continue;
-      const buildInput = await this.repository.getPublicBuildInput(site.currentPublicBuildInputId);
-      if (!buildInput) continue;
-      const snapshots = await Promise.all(buildInput.sourceSnapshotIds.map((idValue) => this.repository.getSourceSnapshot(idValue)));
-      if (!snapshots.some((snapshot) => snapshot?.sourceUrl && normalizedSourceUrl(snapshot.sourceUrl) === source)) continue;
-      const session = await this.getOrCreateSession({ siteId: site.id, ownerId: input.ownerId, buildInput });
-      const run = (await this.repository.listAgentRuns(session.id)).find((candidate) => candidate.kind === "initial_build")
-        ?? await this.enqueueRun({
-          session,
-          kind: "initial_build",
-          instruction: "Create the complete initial customer website from the canonical public business input.",
-          requestedBy: input.ownerId
-        });
-      return { site, session, run, buildInput };
-    }
-    return undefined;
-  }
-
   private async persistWorkspaceSourceSidecar(
-    revision: SiteWorkspaceRevisionV1,
+    revision: SiteWorkspaceRevision,
     files: WorkspaceSourceFile[],
     backup: { id: string; revision: string; size: number; key: string; contentHash: `sha256:${string}` }
   ) {
-    const sidecar = workspaceSourceSidecarV1Schema.parse({
-      schemaVersion: "workspace-source-sidecar-v1",
+    const sidecar = workspaceSourceSidecarSchema.parse({
+      schemaVersion: 1,
       backupId: backup.id,
       archiveKey: backup.key,
       archiveHash: backup.contentHash,
@@ -1006,7 +983,7 @@ export class SiteAuthoringWorkflow {
     await this.blobStore.putImmutable({ key, bytes, contentType: "application/json; charset=utf-8", contentHash });
     const retained = await this.blobStore.get(key);
     if (!retained || retained.contentHash !== contentHash) throw new Error(`Workspace source sidecar verification failed at ${key}.`);
-    this.assertWorkspaceSidecarMatchesRevision(workspaceSourceSidecarV1Schema.parse(JSON.parse(retained.bytes.toString("utf8"))), revision);
+    this.assertWorkspaceSidecarMatchesRevision(workspaceSourceSidecarSchema.parse(JSON.parse(retained.bytes.toString("utf8"))), revision);
   }
 
   private async persistVerificationCaptures(input: {
@@ -1038,16 +1015,16 @@ export class SiteAuthoringWorkflow {
     return sidecar.files.map(({ path, content }) => workspaceSourceFileSchema.parse({ path, content }));
   }
 
-  private async loadWorkspaceSidecar(revision: SiteWorkspaceRevisionV1): Promise<WorkspaceSourceSidecarV1> {
+  private async loadWorkspaceSidecar(revision: SiteWorkspaceRevision): Promise<WorkspaceSourceSidecar> {
     const key = workspaceSourceSidecarKey(revision.sourceArchiveKey);
     const blob = await this.blobStore.get(key);
     if (!blob) throw new Error(`Retained workspace source sidecar is missing at ${key}.`);
-    const sidecar = workspaceSourceSidecarV1Schema.parse(JSON.parse(blob.bytes.toString("utf8")));
+    const sidecar = workspaceSourceSidecarSchema.parse(JSON.parse(blob.bytes.toString("utf8")));
     this.assertWorkspaceSidecarMatchesRevision(sidecar, revision);
     return sidecar;
   }
 
-  private assertWorkspaceSidecarMatchesRevision(sidecar: WorkspaceSourceSidecarV1, revision: SiteWorkspaceRevisionV1) {
+  private assertWorkspaceSidecarMatchesRevision(sidecar: WorkspaceSourceSidecar, revision: SiteWorkspaceRevision) {
     if (sidecar.archiveKey !== revision.sourceArchiveKey || sidecar.sourceHash !== revision.sourceHash) {
       throw new Error(`Workspace sidecar does not match retained revision ${revision.id}.`);
     }
@@ -1123,7 +1100,7 @@ export class SiteAuthoringWorkflow {
     return { destroyed: true as const, session: checkpointed };
   }
 
-  private async ensureSandbox(session: SiteAgentSession, buildInput: SitePublicBuildInputV3) {
+  private async ensureSandbox(session: SiteAgentSession, buildInput: SitePublicBuildInput) {
     let current = session;
     if (session.status === "closed" || session.status === "failed") throw new Error("Agent session is not reusable.");
     const leaseExpired = Date.parse(session.leaseExpiresAt) <= Date.now();
@@ -1251,7 +1228,7 @@ export class SiteAuthoringWorkflow {
     }
     if (!retainedPatch) await this.repository.saveRuntimePatch(patch);
     const series = {
-      schemaVersion: "trusted-runtime-series-v1" as const,
+      schemaVersion: 1 as const,
       id: runtimeSeriesId,
       name: "Lodesta Site Runtime V1",
       activePatchId: patch.id,
@@ -1266,6 +1243,23 @@ export class SiteAuthoringWorkflow {
     const run = await this.repository.getAgentRun(idValue);
     if (!run) throw new Error("Agent run not found.");
     return run;
+  }
+
+  private async bootstrapWithUniqueSlug(input: Parameters<SitePlatformRepository["bootstrapSite"]>[0]): Promise<PlatformSiteRecord> {
+    try {
+      await this.repository.bootstrapSite(input);
+      return input.site;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/slug|site id or slug already exists|duplicate key.*sites.*slug/i.test(message)) throw error;
+      const suffix = input.site.id.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-8);
+      const site = platformSiteRecordSchema.parse({
+        ...input.site,
+        slug: `${input.site.slug.slice(0, Math.max(1, 111 - suffix.length)).replace(/-+$/, "")}-${suffix}`
+      });
+      await this.repository.bootstrapSite({ ...input, site });
+      return site;
+    }
   }
 
   private async requireSession(idValue: string) {
@@ -1378,10 +1372,4 @@ function lazyExternalClient<T extends object>(factory: () => T): T {
 function failureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]`;
-}
-
-function normalizedSourceUrl(value: string) {
-  const url = new URL(value);
-  const path = url.pathname.replace(/\/+$/, "") || "/";
-  return `${url.protocol}//${url.hostname.toLowerCase().replace(/^www\./, "")}${path}`;
 }

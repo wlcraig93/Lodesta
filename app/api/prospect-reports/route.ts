@@ -7,9 +7,9 @@ import {
   publicProspectReport,
   recentProspectReportCutoff,
   resolveGoogleProspectPlace
-} from "@/lib/prospect-reports";
+} from "@/packages/acquisition/prospect-reports";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { processNextProspectReportJob } from "@/lib/prospect-report-jobs";
+import { processNextProspectReportJob } from "@/packages/acquisition/prospect-report-jobs";
 
 export const runtime = "nodejs";
 

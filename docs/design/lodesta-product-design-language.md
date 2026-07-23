@@ -12,7 +12,7 @@ Design around the actual operating objects in the product:
 
 - Agent runs: generation, crawl, objective QA, final visual judgment, publication, maintenance, and telemetry steps.
 - Evidence: source facts, crawl notes, rendered screenshots, scores, checks, leads, and analytics signals.
-- Approvals: owner-confirmed facts, QA gates, publish confirmation, billing/claim gates, and safe apply actions.
+- Approvals: owner-confirmed facts, asset-rights attestations, objective QA gates, publish confirmation, and safe apply actions.
 - Next actions: the smallest useful operator or owner action available from the current state.
 - Comparisons: source site versus generated site, current version versus draft, failing checks versus resolved checks.
 

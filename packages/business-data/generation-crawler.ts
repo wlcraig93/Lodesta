@@ -31,8 +31,8 @@ const skipReasonSchema = z.enum([
 const failureReasonSchema = z.enum(["timeout", "network", "http", "response_too_large", "unsupported_content", "browser_failed"]);
 const evidenceClassSchema = z.enum(["first_party", "third_party", "unknown"]);
 
-export const websiteGenerationIngestionV2Schema = z.object({
-  schemaVersion: z.literal("website-ingestion-v2"),
+export const websiteGenerationIngestionSchema = z.object({
+  schemaVersion: z.literal(1),
   sourceUrl: z.string().url(),
   coverage: z.enum(["complete", "bounded", "restricted", "incomplete"]),
   limits: z.object({
@@ -78,7 +78,7 @@ export const websiteGenerationIngestionV2Schema = z.object({
   elapsedMs: z.number().int().nonnegative()
 }).strict();
 
-export type WebsiteGenerationIngestionV2 = z.infer<typeof websiteGenerationIngestionV2Schema>;
+export type WebsiteGenerationIngestion = z.infer<typeof websiteGenerationIngestionSchema>;
 export type EvidenceClass = z.infer<typeof evidenceClassSchema>;
 
 type FetchLike = typeof fetch;
@@ -93,7 +93,7 @@ export async function crawlWebsiteForGeneration(input: {
   now?: () => number;
   limits?: Partial<GenerationIngestionLimitValues>;
   validateUrl?: (url: string) => Promise<string>;
-}): Promise<{ ingestion: WebsiteGenerationIngestionV2; crawl: CrawlAssessment }> {
+}): Promise<{ ingestion: WebsiteGenerationIngestion; crawl: CrawlAssessment }> {
   const baseValidator = input.validateUrl ?? assertPublicFetchUrl;
   const sourceUrl = await baseValidator(input.url);
   const source = new URL(sourceUrl);
@@ -227,8 +227,8 @@ export async function crawlWebsiteForGeneration(input: {
       : inventoryTruncated || inventory.size > limits.selectedPages || skipped.some((entry) => entry.reason === "selection_limit" || entry.reason === "browser_limit")
         ? "bounded"
         : "complete";
-  const ingestion = websiteGenerationIngestionV2Schema.parse({
-    schemaVersion: "website-ingestion-v2",
+  const ingestion = websiteGenerationIngestionSchema.parse({
+    schemaVersion: 1,
     sourceUrl,
     coverage,
     limits,
@@ -348,7 +348,7 @@ async function readRobots(source: URL, fetchImpl: FetchLike, scheduler: OriginSc
   return { disallowed, sitemaps };
 }
 
-function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], ingestion: WebsiteGenerationIngestionV2): CrawlAssessment {
+function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], ingestion: WebsiteGenerationIngestion): CrawlAssessment {
   const source = new URL(sourceUrl);
   const primary = pages.find((page) => normalizeSameSite(page.url, source) === normalizeSameSite(sourceUrl, source)) ?? pages[0];
   const orderedPages = primary ? [primary, ...pages.filter((page) => page !== primary)] : pages;

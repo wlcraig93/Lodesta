@@ -1,7 +1,7 @@
-import type { VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { VerticalContextModule } from "@/packages/site-contracts";
 
-export const syntheticContextModule: VerticalContextModuleV1 = {
-  schemaVersion: "vertical-context-module-v1",
+export const syntheticContextModule: VerticalContextModule = {
+  schemaVersion: 1,
   id: "synthetic_test_vertical",
   version: "synthetic-v1",
   status: "test_only",

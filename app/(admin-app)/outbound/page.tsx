@@ -2,7 +2,7 @@ import { AdminButtonAnchor, AdminButtonRow } from "@/components/admin/AdminButto
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdminPageAccess } from "@/lib/page-access";
-import { outboundComplianceStatus } from "@/lib/outbound";
+import { outboundComplianceStatus } from "@/packages/acquisition/outbound";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export default async function OutboundPage() {
       <AdminPageHeader
         eyebrow="Outbound wedge"
         title="Campaign measurement"
-        description="Track outreach from claim-link open through picker interaction, checkout start, paid conversion, publish, credibility feedback, and support burden."
+        description="Track outreach from invitation open through adoption, publish, credibility feedback, and support burden."
         actions={
           <AdminButtonRow>
             <AdminButtonAnchor variant="secondary" href="/api/outbound/export">
@@ -35,15 +35,15 @@ export default async function OutboundPage() {
 
       <section className="metric-row">
         <Metric label="Prospects" value={summary.prospects} />
-        <Metric label="Claim opens" value={summary.claimLinkOpened} />
-        <Metric label="Checkout starts" value={summary.checkoutStarted} />
-        <Metric label="Paid" value={summary.paid} />
+        <Metric label="Invitation opens" value={summary.invitationOpened} />
+        <Metric label="Adoptions started" value={summary.adoptionsStarted} />
+        <Metric label="Adopted" value={summary.adopted} />
       </section>
 
       <section className="metric-row">
-        <Metric label="Open to checkout" value={`${Math.round(summary.claimLinkToCheckoutRate * 100)}%`} />
-        <Metric label="Checkout to paid" value={`${Math.round(summary.checkoutToPaidRate * 100)}%`} />
-        <Metric label="Paid to publish" value={`${Math.round(summary.claimToPublishRate * 100)}%`} />
+        <Metric label="Open to adoption" value={`${Math.round(summary.invitationToAdoptionRate * 100)}%`} />
+        <Metric label="Adoption to publish" value={`${Math.round(summary.adoptionToPublishRate * 100)}%`} />
+        <Metric label="Mailer to adoption" value={`${Math.round(summary.mailerToAdoptionRate * 100)}%`} />
         <Metric label="Picker interactions" value={summary.pickerInteractions} />
       </section>
 
@@ -87,9 +87,9 @@ export default async function OutboundPage() {
             {summary.verticalBreakdown.map((item) => (
               <article key={item.vertical} className="finding-card">
                 <span className="badge">{item.vertical.replace("_", " ")}</span>
-                <h3>{Math.round(item.claimLinkToCheckoutRate * 100)}% open-to-checkout</h3>
+                <h3>{Math.round(item.invitationToAdoptionRate * 100)}% open-to-adoption</h3>
                 <p>
-                  {item.prospects} prospects · {item.checkoutStarted} checkout · {item.paid} paid · {item.published} published
+                  {item.prospects} prospects · {item.adopted} adopted · {item.published} published
                 </p>
               </article>
             ))}

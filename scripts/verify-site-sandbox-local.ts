@@ -16,7 +16,7 @@ import { Fact } from "../platform/sdk";
 import { LocalIntro } from "./components/LocalIntro";
 export const siteDefinition = {
   siteName: "Multi-file sandbox verification",
-  claims: [], capabilityBindings: [],
+  factDeclarations: [], capabilityBindings: [],
   routes: [{ path: "/", title: "Multi-file sandbox verification", description: "Multi-file verification",
     element: <main><LocalIntro /><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1></main> }]
 };`

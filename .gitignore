@@ -12,3 +12,4 @@ tsconfig.tsbuildinfo
 .data
 supabase/.temp/
 .gstack/
+.design/**/screenshots/

@@ -1,7 +1,7 @@
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite } from "@/packages/site-platform";
-import type { AgentAccessPolicyV1 } from "@/packages/site-contracts";
+import type { AgentAccessPolicy } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +56,7 @@ export async function GET(
   });
 }
 
-function siteRobots(request: Request, slug: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1) {
+function siteRobots(request: Request, slug: string, artifactHash: string, versionId: string, policy: AgentAccessPolicy) {
   const origin = new URL(request.url).origin;
   const basePath = siteBasePath(request, slug);
   return new Response(robotsTextForSite(policy, `${origin}${basePath}/sitemap.xml`), {
@@ -64,7 +64,7 @@ function siteRobots(request: Request, slug: string, artifactHash: string, versio
   });
 }
 
-function siteSitemap(request: Request, slug: string, routes: string[], lastModified: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1) {
+function siteSitemap(request: Request, slug: string, routes: string[], lastModified: string, artifactHash: string, versionId: string, policy: AgentAccessPolicy) {
   const origin = new URL(request.url).origin;
   const basePath = siteBasePath(request, slug);
   const urls = routes.map((route) => `<url><loc>${escapeXml(`${origin}${basePath}${route === "/" ? "" : route}`)}</loc><lastmod>${escapeXml(lastModified)}</lastmod></url>`).join("");
@@ -99,7 +99,7 @@ function markdownRouteUrl(request: Request, slug: string, route: string) {
   return route === "/" ? `${base}/index.md` : `${base}${route}/index.md`;
 }
 
-function siteHeaders(contentType: string, artifactHash: string, versionId: string, policy: AgentAccessPolicyV1, link?: string) {
+function siteHeaders(contentType: string, artifactHash: string, versionId: string, policy: AgentAccessPolicy, link?: string) {
   const headers = new Headers({
     "content-type": contentType,
     "cache-control": "public, max-age=60, s-maxage=300, stale-while-revalidate=60",

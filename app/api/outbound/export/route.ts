@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { buildOutboundMailerManifest, outboundMailerManifestCsv } from "@/lib/outbound";
+import { buildOutboundMailerManifest, outboundMailerManifestCsv } from "@/packages/acquisition/outbound";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdmin } from "@/lib/security";
 

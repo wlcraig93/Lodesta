@@ -1,6 +1,6 @@
 import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
-import type { AssetRevisionRefV1 } from "@/packages/site-contracts";
+import type { AssetRevisionRef } from "@/packages/site-contracts";
 import { normalizeRoutePath, type ArtifactGateFinding } from "./contracts";
 
 const htmlTags = new Set([
@@ -25,7 +25,7 @@ export type SanitizeArtifactInput = {
   route: string;
   bodyHtml: string;
   declaredRoutes: Set<string>;
-  assets: AssetRevisionRefV1[];
+  assets: AssetRevisionRef[];
   allowedFormIds: Set<string>;
   allowedExternalHrefs: Set<string>;
   allowedPhoneNumbers: Set<string>;
@@ -121,7 +121,7 @@ function sanitizeLink(element: Element, input: SanitizeArtifactInput, findings: 
 
 function sanitizeAsset(
   element: Element,
-  assets: Map<string, AssetRevisionRefV1>,
+  assets: Map<string, AssetRevisionRef>,
   findings: ArtifactGateFinding[],
   route: string
 ) {

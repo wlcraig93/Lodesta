@@ -2,27 +2,25 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact } from "../packages/site-verification/contracts";
-import { prepareSiteArtifact } from "../packages/site-verification/finalizer";
-import { ArtifactClaimValidator } from "../packages/site-verification/artifact-claims";
+import { finalizePreparedArtifact, prepareSiteArtifact } from "../packages/site-verification/finalizer";
+import { FactDeclarationValidator } from "../packages/site-verification/fact-declarations";
 import {
-  assetRevisionV1Schema,
-  businessStateV3Schema,
+  assetRevisionSchema,
+  businessStateSchema,
   controlPlaneChangePayloadSchema,
-  operatorQueueItemSchema,
   platformSiteRecordSchema,
   siteAgentRunSchema,
   siteAgentRunEventSchema,
   siteAgentSessionSchema,
-  siteBuildArtifactV1Schema,
-  siteIntentV3Schema,
-  sitePublicBuildInputV3Schema,
-  siteVersionV4Schema,
-  siteVersionApprovalV1Schema,
-  siteWorkspaceRevisionV1Schema,
-  sourceSnapshotV1Schema,
+  siteBuildArtifactSchema,
+  siteIntentSchema,
+  sitePublicBuildInputSchema,
+  siteVersionSchema,
+  siteWorkspaceRevisionSchema,
+  sourceSnapshotSchema,
   verticalDemandEventSchema,
-  type TrustedRuntimePatchV1,
-  type TrustedRuntimeSeriesV1
+  type TrustedRuntimePatch,
+  type TrustedRuntimeSeries
 } from "../packages/site-contracts";
 import { LocalSitePlatformRepository } from "../packages/platform-data/repository";
 import { SiteAuthoringWorkflow, initialGenerationDeadlineMs, siteEditDeadlineMs } from "../packages/site-platform/workflow";
@@ -35,7 +33,6 @@ import {
   workspaceSourceSidecarKey
 } from "../packages/site-artifacts";
 import { LocalArtifactBlobMaintenanceStore } from "../packages/site-artifacts/maintenance-store";
-import { deriveSitePublicationReadiness } from "../packages/site-platform/publication-readiness";
 import { createPublicBuildInput } from "../packages/business-data/public-projection";
 import { sha256 } from "../packages/business-data";
 import { assetRevisionIdForBusiness, sourceSnapshotIdForBusiness } from "../packages/business-data/website-ingestion";
@@ -45,7 +42,6 @@ import { validateWorkspaceSourcePolicy } from "../packages/site-agent/source-pol
 import { ControlPlaneService } from "../packages/control-plane/service";
 import { canAccessAgentSession } from "../app/api/site-agent/auth";
 import { GET as readSiteReadinessRoute } from "../app/api/sites/[siteId]/readiness/route";
-import { POST as reviewSiteVersionRoute } from "../app/api/site-versions/[versionId]/review/route";
 import { LocalPlatformOperationsRepository, redirectsStrandedByRoutes, validateSiteRedirectInput } from "../packages/platform-operations";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { platformCapabilityStyles } from "../workers/site-sandbox/scaffold/platform/capability-styles";
@@ -56,18 +52,17 @@ import { runEventPayloadRetentionMs } from "../packages/site-platform/run-events
 const buildInput = buildSyntheticSiteInput();
 let retiredIntentAccepted = true;
 let retiredInputAccepted = true;
-try { siteIntentV3Schema.parse({ ...buildInput.intent, schemaVersion: "site-intent-v2" }); } catch { retiredIntentAccepted = false; }
-try { sitePublicBuildInputV3Schema.parse({ ...buildInput, schemaVersion: "site-public-build-input-v2" }); } catch { retiredInputAccepted = false; }
-assert(!retiredIntentAccepted, "SiteIntentV3 accepted the retired V2 discriminator");
-assert(!retiredInputAccepted, "SitePublicBuildInputV3 accepted the retired V2 discriminator");
+try { siteIntentSchema.parse({ ...buildInput.intent, schemaVersion: "site-intent-v2" }); } catch { retiredIntentAccepted = false; }
+try { sitePublicBuildInputSchema.parse({ ...buildInput, schemaVersion: "site-public-build-input-v2" }); } catch { retiredInputAccepted = false; }
+assert(!retiredIntentAccepted, "SiteIntent accepted the retired V2 discriminator");
+assert(!retiredInputAccepted, "SitePublicBuildInput accepted the retired V2 discriminator");
 assert(deriveSiteLifecycle({ publishedVersionId: "version_live" }, [{ status: "published" }], { status: "running" }) === "generating", "active generation did not take precedence over publication status");
 assert(deriveSiteLifecycle({ publishedVersionId: undefined }, [], { status: "failed" }) === "needs_attention", "failed generation did not surface as needing attention");
 assert(deriveSiteLifecycle({ publishedVersionId: undefined }, [{ status: "candidate" }], { status: "succeeded" }) === "ready_for_review", "candidate site did not surface as ready for review");
 assert(deriveSiteLifecycle({ publishedVersionId: "version_live" }, [{ status: "published" }], { status: "succeeded" }) === "published", "published site did not retain its lifecycle status");
 assert(deriveSiteLifecycle({ publishedVersionId: undefined }, [], undefined) === "draft", "empty site did not default to draft");
-assert(deriveSiteOwnership([{ status: "preview" }]) === "claim_pending", "preview claim did not surface as pending");
-assert(deriveSiteOwnership([{ status: "checkout_required" }, { status: "claimed" }]) === "claimed", "completed claim did not take precedence over pending claims");
-assert(deriveSiteOwnership([]) === "unclaimed", "site without claims did not surface as unclaimed");
+assert(deriveSiteOwnership({ ownerUserId: "00000000-0000-4000-8000-000000000001" }) === "owned", "owned site did not surface as account owned");
+assert(deriveSiteOwnership({ ownerUserId: undefined }) === "unowned", "site without an owner did not surface as unowned");
 assert(initialGenerationDeadlineMs === 60 * 60_000, "initial workflow deadline drifted from 60 minutes");
 assert(siteEditDeadlineMs === 25 * 60_000, "edit workflow deadline drifted from 25 minutes");
 assert(runEventPayloadRetentionMs === 24 * 60 * 60_000, "run event payload database expiry drifted from the one-day R2 lifecycle");
@@ -85,7 +80,7 @@ const hostile = agentAuthoredArtifactSchema.parse({
     description: "Must never pass artifact verification.",
     bodyHtml: `<main onclick="fetch('https://evil.example')"><script>alert(1)</script><iframe src="https://evil.example"></iframe><h1 data-lodesta-fact-id="business:name">Northstar Collision Repair</h1><p>Certified collision specialists with a lifetime warranty and 5 stars.</p><img src="https://evil.example/pixel.png" alt=""><input type="image" src="https://evil.example/submit.png"><a href="javascript:alert(1)">Unsafe</a><a href="https://evil.example/phishing">Unverified external link</a><form data-lodesta-form-id="unknown_form"><input name="email" type="email"><button>Send</button></form></main>`
   }],
-  claims: [],
+  factDeclarations: [],
   capabilityBindings: [{ id: "hostile_form", kind: "form", route: "/", config: { formId: "unknown_form" } }]
 });
 const claimParity: { cases: Array<{ id: string; html: string; declarations: unknown[]; expected: "pass" | "fail" }> } = {
@@ -123,7 +118,7 @@ const safe = agentAuthoredArtifactSchema.parse({
     path: "/", title: buildInput.business.name, description: "Collision repair",
     bodyHtml: `<main><h1 data-lodesta-fact-id="${businessName.id}">${businessName.value}</h1><a href="tel:${phone.value}" data-lodesta-fact-id="${phone.id}">${phone.value}</a><p>Collision Repair</p><section data-lodesta-map="location_primary"><address data-lodesta-fact-id="${address.id}">${address.value}</address><a href="https://www.google.com/maps/search/?api=1&amp;query=place_id%3AChIJ-synthetic-location" data-lodesta-map-fallback>Directions</a></section><details data-lodesta-disclosure="disclosure-process"><summary>What happens next?</summary><p>We inspect the vehicle.</p></details><form data-lodesta-form-id="${buildInput.forms[0].id}"><label>Email<input name="email" type="email" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></main>`
   }],
-  claims: [{ id: "service_claim", route: "/", text: "Collision Repair", kind: "free_text", sourceFactIds: [offering.id], autoDeclared: false }],
+  factDeclarations: [{ id: "service_claim", route: "/", text: "Collision Repair", kind: "free_text", sourceFactIds: [offering.id], autoDeclared: false }],
   capabilityBindings: [
     { id: "estimate_form", kind: "form", route: "/", config: { formId: buildInput.forms[0].id } },
     { id: "primary_map", kind: "map", route: "/", config: { locationId: "location_primary" } },
@@ -133,11 +128,73 @@ const safe = agentAuthoredArtifactSchema.parse({
 const safePrepared = prepareSiteArtifact({ authoredArtifact: safe, buildInput, runtimeSeriesId: "site-runtime-v1" });
 const safeErrors = safePrepared.findings.filter((finding) => finding.severity === "error");
 assert(safeErrors.length === 0, `safe artifact failed: ${safeErrors.map((finding) => finding.id).join(", ")}`);
-assert(safePrepared.claims.some((claim) => claim.autoDeclared && claim.sourceFactIds.includes(phone.id)), "SDK phone value was not auto-declared");
-assert(safePrepared.claims.some((claim) => claim.autoDeclared && claim.sourceFactIds.includes(address.id)), "SDK map address was not auto-declared");
-assert(safePrepared.claims.some((claim) => claim.kind === "structured_data" && claim.sourceFactIds.includes(businessName.id)), "JSON-LD business name lacks a source-bound claim");
+assertThrows(
+  () => agentAuthoredArtifactSchema.parse({ ...safe, factDeclarations: undefined, claims: safe.factDeclarations }),
+  "The clean artifact contract accepted the retired claims field."
+);
+assertThrows(
+  () => agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({ ...safe, factDeclarations: undefined, claims: safe.factDeclarations })),
+  "The authored-artifact normalizer retained a claims compatibility reader."
+);
+assert(safePrepared.factDeclarations.some((claim) => claim.autoDeclared && claim.sourceFactIds.includes(phone.id)), "SDK phone value was not auto-declared");
+assert(safePrepared.factDeclarations.some((claim) => claim.autoDeclared && claim.sourceFactIds.includes(address.id)), "SDK map address was not auto-declared");
+assert(safePrepared.factDeclarations.some((claim) => claim.kind === "structured_data" && claim.sourceFactIds.includes(businessName.id)), "JSON-LD business name lacks a source-bound claim");
 assert(safePrepared.capabilityBindings.some((binding) => binding.kind === "analytics"), "platform analytics capability was not recorded in the artifact");
 assert(safePrepared.files.every((file) => !file.bytes.toString("utf8").includes("<script>alert")), "hostile script survived preparation");
+const fixedFinalization = {
+  prepared: safePrepared,
+  buildInput,
+  artifactId: "artifact_hash_test",
+  workspaceRevisionId: "workspace_hash_test",
+  runtimeSeriesId: "site-runtime-v1",
+  runtimePatchId: "runtime_patch_hash_test",
+  storagePrefix: "site-artifacts/site_hash_test/artifact_hash_test",
+  toolchainVersion: "verification",
+  sandboxImageDigest: `sha256:${"f".repeat(64)}` as const,
+  browserGate: { findings: [], screenshotKeys: [], routesChecked: 1, linksChecked: 0 },
+  createdAt: "2026-07-20T00:00:00.000Z"
+};
+const finalizedHashA = finalizePreparedArtifact(fixedFinalization);
+const finalizedHashB = finalizePreparedArtifact(fixedFinalization);
+assert(finalizedHashA.artifact.artifactHash === finalizedHashB.artifact.artifactHash, "Artifact hashing is not deterministic.");
+assertThrows(
+  () => siteBuildArtifactSchema.parse({
+    ...finalizedHashA.artifact,
+    factDeclarations: undefined,
+    claims: finalizedHashA.artifact.factDeclarations
+  }),
+  "The retained artifact contract accepted the retired claims field."
+);
+const changedHash = finalizePreparedArtifact({
+  ...fixedFinalization,
+  prepared: {
+    ...safePrepared,
+    factDeclarations: [
+      ...safePrepared.factDeclarations,
+      { id: "hash_change", route: "/", text: "Collision Repair", kind: "free_text", sourceFactIds: [offering.id], autoDeclared: false }
+    ]
+  }
+});
+assert(changedHash.artifact.artifactHash !== finalizedHashA.artifact.artifactHash, "Fact declarations were excluded from artifact hashing.");
+assert(
+  changedHash.artifact.artifactHash !== siteVersionSchema.parse({
+    schemaVersion: 1,
+    id: "version_hash_test",
+    siteId: buildInput.siteId,
+    number: 1,
+    status: "candidate",
+    artifactId: finalizedHashA.artifact.id,
+    artifactHash: finalizedHashA.artifact.artifactHash,
+    workspaceRevisionId: finalizedHashA.artifact.workspaceRevisionId,
+    publicBuildInputId: buildInput.id,
+    formDefinitionIds: [],
+    sourceSnapshotIds: [],
+    assetRevisionIds: [],
+    createdAt: fixedFinalization.createdAt,
+    createdBy: { kind: "system", id: "verification" }
+  }).artifactHash,
+  "A declaration-tampered artifact still matched the pinned version hash."
+);
 const containedCopy = "careful vehicle surface inspection documents visible damage before the repair plan is prepared for the customer";
 const asymmetricRepetition = prepareSiteArtifact({
   authoredArtifact: agentAuthoredArtifactSchema.parse({
@@ -148,7 +205,7 @@ const asymmetricRepetition = prepareSiteArtifact({
       { path: "/", title: "Duplicate metadata", description: "The same deterministic metadata value", bodyHtml: `<main><h1>Shared route heading</h1><p>${containedCopy}</p><a href="/contained">Details</a> <p>Additional detailed context about scheduling materials preparation communication documentation finishing delivery follow up records estimates photographs timing approvals coordination quality controls and next steps.</p></main>` },
       { path: "/contained", title: "Duplicate metadata", description: "The same deterministic metadata value", bodyHtml: `<main><h1>Shared route heading</h1><p>${containedCopy}</p><a href="/contained">Details</a></main>` }
     ],
-    claims: [],
+    factDeclarations: [],
     capabilityBindings: []
   }),
   buildInput,
@@ -161,7 +218,7 @@ assert(asymmetricRepetition.findings.some((finding) => finding.id === "metadata.
   && asymmetricRepetition.findings.some((finding) => finding.id === "metadata.description_duplicate" && finding.severity === "warning"), "duplicate route metadata was not advisory");
 const serviceOffering = buildInput.business.offerings[0];
 assert(serviceOffering, "synthetic V3 input has no offering for service-page verification");
-const serviceGateInput = sitePublicBuildInputV3Schema.parse({
+const serviceGateInput = sitePublicBuildInputSchema.parse({
   ...buildInput,
   intent: {
     ...buildInput.intent,
@@ -196,18 +253,18 @@ assert(preparedCss.endsWith(safe.sharedCss), "agent CSS no longer follows platfo
 assert(formatPhoneForDisplay("+15125550142") === "(512) 555-0142", "SDK presentation did not format a valid canonical US phone");
 assert(formatPhoneForDisplay("+442079460958") === "+442079460958" && formatPhoneForDisplay("call the front desk") === "call the front desk", "SDK presentation changed an international or unknown phone value");
 const orderedHours = orderedLocationHours(buildInput.business.locations[0]?.hours);
-assert(orderedHours.map((item) => item.label).join("|") === "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|By appointment", "managed location hours are not Monday-first with aliases normalized and unknown labels last");
+assert(orderedHours.map((item) => item.label).join("|") === "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday", "managed canonical location hours are not Monday-first");
 assert(buildInput.business.locations[0]?.googlePlaceId === "ChIJ-synthetic-location", "synthetic public build input omitted the Google place ID");
 
 const normalizedSidecars = agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
   ...safe,
-  claims: [{ text: "Collision Repair", factIds: [offering.id] }],
+  factDeclarations: [{ text: "Collision Repair", factIds: [offering.id] }],
   capabilityBindings: { form: { formId: buildInput.forms[0].id } }
 }));
-assert(normalizedSidecars.claims[0]?.route === "/" && normalizedSidecars.claims[0]?.kind === "free_text", "authored claim shorthand was not normalized");
+assert(normalizedSidecars.factDeclarations[0]?.route === "/" && normalizedSidecars.factDeclarations[0]?.kind === "free_text", "authored claim shorthand was not normalized");
 assert(normalizedSidecars.capabilityBindings.some((binding) => binding.kind === "form" && binding.config.formId === buildInput.forms[0].id), "SDK form hook did not derive its capability binding");
 
-const parityInput = sitePublicBuildInputV3Schema.parse({
+const parityInput = sitePublicBuildInputSchema.parse({
   ...buildInput,
   business: {
     ...buildInput.business,
@@ -237,19 +294,19 @@ const parityInput = sitePublicBuildInputV3Schema.parse({
     }
   ]
 });
-const claimValidator = new ArtifactClaimValidator();
+const claimValidator = new FactDeclarationValidator();
 const formattedSdkResult = claimValidator.validate({
   routes: [{
     path: "/",
-    html: `<main><a data-lodesta-fact-id="${phone.id}" href="tel:+15125550142">(512) 555-0142</a><dl data-lodesta-fact-id="fact_hours"><div><dt>Monday</dt><dd>8:00 AM-5:30 PM</dd></div><div><dt>Saturday</dt><dd>Closed</dd></div><div><dt>By appointment</dt><dd>Evenings</dd></div></dl></main>`
+    html: `<main><a data-lodesta-fact-id="${phone.id}" href="tel:+15125550142">(512) 555-0142</a><dl data-lodesta-fact-id="fact_hours"><div><dt>Monday</dt><dd>8:00 AM-5:30 PM</dd></div><div><dt>Saturday</dt><dd>Closed</dd></div></dl></main>`
   }],
   declarations: [],
   buildInput
 });
 assert(formattedSdkResult.status === "pass", `formatted SDK bindings failed claim validation: ${formattedSdkResult.findings.map((finding) => finding.message).join("; ")}`);
 assert(formattedSdkResult.declarations.some((claim) => claim.sourceFactIds.includes(phone.id)), "formatted SDK phone did not produce a source-bound declaration");
-assert(formattedSdkResult.declarations.filter((claim) => claim.sourceFactIds.includes("fact_hours")).map((claim) => claim.text).sort().join("|") === "8:00 AM-5:30 PM|Closed|Evenings", "structured SDK hours did not declare every distinct rendered canonical value");
-const sourceBoundOfferInput = sitePublicBuildInputV3Schema.parse({
+assert(formattedSdkResult.declarations.filter((claim) => claim.sourceFactIds.includes("fact_hours")).map((claim) => claim.text).sort().join("|") === "8:00 AM-5:30 PM|Closed", "structured SDK hours did not declare every distinct rendered canonical value");
+const sourceBoundOfferInput = sitePublicBuildInputSchema.parse({
   ...parityInput,
   publicFacts: [
     ...parityInput.publicFacts,
@@ -284,7 +341,7 @@ assert(unboundOffer.status === "fail" && unboundOffer.findings.some((finding) =>
 for (const parityCase of claimParity.cases) {
   const result = claimValidator.validate({
     routes: [{ path: "/", html: parityCase.html }],
-    declarations: parityCase.declarations as Parameters<ArtifactClaimValidator["validate"]>[0]["declarations"],
+    declarations: parityCase.declarations as Parameters<FactDeclarationValidator["validate"]>[0]["declarations"],
     buildInput: parityInput
   });
   assert(result.status === parityCase.expected, `claim parity case ${parityCase.id} expected ${parityCase.expected}, received ${result.status}`);
@@ -309,7 +366,7 @@ const metadataClaimResult = claimValidator.validate({
 });
 assert(metadataClaimResult.status === "fail" && metadataClaimResult.findings.some((finding) => finding.id === "claim.sensitive_unsupported"), "unsupported metadata claims bypassed factual validation");
 
-const disabledCapabilityInput = sitePublicBuildInputV3Schema.parse({
+const disabledCapabilityInput = sitePublicBuildInputSchema.parse({
   ...buildInput,
   intent: { ...buildInput.intent, enabledCapabilities: ["forms", "analytics"] }
 });
@@ -331,8 +388,8 @@ assert(!matchVerticalContext("Landscape maintenance, tree trimming, irrigation, 
 let unsupported = false;
 try { verticalContextFor("synthetic_test_vertical"); } catch { unsupported = true; }
 assert(unsupported, "test-only vertical leaked into the production registry");
-const syntheticState = businessStateV3Schema.parse({
-  schemaVersion: "business-state-v3",
+const syntheticState = businessStateSchema.parse({
+  schemaVersion: 1,
   businessId: buildInput.businessId,
   siteId: buildInput.siteId,
   revision: buildInput.businessStateRevision,
@@ -374,7 +431,7 @@ const ineligibleParallelFact = {
   id: "fact_phone_enrichment_only", kind: "phone" as const, label: "Unconfirmed enrichment phone", value: "512-555-9999", publicEligible: false,
   source: { factId: "fact_phone_enrichment_only", sourceSnapshotId: "source_places", observedAt: buildInput.createdAt, confidence: 0.72, ownerConfirmed: false }
 };
-const ineligibleParallelState = businessStateV3Schema.parse({
+const ineligibleParallelState = businessStateSchema.parse({
   ...syntheticState,
   contacts: { ...syntheticState.contacts, phone: ineligibleParallelFact.value },
   facts: [...syntheticState.facts, ineligibleParallelFact]
@@ -390,7 +447,7 @@ const observedProofFact = {
   id: "fact_proof_observed", kind: "proof" as const, label: "Observed testimonial", value: "They explained each repair clearly and kept us informed throughout the process.", publicEligible: false,
   source: { factId: "fact_proof_observed", sourceSnapshotId: "source_website", sourceBlockId: "source_block_testimonial", sourceUrl: "https://example.com/reviews", observedAt: buildInput.createdAt, confidence: 0.65, ownerConfirmed: false }
 };
-const observedProofState = businessStateV3Schema.parse({
+const observedProofState = businessStateSchema.parse({
   ...syntheticState,
   facts: [...syntheticState.facts, observedProofFact],
   proof: [{ id: "proof_observed", kind: "testimonial", status: "observed", publicText: observedProofFact.value, verbatim: true, sourceFactIds: [observedProofFact.id] }]
@@ -402,7 +459,7 @@ const observedProofProjection = createPublicBuildInput({
 assert(!observedProofProjection.publicFacts.some((fact) => fact.id === observedProofFact.id), "unconfirmed proof fact leaked into the public projection");
 assert(observedProofProjection.business.proof.length === 0, "unconfirmed proof item leaked into the public projection");
 
-const thirdPartyProofState = businessStateV3Schema.parse({
+const thirdPartyProofState = businessStateSchema.parse({
   ...observedProofState,
   facts: observedProofState.facts.map((fact) => fact.id === observedProofFact.id ? {
     ...fact,
@@ -418,7 +475,7 @@ const thirdPartyProofProjection = createPublicBuildInput({
 assert(!thirdPartyProofProjection.publicFacts.some((fact) => fact.id === observedProofFact.id), "third-party evidence automatically supported a public claim");
 assert(thirdPartyProofProjection.business.proof.length === 0, "third-party proof was not excluded from the V3 public projection");
 
-const confirmedProofState = businessStateV3Schema.parse({
+const confirmedProofState = businessStateSchema.parse({
   ...observedProofState,
   facts: observedProofState.facts.map((fact) => fact.id === observedProofFact.id ? { ...fact, publicEligible: true, source: { ...fact.source, ownerConfirmed: true } } : fact),
   proof: observedProofState.proof.map((item) => ({ ...item, status: "confirmed" as const, confirmedAt: buildInput.createdAt }))
@@ -432,7 +489,7 @@ let partialProofRejected = false;
 try {
   createPublicBuildInput({
     id: "input_partial_proof_projection",
-    state: businessStateV3Schema.parse({ ...confirmedProofState, proof: confirmedProofState.proof.map((item) => ({ ...item, publicText: "They explained each repair clearly." })) }),
+    state: businessStateSchema.parse({ ...confirmedProofState, proof: confirmedProofState.proof.map((item) => ({ ...item, publicText: "They explained each repair clearly." })) }),
     intent: buildInput.intent, forms: buildInput.forms, domainContext: syntheticVertical,
     sourceSnapshotIds: buildInput.sourceSnapshotIds, createdAt: buildInput.createdAt
   });
@@ -445,7 +502,7 @@ const syntheticPrepared = prepareSiteArtifact({
     siteName: syntheticProjection.business.name,
     sharedCss: "body{margin:0;color:#111;background:#fff;font:18px/1.5 Arial,sans-serif}main{padding:48px}",
     routes: [{ path: "/", title: syntheticProjection.business.name, description: "Synthetic module test", bodyHtml: `<main><h1 data-lodesta-fact-id="${syntheticState.facts[0].id}">${syntheticProjection.business.name}</h1></main>` }],
-    claims: [],
+    factDeclarations: [],
     capabilityBindings: []
   }),
   buildInput: syntheticProjection,
@@ -460,13 +517,7 @@ assert(canAccessAgentSession({ actorId: "operator", isOperator: true }, "owner_a
 const priorRequireAuth = process.env.LODESTA_REQUIRE_AUTH;
 process.env.LODESTA_REQUIRE_AUTH = "true";
 const unauthorizedReadiness = await readSiteReadinessRoute(new Request("http://127.0.0.1/api/sites/missing/readiness"), { params: Promise.resolve({ siteId: "missing" }) });
-const unauthorizedReview = await reviewSiteVersionRoute(new Request("http://127.0.0.1/api/site-versions/missing/review", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ status: "approved", note: "Unauthorized verification request." })
-}), { params: Promise.resolve({ versionId: "missing" }) });
 assert(unauthorizedReadiness.status === 401, "readiness endpoint did not require an owner or operator");
-assert(unauthorizedReview.status === 401, "exact-version review endpoint did not require an operator");
 if (priorRequireAuth === undefined) delete process.env.LODESTA_REQUIRE_AUTH;
 else process.env.LODESTA_REQUIRE_AUTH = priorRequireAuth;
 const validRedirect = validateSiteRedirectInput({ siteId: "site_redirect_test", sourcePath: "/old-service/", destinationPath: "/services/collision-repair" }, ["/", "/services/collision-repair"]);
@@ -602,29 +653,29 @@ try {
     createdAt: "2026-07-20T00:00:30.000Z"
   }));
   assert((await repository.listVerticalDemandEvents("open")).length === 1, "unmatched domain demand was not retained independently of site state");
-  const revision = siteWorkspaceRevisionV1Schema.parse({
-    schemaVersion: "site-workspace-revision-v1", id: "workspace_atomic_test", siteId: site.id, revisionNumber: 1,
+  const revision = siteWorkspaceRevisionSchema.parse({
+    schemaVersion: 1, id: "workspace_atomic_test", siteId: site.id, revisionNumber: 1,
     sourceHash: `sha256:${"1".repeat(64)}`, sourceArchiveKey: `workspace-backups/${"1".repeat(64)}.tar.gz`,
     files: [{ path: "src/site.tsx", contentHash: `sha256:${"2".repeat(64)}`, bytes: 100 }],
     createdAt: "2026-07-20T00:01:00.000Z", createdBy: { kind: "system", id: "verification" }
   });
   const artifactBase = {
-    schemaVersion: "site-build-artifact-v1" as const, id: "artifact_atomic_test", siteId: site.id,
+    schemaVersion: 1 as const, id: "artifact_atomic_test", siteId: site.id,
     workspaceRevisionId: revision.id, publicBuildInputId: "input_atomic_test", createdAt: "2026-07-20T00:02:00.000Z",
     artifactHash: `sha256:${"3".repeat(64)}`, storagePrefix: "site-artifacts/site_atomic_test/artifact_atomic_test",
     files: [{ path: "index.html", contentType: "text/html", contentHash: `sha256:${"4".repeat(64)}`, bytes: 200, storageKey: "site-artifacts/site_atomic_test/artifact_atomic_test/index.html" }],
     routes: [{ path: "/", htmlFile: "index.html", title: "Atomic Test", description: "Atomic build test" }],
-    claims: [], capabilityBindings: [], runtimeSeriesId: "site-runtime-v1", runtimePatchAtFinalization: "runtime_patch_test",
+    factDeclarations: [], capabilityBindings: [], runtimeSeriesId: "site-runtime-v1", runtimePatchAtFinalization: "runtime_patch_test",
     toolchainVersion: "verification", sandboxImageDigest: `sha256:${"5".repeat(64)}`
   };
-  const failedArtifact = siteBuildArtifactV1Schema.parse({
+  const failedArtifact = siteBuildArtifactSchema.parse({
     ...artifactBase,
     qa: { hardGate: "failed", checkedAt: "2026-07-20T00:02:00.000Z", routesChecked: 1, linksChecked: 0, findings: [], screenshotKeys: [] }
   });
   let rejectedFailedBuild = false;
   try { await repository.commitVerifiedBuild({ revision, artifact: failedArtifact }); } catch { rejectedFailedBuild = true; }
   assert(rejectedFailedBuild && !(await repository.getSite(site.id))?.currentWorkspaceRevisionId, "failed build advanced the canonical workspace");
-  const passedArtifact = siteBuildArtifactV1Schema.parse({
+  const passedArtifact = siteBuildArtifactSchema.parse({
     ...artifactBase,
     qa: { hardGate: "passed", checkedAt: "2026-07-20T00:02:00.000Z", routesChecked: 1, linksChecked: 0, findings: [], screenshotKeys: [] }
   });
@@ -704,7 +755,7 @@ try {
     id: "site_direct_edit_test", businessId: "business_direct_edit_test", slug: "direct-edit-test", status: "draft",
     createdAt: buildInput.createdAt, updatedAt: buildInput.createdAt
   });
-  const editInput = sitePublicBuildInputV3Schema.parse({
+  const editInput = sitePublicBuildInputSchema.parse({
     ...buildInput,
     id: "input_direct_edit_test",
     siteId: editSite.id,
@@ -742,7 +793,7 @@ try {
     inputQuestion: "Which phone number should be primary?",
     inputExpiresAt: "2099-07-29T00:00:00.000Z"
   }));
-  const interveningRevision = siteWorkspaceRevisionV1Schema.parse({
+  const interveningRevision = siteWorkspaceRevisionSchema.parse({
     ...revision,
     id: "workspace_revision_intervening_edit",
     siteId: editSite.id,
@@ -751,7 +802,7 @@ try {
     sourceArchiveKey: "workspace-backups/site_direct_edit_test/intervening.tar.gz",
     createdBy: { kind: "owner", id: editSession.ownerId }
   });
-  const interveningArtifact = siteBuildArtifactV1Schema.parse({
+  const interveningArtifact = siteBuildArtifactSchema.parse({
     ...passedArtifact,
     id: "artifact_intervening_edit",
     siteId: editSite.id,
@@ -761,7 +812,7 @@ try {
     storagePrefix: "site-artifacts/site_direct_edit_test/artifact_intervening_edit"
   });
   await repository.commitVerifiedBuild({ revision: interveningRevision, artifact: interveningArtifact });
-  const currentResumeInput = sitePublicBuildInputV3Schema.parse({
+  const currentResumeInput = sitePublicBuildInputSchema.parse({
     ...editInput,
     id: "input_direct_edit_current",
     inputHash: `sha256:${"9".repeat(64)}`,
@@ -1035,7 +1086,7 @@ try {
     id: rightsSiteId, businessId: rightsBusinessId, slug: "rights-gate-test", status: "draft",
     createdAt: buildInput.createdAt, updatedAt: buildInput.createdAt
   });
-  const rightsState = businessStateV3Schema.parse({
+  const rightsState = businessStateSchema.parse({
     ...syntheticState,
     businessId: rightsBusinessId,
     siteId: rightsSiteId,
@@ -1050,7 +1101,7 @@ try {
   });
   const rightsIntent = { ...buildInput.intent, id: "intent_rights_gate_test", siteId: rightsSiteId };
   const rightsForm = { ...buildInput.forms[0], id: "form_rights_gate_test", siteId: rightsSiteId };
-  const rightsInput = sitePublicBuildInputV3Schema.parse({
+  const rightsInput = sitePublicBuildInputSchema.parse({
     ...buildInput,
     id: "input_rights_gate_test",
     siteId: rightsSiteId,
@@ -1060,13 +1111,13 @@ try {
     forms: [rightsForm],
     assetRevisionIds: [rightsAsset.revisionId]
   });
-  const rightsSource = sourceSnapshotV1Schema.parse({
-    schemaVersion: "source-snapshot-v1", id: rightsInput.sourceSnapshotIds[0], businessId: rightsBusinessId,
+  const rightsSource = sourceSnapshotSchema.parse({
+    schemaVersion: 1, id: rightsInput.sourceSnapshotIds[0], businessId: rightsBusinessId,
     sourceType: "owner_input", contentHash: `sha256:${"c".repeat(64)}`,
     capturedAt: buildInput.createdAt, payload: { verification: "rights gate" }
   });
-  const rightsAssetRevision = assetRevisionV1Schema.parse({
-    schemaVersion: "asset-revision-v1", id: rightsAsset.revisionId, assetId: rightsAsset.assetId,
+  const rightsAssetRevision = assetRevisionSchema.parse({
+    schemaVersion: 1, id: rightsAsset.revisionId, assetId: rightsAsset.assetId,
     businessId: rightsBusinessId, contentHash: rightsAsset.contentHash, storageKey: rightsAsset.storageKey,
     publicUrl: rightsAsset.publicUrl, mimeType: rightsAsset.mimeType, bytes: 128,
     provenance: { verification: "rights gate" }, rightsStatus: rightsAsset.rightsStatus, createdAt: buildInput.createdAt
@@ -1075,19 +1126,19 @@ try {
     site: rightsSite, state: rightsState, intent: rightsIntent, forms: [rightsForm],
     sourceSnapshots: [rightsSource], assetRevisions: [rightsAssetRevision], publicBuildInput: rightsInput
   });
-  const rightsRevision = siteWorkspaceRevisionV1Schema.parse({
+  const rightsRevision = siteWorkspaceRevisionSchema.parse({
     ...revision, id: "workspace_rights_gate_test", siteId: rightsSiteId,
     sourceHash: `sha256:${"9".repeat(64)}`, sourceArchiveKey: `workspace-backups/${"9".repeat(64)}.tar.gz`
   });
-  const rightsArtifact = siteBuildArtifactV1Schema.parse({
+  const rightsArtifact = siteBuildArtifactSchema.parse({
     ...passedArtifact, id: "artifact_rights_gate_test", siteId: rightsSiteId, workspaceRevisionId: rightsRevision.id,
     publicBuildInputId: rightsInput.id, artifactHash: `sha256:${"a".repeat(64)}`,
     storagePrefix: "site-artifacts/site_rights_gate_test/artifact_rights_gate_test",
     files: [{ ...passedArtifact.files[0], contentHash: `sha256:${"b".repeat(64)}`, storageKey: "site-artifacts/site_rights_gate_test/artifact_rights_gate_test/index.html" }]
   });
   await repository.commitVerifiedBuild({ revision: rightsRevision, artifact: rightsArtifact });
-  const rightsVersion = siteVersionV4Schema.parse({
-    schemaVersion: "site-version-v4", id: "version_rights_gate_test", siteId: rightsSiteId, number: 1, status: "candidate",
+  const rightsVersion = siteVersionSchema.parse({
+    schemaVersion: 1, id: "version_rights_gate_test", siteId: rightsSiteId, number: 1, status: "candidate",
     artifactId: rightsArtifact.id, artifactHash: rightsArtifact.artifactHash, workspaceRevisionId: rightsRevision.id,
     publicBuildInputId: rightsInput.id, formDefinitionIds: [rightsForm.id], sourceSnapshotIds: rightsInput.sourceSnapshotIds,
     assetRevisionIds: rightsInput.assetRevisionIds, createdAt: buildInput.createdAt, createdBy: { kind: "system", id: "verification" }
@@ -1098,169 +1149,6 @@ try {
     unpublishableMediaRejected = error instanceof Error && error.message === "candidate_contains_unpublishable_media";
   }
   assert(unpublishableMediaRejected, "local publication bypassed the reference-only media rights gate");
-
-  const experimentalSiteId = "site_experimental_test";
-  const experimentalBusinessId = "business_experimental_test";
-  const experimentalSourceId = "source_experimental_test";
-  const experimentalForm = { ...buildInput.forms[0], id: "form_experimental_test", siteId: experimentalSiteId };
-  const experimentalFacts = buildInput.publicFacts.map((fact) => ({ ...fact, source: { ...fact.source, sourceSnapshotId: experimentalSourceId } }));
-  const experimentalState = businessStateV3Schema.parse({
-    ...syntheticState,
-    businessId: experimentalBusinessId,
-    siteId: experimentalSiteId,
-    facts: experimentalFacts,
-    offerings: buildInput.business.offerings,
-    contacts: buildInput.business.contacts,
-    locations: buildInput.business.locations
-  });
-  const experimentalIntent = { ...buildInput.intent, id: "intent_experimental_test", siteId: experimentalSiteId };
-  const experimentalInput = sitePublicBuildInputV3Schema.parse({
-    ...buildInput,
-    id: "input_experimental_test",
-    siteId: experimentalSiteId,
-    businessId: experimentalBusinessId,
-    publicFacts: experimentalFacts,
-    intent: experimentalIntent,
-    forms: [experimentalForm],
-    sourceSnapshotIds: [experimentalSourceId]
-  });
-  await repository.bootstrapSite({
-    site: platformSiteRecordSchema.parse({
-      id: experimentalSiteId,
-      businessId: experimentalBusinessId,
-      slug: "experimental-test",
-      status: "experimental",
-      createdAt: buildInput.createdAt,
-      updatedAt: buildInput.createdAt
-    }),
-    state: experimentalState,
-    intent: experimentalIntent,
-    forms: [experimentalForm],
-    sourceSnapshots: [sourceSnapshotV1Schema.parse({
-      schemaVersion: "source-snapshot-v1",
-      id: experimentalSourceId,
-      businessId: experimentalBusinessId,
-      sourceType: "owner_input",
-      contentHash: `sha256:${"d".repeat(64)}`,
-      capturedAt: buildInput.createdAt,
-      payload: { verification: "experimental non-publishability" }
-    })],
-    assetRevisions: [],
-    publicBuildInput: experimentalInput
-  });
-  const experimentalRevision = siteWorkspaceRevisionV1Schema.parse({
-    ...revision,
-    id: "workspace_experimental_test",
-    siteId: experimentalSiteId,
-    sourceHash: `sha256:${"e".repeat(64)}`,
-    sourceArchiveKey: `workspace-backups/${"e".repeat(64)}.tar.gz`
-  });
-  const experimentalArtifact = siteBuildArtifactV1Schema.parse({
-    ...passedArtifact,
-    id: "artifact_experimental_test",
-    siteId: experimentalSiteId,
-    workspaceRevisionId: experimentalRevision.id,
-    publicBuildInputId: experimentalInput.id,
-    artifactHash: `sha256:${"f".repeat(64)}`,
-    storagePrefix: "site-artifacts/site_experimental_test/artifact_experimental_test",
-    files: [{ ...passedArtifact.files[0], contentHash: `sha256:${"0".repeat(64)}`, storageKey: "site-artifacts/site_experimental_test/artifact_experimental_test/index.html" }]
-  });
-  await repository.commitVerifiedBuild({ revision: experimentalRevision, artifact: experimentalArtifact });
-  const experimentalVersion = siteVersionV4Schema.parse({
-    schemaVersion: "site-version-v4",
-    id: "version_experimental_test",
-    siteId: experimentalSiteId,
-    number: 1,
-    status: "candidate",
-    artifactId: experimentalArtifact.id,
-    artifactHash: experimentalArtifact.artifactHash,
-    workspaceRevisionId: experimentalRevision.id,
-    publicBuildInputId: experimentalInput.id,
-    formDefinitionIds: [experimentalForm.id],
-    sourceSnapshotIds: [experimentalSourceId],
-    assetRevisionIds: [],
-    createdAt: buildInput.createdAt,
-    createdBy: { kind: "agent", id: "run_experimental_publish_test" }
-  });
-  await repository.createSiteVersion(experimentalVersion);
-  const initialExperimentalReadiness = await deriveSitePublicationReadiness({ versionId: experimentalVersion.id, repository, operationsRepository: operations });
-  assert(initialExperimentalReadiness.blockers.some((blocker) => blocker.code === "experimental_site") && initialExperimentalReadiness.blockers.some((blocker) => blocker.code === "operator_approval"), "experimental readiness did not report its independent blockers");
-  await repository.saveSiteVersionApproval(siteVersionApprovalV1Schema.parse({
-    schemaVersion: "site-version-approval-v1", id: "approval_wrong_artifact_test", siteId: experimentalSiteId,
-    versionId: experimentalVersion.id, artifactHash: `sha256:${"1".repeat(64)}`, status: "approved",
-    actorId: "operator_test", note: "Intentionally wrong artifact hash.", createdAt: "2026-07-20T00:03:00.000Z"
-  }));
-  assert((await deriveSitePublicationReadiness({ versionId: experimentalVersion.id, repository, operationsRepository: operations })).blockers.some((blocker) => blocker.code === "operator_approval"), "approval for a different artifact hash unlocked publication");
-  await repository.saveSiteVersionApproval(siteVersionApprovalV1Schema.parse({
-    schemaVersion: "site-version-approval-v1", id: "approval_exact_artifact_test", siteId: experimentalSiteId,
-    versionId: experimentalVersion.id, artifactHash: experimentalVersion.artifactHash, status: "approved",
-    actorId: "operator_test", note: "Exact artifact reviewed for readiness verification.", createdAt: "2026-07-20T00:04:00.000Z"
-  }));
-  assert(!(await deriveSitePublicationReadiness({ versionId: experimentalVersion.id, repository, operationsRepository: operations })).blockers.some((blocker) => blocker.code === "operator_approval"), "exact artifact approval did not clear the approval blocker");
-  await assertRejectsExperimental(() => repository.promoteSiteVersion(experimentalVersion.id, "operator_test"), "local repository");
-  await assertRejectsExperimental(() => workflow.promoteVersion(experimentalVersion.id, "operator_test"), "workflow promotion");
-  const automaticRun = siteAgentRunSchema.parse({
-    schemaVersion: "site-agent-run",
-    id: "run_experimental_publish_test",
-    sessionId: "session_experimental_publish_test",
-    siteId: experimentalSiteId,
-    publicBuildInputId: experimentalInput.id,
-    origin: "system",
-    requestedBy: "operator_test",
-    publishAfterSuccess: true,
-    kind: "edit",
-    status: "succeeded",
-    stage: "candidate_ready",
-    exactParentRevisionId: experimentalRevision.id,
-    outputRevisionId: experimentalRevision.id,
-    candidateVersionId: experimentalVersion.id,
-    modelId: "verification",
-    executionNumber: 1,
-    skillVersions: {},
-    usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
-    startedAt: buildInput.createdAt,
-    completedAt: buildInput.createdAt
-  });
-  await repository.saveAgentRun(automaticRun);
-  await workflow.executeRunAndFinalize(automaticRun.id);
-  const experimentalAfterAutomaticPublish = await repository.getSite(experimentalSiteId);
-  assert(experimentalAfterAutomaticPublish?.status === "experimental" && !experimentalAfterAutomaticPublish.publishedVersionId, "publishAfterSuccess bypassed experimental non-publishability");
-
-  const priorSubjectiveFinding = operatorQueueItemSchema.parse({
-    schemaVersion: "operator-queue-item",
-    id: "operator_subjective_continuity_test",
-    siteId: experimentalSiteId,
-    versionId: experimentalVersion.id,
-    runId: automaticRun.id,
-    reason: "subjective_finding",
-    severity: "normal",
-    status: "open",
-    findings: [{ route: "/", area: "craft", severity: "normal", message: "A prior visual defect remains unresolved." }],
-    createdAt: "2026-07-20T00:05:00.000Z",
-    updatedAt: "2026-07-20T00:05:00.000Z"
-  });
-  await repository.saveOperatorQueueItem(priorSubjectiveFinding);
-  const successorRun = siteAgentRunSchema.parse({
-    ...automaticRun,
-    id: "run_experimental_successor_test",
-    publishAfterSuccess: false,
-    candidateVersionId: "version_experimental_successor_test",
-    startedAt: "2026-07-20T00:06:00.000Z",
-    completedAt: "2026-07-20T00:06:00.000Z"
-  });
-  await repository.saveAgentRun(successorRun);
-  await repository.createSiteVersion(siteVersionV4Schema.parse({
-    ...experimentalVersion,
-    id: successorRun.candidateVersionId,
-    number: 2,
-    createdAt: "2026-07-20T00:06:00.000Z",
-    createdBy: { kind: "agent", id: successorRun.id }
-  }));
-  const openSubjectiveItems = (await repository.listOperatorQueue("open"))
-    .filter((item) => item.siteId === experimentalSiteId && item.reason === "subjective_finding");
-  assert(openSubjectiveItems.some((item) => item.id === priorSubjectiveFinding.id && item.versionId === experimentalVersion.id), "A successor ship candidate hid or resolved the prior site-scoped subjective finding.");
-  const successorReadiness = await deriveSitePublicationReadiness({ versionId: successorRun.candidateVersionId!, repository, operationsRepository: operations });
-  assert(!successorReadiness.blockers.some((blocker) => blocker.message.includes("visual") || blocker.message.includes("subjective")), "an advisory subjective finding blocked a successor candidate");
 
   const controlPlane = new ControlPlaneService(repository, workflow);
   const addedOffering = await controlPlane.submit({
@@ -1327,13 +1215,13 @@ try {
   await rm(repositoryDir, { recursive: true, force: true });
 }
 
-const runtimePatches = new Map<string, TrustedRuntimePatchV1>();
-const runtimeSeries = new Map<string, TrustedRuntimeSeriesV1>();
+const runtimePatches = new Map<string, TrustedRuntimePatch>();
+const runtimeSeries = new Map<string, TrustedRuntimeSeries>();
 const runtimeRegistry = {
   async getSeries(id: string) { return runtimeSeries.get(id); },
   async getPatch(id: string) { return runtimePatches.get(id); },
-  async savePatch(patch: TrustedRuntimePatchV1) { runtimePatches.set(patch.id, patch); },
-  async saveSeries(series: TrustedRuntimeSeriesV1) { runtimeSeries.set(series.id, series); }
+  async savePatch(patch: TrustedRuntimePatch) { runtimePatches.set(patch.id, patch); },
+  async saveSeries(series: TrustedRuntimeSeries) { runtimeSeries.set(series.id, series); }
 };
 const firstRuntime = await createSiteRuntimePatch({
   id: "runtime_patch_first", version: "1.0.0", storageKey: "runtime/first.js",
@@ -1357,7 +1245,7 @@ const rolledBack = await rollbackRuntimePatch({ registry: runtimeRegistry, serie
 assert(rolledBack.activePatchId === firstRuntime.patch.id && rolledBack.previousPatchId === secondRuntime.patch.id, "runtime rollback did not atomically reverse the active patch");
 
 console.log(JSON.stringify({
-  ok: true, hostileFailures: hostileErrors.size, safeClaims: safePrepared.claims.length,
+  ok: true, hostileFailures: hostileErrors.size, safeFactDeclarations: safePrepared.factDeclarations.length,
   claimParityCases: claimParity.cases.length, syntheticModule: "pass", capabilityPolicy: "pass",
   atomicVerifiedBuild: "pass", atomicRunClaim: "pass", controlPlaneCoalescing: "pass",
   directEditEnqueue: "pass", policyOnlyIsolation: "pass", clarificationLifecycle: "pass", runEventLifecycle: "pass",
@@ -1369,12 +1257,10 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-async function assertRejectsExperimental(operation: () => Promise<unknown>, surface: string) {
+function assertThrows(operation: () => unknown, message: string) {
   let rejected = false;
-  try { await operation(); } catch (error) {
-    rejected = error instanceof Error && (error.message.includes("experimental_site_not_publishable") || error.message.includes("experimental_site"));
-  }
-  assert(rejected, `${surface} accepted an experimental site promotion.`);
+  try { operation(); } catch { rejected = true; }
+  assert(rejected, message);
 }
 
 async function assertRejects(

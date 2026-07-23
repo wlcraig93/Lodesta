@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdmin } from "@/lib/security";
-import { assertOutboundCompliance } from "@/lib/outbound";
+import { assertOutboundCompliance } from "@/packages/acquisition/outbound";
 
 export const runtime = "nodejs";
 

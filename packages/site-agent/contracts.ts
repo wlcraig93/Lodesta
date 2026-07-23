@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type SiteElementSelectionV1, type SitePublicBuildInputV3 } from "@/packages/site-contracts";
+import { type SiteElementSelection, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { validateWorkspaceSourcePolicy } from "./source-policy";
 import type { ManagerTaskKind } from "./skills";
 
@@ -23,10 +23,10 @@ export function assertCompleteWorkspace(files: WorkspaceSourceFile[]) {
 }
 
 export type ManagerRunRequest = {
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   instruction: string;
   kind: ManagerTaskKind;
-  selection?: SiteElementSelectionV1;
+  selection?: SiteElementSelection;
   limits?: Partial<ManagerRunLimits>;
   signal?: AbortSignal;
 };

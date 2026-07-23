@@ -1,12 +1,12 @@
 import { sha256, stableJson } from "../../packages/business-data";
-import { siteIntentV3Schema, sitePublicBuildInputV3Schema } from "../../packages/site-contracts";
+import { siteIntentSchema, sitePublicBuildInputSchema } from "../../packages/site-contracts";
 import { autoBodyContextModule } from "../../packages/vertical-context";
 
 const createdAt = "2026-07-20T00:00:00.000Z";
 
 export function buildSyntheticSiteInput() {
   const intentWithoutHash = {
-    schemaVersion: "site-intent-v3" as const,
+    schemaVersion: 1 as const,
     id: "intent_synthetic_verification",
     siteId: "site_synthetic_verification",
     revision: 1,
@@ -26,7 +26,7 @@ export function buildSyntheticSiteInput() {
     },
     notes: []
   };
-  const intent = siteIntentV3Schema.parse({
+  const intent = siteIntentSchema.parse({
     ...intentWithoutHash,
     intentHash: sha256(stableJson(intentWithoutHash))
   });
@@ -34,11 +34,11 @@ export function buildSyntheticSiteInput() {
     fact("business:name", "business_name", "Business name", "Northstar Collision Repair"),
     fact("fact_phone", "phone", "Phone", "+15125550142"),
     fact("fact_address", "address", "Address", "1200 Main Street, Austin, TX 78701"),
-    fact("fact_hours", "hours", "Hours", { fri: "8:00 AM-5:30 PM", Monday: "8:00 AM-5:30 PM", wed: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Thu: "8:00 AM-5:30 PM", Sunday: "Closed", sat: "Closed", "By appointment": "Evenings" }),
+    fact("fact_hours", "hours", "Hours", { Monday: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Wednesday: "8:00 AM-5:30 PM", Thursday: "8:00 AM-5:30 PM", Friday: "8:00 AM-5:30 PM", Saturday: "Closed", Sunday: "Closed" }),
     fact("fact_service_collision", "offering", "Service", "Collision Repair")
   ];
   const valueWithoutHash = {
-    schemaVersion: "site-public-build-input-v3" as const,
+    schemaVersion: 1 as const,
     id: "input_synthetic_verification",
     siteId: "site_synthetic_verification",
     businessId: "business_synthetic_verification",
@@ -59,7 +59,7 @@ export function buildSyntheticSiteInput() {
         postalCode: "78701",
         country: "US",
         googlePlaceId: "ChIJ-synthetic-location",
-        hours: { fri: "8:00 AM-5:30 PM", Monday: "8:00 AM-5:30 PM", wed: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Thu: "8:00 AM-5:30 PM", Sunday: "Closed", sat: "Closed", "By appointment": "Evenings" },
+        hours: { Monday: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Wednesday: "8:00 AM-5:30 PM", Thursday: "8:00 AM-5:30 PM", Friday: "8:00 AM-5:30 PM", Saturday: "Closed", Sunday: "Closed" },
         sourceFactIds: ["fact_address", "fact_hours"]
       }],
       serviceAreas: [],
@@ -81,7 +81,7 @@ export function buildSyntheticSiteInput() {
     publicFacts,
     intent,
     forms: [{
-      schemaVersion: "form-definition-v2" as const,
+      schemaVersion: 1 as const,
       id: "form_estimate",
       siteId: "site_synthetic_verification",
       revision: 1,
@@ -105,7 +105,7 @@ export function buildSyntheticSiteInput() {
     sourceSnapshotIds: ["source_owner"],
     assetRevisionIds: []
   };
-  return sitePublicBuildInputV3Schema.parse({
+  return sitePublicBuildInputSchema.parse({
     ...valueWithoutHash,
     inputHash: sha256(stableJson(valueWithoutHash))
   });

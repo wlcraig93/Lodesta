@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { platformOperationsRepository } from "@/packages/platform-operations";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import { getCurrentUser } from "./supabase/server";
 import { authRequired, hasPlatformAdminRole, hasValidAdminToken } from "./auth-policy";
 
@@ -53,15 +53,11 @@ export async function requirePlatformSiteOwnerAccess(siteId: string, nextPath: s
     };
   }
   const userId = auth.user?.id;
-  const email = auth.user?.email?.toLowerCase();
-  if (!userId && !email) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
+  if (!userId) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
 
-  const claims = await platformOperationsRepository.listClaims(siteId);
-  const ownsSite = claims.some(
-    (claim) =>
-      claim.status === "claimed" &&
-      ((userId && claim.ownerUserId === userId) || (email && claim.ownerEmail?.toLowerCase() === email))
-  );
+  const site = await sitePlatformRepository.getSite(siteId);
+  if (!site) notFound();
+  const ownsSite = site.ownerUserId === userId;
   const canAccessAdmin = hasPlatformAdminRole(auth.user);
   if (ownsSite) {
     return { ...auth, mode: "owner" as const, canAccessAdmin, tokenAccess: false as const };

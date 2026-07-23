@@ -9,8 +9,8 @@ export type HealthReport = { status: HealthState; timestamp: string; checks: Hea
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
-    checkUrl(), checkRepository(), checkAuth(), checkAdmin(), checkStripe(), checkSandbox(),
-    checkArtifactBroker(), checkOpenAi(), checkHashSecret(), checkClaimSecret(), checkEmail(), checkPlaces()
+    checkUrl(), checkRepository(), checkAuth(), checkAdmin(), checkSandbox(),
+    checkArtifactBroker(), checkOpenAi(), checkHashSecret(), checkEmail(), checkPlaces()
   ];
   if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
   return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
@@ -37,13 +37,6 @@ function checkAdmin() {
   return process.env.LODESTA_ADMIN_TOKEN ? ok("admin", "Admin authorization", "Admin token is configured.") : (deployed() ? error : warning)("admin", "Admin authorization", "LODESTA_ADMIN_TOKEN is not configured.");
 }
 
-function checkStripe() {
-  const values = [process.env.STRIPE_SECRET_KEY, process.env.STRIPE_PRICE_ID, process.env.STRIPE_WEBHOOK_SECRET];
-  if (values.every(Boolean)) return ok("stripe", "Stripe", "Checkout, portal, and webhook completion are configured.");
-  if (values.some(Boolean)) return error("stripe", "Stripe", "Stripe is partially configured.");
-  return warning("stripe", "Stripe", "Stripe is not configured.");
-}
-
 function checkSandbox() {
   return process.env.LODESTA_SANDBOX_URL && process.env.LODESTA_SANDBOX_TOKEN
     ? ok("sandbox", "Cloudflare Sandbox", "Sandbox bridge and authentication are configured.")
@@ -61,12 +54,11 @@ function checkArtifactBroker() {
 
 function checkOpenAi() { return process.env.OPENAI_API_KEY ? ok("openai", "Website manager model", "OpenAI is configured.") : error("openai", "Website manager model", "OPENAI_API_KEY is required for site construction and edits."); }
 function checkHashSecret() { if (hasConfiguredHashSecret()) return ok("hash_secret", "Privacy hash secret", "Stable visitor hashing uses a deployment secret."); return (deployed() ? error : warning)("hash_secret", "Privacy hash secret", usesDevelopmentHashSecret() ? "Using the development hash secret." : "LODESTA_HASH_SECRET is missing."); }
-function checkClaimSecret() { return process.env.LODESTA_CLAIM_CHALLENGE_SECRET || process.env.NEXTAUTH_SECRET ? ok("claim_secret", "Claim challenge secret", "Signed claim challenges are configured.") : (deployed() ? error : warning)("claim_secret", "Claim challenge secret", "LODESTA_CLAIM_CHALLENGE_SECRET is missing."); }
 function checkEmail() { return process.env.RESEND_API_KEY ? ok("email", "Operational email", "Resend is configured.") : warning("email", "Operational email", "Email notifications are disabled."); }
 function checkPlaces() { return process.env.GOOGLE_PLACES_API_KEY ? ok("places", "Google Places", "Places enrichment is configured.") : warning("places", "Google Places", "Places enrichment is disabled."); }
 
 async function checkRepositoryReadiness() {
-  try { const sites = await sitePlatformRepository.listSites(); return ok("repository_readiness", "Repository readiness", `V4 repository responded with ${sites.length} site(s).`); }
+  try { const sites = await sitePlatformRepository.listSites(); return ok("repository_readiness", "Repository readiness", `Repository responded with ${sites.length} site(s).`); }
   catch (caught) { return error("repository_readiness", "Repository readiness", message(caught)); }
 }
 

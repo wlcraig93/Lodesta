@@ -21,7 +21,6 @@ const analyticsEventSchema = z.object({
     "engagement",
     "scroll_depth",
     "web_vital",
-    "experiment_assignment",
     "agent_readable_request",
     "places_ui"
   ]),

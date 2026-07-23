@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { chromium, type Browser, type Page } from "playwright";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
-import type { SitePublicBuildInputV3 } from "@/packages/site-contracts";
+import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import type { PreparedSiteArtifact } from "./finalizer";
 import type { ArtifactGateFinding } from "./contracts";
 
@@ -27,7 +27,7 @@ const viewports = [
 
 export async function runArtifactBrowserGate(input: {
   prepared: PreparedSiteArtifact;
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   blobStore: ArtifactBlobStore;
   capturePrefix: string;
   signal?: AbortSignal;
@@ -42,7 +42,7 @@ export async function runArtifactBrowserGate(input: {
 
 async function runArtifactBrowserGateOnce(input: {
   prepared: PreparedSiteArtifact;
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   blobStore: ArtifactBlobStore;
   capturePrefix: string;
   signal?: AbortSignal;
@@ -149,7 +149,7 @@ function abortable<T>(operation: Promise<T>, signal?: AbortSignal) {
 
 async function startHarness(input: {
   prepared: PreparedSiteArtifact;
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   blobStore: ArtifactBlobStore;
 }) {
   const routeFiles = new Map(input.prepared.routes.map((route) => [route.path, route.html]));
@@ -183,7 +183,7 @@ async function startHarness(input: {
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
 
-type BrowserPageMetricsV1 = {
+type BrowserPageMetrics = {
   horizontalOverflowPx: number;
   headingOverflowCount: number;
   brokenImages: number;
@@ -286,8 +286,8 @@ const browserInspectionSource = String.raw`(() => {
     };
 })()`;
 
-async function inspectPage(page: Page): Promise<BrowserPageMetricsV1> {
-  return await page.evaluate(browserInspectionSource) as BrowserPageMetricsV1;
+async function inspectPage(page: Page): Promise<BrowserPageMetrics> {
+  return await page.evaluate(browserInspectionSource) as BrowserPageMetrics;
 }
 
 async function settleImages(page: Page) {

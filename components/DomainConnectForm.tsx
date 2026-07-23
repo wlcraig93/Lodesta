@@ -6,8 +6,12 @@ import { parseJsonResponse } from "@/lib/client-json";
 
 const domainResponseSchema = z.object({
   error: z.string().optional(),
-  verification: z.object({ note: z.string().optional(), value: z.string().optional() }).passthrough().optional(),
-  activationNotice: z.string().optional()
+  domain: z.object({
+    verificationName: z.string(),
+    verificationValue: z.string(),
+    routingName: z.string(),
+    routingTarget: z.string()
+  }).optional()
 }).passthrough();
 
 type DomainConnectFormProps = {
@@ -23,17 +27,16 @@ export function DomainConnectForm({ siteId, disabled = false, disabledReason }: 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled) {
-      setStatus(disabledReason ?? "Complete checkout before connecting a custom domain.");
+      setStatus(disabledReason ?? "Custom domains are unavailable.");
       return;
     }
-    setStatus("Registering hostname...");
+    setStatus("Preparing DNS instructions...");
     const response = await fetch("/api/domains", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         siteId,
-        hostname,
-        provider: "cloudflare_for_saas"
+        hostname
       })
     });
     const result = await parseJsonResponse(response, domainResponseSchema);
@@ -41,11 +44,8 @@ export function DomainConnectForm({ siteId, disabled = false, disabledReason }: 
       setStatus(result.error ?? "Unable to register domain.");
       return;
     }
-    setStatus(
-      `${result.verification?.note ?? "Domain registered."} Verification value: ${result.verification?.value ?? "pending"}. ${
-        result.activationNotice ?? "Activation may take up to 30 seconds to apply across all servers."
-      }`
-    );
+    setStatus("DNS instructions are ready below. Add both records, then check the connection.");
+    window.location.reload();
   }
 
   return (
@@ -61,7 +61,7 @@ export function DomainConnectForm({ siteId, disabled = false, disabledReason }: 
         />
       </label>
       <button className="button primary" type="submit" disabled={disabled}>
-        Connect domain
+        Get DNS records
       </button>
       {disabled && disabledReason ? <p className="form-status">{disabledReason}</p> : null}
       {status ? <p className="form-status">{status}</p> : null}

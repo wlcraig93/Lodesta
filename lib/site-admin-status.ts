@@ -1,8 +1,7 @@
-import type { ClaimRecord } from "@/packages/platform-operations";
-import type { PlatformSiteRecord, SiteAgentRun, SiteVersionV4 } from "@/packages/site-contracts";
+import type { PlatformSiteRecord, SiteAgentRun, SiteVersion } from "@/packages/site-contracts";
 
 export type SiteLifecycleStatus = "generating" | "needs_attention" | "ready_for_review" | "published" | "draft";
-export type SiteOwnershipStatus = "claimed" | "claim_pending" | "unclaimed";
+export type SiteOwnershipStatus = "owned" | "unowned";
 
 export const siteLifecycleLabels: Record<SiteLifecycleStatus, string> = {
   generating: "Generating",
@@ -13,14 +12,13 @@ export const siteLifecycleLabels: Record<SiteLifecycleStatus, string> = {
 };
 
 export const siteOwnershipLabels: Record<SiteOwnershipStatus, string> = {
-  claimed: "Claimed",
-  claim_pending: "Claim pending",
-  unclaimed: "Unclaimed"
+  owned: "Account owned",
+  unowned: "Unowned"
 };
 
 export function deriveSiteLifecycle(
   site: Pick<PlatformSiteRecord, "publishedVersionId">,
-  versions: Array<Pick<SiteVersionV4, "status">>,
+  versions: Array<Pick<SiteVersion, "status">>,
   latestRun?: Pick<SiteAgentRun, "status">
 ): SiteLifecycleStatus {
   if (latestRun?.status === "queued" || latestRun?.status === "running") return "generating";
@@ -30,8 +28,6 @@ export function deriveSiteLifecycle(
   return "draft";
 }
 
-export function deriveSiteOwnership(claims: Array<Pick<ClaimRecord, "status">>): SiteOwnershipStatus {
-  if (claims.some((claim) => claim.status === "claimed")) return "claimed";
-  if (claims.length) return "claim_pending";
-  return "unclaimed";
+export function deriveSiteOwnership(site: Pick<PlatformSiteRecord, "ownerUserId">): SiteOwnershipStatus {
+  return site.ownerUserId ? "owned" : "unowned";
 }

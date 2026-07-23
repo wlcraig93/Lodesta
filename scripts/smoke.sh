@@ -106,18 +106,30 @@ request GET "/api/health?deep=1"
 expect_status "deep health" "200"
 expect_json "deep health" 'const x=JSON.parse(process.env.BODY); if (!["ok","warning"].includes(x.status)||!x.checks?.some(c=>c.id==="repository_readiness")) process.exit(1)'
 
+request GET "/account"
+expect_status "account entry" "200"
+request GET "/account/onboarding"
+expect_status "account onboarding" "200"
+request GET "/api/website-setups"
+if [[ "$STATUS" != "401" && "$STATUS" != "503" ]]; then
+  echo "Smoke check failed: unauthenticated website setups returned $STATUS, expected 401 or local-open 503" >&2
+  echo "$BODY" >&2
+  exit 1
+fi
+echo "ok - website setup authentication boundary"
+
 for path in "/admin/sites" "/admin/sites/new" "/admin/site-queue" "/admin/runs" "/settings"; do
   request GET "$path"
   [[ "$STATUS" =~ ^(200|307)$ ]] || { echo "Smoke check failed: operator surface $path returned $STATUS" >&2; exit 1; }
 done
-echo "ok - V4 operator surfaces"
+echo "ok - operator surfaces"
 
 request GET "/sites/smoke-missing"
 expect_status "unknown public site fails closed" "404"
 request GET "/preview/smoke-missing"
 expect_status "unknown preview fails closed" "404"
 
-expect_empty_route_404 "missing V4 asset reaches encoded route" "/_lodesta/assets/asset_revision_smoke_missing"
+expect_empty_route_404 "missing canonical asset reaches encoded route" "/_lodesta/assets/asset_revision_smoke_missing"
 expect_empty_route_404 "missing runtime series reaches encoded route" "/_lodesta/runtime/smoke-missing.js"
 expect_empty_route_404 "missing runtime patch reaches encoded route" "/_lodesta/runtime/patches/0000000000000000000000000000000000000000000000000000000000000000.js"
 
@@ -133,7 +145,7 @@ expect_status "unknown agent session rejected" "404"
 
 for path in "/api/intake" "/api/sites/regenerate" "/api/sites/versions" "/api/preview-tokens"; do
   request GET "$path"
-  expect_status "deleted V3 route $path" "404"
+  expect_status "deleted legacy route $path" "404"
 done
 
 echo "Smoke checks passed for $BASE_URL"

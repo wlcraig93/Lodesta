@@ -9,6 +9,6 @@ export const siteDefinition = {
     description: "A new website workspace.",
     element: <main><h1><Fact id="business:name" /></h1></main>
   }],
-  claims: [],
+  factDeclarations: [],
   capabilityBindings: []
 };

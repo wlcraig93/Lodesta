@@ -1,4 +1,4 @@
-import { sitePublicBuildInputV3Schema, type SitePublicBuildInputV3 } from "@/packages/site-contracts";
+import { sitePublicBuildInputSchema, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifact } from "@/packages/site-verification";
 import { assertWorkspaceSourcePolicy } from "@/packages/site-agent/source-policy";
 
@@ -35,8 +35,8 @@ export class SiteSandboxClient {
     if (!token) throw new Error("Sandbox bridge token is required.");
   }
 
-  async bootstrap(sessionId: string, buildInput: SitePublicBuildInputV3) {
-    const value = sitePublicBuildInputV3Schema.parse(buildInput);
+  async bootstrap(sessionId: string, buildInput: SitePublicBuildInput) {
+    const value = sitePublicBuildInputSchema.parse(buildInput);
     return this.call<{ ok: true; revision: string }>(sessionId, "bootstrap", "POST", { publicBuildInput: value });
   }
 
@@ -51,8 +51,8 @@ export class SiteSandboxClient {
     }>(sessionId, "apply", "POST", { expectedRevision, files });
   }
 
-  async rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInputV3) {
-    const value = sitePublicBuildInputV3Schema.parse(buildInput);
+  async rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInput) {
+    const value = sitePublicBuildInputSchema.parse(buildInput);
     return this.call<{
       ok: true;
       revision: string;
@@ -89,7 +89,7 @@ export class SiteSandboxClient {
         platform: string;
         toolchain: string;
         managerPrompt: string;
-        claimPolicy: string;
+        factDeclarationPolicy: string;
         verificationPolicy: string;
         sourcePolicy: string;
         sandboxImageDigest: `sha256:${string}`;

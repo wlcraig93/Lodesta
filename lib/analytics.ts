@@ -55,7 +55,6 @@ export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): An
     ),
     funnelDropoffs: summarizeFunnelDropoffs(siteEvents),
     sectionConversionPaths: summarizeSectionConversionPaths(siteEvents),
-    outcomesByExperimentVariant: summarizeExperimentVariants(siteEvents),
     outcomesBySource: summarizeSources(siteEvents),
     clickMap: summarizeClickMap(siteEvents),
     standardCorrelations: summarizeStandardCorrelations(siteEvents, totals),
@@ -274,43 +273,6 @@ function summarizeSectionConversionPaths(events: AnalyticsEvent[]): AnalyticsSec
       medianTimeToActionMs: median(group.timeToActionMs)
     }))
     .sort((left, right) => right.primaryActions - left.primaryActions || right.actionRate - left.actionRate || right.exposures - left.exposures)
-    .slice(0, 12);
-}
-
-function summarizeExperimentVariants(events: AnalyticsEvent[]): AnalyticsOutcomeRow[] {
-  const assignments = new Map<string, Array<{ experimentId: string; variantId: string; surface?: string }>>();
-  for (const event of events) {
-    if (event.eventType !== "experiment_assignment") continue;
-    const experimentId = String(event.metadata?.experimentId ?? "unknown");
-    const variantId = String(event.metadata?.variantId ?? "unknown");
-    const surface = typeof event.metadata?.surface === "string" ? event.metadata.surface : undefined;
-    const sessionAssignments = assignments.get(event.sessionId) ?? [];
-    if (!sessionAssignments.some((assignment) => assignment.experimentId === experimentId && assignment.variantId === variantId)) {
-      sessionAssignments.push({ experimentId, variantId, surface });
-    }
-    assignments.set(event.sessionId, sessionAssignments);
-  }
-
-  const groups = new Map<string, AnalyticsEvent[]>();
-  const labels = new Map<string, string>();
-  for (const event of events) {
-    const sessionAssignments = assignments.get(event.sessionId);
-    if (!sessionAssignments) continue;
-    for (const assignment of sessionAssignments) {
-      const key = `${assignment.experimentId}:${assignment.variantId}`;
-      const group = groups.get(key) ?? [];
-      group.push(event);
-      groups.set(key, group);
-      labels.set(
-        key,
-        `${assignment.experimentId} / ${assignment.variantId}${assignment.surface ? ` / ${assignment.surface}` : ""}`
-      );
-    }
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({ key, label: labels.get(key) ?? key.replace(":", " / "), events: group.length, ...outcomeTotals(group) }))
-    .sort((a, b) => b.primaryActions - a.primaryActions || b.events - a.events)
     .slice(0, 12);
 }
 

@@ -1,82 +1,56 @@
-# Lodesta V1 Product Refinement
+# Lodesta Pre-Launch Rollout
 
-**Status:** Private product refinement; no global customer-admission score is active
+**Status:** Canonical account-owned builder implemented; destructive reset remains gated
 
-**Architecture authority:** [Product-Path Simplification](product-path-simplification-plan.md)
+## Product contract
 
-## Product
+- A configured Supabase account is the only identity requirement for project creation.
+- Any signed-in user may import any public source URL. Source URLs are reusable and never confer ownership.
+- Same-account duplicate detection is advisory and requires an explicit confirmation; it never queries or discloses another account.
+- Every project owns a unique Lodesta slug and may publish there after objective release checks.
+- `sites.owner_user_id` is the sole owner authorization source.
+- Custom hostnames are exclusive only after exact, site-bound TXT proof. The owner configures the ownership TXT record and routing CNAME/ALIAS together.
+- Billing is not part of this release.
+- Imported images remain `reference_only` until replaced by a platform-cleared asset or explicitly attested by the site owner.
 
-Lodesta builds and manages high-quality websites for US local businesses. V1 ingests
-verifiable business facts from an existing URL, produces a protected draft, and gives
-the owner an AI website workspace for visual and content changes. Auto body supplies the
-first optional domain-context module but is not an eligibility gate.
+## Verification before infrastructure work
 
-The product is intentionally narrower than a general application builder. It owns shared
-backend capabilities and refuses arbitrary authentication, databases, payments, custom
-server code, dependencies, secrets, or unsupported embeds.
+```bash
+npm run typecheck
+npm run verify:architecture
+npm run verify:database
+npm run verify:authoring
+npm run verify:runtime
+npm run verify:account-setup-domain
+npm run verify:acquisition
+npm run verify:render-browser
+npm run smoke:dev
+```
 
-## V1 Contract
+## Canonical reset
 
-- Canonical `BusinessStateV3` owns business truth and provenance.
-- `SiteIntentV3` owns presentation goals without templates or layout recipes.
-- One `WebsiteManagerAgent` authors a React/TypeScript/CSS workspace in Cloudflare Sandbox.
-- No agent-authored JavaScript reaches visitors.
-- Forms, analytics, maps, domains, redirects, publishing, runtime interactions, and rollback are platform-owned.
-- Sanitization, claim grounding, capability authorization, browser QA, and immutable finalization are hard release gates.
-- Candidate, preview, and production HTML/CSS bytes are identical.
-- The exact artifact requires operator approval before publication.
+The repository intentionally contains one from-zero application migration. Never apply it over the historical public schema.
 
-## Current Work
+1. Finish and review the coordinated code/schema change.
+2. Quiesce web and workers.
+3. Create an annotated pre-reset Git tag and retain runnable web, worker, and sandbox artifacts with exact image digests.
+4. Snapshot the public schema, migration ledger, row counts, referenced blobs, blob hashes, and a manifest hash.
+5. Restore that snapshot into an isolated Supabase environment and verify rows, `auth.users` foreign keys, blobs, and hashes.
+6. Apply the sole baseline to a separate empty Supabase environment and run the full suite with `LODESTA_VERIFY_LIVE_DATABASE=true`.
+7. Require the exact operator confirmation `reset-prelaunch:<manifest-hash>`.
+8. Preserve Supabase Auth, reset only application-owned public schema and managed artifact storage, and apply the baseline.
+9. Seed the trusted runtime and operator defaults.
+10. Deploy web and worker together, then run live boundary verification before reopening traffic.
 
-1. Deploy the coordinated site-authoring simplification and verify its infrastructure boundaries.
-2. Generate private sites with `npm run experiment:site -- --url=<https-url>` as useful product questions arise.
-3. Inspect each candidate and exercise edits through the real owner workspace instead of a scripted test protocol.
-4. Record subjective observations in the attempt's freeform `notes.md`; use the report provenance and objective findings to compare attempts.
-5. Improve evidence, skills, prompts, or tools when a problem is understood. Add hard verification only for factual, safety, capability, or functional violations.
+The implementation workflow must stop before step 8 unless the exact manifest-bound confirmation has been supplied.
 
-Experiments may be repeated against the same or different businesses. There are no fixed
-sample sizes, reserved URLs, rerun restrictions, quality scores, required edit categories,
-or admission verdicts. A future customer-evaluation process will be designed only after
-the product's real strengths and recurring failure modes are understood.
+## Rollback
 
-## Per-Site Publication Boundary
+If live boundary verification fails:
 
-Private experimentation does not weaken shipping controls. A site can publish only when:
+1. Quiesce the new stack.
+2. Redeploy the tagged pre-reset web, worker, and sandbox artifacts.
+3. Restore the rehearsed database and blob snapshot.
+4. Run the prior stack’s verification before reopening traffic.
 
-- it is not marked experimental;
-- its candidate uses the current business state and site intent;
-- its exact artifact passed objective QA;
-- all rendered assets have publication rights;
-- forms and active redirects are valid; and
-- an operator approved that exact artifact hash.
-
-These checks are enforced in application readiness and the database promotion function.
-
-## Initial Managed Surface
-
-- URL ingestion and source retention.
-- Optional domain context through the shared module boundary.
-- Multi-page website creation and AI-guided visual/content edits.
-- Canonical fact and offering changes through typed control-plane requests.
-- Managed forms and inbox, first-party analytics, maps, and safe links.
-- SEO/AEO metadata, JSON-LD, robots, sitemap, and text/Markdown discovery routes.
-- Protected preview, claim, billing, custom domains, immutable publishing, version history, and rollback.
-
-Scheduling, customer authentication, ecommerce, custom applications, additional production
-domain modules, arbitrary plug-ins, and fleet-wide autonomous experimentation remain deferred.
-
-## Infrastructure Verification
-
-- Next.js and Railway host product UI, APIs, public artifact serving, and workers.
-- Supabase stores canonical authorities and operational records.
-- R2 stores immutable source archives, assets, screenshots, runtime patches, and finalized bytes.
-- Cloudflare Sandbox runs isolated builds with a prebaked dependency tree and deny-by-default egress.
-- Cloudflare for SaaS provides custom-domain integration where configured.
-
-Fresh databases apply ordered files under `supabase/migrations`; there is no parallel
-monolithic schema file. Before deployed authoring is enabled, run Supabase, sandbox,
-artifact-boundary, browser, trusted-runtime, smoke, and live walking-skeleton verification.
-Agent Ready scanning is an optional technical check rather than an admission requirement.
-
-Do not add a runtime rule, template, URL-specific branch, grader, or domain-specific
-generator to make one experimental site look better.
+No experimental sites, telemetry, claims, billing rows, or test projects are restored into the new canonical schema.

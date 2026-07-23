@@ -1,7 +1,7 @@
-import type { VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { VerticalContextModule } from "@/packages/site-contracts";
 
-export const autoBodyContextModule: VerticalContextModuleV1 = {
-  schemaVersion: "vertical-context-module-v1",
+export const autoBodyContextModule: VerticalContextModule = {
+  schemaVersion: 1,
   id: "auto_body",
   version: "auto-body-v1",
   status: "active",

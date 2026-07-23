@@ -50,7 +50,7 @@ const prepared = prepareSiteArtifact({
         bodyHtml: `<header><strong data-lodesta-fact-id="${name.id}">${name.value}</strong><nav><a href="/">Home</a><a href="/contact">Contact</a></nav></header><main><section class="hero"><h1>Request repair help</h1><p data-lodesta-fact-id="${phone.id}">Call ${phone.value}</p></section><section class="panel"><h2>Tell us what happened</h2><form data-lodesta-form-id="${form.id}"><label>Name<input name="name" required></label><label>Phone<input name="phone" type="tel" required></label><label>Details<textarea name="message"></textarea></label><button type="submit">${form.submitLabel}</button><p data-lodesta-form-status></p></form></section></main>`
       }
     ],
-    claims: [],
+    factDeclarations: [],
     capabilityBindings: [
       { id: "primary_map", kind: "map", route: "/", config: { locationId: "location_primary" } },
       { id: "contact_form", kind: "form", route: "/contact", config: { formId: form.id } }

@@ -2,22 +2,25 @@ import Link from "next/link";
 import { deriveSitePublicationReadiness } from "@/packages/site-platform";
 import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { WorkspaceMetric, WorkspacePageHeader, WorkspaceStatus, formatWorkspaceDate, humanize } from "@/components/OwnerWorkspaceUI";
-import type { SiteAgentRun, SitePublicationReadinessV1, SiteVersionV4 } from "@/packages/site-contracts";
+import type { SiteAgentRun, SitePublicationReadiness, SiteVersion } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";
 
 export default async function WorkspaceHomePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const context = await requireOwnerWorkspace(slug, `/workspace/${slug}`);
-  const [versions, runs, queue, inquiries, analytics] = await Promise.all([
+  const [versions, runs, queue, inquiries, analytics, domains] = await Promise.all([
     sitePlatformRepository.listSiteVersions(context.site.id),
     sitePlatformRepository.listRecentAgentRuns({ siteId: context.site.id, limit: 8 }),
     sitePlatformRepository.listOperatorQueue(),
     siteCapabilityRepository.listInquiries(context.site.id),
-    siteCapabilityRepository.analyticsSummary(context.site.id)
+    siteCapabilityRepository.analyticsSummary(context.site.id),
+    platformOperationsRepository.listDomains(context.site.id)
   ]);
+  const domainAttention = domains.find((domain) => domain.status === "attention_required");
   const candidate = versions.find((version) => version.status === "candidate");
   const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
   const openQueue = queue.filter((item) => item.siteId === context.site.id && ["open", "in_review"].includes(item.status));
@@ -35,6 +38,14 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
         description="Your website, customer interest, and the smallest useful next action—together in one place."
         actions={<>{context.site.publishedVersionId ? <a className="button secondary" href={`/sites/${slug}`} target="_blank" rel="noreferrer">Open live site</a> : null}<Link className="button primary" href={`/workspace/${slug}/website`}>Open website</Link></>}
       />
+
+      {domainAttention ? (
+        <section className="workspace-next-action is-attention" aria-label="Domain needs attention">
+          <div className="workspace-next-action-index" aria-hidden="true">!</div>
+          <div><span>Domain connection</span><h2>{domainAttention.hostname} needs to be re-verified</h2><p>The Lodesta URL remains available. Check the DNS records to restore custom-domain routing.</p></div>
+          <Link className="button primary" href={`/workspace/${slug}/settings#domain`}>Review domain</Link>
+        </section>
+      ) : null}
 
       <section className={`workspace-next-action is-${nextAction.tone}`} aria-labelledby="workspace-next-action-title">
         <div className="workspace-next-action-index" aria-hidden="true">01</div>
@@ -78,8 +89,8 @@ function HealthRow({ label, value, attention = false, href }: { label: string; v
 
 function deriveNextAction(input: {
   slug: string;
-  candidate?: SiteVersionV4;
-  readiness?: SitePublicationReadinessV1;
+  candidate?: SiteVersion;
+  readiness?: SitePublicationReadiness;
   runs: SiteAgentRun[];
   openQueue: number;
   pendingProof: number;

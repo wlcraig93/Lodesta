@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { searchGoogleProspectPlaces } from "@/lib/prospect-reports";
+import { searchGoogleProspectPlaces } from "@/packages/acquisition/prospect-reports";
 
 export const runtime = "nodejs";
 

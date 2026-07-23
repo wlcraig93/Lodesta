@@ -32,8 +32,8 @@ const termsSections = [
     body: "You may not use the service for unlawful activity, misleading claims, spam, abusive behavior, infringement, security attacks, or activity that harms Lodesta, customers, visitors, or third parties."
   },
   {
-    title: "6. Payments and billing",
-    body: "Any paid plan, subscription, usage charge, refund, or cancellation terms will be described in the applicable order, checkout, or billing flow."
+    title: "6. Future paid services",
+    body: "Lodesta does not offer a paid plan in this pre-launch release. Any future pricing and payment terms will be presented before a user accepts them."
   },
   {
     title: "7. Availability and changes",
@@ -72,7 +72,7 @@ export default function TermsPage() {
         <section className="panel">
           <h2>Draft status</h2>
           <p>
-            This page is not legal advice and is intentionally generic. It exists so product, billing, and account flows
+            This page is not legal advice and is intentionally generic. It exists so product and account flows
             have a stable <code>/terms</code> URL while final policy language is prepared.
           </p>
         </section>

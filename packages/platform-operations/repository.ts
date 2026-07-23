@@ -1,22 +1,25 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { createCheckoutSession } from "@/lib/billing";
-import { refreshCustomHostnameStatus, registerCustomHostname } from "@/lib/domains";
-import { claimVerificationSatisfies } from "@/lib/owner-access";
+import {
+  applyProviderExecutionFailure,
+  applyProviderObservation,
+  inspectDomainDns,
+  newDomainVerification,
+  refreshCustomHostnameStatus,
+  registerCustomHostname
+} from "@/lib/domains";
 import {
   applyOutboundEventToProspect,
   newOutboundCampaign,
   newOutboundEvent,
   newOutboundProspect,
   summarizeOutbound
-} from "@/lib/outbound";
+} from "@/packages/acquisition/outbound";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import type {
-  ClaimRecord,
-  ClaimWithCheckout,
-  CompleteClaimCheckoutInput,
-  CreateClaimInput,
+  AdoptionInvitation,
+  CreateWebsiteSetupInput,
   CreateOutboundCampaignInput,
   CreateProspectReportInput,
   CreateProspectReportLeadInput,
@@ -25,35 +28,48 @@ import type {
   OutboundEvent,
   OutboundProspect,
   OutboundSummary,
-  ProspectReportJobV1,
+  ProspectReportJob,
   ProspectReportLead,
   ProspectReportRecord,
   RecordOutboundEventInput,
   RegisterDomainInput,
-  SiteRedirectRuleV1,
-  SitePreviewTokenV1,
+  SiteRedirectRule,
+  SitePreviewToken,
   UpsertSiteRedirectInput,
   UpdateProspectReportInput,
+  WebsiteSetupFailureCode,
+  WebsiteSetupSourceUpdate,
+  WebsiteSetup,
   UpsertOutboundProspectInput
 } from "./contracts";
 
 export interface PlatformOperationsRepository {
-  createClaim(input: CreateClaimInput): Promise<ClaimWithCheckout | null>;
-  completeClaimCheckout(input: CompleteClaimCheckoutInput): Promise<ClaimRecord | null>;
-  listClaims(siteId?: string): Promise<ClaimRecord[]>;
-  createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }): Promise<SitePreviewTokenV1>;
-  resolvePreviewToken(token: string): Promise<SitePreviewTokenV1 | null>;
-  listPreviewTokens(siteId?: string): Promise<SitePreviewTokenV1[]>;
+  createAdoptionInvitation(input: { siteId: string; tokenHash: string; expiresAt: string }): Promise<AdoptionInvitation>;
+  findAdoptionInvitation(tokenHash: string): Promise<AdoptionInvitation | null>;
+  consumeAdoptionInvitation(input: { tokenHash: string; ownerUserId: string }): Promise<AdoptionInvitation | null>;
+  createWebsiteSetup(input: CreateWebsiteSetupInput): Promise<WebsiteSetup>;
+  getWebsiteSetup(setupId: string): Promise<WebsiteSetup | null>;
+  listWebsiteSetupsForOwner(ownerUserId: string): Promise<WebsiteSetup[]>;
+  listWebsiteSetups(siteId?: string): Promise<WebsiteSetup[]>;
+  updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate): Promise<WebsiteSetup | null>;
+  cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
+  retryWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
+  claimNextWebsiteSetup(workerId: string): Promise<WebsiteSetup | null>;
+  linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }): Promise<WebsiteSetup | null>;
+  failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }): Promise<WebsiteSetup | null>;
+  createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }): Promise<SitePreviewToken>;
+  resolvePreviewToken(token: string): Promise<SitePreviewToken | null>;
+  listPreviewTokens(siteId?: string): Promise<SitePreviewToken[]>;
   registerDomain(input: RegisterDomainInput): Promise<DomainRecord | null>;
   refreshDomain(input: { domainId: string }): Promise<DomainRecord | null>;
   listDomains(siteId?: string): Promise<DomainRecord[]>;
   getDomainById(domainId: string): Promise<DomainRecord | null>;
   getDomainByHostname(hostname: string): Promise<DomainRecord | null>;
-  upsertRedirect(input: UpsertSiteRedirectInput): Promise<SiteRedirectRuleV1>;
-  setRedirectStatus(input: { redirectId: string; status: SiteRedirectRuleV1["status"] }): Promise<SiteRedirectRuleV1 | null>;
-  listRedirects(siteId: string): Promise<SiteRedirectRuleV1[]>;
-  getRedirectById(redirectId: string): Promise<SiteRedirectRuleV1 | null>;
-  resolveRedirect(siteId: string, sourcePath: string): Promise<SiteRedirectRuleV1 | null>;
+  upsertRedirect(input: UpsertSiteRedirectInput): Promise<SiteRedirectRule>;
+  setRedirectStatus(input: { redirectId: string; status: SiteRedirectRule["status"] }): Promise<SiteRedirectRule | null>;
+  listRedirects(siteId: string): Promise<SiteRedirectRule[]>;
+  getRedirectById(redirectId: string): Promise<SiteRedirectRule | null>;
+  resolveRedirect(siteId: string, sourcePath: string): Promise<SiteRedirectRule | null>;
   createOutboundCampaign(input: CreateOutboundCampaignInput): Promise<OutboundCampaign>;
   listOutboundCampaigns(): Promise<OutboundCampaign[]>;
   upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
@@ -68,76 +84,212 @@ export interface PlatformOperationsRepository {
   findReusableProspectReportByPlaceId(placeId: string, since: string): Promise<ProspectReportRecord | null>;
   updateProspectReport(input: UpdateProspectReportInput): Promise<ProspectReportRecord | null>;
   createProspectReportLead(input: CreateProspectReportLeadInput): Promise<ProspectReportLead | null>;
-  enqueueProspectReportJob(reportId: string): Promise<ProspectReportJobV1>;
-  claimNextProspectReportJob(workerId: string): Promise<ProspectReportJobV1 | null>;
+  enqueueProspectReportJob(reportId: string): Promise<ProspectReportJob>;
+  claimNextProspectReportJob(workerId: string): Promise<ProspectReportJob | null>;
   completeProspectReportJob(jobId: string): Promise<void>;
   failProspectReportJob(jobId: string, error: string): Promise<void>;
 }
 
+export class IdempotencyKeyConflictError extends Error {
+  readonly code = "idempotency_key_conflict";
+  constructor() {
+    super("This idempotency key was already used for a different website source.");
+    this.name = "IdempotencyKeyConflictError";
+  }
+}
+
+export class ConcurrentProjectLimitError extends Error {
+  readonly code = "concurrent_project_limit";
+  constructor() {
+    super("Finish or cancel an active build before starting another.");
+    this.name = "ConcurrentProjectLimitError";
+  }
+}
+
 type LocalState = {
-  claims: ClaimRecord[];
-  previewTokens: SitePreviewTokenV1[];
+  adoptionInvitations: AdoptionInvitation[];
+  websiteSetups: WebsiteSetup[];
+  previewTokens: SitePreviewToken[];
   domains: DomainRecord[];
-  redirects: SiteRedirectRuleV1[];
+  redirects: SiteRedirectRule[];
   campaigns: OutboundCampaign[];
   prospects: OutboundProspect[];
   events: OutboundEvent[];
   reports: ProspectReportRecord[];
   leads: ProspectReportLead[];
-  jobs: ProspectReportJobV1[];
+  prospectReportJobs: ProspectReportJob[];
 };
 
-const emptyState = (): LocalState => ({ claims: [], previewTokens: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], jobs: [] });
+const emptyState = (): LocalState => ({ adoptionInvitations: [], websiteSetups: [], previewTokens: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], prospectReportJobs: [] });
 
 export class LocalPlatformOperationsRepository implements PlatformOperationsRepository {
   private queue = Promise.resolve();
   constructor(private readonly path = resolve(process.cwd(), ".data", "site-platform", "operations.json")) {}
 
-  async createClaim(input: CreateClaimInput) {
-    if (!claimVerificationSatisfies(input.verificationLevel)) return null;
-    const site = await sitePlatformRepository.getSite(input.siteId);
-    if (!site) return null;
-    const state = await sitePlatformRepository.getBusinessState(site.businessId);
-    if (!state) return null;
-    const now = new Date().toISOString();
-    const claim: ClaimRecord = {
-      id: crypto.randomUUID(), siteId: site.id, ownerUserId: input.ownerUserId,
-      ownerEmail: input.ownerEmail?.toLowerCase(), verificationLevel: input.verificationLevel,
-      verificationMethod: input.verificationMethod, verifiedBy: input.verifiedBy,
-      verifiedAt: input.verifiedAt ?? now, outboundCampaignId: input.outboundCampaignId,
-      outboundProspectId: input.outboundProspectId, verifiedFacts: input.verifiedFacts ?? [],
-      acceptedTermsAt: input.acceptedTerms ? now : undefined,
-      acceptedManagementAt: input.acceptedManagement ? now : undefined,
-      assetRightsAcceptedAt: input.acceptedAssetRights ? now : undefined,
-      attestedAssetIds: input.attestedAssetIds ?? [], status: "checkout_required", createdAt: now
+  async createAdoptionInvitation(input: { siteId: string; tokenHash: string; expiresAt: string }) {
+    const invitation: AdoptionInvitation = {
+      id: `invitation_${crypto.randomUUID().replaceAll("-", "")}`,
+      siteId: input.siteId,
+      tokenHash: input.tokenHash,
+      expiresAt: input.expiresAt,
+      createdAt: new Date().toISOString()
     };
-    const checkout = await createCheckoutSession({
-      claimId: claim.id, siteId: site.id, siteSlug: site.slug,
-      siteName: state.identity.name, ownerEmail: input.ownerEmail
-    });
-    claim.stripeCheckoutSessionId = checkout.sessionId;
-    await this.write((store) => { store.claims.push(claim); });
-    return { ...claim, checkout };
-  }
-
-  async completeClaimCheckout(input: CompleteClaimCheckoutInput) {
-    let result: ClaimRecord | null = null;
     await this.write((store) => {
-      const claim = input.claimId
-        ? store.claims.find((item) => item.id === input.claimId)
-        : store.claims.find((item) => item.stripeCheckoutSessionId === input.checkoutSessionId);
-      if (!claim || (input.siteId && claim.siteId !== input.siteId)) return;
-      if (input.checkoutSessionId && claim.stripeCheckoutSessionId && claim.stripeCheckoutSessionId !== input.checkoutSessionId) return;
-      claim.status = "claimed";
-      claim.claimedAt = input.completedAt ?? new Date().toISOString();
-      claim.stripeCustomerId = input.stripeCustomerId ?? claim.stripeCustomerId;
-      claim.stripeSubscriptionId = input.stripeSubscriptionId ?? claim.stripeSubscriptionId;
-      claim.stripeCheckoutSessionId = input.checkoutSessionId ?? claim.stripeCheckoutSessionId;
-      result = structuredClone(claim);
+      if (store.adoptionInvitations.some((item) => item.tokenHash === input.tokenHash)) throw new Error("Adoption token already exists.");
+      store.adoptionInvitations.push(invitation);
+    });
+    return invitation;
+  }
+  async findAdoptionInvitation(tokenHash: string) {
+    const invitation = (await this.read()).adoptionInvitations.find((item) => item.tokenHash === tokenHash);
+    if (!invitation || invitation.consumedAt || Date.parse(invitation.expiresAt) <= Date.now()) return null;
+    return structuredClone(invitation);
+  }
+  async consumeAdoptionInvitation(input: { tokenHash: string; ownerUserId: string }) {
+    let result: AdoptionInvitation | null = null;
+    await this.write(async (store) => {
+      const invitation = store.adoptionInvitations.find((item) => item.tokenHash === input.tokenHash);
+      if (!invitation || invitation.consumedAt || Date.parse(invitation.expiresAt) <= Date.now()) return;
+      const site = await sitePlatformRepository.assignSiteOwnerIfUnowned(invitation.siteId, input.ownerUserId);
+      if (!site || site.ownerUserId !== input.ownerUserId) return;
+      invitation.consumedAt = new Date().toISOString();
+      invitation.consumedByUserId = input.ownerUserId;
+      result = structuredClone(invitation);
     });
     return result;
   }
-  async listClaims(siteId?: string) { return (await this.read()).claims.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
+
+  async createWebsiteSetup(input: CreateWebsiteSetupInput) {
+    const now = new Date().toISOString();
+    let result!: WebsiteSetup;
+    await this.write((store) => {
+      const existing = store.websiteSetups.find((item) =>
+        item.ownerUserId === input.ownerUserId && item.idempotencyKey === input.idempotencyKey
+      );
+      if (existing) {
+        if (existing.creationRequestHash !== input.creationRequestHash) throw new IdempotencyKeyConflictError();
+        result = structuredClone(existing);
+        return;
+      }
+      const active = store.websiteSetups.filter((item) =>
+        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
+      ).length;
+      if (active >= 3) throw new ConcurrentProjectLimitError();
+      result = {
+        id: `setup_${crypto.randomUUID().replaceAll("-", "")}`,
+        ownerUserId: input.ownerUserId,
+        sourceUrl: input.sourceUrl,
+        normalizedSource: input.normalizedSource,
+        sourceRevision: 1,
+        status: "queued",
+        attempts: 0,
+        maxAttempts: 3,
+        idempotencyKey: input.idempotencyKey,
+        creationRequestHash: input.creationRequestHash,
+        createdAt: now,
+        updatedAt: now
+      };
+      store.websiteSetups.push(result);
+    });
+    return result;
+  }
+  async getWebsiteSetup(setupId: string) { return structuredClone((await this.read()).websiteSetups.find((item) => item.id === setupId) ?? null); }
+  async listWebsiteSetupsForOwner(ownerUserId: string) { return (await this.read()).websiteSetups.filter((item) => item.ownerUserId === ownerUserId).sort(byCreatedDesc); }
+  async listWebsiteSetups(siteId?: string) { return (await this.read()).websiteSetups.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
+  async updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
+      if (!setup || !["queued", "processing", "failed"].includes(setup.status)) return;
+      if (setup.status === "failed" && store.websiteSetups.filter((item) =>
+        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
+      ).length >= 3) throw new ConcurrentProjectLimitError();
+      setup.sourceUrl = input.sourceUrl;
+      setup.normalizedSource = input.normalizedSource;
+      setup.sourceRevision += 1;
+      setup.status = "queued";
+      setup.failureCode = undefined;
+      setup.failureReason = undefined;
+      setup.siteId = undefined;
+      setup.sessionId = undefined;
+      setup.runId = undefined;
+      setup.lockedAt = undefined;
+      setup.lockedBy = undefined;
+      setup.updatedAt = new Date().toISOString();
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
+      if (!setup || setup.status === "canceled") return;
+      setup.status = "canceled";
+      setup.lockedAt = undefined;
+      setup.lockedBy = undefined;
+      setup.updatedAt = new Date().toISOString();
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async retryWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
+      if (!setup || setup.status !== "failed" || !isRetriableSetupFailure(setup.failureCode)) return;
+      if (store.websiteSetups.filter((item) =>
+        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
+      ).length >= 3) throw new ConcurrentProjectLimitError();
+      setup.status = "queued";
+      setup.failureCode = undefined;
+      setup.failureReason = undefined;
+      setup.lockedAt = undefined;
+      setup.lockedBy = undefined;
+      setup.updatedAt = new Date().toISOString();
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async claimNextWebsiteSetup(workerId: string) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const staleBefore = Date.now() - 75 * 60_000;
+      const setup = store.websiteSetups
+        .filter((item) => item.status === "queued" || (item.status === "processing" && item.lockedAt && Date.parse(item.lockedAt) < staleBefore))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+      if (!setup) return;
+      setup.status = "processing";
+      setup.attempts += 1;
+      setup.lockedBy = workerId;
+      setup.lockedAt = new Date().toISOString();
+      setup.updatedAt = setup.lockedAt;
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }) {
+    let result: WebsiteSetup | null = null;
+    await this.write(async (store) => {
+      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.status === "processing" && item.sourceRevision === input.sourceRevision);
+      if (!setup) return;
+      const site = await sitePlatformRepository.assignSiteOwnerIfUnowned(input.siteId, setup.ownerUserId);
+      if (!site || site.ownerUserId !== setup.ownerUserId) return;
+      Object.assign(setup, { status: "linked", siteId: input.siteId, sessionId: input.sessionId, runId: input.runId, lockedBy: undefined, lockedAt: undefined, updatedAt: new Date().toISOString() } satisfies Partial<WebsiteSetup>);
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.status === "processing" && item.sourceRevision === input.sourceRevision);
+      if (!setup) return;
+      Object.assign(setup, { status: "failed", failureCode: input.failureCode, failureReason: input.failureReason, siteId: input.siteId, lockedBy: undefined, lockedAt: undefined, updatedAt: new Date().toISOString() } satisfies Partial<WebsiteSetup>);
+      result = structuredClone(setup);
+    });
+    return result;
+  }
 
   async createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }) {
     const [site, version] = await Promise.all([sitePlatformRepository.getSite(input.siteId), sitePlatformRepository.getSiteVersion(input.siteVersionId)]);
@@ -155,40 +307,67 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 
   async registerDomain(input: RegisterDomainInput) {
     if (!await sitePlatformRepository.getSite(input.siteId)) return null;
-    const provider = input.provider ?? "cloudflare_for_saas";
-    const verification = provider === "railway"
-      ? { type: "cname" as const, value: process.env.CLOUDFLARE_FALLBACK_ORIGIN ?? "customers.lodesta.example", configured: true, note: "Configure the custom domain in Railway." }
-      : await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
-    const domain: DomainRecord = {
-      id: crypto.randomUUID(), siteId: input.siteId, hostname: input.hostname.toLowerCase(), kind: "custom",
-      status: provider === "railway" ? "active" : "pending", provider,
-      providerHostnameId: verification.providerHostnameId, verification, createdAt: new Date().toISOString()
-    };
+    const domain = newDomainVerification(input);
     await this.write((store) => { store.domains.push(domain); });
     return domain;
   }
   async refreshDomain(input: { domainId: string }) {
     const existing = await this.getDomainById(input.domainId);
     if (!existing) return null;
-    const refreshed = await refreshCustomHostnameStatus({ provider: existing.provider, hostname: existing.hostname, providerHostnameId: existing.providerHostnameId, verification: existing.verification });
     let result: DomainRecord | null = null;
-    await this.write((store) => {
+    await this.write(async (store) => {
       const domain = store.domains.find((item) => item.id === input.domainId);
       if (!domain) return;
-      domain.status = refreshed.status;
-      domain.providerHostnameId = refreshed.verification?.providerHostnameId ?? domain.providerHostnameId;
-      domain.verification = refreshed.verification ?? domain.verification;
+      const now = new Date();
+      if (domain.ownershipProofStatus === "pending" && Date.parse(domain.expiresAt) <= now.getTime()) {
+        Object.assign(domain, { status: "expired", updatedAt: now.toISOString() } satisfies Partial<DomainRecord>);
+        result = structuredClone(domain);
+        return;
+      }
+      const dns = await inspectDomainDns(domain);
+      domain.routingStatus = dns.routing ? "active" : "pending";
+      if (dns.ownershipProof && domain.ownershipProofStatus === "pending") {
+        const conflict = store.domains.some((item) =>
+          item.id !== domain.id && item.hostname === domain.hostname && item.ownershipProofStatus === "verified" &&
+          !["expired", "conflict"].includes(item.status)
+        );
+        if (conflict) {
+          Object.assign(domain, { status: "conflict", updatedAt: now.toISOString() } satisfies Partial<DomainRecord>);
+          result = structuredClone(domain);
+          return;
+        }
+        domain.ownershipProofStatus = "verified";
+        domain.ownershipVerifiedAt = now.toISOString();
+        domain.status = "provisioning";
+      }
+      if (domain.ownershipProofStatus === "pending") {
+        domain.updatedAt = now.toISOString();
+        result = structuredClone(domain);
+        return;
+      }
+      try {
+        const observation = domain.providerHostnameId
+          ? await refreshCustomHostnameStatus({ hostname: domain.hostname, providerHostnameId: domain.providerHostnameId })
+          : await registerCustomHostname({ hostname: domain.hostname });
+        Object.assign(domain, applyProviderObservation(domain, observation, now));
+      } catch (error) {
+        Object.assign(domain, applyProviderExecutionFailure(domain, error, now));
+      }
+      if (domain.routingStatus !== "active" && domain.status === "active") {
+        domain.status = "attention_required";
+        domain.attentionRequiredAt ??= now.toISOString();
+      }
       result = structuredClone(domain);
     });
     return result;
   }
   async listDomains(siteId?: string) { return (await this.read()).domains.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
   async getDomainById(id: string) { return structuredClone((await this.read()).domains.find((item) => item.id === id) ?? null); }
-  async getDomainByHostname(hostname: string) { return structuredClone((await this.read()).domains.find((item) => item.hostname === hostname.toLowerCase()) ?? null); }
+  async getDomainByHostname(hostname: string) { return structuredClone((await this.read()).domains.find((item) => item.hostname === hostname.toLowerCase() && item.status === "active") ?? null); }
 
   async upsertRedirect(input: UpsertSiteRedirectInput) {
     const now = new Date().toISOString();
-    let result!: SiteRedirectRuleV1;
+    let result!: SiteRedirectRule;
     await this.write((store) => {
       const existing = store.redirects.find((item) => item.siteId === input.siteId && item.sourcePath === input.sourcePath);
       if (existing) {
@@ -211,8 +390,8 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     });
     return result;
   }
-  async setRedirectStatus(input: { redirectId: string; status: SiteRedirectRuleV1["status"] }) {
-    let result: SiteRedirectRuleV1 | null = null;
+  async setRedirectStatus(input: { redirectId: string; status: SiteRedirectRule["status"] }) {
+    let result: SiteRedirectRule | null = null;
     await this.write((store) => {
       const redirect = store.redirects.find((item) => item.id === input.redirectId);
       if (!redirect) return;
@@ -282,21 +461,21 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   }
   async enqueueProspectReportJob(reportId: string) {
     const now = new Date().toISOString();
-    const job: ProspectReportJobV1 = { id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, reportId, status: "queued", attempts: 0, maxAttempts: 2, runAfter: now, createdAt: now, updatedAt: now };
-    await this.write((store) => { store.jobs.push(job); });
+    const job: ProspectReportJob = { id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, reportId, status: "queued", attempts: 0, maxAttempts: 2, runAfter: now, createdAt: now, updatedAt: now };
+    await this.write((store) => { store.prospectReportJobs.push(job); });
     return job;
   }
   async claimNextProspectReportJob(workerId: string) {
-    let result: ProspectReportJobV1 | null = null;
+    let result: ProspectReportJob | null = null;
     await this.write((store) => {
-      const job = store.jobs.filter((item) => item.status === "queued" && item.runAfter <= new Date().toISOString()).sort(byCreatedDesc).at(-1);
+      const job = store.prospectReportJobs.filter((item) => item.status === "queued" && item.runAfter <= new Date().toISOString()).sort(byCreatedDesc).at(-1);
       if (!job) return;
       job.status = "running"; job.attempts += 1; job.lockedBy = workerId; job.updatedAt = new Date().toISOString(); result = structuredClone(job);
     });
     return result;
   }
-  async completeProspectReportJob(jobId: string) { await this.write((store) => { const job = store.jobs.find((item) => item.id === jobId); if (job) { job.status = "completed"; job.updatedAt = new Date().toISOString(); } }); }
-  async failProspectReportJob(jobId: string, error: string) { await this.write((store) => { const job = store.jobs.find((item) => item.id === jobId); if (!job) return; job.error = error; job.status = job.attempts < job.maxAttempts ? "queued" : "failed"; job.runAfter = new Date(Date.now() + 30_000).toISOString(); job.updatedAt = new Date().toISOString(); }); }
+  async completeProspectReportJob(jobId: string) { await this.write((store) => { const job = store.prospectReportJobs.find((item) => item.id === jobId); if (job) { job.status = "completed"; job.updatedAt = new Date().toISOString(); } }); }
+  async failProspectReportJob(jobId: string, error: string) { await this.write((store) => { const job = store.prospectReportJobs.find((item) => item.id === jobId); if (!job) return; job.error = error; job.status = job.attempts < job.maxAttempts ? "queued" : "failed"; job.runAfter = new Date(Date.now() + 30_000).toISOString(); job.updatedAt = new Date().toISOString(); }); }
 
   private async read() {
     const raw = await readFile(this.path, "utf8").catch(() => undefined);
@@ -308,77 +487,203 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   }
 }
 
-type ClaimRow = { id: string; site_id: string; owner_user_id: string | null; owner_email: string | null; verification_level: ClaimRecord["verificationLevel"]; verification_method: string | null; verified_by: string | null; verified_at: string | null; stripe_customer_id: string | null; stripe_subscription_id: string | null; stripe_checkout_session_id: string | null; status: ClaimRecord["status"]; fact_verification: unknown; created_at: string; claimed_at: string | null };
-type PreviewTokenRow = { token: string; site_id: string; site_version_v4_id: string | null; expires_at: string | null; created_at: string };
-type DomainRow = { id: string; site_id: string; hostname: string; kind: DomainRecord["kind"]; status: DomainRecord["status"]; provider: DomainRecord["provider"]; provider_hostname_id: string | null; verification: unknown; created_at: string };
-type RedirectRow = { id: string; site_id: string; source_path: string; destination_path: string; status: SiteRedirectRuleV1["status"]; created_at: string; updated_at: string };
+type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null };
+type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
+type PreviewTokenRow = { token: string; site_id: string; site_version_id: string | null; expires_at: string | null; created_at: string };
+type DomainRow = {
+  id: string;
+  site_id: string;
+  hostname: string;
+  status: DomainRecord["status"];
+  ownership_proof_status: DomainRecord["ownershipProofStatus"];
+  routing_status: DomainRecord["routingStatus"];
+  provider_status: DomainRecord["providerStatus"];
+  certificate_status: DomainRecord["certificateStatus"];
+  verification_name: string;
+  verification_value: string;
+  routing_name: string;
+  routing_target: string;
+  expires_at: string;
+  provider_hostname_id: string | null;
+  ownership_verified_at: string | null;
+  activated_at: string | null;
+  attention_required_at: string | null;
+  provider_invalid_count: number;
+  first_provider_invalid_at: string | null;
+  last_provider_invalid_at: string | null;
+  execution_failure_count: number;
+  last_execution_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type RedirectRow = { id: string; site_id: string; source_path: string; destination_path: string; status: SiteRedirectRule["status"]; created_at: string; updated_at: string };
 type CampaignRow = { id: string; name: string; channel: OutboundCampaign["channel"]; status: OutboundCampaign["status"]; metadata: unknown; created_at: string; started_at: string | null; ended_at: string | null };
-type ProspectRow = { id: string; campaign_id: string; site_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_token: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_preview_viewed_at: string | null; claim_started_at: string | null; claimed_at: string | null; published_at: string | null; disqualified_at: string | null };
+type ProspectRow = { id: string; campaign_id: string; site_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_token: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
 type EventRow = { id: string; campaign_id: string; prospect_id: string | null; site_id: string | null; type: OutboundEvent["type"]; occurred_at: string; value: number | null; metadata: unknown };
 type ReportRow = { id: string; place_id: string; status: ProspectReportRecord["status"]; job_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; unlocked_at: string | null; lead_id: string | null; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
 type LeadRow = { id: string; report_id: string; email: string; contact_name: string | null; phone: string | null; ip_hash: string | null; metadata: unknown; created_at: string };
-type JobRow = { id: string; status: ProspectReportJobV1["status"]; payload: unknown; error: string | null; attempts: number; max_attempts: number; run_after: string; locked_by: string | null; created_at: string; updated_at: string };
+type JobRow = { id: string; report_id: string; status: ProspectReportJob["status"]; error: string | null; attempts: number; max_attempts: number; run_after: string; locked_by: string | null; created_at: string; updated_at: string };
 
 class SupabasePlatformOperationsRepository implements PlatformOperationsRepository {
   private get client() { return getSupabaseAdminClient(); }
 
-  async createClaim(input: CreateClaimInput) {
-    if (!claimVerificationSatisfies(input.verificationLevel)) return null;
-    const site = await sitePlatformRepository.getSite(input.siteId);
-    if (!site) return null;
-    const state = await sitePlatformRepository.getBusinessState(site.businessId);
-    if (!state) return null;
-    const now = new Date().toISOString();
-    const row = await data<ClaimRow>(this.client.from("claims").insert({
-      id: crypto.randomUUID(), site_id: input.siteId, owner_user_id: input.ownerUserId,
-      owner_email: input.ownerEmail?.toLowerCase(), verification_level: input.verificationLevel ?? "unverified",
-      verification_method: input.verificationMethod, verified_by: input.verifiedBy,
-      verified_at: input.verifiedAt ?? now, status: "checkout_required",
-      fact_verification: { verifiedFacts: input.verifiedFacts ?? [], acceptedTermsAt: input.acceptedTerms ? now : undefined,
-        acceptedManagementAt: input.acceptedManagement ? now : undefined, assetRightsAcceptedAt: input.acceptedAssetRights ? now : undefined,
-        attestedAssetIds: input.attestedAssetIds ?? [], outboundCampaignId: input.outboundCampaignId, outboundProspectId: input.outboundProspectId }
-    }).select("*").single(), "Create claim");
-    const checkout = await createCheckoutSession({ claimId: row.id, siteId: site.id, siteSlug: site.slug, siteName: state.identity.name, ownerEmail: input.ownerEmail });
-    if (checkout.sessionId) await data(this.client.from("claims").update({ stripe_checkout_session_id: checkout.sessionId }).eq("id", row.id).select("id").single(), "Store checkout session");
-    return { ...claimFromRow(row), stripeCheckoutSessionId: checkout.sessionId, checkout };
+  async createAdoptionInvitation(input: { siteId: string; tokenHash: string; expiresAt: string }) {
+    const row = await data<AdoptionInvitationRow>(this.client.from("adoption_invitations").insert({
+      id: `invitation_${crypto.randomUUID().replaceAll("-", "")}`,
+      site_id: input.siteId,
+      token_hash: input.tokenHash,
+      expires_at: input.expiresAt
+    }).select("*").single(), "Create adoption invitation");
+    return adoptionInvitationFromRow(row);
+  }
+  async findAdoptionInvitation(tokenHash: string) {
+    const row = await maybe<AdoptionInvitationRow>(this.client.from("adoption_invitations").select("*")
+      .eq("token_hash", tokenHash).is("consumed_at", null).gt("expires_at", new Date().toISOString()).maybeSingle(), "Find adoption invitation");
+    return row ? adoptionInvitationFromRow(row) : null;
+  }
+  async consumeAdoptionInvitation(input: { tokenHash: string; ownerUserId: string }) {
+    const row = await maybe<AdoptionInvitationRow>(this.client.rpc("consume_adoption_invitation", {
+      target_token_hash: input.tokenHash,
+      target_owner_user_id: input.ownerUserId
+    }).maybeSingle(), "Consume adoption invitation");
+    return row ? adoptionInvitationFromRow(row) : null;
   }
 
-  async completeClaimCheckout(input: CompleteClaimCheckoutInput) {
-    if (!input.claimId && !input.checkoutSessionId) return null;
-    let query = this.client.from("claims").select("*");
-    query = input.claimId ? query.eq("id", input.claimId) : query.eq("stripe_checkout_session_id", input.checkoutSessionId);
-    const existing = await maybe<ClaimRow>(query.maybeSingle(), "Find claim");
-    if (!existing || (input.siteId && existing.site_id !== input.siteId)) return null;
-    if (input.checkoutSessionId && existing.stripe_checkout_session_id && existing.stripe_checkout_session_id !== input.checkoutSessionId) return null;
-    const row = await data<ClaimRow>(this.client.from("claims").update({ status: "claimed", claimed_at: input.completedAt ?? new Date().toISOString(), stripe_customer_id: input.stripeCustomerId ?? existing.stripe_customer_id, stripe_subscription_id: input.stripeSubscriptionId ?? existing.stripe_subscription_id, stripe_checkout_session_id: input.checkoutSessionId ?? existing.stripe_checkout_session_id }).eq("id", existing.id).select("*").single(), "Complete claim");
-    return claimFromRow(row);
+  async createWebsiteSetup(input: CreateWebsiteSetupInput) {
+    const result = await this.client.rpc("create_website_setup", {
+      target_owner_user_id: input.ownerUserId,
+      target_source_url: input.sourceUrl,
+      target_normalized_source: input.normalizedSource,
+      target_idempotency_key: input.idempotencyKey,
+      target_creation_request_hash: input.creationRequestHash
+    }).maybeSingle();
+    if (result.error) {
+      if (/idempotency_key_conflict/i.test(result.error.message)) throw new IdempotencyKeyConflictError();
+      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
+      throw new Error(`Create website setup: ${result.error.message}`);
+    }
+    if (!result.data) throw new Error("Create website setup: no data returned");
+    return websiteSetupFromRow(result.data as WebsiteSetupRow);
   }
-  async listClaims(siteId?: string) { let query = this.client.from("claims").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<ClaimRow[]>(query, "List claims")).map(claimFromRow); }
+  async getWebsiteSetup(setupId: string) { const row = await maybe<WebsiteSetupRow>(this.client.from("website_setups").select("*").eq("id", setupId).maybeSingle(), "Get website setup"); return row ? websiteSetupFromRow(row) : null; }
+  async listWebsiteSetupsForOwner(ownerUserId: string) { return (await data<WebsiteSetupRow[]>(this.client.from("website_setups").select("*").eq("owner_user_id", ownerUserId).order("created_at", { ascending: false }), "List owner website setups")).map(websiteSetupFromRow); }
+  async listWebsiteSetups(siteId?: string) { let query = this.client.from("website_setups").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<WebsiteSetupRow[]>(query, "List website setups")).map(websiteSetupFromRow); }
+  async updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate) {
+    const result = await this.client.rpc("update_website_setup_source", {
+      target_setup_id: input.setupId,
+      target_owner_user_id: input.ownerUserId,
+      target_source_url: input.sourceUrl,
+      target_normalized_source: input.normalizedSource
+    }).maybeSingle();
+    if (result.error) {
+      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
+      throw new Error(`Update website setup source: ${result.error.message}`);
+    }
+    const row = result.data as WebsiteSetupRow | null;
+    return row ? websiteSetupFromRow(row) : null;
+  }
+  async cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
+    const row = await maybe<WebsiteSetupRow>(this.client.rpc("cancel_website_setup", {
+      target_setup_id: input.setupId,
+      target_owner_user_id: input.ownerUserId
+    }).maybeSingle(), "Cancel website setup");
+    return row ? websiteSetupFromRow(row) : null;
+  }
+  async retryWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
+    const result = await this.client.rpc("retry_website_setup", {
+      target_setup_id: input.setupId,
+      target_owner_user_id: input.ownerUserId
+    }).maybeSingle();
+    if (result.error) {
+      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
+      throw new Error(`Retry website setup: ${result.error.message}`);
+    }
+    const row = result.data as WebsiteSetupRow | null;
+    return row ? websiteSetupFromRow(row) : null;
+  }
+  async claimNextWebsiteSetup(workerId: string) { const row = await maybe<WebsiteSetupRow>(this.client.rpc("claim_next_website_setup", { worker_id: workerId }).maybeSingle(), "Claim website setup"); return row ? websiteSetupFromRow(row) : null; }
+  async linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }) {
+    const row = await maybe<WebsiteSetupRow>(this.client.rpc("link_website_setup", {
+      target_setup_id: input.setupId,
+      target_source_revision: input.sourceRevision,
+      target_site_id: input.siteId,
+      target_session_id: input.sessionId,
+      target_run_id: input.runId
+    }).maybeSingle(), "Link website setup");
+    return row ? websiteSetupFromRow(row) : null;
+  }
+  async failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }) {
+    const row = await maybe<WebsiteSetupRow>(this.client.from("website_setups").update({ status: "failed", site_id: input.siteId ?? null, failure_code: input.failureCode, failure_reason: input.failureReason, locked_by: null, locked_at: null, updated_at: new Date().toISOString() }).eq("id", input.setupId).eq("status", "processing").eq("source_revision", input.sourceRevision).select("*").maybeSingle(), "Fail website setup");
+    return row ? websiteSetupFromRow(row) : null;
+  }
 
   async createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }) {
     const version = await sitePlatformRepository.getSiteVersion(input.siteVersionId);
     if (!version || version.siteId !== input.siteId) throw new Error("Preview version does not belong to the site.");
-    const row = await data<PreviewTokenRow>(this.client.from("preview_tokens").insert({ token: crypto.randomUUID().replaceAll("-", ""), site_id: input.siteId, site_version_v4_id: input.siteVersionId, expires_at: input.expiresAt }).select("*").single(), "Create preview token");
+    const row = await data<PreviewTokenRow>(this.client.from("preview_tokens").insert({ token: crypto.randomUUID().replaceAll("-", ""), site_id: input.siteId, site_version_id: input.siteVersionId, expires_at: input.expiresAt }).select("*").single(), "Create preview token");
     return previewFromRow(row);
   }
-  async resolvePreviewToken(token: string) { const row = await maybe<PreviewTokenRow>(this.client.from("preview_tokens").select("*").eq("token", token).maybeSingle(), "Resolve preview token"); if (!row || !row.site_version_v4_id || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) return null; return previewFromRow(row); }
-  async listPreviewTokens(siteId?: string) { let query = this.client.from("preview_tokens").select("*").not("site_version_v4_id", "is", null).order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<PreviewTokenRow[]>(query, "List preview tokens")).map(previewFromRow); }
+  async resolvePreviewToken(token: string) { const row = await maybe<PreviewTokenRow>(this.client.from("preview_tokens").select("*").eq("token", token).maybeSingle(), "Resolve preview token"); if (!row || !row.site_version_id || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) return null; return previewFromRow(row); }
+  async listPreviewTokens(siteId?: string) { let query = this.client.from("preview_tokens").select("*").not("site_version_id", "is", null).order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<PreviewTokenRow[]>(query, "List preview tokens")).map(previewFromRow); }
 
   async registerDomain(input: RegisterDomainInput) {
     if (!await sitePlatformRepository.getSite(input.siteId)) return null;
-    const provider = input.provider ?? "cloudflare_for_saas";
-    const verification = provider === "railway" ? { type: "cname" as const, value: process.env.CLOUDFLARE_FALLBACK_ORIGIN ?? "customers.lodesta.example", configured: true, note: "Configure the custom domain in Railway." } : await registerCustomHostname({ hostname: input.hostname.toLowerCase() });
-    const row = await data<DomainRow>(this.client.from("domains").insert({ id: crypto.randomUUID(), site_id: input.siteId, hostname: input.hostname.toLowerCase(), kind: "custom", status: provider === "railway" ? "active" : "pending", provider, provider_hostname_id: verification.providerHostnameId, verification }).select("*").single(), "Register domain");
+    const value = newDomainVerification(input);
+    const row = await data<DomainRow>(this.client.from("domains").insert(domainToRow(value)).select("*").single(), "Register domain");
     return domainFromRow(row);
   }
-  async refreshDomain(input: { domainId: string }) { const existing = await this.getDomainById(input.domainId); if (!existing) return null; const refreshed = await refreshCustomHostnameStatus({ provider: existing.provider, hostname: existing.hostname, providerHostnameId: existing.providerHostnameId, verification: existing.verification }); const row = await data<DomainRow>(this.client.from("domains").update({ status: refreshed.status, provider_hostname_id: refreshed.verification?.providerHostnameId ?? existing.providerHostnameId, verification: refreshed.verification ?? existing.verification }).eq("id", input.domainId).select("*").single(), "Refresh domain"); return domainFromRow(row); }
+  async refreshDomain(input: { domainId: string }) {
+    let existing = await this.getDomainById(input.domainId);
+    if (!existing) return null;
+    const now = new Date();
+    if (existing.ownershipProofStatus === "pending" && Date.parse(existing.expiresAt) <= now.getTime()) {
+      return this.updateDomain({ ...existing, status: "expired", updatedAt: now.toISOString() });
+    }
+
+    let dns: Awaited<ReturnType<typeof inspectDomainDns>>;
+    try {
+      dns = await inspectDomainDns(existing);
+    } catch (error) {
+      return this.updateDomain(applyProviderExecutionFailure(existing, error, now));
+    }
+    existing = { ...existing, routingStatus: dns.routing ? "active" : "pending", updatedAt: now.toISOString() };
+
+    if (dns.ownershipProof && existing.ownershipProofStatus === "pending") {
+      const verified = await maybe<DomainRow>(this.client.rpc("claim_domain_ownership", {
+        domain_id: existing.id,
+        verified_at: now.toISOString()
+      }).maybeSingle(), "Claim verified domain");
+      if (!verified) return this.updateDomain({ ...existing, status: "conflict" });
+      existing = { ...domainFromRow(verified), routingStatus: existing.routingStatus };
+    }
+    if (existing.ownershipProofStatus === "pending") return this.updateDomain(existing);
+
+    let next: DomainRecord;
+    try {
+      const observation = existing.providerHostnameId
+        ? await refreshCustomHostnameStatus({ hostname: existing.hostname, providerHostnameId: existing.providerHostnameId })
+        : await registerCustomHostname({ hostname: existing.hostname });
+      next = applyProviderObservation(existing, observation, now);
+    } catch (error) {
+      next = applyProviderExecutionFailure(existing, error, now);
+    }
+    if (next.routingStatus !== "active" && next.status === "active") {
+      next = { ...next, status: "attention_required", attentionRequiredAt: next.attentionRequiredAt ?? now.toISOString() };
+    }
+    return this.updateDomain(next);
+  }
   async listDomains(siteId?: string) { let query = this.client.from("domains").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<DomainRow[]>(query, "List domains")).map(domainFromRow); }
   async getDomainById(id: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("id", id).maybeSingle(), "Get domain"); return row ? domainFromRow(row) : null; }
-  async getDomainByHostname(hostname: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("hostname", hostname.toLowerCase()).maybeSingle(), "Resolve domain"); return row ? domainFromRow(row) : null; }
+  async getDomainByHostname(hostname: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("hostname", hostname.toLowerCase()).eq("status", "active").maybeSingle(), "Resolve domain"); return row ? domainFromRow(row) : null; }
+
+  private async updateDomain(value: DomainRecord) {
+    const row = await data<DomainRow>(this.client.from("domains").update(domainToRow(value)).eq("id", value.id).select("*").single(), "Update domain");
+    return domainFromRow(row);
+  }
 
   async upsertRedirect(input: UpsertSiteRedirectInput) {
     const now = new Date().toISOString();
-    const row = await data<RedirectRow>(this.client.from("site_redirects_v1").upsert({
+    const row = await data<RedirectRow>(this.client.from("site_redirects").upsert({
       site_id: input.siteId,
       source_path: input.sourcePath,
       destination_path: input.destinationPath,
@@ -387,13 +692,13 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     }, { onConflict: "site_id,source_path", ignoreDuplicates: false }).select("*").single(), "Upsert site redirect");
     return redirectFromRow(row);
   }
-  async setRedirectStatus(input: { redirectId: string; status: SiteRedirectRuleV1["status"] }) {
-    const row = await maybe<RedirectRow>(this.client.from("site_redirects_v1").update({ status: input.status, updated_at: new Date().toISOString() }).eq("id", input.redirectId).select("*").maybeSingle(), "Update site redirect");
+  async setRedirectStatus(input: { redirectId: string; status: SiteRedirectRule["status"] }) {
+    const row = await maybe<RedirectRow>(this.client.from("site_redirects").update({ status: input.status, updated_at: new Date().toISOString() }).eq("id", input.redirectId).select("*").maybeSingle(), "Update site redirect");
     return row ? redirectFromRow(row) : null;
   }
-  async listRedirects(siteId: string) { return (await data<RedirectRow[]>(this.client.from("site_redirects_v1").select("*").eq("site_id", siteId).order("created_at", { ascending: false }), "List site redirects")).map(redirectFromRow); }
-  async getRedirectById(id: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects_v1").select("*").eq("id", id).maybeSingle(), "Get site redirect"); return row ? redirectFromRow(row) : null; }
-  async resolveRedirect(siteId: string, sourcePath: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects_v1").select("*").eq("site_id", siteId).eq("source_path", sourcePath).eq("status", "active").maybeSingle(), "Resolve site redirect"); return row ? redirectFromRow(row) : null; }
+  async listRedirects(siteId: string) { return (await data<RedirectRow[]>(this.client.from("site_redirects").select("*").eq("site_id", siteId).order("created_at", { ascending: false }), "List site redirects")).map(redirectFromRow); }
+  async getRedirectById(id: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects").select("*").eq("id", id).maybeSingle(), "Get site redirect"); return row ? redirectFromRow(row) : null; }
+  async resolveRedirect(siteId: string, sourcePath: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects").select("*").eq("site_id", siteId).eq("source_path", sourcePath).eq("status", "active").maybeSingle(), "Resolve site redirect"); return row ? redirectFromRow(row) : null; }
 
   async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); return campaignFromRow(await data<CampaignRow>(this.client.from("outbound_campaigns").insert({ id: value.id, name: value.name, channel: value.channel, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt, started_at: value.startedAt, ended_at: value.endedAt }).select("*").single(), "Create campaign")); }
   async listOutboundCampaigns() { return (await data<CampaignRow[]>(this.client.from("outbound_campaigns").select("*").order("created_at", { ascending: false }), "List campaigns")).map(campaignFromRow); }
@@ -410,30 +715,85 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async findReusableProspectReportByPlaceId(placeId: string, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("place_id", placeId).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
   async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", jobId: "job_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", unlockedAt: "unlocked_at", leadId: "lead_id", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
   async createProspectReportLead(input: CreateProspectReportLeadInput) { const now = new Date().toISOString(); const row = await data<LeadRow>(this.client.from("prospect_report_leads").insert({ id: `prospect_lead_${crypto.randomUUID().replaceAll("-", "")}`, report_id: input.reportId, email: input.email.toLowerCase(), contact_name: input.contactName, phone: input.phone, ip_hash: input.ipHash, metadata: input.metadata ?? {}, created_at: now }).select("*").single(), "Create report lead"); await this.updateProspectReport({ reportId: input.reportId, unlockedAt: now, leadId: row.id }); return leadFromRow(row); }
-  async enqueueProspectReportJob(reportId: string) { const now = new Date().toISOString(); const row = await data<JobRow>(this.client.from("jobs").insert({ id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, kind: "prospect_presence_report", status: "queued", payload: { reportId }, attempts: 0, max_attempts: 2, run_after: now, created_at: now, updated_at: now }).select("*").single(), "Enqueue report job"); return jobFromRow(row); }
-  async claimNextProspectReportJob(workerId: string) { const row = await maybe<JobRow>(this.client.rpc("claim_prospect_report_job_v1", { worker_id: workerId }).maybeSingle(), "Claim report job"); return row ? jobFromRow(row) : null; }
-  async completeProspectReportJob(jobId: string) { await data(this.client.from("jobs").update({ status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", jobId).select("id").single(), "Complete report job"); }
-  async failProspectReportJob(jobId: string, error: string) { const row = await data<JobRow>(this.client.from("jobs").select("*").eq("id", jobId).single(), "Read failed report job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail report job"); }
+  async enqueueProspectReportJob(reportId: string) { const now = new Date().toISOString(); const row = await data<JobRow>(this.client.from("prospect_report_jobs").insert({ id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, report_id: reportId, status: "queued", attempts: 0, max_attempts: 2, run_after: now, created_at: now, updated_at: now }).select("*").single(), "Enqueue report job"); return jobFromRow(row); }
+  async claimNextProspectReportJob(workerId: string) { const row = await maybe<JobRow>(this.client.rpc("claim_prospect_report_job", { worker_id: workerId }).maybeSingle(), "Claim report job"); return row ? jobFromRow(row) : null; }
+  async completeProspectReportJob(jobId: string) { await data(this.client.from("prospect_report_jobs").update({ status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", jobId).select("id").single(), "Complete report job"); }
+  async failProspectReportJob(jobId: string, error: string) { const row = await data<JobRow>(this.client.from("prospect_report_jobs").select("*").eq("id", jobId).single(), "Read failed report job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("prospect_report_jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail report job"); }
 
-  private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = prospectFromRow(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_preview_viewed_at: value.firstPreviewViewedAt, claim_started_at: value.claimStartedAt, claimed_at: value.claimedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
+  private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = prospectFromRow(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
 }
 
 export const platformOperationsRepository: PlatformOperationsRepository = process.env.LODESTA_REPOSITORY === "local"
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function claimFromRow(row: ClaimRow): ClaimRecord { const facts = (row.fact_verification ?? {}) as Record<string, unknown>; return { id: row.id, siteId: row.site_id, ownerUserId: row.owner_user_id ?? undefined, ownerEmail: row.owner_email ?? undefined, verificationLevel: row.verification_level ?? "unverified", verificationMethod: row.verification_method ?? undefined, verifiedBy: row.verified_by ?? undefined, verifiedAt: row.verified_at ?? undefined, outboundCampaignId: stringValue(facts.outboundCampaignId), outboundProspectId: stringValue(facts.outboundProspectId), verifiedFacts: stringArray(facts.verifiedFacts), acceptedTermsAt: stringValue(facts.acceptedTermsAt), acceptedManagementAt: stringValue(facts.acceptedManagementAt), assetRightsAcceptedAt: stringValue(facts.assetRightsAcceptedAt), attestedAssetIds: stringArray(facts.attestedAssetIds), status: row.status, createdAt: row.created_at, claimedAt: row.claimed_at ?? undefined, stripeCustomerId: row.stripe_customer_id ?? undefined, stripeSubscriptionId: row.stripe_subscription_id ?? undefined, stripeCheckoutSessionId: row.stripe_checkout_session_id ?? undefined }; }
-function previewFromRow(row: PreviewTokenRow): SitePreviewTokenV1 { if (!row.site_version_v4_id) throw new Error("Preview token does not reference a V4 version."); return { token: row.token, siteId: row.site_id, siteVersionId: row.site_version_v4_id, expiresAt: row.expires_at ?? undefined, createdAt: row.created_at }; }
-function domainFromRow(row: DomainRow): DomainRecord { return { id: row.id, siteId: row.site_id, hostname: row.hostname, kind: row.kind, status: row.status, provider: row.provider, providerHostnameId: row.provider_hostname_id ?? undefined, verification: row.verification as DomainRecord["verification"], createdAt: row.created_at }; }
-function redirectFromRow(row: RedirectRow): SiteRedirectRuleV1 { return { id: row.id, siteId: row.site_id, sourcePath: row.source_path, destinationPath: row.destination_path, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined }; }
+function previewFromRow(row: PreviewTokenRow): SitePreviewToken { if (!row.site_version_id) throw new Error("Preview token does not reference a site version."); return { token: row.token, siteId: row.site_id, siteVersionId: row.site_version_id, expiresAt: row.expires_at ?? undefined, createdAt: row.created_at }; }
+function domainFromRow(row: DomainRow): DomainRecord {
+  return {
+    id: row.id,
+    siteId: row.site_id,
+    hostname: row.hostname,
+    status: row.status,
+    ownershipProofStatus: row.ownership_proof_status,
+    routingStatus: row.routing_status,
+    providerStatus: row.provider_status,
+    certificateStatus: row.certificate_status,
+    verificationName: row.verification_name,
+    verificationValue: row.verification_value,
+    routingName: row.routing_name,
+    routingTarget: row.routing_target,
+    expiresAt: row.expires_at,
+    providerHostnameId: row.provider_hostname_id ?? undefined,
+    ownershipVerifiedAt: row.ownership_verified_at ?? undefined,
+    activatedAt: row.activated_at ?? undefined,
+    attentionRequiredAt: row.attention_required_at ?? undefined,
+    providerInvalidCount: row.provider_invalid_count,
+    firstProviderInvalidAt: row.first_provider_invalid_at ?? undefined,
+    lastProviderInvalidAt: row.last_provider_invalid_at ?? undefined,
+    executionFailureCount: row.execution_failure_count,
+    lastExecutionError: row.last_execution_error ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+function domainToRow(value: DomainRecord) {
+  return {
+    id: value.id,
+    site_id: value.siteId,
+    hostname: value.hostname,
+    status: value.status,
+    ownership_proof_status: value.ownershipProofStatus,
+    routing_status: value.routingStatus,
+    provider_status: value.providerStatus,
+    certificate_status: value.certificateStatus,
+    verification_name: value.verificationName,
+    verification_value: value.verificationValue,
+    routing_name: value.routingName,
+    routing_target: value.routingTarget,
+    expires_at: value.expiresAt,
+    provider_hostname_id: value.providerHostnameId ?? null,
+    ownership_verified_at: value.ownershipVerifiedAt ?? null,
+    activated_at: value.activatedAt ?? null,
+    attention_required_at: value.attentionRequiredAt ?? null,
+    provider_invalid_count: value.providerInvalidCount,
+    first_provider_invalid_at: value.firstProviderInvalidAt ?? null,
+    last_provider_invalid_at: value.lastProviderInvalidAt ?? null,
+    execution_failure_count: value.executionFailureCount,
+    last_execution_error: value.lastExecutionError ?? null,
+    created_at: value.createdAt,
+    updated_at: value.updatedAt
+  };
+}
+function redirectFromRow(row: RedirectRow): SiteRedirectRule { return { id: row.id, siteId: row.site_id, sourcePath: row.source_path, destinationPath: row.destination_path, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function campaignFromRow(row: CampaignRow): OutboundCampaign { return { id: row.id, name: row.name, channel: row.channel, status: row.status, metadata: row.metadata as OutboundCampaign["metadata"], createdAt: row.created_at, startedAt: row.started_at ?? undefined, endedAt: row.ended_at ?? undefined }; }
-function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewToken: row.preview_token ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, claimStartedAt: row.claim_started_at ?? undefined, claimedAt: row.claimed_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
+function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewToken: row.preview_token ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
 function eventFromRow(row: EventRow): OutboundEvent { return { id: row.id, campaignId: row.campaign_id, prospectId: row.prospect_id ?? undefined, siteId: row.site_id ?? undefined, type: row.type, occurredAt: row.occurred_at, value: row.value ?? undefined, metadata: row.metadata as OutboundEvent["metadata"] }; }
 function reportFromRow(row: ReportRow): ProspectReportRecord { return { id: row.id, placeId: row.place_id, status: row.status, jobId: row.job_id ?? undefined, sourceUrl: row.source_url ?? undefined, sourceHost: row.source_host ?? undefined, websiteKind: row.website_kind, result: row.report_json as ProspectReportRecord["result"] | undefined, unlockedAt: row.unlocked_at ?? undefined, leadId: row.lead_id ?? undefined, errorCode: row.error_code ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function leadFromRow(row: LeadRow): ProspectReportLead { return { id: row.id, reportId: row.report_id, email: row.email, contactName: row.contact_name ?? undefined, phone: row.phone ?? undefined, ipHash: row.ip_hash ?? undefined, metadata: row.metadata as ProspectReportLead["metadata"], createdAt: row.created_at }; }
-function jobFromRow(row: JobRow): ProspectReportJobV1 { const payload = row.payload as { reportId?: string }; if (!payload.reportId) throw new Error("Prospect report job is missing reportId."); return { id: row.id, reportId: payload.reportId, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
-function stringValue(value: unknown) { return typeof value === "string" ? value : undefined; }
-function stringArray(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
+function jobFromRow(row: JobRow): ProspectReportJob { return { id: row.id, reportId: row.report_id, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function byCreatedDesc<T extends { createdAt: string }>(a: T, b: T) { return b.createdAt.localeCompare(a.createdAt); }
+function isRetriableSetupFailure(code?: WebsiteSetupFailureCode) { return code === "website_crawl_failed" || code === "bootstrap_failed" || code === "worker_interrupted"; }
 async function data<T = unknown>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, operation: string) { const result = await query; if (result.error) throw new Error(`${operation}: ${result.error.message}`); if (result.data === null) throw new Error(`${operation}: no data returned`); return result.data; }
 async function maybe<T>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, operation: string) { const result = await query; if (result.error) throw new Error(`${operation}: ${result.error.message}`); return result.data; }

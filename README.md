@@ -9,6 +9,7 @@ The canonical architecture and implementation sequence are documented in [docs/p
 ## Architecture
 
 - `packages/business-data`: crawl ingestion, normalized business state, and public sandbox projection.
+- `packages/acquisition`: presence reports, outbound campaigns, prospects, adoption, and their worker.
 - `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
 - `packages/site-agent`: the single website-authoring agent, its tools, and knowledge skills.
 - `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.
@@ -16,7 +17,7 @@ The canonical architecture and implementation sequence are documented in [docs/p
 - `workers/recovery-watchdog`: stateless fifteen-minute recovery trigger for the Railway web service.
 - `packages/site-verification`: sanitizer, factual-claim validation, browser gate, contact sheets, and finalization.
 - `packages/site-artifacts`: content-addressed local or R2 artifact storage.
-- `packages/platform-data`: V4 repository contracts and Supabase implementation.
+- `packages/platform-data`: canonical repository contracts and Supabase implementation.
 - `packages/site-platform`: sessions, runs, clarifications, immutable candidates, publishing, restore, and rollback.
 - `packages/site-capabilities`: managed forms, analytics, maps, safe links, and capability policy.
 - `packages/control-plane`: typed business-state and site-intent mutations.
@@ -37,6 +38,7 @@ Important surfaces:
 
 - `/admin/sites`: admin site creation and management.
 - `/account`: owner entry router and multi-site chooser.
+- `/account/onboarding`: create an independent signed-in website project from any public source URL.
 - `/admin/site-queue`: candidate-version and operator-review queue.
 - `/settings`: site-authoring and ingestion model settings.
 - `/workspace/:slug`: owner home, site status, and next action.
@@ -44,29 +46,26 @@ Important surfaces:
 - `/workspace/:slug/inbox`: managed form inbox.
 - `/workspace/:slug/results`: owner-readable first-party analytics.
 - `/workspace/:slug/business`: canonical business data and site intent.
-- `/workspace/:slug/settings`: domains, redirects, billing, and access.
+- `/workspace/:slug/settings`: proof-first custom domains, redirects, and access.
 - `/sites/:slug/*`: published immutable site artifact.
 
-Copy `.env.example` to local environment configuration and provide real values outside git. Experimental generation requires OpenAI, Supabase, Cloudflare Sandbox, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
+Copy `.env.example` to local environment configuration and provide real values outside git. Website generation requires OpenAI, Supabase, Cloudflare Sandbox, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
 
 ## Verification
 
 ```bash
 npm run typecheck
-npm run verify:site-authoring-architecture
-npm run verify:site-authoring-platform
-npm run verify:trusted-runtime
+npm run verify:architecture
+npm run verify:database
+npm run verify:authoring
+npm run verify:runtime
+npm run verify:account-setup-domain
+npm run verify:acquisition
 npm run verify:render-browser
 npm run smoke:dev
 ```
 
-Live integration checks require `.env.local`:
-
-```bash
-npm run verify:supabase
-npm run verify:site-sandbox-v1
-npm run verify:site-authoring-walking-skeleton
-```
+Set `LODESTA_VERIFY_LIVE_DATABASE=true` only when the canonical baseline has been applied to the target environment and the browser-role denial checks should run against it.
 
 After the runtime release suite passes, promote the content-hashed trusted runtime through the audited series RPC:
 
@@ -74,21 +73,7 @@ After the runtime release suite passes, promote the content-hashed trusted runti
 npm run runtime:promote -- --apply --verified-by=<operator-id>
 ```
 
-The deployed end-to-end check creates a private, non-publishable site:
-
-```bash
-npm run verify:site-authoring-live-experiment
-```
-
-It exercises initial generation, exact editing, clarification and stale-base resume, and policy-only isolation. This verifies deployed plumbing and safety boundaries; it does not score product quality.
-
-For ordinary product refinement, generate one traceable private site and continue editing it through the real workspace UI:
-
-```bash
-npm run experiment:site -- --url=https://business.example/
-```
-
-Every invocation creates a distinct experimental site. Reports, screenshots, provenance, and freeform notes are retained beneath `.data/site-experiments/`; the command prints the workspace, preview, and exact cleanup paths. Agent Ready checks remain available separately through `npm run verify:agent-ready-sites` when those technical surfaces are relevant.
+Product refinement uses the same signed-in `/account/onboarding` flow as customers. Every confirmed creation is an independent project, even when the same account or another account has used the source URL before.
 
 ## Deployment
 
@@ -96,15 +81,17 @@ Railway hosts the Next.js web service and worker. Supabase stores canonical auth
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
-Database changes are migration files under `supabase/migrations`. Strict immutable authorities are never rewritten in place. Regenerable operational records use the single canonical unversioned site-authoring schema; the application has no compatibility readers or dual-write paths.
+The application schema is created from the sole canonical file under `supabase/migrations`. Strict immutable authorities are never rewritten in place. Regenerable operational records use canonical unversioned names; the application has no compatibility readers or dual-write paths.
 
 ## Security Boundaries
 
-- Sandbox input contains only `SitePublicBuildInputV3`; private evidence and secrets never enter the build environment.
+- Sandbox input contains only `SitePublicBuildInput`; private evidence and secrets never enter the build environment.
 - Sandbox sessions perform no network installs and import only the prebaked Lodesta SDK and allowlisted toolchain.
 - HTML, CSS, routes, links, assets, forms, capabilities, structured data, and factual claims are validated before persistence.
 - Forms, analytics, maps, domains, internal redirects, publishing, runtime behavior, and all backend functions are platform-owned.
 - Preview forms remain disabled outside eligible published versions.
 - Public writes pass through server-side authorization, validation, rate limiting, and URL-safety boundaries.
+- Supabase browser clients are Auth-only. RLS and privileges deny `anon` and `authenticated` direct application-table access.
+- Site ownership is exact `sites.owner_user_id` equality; source URLs never confer ownership.
 
 See `AGENTS.md` for the repository's clean-break, stored-artifact, security, testing, and git rules.

@@ -1,5 +1,5 @@
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
-import type { PublicPresenceEnrichment } from "./public-presence";
+import type { PublicPresenceEnrichment } from "@/packages/acquisition/public-presence";
 import { normalizePublicFetchUrlInput } from "./url-safety";
 
 export class LaunchMarketError extends Error {

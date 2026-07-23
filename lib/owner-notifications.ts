@@ -1,13 +1,7 @@
 import { configuredAppOriginOrDefault } from "./app-origin";
-import type { BusinessStateV3, PlatformSiteRecord } from "@/packages/site-contracts";
-import type { ClaimRecord } from "@/packages/platform-operations";
+import type { BusinessState, PlatformSiteRecord } from "@/packages/site-contracts";
 
-export type OwnerOperationalNotificationKind =
-  | "proposal_ready"
-  | "draft_awaiting_publish"
-  | "website_input_needed"
-  | "inquiry_digest"
-  | "payment_failure";
+export type OwnerOperationalNotificationKind = "website_input_needed";
 
 export type OwnerOperationalNotificationResult = {
   kind: OwnerOperationalNotificationKind;
@@ -22,14 +16,13 @@ export type OwnerOperationalNotificationResult = {
 
 export async function sendOwnerOperationalEmail(input: {
   site: PlatformSiteRecord;
-  business: BusinessStateV3;
-  claims?: ClaimRecord[];
+  business: BusinessState;
   kind: OwnerOperationalNotificationKind;
   subject: string;
   summaryLines: string[];
   actionPath?: string;
 }): Promise<OwnerOperationalNotificationResult> {
-  const target = ownerNotificationTarget(input.business, input.claims ?? []);
+  const target = ownerNotificationTarget(input.business);
   if (!target) {
     return {
       kind: input.kind,
@@ -78,21 +71,15 @@ export async function sendOwnerOperationalEmail(input: {
   };
 }
 
-export function ownerNotificationTarget(business: BusinessStateV3, claims: ClaimRecord[]) {
-  return [
-    ...claims
-      .filter((claim) => claim.status === "claimed")
-      .map((claim) => claim.ownerEmail)
-      .filter((email): email is string => Boolean(email)),
-    business.contacts.email
-  ]
+export function ownerNotificationTarget(business: BusinessState) {
+  return [business.contacts.email]
     .map((email) => email?.trim().toLowerCase())
     .find((email) => Boolean(email));
 }
 
 function ownerNotificationText(input: {
   site: PlatformSiteRecord;
-  business: BusinessStateV3;
+  business: BusinessState;
   kind: OwnerOperationalNotificationKind;
   subject: string;
   summaryLines: string[];

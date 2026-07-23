@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { persistSiteIntentAuthority } from "../packages/platform-data/repository";
-import type { SiteIntentV3 } from "../packages/site-contracts";
+import type { SiteIntent } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const initial = buildSyntheticSiteInput().intent;
@@ -15,7 +15,7 @@ const next = {
   revision: initial.revision + 1,
   intentHash: `sha256:${"7".repeat(64)}`,
   updatedAt: "2026-07-22T18:00:00.000Z"
-} satisfies SiteIntentV3;
+} satisfies SiteIntent;
 const updated = mockClient({ current: initial, updateResult: { site_id: initial.siteId } });
 await persistSiteIntentAuthority(updated.client as never, next);
 assert(updated.calls.update, "existing intent did not use the update path");
@@ -37,7 +37,7 @@ process.stdout.write(`${JSON.stringify({
   optimisticRevisionConflict: "pass"
 })}\n`);
 
-function mockClient(input: { current: SiteIntentV3 | null; updateResult?: { site_id: string } | null }) {
+function mockClient(input: { current: SiteIntent | null; updateResult?: { site_id: string } | null }) {
   const calls: {
     insert?: Record<string, unknown>;
     update?: Record<string, unknown>;
@@ -45,7 +45,7 @@ function mockClient(input: { current: SiteIntentV3 | null; updateResult?: { site
   } = { filters: [] };
   const client = {
     from(table: string) {
-      assert.equal(table, "site_intents_v3");
+      assert.equal(table, "site_intents");
       let operation: "read" | "insert" | "update" = "read";
       const query = {
         select(_columns: string) { return query; },

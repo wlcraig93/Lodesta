@@ -10,7 +10,7 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 export default async function NewAdminSitePage() {
   await requireAdminPageAccess("/admin/sites/new");
   return <main className="admin-page">
-    <AdminPageHeader eyebrow="New site" title="Create site" description="Start an unclaimed draft from an existing business website." actions={<Link className="button secondary" href="/admin/sites">Manage sites</Link>} />
+    <AdminPageHeader eyebrow="New site" title="Create site" description="Start an unowned draft from an existing business website." actions={<Link className="button secondary" href="/admin/sites">Manage sites</Link>} />
     <div className="create-site-shell">
       <CreateSiteForm />
     </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createPresenceIntakePlan } from "@/lib/presence-intake";
-import { runUrlPresenceAssessment } from "@/lib/presence-assessment-runner";
+import { createPresenceIntakePlan } from "@/packages/acquisition/presence-intake";
+import { runUrlPresenceAssessment } from "@/packages/acquisition/presence-assessment-runner";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-safety";

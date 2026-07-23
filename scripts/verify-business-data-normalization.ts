@@ -6,7 +6,7 @@ import {
 } from "../lib/business-fact-normalization";
 import { canonicalOfferingCandidates } from "../packages/business-data/offering-normalization";
 import { deduplicateRetainedAssets } from "../packages/business-data/website-ingestion";
-import { assetRevisionV1Schema } from "../packages/site-contracts";
+import { assetRevisionSchema } from "../packages/site-contracts";
 import { autoBodyContextModule } from "../packages/vertical-context/auto-body";
 
 assert.deepEqual(normalizeObservedBusinessHours([
@@ -59,8 +59,8 @@ assert.deepEqual(canonicalOfferingCandidates(["Landscape Design", "Lawn Maintena
   { sourceName: "Lawn Maintenance", name: "Lawn Maintenance" }
 ]);
 
-const repeatedAssetRevision = assetRevisionV1Schema.parse({
-  schemaVersion: "asset-revision-v1",
+const repeatedAssetRevision = assetRevisionSchema.parse({
+  schemaVersion: 1,
   id: "asset_revision_repeated_content",
   assetId: "asset_source_1",
   businessId: "business_repeated_content",

@@ -78,7 +78,6 @@ export type AnalyticsEvent = {
     | "engagement"
     | "scroll_depth"
     | "web_vital"
-    | "experiment_assignment"
     | "agent_readable_request"
     | "places_ui";
   timestamp: string;
@@ -120,7 +119,6 @@ export type AnalyticsSummary = {
   outcomesBySection: AnalyticsOutcomeRow[];
   funnelDropoffs: AnalyticsFunnelDropoff[];
   sectionConversionPaths: AnalyticsSectionConversionPath[];
-  outcomesByExperimentVariant: AnalyticsOutcomeRow[];
   outcomesBySource: AnalyticsOutcomeRow[];
   clickMap: AnalyticsClickMapPoint[];
   standardCorrelations: AnalyticsStandardCorrelation[];

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
-import type { PublicPresenceEnrichment } from "@/lib/public-presence";
+import type { PublicPresenceEnrichment } from "@/packages/acquisition/public-presence";
 import { reconstructSourceTokenSpan } from "@/lib/source-text-blocks";
-import type { WebsiteGenerationIngestionV2 } from "./generation-crawler";
+import type { WebsiteGenerationIngestion } from "./generation-crawler";
 
 const evidenceReferenceSchema = z.object({
   sourceBlockId: z.string().min(1).max(200),
@@ -20,7 +20,7 @@ const evidencedText = (maximum: number) => z.object({
 }).strict();
 
 const modelSchema = z.object({
-  schemaVersion: z.literal("website-understanding-v3"),
+  schemaVersion: z.literal(1),
   businessName: evidencedText(200),
   observedCategory: evidencedText(120).extend({ confidence: z.number().min(0).max(1) }).strict(),
   cleanedServices: z.array(evidencedText(160)).max(24),
@@ -41,8 +41,8 @@ const modelSchema = z.object({
   }).strict()
 }).strict();
 
-type ModelUnderstandingV3 = z.infer<typeof modelSchema>;
-export type WebsiteUnderstandingV3 = ModelUnderstandingV3 & {
+type ModelUnderstanding = z.infer<typeof modelSchema>;
+export type WebsiteUnderstanding = ModelUnderstanding & {
   provenance: {
     producer: "website-understanding";
     model: string;
@@ -62,12 +62,12 @@ export class WebsiteUnderstandingValidationError extends Error {
 
 export async function understandWebsite(input: {
   sourceUrl: string;
-  ingestion: WebsiteGenerationIngestionV2;
+  ingestion: WebsiteGenerationIngestion;
   publicPresence?: PublicPresenceEnrichment;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   modelOverride?: string;
-}): Promise<WebsiteUnderstandingV3> {
+}): Promise<WebsiteUnderstanding> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required for production website ingestion.");
   const settings = input.modelOverride ? undefined : await getSiteAuthoringModelSettings();
@@ -102,7 +102,7 @@ export async function understandWebsite(input: {
             }) }]
           }
         ],
-        text: { verbosity: "low", format: { type: "json_schema", name: "website_understanding_v3", strict: true, schema: jsonSchema() } }
+        text: { verbosity: "low", format: { type: "json_schema", name: "website_understanding", strict: true, schema: jsonSchema() } }
       }),
       signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000)
     });
@@ -135,7 +135,7 @@ export async function understandWebsite(input: {
   throw new WebsiteUnderstandingValidationError(validationFailures);
 }
 
-export function canonicalizeUnderstandingEvidenceQuotes(understanding: ModelUnderstandingV3, ingestion: WebsiteGenerationIngestionV2) {
+export function canonicalizeUnderstandingEvidenceQuotes(understanding: ModelUnderstanding, ingestion: WebsiteGenerationIngestion) {
   const blocks = new Map(ingestion.modelBlocks.map((block) => [block.id, block]));
   const canonicalize = (reference: z.infer<typeof evidenceReferenceSchema>) => {
     const block = blocks.get(reference.sourceBlockId);
@@ -168,10 +168,10 @@ export function canonicalizeUnderstandingEvidenceQuotes(understanding: ModelUnde
       ? { ...understanding.businessStory, evidence: evidence(understanding.businessStory.evidence) }
       : null,
     brandExpression: { ...understanding.brandExpression, evidence: evidence(understanding.brandExpression.evidence) }
-  } satisfies ModelUnderstandingV3;
+  } satisfies ModelUnderstanding;
 }
 
-export function validateUnderstandingEvidence(understanding: ModelUnderstandingV3, ingestion: WebsiteGenerationIngestionV2) {
+export function validateUnderstandingEvidence(understanding: ModelUnderstanding, ingestion: WebsiteGenerationIngestion) {
   const failures: string[] = [];
   const blocks = new Map(ingestion.modelBlocks.map((block) => [block.id, block]));
   const groups: Array<[string, z.infer<typeof evidenceReferenceSchema>[]]> = [
@@ -240,7 +240,7 @@ function jsonSchema() {
     type: "object", additionalProperties: false,
     required: ["schemaVersion", "businessName", "observedCategory", "cleanedServices", "primaryConversion", "locationOrServiceArea", "businessStory", "brandExpression"],
     properties: {
-      schemaVersion: { type: "string", const: "website-understanding-v3" },
+      schemaVersion: { type: "number", const: 1 },
       businessName: text,
       observedCategory: { type: "object", additionalProperties: false, required: ["value", "confidence", "evidence"], properties: { value: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 1 }, evidence: { type: "array", minItems: 1, maxItems: 8, items: evidence } } },
       cleanedServices: { type: "array", maxItems: 24, items: text },

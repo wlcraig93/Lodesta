@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { hasValidRecoveryWatchdogToken } from "../lib/auth-policy";
-import { processProspectReportJobs } from "../lib/prospect-report-jobs";
+import { processProspectReportJobs } from "../packages/acquisition/prospect-report-jobs";
 import { automaticRecoveryLimit } from "../lib/recovery-watchdog";
 import { shouldScheduleStartupRecovery, triggerStartupRecovery } from "../instrumentation";
-import type { ProspectPresenceReportResult, ProspectReportJobV1, ProspectReportRecord } from "../packages/platform-operations";
+import type { ProspectPresenceReportResult, ProspectReportJob, ProspectReportRecord } from "../packages/platform-operations";
 import { siteAgentRecoveryStaleAfterMs } from "../packages/site-platform";
 import { triggerRecoveryWatchdog } from "../workers/recovery-watchdog/src/index";
 
@@ -66,7 +66,7 @@ async function main() {
   }, (async () => new Response(null, { status: 401 })) as typeof fetch), /status 401/);
 
   const reports = new Map<string, ProspectReportRecord>();
-  const jobs: ProspectReportJobV1[] = [];
+  const jobs: ProspectReportJob[] = [];
   for (let index = 1; index <= 5; index += 1) {
     const reportId = `prospect_report_${index}`;
     const now = new Date().toISOString();

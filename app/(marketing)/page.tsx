@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 const WORKFLOW_STEPS = [
   {
     step: "01",
-    title: "Claim your business",
-    body: "Tell us your business. We pull your info, photos, and reviews and show you a preview built for your trade."
+    title: "Create your website",
+    body: "Sign in, share an existing website, and Lodesta builds a private project you can edit and publish."
   },
   {
     step: "02",
@@ -63,7 +63,7 @@ export default async function HomePage({
             </div>
             <div className="marketing-trust-row" aria-label="Product guarantees">
               <span>Noindex previews</span>
-              <span>Claim before publishing</span>
+              <span>Publish on your Lodesta URL</span>
               <span>First-party analytics</span>
             </div>
           </div>
@@ -74,7 +74,7 @@ export default async function HomePage({
         <div className="marketing-proof-inner">
           <div className="marketing-proof-item">
             <strong>Days</strong>
-            <span>From claim to a live, managed site</span>
+            <span>From source URL to a live, managed site</span>
           </div>
           <div className="marketing-proof-item">
             <strong>0 hrs</strong>

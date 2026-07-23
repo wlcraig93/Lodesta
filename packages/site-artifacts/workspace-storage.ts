@@ -5,8 +5,8 @@ const contentHashSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/) as z.ZodType
 const timestampSchema = z.string().datetime({ offset: true });
 const workspacePathSchema = z.string().min(1).max(300).regex(/^src\/(?!.*\.\.)(?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+\.(?:css|json|ts|tsx)$/);
 
-export const workspaceSourceSidecarV1Schema = z.object({
-  schemaVersion: z.literal("workspace-source-sidecar-v1"),
+export const workspaceSourceSidecarSchema = z.object({
+  schemaVersion: z.literal(1),
   backupId: z.string().regex(/^[a-f0-9]{64}$/),
   archiveKey: z.string().regex(/^workspace-backups\/[a-f0-9]{64}\.tar\.gz$/),
   archiveHash: contentHashSchema,
@@ -34,8 +34,8 @@ export const workspaceSourceSidecarV1Schema = z.object({
     context.addIssue({ code: "custom", path: ["sourceHash"], message: "Source hash does not match the canonical source-file manifest." });
   }
 });
-export type WorkspaceSourceSidecarV1 = z.infer<typeof workspaceSourceSidecarV1Schema>;
+export type WorkspaceSourceSidecar = z.infer<typeof workspaceSourceSidecarSchema>;
 
-export function serializeWorkspaceSourceSidecar(value: WorkspaceSourceSidecarV1) {
-  return Buffer.from(`${stableJson(workspaceSourceSidecarV1Schema.parse(value))}\n`);
+export function serializeWorkspaceSourceSidecar(value: WorkspaceSourceSidecar) {
+  return Buffer.from(`${stableJson(workspaceSourceSidecarSchema.parse(value))}\n`);
 }

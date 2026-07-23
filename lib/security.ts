@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { platformOperationsRepository } from "@/packages/platform-operations";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import { getCurrentUser } from "./supabase/server";
 import { adminToken, authRequired, hasPlatformAdminRole, hasValidAdminToken } from "./auth-policy";
 
 export async function requireAdmin(request: Request) {
   const expected = adminToken();
   if (expected && hasValidAdminToken(request.headers)) return null;
-  if (!expected && !authRequired()) return null;
+  if (!expected && !authRequired() && ["GET", "HEAD"].includes(request.method.toUpperCase())) return null;
 
   const auth = await getCurrentUser();
   if (auth.configured && hasPlatformAdminRole(auth.user)) return null;
@@ -17,7 +17,7 @@ export async function requireAdmin(request: Request) {
 export async function requireAdminOrSiteOwner(request: Request, siteId: string) {
   const expected = adminToken();
   if (expected && hasValidAdminToken(request.headers)) return null;
-  if (!expected && !authRequired()) return null;
+  if (!expected && !authRequired() && ["GET", "HEAD"].includes(request.method.toUpperCase())) return null;
 
   const auth = await getCurrentUser();
   if (auth.configured && hasPlatformAdminRole(auth.user)) {
@@ -25,17 +25,11 @@ export async function requireAdminOrSiteOwner(request: Request, siteId: string) 
   }
 
   const userId = auth.user?.id;
-  const email = auth.user?.email?.toLowerCase();
-  if (!auth.configured || (!userId && !email)) {
+  if (!auth.configured || !userId) {
     return NextResponse.json({ error: "Site owner authorization required" }, { status: 401 });
   }
 
-  const claims = await platformOperationsRepository.listClaims(siteId);
-  const ownsSite = claims.some(
-    (claim) =>
-      claim.status === "claimed" &&
-      ((userId && claim.ownerUserId === userId) || (email && claim.ownerEmail?.toLowerCase() === email))
-  );
-  if (ownsSite) return null;
+  const site = await sitePlatformRepository.getSite(siteId);
+  if (site?.ownerUserId === userId) return null;
   return NextResponse.json({ error: "Site owner authorization required" }, { status: 403 });
 }

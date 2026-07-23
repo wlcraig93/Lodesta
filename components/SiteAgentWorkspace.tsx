@@ -12,22 +12,22 @@ import type {
   PlatformSiteRecord,
   SiteAgentRun,
   SiteAgentSession,
-  SiteElementSelectionV1,
-  SitePublicationReadinessV1,
-  SitePublicBuildInputV3,
-  SiteVersionV4
+  SiteElementSelection,
+  SitePublicationReadiness,
+  SitePublicBuildInput,
+  SiteVersion
 } from "@/packages/site-contracts";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 
 type WorkspacePayload = {
   site: PlatformSiteRecord;
   session?: SiteAgentSession;
-  input?: SitePublicBuildInputV3;
-  versions: SiteVersionV4[];
+  input?: SitePublicBuildInput;
+  versions: SiteVersion[];
   versionRoutes: Record<string, Array<{ path: string; title: string }>>;
   messages: SiteAgentMessage[];
   runs: SiteAgentRun[];
-  readiness?: SitePublicationReadinessV1;
+  readiness?: SitePublicationReadiness;
   openFindings?: OperatorQueueItem[];
   activeRunActivity?: string;
 };
@@ -66,8 +66,8 @@ export function SiteAgentWorkspace({
   isAdmin = false
 }: {
   initialSite: PlatformSiteRecord;
-  initialInput: SitePublicBuildInputV3;
-  initialVersions: SiteVersionV4[];
+  initialInput: SitePublicBuildInput;
+  initialVersions: SiteVersion[];
   isAdmin?: boolean;
 }) {
   const [workspace, setWorkspace] = useState<WorkspacePayload>({
@@ -91,7 +91,7 @@ export function SiteAgentWorkspace({
   const [iframeSrc, setIframeSrc] = useState("about:blank");
   const [compare, setCompare] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selection, setSelection] = useState<SiteElementSelectionV1>();
+  const [selection, setSelection] = useState<SiteElementSelection>();
   const [clock, setClock] = useState(Date.now());
   const [panelMode, setPanelMode] = useState<DesktopPanelMode>("split");
   const [panelWidth, setPanelWidth] = useState(400);
@@ -892,8 +892,8 @@ function workspaceStatus({
 }: {
   site: PlatformSiteRecord;
   activeRun?: SiteAgentRun;
-  latestCandidate?: SiteVersionV4;
-  readiness?: SitePublicationReadinessV1;
+  latestCandidate?: SiteVersion;
+  readiness?: SitePublicationReadiness;
 }) {
   if (activeRun) return { label: stageLabel(activeRun), tone: "working" };
   if (latestCandidate && readiness?.status === "ready") return { label: "Ready to publish", tone: "ready" };

@@ -1,12 +1,12 @@
 import { DomUtils, parseDocument } from "htmlparser2";
 import {
-  siteBuildArtifactV1Schema,
-  type ClaimDeclarationV1,
-  type SiteBuildArtifactV1,
-  type SitePublicBuildInputV3
+  siteBuildArtifactSchema,
+  type FactDeclaration,
+  type SiteBuildArtifact,
+  type SitePublicBuildInput
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "@/packages/business-data";
-import { ArtifactClaimValidator } from "./artifact-claims";
+import { FactDeclarationValidator } from "./fact-declarations";
 import {
   agentAuthoredArtifactSchema,
   normalizeRoutePath,
@@ -26,7 +26,7 @@ export type PreparedSiteArtifact = {
   authored: AgentAuthoredArtifact;
   files: PreparedArtifactFile[];
   routes: Array<{ path: string; htmlFile: string; title: string; description: string; html: string }>;
-  claims: ClaimDeclarationV1[];
+  factDeclarations: FactDeclaration[];
   capabilityBindings: AgentAuthoredArtifact["capabilityBindings"];
   findings: ArtifactGateFinding[];
   qualityMetrics: {
@@ -43,7 +43,7 @@ export type BrowserGateResult = {
 
 export function prepareSiteArtifact(input: {
   authoredArtifact: AgentAuthoredArtifact;
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   runtimeSeriesId: string;
 }) {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
@@ -81,17 +81,17 @@ export function prepareSiteArtifact(input: {
   });
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
-  const claims = new ArtifactClaimValidator().validate({
+  const factDeclarations = new FactDeclarationValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
-    declarations: authored.claims,
+    declarations: authored.factDeclarations,
     buildInput: input.buildInput
   });
-  findings.push(...claims.findings);
+  findings.push(...factDeclarations.findings);
   const qualityMetrics = { routeSimilarity: routeSimilarityMetrics(sanitized) };
-  findings.push(...validateSiteStructure({ routes: sanitized, declarations: claims.declarations, buildInput: input.buildInput, similarities: qualityMetrics.routeSimilarity }));
+  findings.push(...validateSiteStructure({ routes: sanitized, declarations: factDeclarations.declarations, buildInput: input.buildInput, similarities: qualityMetrics.routeSimilarity }));
 
   const structured = structuredDataFor(input.buildInput);
-  const structuredClaims = structured.claims;
+  const structuredDeclarations = structured.factDeclarations;
   const platformBindings = input.buildInput.intent.enabledCapabilities.includes("analytics")
     ? sanitized.map((route, index) => ({ id: `capability_analytics_${index + 1}`, kind: "analytics" as const, route: route.path, config: {} }))
     : [];
@@ -131,7 +131,7 @@ export function prepareSiteArtifact(input: {
     authored,
     files,
     routes: routeOutputs,
-    claims: [...claims.declarations, ...structuredClaims],
+    factDeclarations: [...factDeclarations.declarations, ...structuredDeclarations],
     capabilityBindings,
     findings: dedupeFindings(findings),
     qualityMetrics
@@ -140,7 +140,7 @@ export function prepareSiteArtifact(input: {
 
 export function finalizePreparedArtifact(input: {
   prepared: PreparedSiteArtifact;
-  buildInput: SitePublicBuildInputV3;
+  buildInput: SitePublicBuildInput;
   artifactId: string;
   workspaceRevisionId: string;
   runtimeSeriesId: string;
@@ -150,7 +150,7 @@ export function finalizePreparedArtifact(input: {
   sandboxImageDigest: `sha256:${string}`;
   browserGate: BrowserGateResult;
   createdAt?: string;
-}): { artifact: SiteBuildArtifactV1; files: PreparedArtifactFile[]; qualityMetrics: PreparedSiteArtifact["qualityMetrics"] } {
+}): { artifact: SiteBuildArtifact; files: PreparedArtifactFile[]; qualityMetrics: PreparedSiteArtifact["qualityMetrics"] } {
   const createdAt = input.createdAt ?? new Date().toISOString();
   const findings = dedupeFindings([...input.prepared.findings, ...input.browserGate.findings]);
   const fileRecords = input.prepared.files.map((file) => ({
@@ -163,13 +163,13 @@ export function finalizePreparedArtifact(input: {
   const artifactHash = sha256(stableJson({
     files: fileRecords.map(({ path, contentType, contentHash, bytes }) => ({ path, contentType, contentHash, bytes })),
     routes: input.prepared.routes.map(({ path, htmlFile, title, description }) => ({ path, htmlFile, title, description })),
-    claims: input.prepared.claims,
+    factDeclarations: input.prepared.factDeclarations,
     capabilityBindings: input.prepared.capabilityBindings,
     runtimeSeriesId: input.runtimeSeriesId
   }));
   const hardGate = findings.some((finding) => finding.severity === "error") ? "failed" as const : "passed" as const;
-  const artifact = siteBuildArtifactV1Schema.parse({
-    schemaVersion: "site-build-artifact-v1",
+  const artifact = siteBuildArtifactSchema.parse({
+    schemaVersion: 1,
     id: input.artifactId,
     siteId: input.buildInput.siteId,
     workspaceRevisionId: input.workspaceRevisionId,
@@ -179,7 +179,7 @@ export function finalizePreparedArtifact(input: {
     storagePrefix: input.storagePrefix,
     files: fileRecords,
     routes: input.prepared.routes.map(({ path, htmlFile, title, description }) => ({ path, htmlFile, title, description })),
-    claims: input.prepared.claims,
+    factDeclarations: input.prepared.factDeclarations,
     capabilityBindings: input.prepared.capabilityBindings,
     runtimeSeriesId: input.runtimeSeriesId,
     runtimePatchAtFinalization: input.runtimePatchId,
@@ -199,8 +199,8 @@ export function finalizePreparedArtifact(input: {
 
 function validateSiteStructure(input: {
   routes: Array<{ path: string; title: string; description: string; bodyHtml: string }>;
-  declarations: ClaimDeclarationV1[];
-  buildInput: SitePublicBuildInputV3;
+  declarations: FactDeclaration[];
+  buildInput: SitePublicBuildInput;
   similarities: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
 }) {
   const findings: ArtifactGateFinding[] = [];
@@ -292,7 +292,7 @@ function normalizeText(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput: SitePublicBuildInputV3) {
+function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput: SitePublicBuildInput) {
   const findings: ArtifactGateFinding[] = [];
   const routes = new Set(artifact.routes.map((route) => normalizeRoutePath(route.path)));
   const forms = new Set(buildInput.forms.map((form) => form.id));
@@ -321,7 +321,7 @@ function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput:
   return findings;
 }
 
-function structuredDataFor(buildInput: SitePublicBuildInputV3) {
+function structuredDataFor(buildInput: SitePublicBuildInput) {
   const facts = new Map(buildInput.publicFacts.map((fact) => [fact.kind, fact]));
   const location = buildInput.business.locations[0];
   const value: Record<string, unknown> = {
@@ -329,10 +329,10 @@ function structuredDataFor(buildInput: SitePublicBuildInputV3) {
     "@type": buildInput.domainContext?.structuredDataType ?? "LocalBusiness",
     name: buildInput.business.name
   };
-  const claims: ClaimDeclarationV1[] = [];
-  addStructuredFact(value, claims, "/", "name", facts.get("business_name"));
-  addStructuredFact(value, claims, "/", "telephone", facts.get("phone"));
-  addStructuredFact(value, claims, "/", "email", facts.get("email"));
+  const factDeclarations: FactDeclaration[] = [];
+  addStructuredFact(value, factDeclarations, "/", "name", facts.get("business_name"));
+  addStructuredFact(value, factDeclarations, "/", "telephone", facts.get("phone"));
+  addStructuredFact(value, factDeclarations, "/", "email", facts.get("email"));
   if (location) {
     const addressFact = facts.get("address");
     if (addressFact) {
@@ -346,32 +346,32 @@ function structuredDataFor(buildInput: SitePublicBuildInputV3) {
       };
       for (const [key, item] of Object.entries(value.address as Record<string, unknown>)) {
         if (key === "@type" || item === undefined) continue;
-        claims.push(structuredClaim(`jsonld:address:${key}`, String(item), addressFact.id));
+        factDeclarations.push(structuredClaim(`jsonld:address:${key}`, String(item), addressFact.id));
       }
     }
   }
   const offeringFacts = buildInput.publicFacts.filter((fact) => fact.kind === "offering");
   if (offeringFacts.length) {
     value.makesOffer = offeringFacts.map((fact) => ({ "@type": "Offer", itemOffered: { "@type": "Service", name: String(fact.value) } }));
-    for (const fact of offeringFacts) claims.push(structuredClaim(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
+    for (const fact of offeringFacts) factDeclarations.push(structuredClaim(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
   }
-  return { value, claims };
+  return { value, factDeclarations };
 }
 
 function addStructuredFact(
   target: Record<string, unknown>,
-  claims: ClaimDeclarationV1[],
+  factDeclarations: FactDeclaration[],
   route: string,
   key: string,
-  fact: SitePublicBuildInputV3["publicFacts"][number] | undefined
+  fact: SitePublicBuildInput["publicFacts"][number] | undefined
 ) {
   if (!fact) return;
   const value = typeof fact.value === "string" ? fact.value : String(fact.value);
   target[key] = value;
-  claims.push({ ...structuredClaim(`jsonld:${key}`, value, fact.id), route });
+  factDeclarations.push({ ...structuredClaim(`jsonld:${key}`, value, fact.id), route });
 }
 
-function structuredClaim(id: string, text: string, factId: string): ClaimDeclarationV1 {
+function structuredClaim(id: string, text: string, factId: string): FactDeclaration {
   return { id, route: "/", text, kind: "structured_data", sourceFactIds: [factId], autoDeclared: true };
 }
 
@@ -391,7 +391,7 @@ function documentHtml(input: {
   return `<!doctype html><html lang="en" data-lodesta-site-id="${escapeAttribute(input.siteId)}" data-lodesta-analytics="${input.analyticsEnabled ? "true" : "false"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title><meta name="description" content="${escapeAttribute(input.description)}"><link rel="stylesheet" href="${input.cssPath}">${structured}<script src="/_lodesta/runtime/${encodeURIComponent(input.runtimeSeriesId)}.js" defer data-lodesta-runtime="${escapeAttribute(input.runtimeSeriesId)}"></script></head><body>${input.bodyHtml}</body></html>`;
 }
 
-function allowedExternalHrefsFor(buildInput: SitePublicBuildInputV3) {
+function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
   const values = [
     ...buildInput.business.links.map((link) => link.url),
     ...buildInput.business.locations.map(mapHrefForLocation)
@@ -399,7 +399,7 @@ function allowedExternalHrefsFor(buildInput: SitePublicBuildInputV3) {
   return new Set(values.map((value) => new URL(value).toString()));
 }
 
-function mapHrefForLocation(location: SitePublicBuildInputV3["business"]["locations"][number]) {
+function mapHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
   const address = [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ");
   const query = location.googlePlaceId ? `place_id:${location.googlePlaceId}` : address || location.label;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;

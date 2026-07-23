@@ -3,7 +3,8 @@ import "../scripts/load-env";
 import { setTimeout as sleep } from "node:timers/promises";
 import { siteAuthoringWorkflow } from "../packages/site-platform";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { processNextProspectReportJob } from "../lib/prospect-report-jobs";
+import { processNextProspectReportJob } from "../packages/acquisition/prospect-report-jobs";
+import { processNextWebsiteSetup } from "../lib/website-setup-jobs";
 
 const localRecoveryStaleAfterMs = 15 * 60_000;
 
@@ -28,20 +29,27 @@ async function main() {
   }
   if (command === "process-once") {
     const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs });
-    const prospectReport = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length ? null : await processNextProspectReportJob();
-    console.log(JSON.stringify({ agentRuns, prospectReport }, null, 2));
+    const websiteSetup = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length ? null : await processNextWebsiteSetup();
+    const prospectReport = websiteSetup ? null : await processNextProspectReportJob();
+    console.log(JSON.stringify({ agentRuns, websiteSetup, prospectReport }, null, 2));
     return;
   }
   if (command === "process-all") {
     const limit = boundedLimit(process.argv[3]);
     const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
+    const websiteSetups = [];
+    for (let index = 0; index < limit; index += 1) {
+      const result = await processNextWebsiteSetup();
+      if (!result) break;
+      websiteSetups.push(result);
+    }
     const prospectReports = [];
     for (let index = 0; index < limit; index += 1) {
       const result = await processNextProspectReportJob();
       if (!result) break;
       prospectReports.push(result);
     }
-    console.log(JSON.stringify({ agentRuns, prospectReports }, null, 2));
+    console.log(JSON.stringify({ agentRuns, websiteSetups, prospectReports }, null, 2));
     return;
   }
   if (command === "work") {
@@ -52,6 +60,11 @@ async function main() {
       const result = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs });
       if (result.reaped.length || result.recovered.length || result.processed.length) {
         console.log(JSON.stringify({ event: "agent_runs_processed", reapedSessions: result.reaped, recovered: result.recovered, processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
+        continue;
+      }
+      const setup = await processNextWebsiteSetup();
+      if (setup) {
+        console.log(JSON.stringify({ event: "website_setup_processed", ...setup }));
         continue;
       }
       const prospect = await processNextProspectReportJob();

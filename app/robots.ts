@@ -16,8 +16,7 @@ export default function robots(): MetadataRoute.Robots {
           "/crawl-fixtures/",
           "/preview/",
           "/workspace/",
-          "/experiments/",
-          "/claim/",
+          "/adopt/",
           "/outbound",
           "/admin"
         ]

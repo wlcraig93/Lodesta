@@ -1,45 +1,43 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
-  businessStateV3Schema,
-  assetRevisionV1Schema,
+  businessStateSchema,
+  assetRevisionSchema,
   controlPlaneChangeRequestSchema,
-  formDefinitionV2Schema,
+  formDefinitionSchema,
   operatorQueueItemSchema,
   platformSiteRecordSchema,
   siteAgentRunSchema,
   siteAgentRunEventSchema,
   siteAgentMessageSchema,
   siteAgentSessionSchema,
-  siteBuildArtifactV1Schema,
-  siteIntentV3Schema,
-  sitePublicBuildInputV3Schema,
-  siteVersionV4Schema,
-  siteVersionApprovalV1Schema,
-  siteWorkspaceRevisionV1Schema,
-  sourceSnapshotV1Schema,
-  trustedRuntimePatchV1Schema,
-  trustedRuntimeSeriesV1Schema,
+  siteBuildArtifactSchema,
+  siteIntentSchema,
+  sitePublicBuildInputSchema,
+  siteVersionSchema,
+  siteWorkspaceRevisionSchema,
+  sourceSnapshotSchema,
+  trustedRuntimePatchSchema,
+  trustedRuntimeSeriesSchema,
   verticalDemandEventSchema,
-  type BusinessStateV3,
-  type AssetRevisionV1,
+  type BusinessState,
+  type AssetRevision,
   type ControlPlaneChangeRequest,
-  type FormDefinitionV2,
+  type FormDefinition,
   type OperatorQueueItem,
   type PlatformSiteRecord,
   type SiteAgentRun,
   type SiteAgentRunEvent,
   type SiteAgentMessage,
   type SiteAgentSession,
-  type SiteBuildArtifactV1,
-  type SiteIntentV3,
-  type SitePublicBuildInputV3,
-  type SiteVersionV4,
-  type SiteVersionApprovalV1,
-  type SiteWorkspaceRevisionV1,
-  type SourceSnapshotV1,
-  type TrustedRuntimePatchV1,
-  type TrustedRuntimeSeriesV1,
+  type SiteBuildArtifact,
+  type SiteIntent,
+  type SitePublicBuildInput,
+  type SiteVersion,
+  type SiteWorkspaceRevision,
+  type SourceSnapshot,
+  type TrustedRuntimePatch,
+  type TrustedRuntimeSeries,
   type VerticalDemandEvent
 } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
@@ -56,12 +54,12 @@ export type SiteAgentRunAdminRecord = {
 
 export type BootstrapSiteV1Input = {
   site: PlatformSiteRecord;
-  state: BusinessStateV3;
-  intent: SiteIntentV3;
-  forms: FormDefinitionV2[];
-  sourceSnapshots: SourceSnapshotV1[];
-  assetRevisions: AssetRevisionV1[];
-  publicBuildInput: SitePublicBuildInputV3;
+  state: BusinessState;
+  intent: SiteIntent;
+  forms: FormDefinition[];
+  sourceSnapshots: SourceSnapshot[];
+  assetRevisions: AssetRevision[];
+  publicBuildInput: SitePublicBuildInput;
 };
 
 export interface SitePlatformRepository {
@@ -70,40 +68,43 @@ export interface SitePlatformRepository {
   getSite(siteId: string): Promise<PlatformSiteRecord | undefined>;
   getSiteBySlug(slug: string): Promise<PlatformSiteRecord | undefined>;
   listSites(): Promise<PlatformSiteRecord[]>;
+  getSitesByOwnerUserId(ownerUserId: string): Promise<PlatformSiteRecord[]>;
+  getSitesByIds(siteIds: string[]): Promise<PlatformSiteRecord[]>;
+  assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   setCurrentPublicBuildInput(siteId: string, inputId: string): Promise<void>;
-  saveSourceSnapshot(snapshot: SourceSnapshotV1): Promise<void>;
-  getSourceSnapshot(id: string): Promise<SourceSnapshotV1 | undefined>;
-  saveAssetRevision(revision: AssetRevisionV1): Promise<void>;
-  getAssetRevision(id: string): Promise<AssetRevisionV1 | undefined>;
-  getAssetRevisionByStorageKey(storageKey: string): Promise<AssetRevisionV1 | undefined>;
+  saveSourceSnapshot(snapshot: SourceSnapshot): Promise<void>;
+  getSourceSnapshot(id: string): Promise<SourceSnapshot | undefined>;
+  saveAssetRevision(revision: AssetRevision): Promise<void>;
+  getAssetRevision(id: string): Promise<AssetRevision | undefined>;
+  getAssetRevisionByStorageKey(storageKey: string): Promise<AssetRevision | undefined>;
   isAssetRevisionPublic(id: string): Promise<boolean>;
-  saveBusinessState(state: BusinessStateV3): Promise<void>;
-  getBusinessState(businessId: string): Promise<BusinessStateV3 | undefined>;
-  saveSiteIntent(intent: SiteIntentV3): Promise<void>;
-  getSiteIntent(siteId: string): Promise<SiteIntentV3 | undefined>;
-  saveFormDefinition(form: FormDefinitionV2): Promise<void>;
-  getFormDefinition(formId: string): Promise<FormDefinitionV2 | undefined>;
-  getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinitionV2 | undefined>;
-  savePublicBuildInput(input: SitePublicBuildInputV3): Promise<void>;
-  getPublicBuildInput(id: string): Promise<SitePublicBuildInputV3 | undefined>;
-  commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }): Promise<void>;
-  getWorkspaceRevision(id: string): Promise<SiteWorkspaceRevisionV1 | undefined>;
-  getBuildArtifact(id: string): Promise<SiteBuildArtifactV1 | undefined>;
-  createSiteVersion(version: SiteVersionV4): Promise<void>;
-  getSiteVersion(id: string): Promise<SiteVersionV4 | undefined>;
-  listSiteVersions(siteId: string): Promise<SiteVersionV4[]>;
-  saveSiteVersionApproval(approval: SiteVersionApprovalV1): Promise<void>;
-  listSiteVersionApprovals(versionId: string): Promise<SiteVersionApprovalV1[]>;
+  saveBusinessState(state: BusinessState): Promise<void>;
+  getBusinessState(businessId: string): Promise<BusinessState | undefined>;
+  getBusinessStatesByIds(businessIds: string[]): Promise<BusinessState[]>;
+  saveSiteIntent(intent: SiteIntent): Promise<void>;
+  getSiteIntent(siteId: string): Promise<SiteIntent | undefined>;
+  saveFormDefinition(form: FormDefinition): Promise<void>;
+  getFormDefinition(formId: string): Promise<FormDefinition | undefined>;
+  getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinition | undefined>;
+  savePublicBuildInput(input: SitePublicBuildInput): Promise<void>;
+  getPublicBuildInput(id: string): Promise<SitePublicBuildInput | undefined>;
+  commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }): Promise<void>;
+  getWorkspaceRevision(id: string): Promise<SiteWorkspaceRevision | undefined>;
+  getBuildArtifact(id: string): Promise<SiteBuildArtifact | undefined>;
+  createSiteVersion(version: SiteVersion): Promise<void>;
+  getSiteVersion(id: string): Promise<SiteVersion | undefined>;
+  listSiteVersions(siteId: string): Promise<SiteVersion[]>;
   promoteSiteVersion(versionId: string, actorId: string): Promise<void>;
-  saveRuntimePatch(patch: TrustedRuntimePatchV1): Promise<void>;
-  getRuntimePatch(id: string): Promise<TrustedRuntimePatchV1 | undefined>;
-  getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatchV1 | undefined>;
-  saveRuntimeSeries(series: TrustedRuntimeSeriesV1): Promise<void>;
-  getRuntimeSeries(id: string): Promise<TrustedRuntimeSeriesV1 | undefined>;
+  saveRuntimePatch(patch: TrustedRuntimePatch): Promise<void>;
+  getRuntimePatch(id: string): Promise<TrustedRuntimePatch | undefined>;
+  getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatch | undefined>;
+  saveRuntimeSeries(series: TrustedRuntimeSeries): Promise<void>;
+  getRuntimeSeries(id: string): Promise<TrustedRuntimeSeries | undefined>;
   saveAgentSession(session: SiteAgentSession): Promise<void>;
   getAgentSession(id: string): Promise<SiteAgentSession | undefined>;
   getActiveAgentSession(siteId: string, ownerId: string): Promise<SiteAgentSession | undefined>;
   listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSession[]>;
+  enqueueAgentRun(run: SiteAgentRun): Promise<SiteAgentRun>;
   saveAgentRun(run: SiteAgentRun): Promise<void>;
   claimAgentRun(runId: string): Promise<SiteAgentRun | undefined>;
   getAgentRun(id: string): Promise<SiteAgentRun | undefined>;
@@ -133,18 +134,17 @@ export interface SitePlatformRepository {
 
 type LocalState = {
   sites: Record<string, PlatformSiteRecord>;
-  sourceSnapshots: Record<string, SourceSnapshotV1>;
-  assetRevisions: Record<string, AssetRevisionV1>;
-  businessStates: Record<string, BusinessStateV3>;
-  intents: Record<string, SiteIntentV3>;
-  forms: Record<string, FormDefinitionV2>;
-  buildInputs: Record<string, SitePublicBuildInputV3>;
-  workspaceRevisions: Record<string, SiteWorkspaceRevisionV1>;
-  artifacts: Record<string, SiteBuildArtifactV1>;
-  versions: Record<string, SiteVersionV4>;
-  versionApprovals: Record<string, SiteVersionApprovalV1>;
-  runtimePatches: Record<string, TrustedRuntimePatchV1>;
-  runtimeSeries: Record<string, TrustedRuntimeSeriesV1>;
+  sourceSnapshots: Record<string, SourceSnapshot>;
+  assetRevisions: Record<string, AssetRevision>;
+  businessStates: Record<string, BusinessState>;
+  intents: Record<string, SiteIntent>;
+  forms: Record<string, FormDefinition>;
+  buildInputs: Record<string, SitePublicBuildInput>;
+  workspaceRevisions: Record<string, SiteWorkspaceRevision>;
+  artifacts: Record<string, SiteBuildArtifact>;
+  versions: Record<string, SiteVersion>;
+  runtimePatches: Record<string, TrustedRuntimePatch>;
+  runtimeSeries: Record<string, TrustedRuntimeSeries>;
   sessions: Record<string, SiteAgentSession>;
   runs: Record<string, SiteAgentRun>;
   runEvents: Record<string, SiteAgentRunEvent>;
@@ -156,7 +156,7 @@ type LocalState = {
 };
 
 const emptyLocalState = (): LocalState => ({
-  sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {}, versionApprovals: {},
+  sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {},
   runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
 });
 
@@ -168,12 +168,12 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   bootstrapSite(input: BootstrapSiteV1Input) {
     return this.write((store) => {
       const site = platformSiteRecordSchema.parse(input.site);
-      const state = businessStateV3Schema.parse(input.state);
-      const intent = siteIntentV3Schema.parse(input.intent);
-      const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
-      const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotV1Schema.parse(snapshot));
-      const assetRevisions = input.assetRevisions.map((revision) => assetRevisionV1Schema.parse(revision));
-      const publicBuildInput = sitePublicBuildInputV3Schema.parse(input.publicBuildInput);
+      const state = businessStateSchema.parse(input.state);
+      const intent = siteIntentSchema.parse(input.intent);
+      const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
+      const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotSchema.parse(snapshot));
+      const assetRevisions = input.assetRevisions.map((revision) => assetRevisionSchema.parse(revision));
+      const publicBuildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
       if (site.id !== state.siteId || site.businessId !== state.businessId || intent.siteId !== site.id || forms.some((form) => form.siteId !== site.id)) {
         throw new Error("Bootstrap authorities do not belong to the same site.");
       }
@@ -200,6 +200,23 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async getSite(siteId: string) { return clone((await this.read()).sites[siteId]); }
   async getSiteBySlug(slug: string) { return clone(Object.values((await this.read()).sites).find((site) => site.slug === slug)); }
   async listSites() { return Object.values((await this.read()).sites).map((item) => clone(item) as PlatformSiteRecord); }
+  async getSitesByOwnerUserId(ownerUserId: string) {
+    return Object.values((await this.read()).sites)
+      .filter((site) => site.ownerUserId === ownerUserId)
+      .map((site) => clone(site) as PlatformSiteRecord);
+  }
+  async getSitesByIds(siteIds: string[]) { const state = await this.read(); return [...new Set(siteIds)].flatMap((id) => state.sites[id] ? [clone(state.sites[id]) as PlatformSiteRecord] : []); }
+  async assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string) {
+    let result: PlatformSiteRecord | undefined;
+    await this.write((store) => {
+      const site = store.sites[siteId];
+      if (!site || (site.ownerUserId && site.ownerUserId !== ownerUserId)) return;
+      site.ownerUserId = ownerUserId;
+      site.updatedAt = new Date().toISOString();
+      result = clone(site) as PlatformSiteRecord;
+    });
+    return result;
+  }
   setCurrentPublicBuildInput(siteId: string, inputId: string) {
     return this.write((store) => {
       const site = store.sites[siteId];
@@ -209,28 +226,29 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     });
   }
 
-  saveSourceSnapshot(snapshot: SourceSnapshotV1) { return this.insertImmutable("sourceSnapshots", sourceSnapshotV1Schema.parse(snapshot)); }
+  saveSourceSnapshot(snapshot: SourceSnapshot) { return this.insertImmutable("sourceSnapshots", sourceSnapshotSchema.parse(snapshot)); }
   async getSourceSnapshot(id: string) { return clone((await this.read()).sourceSnapshots[id]); }
-  saveAssetRevision(revision: AssetRevisionV1) { return this.insertImmutable("assetRevisions", assetRevisionV1Schema.parse(revision)); }
+  saveAssetRevision(revision: AssetRevision) { return this.insertImmutable("assetRevisions", assetRevisionSchema.parse(revision)); }
   async getAssetRevision(id: string) { return clone((await this.read()).assetRevisions[id]); }
   async getAssetRevisionByStorageKey(storageKey: string) { return clone(Object.values((await this.read()).assetRevisions).find((item) => item.storageKey === storageKey)); }
   async isAssetRevisionPublic(id: string) {
     return Object.values((await this.read()).versions).some((version) => version.status === "published" && version.assetRevisionIds.includes(id));
   }
 
-  saveBusinessState(state: BusinessStateV3) {
+  saveBusinessState(state: BusinessState) {
     return this.write((store) => {
-      const parsed = businessStateV3Schema.parse(state);
+      const parsed = businessStateSchema.parse(state);
       const current = store.businessStates[parsed.businessId];
       assertRevisionAdvance(current?.revision, parsed.revision, "business state");
       store.businessStates[parsed.businessId] = parsed;
     });
   }
   async getBusinessState(id: string) { return clone((await this.read()).businessStates[id]); }
+  async getBusinessStatesByIds(businessIds: string[]) { const state = await this.read(); return [...new Set(businessIds)].flatMap((id) => state.businessStates[id] ? [clone(state.businessStates[id]) as BusinessState] : []); }
 
-  saveSiteIntent(intent: SiteIntentV3) {
+  saveSiteIntent(intent: SiteIntent) {
     return this.write((store) => {
-      const parsed = siteIntentV3Schema.parse(intent);
+      const parsed = siteIntentSchema.parse(intent);
       const current = Object.values(store.intents).find((item) => item.siteId === parsed.siteId);
       assertRevisionAdvance(current?.revision, parsed.revision, "site intent");
       store.intents[parsed.id] = parsed;
@@ -238,9 +256,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
   async getSiteIntent(siteId: string) { return clone(Object.values((await this.read()).intents).find((item) => item.siteId === siteId)); }
 
-  saveFormDefinition(form: FormDefinitionV2) {
+  saveFormDefinition(form: FormDefinition) {
     return this.write((store) => {
-      const parsed = formDefinitionV2Schema.parse(form);
+      const parsed = formDefinitionSchema.parse(form);
       if (store.forms[parsed.id]) throw new Error("Form definitions are immutable.");
       store.forms[parsed.id] = parsed;
     });
@@ -254,13 +272,13 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return referenced ? clone(form) : undefined;
   }
 
-  savePublicBuildInput(input: SitePublicBuildInputV3) { return this.insertImmutable("buildInputs", sitePublicBuildInputV3Schema.parse(input)); }
+  savePublicBuildInput(input: SitePublicBuildInput) { return this.insertImmutable("buildInputs", sitePublicBuildInputSchema.parse(input)); }
   async getPublicBuildInput(id: string) { return clone((await this.read()).buildInputs[id]); }
 
-  commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }) {
+  commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }) {
     return this.write((store) => {
-      const revision = siteWorkspaceRevisionV1Schema.parse(input.revision);
-      const artifact = siteBuildArtifactV1Schema.parse(input.artifact);
+      const revision = siteWorkspaceRevisionSchema.parse(input.revision);
+      const artifact = siteBuildArtifactSchema.parse(input.artifact);
       if (artifact.qa.hardGate !== "passed") throw new Error("Only hard-gate-passed builds can be committed.");
       if (artifact.siteId !== revision.siteId || artifact.workspaceRevisionId !== revision.id) {
         throw new Error("Verified artifact and workspace revision do not match.");
@@ -284,23 +302,15 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async getWorkspaceRevision(id: string) { return clone((await this.read()).workspaceRevisions[id]); }
 
   async getBuildArtifact(id: string) { return clone((await this.read()).artifacts[id]); }
-  createSiteVersion(version: SiteVersionV4) { return this.insertImmutable("versions", siteVersionV4Schema.parse(version)); }
+  createSiteVersion(version: SiteVersion) { return this.insertImmutable("versions", siteVersionSchema.parse(version)); }
   async getSiteVersion(id: string) { return clone((await this.read()).versions[id]); }
   async listSiteVersions(siteId: string) {
-    return Object.values((await this.read()).versions).filter((item) => item.siteId === siteId).sort((a, b) => b.number - a.number).map((item) => clone(item) as SiteVersionV4);
-  }
-  saveSiteVersionApproval(approval: SiteVersionApprovalV1) {
-    return this.insertImmutable("versionApprovals", siteVersionApprovalV1Schema.parse(approval));
-  }
-  async listSiteVersionApprovals(versionId: string) {
-    return Object.values((await this.read()).versionApprovals ?? {}).filter((item) => item.versionId === versionId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt)).map((item) => clone(item) as SiteVersionApprovalV1);
+    return Object.values((await this.read()).versions).filter((item) => item.siteId === siteId).sort((a, b) => b.number - a.number).map((item) => clone(item) as SiteVersion);
   }
   promoteSiteVersion(versionId: string, actorId: string) {
     return this.write((store) => {
       const target = store.versions[versionId];
       if (!target || !["candidate", "superseded"].includes(target.status)) throw new Error("Version is not promotable.");
-      if (store.sites[target.siteId]?.status === "experimental") throw new Error("experimental_site_not_publishable");
       const artifact = store.artifacts[target.artifactId];
       if (!artifact || artifact.qa.hardGate !== "passed") throw new Error("Version artifact has not passed the hard gate.");
       const input = store.buildInputs[target.publicBuildInputId];
@@ -309,12 +319,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       if (!input || !state || !intent || input.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, input.intent)) {
         throw new Error("stale_candidate");
       }
-      if (input.business.assets.some((asset) => !["preclaim_safe", "customer_granted"].includes(asset.rightsStatus))) {
+      if (input.business.assets.some((asset) => !["platform_cleared", "owner_attested"].includes(asset.rightsStatus))) {
         throw new Error("candidate_contains_unpublishable_media");
       }
-      const latestApproval = Object.values(store.versionApprovals ?? {}).filter((item) => item.versionId === target.id && item.artifactHash === target.artifactHash)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-      if (latestApproval?.status !== "approved") throw new Error("candidate_requires_operator_approval");
       const prior = Object.values(store.versions).find((item) => item.siteId === target.siteId && item.status === "published");
       if (prior) prior.status = "superseded";
       target.status = "published";
@@ -335,11 +342,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     });
   }
 
-  saveRuntimePatch(patch: TrustedRuntimePatchV1) { return this.insertImmutable("runtimePatches", trustedRuntimePatchV1Schema.parse(patch)); }
+  saveRuntimePatch(patch: TrustedRuntimePatch) { return this.insertImmutable("runtimePatches", trustedRuntimePatchSchema.parse(patch)); }
   async getRuntimePatch(id: string) { return clone((await this.read()).runtimePatches[id]); }
   async getRuntimePatchByHash(hash: string) { return clone(Object.values((await this.read()).runtimePatches).find((patch) => patch.contentHash === hash)); }
-  saveRuntimeSeries(series: TrustedRuntimeSeriesV1) {
-    return this.write((store) => { store.runtimeSeries[series.id] = trustedRuntimeSeriesV1Schema.parse(series); });
+  saveRuntimeSeries(series: TrustedRuntimeSeries) {
+    return this.write((store) => { store.runtimeSeries[series.id] = trustedRuntimeSeriesSchema.parse(series); });
   }
   async getRuntimeSeries(id: string) { return clone((await this.read()).runtimeSeries[id]); }
   saveAgentSession(session: SiteAgentSession) {
@@ -357,6 +364,16 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       .sort((left, right) => left.leaseExpiresAt.localeCompare(right.leaseExpiresAt))
       .slice(0, limit)
       .map((session) => clone(session) as SiteAgentSession);
+  }
+  async enqueueAgentRun(run: SiteAgentRun) {
+    const value = siteAgentRunSchema.parse(run);
+    const state = await this.read();
+    const active = Object.values(state.runs).filter((candidate) =>
+      candidate.requestedBy === value.requestedBy && ["queued", "running"].includes(candidate.status)
+    ).length;
+    if (active >= 3) throw new Error("concurrent_project_limit");
+    await this.saveAgentRun(value);
+    return value;
   }
   saveAgentRun(run: SiteAgentRun) { return this.write((store) => { store.runs[run.id] = siteAgentRunSchema.parse(run); }); }
   async claimAgentRun(runId: string) {
@@ -491,7 +508,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => clone(item) as VerticalDemandEvent);
   }
 
-  private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "versionApprovals" | "runtimePatches">>(
+  private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "runtimePatches">>(
     key: K,
     value: LocalState[K][string]
   ) {
@@ -531,12 +548,12 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
 
   async bootstrapSite(input: BootstrapSiteV1Input) {
     const site = platformSiteRecordSchema.parse(input.site);
-    const state = businessStateV3Schema.parse(input.state);
-    const intent = siteIntentV3Schema.parse(input.intent);
-    const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
-    const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotV1Schema.parse(snapshot));
-    const assetRevisions = input.assetRevisions.map((revision) => assetRevisionV1Schema.parse(revision));
-    const publicBuildInput = sitePublicBuildInputV3Schema.parse(input.publicBuildInput);
+    const state = businessStateSchema.parse(input.state);
+    const intent = siteIntentSchema.parse(input.intent);
+    const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
+    const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotSchema.parse(snapshot));
+    const assetRevisions = input.assetRevisions.map((revision) => assetRevisionSchema.parse(revision));
+    const publicBuildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
     assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
     await requireData(this.client.rpc("bootstrap_site", {
       site_document: site,
@@ -552,8 +569,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   async createSite(site: PlatformSiteRecord) {
     const value = platformSiteRecordSchema.parse(site);
     await requireOk(this.client.from("sites").insert({
-      id: value.id, workspace_id: value.workspaceId, business_id: value.businessId, slug: value.slug, status: value.status,
-      is_primary: true, created_at: value.createdAt, updated_at: value.updatedAt
+      id: value.id, owner_user_id: value.ownerUserId, source_url: value.sourceUrl, normalized_source: value.normalizedSource,
+      business_id: value.businessId, slug: value.slug, status: value.status,
+      created_at: value.createdAt, updated_at: value.updatedAt
     }), "Create site");
   }
   async getSite(siteId: string) { return this.siteQuery(this.client.from("sites").select("*").eq("id", siteId).maybeSingle()); }
@@ -562,34 +580,59 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Record<string, unknown>[]>(this.client.from("sites").select("*").order("created_at", { ascending: false }), "List sites");
     return rows.map(siteFromRow);
   }
+  async getSitesByOwnerUserId(ownerUserId: string) {
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("sites").select("*").eq("owner_user_id", ownerUserId).order("created_at", { ascending: false }),
+      "List sites by owner"
+    );
+    return rows.map(siteFromRow);
+  }
+  async getSitesByIds(siteIds: string[]) {
+    const ids = [...new Set(siteIds)];
+    if (!ids.length) return [];
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("sites").select("*").in("id", ids), "Load sites by ID");
+    return rows.map(siteFromRow);
+  }
+  async assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string) {
+    const row = await requireData<Record<string, unknown> | null>(
+      this.client.from("sites")
+        .update({ owner_user_id: ownerUserId, updated_at: new Date().toISOString() })
+        .eq("id", siteId)
+        .or(`owner_user_id.is.null,owner_user_id.eq.${ownerUserId}`)
+        .select("*")
+        .maybeSingle(),
+      "Assign site owner"
+    );
+    return row ? siteFromRow(row) : undefined;
+  }
   async setCurrentPublicBuildInput(siteId: string, inputId: string) {
     const input = await this.getPublicBuildInput(inputId);
     if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
     await requireOk(this.client.from("sites").update({ current_public_build_input_id: inputId, updated_at: new Date().toISOString() }).eq("id", siteId), "Set current public build input");
   }
-  async saveSourceSnapshot(snapshot: SourceSnapshotV1) {
-    const value = sourceSnapshotV1Schema.parse(snapshot);
+  async saveSourceSnapshot(snapshot: SourceSnapshot) {
+    const value = sourceSnapshotSchema.parse(snapshot);
     const existing = await this.getSourceSnapshot(value.id);
     if (existing) {
       if (existing.contentHash !== value.contentHash) throw new Error(`Immutable source snapshot collision for ${value.id}.`);
       return;
     }
     await requireOk(this.client.from("source_snapshots").insert({
-      id: value.id, business_id: value.businessId, source_type: value.sourceType,
+      id: value.id, business_id: value.businessId, schema_version: value.schemaVersion, source_type: value.sourceType,
       source_url: value.sourceUrl, content_hash: value.contentHash, captured_at: value.capturedAt,
       payload: value.payload
     }), "Save source snapshot");
   }
   async getSourceSnapshot(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("source_snapshots").select("*").eq("id", id).maybeSingle(), "Load source snapshot");
-    return row ? sourceSnapshotV1Schema.parse({
-      schemaVersion: "source-snapshot-v1", id: row.id, businessId: row.business_id,
+    return row ? sourceSnapshotSchema.parse({
+      schemaVersion: row.schema_version, id: row.id, businessId: row.business_id,
       sourceType: row.source_type, sourceUrl: row.source_url ?? undefined,
       contentHash: row.content_hash, capturedAt: row.captured_at, payload: row.payload
     }) : undefined;
   }
-  async saveAssetRevision(revision: AssetRevisionV1) {
-    const value = assetRevisionV1Schema.parse(revision);
+  async saveAssetRevision(revision: AssetRevision) {
+    const value = assetRevisionSchema.parse(revision);
     const existing = await this.getAssetRevision(value.id);
     if (existing) {
       if (existing.contentHash !== value.contentHash) throw new Error(`Immutable asset revision collision for ${value.id}.`);
@@ -605,7 +648,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async getAssetRevision(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("asset_revisions").select("*").eq("id", id).maybeSingle(), "Load asset revision");
-    return row ? assetRevisionV1Schema.parse({
+    return row ? assetRevisionSchema.parse({
       schemaVersion: row.schema_version, id: row.id, assetId: row.asset_id, businessId: row.business_id,
       contentHash: row.content_hash, storageKey: row.storage_path, publicUrl: row.public_url ?? undefined,
       mimeType: row.mime_type, bytes: row.bytes, width: row.width ?? undefined, height: row.height ?? undefined,
@@ -615,7 +658,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async getAssetRevisionByStorageKey(storageKey: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("asset_revisions").select("*").eq("storage_path", storageKey).maybeSingle(), "Load asset revision by storage key");
-    return row ? assetRevisionV1Schema.parse({
+    return row ? assetRevisionSchema.parse({
       schemaVersion: row.schema_version, id: row.id, assetId: row.asset_id, businessId: row.business_id,
       contentHash: row.content_hash, storageKey: row.storage_path, publicUrl: row.public_url ?? undefined,
       mimeType: row.mime_type, bytes: row.bytes, width: row.width ?? undefined, height: row.height ?? undefined,
@@ -625,8 +668,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async isAssetRevisionPublic(id: string) {
     const row = await requireData<{ version_id: string } | null>(
-      this.client.from("site_version_assets").select("version_id,site_versions_v4!inner(status)")
-        .eq("asset_revision_id", id).eq("site_versions_v4.status", "published").limit(1).maybeSingle(),
+      this.client.from("site_version_assets").select("version_id,site_versions!inner(status)")
+        .eq("asset_revision_id", id).eq("site_versions.status", "published").limit(1).maybeSingle(),
       "Check public asset revision"
     );
     return Boolean(row);
@@ -636,43 +679,49 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return row ? siteFromRow(row) : undefined;
   }
 
-  async saveBusinessState(state: BusinessStateV3) {
-    const value = businessStateV3Schema.parse(state);
+  async saveBusinessState(state: BusinessState) {
+    const value = businessStateSchema.parse(state);
     const current = await this.getBusinessState(value.businessId);
     assertRevisionAdvance(current?.revision, value.revision, "business state");
-    await requireOk(this.client.from("business_states_v3").upsert({
+    await requireOk(this.client.from("business_states").upsert({
       business_id: value.businessId, site_id: value.siteId, schema_version: value.schemaVersion,
       revision: value.revision, state_hash: value.stateHash, state: value, updated_at: value.updatedAt
     }), "Save business state");
   }
   async getBusinessState(businessId: string) {
-    const row = await requireData<{ state: unknown } | null>(this.client.from("business_states_v3").select("state").eq("business_id", businessId).maybeSingle(), "Load business state");
-    return row ? businessStateV3Schema.parse(row.state) : undefined;
+    const row = await requireData<{ state: unknown } | null>(this.client.from("business_states").select("state").eq("business_id", businessId).maybeSingle(), "Load business state");
+    return row ? businessStateSchema.parse(row.state) : undefined;
   }
-  async saveSiteIntent(intent: SiteIntentV3) {
+  async getBusinessStatesByIds(businessIds: string[]) {
+    const ids = [...new Set(businessIds)];
+    if (!ids.length) return [];
+    const rows = await requireData<{ state: unknown }[]>(this.client.from("business_states").select("state").in("business_id", ids), "Load business states by ID");
+    return rows.map((row) => businessStateSchema.parse(row.state));
+  }
+  async saveSiteIntent(intent: SiteIntent) {
     return persistSiteIntentAuthority(this.client, intent);
   }
   async getSiteIntent(siteId: string) {
-    const row = await requireData<{ intent: unknown } | null>(this.client.from("site_intents_v3").select("intent").eq("site_id", siteId).maybeSingle(), "Load site intent");
-    return row ? siteIntentV3Schema.parse(row.intent) : undefined;
+    const row = await requireData<{ intent: unknown } | null>(this.client.from("site_intents").select("intent").eq("site_id", siteId).maybeSingle(), "Load site intent");
+    return row ? siteIntentSchema.parse(row.intent) : undefined;
   }
-  async saveFormDefinition(form: FormDefinitionV2) {
-    const value = formDefinitionV2Schema.parse(form);
-    await requireOk(this.client.from("form_definitions_v2").insert({
+  async saveFormDefinition(form: FormDefinition) {
+    const value = formDefinitionSchema.parse(form);
+    await requireOk(this.client.from("form_definitions").insert({
       id: value.id, site_id: value.siteId, schema_version: value.schemaVersion, revision: value.revision,
       status: value.status, definition: value, created_at: value.createdAt
     }), "Save form definition");
   }
   async getFormDefinition(id: string) {
     const row = await requireData<Record<string, unknown> | null>(
-      this.client.from("form_definitions_v2").select("definition,status").eq("id", id).maybeSingle(),
+      this.client.from("form_definitions").select("definition,status").eq("id", id).maybeSingle(),
       "Load form definition"
     );
-    return row ? formDefinitionV2Schema.parse({ ...formDefinitionV2Schema.parse(row.definition), status: row.status }) : undefined;
+    return row ? formDefinitionSchema.parse({ ...formDefinitionSchema.parse(row.definition), status: row.status }) : undefined;
   }
   async getPublishedFormDefinition(siteId: string, formId: string) {
     const version = await requireData<{ id: string } | null>(
-      this.client.from("site_versions_v4").select("id").eq("site_id", siteId).eq("status", "published").maybeSingle(),
+      this.client.from("site_versions").select("id").eq("site_id", siteId).eq("status", "published").maybeSingle(),
       "Load published version for form"
     );
     if (!version) return undefined;
@@ -684,8 +733,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const form = await this.getFormDefinition(formId);
     return form?.siteId === siteId && form.status === "published" ? form : undefined;
   }
-  async savePublicBuildInput(input: SitePublicBuildInputV3) {
-    const value = sitePublicBuildInputV3Schema.parse(input);
+  async savePublicBuildInput(input: SitePublicBuildInput) {
+    const value = sitePublicBuildInputSchema.parse(input);
     await requireOk(this.client.from("site_public_build_inputs").insert({
       id: value.id, site_id: value.siteId, business_id: value.businessId, schema_version: value.schemaVersion,
       business_state_revision: value.businessStateRevision, site_intent_revision: value.siteIntentRevision,
@@ -696,14 +745,14 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     await insertRefs(this.client, "site_public_build_input_assets", "input_id", value.id, "asset_revision_id", value.assetRevisionIds);
     await insertRefs(this.client, "site_public_build_input_forms", "input_id", value.id, "form_definition_id", value.forms.map((form) => form.id));
   }
-  async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputV3Schema); }
-  async commitVerifiedBuild(input: { revision: SiteWorkspaceRevisionV1; artifact: SiteBuildArtifactV1 }) {
-    const revision = siteWorkspaceRevisionV1Schema.parse(input.revision);
-    const artifact = siteBuildArtifactV1Schema.parse(input.artifact);
+  async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputSchema); }
+  async commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }) {
+    const revision = siteWorkspaceRevisionSchema.parse(input.revision);
+    const artifact = siteBuildArtifactSchema.parse(input.artifact);
     if (artifact.qa.hardGate !== "passed" || artifact.siteId !== revision.siteId || artifact.workspaceRevisionId !== revision.id) {
       throw new Error("Verified artifact and workspace revision do not match.");
     }
-    await requireData(this.client.rpc("commit_verified_site_build_v1", {
+    await requireData(this.client.rpc("commit_verified_site_build", {
       revision_document: revision,
       artifact_document: artifact
     }), "Commit verified site build");
@@ -712,10 +761,10 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("site_workspace_revisions").select("*").eq("id", id).maybeSingle(), "Load workspace revision");
     return row ? workspaceFromRow(row) : undefined;
   }
-  async getBuildArtifact(id: string) { return getJson(this.client, "site_build_artifacts", "artifact", id, siteBuildArtifactV1Schema); }
-  async createSiteVersion(version: SiteVersionV4) {
-    const value = siteVersionV4Schema.parse(version);
-    await requireOk(this.client.from("site_versions_v4").insert({
+  async getBuildArtifact(id: string) { return getJson(this.client, "site_build_artifacts", "artifact", id, siteBuildArtifactSchema); }
+  async createSiteVersion(version: SiteVersion) {
+    const value = siteVersionSchema.parse(version);
+    await requireOk(this.client.from("site_versions").insert({
       id: value.id, site_id: value.siteId, schema_version: value.schemaVersion, version_number: value.number,
       status: value.status, artifact_id: value.artifactId, workspace_revision_id: value.workspaceRevisionId,
       public_build_input_id: value.publicBuildInputId, version: value, created_by_kind: value.createdBy.kind,
@@ -728,7 +777,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async getSiteVersion(id: string) {
     const row = await requireData<Record<string, unknown> | null>(
-      this.client.from("site_versions_v4")
+      this.client.from("site_versions")
         .select("version,status,published_at,replaced_version_id,stale_reason")
         .eq("id", id)
         .maybeSingle(),
@@ -738,7 +787,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async listSiteVersions(siteId: string) {
     const rows = await requireData<Record<string, unknown>[]>(
-      this.client.from("site_versions_v4")
+      this.client.from("site_versions")
         .select("version,status,published_at,replaced_version_id,stale_reason")
         .eq("site_id", siteId)
         .order("version_number", { ascending: false }),
@@ -746,25 +795,11 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(siteVersionFromRow);
   }
-  async saveSiteVersionApproval(approval: SiteVersionApprovalV1) {
-    const value = siteVersionApprovalV1Schema.parse(approval);
-    await requireOk(this.client.from("site_version_approvals_v1").insert({
-      id: value.id, schema_version: value.schemaVersion, site_id: value.siteId, version_id: value.versionId,
-      artifact_hash: value.artifactHash, status: value.status, actor_id: value.actorId, note: value.note, created_at: value.createdAt
-    }), "Save site version approval");
-  }
-  async listSiteVersionApprovals(versionId: string) {
-    const rows = await requireData<Record<string, unknown>[]>(
-      this.client.from("site_version_approvals_v1").select("*").eq("version_id", versionId).order("created_at"),
-      "List site version approvals"
-    );
-    return rows.map(siteVersionApprovalFromRow);
-  }
   async promoteSiteVersion(versionId: string, actorId: string) {
-    await requireData(this.client.rpc("promote_site_version_v4", { target_version_id: versionId, actor_id: actorId }), "Promote site version");
+    await requireData(this.client.rpc("promote_site_version", { target_version_id: versionId, actor_id: actorId }), "Promote site version");
   }
-  async saveRuntimePatch(patch: TrustedRuntimePatchV1) {
-    const value = trustedRuntimePatchV1Schema.parse(patch);
+  async saveRuntimePatch(patch: TrustedRuntimePatch) {
+    const value = trustedRuntimePatchSchema.parse(patch);
     await requireOk(this.client.from("trusted_runtime_patches").insert({
       id: value.id, schema_version: value.schemaVersion, series_id: value.seriesId, version: value.version,
       content_hash: value.contentHash, storage_key: value.storageKey, provenance: value.provenance,
@@ -780,9 +815,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_patches").select("*").eq("content_hash", hash).maybeSingle(), "Load runtime patch by hash");
     return row ? runtimePatchFromRow(row) : undefined;
   }
-  async saveRuntimeSeries(series: TrustedRuntimeSeriesV1) {
-    const value = trustedRuntimeSeriesV1Schema.parse(series);
-    await requireData(this.client.rpc("set_trusted_runtime_series_v1", { series_document: value }), "Save runtime series");
+  async saveRuntimeSeries(series: TrustedRuntimeSeries) {
+    const value = trustedRuntimeSeriesSchema.parse(series);
+    await requireData(this.client.rpc("set_trusted_runtime_series", { series_document: value }), "Save runtime series");
   }
   async getRuntimeSeries(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_series").select("*").eq("id", id).maybeSingle(), "Load runtime series");
@@ -833,6 +868,16 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
         output_revision_id: value.outputRevisionId, model_id: value.modelId, run: value,
         started_at: value.startedAt, completed_at: value.completedAt
       }), "Save agent run"), "Save agent run");
+  }
+  async enqueueAgentRun(run: SiteAgentRun) {
+    const value = siteAgentRunSchema.parse(run);
+    const result = await this.client.rpc("enqueue_site_agent_run", { run_document: value });
+    if (result.error) {
+      if (/concurrent_project_limit/i.test(result.error.message)) throw new Error("concurrent_project_limit");
+      throw new Error(`Enqueue site agent run: ${result.error.message}`);
+    }
+    if (!result.data) throw new Error("Enqueue site agent run: no data returned");
+    return siteAgentRunSchema.parse(result.data);
   }
   async claimAgentRun(runId: string) {
     const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", { target_run_id: runId }), "Claim site agent run");
@@ -997,17 +1042,17 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
 
 export async function persistSiteIntentAuthority(
   client: ReturnType<typeof getSupabaseAdminClient>,
-  intent: SiteIntentV3
+  intent: SiteIntent
 ) {
-  const value = siteIntentV3Schema.parse(intent);
+  const value = siteIntentSchema.parse(intent);
   const currentRow = await requireData<{ intent: unknown } | null>(
-    client.from("site_intents_v3").select("intent").eq("site_id", value.siteId).maybeSingle(),
+    client.from("site_intents").select("intent").eq("site_id", value.siteId).maybeSingle(),
     "Load site intent for write"
   );
-  const current = currentRow ? siteIntentV3Schema.parse(currentRow.intent) : undefined;
+  const current = currentRow ? siteIntentSchema.parse(currentRow.intent) : undefined;
   assertRevisionAdvance(current?.revision, value.revision, "site intent");
   if (!current) {
-    await requireOk(client.from("site_intents_v3").insert({
+    await requireOk(client.from("site_intents").insert({
       id: value.id,
       site_id: value.siteId,
       schema_version: value.schemaVersion,
@@ -1021,7 +1066,7 @@ export async function persistSiteIntentAuthority(
   }
   if (current.id !== value.id) throw new Error("site_intent_identity_mismatch");
   const updated = await requireData<{ site_id: string } | null>(
-    client.from("site_intents_v3").update({
+    client.from("site_intents").update({
       schema_version: value.schemaVersion,
       revision: value.revision,
       intent_hash: value.intentHash,
@@ -1114,7 +1159,8 @@ async function insertRefs(
 
 function siteFromRow(row: Record<string, unknown>) {
   return platformSiteRecordSchema.parse({
-    id: row.id, workspaceId: row.workspace_id ?? undefined, businessId: row.business_id, slug: row.slug,
+    id: row.id, ownerUserId: row.owner_user_id ?? undefined, sourceUrl: row.source_url ?? undefined,
+    normalizedSource: row.normalized_source ?? undefined, businessId: row.business_id, slug: row.slug,
     status: row.status, publishedVersionId: row.published_version_id ?? undefined,
     currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     currentPublicBuildInputId: row.current_public_build_input_id ?? undefined,
@@ -1123,7 +1169,7 @@ function siteFromRow(row: Record<string, unknown>) {
 }
 
 function workspaceFromRow(row: Record<string, unknown>) {
-  return siteWorkspaceRevisionV1Schema.parse({
+  return siteWorkspaceRevisionSchema.parse({
     schemaVersion: row.schema_version, id: row.id, siteId: row.site_id,
     parentRevisionId: row.parent_revision_id ?? undefined, revisionNumber: row.revision_number,
     sourceHash: row.source_hash, sourceArchiveKey: row.source_archive_key, files: row.files,
@@ -1132,8 +1178,8 @@ function workspaceFromRow(row: Record<string, unknown>) {
 }
 
 function siteVersionFromRow(row: Record<string, unknown>) {
-  const version = siteVersionV4Schema.parse(row.version);
-  return siteVersionV4Schema.parse({
+  const version = siteVersionSchema.parse(row.version);
+  return siteVersionSchema.parse({
     ...version,
     status: row.status,
     publishedAt: row.published_at ?? undefined,
@@ -1143,7 +1189,7 @@ function siteVersionFromRow(row: Record<string, unknown>) {
 }
 
 function runtimePatchFromRow(row: Record<string, unknown>) {
-  return trustedRuntimePatchV1Schema.parse({
+  return trustedRuntimePatchSchema.parse({
     schemaVersion: row.schema_version, id: row.id, seriesId: row.series_id, version: row.version,
     contentHash: row.content_hash, storageKey: row.storage_key, provenance: row.provenance,
     securityStatus: row.security_status, compatibilityStatus: row.compatibility_status,
@@ -1152,7 +1198,7 @@ function runtimePatchFromRow(row: Record<string, unknown>) {
 }
 
 function runtimeSeriesFromRow(row: Record<string, unknown>) {
-  return trustedRuntimeSeriesV1Schema.parse({
+  return trustedRuntimeSeriesSchema.parse({
     schemaVersion: row.schema_version, id: row.id, name: row.name, activePatchId: row.active_patch_id,
     previousPatchId: row.previous_patch_id ?? undefined, updatedAt: row.updated_at, updatedBy: row.updated_by
   });
@@ -1231,13 +1277,6 @@ function runEventFromRow(row: Record<string, unknown>) {
     errorCode: row.error_code ?? undefined,
     startedAt: row.started_at,
     completedAt: row.completed_at ?? undefined
-  });
-}
-
-function siteVersionApprovalFromRow(row: Record<string, unknown>) {
-  return siteVersionApprovalV1Schema.parse({
-    schemaVersion: row.schema_version, id: row.id, siteId: row.site_id, versionId: row.version_id,
-    artifactHash: row.artifact_hash, status: row.status, actorId: row.actor_id, note: row.note, createdAt: row.created_at
   });
 }
 

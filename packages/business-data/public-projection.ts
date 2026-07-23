@@ -1,19 +1,19 @@
 import {
-  businessStateV3Schema,
-  formDefinitionV2Schema,
+  businessStateSchema,
+  formDefinitionSchema,
   publicFactSchema,
-  siteIntentV3Schema,
-  sitePublicBuildInputV3Schema,
-  verticalContextModuleV1Schema,
-  type BusinessStateV3,
-  type FormDefinitionV2,
-  type SiteIntentV3,
-  type SitePublicBuildInputV3,
-  type VerticalContextModuleV1
+  siteIntentSchema,
+  sitePublicBuildInputSchema,
+  verticalContextModuleSchema,
+  type BusinessState,
+  type FormDefinition,
+  type SiteIntent,
+  type SitePublicBuildInput,
+  type VerticalContextModule
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "./hash";
 
-export function siteIntentBuildContent(intent: SiteIntentV3) {
+export function siteIntentBuildContent(intent: SiteIntent) {
   const {
     agentAccessPolicy: _agentAccessPolicy,
     revision: _revision,
@@ -24,25 +24,25 @@ export function siteIntentBuildContent(intent: SiteIntentV3) {
   return content;
 }
 
-export function siteIntentMatchesBuildContent(current: SiteIntentV3, built: SiteIntentV3) {
+export function siteIntentMatchesBuildContent(current: SiteIntent, built: SiteIntent) {
   return stableJson(siteIntentBuildContent(current)) === stableJson(siteIntentBuildContent(built));
 }
 export type CreatePublicBuildInput = {
   id: string;
-  state: BusinessStateV3;
-  intent: SiteIntentV3;
-  forms: FormDefinitionV2[];
-  domainContext?: VerticalContextModuleV1;
+  state: BusinessState;
+  intent: SiteIntent;
+  forms: FormDefinition[];
+  domainContext?: VerticalContextModule;
   sourceSnapshotIds: string[];
   createdAt?: string;
   runtimeSeriesId?: string;
 };
 
-export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInputV3 {
-  const state = businessStateV3Schema.parse(input.state);
-  const intent = siteIntentV3Schema.parse(input.intent);
-  const domainContext = input.domainContext ? verticalContextModuleV1Schema.parse(input.domainContext) : undefined;
-  const forms = input.forms.map((form) => formDefinitionV2Schema.parse(form));
+export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInput {
+  const state = businessStateSchema.parse(input.state);
+  const intent = siteIntentSchema.parse(input.intent);
+  const domainContext = input.domainContext ? verticalContextModuleSchema.parse(input.domainContext) : undefined;
+  const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
 
   if (state.siteId !== intent.siteId || forms.some((form) => form.siteId !== state.siteId)) {
     throw new Error("Public build input authorities must belong to the same site.");
@@ -112,7 +112,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
   const createdAt = input.createdAt ?? new Date().toISOString();
 
   const withoutHash = {
-    schemaVersion: "site-public-build-input-v3" as const,
+    schemaVersion: 1 as const,
     id: input.id,
     siteId: state.siteId,
     businessId: state.businessId,
@@ -147,7 +147,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     assetRevisionIds
   };
 
-  return sitePublicBuildInputV3Schema.parse({
+  return sitePublicBuildInputSchema.parse({
     ...withoutHash,
     inputHash: sha256(stableJson(withoutHash))
   });

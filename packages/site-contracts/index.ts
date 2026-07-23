@@ -8,6 +8,10 @@ const publicUrl = z.string().url().refine((value) => {
   const protocol = new URL(value).protocol;
   return protocol === "https:" || protocol === "http:";
 }, "Only HTTP(S) URLs are allowed.");
+const canonicalHoursKey = z.string().regex(
+  /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)(?:-(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday))?$/
+);
+export const canonicalHoursSchema = z.record(canonicalHoursKey, z.string().min(1).max(120));
 
 export const verticalIdSchema = z.string().min(1).max(80).regex(/^[a-z][a-z0-9_]*$/);
 export type VerticalId = z.infer<typeof verticalIdSchema>;
@@ -22,7 +26,7 @@ export const factSourceRefSchema = z.object({
   confidence: z.number().min(0).max(1),
   ownerConfirmed: z.boolean()
 }).strict();
-export type FactSourceRefV1 = z.infer<typeof factSourceRefSchema>;
+export type FactSourceRef = z.infer<typeof factSourceRefSchema>;
 
 const factSchema = z.object({
   id: identifier,
@@ -44,18 +48,18 @@ const factSchema = z.object({
   source: factSourceRefSchema
 }).strict();
 
-export const businessFactV2Schema = factSchema.extend({
+export const businessFactSchema = factSchema.extend({
   publicEligible: z.boolean()
 }).strict();
-export type BusinessFactV2 = z.infer<typeof businessFactV2Schema>;
+export type BusinessFact = z.infer<typeof businessFactSchema>;
 
 export const publicFactSchema = factSchema.extend({
   publicEligible: z.literal(true)
 }).strict();
-export type PublicFactV1 = z.infer<typeof publicFactSchema>;
+export type PublicFact = z.infer<typeof publicFactSchema>;
 
-export const sourceSnapshotV1Schema = z.object({
-  schemaVersion: z.literal("source-snapshot-v1"),
+export const sourceSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   businessId: identifier,
   sourceType: z.enum(["website", "google_places", "owner_input", "operator_input"]),
@@ -64,10 +68,10 @@ export const sourceSnapshotV1Schema = z.object({
   capturedAt: isoTimestamp,
   payload: z.record(z.string(), z.unknown())
 }).strict();
-export type SourceSnapshotV1 = z.infer<typeof sourceSnapshotV1Schema>;
+export type SourceSnapshot = z.infer<typeof sourceSnapshotSchema>;
 
-export const assetRevisionV1Schema = z.object({
-  schemaVersion: z.literal("asset-revision-v1"),
+export const assetRevisionSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   assetId: identifier,
   businessId: identifier,
@@ -79,7 +83,7 @@ export const assetRevisionV1Schema = z.object({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   provenance: z.record(z.string(), z.unknown()).optional(),
-  rightsStatus: z.enum(["preclaim_safe", "customer_granted", "reference_only", "unknown"]),
+  rightsStatus: z.enum(["platform_cleared", "owner_attested", "reference_only", "unknown"]),
   attestation: z.object({
     attestedBy: identifier,
     attestedAt: isoTimestamp,
@@ -87,7 +91,7 @@ export const assetRevisionV1Schema = z.object({
   }).strict().optional(),
   createdAt: isoTimestamp
 }).strict();
-export type AssetRevisionV1 = z.infer<typeof assetRevisionV1Schema>;
+export type AssetRevision = z.infer<typeof assetRevisionSchema>;
 
 export const businessOfferingSchema = z.object({
   id: identifier,
@@ -104,7 +108,7 @@ export const businessOfferingSchema = z.object({
 }).strict().refine((value) => value.catalogId || value.customName, {
   message: "An offering must use a catalog ID or a custom name."
 });
-export type BusinessOfferingV2 = z.infer<typeof businessOfferingSchema>;
+export type BusinessOffering = z.infer<typeof businessOfferingSchema>;
 
 export const businessProofSchema = z.object({
   id: identifier,
@@ -116,7 +120,7 @@ export const businessProofSchema = z.object({
   expiresAt: isoTimestamp.optional(),
   confirmedAt: isoTimestamp.optional()
 }).strict();
-export type BusinessProofV2 = z.infer<typeof businessProofSchema>;
+export type BusinessProof = z.infer<typeof businessProofSchema>;
 
 export const assetRevisionRefSchema = z.object({
   assetId: identifier,
@@ -125,18 +129,18 @@ export const assetRevisionRefSchema = z.object({
   contentHash,
   storageKey: z.string().min(1).max(1024),
   publicUrl: publicUrl.optional(),
-  mimeType: assetRevisionV1Schema.shape.mimeType,
+  mimeType: assetRevisionSchema.shape.mimeType,
   alt: z.string().max(500),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
-  rightsStatus: z.enum(["preclaim_safe", "customer_granted", "reference_only"]),
+  rightsStatus: z.enum(["platform_cleared", "owner_attested", "reference_only"]),
   sourceFactIds: z.array(identifier),
   activeForFutureBuilds: z.boolean()
 }).strict();
-export type AssetRevisionRefV1 = z.infer<typeof assetRevisionRefSchema>;
+export type AssetRevisionRef = z.infer<typeof assetRevisionRefSchema>;
 
-export const businessStateV3Schema = z.object({
-  schemaVersion: z.literal("business-state-v3"),
+export const businessStateSchema = z.object({
+  schemaVersion: z.literal(1),
   businessId: identifier,
   siteId: identifier,
   revision: z.number().int().positive(),
@@ -163,7 +167,7 @@ export const businessStateV3Schema = z.object({
     latitude: z.number().min(-90).max(90).optional(),
     longitude: z.number().min(-180).max(180).optional(),
     googlePlaceId: z.string().max(255).optional(),
-    hours: z.record(z.string(), z.string().max(120)).optional(),
+    hours: canonicalHoursSchema.optional(),
     sourceFactIds: z.array(identifier)
   }).strict()).max(50),
   serviceAreas: z.array(z.object({
@@ -182,11 +186,11 @@ export const businessStateV3Schema = z.object({
     publicEligible: z.boolean(),
     sourceFactIds: z.array(identifier)
   }).strict()),
-  facts: z.array(businessFactV2Schema)
+  facts: z.array(businessFactSchema)
 }).strict();
-export type BusinessStateV3 = z.infer<typeof businessStateV3Schema>;
+export type BusinessState = z.infer<typeof businessStateSchema>;
 
-export const agentAccessPolicyV1Schema = z.object({
+export const agentAccessPolicySchema = z.object({
   search: z.enum(["allow", "disallow"]),
   aiInput: z.enum(["allow", "disallow"]),
   aiTrain: z.enum(["allow", "disallow"]),
@@ -209,10 +213,10 @@ export const agentAccessPolicyV1Schema = z.object({
     });
   }
 });
-export type AgentAccessPolicyV1 = z.infer<typeof agentAccessPolicyV1Schema>;
+export type AgentAccessPolicy = z.infer<typeof agentAccessPolicySchema>;
 
-export const siteIntentV3Schema = z.object({
-  schemaVersion: z.literal("site-intent-v3"),
+export const siteIntentSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   revision: z.number().int().positive(),
@@ -237,13 +241,13 @@ export const siteIntentV3Schema = z.object({
     notes: z.array(z.string().max(300)).max(12)
   }).strict(),
   enabledCapabilities: z.array(z.enum(["forms", "analytics", "maps", "proof", "gallery", "disclosure"])),
-  agentAccessPolicy: agentAccessPolicyV1Schema,
+  agentAccessPolicy: agentAccessPolicySchema,
   notes: z.array(z.string().max(400)).max(20)
 }).strict();
-export type SiteIntentV3 = z.infer<typeof siteIntentV3Schema>;
+export type SiteIntent = z.infer<typeof siteIntentSchema>;
 
-export const verticalContextModuleV1Schema = z.object({
-  schemaVersion: z.literal("vertical-context-module-v1"),
+export const verticalContextModuleSchema = z.object({
+  schemaVersion: z.literal(1),
   id: z.string().min(1).max(80),
   version: z.string().min(1).max(80),
   status: z.enum(["active", "test_only", "tombstoned"]),
@@ -266,10 +270,10 @@ export const verticalContextModuleV1Schema = z.object({
   skillRef: z.string().min(1).max(255),
   evaluationRef: z.string().min(1).max(255)
 }).strict();
-export type VerticalContextModuleV1 = z.infer<typeof verticalContextModuleV1Schema>;
+export type VerticalContextModule = z.infer<typeof verticalContextModuleSchema>;
 
-export const formDefinitionV2Schema = z.object({
-  schemaVersion: z.literal("form-definition-v2"),
+export const formDefinitionSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   revision: z.number().int().positive(),
@@ -286,10 +290,10 @@ export const formDefinitionV2Schema = z.object({
   successMessage: z.string().min(1).max(300),
   createdAt: isoTimestamp
 }).strict();
-export type FormDefinitionV2 = z.infer<typeof formDefinitionV2Schema>;
+export type FormDefinition = z.infer<typeof formDefinitionSchema>;
 
-export const sitePublicBuildInputV3Schema = z.object({
-  schemaVersion: z.literal("site-public-build-input-v3"),
+export const sitePublicBuildInputSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   businessId: identifier,
@@ -297,21 +301,21 @@ export const sitePublicBuildInputV3Schema = z.object({
   businessStateRevision: z.number().int().positive(),
   siteIntentRevision: z.number().int().positive(),
   inputHash: contentHash,
-  domainContext: verticalContextModuleV1Schema.optional(),
+  domainContext: verticalContextModuleSchema.optional(),
   business: z.object({
     name: z.string().min(1).max(200),
     description: z.string().max(1200).optional(),
-    contacts: businessStateV3Schema.shape.contacts,
-    locations: businessStateV3Schema.shape.locations,
-    serviceAreas: businessStateV3Schema.shape.serviceAreas,
+    contacts: businessStateSchema.shape.contacts,
+    locations: businessStateSchema.shape.locations,
+    serviceAreas: businessStateSchema.shape.serviceAreas,
     offerings: z.array(businessOfferingSchema).refine((items) => items.every((item) => item.visibility !== "hidden")),
     proof: z.array(businessProofSchema).refine((items) => items.every((item) => item.status === "confirmed")),
     assets: z.array(assetRevisionRefSchema).refine((items) => items.every((item) => item.rightsStatus !== undefined)),
-    links: businessStateV3Schema.shape.links.refine((items) => items.every((item) => item.publicEligible))
+    links: businessStateSchema.shape.links.refine((items) => items.every((item) => item.publicEligible))
   }).strict(),
   publicFacts: z.array(publicFactSchema),
-  intent: siteIntentV3Schema,
-  forms: z.array(formDefinitionV2Schema),
+  intent: siteIntentSchema,
+  forms: z.array(formDefinitionSchema),
   capabilityConfiguration: z.object({
     formsEndpoint: z.string().startsWith("/"),
     analyticsEndpoint: z.string().startsWith("/"),
@@ -321,7 +325,7 @@ export const sitePublicBuildInputV3Schema = z.object({
   sourceSnapshotIds: z.array(identifier),
   assetRevisionIds: z.array(identifier)
 }).strict();
-export type SitePublicBuildInputV3 = z.infer<typeof sitePublicBuildInputV3Schema>;
+export type SitePublicBuildInput = z.infer<typeof sitePublicBuildInputSchema>;
 
 export const workspaceFileSchema = z.object({
   path: z.string().min(1).max(300).regex(/^(?!\/)(?!.*\.\.)(?:[a-zA-Z0-9_.-]+\/)*[a-zA-Z0-9_.-]+$/),
@@ -329,8 +333,8 @@ export const workspaceFileSchema = z.object({
   bytes: z.number().int().nonnegative()
 }).strict();
 
-export const siteWorkspaceRevisionV1Schema = z.object({
-  schemaVersion: z.literal("site-workspace-revision-v1"),
+export const siteWorkspaceRevisionSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   parentRevisionId: identifier.optional(),
@@ -341,9 +345,9 @@ export const siteWorkspaceRevisionV1Schema = z.object({
   createdAt: isoTimestamp,
   createdBy: z.object({ kind: z.enum(["agent", "owner", "operator", "system"]), id: identifier }).strict()
 }).strict();
-export type SiteWorkspaceRevisionV1 = z.infer<typeof siteWorkspaceRevisionV1Schema>;
+export type SiteWorkspaceRevision = z.infer<typeof siteWorkspaceRevisionSchema>;
 
-export const claimDeclarationV1Schema = z.object({
+export const factDeclarationSchema = z.object({
   id: identifier,
   route: z.string().startsWith("/"),
   selector: z.string().min(1).max(500).optional(),
@@ -352,7 +356,7 @@ export const claimDeclarationV1Schema = z.object({
   sourceFactIds: z.array(identifier).min(1),
   autoDeclared: z.boolean()
 }).strict();
-export type ClaimDeclarationV1 = z.infer<typeof claimDeclarationV1Schema>;
+export type FactDeclaration = z.infer<typeof factDeclarationSchema>;
 
 export const artifactQaSchema = z.object({
   hardGate: z.enum(["passed", "failed"]),
@@ -369,8 +373,8 @@ export const artifactQaSchema = z.object({
   screenshotKeys: z.array(z.string().min(1).max(1024))
 }).strict();
 
-export const siteBuildArtifactV1Schema = z.object({
-  schemaVersion: z.literal("site-build-artifact-v1"),
+export const siteBuildArtifactSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   workspaceRevisionId: identifier,
@@ -391,7 +395,7 @@ export const siteBuildArtifactV1Schema = z.object({
     title: z.string().min(1).max(200),
     description: z.string().max(500)
   }).strict()).min(1),
-  claims: z.array(claimDeclarationV1Schema),
+  factDeclarations: z.array(factDeclarationSchema),
   capabilityBindings: z.array(z.object({
     id: identifier,
     kind: z.enum(["form", "analytics", "map", "gallery", "disclosure"]),
@@ -404,10 +408,10 @@ export const siteBuildArtifactV1Schema = z.object({
   sandboxImageDigest: contentHash,
   qa: artifactQaSchema
 }).strict();
-export type SiteBuildArtifactV1 = z.infer<typeof siteBuildArtifactV1Schema>;
+export type SiteBuildArtifact = z.infer<typeof siteBuildArtifactSchema>;
 
-export const siteVersionV4Schema = z.object({
-  schemaVersion: z.literal("site-version-v4"),
+export const siteVersionSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
   number: z.number().int().positive(),
@@ -425,22 +429,24 @@ export const siteVersionV4Schema = z.object({
   replacedVersionId: identifier.optional(),
   staleReason: z.string().max(1000).optional()
 }).strict();
-export type SiteVersionV4 = z.infer<typeof siteVersionV4Schema>;
+export type SiteVersion = z.infer<typeof siteVersionSchema>;
 
-export const siteElementSelectionV1Schema = z.object({
+export const siteElementSelectionSchema = z.object({
   route: z.string().startsWith("/"),
   selector: z.string().min(1).max(500).optional(),
   workspaceRevisionId: identifier.optional(),
   versionId: identifier.optional()
 }).strict();
-export type SiteElementSelectionV1 = z.infer<typeof siteElementSelectionV1Schema>;
+export type SiteElementSelection = z.infer<typeof siteElementSelectionSchema>;
 
 export const platformSiteRecordSchema = z.object({
   id: identifier,
-  workspaceId: identifier.optional(),
+  ownerUserId: z.string().uuid().optional(),
+  sourceUrl: publicUrl.optional(),
+  normalizedSource: publicUrl.optional(),
   businessId: identifier,
   slug: z.string().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  status: z.enum(["draft", "experimental", "active", "paused"]),
+  status: z.enum(["draft", "active", "paused"]),
   publishedVersionId: identifier.optional(),
   currentWorkspaceRevisionId: identifier.optional(),
   currentPublicBuildInputId: identifier.optional(),
@@ -484,33 +490,20 @@ export const operatorQueueItemSchema = z.object({
 });
 export type OperatorQueueItem = z.infer<typeof operatorQueueItemSchema>;
 
-export const siteVersionApprovalV1Schema = z.object({
-  schemaVersion: z.literal("site-version-approval-v1"),
-  id: identifier,
-  siteId: identifier,
-  versionId: identifier,
-  artifactHash: contentHash,
-  status: z.enum(["pending", "approved", "rejected"]),
-  actorId: identifier,
-  note: z.string().min(1).max(2000),
-  createdAt: isoTimestamp
-}).strict();
-export type SiteVersionApprovalV1 = z.infer<typeof siteVersionApprovalV1Schema>;
-
-export const sitePublicationReadinessV1Schema = z.object({
-  schemaVersion: z.literal("site-publication-readiness-v1"),
+export const sitePublicationReadinessSchema = z.object({
+  schemaVersion: z.literal(1),
   siteId: identifier,
   versionId: identifier,
   artifactHash: contentHash,
   status: z.enum(["ready", "blocked"]),
   blockers: z.array(z.object({
-    code: z.enum(["experimental_site", "stale_input", "objective_qa", "asset_rights", "operator_approval", "unsafe_form", "stranded_redirect"]),
+    code: z.enum(["stale_input", "objective_qa", "asset_rights", "unsafe_form", "stranded_redirect"]),
     message: z.string().min(1).max(2000),
     referenceId: identifier.optional()
   }).strict()),
   checkedAt: isoTimestamp
 }).strict();
-export type SitePublicationReadinessV1 = z.infer<typeof sitePublicationReadinessV1Schema>;
+export type SitePublicationReadiness = z.infer<typeof sitePublicationReadinessSchema>;
 
 export const siteAgentSessionSchema = z.object({
   schemaVersion: z.literal("site-agent-session"),
@@ -541,7 +534,7 @@ export const siteAgentMessageSchema = z.object({
   runId: identifier.optional(),
   role: z.enum(["owner", "agent", "operator", "system"]),
   content: z.string().min(1),
-  selection: siteElementSelectionV1Schema.optional(),
+  selection: siteElementSelectionSchema.optional(),
   createdAt: isoTimestamp
 }).strict();
 export type SiteAgentMessage = z.infer<typeof siteAgentMessageSchema>;
@@ -614,8 +607,8 @@ export const siteAgentRunSchema = z.object({
 }).strict();
 export type SiteAgentRun = z.infer<typeof siteAgentRunSchema>;
 
-export const trustedRuntimePatchV1Schema = z.object({
-  schemaVersion: z.literal("trusted-runtime-patch-v1"),
+export const trustedRuntimePatchSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   seriesId: identifier,
   version: z.string().min(1).max(80),
@@ -628,10 +621,10 @@ export const trustedRuntimePatchV1Schema = z.object({
   promotedAt: isoTimestamp.optional(),
   promotedBy: identifier.optional()
 }).strict();
-export type TrustedRuntimePatchV1 = z.infer<typeof trustedRuntimePatchV1Schema>;
+export type TrustedRuntimePatch = z.infer<typeof trustedRuntimePatchSchema>;
 
-export const trustedRuntimeSeriesV1Schema = z.object({
-  schemaVersion: z.literal("trusted-runtime-series-v1"),
+export const trustedRuntimeSeriesSchema = z.object({
+  schemaVersion: z.literal(1),
   id: identifier,
   name: z.string().min(1).max(120),
   activePatchId: identifier,
@@ -639,22 +632,22 @@ export const trustedRuntimeSeriesV1Schema = z.object({
   updatedAt: isoTimestamp,
   updatedBy: identifier
 }).strict();
-export type TrustedRuntimeSeriesV1 = z.infer<typeof trustedRuntimeSeriesV1Schema>;
+export type TrustedRuntimeSeries = z.infer<typeof trustedRuntimeSeriesSchema>;
 
 export const controlPlaneChangePayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("confirm_facts"), factIds: z.array(identifier).min(1).max(200) }).strict(),
   z.object({ kind: z.literal("update_contact"), phone: z.string().max(60).optional(), email: z.string().email().optional() }).strict(),
-  z.object({ kind: z.literal("update_hours"), locationId: identifier, hours: z.record(z.string(), z.string().max(120)) }).strict(),
+  z.object({ kind: z.literal("update_hours"), locationId: identifier, hours: canonicalHoursSchema }).strict(),
   z.object({ kind: z.literal("add_offering"), name: z.string().min(2).max(160), pageMode: z.enum(["none", "shared", "dedicated"]) }).strict(),
   z.object({ kind: z.literal("set_offering"), offeringId: identifier, enabled: z.boolean(), pageMode: z.enum(["none", "shared", "dedicated"]) }).strict(),
   z.object({ kind: z.literal("set_proof"), proofId: identifier, enabled: z.boolean() }).strict(),
   z.object({ kind: z.literal("set_asset_active"), assetId: identifier, active: z.boolean() }).strict(),
-  z.object({ kind: z.literal("register_asset"), asset: assetRevisionRefSchema, revision: assetRevisionV1Schema }).strict(),
+  z.object({ kind: z.literal("register_asset"), asset: assetRevisionRefSchema, revision: assetRevisionSchema }).strict(),
   z.object({ kind: z.literal("attest_asset_rights"), assetRevisionId: identifier, statement: z.string().min(20).max(1000) }).strict(),
   z.object({ kind: z.literal("update_external_link"), linkId: identifier, url: publicUrl }).strict(),
-  z.object({ kind: z.literal("update_site_intent"), patch: siteIntentV3Schema.partial().omit({ schemaVersion: true, id: true, siteId: true, revision: true, intentHash: true, updatedAt: true, agentAccessPolicy: true }) }).strict(),
-  z.object({ kind: z.literal("update_agent_access_policy"), policy: agentAccessPolicyV1Schema }).strict(),
-  z.object({ kind: z.literal("request_site_edit"), instruction: z.string().min(1).max(4000), selection: siteElementSelectionV1Schema.optional() }).strict()
+  z.object({ kind: z.literal("update_site_intent"), patch: siteIntentSchema.partial().omit({ schemaVersion: true, id: true, siteId: true, revision: true, intentHash: true, updatedAt: true, agentAccessPolicy: true }) }).strict(),
+  z.object({ kind: z.literal("update_agent_access_policy"), policy: agentAccessPolicySchema }).strict(),
+  z.object({ kind: z.literal("request_site_edit"), instruction: z.string().min(1).max(4000), selection: siteElementSelectionSchema.optional() }).strict()
 ]);
 export type ControlPlaneChangePayload = z.infer<typeof controlPlaneChangePayloadSchema>;
 

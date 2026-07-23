@@ -2,9 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import type { BusinessStateV3, SiteIntentV3 } from "@/packages/site-contracts";
+import type { BusinessState, SiteIntent } from "@/packages/site-contracts";
 
-export function BusinessDataControls({ siteId, state, intent }: { siteId: string; state: BusinessStateV3; intent: SiteIntentV3 }) {
+export function BusinessDataControls({ siteId, state, intent }: { siteId: string; state: BusinessState; intent: SiteIntent }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();

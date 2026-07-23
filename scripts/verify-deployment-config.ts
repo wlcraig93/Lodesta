@@ -14,7 +14,7 @@ const publicRoute = readFileSync("app/sites/[slug]/[[...path]]/route.ts", "utf8"
 const publicSite = readFileSync("packages/site-platform/public-site.ts", "utf8");
 const architecture = readFileSync("scripts/verify-site-authoring-architecture.ts", "utf8");
 
-for (const name of ["typecheck", "smoke:dev", "experiment:site", "verify:render-browser", "verify:site-authoring-platform", "verify:site-authoring-walking-skeleton", "verify:site-walking-skeleton", "verify:agent-ready-sites", "verify:r2-lifecycle", "verify:site-authoring-architecture"]) {
+for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
 for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY="]) {
@@ -32,7 +32,6 @@ assert(maintenanceRoute.includes("hasValidRecoveryWatchdogToken") && maintenance
 assert(prospectRoute.includes("after(async") && prospectRoute.includes("processNextProspectReportJob"), "Prospect reports must schedule immediate processing.");
 assert(publicRoute.includes("readVerifiedArtifactFile"), "Public serving must verify immutable artifact bytes.");
 assert(publicRoute.includes("loadPublishedSiteContext") && publicSite.includes('artifact.qa.hardGate !== "passed"'), "Public serving must reject unverified artifacts.");
-assert(architecture.includes("forbiddenFiles") && architecture.includes("forbiddenArchitecture"), "Architecture ratchet must reject retired contracts.");
-assert(architecture.includes("site-build-artifact-v1"), "Architecture ratchet must enforce V4 artifact finalization.");
+assert(architecture.includes("locallyDeclaredVersioned") && architecture.includes("canonicalMigration"), "Architecture ratchet must enforce canonical local contracts and the baseline.");
 
 process.stdout.write(`${JSON.stringify({ ok: true, web: "railway.toml", watchdog: "workers/recovery-watchdog/wrangler.jsonc", localWorker: "workers/runner.ts", generation: "site-authoring" }, null, 2)}\n`);

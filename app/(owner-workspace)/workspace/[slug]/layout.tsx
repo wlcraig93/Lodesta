@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { OwnerWorkspaceShell } from "@/components/OwnerWorkspaceShell";
+import { ProductAppShell } from "@/components/ProductAppShell";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export default async function SiteWorkspaceLayout({ children, params }: { childr
     published: Boolean(context.site.publishedVersionId)
   };
   return (
-    <OwnerWorkspaceShell
+    <ProductAppShell
       site={selected}
       sites={context.options}
       accessMode={context.accessMode}
@@ -26,6 +26,6 @@ export default async function SiteWorkspaceLayout({ children, params }: { childr
       authConfigured={context.authConfigured}
     >
       {children}
-    </OwnerWorkspaceShell>
+    </ProductAppShell>
   );
 }

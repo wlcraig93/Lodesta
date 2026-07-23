@@ -3,14 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { z } from "zod";
-import type { SiteRedirectRuleV1 } from "@/packages/platform-operations";
+import type { SiteRedirectRule } from "@/packages/platform-operations";
 import { parseJsonResponse } from "@/lib/client-json";
 
 const redirectResponseSchema = z.object({ error: z.string().optional() }).passthrough();
 
 export function RedirectRulesPanel({ siteId, redirects, routes }: {
   siteId: string;
-  redirects: SiteRedirectRuleV1[];
+  redirects: SiteRedirectRule[];
   routes: Array<{ path: string; title: string }>;
 }) {
   const router = useRouter();
@@ -37,7 +37,7 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
     router.refresh();
   }
 
-  async function setRuleStatus(redirect: SiteRedirectRuleV1) {
+  async function setRuleStatus(redirect: SiteRedirectRule) {
     const next = redirect.status === "active" ? "inactive" : "active";
     setStatus(`${next === "active" ? "Activating" : "Pausing"} redirect...`);
     const response = await fetch("/api/redirects", {

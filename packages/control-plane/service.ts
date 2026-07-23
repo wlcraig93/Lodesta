@@ -4,18 +4,18 @@ import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/
 import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform";
 import {
   operatorQueueItemSchema,
-  businessStateV3Schema,
-  assetRevisionV1Schema,
+  businessStateSchema,
+  assetRevisionSchema,
   controlPlaneChangeRequestSchema,
   siteAgentSessionSchema,
-  siteIntentV3Schema,
-  sourceSnapshotV1Schema,
-  type BusinessStateV3,
-  type AssetRevisionV1,
+  siteIntentSchema,
+  sourceSnapshotSchema,
+  type BusinessState,
+  type AssetRevision,
   type ControlPlaneChangePayload,
   type ControlPlaneChangeRequest,
-  type SiteIntentV3,
-  type SourceSnapshotV1
+  type SiteIntent,
+  type SourceSnapshot
 } from "@/packages/site-contracts";
 
 export class ControlPlaneService {
@@ -87,14 +87,14 @@ export class ControlPlaneService {
       let nextState = state;
       let nextIntent = intent;
       if (request.targetAuthority === "business_state") {
-        let attestedAsset: AssetRevisionV1 | undefined;
+        let attestedAsset: AssetRevision | undefined;
         if (request.payload.kind === "attest_asset_rights") {
           const currentAsset = await this.repository.getAssetRevision(request.payload.assetRevisionId);
           if (!currentAsset || currentAsset.businessId !== state.businessId) throw new Error("Asset revision was not found.");
-          attestedAsset = assetRevisionV1Schema.parse({
+          attestedAsset = assetRevisionSchema.parse({
             ...currentAsset,
             id: id("asset_revision"),
-            rightsStatus: "customer_granted",
+            rightsStatus: "owner_attested",
             attestation: { attestedBy: actorId, attestedAt: new Date().toISOString(), statement: request.payload.statement },
             createdAt: new Date().toISOString()
           });
@@ -184,11 +184,11 @@ export class ControlPlaneService {
     return site ? this.repository.getBusinessState(site.businessId) : undefined;
   }
 
-  private async ownerInputSnapshot(request: ControlPlaneChangeRequest): Promise<SourceSnapshotV1> {
+  private async ownerInputSnapshot(request: ControlPlaneChangeRequest): Promise<SourceSnapshot> {
     const now = new Date().toISOString();
     const payload = { requestId: request.id, requestedBy: request.requestedBy, change: request.payload };
-    return sourceSnapshotV1Schema.parse({
-      schemaVersion: "source-snapshot-v1", id: id("source"), businessId: request.businessId,
+    return sourceSnapshotSchema.parse({
+      schemaVersion: 1, id: id("source"), businessId: request.businessId,
       sourceType: "owner_input", contentHash: sha256(stableJson(payload)), capturedAt: now, payload
     });
   }
@@ -218,7 +218,7 @@ function policyFor(kind: ControlPlaneChangePayload["kind"]): {
   }
 }
 
-function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChangePayload, source: SourceSnapshotV1, attestedAsset?: AssetRevisionV1) {
+function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePayload, source: SourceSnapshot, attestedAsset?: AssetRevision) {
   const now = new Date().toISOString();
   const next = structuredClone(state);
   if (payload.kind === "confirm_facts") {
@@ -294,7 +294,7 @@ function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChange
     const asset = next.assets.find((item) => item.revisionId === payload.assetRevisionId);
     if (!asset) throw new Error("Asset reference was not found.");
     asset.revisionId = attestedAsset.id;
-    asset.rightsStatus = "customer_granted";
+    asset.rightsStatus = "owner_attested";
     asset.activeForFutureBuilds = true;
   } else if (payload.kind === "update_external_link") {
     const link = next.links.find((item) => item.id === payload.linkId);
@@ -309,15 +309,15 @@ function mutateBusinessState(state: BusinessStateV3, payload: ControlPlaneChange
   next.updatedAt = now;
   const { stateHash: _oldHash, ...withoutHash } = next;
   next.stateHash = sha256(stableJson(withoutHash));
-  return businessStateV3Schema.parse(next);
+  return businessStateSchema.parse(next);
 }
 
 function upsertFact(
-  state: BusinessStateV3,
-  kind: BusinessStateV3["facts"][number]["kind"],
+  state: BusinessState,
+  kind: BusinessState["facts"][number]["kind"],
   label: string,
   value: unknown,
-  source: SourceSnapshotV1,
+  source: SourceSnapshot,
   now: string
 ) {
   const fact = state.facts.find((item) => item.kind === kind);
@@ -329,11 +329,11 @@ function upsertFact(
   }
 }
 
-function mutateSiteIntent(intent: SiteIntentV3, patch: Partial<SiteIntentV3>) {
+function mutateSiteIntent(intent: SiteIntent, patch: Partial<SiteIntent>) {
   const next = { ...intent, ...patch, revision: intent.revision + 1, updatedAt: new Date().toISOString() };
   const { intentHash: _oldHash, ...withoutHash } = next;
   next.intentHash = sha256(stableJson(withoutHash));
-  return siteIntentV3Schema.parse(next);
+  return siteIntentSchema.parse(next);
 }
 
 function instructionFor(payload: ControlPlaneChangePayload) {

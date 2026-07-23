@@ -5,9 +5,7 @@ import { authorizedOperator } from "../auth";
 
 const bootstrapSchema = z.object({
   url: z.string().url(),
-  mode: z.enum(["draft", "experimental"]).default("draft"),
-  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
-  workspaceId: z.string().min(1).max(120).optional()
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional()
 }).strict();
 
 export async function POST(request: Request) {

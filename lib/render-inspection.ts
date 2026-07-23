@@ -7,7 +7,7 @@ import type {
   RenderViewportMetrics,
   RenderViewportName,
   RenderScreenshotArtifact
-} from "./presence-contracts";
+} from "@/packages/acquisition/presence-contracts";
 
 export type InspectUrlRenderInput = {
   url: string;

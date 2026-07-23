@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SiteVersionV4 } from "@/packages/site-contracts";
+import type { SiteVersion } from "@/packages/site-contracts";
 
-export function SiteVersionActions({ version }: { version: SiteVersionV4 }) {
+export function SiteVersionActions({ version }: { version: SiteVersion }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();

@@ -3,16 +3,12 @@ import { z } from "zod";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdmin, requireAdminOrSiteOwner } from "@/lib/security";
 import { normalizeCustomHostname } from "@/lib/domains";
-import { invalidateDomainResolution } from "@/lib/domain-resolution-cache";
 import { sitePlatformRepository } from "@/packages/platform-data";
-
-const activationNotice = "Domain activation may take up to 30 seconds to apply across all servers.";
 
 const domainSchema = z.object({
   siteId: z.string().min(1),
-  hostname: z.string().min(3),
-  provider: z.enum(["railway", "cloudflare_for_saas"]).optional()
-});
+  hostname: z.string().min(3)
+}).strict();
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -25,15 +21,6 @@ export async function POST(request: Request) {
 
   const site = await sitePlatformRepository.getSite(parsed.data.siteId);
   if (!site) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  if (parsed.data.provider === "railway" && !manualCustomDomainsAllowed()) {
-    return NextResponse.json(
-      {
-        error:
-          "Railway/manual custom domains are disabled in deployed mode. Use Cloudflare for SaaS or set LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS=true for an explicitly managed exception."
-      },
-      { status: 400 }
-    );
-  }
   let hostname: string;
   try {
     hostname = normalizeCustomHostname(parsed.data.hostname);
@@ -41,22 +28,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid hostname" }, { status: 400 });
   }
 
-  const existingDomain = await repository.getDomainByHostname(hostname);
-  if (existingDomain) {
-    invalidateDomainResolution(hostname);
-    if (existingDomain.siteId === parsed.data.siteId) return NextResponse.json({ ...existingDomain, activationNotice });
-    return NextResponse.json({ error: "Hostname is already connected to another site." }, { status: 409 });
-  }
-
   const domain = await repository.registerDomain({ ...parsed.data, hostname });
   if (!domain) return NextResponse.json({ error: "Unknown site" }, { status: 404 });
-  invalidateDomainResolution(domain.hostname);
-  return NextResponse.json({ ...domain, activationNotice });
-}
-
-function manualCustomDomainsAllowed() {
-  if (process.env.LODESTA_ALLOW_MANUAL_CUSTOM_DOMAINS === "true") return true;
-  return process.env.NODE_ENV !== "production" && process.env.LODESTA_REQUIRE_AUTH !== "true";
+  return NextResponse.json({ domain }, { status: 201 });
 }
 
 export async function GET(request: Request) {

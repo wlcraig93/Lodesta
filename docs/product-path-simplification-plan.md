@@ -23,20 +23,18 @@ There is no orchestration framework between the model and its workspace.
 
 ## Authority boundary
 
-The strict authorities remain versioned and fail loud: `BusinessStateV3`,
-`SiteIntentV3`, `SourceSnapshotV1`, `AssetRevisionV1`, `FormDefinitionV2`,
-`SitePublicBuildInputV3`, `SiteWorkspaceRevisionV1`, `SiteBuildArtifactV1`,
-`SiteVersionV4`, `TrustedRuntimeSeriesV1`, and `TrustedRuntimePatchV1`.
+The strict authorities remain versioned and fail loud: `BusinessState`,
+`SiteIntent`, `SourceSnapshot`, `AssetRevision`, `FormDefinition`,
+`SitePublicBuildInput`, `SiteWorkspaceRevision`, `SiteBuildArtifact`,
+`SiteVersion`, `TrustedRuntimeSeries`, and `TrustedRuntimePatch`.
 
-They have one TypeScript name each. There are no unversioned aliases for versioned wire
-contracts. Mutable owner truth advances monotonically; retained inputs, workspaces,
-artifacts, versions, and runtime patches remain immutable.
+They have one unsuffixed TypeScript name each and carry numeric `schemaVersion: 1` inside
+their retained payloads. Mutable owner truth advances monotonically; retained inputs,
+workspaces, artifacts, versions, and runtime patches remain immutable.
 
 Regenerable operational records use canonical unversioned names: `SiteAgentSession`,
 `SiteAgentRun`, and `SiteAgentRunEvent`. Because Lodesta has no production sites, the
-2026-07-22 migration is an assert-empty hard cut: an operator explicitly removes any
-pre-launch experimental site first, then the migration replaces the active run/event
-contracts and drops the obsolete edit-objective table. It does not translate historical
+canonical baseline is a rehearsed pre-launch hard cut. It does not translate historical
 attempts, retain archive tables, or create compatibility paths.
 
 ## Canonical flow
@@ -134,7 +132,7 @@ claims. Puffery, tone, layout preferences, and marketing advice are warnings.
 
 ## Policy-only changes and outcome reporting
 
-Agent-access policy is resolved from current `SiteIntentV3` at request/serving time. A
+Agent-access policy is resolved from current `SiteIntent` at request/serving time. A
 policy-only update changes the authority without creating a build input, agent run,
 workspace revision, artifact, or candidate. It does not stale an otherwise current
 candidate.
@@ -157,44 +155,46 @@ The standing implementation checks are:
 - `npm run typecheck`
 - `npm run verify:site-intent-persistence`
 - `npm run verify:site-agent-manager`
-- `npm run verify:site-authoring-platform`
+- `npm run verify:authoring`
 - `npm run verify:site-agent-workspace`
 - `npm run verify:site-sandbox-local`
 - `npm run verify:render-browser`
-- `npm run verify:site-authoring-architecture`
+- `npm run verify:architecture`
 - `npm run verify:artifact-storage-boundaries`
 - `npm run verify:trusted-runtime`
 - `npm run smoke:dev`
 
-The live walking skeleton remains the final environment-backed acceptance: ingest one
-real business, generate and inspect a multi-file candidate, perform an exact edit, prove
-policy-only isolation, and retain the private candidate for plumbing inspection.
+The signed-in onboarding and workspace flow is the final environment-backed acceptance:
+ingest one public source, generate and inspect a multi-file candidate, perform an exact
+edit, prove policy-only isolation, and publish to the unique Lodesta URL.
 
 ## Product refinement
 
-Private product experiments are deliberately rerunnable and unscored. Each invocation may
-create a distinct experimental site, retain objective findings and implementation
-provenance, and hand the candidate to the real workspace UI for continued editing.
+Private product projects are deliberately rerunnable and unscored. Each confirmed creation
+may create a distinct site from the same source and hand the candidate to the real workspace
+UI for continued editing.
 Subjective observations remain freeform notes. There are no frozen samples, fixed quality
 rubrics, mandatory edit batteries, or global admission verdicts. Those process structures
 may be designed later only from observed product behavior.
 
-This freedom ends at publication. Experimental sites cannot publish, and every real
-candidate still requires current canonical inputs, passing objective QA, usable assets,
-forms and redirects, and operator approval bound to the exact artifact.
+This freedom ends at publication. Every candidate requires current canonical inputs,
+passing objective QA, publishable assets, and valid forms and redirects. Subjective
+quality, source ownership, business identity, billing, and operator approval do
+not block publication.
 
 ## Coordinated rollout
 
 Implementation and local verification do not mutate shared infrastructure. Roll out the
 clean break as one coordinated release:
 
-1. prove the pre-launch agent run, event, and edit-objective tables are empty;
-2. apply migrations `202607220001` through `202607220003`;
-3. build and deploy the Cloudflare sandbox Worker and its updated container, then record
+1. rehearse the snapshot restore and prove the canonical baseline on a separate empty database;
+2. require the manifest-bound `reset-prelaunch:<manifest-hash>` confirmation;
+3. apply the sole canonical baseline while preserving Supabase Auth;
+4. build and deploy the Cloudflare sandbox Worker and its updated container, then record
    the deployed image digest in the code-owned platform manifest;
-4. deploy the web application and run worker against that exact manifest;
-5. install the one-day `agent-run-events/` object lifecycle rule; and
-6. run Supabase, deployed-sandbox, smoke, release-boundary, and live walking-skeleton
+5. deploy the web application and run worker against that exact manifest;
+6. install the one-day `agent-run-events/` object lifecycle rule; and
+7. run database, deployed-sandbox, smoke, release-boundary, and signed-in onboarding
    verification before allowing new website runs.
 
 The application and deployed-sandbox verifiers intentionally fail closed while either

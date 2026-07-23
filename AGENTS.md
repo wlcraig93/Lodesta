@@ -18,13 +18,13 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 ## Compatibility Boundary
 
 - Clean-breakable by default: admin/operator UI, settings, dashboards, intake/admin workflows, local dev tooling, docs, and internal component patterns.
-- Boundary-sensitive by default: finalized customer-site artifacts, trusted-runtime resolution, public `/sites/*` output, preview-token routes, SEO/robots/sitemap behavior, analytics/form submission surfaces, repository/schema contracts that back public/customer flows, auth, billing, webhooks, privacy, and URL-safety logic.
+- Boundary-sensitive by default: finalized customer-site artifacts, trusted-runtime resolution, public `/sites/*` output, preview routes, SEO/robots/sitemap behavior, analytics/form submission surfaces, repository/schema contracts that back public/customer flows, auth, custom domains, adoption invitations, privacy, and URL-safety logic.
 - If uncertain whether a utility, type, API handler, or component affects generated customer websites or public/customer flows, treat it as boundary-sensitive and confirm before changing it.
 - When intentionally changing a boundary-sensitive area, make the customer/public behavior explicit and update callers, docs, and tests in the same change.
 
 ## Simplification Doctrine
 
-- The website agent gets broad freedom while authoring. Facts, security, capabilities, and release integrity are enforced at the boundary: the verification gate, the release service, claim validation, and the trusted runtime.
+- The website agent gets broad freedom while authoring. Facts, security, capabilities, asset rights, and release integrity are enforced at the verification gate, release service, and trusted runtime.
 - When generation or editing fails or produces poor output, fix it by improving context, skills, prompts, tools, or the hard verification gate — never by adding orchestration between the model and its workspace.
 - Do not add planning phases, mandatory tool sequences, edit-anchor or replacement-count protocols, per-action budgets or counters, automatic critics, automatic repair continuations, or convergence checks. Reintroducing any of these requires an explicit product-owner decision recorded in a plan document.
 - The only standing run limits are the overall deadline, token budget, workspace size, and concurrency. Prefer deleting a constraint over tuning it.
@@ -32,14 +32,23 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 ## Stored Artifact Schema Changes
 
-- Stored artifact policy is two-tier. Strict authorities are normalized `BusinessStateV3`, `SiteIntentV3`, immutable `SourceSnapshotV1`, `AssetRevisionV1`, `FormDefinitionV2`, `SitePublicBuildInputV3`, `SiteWorkspaceRevisionV1`, `SiteBuildArtifactV1`, public `SiteVersionV4`, `TrustedRuntimeSeriesV1`, and `TrustedRuntimePatchV1`. Public rendering, owner truth, publish gates, form handling, runtime security, and auditability depend on these shapes.
-- Mutable business state and site intent evolve through typed control-plane changes and monotonically increasing revisions. Immutable source snapshots, asset revisions, form definitions, public build inputs, workspace revisions, build artifacts, runtime patches, and site versions are never rewritten or backfilled in place. Schema evolution creates a monotonic new schema version, and readers must support every retained version.
+- Stored artifact policy is two-tier. Strict authorities are normalized `BusinessState`, `SiteIntent`, immutable `SourceSnapshot`, `AssetRevision`, `FormDefinition`, `SitePublicBuildInput`, `SiteWorkspaceRevision`, `SiteBuildArtifact`, public `SiteVersion`, `TrustedRuntimeSeries`, and `TrustedRuntimePatch`. Each retained payload carries numeric `schemaVersion: 1`. Public rendering, owner truth, publish gates, form handling, runtime security, and auditability depend on these shapes.
+- Mutable business state and site intent evolve through typed control-plane changes and monotonically increasing revisions. Immutable source snapshots, asset revisions, form definitions, public build inputs, workspace revisions, build artifacts, runtime patches, and site versions are never rewritten in place. After production data exists, schema evolution increments the numeric payload version and readers support every retained version.
 - `SiteAgentRun`, `SiteAgentSession`, `SiteAgentRunEvent`, screenshots, transient build logs, and prompt/debug artifacts are regenerable intermediates. They may be added or reshaped through an explicit clean cut without historical backfills, but any intermediate that affects a candidate must carry producer, model, skill, input-hash, timestamp, and stale/regeneration provenance where practical.
-- `WorkspaceSourceSidecarV1` is an immutable derived artifact bound to a retained `SiteWorkspaceRevisionV1` by archive key/hash and source hash. It is never rewritten, uses delete-restrict semantics while its revision is retained, and may be regenerated only by an explicit operator command that verifies the retained workspace archive and revision manifest.
+- `WorkspaceSourceSidecar` is an immutable derived artifact bound to a retained `SiteWorkspaceRevision` by archive key/hash and source hash. It is never rewritten, uses delete-restrict semantics while its revision is retained, and may be regenerated only by an explicit operator command that verifies the retained workspace archive and revision manifest.
 - Source snapshots, asset revision binaries, form definitions, public build inputs, workspace archives, build-artifact bytes, and runtime patches referenced by a retained version must use delete-restrict or independent-copy semantics. Owner deletion marks mutable assets inactive for future versions; it never breaks a retained version.
 - Do not delete stored rows from migrations to satisfy a strict schema change; backfill or report them so an operator decides. Pre-launch test data may be deleted only by an explicit operator command before an assert-empty hard cutover.
 - Keep strict fail-loud assertions on boundary-sensitive surfaces (public `/sites/*`, owner workspace, APIs). Admin/operator surfaces must degrade legibly instead: soft-parse retained contracts and show a "stale schema - rebuild" notice, never a raw error page. Repository reads of failed internal runs may stay soft so repair surfaces can load them; authority writes assert.
 - When adding a new strict assertion, run the stored-data report first and prove zero violations or perform an explicit pre-launch hard cutover. Never add a compatibility reader without an external boundary requirement.
+
+## Account And Ownership
+
+- Authentication is the only identity requirement for creating and publishing a Lodesta-hosted project.
+- `sites.owner_user_id` is the sole owner authorization source. Owner access uses exact authenticated user-ID equality; email, source URL, business contact data, invitations, and acquisition records never authorize a site.
+- Source URLs are reusable and confer no ownership. Same-account matches may prompt for confirmation but never block creation or disclose another account.
+- Only verified DNS proof grants an exclusive custom hostname. Pending proof attempts are non-exclusive.
+- Application tables are server-only through service-role repositories. Browser Supabase clients are for Auth only; application tables use RLS with no `anon` or `authenticated` policies.
+- Account deletion is intentionally restricted while sites are owned. A future deletion flow must transfer or explicitly dispose of owned sites first.
 
 ## Secrets And Data
 

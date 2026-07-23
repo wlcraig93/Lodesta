@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { siteElementSelectionV1Schema } from "@/packages/site-contracts";
+import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow } from "@/packages/site-platform";
 import { authorizedSiteActor, canAccessAgentSession } from "../auth";
@@ -8,7 +8,7 @@ import { authorizedSiteActor, canAccessAgentSession } from "../auth";
 const discussionSchema = z.object({
   sessionId: z.string().min(1),
   message: z.string().min(1).max(6000),
-  selection: siteElementSelectionV1Schema.optional()
+  selection: siteElementSelectionSchema.optional()
 }).strict();
 
 export async function POST(request: Request) {

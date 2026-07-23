@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCall, ResponseInputItem, Tool } from "openai/resources/responses/responses";
 import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { sha256, stableJson } from "@/packages/business-data";
-import type { SiteElementSelectionV1, SitePublicBuildInputV3 } from "@/packages/site-contracts";
+import type { SiteElementSelection, SitePublicBuildInput } from "@/packages/site-contracts";
 import {
   managerCompletionSchema,
   managerDiscussionSchema,
@@ -198,10 +198,10 @@ export class WebsiteManagerAgent {
   }
 
   async discuss(input: {
-    buildInput: SitePublicBuildInputV3;
+    buildInput: SitePublicBuildInput;
     message: string;
     currentFiles?: WorkspaceSourceFile[];
-    selection?: SiteElementSelectionV1;
+    selection?: SiteElementSelection;
     signal?: AbortSignal;
   }) {
     const settings = await getSiteAuthoringModelSettings();

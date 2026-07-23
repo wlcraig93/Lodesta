@@ -1,50 +1,50 @@
 import { randomUUID } from "node:crypto";
 import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
-import { gatherPublicPresenceSignals, type PublicPresenceEnrichment } from "@/lib/public-presence";
+import { gatherPublicPresenceSignals, type PublicPresenceEnrichment } from "@/packages/acquisition/public-presence";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
-  assetRevisionV1Schema,
-  businessStateV3Schema,
-  formDefinitionV2Schema,
+  assetRevisionSchema,
+  businessStateSchema,
+  formDefinitionSchema,
   platformSiteRecordSchema,
-  siteIntentV3Schema,
-  sourceSnapshotV1Schema,
-  type AssetRevisionRefV1,
-  type AssetRevisionV1,
-  type BusinessOfferingV2,
-  type BusinessStateV3,
-  type FormDefinitionV2,
+  siteIntentSchema,
+  sourceSnapshotSchema,
+  type AssetRevisionRef,
+  type AssetRevision,
+  type BusinessOffering,
+  type BusinessState,
+  type FormDefinition,
   type PlatformSiteRecord,
-  type BusinessFactV2,
-  type SiteIntentV3,
-  type SourceSnapshotV1,
-  type VerticalContextModuleV1
+  type BusinessFact,
+  type SiteIntent,
+  type SourceSnapshot,
+  type VerticalContextModule
 } from "@/packages/site-contracts";
 import { matchVerticalContext } from "@/packages/vertical-context";
 import { sha256, stableJson } from "./hash";
-import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestionV2 } from "./generation-crawler";
+import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
 import { understandWebsite } from "./understanding";
 import { canonicalOfferingCandidates, type CanonicalOfferingCandidate } from "./offering-normalization";
 
-export type RetainedAssetBinaryV1 = {
-  revision: AssetRevisionV1;
+export type RetainedAssetBinary = {
+  revision: AssetRevision;
   bytes: Buffer;
 };
 
-export type WebsiteIngestionResultV2 = {
+export type WebsiteIngestionResult = {
   site: PlatformSiteRecord;
-  state: BusinessStateV3;
-  intent: SiteIntentV3;
-  forms: FormDefinitionV2[];
-  sourceSnapshots: SourceSnapshotV1[];
-  retainedAssets: RetainedAssetBinaryV1[];
+  state: BusinessState;
+  intent: SiteIntent;
+  forms: FormDefinition[];
+  sourceSnapshots: SourceSnapshot[];
+  retainedAssets: RetainedAssetBinary[];
   sourceUrl: string;
   crawl: CrawlAssessment;
-  generationIngestion: WebsiteGenerationIngestionV2;
+  generationIngestion: WebsiteGenerationIngestion;
   validationEligibility: "frozen_validation" | "private_review_only";
-  domainContext?: VerticalContextModuleV1;
+  domainContext?: VerticalContextModule;
 };
 
 export class WebsiteCrawlError extends Error {
@@ -59,10 +59,9 @@ export async function ingestWebsite(input: {
   slug?: string;
   siteId?: string;
   businessId?: string;
-  workspaceId?: string;
   now?: string;
   signal?: AbortSignal;
-}): Promise<WebsiteIngestionResultV2> {
+}): Promise<WebsiteIngestionResult> {
   let sourceUrl: string;
   try {
     sourceUrl = await assertPublicFetchUrl(input.url);
@@ -95,8 +94,8 @@ export async function ingestWebsite(input: {
   if (!name) throw new Error("The source website did not expose a business name.");
   const sourceContentHash = sha256(stableJson({ generationIngestion, crawl }));
   const sourceSnapshotId = sourceSnapshotIdForBusiness(businessId, sourceContentHash);
-  const sourceSnapshot = sourceSnapshotV1Schema.parse({
-    schemaVersion: "source-snapshot-v1",
+  const sourceSnapshot = sourceSnapshotSchema.parse({
+    schemaVersion: 1,
     id: sourceSnapshotId,
     businessId,
     sourceType: "website",
@@ -115,9 +114,9 @@ export async function ingestWebsite(input: {
     [page.url, page.evidenceClass] as const,
     [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
   ]));
-  const publicFacts: BusinessFactV2[] = [];
+  const publicFacts: BusinessFact[] = [];
   const addFact = (
-    kind: BusinessFactV2["kind"],
+    kind: BusinessFact["kind"],
     label: string,
     value: unknown,
     confidence = 0.78,
@@ -194,7 +193,7 @@ export async function ingestWebsite(input: {
     now,
     signal: input.signal
   });
-  const assets: AssetRevisionRefV1[] = retainedAssets.map(({ revision }, index) => ({
+  const assets: AssetRevisionRef[] = retainedAssets.map(({ revision }, index) => ({
     assetId: revision.assetId,
     revisionId: revision.id,
     kind: index === 0 && crawl.assetReferences.find((candidate) => candidate.url === revision.provenance?.sourceUrl)?.kind === "logo" ? "logo" : "photo",
@@ -231,7 +230,7 @@ export async function ingestWebsite(input: {
   }] : [];
 
   const stateWithoutHash = {
-    schemaVersion: "business-state-v3" as const,
+    schemaVersion: 1 as const,
     businessId,
     siteId,
     revision: 1,
@@ -250,10 +249,10 @@ export async function ingestWebsite(input: {
     links,
     facts: publicFacts
   };
-  const state = businessStateV3Schema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
+  const state = businessStateSchema.parse({ ...stateWithoutHash, stateHash: sha256(stableJson(stateWithoutHash)) });
   const slug = input.slug ?? safeSlug(name);
-  const form = formDefinitionV2Schema.parse({
-    schemaVersion: "form-definition-v2",
+  const form = formDefinitionSchema.parse({
+    schemaVersion: 1,
     id: `form_estimate_${idPart(randomUUID())}`,
     siteId,
     revision: 1,
@@ -282,7 +281,7 @@ export async function ingestWebsite(input: {
     { id: "page_contact", purpose: "contact" as const, slug: "contact", title: "Contact", required: true }
   ];
   const intentWithoutHash = {
-    schemaVersion: "site-intent-v3" as const,
+    schemaVersion: 1 as const,
     id: `intent_${idPart(randomUUID())}`,
     siteId,
     revision: 1,
@@ -307,10 +306,9 @@ export async function ingestWebsite(input: {
     },
     notes: []
   };
-  const intent = siteIntentV3Schema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
+  const intent = siteIntentSchema.parse({ ...intentWithoutHash, intentHash: sha256(stableJson(intentWithoutHash)) });
   const site = platformSiteRecordSchema.parse({
     id: siteId,
-    workspaceId: input.workspaceId,
     businessId,
     slug,
     status: "draft",
@@ -352,7 +350,7 @@ async function retainReferenceAssets(input: {
   signal?: AbortSignal;
 }) {
   const candidates = uniqueBy(input.crawl.assetReferences, (asset) => asset.url).slice(0, 8);
-  const results: RetainedAssetBinaryV1[] = [];
+  const results: RetainedAssetBinary[] = [];
   for (const [index, candidate] of candidates.entries()) {
     try {
       const url = await assertPublicFetchUrl(candidate.url);
@@ -367,8 +365,8 @@ async function retainReferenceAssets(input: {
       const contentHash = sha256(bytes);
       const scopedAssetHash = sha256(stableJson({ businessId: input.businessId, contentHash }));
       const assetId = `asset_source_${index + 1}_${scopedAssetHash.slice(7, 17)}`;
-      const revision = assetRevisionV1Schema.parse({
-        schemaVersion: "asset-revision-v1",
+      const revision = assetRevisionSchema.parse({
+        schemaVersion: 1,
         id: assetRevisionIdForBusiness(input.businessId, contentHash),
         assetId,
         businessId: input.businessId,
@@ -393,8 +391,8 @@ async function retainReferenceAssets(input: {
   return deduplicateRetainedAssets(results);
 }
 
-export function deduplicateRetainedAssets(assets: RetainedAssetBinaryV1[]) {
-  const retained = new Map<string, RetainedAssetBinaryV1>();
+export function deduplicateRetainedAssets(assets: RetainedAssetBinary[]) {
+  const retained = new Map<string, RetainedAssetBinary>();
   for (const asset of assets) {
     const existing = retained.get(asset.revision.id);
     if (!existing) {
@@ -475,8 +473,8 @@ function serviceIsSourceBacked(service: string, crawl: CrawlAssessment) {
 function offeringFromService(
   service: CanonicalOfferingCandidate,
   index: number,
-  addFact: (kind: BusinessFactV2["kind"], label: string, value: unknown, confidence?: number) => string | undefined
-): BusinessOfferingV2 {
+  addFact: (kind: BusinessFact["kind"], label: string, value: unknown, confidence?: number) => string | undefined
+): BusinessOffering {
   const factId = addFact("offering", "Service", service.sourceName, 0.72)!;
   return {
     id: `offering_${index + 1}_${safeSlug(service.name).slice(0, 60)}`,
@@ -493,9 +491,9 @@ function offeringFromService(
 function observedProof(
   crawl: CrawlAssessment,
   sourceSnapshotId: string,
-  facts: BusinessFactV2[],
+  facts: BusinessFact[],
   now: string
-): BusinessStateV3["proof"] {
+): BusinessState["proof"] {
   const candidates = crawl.pageSummaries
     .filter((page) => page.purposeTags.includes("reviews"))
     .flatMap((page) => page.sourceTextBlocks)
@@ -554,7 +552,7 @@ function resolveDomainContext(facts: ExtractedBusinessFacts) {
   return matchVerticalContext([...facts.categories, ...facts.services, facts.description ?? ""].join(" "));
 }
 
-function preferredBusinessTerm(domainContext?: VerticalContextModuleV1) {
+function preferredBusinessTerm(domainContext?: VerticalContextModule) {
   return domainContext?.terminology.business?.[0] ?? "business";
 }
 
@@ -574,7 +572,7 @@ function sameValue(left: unknown, right: unknown) {
   return normalizedText(displayValue(left)) === normalizedText(displayValue(right));
 }
 
-function normalizedImageMime(value: string | null): AssetRevisionV1["mimeType"] | undefined {
+function normalizedImageMime(value: string | null): AssetRevision["mimeType"] | undefined {
   const mime = value?.split(";")[0].trim().toLowerCase();
   return mime === "image/png" || mime === "image/jpeg" || mime === "image/webp" ? mime : undefined;
 }

@@ -28,7 +28,7 @@ async function main() {
       return print(post(`/api/site-versions/${encodeURIComponent(args[0])}/restore`, {}));
     case "connect-domain":
       requireArgs(command, args, 2);
-      return print(post("/api/domains", { siteId: args[0], hostname: args[1], provider: "cloudflare_for_saas" }));
+      return print(post("/api/domains", { siteId: args[0], hostname: args[1] }));
     case "refresh-domain":
       requireArgs(command, args, 1);
       return print(post("/api/domains/refresh", { domainId: args[0] }));
@@ -57,6 +57,6 @@ function headers() { return adminToken ? { authorization: `Bearer ${adminToken}`
 async function parse(response) { const text = await response.text(); const value = text ? JSON.parse(text) : null; if (!response.ok) throw new Error(`${response.status}: ${JSON.stringify(value)}`); return value; }
 async function print(value) { process.stdout.write(`${JSON.stringify(await value, null, 2)}\n`); }
 function requireArgs(command, args, count) { if (args.length < count) throw new Error(`${command} requires at least ${count} argument(s).`); }
-function help() { process.stdout.write(`Lodesta V4 admin CLI\n\ncreate-site-from-url <url> [slug]\nsite-workspace <siteId>\napply-edit <sessionId> <instruction>\nrun-status <runId>\npublish-version <versionId>\nrestore-version <versionId>\nconnect-domain <siteId> <hostname>\nrefresh-domain <domainId>\nrequest-change <siteId> <json>\ninspect-inquiries [siteId]\nprocess-runs [limit]\ncreate-outbound-campaign <name>\noutbound-summary [campaignId]\nhealth [deep]\n`); }
+function help() { process.stdout.write(`Lodesta admin CLI\n\ncreate-site-from-url <url> [slug]\nsite-workspace <siteId>\napply-edit <sessionId> <instruction>\nrun-status <runId>\npublish-version <versionId>\nrestore-version <versionId>\nconnect-domain <siteId> <hostname>\nrefresh-domain <domainId>\nrequest-change <siteId> <json>\ninspect-inquiries [siteId]\nprocess-runs [limit]\ncreate-outbound-campaign <name>\noutbound-summary [campaignId]\nhealth [deep]\n`); }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main().catch((error) => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exit(1); });

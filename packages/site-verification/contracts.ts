@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode } from "domhandler";
-import { claimDeclarationV1Schema } from "@/packages/site-contracts";
+import { factDeclarationSchema } from "@/packages/site-contracts";
 
 export const agentAuthoredRouteSchema = z.object({
   path: z.string().startsWith("/").max(180),
@@ -15,7 +15,7 @@ export const agentAuthoredArtifactSchema = z.object({
   siteName: z.string().min(1).max(200),
   sharedCss: z.string().min(1).max(200_000),
   routes: z.array(agentAuthoredRouteSchema).min(1).max(40),
-  claims: z.array(claimDeclarationV1Schema).max(500),
+  factDeclarations: z.array(factDeclarationSchema).max(500),
   capabilityBindings: z.array(z.object({
     id: z.string().min(1).max(160),
     kind: z.enum(["form", "analytics", "map", "gallery", "disclosure"]),
@@ -44,12 +44,12 @@ export function normalizeAgentAuthoredArtifact(value: unknown) {
   const routes = Array.isArray(artifact.routes)
     ? artifact.routes.filter((route): route is Record<string, unknown> => Boolean(route) && typeof route === "object")
     : [];
-  const claims = Array.isArray(artifact.claims)
-    ? artifact.claims.flatMap((claim, claimIndex) => normalizeAuthoredClaim(claim, claimIndex, routes))
-    : artifact.claims;
+  const factDeclarations = Array.isArray(artifact.factDeclarations)
+    ? artifact.factDeclarations.flatMap((declaration, declarationIndex) => normalizeFactDeclaration(declaration, declarationIndex, routes))
+    : artifact.factDeclarations;
   return {
     ...artifact,
-    claims,
+    factDeclarations,
     capabilityBindings: deriveCapabilityBindings(routes)
   };
 }
@@ -67,9 +67,9 @@ export function normalizeRoutePath(value: string) {
   return path === "/" ? path : path.replace(/\/$/, "");
 }
 
-function normalizeAuthoredClaim(claim: unknown, claimIndex: number, routes: Record<string, unknown>[]) {
-  if (!claim || typeof claim !== "object") return [claim];
-  const record = claim as Record<string, unknown>;
+function normalizeFactDeclaration(declaration: unknown, declarationIndex: number, routes: Record<string, unknown>[]) {
+  if (!declaration || typeof declaration !== "object") return [declaration];
+  const record = declaration as Record<string, unknown>;
   const text = typeof record.text === "string" ? record.text.trim() : "";
   const sourceFactIds = stringArray(record.sourceFactIds).length
     ? stringArray(record.sourceFactIds)
@@ -82,11 +82,11 @@ function normalizeAuthoredClaim(claim: unknown, claimIndex: number, routes: Reco
     const html = typeof route.bodyHtml === "string" ? visibleRouteText(route.bodyHtml) : "";
     return path && text && normalizedText(html).includes(normalizedText(text)) ? [path] : [];
   });
-  const claimRoutes = declaredRoute ? [declaredRoute] : matchingRoutes.length ? [...new Set(matchingRoutes)] : ["/"];
-  return claimRoutes.map((route, routeIndex) => ({
-    id: validIdentifier(record.id) && claimRoutes.length === 1
+  const declarationRoutes = declaredRoute ? [declaredRoute] : matchingRoutes.length ? [...new Set(matchingRoutes)] : ["/"];
+  return declarationRoutes.map((route, routeIndex) => ({
+    id: validIdentifier(record.id) && declarationRoutes.length === 1
       ? record.id
-      : `claim_authored_${claimIndex + 1}_${routeIndex + 1}`,
+      : `fact_declaration_authored_${declarationIndex + 1}_${routeIndex + 1}`,
     route,
     ...(typeof record.selector === "string" && record.selector.trim() ? { selector: record.selector.trim() } : {}),
     text,

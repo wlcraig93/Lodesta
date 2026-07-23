@@ -1,18 +1,18 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  trustedRuntimePatchV1Schema,
-  trustedRuntimeSeriesV1Schema,
-  type TrustedRuntimePatchV1,
-  type TrustedRuntimeSeriesV1
+  trustedRuntimePatchSchema,
+  trustedRuntimeSeriesSchema,
+  type TrustedRuntimePatch,
+  type TrustedRuntimeSeries
 } from "@/packages/site-contracts";
 import { sha256 } from "@/packages/business-data";
 
 export type RuntimeRegistry = {
-  getSeries(id: string): Promise<TrustedRuntimeSeriesV1 | undefined>;
-  getPatch(id: string): Promise<TrustedRuntimePatchV1 | undefined>;
-  savePatch(patch: TrustedRuntimePatchV1, bytes: Buffer): Promise<void>;
-  saveSeries(series: TrustedRuntimeSeriesV1): Promise<void>;
+  getSeries(id: string): Promise<TrustedRuntimeSeries | undefined>;
+  getPatch(id: string): Promise<TrustedRuntimePatch | undefined>;
+  savePatch(patch: TrustedRuntimePatch, bytes: Buffer): Promise<void>;
+  saveSeries(series: TrustedRuntimeSeries): Promise<void>;
 };
 
 export async function createSiteRuntimePatch(input: {
@@ -22,15 +22,15 @@ export async function createSiteRuntimePatch(input: {
   storageKey?: string;
   sourceRevision: string;
   builderVersion: string;
-  securityStatus?: TrustedRuntimePatchV1["securityStatus"];
-  compatibilityStatus?: TrustedRuntimePatchV1["compatibilityStatus"];
+  securityStatus?: TrustedRuntimePatch["securityStatus"];
+  compatibilityStatus?: TrustedRuntimePatch["compatibilityStatus"];
   bytes?: Buffer;
   createdAt?: string;
 }) {
   const bytes = input.bytes ?? await readFile(join(process.cwd(), "packages", "trusted-runtime", "site-runtime-v1.js"));
   const contentHash = sha256(bytes);
-  const patch = trustedRuntimePatchV1Schema.parse({
-    schemaVersion: "trusted-runtime-patch-v1",
+  const patch = trustedRuntimePatchSchema.parse({
+    schemaVersion: 1,
     id: input.id,
     seriesId: input.seriesId ?? "site-runtime-v1",
     version: input.version ?? `1.0.0+${contentHash.slice(7, 19)}`,
@@ -57,8 +57,8 @@ export async function promoteRuntimePatch(input: {
     throw new Error("Runtime patch must pass security and compatibility review before promotion.");
   }
   const current = await input.registry.getSeries(input.seriesId);
-  const updated = trustedRuntimeSeriesV1Schema.parse({
-    schemaVersion: "trusted-runtime-series-v1",
+  const updated = trustedRuntimeSeriesSchema.parse({
+    schemaVersion: 1,
     id: input.seriesId,
     name: current?.name ?? "Lodesta Site Runtime V1",
     activePatchId: patch.id,
@@ -91,6 +91,6 @@ export function runtimeSeriesPath(seriesId: string) {
   return `/_lodesta/runtime/${encodeURIComponent(seriesId)}.js`;
 }
 
-export function runtimePatchPath(patch: TrustedRuntimePatchV1) {
+export function runtimePatchPath(patch: TrustedRuntimePatch) {
   return `/_lodesta/runtime/patches/${patch.contentHash.slice("sha256:".length)}.js`;
 }

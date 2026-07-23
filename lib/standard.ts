@@ -1,4 +1,4 @@
-import type { StandardCriterion } from "./presence-contracts";
+import type { StandardCriterion } from "@/packages/acquisition/presence-contracts";
 
 export const standardCriteria: StandardCriterion[] = [
   {
@@ -11,7 +11,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Browsers can warn visitors away from insecure sites before they call, book, or submit a form.",
     generationRule: "Serve every published customer site over HTTPS through Railway or Cloudflare for SaaS.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "technical.healthy_response",
@@ -23,7 +22,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Customers and search engines may see errors before the business gets a chance to convert them.",
     generationRule: "Published sites must serve cacheable HTML with a successful status for every public page.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "technical.mobile_viewport",
@@ -35,7 +33,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Mobile visitors can see a zoomed-out desktop page and leave before contacting the business.",
     generationRule: "Render a viewport meta tag and responsive layout for every generated site.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "technical.mobile_performance",
@@ -47,7 +44,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Slow or unstable mobile pages make local visitors leave before calling, booking, or submitting a form.",
     generationRule: "Keep public pages lightweight, cacheable, image-optimized, and measured after publish with LCP, CLS, INP, and TTFB analytics.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.title.unique",
@@ -59,7 +55,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Weak search snippets lower local search click-through.",
     generationRule: "Generate page-specific title and meta description from business profile, service, and location.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.meta_description",
@@ -71,7 +66,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Weak snippets reduce local search click-through even when the page ranks.",
     generationRule: "Generate page-specific meta descriptions from business facts, services, and location.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.canonical",
@@ -83,7 +77,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Duplicate URL variants can dilute crawl signals and confuse indexing.",
     generationRule: "Render a canonical URL for every public page based on the mapped domain and page path.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.clean_urls",
@@ -95,7 +88,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Messy URL patterns weaken trust and make service/location pages harder to understand and share.",
     generationRule: "Render extensionless page slugs from the structured page model and keep canonical paths query-free.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.robots_txt",
@@ -105,9 +97,8 @@ export const standardCriteria: StandardCriterion[] = [
     checkMethod: "crawl",
     threshold: { robotsTxtRequired: true },
     businessConsequence: "A missing robots file is a maintenance signal and limits control over crawl behavior.",
-    generationRule: "Serve robots.txt for published sites and disallow tokenized pre-claim previews.",
+    generationRule: "Serve robots.txt for published sites and disallow private previews.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.sitemap",
@@ -119,7 +110,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Search engines may discover service and location pages more slowly.",
     generationRule: "Generate sitemap.xml from the published structured page model.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.local_business_schema",
@@ -131,7 +121,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Search engines have weaker structured understanding of the business.",
     generationRule: "Render LocalBusiness JSON-LD from verified BusinessProfile fields.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "seo.service_location_pages",
@@ -143,7 +132,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "A thin two-page site misses specific local-search intent for services and towns the business serves.",
     generationRule: "Generate dedicated pages for primary services and service areas from the structured BusinessProfile.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "conversion.mobile_click_to_call",
@@ -155,7 +143,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Mobile callers are lost when the phone number is not tappable.",
     generationRule: "Render a text phone link and a sticky mobile call action when phone is known.",
     auditEligible: true,
-    experimentEligible: true
   },
   {
     id: "conversion.lead_form",
@@ -167,7 +154,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Visitors who do not want to call have no low-friction way to become leads.",
     generationRule: "Render a contact form by default and store submissions as flexible JSON payloads.",
     auditEligible: true,
-    experimentEligible: true
   },
   {
     id: "conversion.primary_action_above_fold",
@@ -179,7 +165,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Visitors do not immediately know what action to take.",
     generationRule: "Place the primary CTA in the hero and repeat it after trust proof.",
     auditEligible: true,
-    experimentEligible: true
   },
   {
     id: "conversion.mobile_sticky_action",
@@ -191,7 +176,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "The conversion action scrolls out of reach on mobile.",
     generationRule: "Use sticky mobile CTA for call, booking, order, or form-first businesses.",
     auditEligible: true,
-    experimentEligible: true
   },
   {
     id: "trust.reviews_visible",
@@ -203,7 +187,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Visitors lack confidence that the business is credible.",
     generationRule: "Surface ratings, review count, testimonials, years in business, or credentials near conversion paths.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "trust.credentials_or_years",
@@ -215,7 +198,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Visitors hesitate when they cannot see why the business is credible enough to contact.",
     generationRule: "Include owner-verifiable proof such as credentials, years in business, team proof, testimonials, ratings, or project outcomes.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.service_area_clarity",
@@ -227,7 +209,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Local visitors may abandon if they cannot tell whether the business serves their area.",
     generationRule: "Show address, map, service areas, or local area pages from BusinessProfile facts.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.faqs",
@@ -239,7 +220,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Unanswered questions create friction before calls, bookings, orders, or form submissions.",
     generationRule: "Include FAQ sections on service, local-area, or home pages using fresh copy from structured facts.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "accessibility.image_alt",
@@ -251,7 +231,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Missing alt text hurts accessibility and weakens image-search context.",
     generationRule: "Every generated, licensed, uploaded, or customer-granted image receives descriptive alt text.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.home_services.emergency_cta",
@@ -263,7 +242,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Emergency-intent visitors may leave for a faster competitor.",
     generationRule: "If the business offers urgent service, include emergency service language and call CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.auto_body.before_after",
@@ -275,7 +253,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Prospects cannot quickly verify quality of repair work.",
     generationRule: "Include a before/after gallery or project proof section.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.restaurant.order_path",
@@ -287,7 +264,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Hungry visitors cannot quickly decide or transact.",
     generationRule: "Prioritize menu, order/reserve CTA, hours, location, and real food imagery.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.beauty_salon.gallery_booking",
@@ -299,7 +275,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Style-driven visitors need to see the work and book quickly before comparing another salon.",
     generationRule: "Use a gallery-forward hero or gallery section and a booking-first CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.med_spa.credentials_results",
@@ -311,7 +286,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "High-consideration aesthetic services need clinical trust before visitors request a consultation.",
     generationRule: "Include treatments, provider credentials, before/after proof, reviews, and consultation CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.law_firm.practice_credibility",
@@ -323,7 +297,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Legal prospects need confidence and a relevant practice path, not generic visual filler.",
     generationRule: "Use practice areas, attorney/team credentials, testimonials or results, and consultation CTA; avoid decorative galleries.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.dental.new_patient_path",
@@ -335,7 +308,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "New patients hesitate when they cannot evaluate services, insurance, team, and booking steps.",
     generationRule: "Include services, team, reviews, location, appointment CTA, and new-patient or insurance guidance.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.fitness.trial_schedule",
@@ -347,7 +319,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Prospects need to understand the workout and try it before committing.",
     generationRule: "Lead with trial/join CTA, class or service structure, trainers, social proof, and location.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.real_estate.valuation_contact",
@@ -359,7 +330,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Sellers and buyers convert when the agent gives a clear reason to make contact now.",
     generationRule: "Use a valuation/contact CTA, local expertise proof, testimonials, and listing or service context.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.landscaping.project_gallery",
@@ -371,7 +341,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Homeowners need visual proof, local coverage, and a low-friction quote path.",
     generationRule: "Include services, project gallery, service area, reviews, and quote CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.veterinary.team_new_patient",
@@ -383,7 +352,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Pet owners need to trust the care team and know how to book or call.",
     generationRule: "Include services, vet/team proof, new-patient information, reviews, hours, and appointment CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.creative_studio.portfolio_first",
@@ -395,7 +363,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Creative buyers evaluate the work before they read the copy.",
     generationRule: "Use portfolio/gallery-forward layout, packages or services, testimonials, and inquiry CTA.",
     auditEligible: true,
-    experimentEligible: false
   },
   {
     id: "content.general_local.local_spine",
@@ -407,7 +374,6 @@ export const standardCriteria: StandardCriterion[] = [
     businessConsequence: "Visitors need to know what the business does, why to trust it, and how to contact it.",
     generationRule: "Include hero CTA, services, trust proof, local signals, contact form, and footer NAP.",
     auditEligible: true,
-    experimentEligible: false
   }
 ];
 

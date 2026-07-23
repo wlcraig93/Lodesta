@@ -30,7 +30,7 @@ const prospectSchema = z.object({
   sourceUrl: z.string().url().optional(),
   previewToken: z.string().min(1).optional(),
   mailingCode: z.string().min(1).optional(),
-  status: z.enum(["queued", "mailed", "preview_viewed", "claim_started", "claimed", "published", "disqualified"]).optional(),
+  status: z.enum(["queued", "mailed", "preview_viewed", "adoption_started", "adopted", "published", "disqualified"]).optional(),
   metadata: z.record(z.union([z.string(), z.number(), z.boolean()])).optional()
 });
 

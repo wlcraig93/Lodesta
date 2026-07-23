@@ -1,14 +1,14 @@
-import { verticalContextModuleV1Schema, type VerticalContextModuleV1 } from "@/packages/site-contracts";
+import { verticalContextModuleSchema, type VerticalContextModule } from "@/packages/site-contracts";
 import { autoBodyContextModule } from "./auto-body";
 import { syntheticContextModule } from "./synthetic";
 
-const productionModules = new Map<string, VerticalContextModuleV1>([
-  [autoBodyContextModule.id, verticalContextModuleV1Schema.parse(autoBodyContextModule)]
+const productionModules = new Map<string, VerticalContextModule>([
+  [autoBodyContextModule.id, verticalContextModuleSchema.parse(autoBodyContextModule)]
 ]);
 
-const testModules = new Map<string, VerticalContextModuleV1>([
+const testModules = new Map<string, VerticalContextModule>([
   ...productionModules,
-  [syntheticContextModule.id, verticalContextModuleV1Schema.parse(syntheticContextModule)]
+  [syntheticContextModule.id, verticalContextModuleSchema.parse(syntheticContextModule)]
 ]);
 
 export function verticalContextFor(verticalId: string, options: { includeTestModules?: boolean } = {}) {

@@ -15,7 +15,7 @@ for (const retired of [
 ]) await assertMissing(retired);
 
 const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware] = await Promise.all([
-  readFile("components/OwnerWorkspaceShell.tsx", "utf8"),
+  readFile("components/ProductAppShell.tsx", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("lib/owner-workspace.ts", "utf8"),
   readFile(`${routeRoot}/page.tsx`, "utf8"),
@@ -29,9 +29,9 @@ const [shell, css, context, home, inbox, results, business, settings, account, r
   readFile("middleware.ts", "utf8")
 ]);
 
-for (const label of ["Home", "Website", "Inbox", "Results", "Business", "Settings"]) assert(shell.includes(label), `Workspace navigation is missing ${label}`);
-assert(shell.includes('sites.length <= 1') && shell.includes("Switch website"), "Single- and multi-site identity behavior is not explicit");
-assert(shell.includes('label: "Admin console"') && shell.includes("canAccessAdmin && !tokenAccess"), "Admin console access is not role-restricted inside the account menu");
+for (const label of ["Overview", "Website", "Inbox", "Results", "Business info", "Website settings"]) assert(shell.includes(label), `Workspace navigation is missing ${label}`);
+assert(shell.includes("All websites") && shell.includes("Add website"), "The website switcher is missing account-wide actions");
+assert(shell.includes('label: "Admin console"') && shell.includes("input.canAccessAdmin && !input.tokenAccess"), "Admin console access is not role-restricted inside the account menu");
 assert(shell.includes("AccountActionList") && shell.includes("owner-workspace-mobile-account"), "Desktop and mobile account actions do not share one canonical action list");
 assert(shell.includes("owner-workspace-mobile-nav") && shell.includes("owner-workspace-mobile-sheet"), "Mobile navigation does not use the bottom-tab and More-sheet contract");
 assert(css.includes("grid-template-columns: 220px") && css.includes("grid-template-columns: 64px"), "Desktop shell does not implement the 220px/64px navigation contract");
@@ -43,8 +43,8 @@ assert(inbox.includes('type InboxFilter = "all" | "needs_reply" | "active" | "wo
 assert(inbox.includes("router.replace") && inbox.includes("inquiry="), "Inbox selection is not shareable");
 assert(results.includes("standardCorrelations") && results.includes("context.canAccessAdmin ?"), "Results do not separate owner signals from admin telemetry");
 assert(business.includes("owner-business-section-nav") && business.includes("proof-media") && business.includes("site-preferences"), "Business information is not sectioned");
-assert(settings.includes("DomainConnectForm") && settings.includes("RedirectRulesPanel") && settings.includes("BillingPortalButton"), "Settings does not absorb domains, redirects, and billing");
-assert(account.includes("options.length === 1") && account.includes("redirect(`/workspace/"), "Single-site account entry does not open the workspace");
+assert(settings.includes("DomainConnectForm") && settings.includes("DomainRefreshButton") && settings.includes("RedirectRulesPanel"), "Settings does not expose proof-first domains and redirects");
+assert(account.includes("relationships.length === 1") && account.includes("relationships[0].nextHref"), "Single-relationship account entry does not open its next action");
 assert(repository.includes("getInquiry(siteId: string, inquiryId: string)") && repository.includes('.eq("site_id", siteId).eq("id", inquiryId)'), "Inquiry detail lookup is not site-scoped");
 assert(robots.includes('"/workspace/"'), "Workspace routes are not excluded from indexing");
 assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not protect workspace routes");

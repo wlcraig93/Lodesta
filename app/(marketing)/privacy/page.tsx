@@ -17,7 +17,7 @@ const privacySections = [
   },
   {
     title: "2. How we use information",
-    body: "We use information to provide and improve the service, generate and host websites, process forms, measure performance, secure the platform, communicate with users, and support billing or account workflows."
+    body: "We use information to provide and improve the service, generate and host websites, process forms, measure performance, secure the platform, communicate with users, and support account workflows."
   },
   {
     title: "3. Analytics and cookies",
@@ -25,7 +25,7 @@ const privacySections = [
   },
   {
     title: "4. Sharing and subprocessors",
-    body: "We may share information with service providers that help operate hosting, authentication, billing, storage, email, analytics, AI inference, security, and support systems. Customer inquiry content may be sent to Groq for GPT-OSS triage after Groq data controls and production disclosures are verified. Final subprocessor details should be listed before launch."
+    body: "We may share information with service providers that help operate hosting, authentication, storage, email, analytics, AI inference, security, and support systems. Customer inquiry content may be sent to Groq for GPT-OSS triage after Groq data controls and production disclosures are verified. Final subprocessor details should be listed before launch."
   },
   {
     title: "5. Customer and visitor data",
@@ -72,7 +72,7 @@ export default function PrivacyPage() {
         <section className="panel">
           <h2>Draft status</h2>
           <p>
-            This page is not legal advice and is intentionally generic. It exists so product, billing, and account flows
+            This page is not legal advice and is intentionally generic. It exists so product and account flows
             have a stable <code>/privacy</code> URL while final policy language is prepared.
           </p>
         </section>

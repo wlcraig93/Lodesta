@@ -1,77 +1,82 @@
 import "./load-env";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 
-for (const migration of [
-  "202607200001_agentic_site_platform_v1.sql",
-  "202607200002_agentic_site_publish_rights_gate.sql",
-  "202607200003_agentic_site_promotion_state.sql",
-  "202607200004_agentic_site_test_cleanup.sql",
-  "202607200005_atomic_verified_site_build.sql",
-  "202607200006_operator_authority_reconciliation.sql",
-  "202607200007_atomic_site_agent_run_claim.sql",
-  "202607200008_atomic_prospect_report_job_claim.sql",
-  "202607200009_agentic_readiness_test_cleanup.sql",
-  "202607200010_vertical_demand_events.sql",
-  "202607200011_atomic_site_bootstrap.sql",
-  "202607200012_site_redirects_v1.sql",
-  "202607200013_experimental_site_status.sql",
-  "202607200014_retire_agentic_readiness.sql",
-  "202607200015_experimental_cleanup_and_site_approvals.sql",
-  "202607200016_publication_readiness_v1.sql",
-  "202607200017_site_agent_observability_v1.sql",
-  "202607200018_domain_neutral_generation_v1.sql",
-  "202607200019_site_edit_objectives_v1.sql",
-  "202607200020_final_legacy_generation_cleanup.sql",
-  "202607200021_cost_optimized_sandbox_cutover.sql",
-  "202607210001_site_v3_hard_cutover.sql",
-  "202607220001_policy_only_site_intent.sql",
-  "202607220002_site_agent_needs_input.sql",
-  "202607220003_simple_site_authoring.sql"
+const migrationDirectory = "supabase/migrations";
+const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith(".sql"));
+assert.deepEqual(migrations, ["202607230001_canonical_baseline.sql"], "The public schema must have exactly one canonical migration.");
+const baseline = await readFile(`${migrationDirectory}/${migrations[0]}`, "utf8");
+
+const requiredTables = [
+  "businesses", "sites", "business_states", "site_intents", "source_snapshots", "asset_revisions",
+  "form_definitions", "site_public_build_inputs", "site_workspace_revisions", "site_build_artifacts",
+  "site_versions", "site_agent_sessions", "site_agent_runs", "website_setups", "adoption_invitations",
+  "domains", "active_domains", "prospect_reports", "prospect_report_leads", "prospect_report_jobs"
+];
+for (const table of requiredTables) {
+  assert(new RegExp(`create table ${table}\\s*\\(`).test(baseline), `Canonical table ${table} is missing.`);
+  assert(baseline.includes(`'${table}'`), `${table} is missing from the RLS/privilege loop.`);
+}
+const declaredTables = [...baseline.matchAll(/^create table ([a-z0-9_]+)\s*\(/gm)].map((match) => match[1]).sort();
+const rlsLoop = baseline.match(/foreach table_name in array array\[(.*?)\]\s*loop/s)?.[1] ?? "";
+const protectedTables = [...rlsLoop.matchAll(/'([a-z0-9_]+)'/g)].map((match) => match[1]).sort();
+assert.deepEqual(protectedTables, declaredTables, "Every application table must be present exactly once in the server-only RLS/privilege loop.");
+const requiredFunctions = [
+  "create_website_setup", "enqueue_site_agent_run", "link_website_setup", "claim_next_website_setup",
+  "cancel_website_setup", "update_website_setup_source", "retry_website_setup",
+  "claim_site_agent_run", "claim_domain_ownership", "consume_adoption_invitation",
+  "claim_prospect_report_job", "bootstrap_site", "commit_verified_site_build", "promote_site_version"
+];
+const declaredFunctions = [...baseline.matchAll(/^create function ([a-z0-9_]+)\s*\(/gm)].map((match) => match[1]).sort();
+const browserRevokedFunctions = [...baseline.matchAll(/^revoke all on function ([a-z0-9_]+)\s*\(/gm)].map((match) => match[1]).sort();
+assert.deepEqual(browserRevokedFunctions, declaredFunctions, "Every application function must be revoked from browser roles.");
+for (const name of requiredFunctions) {
+  assert(new RegExp(`create function ${name}\\s*\\(`).test(baseline), `Canonical function ${name} is missing.`);
+  assert(baseline.includes(`revoke all on function ${name}(`), `${name} is not revoked from browser roles.`);
+}
+for (const retired of [
+  "claims", "jobs", "site_version_approvals", "worker_heartbeats", "experiments", "experiment_learnings",
+  "agent_runs", "agent_run_spans", "agent_model_calls", "workspaces", "inquiry_deliveries",
+  "website_setups_v1", "site_versions_v4", "business_states_v3", "site_intents_v3", "form_definitions_v2"
 ]) {
-  const source = readFileSync(`supabase/migrations/${migration}`, "utf8");
-  assert(source.trim().length > 40, `${migration} is missing or empty.`);
+  assert(!new RegExp(`create table ${retired}\\s*\\(`).test(baseline), `Retired table ${retired} remains in the baseline.`);
+}
+assert(baseline.includes("owner_user_id uuid references auth.users(id) on delete restrict"), "Direct site ownership FK is missing.");
+assert(baseline.includes("website_setups_owner_source_idx") && !baseline.includes("unique index website_setups_owner_source"), "Source detection must be non-unique and account-scoped.");
+assert(baseline.includes("pg_advisory_xact_lock") && baseline.includes("private_user_active_operation_count"), "Combined capacity is not transactionally enforced.");
+assert(baseline.includes("hashtextextended('site-agent-global-capacity', 0)"), "Global authoring capacity is not claimed atomically.");
+assert(baseline.includes("enable row level security") && baseline.includes("revoke all on table %I from public, anon, authenticated"), "Server-only RLS posture is missing.");
+assert(baseline.includes("revoke all on schema public from public, anon, authenticated"), "Browser roles retain public-schema privileges.");
+const businessesBody = baseline.match(/create table businesses\s*\((.*?)\n\);/s)?.[1] ?? "";
+const businessColumns = [...businessesBody.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((match) => match[1]);
+assert.deepEqual(
+  businessColumns,
+  ["id", "name", "vertical", "created_at", "updated_at"],
+  "businesses must remain a minimal human-readable identity and foreign-key anchor."
+);
+
+if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
+  const admin = getSupabaseAdminClient();
+  for (const table of requiredTables) {
+    const { error } = await admin.from(table).select("*").limit(1);
+    assert(!error, `${table}: ${error?.message}`);
+  }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+  assert(url && anonKey, "Public Supabase Auth configuration is required for browser-role denial verification.");
+  const browser = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error: anonRead } = await browser.from("sites").select("id").limit(1);
+  assert(anonRead, "The anon role unexpectedly read an application table.");
+  const { error: anonWrite } = await browser.from("sites").insert({ id: "forbidden" });
+  assert(anonWrite, "The anon role unexpectedly mutated an application table.");
 }
 
-const client = getSupabaseAdminClient();
-const checks = await Promise.all([
-  count("sites"), count("business_states_v3"), count("site_intents_v3"), count("site_public_build_inputs"),
-  count("site_workspace_revisions"), count("site_build_artifacts"), count("site_versions_v4"),
-  count("site_agent_sessions"), count("site_agent_runs"), count("site_agent_messages"), count("site_agent_run_events"), count("site_agent_maintenance_leases"),
-  count("control_plane_change_requests"), count("site_operator_queue"),
-  count("trusted_runtime_patches"), count("trusted_runtime_series"), count("trusted_runtime_promotion_audits"),
-  count("vertical_demand_events"), count("site_redirects_v1"), count("site_version_approvals_v1")
-]);
-const legacyTablesAbsent = await Promise.all([
-  assertMissingRelation("generation_artifacts"),
-  assertMissingRelation("site_generations"),
-  assertMissingRelation("site_agent_runs_v2"),
-  assertMissingRelation("site_agent_trace_spans_v1"),
-  assertMissingRelation("site_edit_objectives_v1"),
-  assertMissingRelation("site_agent_maintenance_leases_v1"),
-  assertMissingRelation("control_plane_change_requests_v2"),
-  assertMissingRelation("vertical_demand_events_v1")
-]);
-const { error: telemetryError } = await client.from("site_agent_sessions")
-  .select("sandbox_last_started_at,sandbox_last_destroyed_at,sandbox_provisioned_ms,sandbox_destroy_attempts").limit(1);
-if (telemetryError) throw new Error(`site_agent_sessions telemetry: ${telemetryError.message}`);
-const { data: activeLease, error: leaseError } = await client.rpc("site_agent_maintenance_active", { task_name: `verify-${crypto.randomUUID()}` });
-if (leaseError || activeLease !== false) throw new Error(`site_agent_maintenance_active: ${leaseError?.message ?? "unexpected active result"}`);
-process.stdout.write(`${JSON.stringify({ ok: true, tables: Object.fromEntries(checks), legacyTablesAbsent, durableCutoverLease: true, sandboxCostTelemetry: true }, null, 2)}\n`);
-
-async function count(table: string): Promise<[string, number]> {
-  const column = table === "business_states_v3" ? "business_id" : table === "site_agent_maintenance_leases" ? "task" : "id";
-  // PostgREST can return a misleading 204 for HEAD requests against a missing relation.
-  // Fetch one row so schema-cache failures remain visible to this deployment check.
-  const { count: value, error } = await client.from(table).select(column, { count: "exact" }).limit(1);
-  if (error) throw new Error(`${table}: ${error.message}`);
-  return [table, value ?? 0];
-}
-
-async function assertMissingRelation(table: string) {
-  const { error } = await client.from(table).select("*").limit(1);
-  if (!error) throw new Error(`${table}: retired relation still exists`);
-  if (error.code !== "PGRST205") throw new Error(`${table}: expected missing-relation error PGRST205, received ${error.code ?? "unknown"}: ${error.message}`);
-  return table;
-}
+console.log(JSON.stringify({
+  ok: true,
+  migration: migrations[0],
+  tables: declaredTables.length,
+  functions: declaredFunctions.length,
+  live: process.env.LODESTA_VERIFY_LIVE_DATABASE === "true"
+}));

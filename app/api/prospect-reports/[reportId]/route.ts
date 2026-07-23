@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
-import { publicProspectReport } from "@/lib/prospect-reports";
+import { publicProspectReport } from "@/packages/acquisition/prospect-reports";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";

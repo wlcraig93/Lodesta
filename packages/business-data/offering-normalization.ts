@@ -1,4 +1,4 @@
-import type { VerticalContextModuleV1 } from "@/packages/site-contracts";
+import type { VerticalContextModule } from "@/packages/site-contracts";
 
 export type CanonicalOfferingCandidate = {
   sourceName: string;
@@ -6,7 +6,7 @@ export type CanonicalOfferingCandidate = {
   name: string;
 };
 
-export function canonicalOfferingCandidates(serviceNames: string[], domainContext?: VerticalContextModuleV1) {
+export function canonicalOfferingCandidates(serviceNames: string[], domainContext?: VerticalContextModule) {
   const seen = new Set<string>();
   const candidates: CanonicalOfferingCandidate[] = [];
   for (const sourceName of serviceNames) {

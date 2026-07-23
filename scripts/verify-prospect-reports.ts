@@ -9,7 +9,7 @@ import {
   runProspectPresenceReport,
   unmappedStandardCriteria,
   withProspectScanSlot
-} from "../lib/prospect-reports";
+} from "../packages/acquisition/prospect-reports";
 import { standardCriteria } from "../lib/standard";
 
 type CheckResult = {
@@ -132,7 +132,7 @@ async function main() {
   });
 
   record("google_field_masks", "Places requests only ask for allowed place-id and business URL/location fields.", () => {
-    const source = readFileSync(new URL("../lib/prospect-reports.ts", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../packages/acquisition/prospect-reports.ts", import.meta.url), "utf8");
     const masks = [...source.matchAll(/"X-Goog-FieldMask":\s*"([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(masks, [
       "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",

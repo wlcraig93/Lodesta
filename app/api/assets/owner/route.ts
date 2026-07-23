@@ -14,7 +14,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { createHash } from "node:crypto";
 import { controlPlaneService } from "@/packages/control-plane";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import type { AssetRevisionRefV1, AssetRevisionV1 } from "@/packages/site-contracts";
+import type { AssetRevisionRef, AssetRevision } from "@/packages/site-contracts";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 
 export const runtime = "nodejs";
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   }
 
   const auth = await getCurrentUser();
-  const attestedBy = auth.user?.email ?? auth.user?.id ?? "site_owner";
+  const attestedBy = auth.user?.id ?? "platform_admin";
 
   const site = await sitePlatformRepository.getSite(parsed.data.siteId);
   const state = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
@@ -140,8 +140,8 @@ function assetRegistrations(input: {
     const assetId = `asset_${crypto.randomUUID().replace(/-/g, "")}`;
     const revisionId = `assetrev_${crypto.randomUUID().replace(/-/g, "")}`;
     const publicUrl = absolutePublicAssetUrl(row.url);
-    const revision: AssetRevisionV1 = {
-      schemaVersion: "asset-revision-v1",
+    const revision: AssetRevision = {
+      schemaVersion: 1,
       id: revisionId,
       assetId,
       businessId: input.businessId,
@@ -150,11 +150,11 @@ function assetRegistrations(input: {
       publicUrl,
       mimeType: row.mimeType,
       bytes: row.bytes,
-      rightsStatus: "customer_granted",
+      rightsStatus: "owner_attested",
       attestation: { attestedBy: input.attestedBy, attestedAt: now, statement: "Owner attests they own this image or hold rights to use it." },
       createdAt: now
     };
-    const asset: AssetRevisionRefV1 = {
+    const asset: AssetRevisionRef = {
       assetId,
       revisionId,
       kind: input.kind,
@@ -163,7 +163,7 @@ function assetRegistrations(input: {
       storageKey: row.storagePath,
       publicUrl,
       mimeType: row.mimeType,
-      rightsStatus: "customer_granted",
+      rightsStatus: "owner_attested",
       sourceFactIds: [],
       activeForFutureBuilds: true
     };
@@ -177,7 +177,7 @@ type OwnerAssetRow = {
   rightsConfirmed: boolean;
   contentHash: string;
   storagePath: string;
-  mimeType: AssetRevisionV1["mimeType"];
+  mimeType: AssetRevision["mimeType"];
   bytes: number;
 };
 
@@ -381,7 +381,7 @@ async function storeOwnerAssetUpload(input: {
     rightsConfirmed: input.upload.rightsConfirmed,
     contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
     storagePath: stored.storagePath,
-    mimeType: input.upload.mimeType as AssetRevisionV1["mimeType"],
+    mimeType: input.upload.mimeType as AssetRevision["mimeType"],
     bytes: stored.bytes
   };
 }

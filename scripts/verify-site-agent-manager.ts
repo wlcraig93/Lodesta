@@ -18,7 +18,7 @@ import { Fact } from "../platform/sdk";
 import { Hero } from "./components/Hero";
 export const siteDefinition = {
   siteName: "Northstar Collision Repair",
-  claims: [], capabilityBindings: [],
+  factDeclarations: [], capabilityBindings: [],
   routes: [{ path: "/", title: "Northstar Collision Repair", description: "Collision repair", element: <main><Hero /><h1><Fact id="business:name" /></h1></main> }]
 };`;
 const heroSource = `import React from "react";

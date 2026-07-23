@@ -2,12 +2,12 @@
 
 Lodesta treats website ownership and platform administration as separate authorities:
 
-- A user sees a website in owner mode only through a completed claim matching the authenticated user ID or email.
+- A user sees a website in owner mode only when `sites.owner_user_id` exactly matches the authenticated user ID.
 - A human administrator is authorized by the trusted Supabase Auth metadata value `app_metadata.lodesta_roles`, which must contain `platform_admin`.
 - `user_metadata` never grants platform access because an authenticated user can edit it.
 - `LODESTA_ADMIN_TOKEN` remains the machine/operator credential for APIs and CLI workflows.
 
-All authenticated users enter through `/account`. A platform administrator with a claim receives the normal owner experience for those claimed websites and can open the separate admin console from the account menu. Opening an unclaimed website from its admin record uses the visibly labeled admin-preview context and limits the owner-style site switcher to that website.
+All authenticated users enter through `/account`. A platform administrator receives the normal owner experience for websites assigned to their user ID and can open the separate admin console from the account menu. Opening an unowned website from its admin record uses the visibly labeled admin-preview context and limits the owner-style site switcher to that website.
 
 ## Grant or revoke a human administrator
 
@@ -24,7 +24,7 @@ Before deploying the clean break from `LODESTA_ADMIN_USER_ID`, grant the existin
 
 Use two distinct synthetic, non-customer sites and two separate browser profiles:
 
-1. The founder profile has `platform_admin` plus a completed claim for the founder demo site.
-2. The owner-QA profile has no platform role and a completed claim for a separate QA site.
+1. The founder profile has `platform_admin` and directly owns the founder demo site.
+2. The owner-QA profile has no platform role and directly owns a separate QA site.
 
-Verify that both profiles land in `/account`; each owner inventory contains only its claimed site; only the founder sees Admin console; the owner-QA profile receives no admin access; and an unclaimed site opened by the founder is labeled Admin preview. Keep account emails, Auth user IDs, magic links, and credentials out of source control and screenshots.
+Verify that both profiles land in `/account`; each owner inventory contains only its owned site; only the founder sees Admin console; the owner-QA profile receives no admin access; and an unowned site opened by the founder is labeled Admin preview. Keep account emails, Auth user IDs, magic links, and credentials out of source control and screenshots.

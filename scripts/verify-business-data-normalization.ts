@@ -68,14 +68,28 @@ const repeatedAssetRevision = assetRevisionSchema.parse({
   storageKey: `site-assets/business_repeated_content/${"a".repeat(64)}`,
   mimeType: "image/png",
   bytes: 4,
-  provenance: { source: "website_reference", sourceUrl: "https://example.com/image.png" },
-  rightsStatus: "reference_only",
+  origin: "source_website",
+  provenance: {
+    origin: "source_website",
+    sourceUrl: "https://example.com/image.png",
+    sourcePageUrl: "https://example.com/",
+    sourceSnapshotId: "source_example"
+  },
   createdAt: "2026-07-21T00:00:00.000Z"
 });
 assert.equal(deduplicateRetainedAssets([
   { revision: repeatedAssetRevision, bytes: Buffer.from("same") },
   {
-    revision: { ...repeatedAssetRevision, assetId: "asset_source_2", provenance: { source: "website_reference", sourceUrl: "https://cdn.example.com/image.png" } },
+    revision: {
+      ...repeatedAssetRevision,
+      assetId: "asset_source_2",
+      provenance: {
+        origin: "source_website",
+        sourceUrl: "https://cdn.example.com/image.png",
+        sourcePageUrl: "https://example.com/",
+        sourceSnapshotId: "source_example"
+      }
+    },
     bytes: Buffer.from("same")
   }
 ]).length, 1);

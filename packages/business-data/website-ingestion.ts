@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import sharp from "sharp";
 import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
-import { gatherPublicPresenceSignals, type PublicPresenceEnrichment } from "@/packages/acquisition/public-presence";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
@@ -26,8 +26,8 @@ import { matchVerticalContext } from "@/packages/vertical-context";
 import { WebsiteCrawlError } from "./crawl-errors";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
-import { understandWebsite } from "./understanding";
 import { canonicalOfferingCandidates, type CanonicalOfferingCandidate } from "./offering-normalization";
+import { researchBusiness, type WebResearchUsage } from "./web-research";
 
 export type RetainedAssetBinary = {
   revision: AssetRevision;
@@ -44,6 +44,7 @@ export type WebsiteIngestionResult = {
   sourceUrl: string;
   crawl: CrawlAssessment;
   generationIngestion: WebsiteGenerationIngestion;
+  researchUsage?: WebResearchUsage;
   validationEligibility: "frozen_validation" | "private_review_only";
   domainContext?: VerticalContextModule;
 };
@@ -55,6 +56,7 @@ export async function ingestWebsite(input: {
   businessId?: string;
   now?: string;
   signal?: AbortSignal;
+  researchMode?: "auto" | "disabled";
 }): Promise<WebsiteIngestionResult> {
   let sourceUrl: string;
   try {
@@ -69,25 +71,25 @@ export async function ingestWebsite(input: {
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
   const { ingestion: generationIngestion, crawl } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
+  const research = input.researchMode === "disabled"
+    ? undefined
+    : await researchBusiness({
+      businessId,
+      sourceUrl,
+      businessName: clean(crawl.extractedFacts.name) ?? clean(crawl.title),
+      locality: crawl.extractedFacts.address
+        ? [crawl.extractedFacts.address.city, crawl.extractedFacts.address.region].filter(Boolean).join(", ")
+        : undefined,
+      capturedAt: now,
+      signal: input.signal
+    });
 
-  const presence = await gatherPublicPresenceSignals({ url: sourceUrl, crawl });
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for production website ingestion; deterministic understanding is test-only.");
-  }
-  const understanding = await understandWebsite({
-    sourceUrl,
-    ingestion: generationIngestion,
-    publicPresence: presence,
-    signal: input.signal
-  });
-
-  const facts = mergeFacts(crawl.extractedFacts, presence, sourceUrl);
+  const facts = crawl.extractedFacts;
   const domainContext = resolveDomainContext(crawl.extractedFacts);
   const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
-  const understoodName = clean(understanding.businessName.value);
-  const sourceBackedName = preferBusinessNameCandidate(crawlName, understoodName, new URL(sourceUrl).hostname);
-  const name = clean(sourceBackedName) ?? clean(facts.name);
-  if (!name) throw new Error("The source website did not expose a business name.");
+  const sourceBackedName = preferBusinessNameCandidate(crawlName, undefined, new URL(sourceUrl).hostname);
+  const identityStatus = clean(sourceBackedName) ? "verified" as const : "provisional" as const;
+  const name = clean(sourceBackedName) ?? hostnameBusinessName(sourceUrl);
   const sourceContentHash = sha256(stableJson({ generationIngestion, crawl }));
   const sourceSnapshotId = sourceSnapshotIdForBusiness(businessId, sourceContentHash);
   const sourceSnapshot = sourceSnapshotSchema.parse({
@@ -99,9 +101,7 @@ export async function ingestWebsite(input: {
     contentHash: sourceContentHash,
     capturedAt: now,
     payload: {
-      ingestion: generationIngestion,
-      publicPresence: presence,
-      understanding
+      ingestion: generationIngestion
     }
   });
 
@@ -146,10 +146,10 @@ export async function ingestWebsite(input: {
     return id;
   };
 
-  const understoodNameEvidence = sameValue(name, understoodName)
-    ? understanding.businessName.evidence.find((reference) => reference.evidenceClass === "first_party")
+  const nameFactId = identityStatus === "verified"
+    ? addFact("business_name", "Business name", name, 0.9, sameValue(name, crawlName))
     : undefined;
-  const nameFactId = addFact("business_name", "Business name", name, 0.9, sameValue(name, crawlName) || Boolean(understoodNameEvidence), understoodNameEvidence)!;
+  const sourceWebsiteFactId = addFact("link", "Source website", sourceUrl, 1)!;
   addFact("description", "Business description", clean(facts.description), 0.7, sameValue(facts.description, crawl.extractedFacts.description));
   const phoneFactId = addFact("phone", "Phone", clean(facts.phone), 0.82, sameValue(facts.phone, crawl.extractedFacts.phone));
   addFact("email", "Email", clean(facts.email), 0.78, sameValue(facts.email, crawl.extractedFacts.email));
@@ -163,24 +163,17 @@ export async function ingestWebsite(input: {
     sameValue(facts.hours, crawl.extractedFacts.hours)
   );
 
-  const serviceNames = unique([
-    ...understanding.cleanedServices.filter((service) => service.evidence.some((reference) => reference.evidenceClass === "first_party")).map((service) => service.value),
-    ...facts.services
-  ]).filter((service) => serviceIsSourceBacked(service, crawl)).slice(0, 24);
+  const serviceNames = unique(facts.services).filter((service) => serviceIsSourceBacked(service, crawl)).slice(0, 24);
   const offerings = canonicalOfferingCandidates(serviceNames, domainContext)
     .slice(0, 24)
     .map((service, index) => offeringFromService(service, index, addFact));
   const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
   const crawlServiceAreas = unique(crawl.extractedFacts.serviceAreas);
-  const modelLocationFallback = !eligibleAddress && !crawlServiceAreas.length ? understanding.locationOrServiceArea : undefined;
-  const observedServiceAreas = unique([...crawlServiceAreas, ...(modelLocationFallback ? [modelLocationFallback.value] : [])]);
-  const serviceAreas = observedServiceAreas.slice(0, 50).map((label, index) => {
-    const reference = modelLocationFallback && label === modelLocationFallback.value
-      ? modelLocationFallback.evidence.find((candidate) => candidate.evidenceClass === "first_party")
-      : undefined;
-    const factId = addFact("service_area", "Service area", label, 0.7, true, reference)!;
+  const serviceAreas = crawlServiceAreas.slice(0, 50).map((label, index) => {
+    const factId = addFact("service_area", "Service area", label, 0.7)!;
     return { id: `service_area_${index + 1}`, label, sourceFactIds: [factId] };
   });
+  void eligibleAddress;
 
   const retainedAssets = await retainReferenceAssets({
     businessId,
@@ -189,18 +182,20 @@ export async function ingestWebsite(input: {
     now,
     signal: input.signal
   });
-  const assets: AssetRevisionRef[] = retainedAssets.map(({ revision }, index) => ({
+  const assets: AssetRevisionRef[] = retainedAssets.map(({ revision }) => ({
     assetId: revision.assetId,
     revisionId: revision.id,
-    kind: index === 0 && crawl.assetReferences.find((candidate) => candidate.url === revision.provenance?.sourceUrl)?.kind === "logo" ? "logo" : "photo",
+    kind: retainedAssetKind(revision, crawl),
     contentHash: revision.contentHash,
     storageKey: revision.storageKey,
     mimeType: revision.mimeType,
-    alt: String(revision.provenance?.alt ?? `${name} source photograph`),
+    alt: revision.provenance.origin === "source_website"
+      ? revision.provenance.alt ?? `${name} source photograph`
+      : `${name} source photograph`,
     width: revision.width,
     height: revision.height,
-    rightsStatus: "reference_only",
-    sourceFactIds: [nameFactId],
+    origin: "source_website",
+    sourceFactIds: [nameFactId ?? sourceWebsiteFactId],
     activeForFutureBuilds: true
   }));
 
@@ -209,8 +204,7 @@ export async function ingestWebsite(input: {
     return { id: `link_${index + 1}`, ...link, publicEligible: true, sourceFactIds: [factId] };
   });
   const locationSourceIds = [addressFactId, hoursFactId].filter((value): value is string => Boolean(value));
-  const placeId = presence?.signals.find((signal) => signal.placeId)?.placeId;
-  const locations = facts.address || facts.hours || facts.geo || placeId ? [{
+  const locations = facts.address || facts.hours || facts.geo ? [{
     id: "location_primary",
     label: "Main shop",
     street: clean(facts.address?.street),
@@ -220,7 +214,6 @@ export async function ingestWebsite(input: {
     country: clean(facts.address?.country)?.slice(0, 2).toUpperCase() || "US",
     latitude: facts.geo?.latitude,
     longitude: facts.geo?.longitude,
-    googlePlaceId: placeId,
     hours: facts.hours,
     sourceFactIds: locationSourceIds
   }] : [];
@@ -233,8 +226,9 @@ export async function ingestWebsite(input: {
     updatedAt: now,
     identity: {
       name,
+      status: identityStatus,
       description: clean(facts.description),
-      categories: unique([understanding.observedCategory.value, preferredBusinessTerm(domainContext), ...facts.categories]).slice(0, 20)
+      categories: unique([preferredBusinessTerm(domainContext), ...facts.categories]).slice(0, 20)
     },
     contacts: { phone: clean(facts.phone), email: clean(facts.email) },
     locations,
@@ -283,9 +277,9 @@ export async function ingestWebsite(input: {
     revision: 1,
     updatedAt: now,
     audience: domainContext?.customerJourneys[0],
-    positioning: understanding.businessStory?.summary ?? clean(facts.description),
-    voice: unique([understanding.brandExpression.voiceRegister, "clear", "capable"]).filter(Boolean) as string[],
-    primaryConversion: conversionGoal(understanding.primaryConversion.goal),
+    positioning: clean(facts.description),
+    voice: ["clear", "capable"],
+    primaryConversion: "auto" as const,
     pageRequirements,
     brandConstraints: {
       preferredColors: [],
@@ -312,30 +306,17 @@ export async function ingestWebsite(input: {
     updatedAt: now
   });
   void phoneFactId;
-  const minimumKnowledgeFailures = [
-    !state.identity.name ? "business_name" : undefined,
-    !state.offerings.length && !state.identity.categories.length ? "offering_or_category" : undefined,
-    !understanding.primaryConversion ? "conversion_path" : undefined,
-    !state.serviceAreas.some((area) => area.sourceFactIds.some((factId) => state.facts.some((fact) => fact.id === factId && fact.publicEligible)))
-      && !state.locations.some((location) => location.sourceFactIds.some((factId) => state.facts.some((fact) => fact.id === factId && fact.publicEligible)))
-      ? "location_or_service_area" : undefined
-  ].filter(Boolean);
-  if (minimumKnowledgeFailures.length) {
-    throw new WebsiteCrawlError(
-      "crawl_primary_unavailable",
-      `Minimum business knowledge was not established: ${minimumKnowledgeFailures.join(", ")}.`
-    );
-  }
   return {
     site,
     state,
     intent,
     forms: [form],
-    sourceSnapshots: [sourceSnapshot],
+    sourceSnapshots: [sourceSnapshot, ...(research ? [research.snapshot] : [])],
     retainedAssets,
     sourceUrl,
     crawl,
     generationIngestion,
+    researchUsage: research?.usage,
     validationEligibility: generationIngestion.coverage === "incomplete" ? "private_review_only" : "frozen_validation",
     domainContext
   };
@@ -348,19 +329,20 @@ async function retainReferenceAssets(input: {
   now: string;
   signal?: AbortSignal;
 }) {
-  const candidates = uniqueBy(input.crawl.assetReferences, (asset) => asset.url).slice(0, 8);
+  const candidates = uniqueBy(input.crawl.assetReferences, (asset) => asset.url);
   const results: RetainedAssetBinary[] = [];
   for (const [index, candidate] of candidates.entries()) {
     try {
       const url = await assertPublicFetchUrl(candidate.url);
       const response = await fetch(url, { signal: combinedSignal(input.signal, 10_000) });
       if (!response.ok) continue;
-      const mimeType = normalizedImageMime(response.headers.get("content-type"));
-      if (!mimeType) continue;
       const declaredBytes = Number(response.headers.get("content-length"));
       if (Number.isFinite(declaredBytes) && declaredBytes > 8_000_000) continue;
       const bytes = await readBodyWithLimit(response, 8_000_000);
       if (!bytes?.length) continue;
+      const metadata = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false }).metadata();
+      const mimeType = decodedImageMime(metadata.format);
+      if (!mimeType || !metadata.width || !metadata.height) continue;
       const contentHash = sha256(bytes);
       const scopedAssetHash = sha256(stableJson({ businessId: input.businessId, contentHash }));
       const assetId = `asset_source_${index + 1}_${scopedAssetHash.slice(7, 17)}`;
@@ -373,13 +355,16 @@ async function retainReferenceAssets(input: {
         storageKey: `site-assets/${input.businessId}/${contentHash.slice(7)}`,
         mimeType,
         bytes: bytes.length,
+        width: metadata.width,
+        height: metadata.height,
+        origin: "source_website",
         provenance: {
-          source: "website_reference",
+          origin: "source_website",
           sourceUrl: url,
+          sourcePageUrl: candidate.sourcePageUrl,
           sourceSnapshotId: input.sourceSnapshotId,
           alt: candidate.alt ?? "Source business image"
         },
-        rightsStatus: "reference_only",
         createdAt: input.now
       });
       results.push({ revision, bytes });
@@ -437,29 +422,6 @@ async function readBodyWithLimit(response: Response, maximumBytes: number) {
   }
 }
 
-function mergeFacts(crawl: ExtractedBusinessFacts, presence: PublicPresenceEnrichment | undefined, sourceUrl: string): ExtractedBusinessFacts {
-  const enriched = presence?.facts ?? {};
-  return {
-    ...enriched,
-    ...crawl,
-    name: preferBusinessNameCandidate(crawl.name, enriched.name, new URL(sourceUrl).hostname),
-    description: crawl.description ?? enriched.description,
-    phone: crawl.phone ?? enriched.phone,
-    email: crawl.email ?? enriched.email,
-    address: crawl.address ?? enriched.address,
-    geo: crawl.geo ?? enriched.geo,
-    hours: crawl.hours ?? enriched.hours,
-    reviewsSummary: crawl.reviewsSummary ?? enriched.reviewsSummary,
-    categories: unique([...(enriched.categories ?? []), ...crawl.categories]),
-    services: unique([...(enriched.services ?? []), ...crawl.services]),
-    serviceAreas: unique([...(enriched.serviceAreas ?? []), ...crawl.serviceAreas]),
-    socialLinks: unique([...(enriched.socialLinks ?? []), ...crawl.socialLinks]),
-    bookingLinks: unique([...(enriched.bookingLinks ?? []), ...crawl.bookingLinks]),
-    orderingLinks: unique([...(enriched.orderingLinks ?? []), ...crawl.orderingLinks]),
-    pressLinks: unique([...(enriched.pressLinks ?? []), ...crawl.pressLinks])
-  };
-}
-
 function serviceIsSourceBacked(service: string, crawl: CrawlAssessment) {
   const normalized = normalizedText(service);
   const extracted = crawl.extractedFacts.services.some((value) => {
@@ -497,7 +459,7 @@ function observedProof(
     .filter((page) => page.purposeTags.includes("reviews"))
     .flatMap((page) => page.sourceTextBlocks)
     .filter((block) => /^(?:blockquote|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
-    .filter((block) => block.canonicalTokens.length >= 6 && block.displayText.length >= 30 && block.displayText.length <= 240)
+    .filter((block) => canonicalWordCount(block.displayText) >= 6 && block.displayText.length >= 30 && block.displayText.length <= 240)
     .slice(0, 8);
   return candidates.map((block, index) => {
     const factId = `fact_proof_${index + 1}_${sha256(block.displayText).slice(7, 17)}`;
@@ -571,16 +533,18 @@ function sameValue(left: unknown, right: unknown) {
   return normalizedText(displayValue(left)) === normalizedText(displayValue(right));
 }
 
-function normalizedImageMime(value: string | null): AssetRevision["mimeType"] | undefined {
-  const mime = value?.split(";")[0].trim().toLowerCase();
-  return mime === "image/png" || mime === "image/jpeg" || mime === "image/webp" ? mime : undefined;
+function decodedImageMime(format: string | undefined): AssetRevision["mimeType"] | undefined {
+  if (format === "png") return "image/png";
+  if (format === "jpeg") return "image/jpeg";
+  if (format === "webp") return "image/webp";
+  return undefined;
 }
 
-function conversionGoal(value: "call_first" | "form_first" | "booking_first" | "visit_first" | undefined) {
-  if (value === "call_first") return "call" as const;
-  if (value === "booking_first") return "booking" as const;
-  if (value === "visit_first") return "visit" as const;
-  return "form" as const;
+function retainedAssetKind(revision: AssetRevision, crawl: CrawlAssessment): AssetRevisionRef["kind"] {
+  if (revision.provenance.origin !== "source_website") return "other";
+  const sourceUrl = revision.provenance.sourceUrl;
+  const source = crawl.assetReferences.find((candidate) => candidate.url === sourceUrl);
+  return source?.kind === "logo" ? "logo" : source?.kind === "icon" ? "icon" : "photo";
 }
 
 function combinedSignal(signal: AbortSignal | undefined, timeoutMs: number) {
@@ -606,6 +570,19 @@ function normalizedText(value: string) {
 
 function safeSlug(value: string) {
   return normalizedText(value).replace(/\s+/g, "-").slice(0, 100) || "business";
+}
+
+function hostnameBusinessName(sourceUrl: string) {
+  const hostname = new URL(sourceUrl).hostname.replace(/^www\./, "");
+  const label = hostname.split(".")[0] ?? "business";
+  return label
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+    .trim() || "Business";
+}
+
+function canonicalWordCount(value: string) {
+  return value.normalize("NFKC").match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
 }
 
 function idPart(value: string) {

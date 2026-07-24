@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  analyticsClientContextFromForm,
+  canonicalAnalyticsEvent,
+  resolveAnalyticsServingContext
+} from "@/lib/analytics-ingestion";
 import { ipHashForRequest, sanitizeAnalyticsMetadata, sanitizeAttributionUrl } from "@/lib/privacy";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { validateFormSubmission } from "@/lib/form-validation";
@@ -27,15 +32,14 @@ export async function POST(request: Request) {
     return applyRateLimitHeaders(NextResponse.json({ accepted: false, status: "preview_disabled", reason: "Preview forms do not accept submissions." }, { status: 403 }), limit);
   }
 
-  const site = await sitePlatformRepository.getSite(siteId);
-  if (!site) return applyRateLimitHeaders(NextResponse.json({ error: "Unknown site" }, { status: 404 }), limit);
-  if (site.status !== "active" || !site.publishedVersionId) {
+  const serving = await resolveAnalyticsServingContext(request, siteId, parsedSubmission.versionId, { requireAnalytics: false });
+  if (!serving.ok) {
     return applyRateLimitHeaders(
       NextResponse.json({
         accepted: false,
-        status: "inactive",
-        reason: "Lead capture starts after publish."
-      }, { status: 403 }),
+        status: serving.reason,
+        reason: "Lead capture is available only on the active published website."
+      }, { status: serving.status >= 400 ? serving.status : 403 }),
       limit
     );
   }
@@ -70,6 +74,23 @@ export async function POST(request: Request) {
   }
 
   const submittedAt = new Date();
+  const analyticsClientContext = analyticsClientContextFromForm({
+    siteId,
+    eventId: parsedSubmission.eventId,
+    visitorId: parsedSubmission.visitorId,
+    visitId: parsedSubmission.visitId,
+    pagePath: parsedSubmission.pageId,
+    landingPath: stringMetadata(parsedSubmission.metadata, "landingPath"),
+    referrerHost: stringMetadata(parsedSubmission.metadata, "referrerHost"),
+    utmSource: stringMetadata(parsedSubmission.metadata, "utmSource"),
+    utmMedium: stringMetadata(parsedSubmission.metadata, "utmMedium"),
+    utmCampaign: stringMetadata(parsedSubmission.metadata, "utmCampaign"),
+    deviceCategory: parsedSubmission.deviceCategory,
+    elapsedMs: parsedSubmission.elapsedMs
+  });
+  const analyticsEvent = analyticsClientContext && serving.buildInput.intent.enabledCapabilities.includes("analytics")
+    ? canonicalAnalyticsEvent(serving, analyticsClientContext, "form_submit", { formId }, submittedAt)
+    : undefined;
   const inquiryResult = await siteCapabilityRepository.createInquiryFromForm({
     siteId,
     form,
@@ -79,28 +100,9 @@ export async function POST(request: Request) {
     metadata: parsedSubmission.metadata,
     sourceUrl: sanitizeAttributionUrl(parsedSubmission.sourceUrl || request.headers.get("referer") || undefined),
     userAgent: request.headers.get("user-agent") ?? undefined,
-    ipHash: ipHashForRequest(request, { siteId, at: submittedAt })
+    ipHash: ipHashForRequest(request, { siteId, at: submittedAt }),
+    analyticsEvent
   });
-
-  siteCapabilityRepository
-    .recordAnalyticsEvent({
-      siteId,
-      sessionId: parsedSubmission.sessionId || `form_${inquiryResult.inquiry.id}`,
-      visitorId: parsedSubmission.visitorId,
-      pageId: parsedSubmission.pageId || "unknown",
-      eventType: "form_submit",
-      timestamp: submittedAt.toISOString(),
-      sectionId: parsedSubmission.sectionId || undefined,
-      metadata: {
-        formId,
-        inquiryId: inquiryResult.inquiry.id,
-        duplicate: inquiryResult.duplicate,
-        ...parsedSubmission.metadata
-      }
-    })
-    .catch((error) => {
-      console.warn(`Form submit analytics failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
 
   return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "received" }), limit);
 }
@@ -110,11 +112,16 @@ type ParsedSubmission =
   | {
       ok: true;
       siteId: string;
+      versionId?: string;
       formId: string;
       pageId: string;
       sectionId?: string;
       sessionId?: string;
       visitorId?: string;
+      visitId?: string;
+      eventId?: string;
+      deviceCategory?: string;
+      elapsedMs?: number;
       honeypot: string;
       renderedAt: number;
       payload: Record<string, unknown>;
@@ -136,11 +143,16 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
     return {
       ok: true,
       siteId: stringValue(body.siteId),
+      versionId: identifierValue(body.versionId),
       formId: stringValue(body.formId),
       pageId: stringValue(body.pageId),
       sectionId: stringValue(body.sectionId) || undefined,
       sessionId: stringValue(body.sessionId) || undefined,
       visitorId: identifierValue(body.visitorId),
+      visitId: identifierValue(body.visitId ?? body.sessionId),
+      eventId: identifierValue(body.eventId),
+      deviceCategory: stringValue(body.deviceCategory) || undefined,
+      elapsedMs: numberValue(body.elapsedMs),
       honeypot: stringValue(body.companyWebsite),
       renderedAt: numberValue(body.formRenderedAt ?? body.renderedAt ?? body.startedAt),
       payload,
@@ -162,11 +174,16 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
     return {
       ok: true,
       siteId: stringValue(formData.get("siteId")),
+      versionId: identifierValue(formData.get("versionId")),
       formId: stringValue(formData.get("formId")),
       pageId: stringValue(formData.get("pageId")),
       sectionId: stringValue(formData.get("sectionId")) || undefined,
       sessionId: stringValue(formData.get("sessionId")) || undefined,
       visitorId: identifierValue(formData.get("visitorId")),
+      visitId: identifierValue(formData.get("visitId") ?? formData.get("sessionId")),
+      eventId: identifierValue(formData.get("eventId")),
+      deviceCategory: stringValue(formData.get("deviceCategory")) || undefined,
+      elapsedMs: numberValue(formData.get("elapsedMs")),
       honeypot: stringValue(formData.get("companyWebsite")),
       renderedAt: numberValue(formData.get("formRenderedAt") ?? formData.get("renderedAt") ?? formData.get("startedAt")),
       payload,
@@ -180,11 +197,16 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
 
 const systemFormFields = new Set([
   "siteId",
+  "versionId",
   "formId",
   "pageId",
   "sectionId",
   "sessionId",
   "visitorId",
+  "visitId",
+  "eventId",
+  "deviceCategory",
+  "elapsedMs",
   "companyWebsite",
   "formRenderedAt",
   "sourceUrl",
@@ -254,4 +276,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isMetadataValue(value: unknown): value is string | number | boolean {
   return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function stringMetadata(metadata: Record<string, string | number | boolean>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value : undefined;
 }

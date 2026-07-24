@@ -14,6 +14,7 @@ export type WebsiteSetup = {
   ownerUserId: string;
   sourceUrl: string;
   normalizedSource: string;
+  reportingTimezone: string;
   sourceRevision: number;
   status: WebsiteSetupStatus;
   siteId?: string;
@@ -35,6 +36,7 @@ export type CreateWebsiteSetupInput = {
   ownerUserId: string;
   sourceUrl: string;
   normalizedSource: string;
+  reportingTimezone: string;
   idempotencyKey: string;
   creationRequestHash: string;
 };
@@ -133,11 +135,15 @@ export function redirectsStrandedByRoutes(redirects: SiteRedirectRule[], publish
   return redirects.filter((redirect) => redirect.status === "active" && !routes.has(redirect.sourcePath) && !routes.has(redirect.destinationPath));
 }
 
-export type SitePreviewToken = {
-  token: string;
+export type SitePreviewGrant = {
+  id: string;
   siteId: string;
   siteVersionId: string;
-  expiresAt?: string;
+  secretHash: string;
+  keyVersion: string;
+  secretVersion: number;
+  expiresAt: string;
+  revokedAt?: string;
   createdAt: string;
 };
 
@@ -159,7 +165,7 @@ export type OutboundProspect = {
   businessName: string;
   vertical?: string;
   sourceUrl?: string;
-  previewToken?: string;
+  previewId?: string;
   mailingCode?: string;
   status: "queued" | "mailed" | "preview_viewed" | "adoption_started" | "adopted" | "published" | "disqualified";
   createdAt: string;
@@ -225,6 +231,7 @@ export type OutboundSummary = {
 };
 
 export type CreateOutboundCampaignInput = {
+  id?: string;
   name: string;
   channel?: OutboundCampaign["channel"];
   status?: OutboundCampaign["status"];
@@ -238,7 +245,7 @@ export type UpsertOutboundProspectInput = {
   businessName: string;
   vertical?: string;
   sourceUrl?: string;
-  previewToken?: string;
+  previewId?: string;
   mailingCode?: string;
   status?: OutboundProspect["status"];
   metadata?: Record<string, string | number | boolean>;
@@ -254,22 +261,61 @@ export type RecordOutboundEventInput = {
   occurredAt?: string;
 };
 
-export type ProspectReportBucketId = "search_visibility" | "website_conversion" | "local_content_coverage" | "trust_mobile_readiness";
-export type ProspectReportSignal = { id: string; label: string; passed: boolean; points: number; maxPoints: number; source: "crawl" | "render"; evidence: string };
-export type ProspectReportBucket = { id: ProspectReportBucketId; label: string; score?: number; scoredSignals: number; maxPoints: number; points: number; status: "scored" | "not_enough_signal"; signals: ProspectReportSignal[] };
-export type ProspectReportFinding = { id: string; bucketId: ProspectReportBucketId; bucketLabel: string; severity: "fail" | "warning"; title: string; consequence: string; evidence: string; lodestaFix: string };
+export type ProspectReportFinding = {
+  id: string;
+  dimension: string;
+  severity: "critical" | "major" | "minor" | "advisory";
+  status: "fail" | "warning";
+  title: string;
+  explanation: string;
+  businessConsequence: string;
+  evidence: string[];
+  recommendation: string;
+};
+export type BusinessStrengthSignal = {
+  id: string;
+  label: string;
+  status: "strong" | "moderate" | "limited" | "unknown";
+  score: number;
+  weight: number;
+  value?: number;
+  explanation: string;
+  source: "web_research" | "verified_business_state";
+};
+export type BusinessStrengthAssessment = {
+  schemaVersion: 1;
+  kind: "business-strength";
+  generatedAt: string;
+  source: BusinessStrengthSignal["source"];
+  coverage: number;
+  score?: number;
+  tier?: "high" | "moderate" | "limited";
+  signals: BusinessStrengthSignal[];
+  limitations: string[];
+};
 export type ProspectReportStage = { id: string; label: string; status: "queued" | "running" | "completed" | "skipped" | "failed" };
 export type ProspectReportGatedPlan = { summary: string; priorities: Array<{ title: string; detail: string }> };
 export type ProspectPresenceReportResult = {
-  version: "prospect-presence-report-v1";
+  schemaVersion: 1;
+  kind: "prospect-presence-report";
   generatedAt: string;
   websiteKind: ProspectWebsiteKind;
   sourceUrl?: string;
   sourceHost?: string;
-  overallScore: number;
-  overallLabel: string;
-  scoreSource: "crawl_standard" | "no_owned_website";
-  buckets: ProspectReportBucket[];
+  assessmentId?: string;
+  coverage?: {
+    value: number;
+    assessedCriteria: number;
+    applicableCriteria: number;
+    limitations: string[];
+  };
+  siteUnderstanding: {
+    businessName?: string;
+    primaryLocation?: string;
+    services: string[];
+    customerJourneys: string[];
+  };
+  whatsWorking: Array<{ id: string; dimension: string; title: string; evidence: string[] }>;
   findings: ProspectReportFinding[];
   stages: ProspectReportStage[];
   gatedPlan: ProspectReportGatedPlan;
@@ -277,29 +323,78 @@ export type ProspectPresenceReportResult = {
 export type ProspectWebsiteKind = "owned_website" | "no_website" | "social_or_aggregator";
 export type ProspectReportRecord = {
   id: string;
-  placeId: string;
+  sourceKey: string;
   status: "queued" | "running" | "completed" | "failed";
-  jobId?: string;
+  assessmentId?: string;
   sourceUrl?: string;
   sourceHost?: string;
   websiteKind: ProspectWebsiteKind;
   result?: ProspectPresenceReportResult;
+  businessStrength?: BusinessStrengthAssessment;
   unlockedAt?: string;
   leadId?: string;
   errorCode?: string;
+  resolutionUsage?: {
+    modelId: string;
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
+    searchCalls: number;
+  };
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
 };
 export type ProspectReportLead = { id: string; reportId: string; email: string; contactName?: string; phone?: string; ipHash?: string; metadata?: Record<string, string | number | boolean>; createdAt: string };
 
-export type CreateProspectReportInput = { id?: string; placeId: string; sourceUrl?: string; sourceHost?: string; websiteKind: ProspectWebsiteKind; jobId?: string };
-export type UpdateProspectReportInput = { reportId: string; status?: ProspectReportRecord["status"]; jobId?: string; sourceUrl?: string; sourceHost?: string; websiteKind?: ProspectWebsiteKind; result?: ProspectPresenceReportResult; unlockedAt?: string; leadId?: string; errorCode?: string; completedAt?: string };
+export type CreateProspectReportInput = { id?: string; sourceKey: string; sourceUrl?: string; sourceHost?: string; websiteKind: ProspectWebsiteKind; assessmentId?: string; businessStrength?: BusinessStrengthAssessment; resolutionUsage?: ProspectReportRecord["resolutionUsage"] };
+export type UpdateProspectReportInput = { reportId: string; status?: ProspectReportRecord["status"]; assessmentId?: string; sourceUrl?: string; sourceHost?: string; websiteKind?: ProspectWebsiteKind; result?: ProspectPresenceReportResult; unlockedAt?: string; leadId?: string; errorCode?: string; clearError?: boolean; completedAt?: string };
 export type CreateProspectReportLeadInput = { reportId: string; email: string; contactName?: string; phone?: string; ipHash?: string; metadata?: Record<string, string | number | boolean> };
 
-export type ProspectReportJob = {
+export type WebsiteAssessmentRecord = {
   id: string;
-  reportId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  targetKind: WebsiteAssessmentTargetKind;
+  sourceKey: string;
+  sourceUrl?: string;
+  siteId?: string;
+  artifactId?: string;
+  versionId?: string;
+  rubricIdentity: string;
+  scannerIdentity: string;
+  assessment?: WebsiteAssessment;
+  errorCode?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type CreateWebsiteAssessmentInput = {
+  id?: string;
+  targetKind: WebsiteAssessmentTargetKind;
+  sourceKey: string;
+  sourceUrl?: string;
+  siteId?: string;
+  artifactId?: string;
+  versionId?: string;
+  rubricIdentity: string;
+  scannerIdentity: string;
+};
+
+export type UpdateWebsiteAssessmentInput = {
+  assessmentId: string;
+  status?: WebsiteAssessmentRecord["status"];
+  assessment?: WebsiteAssessment;
+  errorCode?: string;
+  clearError?: boolean;
+  completedAt?: string;
+};
+
+export type WebsiteAssessmentJob = {
+  id: string;
+  assessmentId: string;
+  prospectReportId?: string;
   status: "queued" | "running" | "completed" | "failed";
   attempts: number;
   maxAttempts: number;
@@ -308,4 +403,6 @@ export type ProspectReportJob = {
   error?: string;
   createdAt: string;
   updatedAt: string;
+  completedAt?: string;
 };
+import type { WebsiteAssessment, WebsiteAssessmentTargetKind } from "@/packages/website-assessment/contracts";

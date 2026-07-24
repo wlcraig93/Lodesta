@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 import { hasValidAdminToken } from "@/lib/auth-policy";
 import { AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import { AdminNav, type AdminNavItem } from "@/components/admin/AdminNav";
+import { resolveOwnerIdentity } from "@/lib/owner-identity";
 
 const primaryNavItems: AdminNavItem[] = [
   { href: "/admin/sites", label: "Manage sites" },
@@ -12,18 +13,20 @@ const primaryNavItems: AdminNavItem[] = [
 ];
 
 const operationsNavItems: AdminNavItem[] = [
+  { href: "/authoring-batches", label: "Authoring batches" },
   { href: "/outbound", label: "Outbound" },
   { href: "/settings", label: "Settings" }
 ];
 
 const debugNavItems: AdminNavItem[] = [
+  { href: "/admin/assessments", label: "Assessments" },
   { href: "/admin/runs", label: "Activity" }
 ];
 
 export async function AdminShell({ children }: { children: ReactNode }) {
   const tokenAccess = hasValidAdminToken(await headers());
   const auth = tokenAccess ? { configured: true as const, user: null } : await getCurrentUser();
-  const accountLabel = tokenAccess ? "Admin token" : auth.user?.email ?? "Local admin";
+  const accountIdentity = resolveOwnerIdentity(auth.user, tokenAccess ? "Admin token" : "Local admin");
   const sessionLabel = tokenAccess ? "Token session" : auth.user ? "Platform admin" : "Local development";
   const accountActions: AccountAction[] = tokenAccess
     ? [{ id: "session-note", kind: "note", label: "Authenticated by admin token.", section: "session" }]
@@ -54,8 +57,9 @@ export async function AdminShell({ children }: { children: ReactNode }) {
           </NavGroup>
         </div>
         <AccountMenu
-          label={accountLabel}
-          sessionLabel={sessionLabel}
+          displayName={accountIdentity.displayName}
+          email={accountIdentity.email}
+          contextLabel={sessionLabel}
           actions={accountActions}
         />
       </aside>

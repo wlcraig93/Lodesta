@@ -3,7 +3,7 @@ import type { VerticalContextModule } from "@/packages/site-contracts";
 export const autoBodyContextModule: VerticalContextModule = {
   schemaVersion: 1,
   id: "auto_body",
-  version: "auto-body-v1",
+  version: "auto-body@sha256:b2ce428dd3450ba227aa081963c6bd3a8e58be40f20785a029e79944d5acc791",
   status: "active",
   aliases: ["collision repair", "body shop", "auto collision", "dent repair", "paint and body"],
   classificationSignals: [

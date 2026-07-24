@@ -1,19 +1,22 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
-import { createPresenceIntakePlan } from "@/packages/acquisition/presence-intake";
-import { runUrlPresenceAssessment } from "@/packages/acquisition/presence-assessment-runner";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-safety";
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
+import { platformOperationsRepository as repository } from "@/packages/platform-operations";
+import { sourceKeyForWebsite } from "@/packages/acquisition/prospect-reports";
+import { processNextWebsiteAssessmentJob } from "@/packages/website-assessment/jobs";
+import {
+  websiteAssessmentRubricIdentity,
+  websiteAssessmentScannerIdentity
+} from "@/packages/website-assessment/rubric";
 
 export const runtime = "nodejs";
 
 const presenceSchema = z.object({
-  url: z.string().trim().min(1),
-  render: z.boolean().default(true),
-  screenshots: z.boolean().default(true)
-});
+  url: z.string().trim().min(1)
+}).strict();
 
 export async function POST(request: Request) {
   const unauthorized = await requireAdmin(request);
@@ -49,22 +52,30 @@ export async function POST(request: Request) {
   if (!urlSafety.ok) return applyRateLimitHeaders(NextResponse.json({ error: urlSafety.error }, { status: 400 }), limit);
   const safeUrl = urlSafety.url;
 
-  const { crawl, renderInspection, publicPresence } = await runUrlPresenceAssessment({
-    url: safeUrl,
-    render: parsed.data.render,
-    captureScreenshots: parsed.data.screenshots,
-    publicPresence: "google_places"
+  const assessment = await repository.createWebsiteAssessment({
+    targetKind: "public_url",
+    sourceKey: sourceKeyForWebsite(safeUrl),
+    sourceUrl: safeUrl,
+    rubricIdentity: websiteAssessmentRubricIdentity,
+    scannerIdentity: websiteAssessmentScannerIdentity
   });
-  try {
-    assertLaunchMarket({ url: safeUrl, crawl, publicPresence });
-  } catch (error) {
-    if (isLaunchMarketError(error)) {
-      return applyRateLimitHeaders(NextResponse.json({ error: error.message, code: error.code }, { status: 400 }), limit);
+  const job = await repository.enqueueWebsiteAssessmentJob({ assessmentId: assessment.id });
+  after(async () => {
+    try {
+      await processNextWebsiteAssessmentJob({ workerId: `presence-after-${job.id}` });
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "website_assessment_after_failed",
+        jobId: job.id,
+        error: error instanceof Error ? error.message : String(error)
+      }));
     }
-    throw error;
-  }
+  });
   return applyRateLimitHeaders(
-    NextResponse.json(createPresenceIntakePlan(safeUrl, crawl, renderInspection, publicPresence)),
+    NextResponse.json({
+      assessment,
+      job: { id: job.id, status: job.status }
+    }, { status: 202 }),
     limit
   );
 }

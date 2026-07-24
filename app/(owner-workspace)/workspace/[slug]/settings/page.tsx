@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DomainConnectForm } from "@/components/DomainConnectForm";
 import { DomainRefreshButton } from "@/components/DomainRefreshButton";
+import { AnalyticsTimezoneForm } from "@/components/AnalyticsTimezoneForm";
 import { RedirectRulesPanel } from "@/components/RedirectRulesPanel";
 import { WorkspacePageHeader, WorkspaceStatus, humanize } from "@/components/OwnerWorkspaceUI";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
@@ -57,6 +58,11 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
       <section className="workspace-settings-section" id="redirects">
         <div className="workspace-settings-intro"><span>Redirects</span><h2>Keep old links useful</h2><p>Send retired paths to a published page so customers and search engines do not reach a dead end.</p></div>
         <div className="workspace-settings-content is-single"><section className="workspace-panel"><RedirectRulesPanel siteId={context.site.id} redirects={redirects} routes={routes} /></section></div>
+      </section>
+
+      <section className="workspace-settings-section" id="analytics">
+        <div className="workspace-settings-intro"><span>Analytics</span><h2>Set reporting day boundaries</h2><p>Dates, comparisons, and exports use this timezone. Use the business’s primary local timezone.</p></div>
+        <div className="workspace-settings-content is-single"><section className="workspace-panel"><div className="workspace-panel-heading"><div><span>Reporting timezone</span><h3>{context.site.reportingTimezone}</h3></div></div><AnalyticsTimezoneForm siteId={context.site.id} initialTimezone={context.site.reportingTimezone} /></section></div>
       </section>
 
       <section className="workspace-settings-section" id="access">

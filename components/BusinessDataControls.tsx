@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { BusinessState, SiteIntent } from "@/packages/site-contracts";
 
-export function BusinessDataControls({ siteId, state, intent }: { siteId: string; state: BusinessState; intent: SiteIntent }) {
+export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }: { siteId: string; state: BusinessState; intent: SiteIntent; sourceSnapshotId?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -30,17 +30,14 @@ export function BusinessDataControls({ siteId, state, intent }: { siteId: string
     const file = values.get("assetFile");
     const kind = values.get("assetKind") === "logo" ? "logo" : "photo";
     if (!(file instanceof File) || !file.size) return setNotice("Choose an image to upload.");
-    if (values.get("assetRights") !== "on") return setNotice("Confirm usage rights for this image.");
     const body = new FormData();
     body.set("siteId", siteId);
     if (kind === "logo") {
       body.set("logoFile", file);
       body.set("logoAlt", String(values.get("assetAlt") ?? "") || "Business logo");
-      body.set("logoRights", "true");
     } else {
       body.append("photoFiles", file);
       body.append("photoAlt", String(values.get("assetAlt") ?? "") || "Business photo");
-      body.append("photoRights", "true");
     }
     setBusy("asset-upload"); setNotice(undefined);
     try {
@@ -66,6 +63,12 @@ export function BusinessDataControls({ siteId, state, intent }: { siteId: string
     </nav>
     <div className="owner-authority-stack">
     {notice ? <div className="site-agent-notice" role="status">{notice}</div> : null}
+    <section className="panel"><div className="section-heading-row"><div><h2>Business identity</h2><p className="muted">Confirm or correct the name used throughout the website before publishing.</p></div><span className="badge">{state.identity.status}</span></div>
+      <form className="owner-authority-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("identity", { kind: "confirm_identity", name: String(form.get("name") ?? "") }); }}>
+        <label>Business name<input name="name" defaultValue={state.identity.name} required maxLength={200} /></label>
+        <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "identity" ? "Saving" : state.identity.status === "verified" ? "Update name" : "Confirm name"}</button>
+      </form>
+    </section>
     <section className="panel" id="contact"><div className="section-heading-row"><div><h2>Contact</h2><p className="muted">Confirmed changes recompile the current design without a redesign.</p></div><span className="badge">Revision {state.revision}</span></div>
       <form className="owner-authority-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("contact", { kind: "update_contact", phone: String(form.get("phone") ?? "") || undefined, email: String(form.get("email") ?? "") || undefined }); }}>
         <label>Phone<input name="phone" defaultValue={state.contacts.phone ?? ""} /></label><label>Email<input name="email" type="email" defaultValue={state.contacts.email ?? ""} /></label><button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "contact" ? "Saving" : "Save contact"}</button>
@@ -98,15 +101,14 @@ export function BusinessDataControls({ siteId, state, intent }: { siteId: string
     <section className="panel"><div className="section-heading-row"><div><h2>Proof</h2><p className="muted">Trust-sensitive statements remain private until explicitly confirmed.</p></div><span className="badge">{state.proof.length}</span></div>
       <div className="owner-authority-list">{state.proof.map((proof) => <div className="owner-authority-row" key={proof.id}><div><strong>{proof.kind.replaceAll("_", " ")}</strong><p>{proof.publicText}</p><small>{proof.verbatim ? "Verbatim source excerpt" : "Deterministic fact"} · {proof.status}</small></div><button className="button secondary" type="button" disabled={Boolean(busy)} onClick={() => void submit(proof.id, { kind: "set_proof", proofId: proof.id, enabled: proof.status !== "confirmed" })}>{busy === proof.id ? "Saving" : proof.status === "confirmed" ? "Remove" : "Submit confirmation"}</button></div>)}{!state.proof.length ? <p className="muted">No source-backed proof was retained.</p> : null}</div>
     </section>
-    <section className="panel"><div className="section-heading-row"><div><h2>Photos and logo</h2><p className="muted">Source-site media can shape a candidate, but publication requires rights confirmation.</p></div><span className="badge">{state.assets.length}</span></div>
+    <section className="panel"><div className="section-heading-row"><div><h2>Photos and logo</h2><p className="muted">Source-site, uploaded, and generated media are available to the website manager when they improve the result.</p></div><span className="badge">{state.assets.length}</span></div>
       <form className="owner-asset-upload" onSubmit={uploadAsset}>
         <label>Type<select name="assetKind" defaultValue="photo"><option value="photo">Photo</option><option value="logo">Logo</option></select></label>
         <label>Image<input name="assetFile" type="file" accept="image/png,image/jpeg,image/webp" required /></label>
         <label>Alt text<input name="assetAlt" maxLength={180} placeholder="Describe the image" required /></label>
-        <label className="owner-authority-check"><input name="assetRights" type="checkbox" required /><span><strong>Usage rights confirmed</strong><small>I own this image or have permission to publish it.</small></span></label>
         <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "asset-upload" ? "Uploading" : "Add asset"}</button>
       </form>
-      <div className="owner-authority-list">{state.assets.map((asset) => <div className="owner-authority-row" key={asset.revisionId}><div><strong>{asset.kind}</strong><p>{asset.alt || asset.assetId}</p><small>{asset.rightsStatus.replaceAll("_", " ")} · {asset.activeForFutureBuilds ? "active" : "inactive"}</small></div><div className="button-row"><button className="button secondary" type="button" disabled={Boolean(busy)} onClick={() => void submit(`active:${asset.assetId}`, { kind: "set_asset_active", assetId: asset.assetId, active: !asset.activeForFutureBuilds })}>{asset.activeForFutureBuilds ? "Deactivate" : "Activate"}</button>{asset.rightsStatus === "reference_only" ? <button className="button primary" type="button" disabled={Boolean(busy)} onClick={() => void submit(`rights:${asset.revisionId}`, { kind: "attest_asset_rights", assetRevisionId: asset.revisionId, statement: "I confirm that this business has permission to use this asset on its public website." })}>Confirm rights</button> : null}</div></div>)}{!state.assets.length ? <p className="muted">No usable source assets were retained.</p> : null}</div>
+      <div className="owner-authority-list">{state.assets.map((asset) => <div className="owner-authority-row" key={asset.revisionId}><div><strong>{asset.kind}</strong><p>{asset.alt || asset.assetId}</p><small>{asset.origin.replaceAll("_", " ")} · {asset.activeForFutureBuilds ? "active" : "inactive"}</small></div><div className="button-row"><button className="button secondary" type="button" disabled={Boolean(busy)} onClick={() => void submit(`active:${asset.assetId}`, { kind: "set_asset_active", assetId: asset.assetId, active: !asset.activeForFutureBuilds })}>{asset.activeForFutureBuilds ? "Deactivate" : "Activate"}</button></div></div>)}{!state.assets.length ? <p className="muted">No usable media is available yet.</p> : null}</div>
     </section>
     <section className="panel" id="site-preferences"><div className="section-heading-row"><div><h2>Site intent</h2><p className="muted">The manager uses this direction without selecting a template.</p></div><span className="badge">Revision {intent.revision}</span></div><dl className="detail-list"><dt>Audience</dt><dd>{intent.audience ?? "Not specified"}</dd><dt>Positioning</dt><dd>{intent.positioning ?? "Not specified"}</dd><dt>Voice</dt><dd>{intent.voice.join(", ")}</dd><dt>Conversion</dt><dd>{intent.primaryConversion}</dd><dt>Pages</dt><dd>{intent.pageRequirements.map((page) => page.title).join(", ")}</dd></dl>
       <form className="owner-authority-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("intent:capabilities", { kind: "update_site_intent", patch: { enabledCapabilities: supportedCapabilities.filter((capability) => form.get(capability) === "on") } }); }}>

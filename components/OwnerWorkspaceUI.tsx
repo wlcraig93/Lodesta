@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ProductStatusBadge, type ProductStatusTone } from "@/components/ProductUI";
 
 export function WorkspacePageHeader({ eyebrow, title, description, actions }: { eyebrow: string; title: string; description: string; actions?: ReactNode }) {
   return (
@@ -13,8 +14,8 @@ export function WorkspaceMetric({ label, value, detail, tone = "default" }: { la
   return <article className={`workspace-metric is-${tone}`}><span>{label}</span><strong>{value}</strong>{detail ? <small>{detail}</small> : null}</article>;
 }
 
-export function WorkspaceStatus({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "success" | "attention" | "danger" | "info" }) {
-  return <span className={`workspace-status is-${tone}`}>{children}</span>;
+export function WorkspaceStatus({ children, tone = "neutral" }: { children: ReactNode; tone?: ProductStatusTone }) {
+  return <ProductStatusBadge tone={tone}>{children}</ProductStatusBadge>;
 }
 
 export function humanize(value: string) {

@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import { sha256, stableJson } from "../packages/business-data";
+import { defaultSiteAuthoringModelSettings, validateSiteAuthoringModelSettingsUpdate } from "../lib/operator-settings";
 import {
   WebsiteManagerAgent,
+  createAuthoringContextPacket,
   assertCompleteWorkspace,
   classifyModelProviderError,
   managerLimitsForKind,
   maximumRunCostUsd,
   SiteAuthoringTerminalError,
   usageForModel,
+  type ManagerRunEvent,
   type ManagerResponsesClient,
   type ManagerToolCall,
   type ManagerToolRuntime,
@@ -18,6 +21,20 @@ import { validateWorkspaceSourcePolicy } from "../packages/site-agent/source-pol
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const buildInput = buildSyntheticSiteInput();
+const authoringContext = createAuthoringContextPacket({ buildInput, snapshots: [] });
+assert.equal(defaultSiteAuthoringModelSettings().siteAgentProvider, "openai", "OpenRouter changed the active site-agent provider.");
+assert(validateSiteAuthoringModelSettingsUpdate({
+  siteAgentProvider: "openrouter",
+  siteAgentModel: "openai/gpt-5.6-sol",
+  ingestionModel: "gpt-5.6-sol",
+  version: 0
+}).ok, "Provider-qualified OpenRouter settings were rejected.");
+assert(!validateSiteAuthoringModelSettingsUpdate({
+  siteAgentProvider: "openrouter",
+  siteAgentModel: "gpt-5.6-sol",
+  ingestionModel: "gpt-5.6-sol",
+  version: 0
+}).ok, "Unqualified OpenRouter model settings were accepted.");
 const siteSource = `import React from "react";
 import { Fact } from "../platform/sdk";
 import { Hero } from "./components/Hero";
@@ -62,6 +79,7 @@ const manager = new WebsiteManagerAgent(queueClient([
 ], (params) => requests.push(params)));
 const completed = await manager.run({
   buildInput,
+  authoringContext,
   instruction: "Create the initial site.",
   kind: "initial_build",
   runtime: managerRuntime,
@@ -72,7 +90,7 @@ assert.equal(managerRuntime.finalCheckpoint(), "checkpoint_passed");
 assert.equal(inspections, 1, "finish without inspect_site did not run final verification exactly once");
 assert.deepEqual(completed.toolRecords.map((record) => record.name), ["write_file", "write_file", "apply_patch", "build_preview", "finish"]);
 assert.deepEqual(progress, [1, 2, 3, 4, 5]);
-assert(requests.every((request) => toolNames(request).join(",") === "list_files,read_file,write_file,delete_file,apply_patch,build_preview,inspect_site,request_input,finish"), "manager tool set drifted from the simple workspace protocol");
+assert(requests.every((request) => toolNames(request).join(",") === "list_files,read_file,write_file,delete_file,apply_patch,create_image,build_preview,request_input,finish"), "manager tool set drifted from the workspace and media protocol");
 assert(!JSON.stringify(requests[0]?.input).includes("agentAccessPolicy"), "serving-only agent policy leaked into authoring context");
 assert(!JSON.stringify(requests[0]?.input).toLowerCase().includes("rawcrawl"), "raw crawl payload leaked into authoring context");
 assert((requests.at(-1)?.input as unknown[]).length > (requests[1]?.input as unknown[]).length, "manager discarded earlier tool history instead of retaining the conversation");
@@ -148,22 +166,24 @@ const recovery = await new WebsiteManagerAgent(queueClient([
   ] }),
   call("recover_build", "build_preview", {}),
   call("recover_finish", "finish", finishArgs())
-])).run({ buildInput, instruction: "Recover from a malformed tool call.", kind: "initial_build", runtime: recoveryRuntime });
+])).run({ buildInput, authoringContext, instruction: "Recover from a malformed tool call.", kind: "initial_build", runtime: recoveryRuntime });
 assert(recovery.completion, "a correctable tool argument error terminated the manager run");
 
 const initialLimits = managerLimitsForKind("initial_build");
 const editLimits = managerLimitsForKind("edit");
-assert.deepEqual(initialLimits, { maxInputTokens: 500_000, maxOutputTokens: 50_000, maxDurationMs: 12 * 60_000 });
+assert.deepEqual(initialLimits, { maxInputTokens: 650_000, maxOutputTokens: 40_000, maxDurationMs: 12 * 60_000 });
 assert.deepEqual(editLimits, { maxInputTokens: 250_000, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 });
-assert.equal(maximumRunCostUsd("gpt-5.6-sol", initialLimits), 4, "initial Sol cost ceiling drifted");
+assert.equal(maximumRunCostUsd("gpt-5.6-sol", initialLimits), 4.45, "initial Sol cost ceiling drifted");
 assert.equal(maximumRunCostUsd("gpt-5.6-sol", editLimits), 2, "edit Sol cost ceiling drifted");
 assert.equal(usageForModel("gpt-5.6-sol", {
   input_tokens: 1_000,
   input_tokens_details: { cached_tokens: 800 },
   output_tokens: 100
-}, 25).estimatedCostUsd, 0.0044, "cached input was charged at the full input rate");
+}, 25).costUsd, 0.0044, "cached input was charged at the full input rate");
 const quotaFailure = classifyModelProviderError({ status: 429, error: { code: "insufficient_quota" } });
 assert(quotaFailure.code === "provider_quota_exhausted" && !quotaFailure.retryableByOwner, "quota exhaustion was exposed as owner-retryable");
+const openRouterCreditsFailure = classifyModelProviderError({ status: 402, error: { code: 402, message: "Insufficient credits" } });
+assert(openRouterCreditsFailure.code === "provider_quota_exhausted" && !openRouterCreditsFailure.retryableByOwner, "OpenRouter credit exhaustion lost its provider quota classification");
 const transientProviderFailure = classifyModelProviderError({ status: 429, error: { code: "rate_limit_exceeded" } });
 assert(transientProviderFailure.code === "provider_temporarily_unavailable" && transientProviderFailure.retryableByOwner, "temporary provider rate limit was not retryable");
 
@@ -176,6 +196,7 @@ try {
     call("must_not_run_unpriced", "list_files", {})
   ], () => { unpricedModelRequests += 1; })).run({
     buildInput,
+    authoringContext,
     instruction: "Reject an unpriced operator model before requesting it.",
     kind: "edit",
     runtime: runtime({ initialFiles: files })
@@ -189,6 +210,84 @@ try {
 assert(unpricedModelFailure instanceof SiteAuthoringTerminalError && unpricedModelFailure.message.startsWith("site_agent_model_pricing_missing:"), "unpriced operator model was not rejected");
 assert.equal(unpricedModelRequests, 0, "an unpriced operator model reached the provider");
 
+const previousProviderOverride = process.env.LODESTA_SITE_AGENT_PROVIDER;
+const previousOpenRouterModelOverride = process.env.LODESTA_SITE_AGENT_MODEL;
+const openRouterRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
+const openRouterEvents: ManagerRunEvent[] = [];
+process.env.LODESTA_SITE_AGENT_PROVIDER = "openrouter";
+process.env.LODESTA_SITE_AGENT_MODEL = "openai/gpt-5.6-sol";
+let openRouterResult: Awaited<ReturnType<WebsiteManagerAgent["run"]>> | undefined;
+try {
+  openRouterResult = await new WebsiteManagerAgent(queueClient([
+    {
+      ...call("openrouter_build", "build_preview", {}),
+      id: "gen_openrouter_turn_1",
+      model: "openai/gpt-5.6-sol",
+      usage: {
+        input_tokens: 20,
+        output_tokens: 8,
+        total_tokens: 28,
+        input_tokens_details: { cached_tokens: 5, cache_write_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 3 },
+        cost: 0.0015,
+        cost_details: { upstream_inference_cost: 0.0012 }
+      },
+      openrouter_metadata: {
+        endpoints: { available: [{ provider: "OpenAI", model: "openai/gpt-5.6-sol", selected: true }] }
+      }
+    },
+    {
+      ...call("openrouter_finish", "finish", finishArgs()),
+      id: "gen_openrouter_turn_2",
+      model: "openai/gpt-5.6-sol",
+      usage: {
+        input_tokens: 30,
+        output_tokens: 10,
+        total_tokens: 40,
+        input_tokens_details: { cached_tokens: 10, cache_write_tokens: 0 },
+        output_tokens_details: { reasoning_tokens: 4 },
+        cost: 0.0025,
+        cost_details: { upstream_inference_cost: 0.002 }
+      },
+      openrouter_metadata: {
+        endpoints: { available: [{ provider: "OpenAI", model: "openai/gpt-5.6-sol", selected: true }] }
+      }
+    }
+  ], (params) => openRouterRequests.push(params))).run({
+    buildInput,
+    authoringContext,
+    runId: "run_openrouter_test",
+    instruction: "Exercise the inactive OpenRouter route.",
+    kind: "edit",
+    runtime: runtime({ initialFiles: files }),
+    onEvents: async (events) => { openRouterEvents.push(...events); }
+  });
+} finally {
+  if (previousProviderOverride === undefined) delete process.env.LODESTA_SITE_AGENT_PROVIDER;
+  else process.env.LODESTA_SITE_AGENT_PROVIDER = previousProviderOverride;
+  if (previousOpenRouterModelOverride === undefined) delete process.env.LODESTA_SITE_AGENT_MODEL;
+  else process.env.LODESTA_SITE_AGENT_MODEL = previousOpenRouterModelOverride;
+}
+assert(openRouterResult, "OpenRouter route did not complete.");
+assert.equal(openRouterResult.apiProvider, "openrouter");
+assert.equal(openRouterResult.usage.costUsd, 0.004, "OpenRouter provider-reported per-turn cost was not aggregated.");
+assert.equal(openRouterResult.usage.costSource, "provider_reported");
+assert.equal(openRouterResult.usage.reasoningTokens, 7);
+const routedRequest = openRouterRequests[0] as Parameters<ManagerResponsesClient["create"]>[0] & {
+  provider?: { data_collection?: string; zdr?: boolean; require_parameters?: boolean };
+  session_id?: string;
+};
+assert.deepEqual(routedRequest.provider, { data_collection: "deny", zdr: true, require_parameters: true });
+assert.equal(routedRequest.session_id, "run_openrouter_test");
+const billedTurn = openRouterEvents.find((event) => event.kind === "model_request" && event.status === "succeeded");
+assert(billedTurn, "OpenRouter model turn telemetry was not emitted.");
+assert.equal(billedTurn.apiProvider, "openrouter");
+assert.equal(billedTurn.upstreamProvider, "OpenAI");
+assert.equal(billedTurn.providerRequestId, "gen_openrouter_turn_1");
+assert.equal(billedTurn.costUsd, 0.0015);
+assert.equal(billedTurn.costSource, "provider_reported");
+assert.equal(billedTurn.upstreamInferenceCostUsd, 0.0012);
+
 const terminalRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
 let terminalFailure: unknown;
 try {
@@ -198,6 +297,7 @@ try {
     call("must_not_run", "list_files", {})
   ], (params) => terminalRequests.push(params))).run({
     buildInput,
+    authoringContext,
     instruction: "Stop on a platform contract failure.",
     kind: "edit",
     runtime: runtime({
@@ -223,6 +323,7 @@ try {
     call("over_budget", "list_files", {})
   ])).run({
     buildInput,
+    authoringContext,
     instruction: "Stop after recording the response that exhausts the input budget.",
     kind: "edit",
     limits: { maxInputTokens: 5, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 },
@@ -234,6 +335,23 @@ try {
 }
 assert(limitFailure instanceof SiteAuthoringTerminalError && limitFailure.code === "input_budget_exhausted", "input budget exhaustion lost its terminal classification");
 assert.equal(persistedLimitUsage, 10, "the response that exhausted the input budget was not persisted before termination");
+
+const finishAtBoundaryRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
+const finishAtBoundary = await new WebsiteManagerAgent(queueClient([
+  call("boundary_build", "build_preview", {}),
+  call("boundary_inspect", "inspect_site", {}),
+  call("boundary_finish", "finish", finishArgs())
+], (params) => finishAtBoundaryRequests.push(params))).run({
+  buildInput,
+  authoringContext,
+  instruction: "Retain a verified candidate when the already-paid finish response crosses the input limit.",
+  kind: "edit",
+  limits: { maxInputTokens: 25, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 },
+  runtime: runtime({ initialFiles: files })
+});
+assert.equal(finishAtBoundary.completion.ownerMessage, finishArgs().ownerMessage);
+assert.equal(finishAtBoundary.usage.inputTokens, 30, "terminal response usage was not retained");
+assert.equal(finishAtBoundaryRequests.length, 3, "terminal overage consumed an additional model request");
 
 console.log(JSON.stringify({
   ok: true,
@@ -250,6 +368,9 @@ console.log(JSON.stringify({
   pricedModelEnforcement: "pass",
   terminalPlatformErrors: "pass",
   exhaustedUsagePersistence: "pass",
+  terminalBoundaryCompletion: "pass",
+  openRouterRoute: "pass",
+  perTurnCostTelemetry: "pass",
   boundedCost: "pass"
 }));
 
@@ -258,7 +379,7 @@ function runtime(options: { initialFiles?: WorkspaceSourceFile[]; onBuild?: () =
   return new WorkspaceManagerRuntime<string>({
     kind: options.initialFiles ? "edit" : "initial_build",
     publicBuildInputId: buildInput.id,
-    toolchainVersion: "toolchain-test-v1",
+    toolchainVersion: "toolchain-test",
     sandboxImageDigest: imageDigest,
     initialFiles: options.initialFiles,
     initialSandboxRevision: "sandbox_revision_0",
@@ -290,7 +411,17 @@ function call(callId: string, name: string, args: Record<string, unknown>) {
   };
 }
 
-function queueClient(responses: ReturnType<typeof call>[], onCreate?: (params: Parameters<ManagerResponsesClient["create"]>[0]) => void): ManagerResponsesClient {
+type FakeManagerResponse = Omit<ReturnType<typeof call>, "usage"> & {
+  id?: string;
+  model?: string;
+  usage: ReturnType<typeof call>["usage"] & {
+    cost?: number;
+    cost_details?: { upstream_inference_cost?: number };
+  };
+  openrouter_metadata?: unknown;
+};
+
+function queueClient(responses: FakeManagerResponse[], onCreate?: (params: Parameters<ManagerResponsesClient["create"]>[0]) => void): ManagerResponsesClient {
   const queue = [...responses];
   return { async create(params) { onCreate?.(params); const next = queue.shift(); if (!next) throw new Error("fake_response_queue_exhausted"); return next as never; } };
 }

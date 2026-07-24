@@ -1,5 +1,4 @@
 import type { CrawlAssessment, ExtractedBusinessFacts } from "./crawler";
-import type { PublicPresenceEnrichment } from "@/packages/acquisition/public-presence";
 import { normalizePublicFetchUrlInput } from "./url-safety";
 
 export class LaunchMarketError extends Error {
@@ -15,7 +14,6 @@ type LaunchMarketInput = {
   url?: string;
   prompt?: string;
   crawl?: CrawlAssessment;
-  publicPresence?: PublicPresenceEnrichment;
   facts?: Partial<ExtractedBusinessFacts>;
 };
 
@@ -78,8 +76,7 @@ export function validateLaunchMarket(input: LaunchMarketInput): { ok: true } | {
 
   const countries = [
     input.facts?.address?.country,
-    input.crawl?.extractedFacts.address?.country,
-    input.publicPresence?.facts.address?.country
+    input.crawl?.extractedFacts.address?.country
   ].filter((country): country is string => Boolean(country));
 
   const unsupportedCountry = countries.find((country) => !isUsCountry(country));

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { hasValidRecoveryWatchdogToken } from "../lib/auth-policy";
-import { processProspectReportJobs } from "../packages/acquisition/prospect-report-jobs";
+import { processWebsiteAssessmentJobs } from "../packages/website-assessment/jobs";
 import { automaticRecoveryLimit } from "../lib/recovery-watchdog";
 import { shouldScheduleStartupRecovery, triggerStartupRecovery } from "../instrumentation";
-import type { ProspectPresenceReportResult, ProspectReportJob, ProspectReportRecord } from "../packages/platform-operations";
+import type { WebsiteAssessmentJob, WebsiteAssessmentRecord } from "../packages/platform-operations";
+import { buildWebsiteAssessment } from "../packages/website-assessment/engine";
 import { siteAgentRecoveryStaleAfterMs } from "../packages/site-platform";
 import { triggerRecoveryWatchdog } from "../workers/recovery-watchdog/src/index";
 
@@ -65,22 +66,25 @@ async function main() {
     LODESTA_RECOVERY_WATCHDOG_TOKEN: "watchdog-test-token"
   }, (async () => new Response(null, { status: 401 })) as typeof fetch), /status 401/);
 
-  const reports = new Map<string, ProspectReportRecord>();
-  const jobs: ProspectReportJob[] = [];
+  const assessments = new Map<string, WebsiteAssessmentRecord>();
+  const jobs: WebsiteAssessmentJob[] = [];
   for (let index = 1; index <= 5; index += 1) {
-    const reportId = `prospect_report_${index}`;
+    const assessmentId = `website_assessment_${index}`;
     const now = new Date().toISOString();
-    reports.set(reportId, {
-      id: reportId,
-      placeId: `place_${index}`,
+    assessments.set(assessmentId, {
+      id: assessmentId,
+      sourceKey: `query:${index}`,
       status: "queued",
-      websiteKind: "no_website",
+      targetKind: "public_url",
+      sourceUrl: `https://example${index}.com/`,
+      rubricIdentity: "local-business-rubric@sha256:3396a8d9c0f35cdf9de57c2f61862786bc2d68071c1638dea7edcb948fe149f8",
+      scannerIdentity: "website-assessment-scanner@sha256:605276032a84195a3ec561d51955f0a0f8e09be7b15e94bf257904cb7c71ff32",
       createdAt: now,
       updatedAt: now
     });
     jobs.push({
-      id: `prospect_job_${index}`,
-      reportId,
+      id: `website_assessment_job_${index}`,
+      assessmentId,
       status: "queued",
       attempts: 1,
       maxAttempts: 2,
@@ -90,10 +94,10 @@ async function main() {
     });
   }
   const completed: string[] = [];
-  const results = await processProspectReportJobs({
+  const results = await processWebsiteAssessmentJobs({
     limit: 20,
     repository: {
-      async claimNextProspectReportJob(workerId) {
+      async claimNextWebsiteAssessmentJob(workerId: string) {
         const job = jobs.find((candidate) => candidate.status === "queued") ?? null;
         if (job) {
           job.status = "running";
@@ -101,23 +105,31 @@ async function main() {
         }
         return job;
       },
-      async getProspectReport(reportId) { return reports.get(reportId) ?? null; },
-      async updateProspectReport(input) {
-        const report = reports.get(input.reportId);
-        if (!report) return null;
-        Object.assign(report, input, { updatedAt: new Date().toISOString() });
-        return report;
+      async getWebsiteAssessment(assessmentId: string) { return assessments.get(assessmentId) ?? null; },
+      async updateWebsiteAssessment(input) {
+        const assessmentRecord = assessments.get(input.assessmentId);
+        if (!assessmentRecord) return null;
+        Object.assign(assessmentRecord, input, { updatedAt: new Date().toISOString() });
+        return assessmentRecord;
       },
-      async completeProspectReportJob(jobId) {
+      async completeWebsiteAssessmentJob(jobId: string) {
         const job = jobs.find((candidate) => candidate.id === jobId);
         if (job) job.status = "completed";
         completed.push(jobId);
       },
-      async failProspectReportJob() { throw new Error("unexpected prospect failure"); }
+      async failWebsiteAssessmentJob() { throw new Error("unexpected assessment failure"); },
+      async getProspectReport() { return null; },
+      async updateProspectReport() { return null; }
     },
-    runReport: async () => ({}) as ProspectPresenceReportResult
+    runAssessment: async (record) => buildWebsiteAssessment({
+      id: record.id,
+      target: { kind: "public_url", sourceKey: record.sourceKey, sourceUrl: record.sourceUrl },
+      siteUnderstanding: { services: [], vertical: "general_local", verticalConfidence: 0.35, verticalEvidence: [], customerJourneys: [] },
+      criteria: [],
+      inputHashSource: { fixture: record.id }
+    })
   });
-  assert.equal(results.length, 4, "automatic prospect recovery exceeded its four-job bound");
+  assert.equal(results.length, 4, "automatic assessment recovery exceeded its four-job bound");
   assert.equal(completed.length, 4);
   assert.equal(jobs.filter((job) => job.status === "queued").length, 1);
 

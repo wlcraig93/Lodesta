@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
   const actor = await authorizedSiteActor(request, session.siteId);
   if (!actor.ok) return actor.response;
-  if (!canAccessAgentSession(actor, session.ownerId)) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  if (session.principal.kind !== "owner" || !canAccessAgentSession(actor, session.principal.id)) return NextResponse.json({ error: "Session not found" }, { status: 404 });
   try {
     if (parsed.data.resumeRunId) {
       const run = await siteAuthoringWorkflow.resumeNeedsInput({

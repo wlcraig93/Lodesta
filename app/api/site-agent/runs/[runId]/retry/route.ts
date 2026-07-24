@@ -10,7 +10,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
   const actor = await authorizedSiteActor(request, failed.siteId);
   if (!actor.ok) return actor.response;
   const session = await sitePlatformRepository.getAgentSession(failed.sessionId);
-  if (!session || !canAccessAgentSession(actor, session.ownerId)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+  if (!session || session.principal.kind !== "owner" || !canAccessAgentSession(actor, session.principal.id)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
   try {
     const run = await siteAuthoringWorkflow.retryFailedRun({ runId, actorId: actor.actorId });
     after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id); });

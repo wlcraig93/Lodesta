@@ -7,6 +7,8 @@ const web = readFileSync("railway.toml", "utf8");
 const watchdog = readFileSync("workers/recovery-watchdog/wrangler.jsonc", "utf8");
 const watchdogSource = readFileSync("workers/recovery-watchdog/src/index.ts", "utf8");
 const workerSource = readFileSync("workers/runner.ts", "utf8");
+const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "utf8");
+const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
 const instrumentation = readFileSync("instrumentation.ts", "utf8");
 const maintenanceRoute = readFileSync("app/api/site-agent/maintenance/route.ts", "utf8");
 const prospectRoute = readFileSync("app/api/prospect-reports/route.ts", "utf8");
@@ -22,19 +24,24 @@ const sitemap = readFileSync("app/sitemap.ts", "utf8");
 for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
-for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY="]) {
+for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER="]) {
   assert(env.includes(name), `.env.example must document ${name}`);
 }
 assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");
 assert(web.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"'), "Railway web service must start Next.js.");
 assert(!existsSync("deploy/railway-worker.toml"), "The obsolete production Railway polling worker config must be absent.");
-assert(workerSource.includes("localRecoveryStaleAfterMs") && workerSource.includes("processNextProspectReportJob"), "The local-only worker must preserve fast development recovery and prospect processing.");
+assert(workerSource.includes("localRecoveryStaleAfterMs") && workerSource.includes("processNextWebsiteAssessmentJob"), "The local-only worker must preserve fast development recovery and canonical assessment processing.");
+assert(
+  sandboxWorkerSource.includes("[a-z0-9_-]{1,80}")
+    && sandboxClientSource.includes("[a-z0-9_-]{1,80}"),
+  "Sandbox transport must accept canonical underscore-prefixed session IDs on both sides."
+);
 assert(watchdog.includes('"crons": ["*/15 * * * *"]'), "Recovery watchdog must run every fifteen minutes.");
 assert(!/r2_buckets|durable_objects|containers|queues/.test(watchdog), "Recovery watchdog must not bind stateful Cloudflare resources.");
 assert(watchdogSource.includes("scheduled(") && watchdogSource.includes("LODESTA_RECOVERY_WATCHDOG_TOKEN"), "Recovery watchdog scheduled handler is incomplete.");
 assert(instrumentation.includes('NEXT_PHASE !== "phase-production-build"') && instrumentation.includes('NEXT_RUNTIME === "nodejs"'), "Startup recovery must be Node-only and skip production builds.");
 assert(maintenanceRoute.includes("hasValidRecoveryWatchdogToken") && maintenanceRoute.includes("processAutomaticRecovery"), "Maintenance route is missing machine recovery scheduling.");
-assert(prospectRoute.includes("after(async") && prospectRoute.includes("processNextProspectReportJob"), "Prospect reports must schedule immediate processing.");
+assert(prospectRoute.includes("after(async") && prospectRoute.includes("processNextWebsiteAssessmentJob"), "Prospect reports must schedule immediate canonical assessment processing.");
 assert(publicRoute.includes("readVerifiedArtifactFile"), "Public serving must verify immutable artifact bytes.");
 assert(publicRoute.includes("loadPublishedSiteContext") && publicSite.includes('artifact.qa.hardGate !== "passed"'), "Public serving must reject unverified artifacts.");
 assert(
@@ -57,7 +64,7 @@ for (const value of ['href="/privacy/"', 'href="/terms/"', 'href="mailto:willie@
 }
 assert(!/placeholder/i.test(`${privacyPage}\n${termsPage}`), "Public legal pages must not contain placeholder language.");
 assert(!/\bGroq\b/.test(privacyPage), "Privacy policy must not retain the obsolete Groq disclosure.");
-for (const value of ["Google sign-in", "Supabase", "Railway", "Cloudflare", "OpenAI", "Google Places", "Resend", "willie@lodesta.com"]) {
+for (const value of ["Google sign-in", "Supabase", "Railway", "Cloudflare", "OpenAI", "OpenRouter", "Resend", "willie@lodesta.com"]) {
   assert(privacyPage.includes(value), `Privacy policy must disclose ${value}.`);
 }
 for (const [name, page] of [["Privacy", privacyPage], ["Terms", termsPage]] as const) {

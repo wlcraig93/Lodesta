@@ -40,16 +40,23 @@ try {
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto(origin, { waitUntil: "networkidle" });
   assert.equal(errors.length, 0, errors.join("\n"));
-  assert(analytics.some((event) => event.eventType === "pageview" && event.siteId === "site_runtime_test"), "public pageview was not recorded");
+  assert(analytics.some((event) => event.eventType === "page_view" && event.siteId === "site_runtime_test"), "public page view was not recorded");
+  const pageView = analytics.find((event) => event.eventType === "page_view");
+  assert.equal(typeof pageView?.eventId, "string");
+  assert.equal(typeof pageView?.visitorId, "string");
+  assert.equal(typeof pageView?.visitId, "string");
+  assert.equal(pageView?.versionId, "version_runtime_test");
   await page.fill('input[name="name"]', "Test visitor");
   await page.click('form button[type="submit"]');
   await page.waitForFunction(() => document.querySelector("[data-lodesta-form-status]")?.textContent === "Sent.");
   assert.equal(forms.length, 1, "managed form did not submit exactly once");
   assert.equal(forms[0].siteId, "site_runtime_test");
   assert.equal(forms[0].formId, "form_runtime_test");
+  assert.equal(typeof forms[0].eventId, "string");
+  assert.equal(analytics.filter((event) => event.eventType === "form_submit").length, 0, "browser emitted a duplicate form submission event");
   await page.click("[data-lodesta-map-fallback]");
   await page.waitForTimeout(50);
-  assert(analytics.some((event) => event.eventType === "places_ui"), "managed map fallback telemetry was not recorded");
+  assert(analytics.some((event) => event.eventType === "directions_click"), "managed directions telemetry was not recorded");
   await page.click('[data-lodesta-gallery-direction="next"]');
   assert.equal(await page.getAttribute('[data-lodesta-menu-toggle]', "aria-expanded"), "false");
   await page.click("[data-lodesta-menu-toggle]");
@@ -69,14 +76,22 @@ try {
   const analyticsOff = await browser.newPage();
   await analyticsOff.goto(`${origin}/analytics-off`, { waitUntil: "networkidle" });
   assert.equal(analytics.length + forms.length, previewRequestsBefore, "analytics-disabled page emitted tracking traffic");
-  console.log(JSON.stringify({ ok: true, pageviews: analytics.filter((event) => event.eventType === "pageview").length, formSubmissions: forms.length, previewIsolation: "pass", interactions: "pass" }));
+
+  const internalBefore = analytics.length + forms.length;
+  const internalContext = await browser.newContext({ userAgent: "LodestaGenerationCrawler/2.0" });
+  const internalPage = await internalContext.newPage();
+  await internalPage.goto(origin, { waitUntil: "networkidle" });
+  assert.equal(analytics.length + forms.length, internalBefore, "Lodesta internal agent emitted analytics or form traffic");
+  await internalContext.close();
+
+  console.log(JSON.stringify({ ok: true, pageviews: analytics.filter((event) => event.eventType === "page_view").length, formSubmissions: forms.length, internalExclusion: "pass", previewIsolation: "pass", interactions: "pass" }));
 } finally {
   await browser.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 function documentHtml(analyticsEnabled: boolean) {
-  return `<!doctype html><html data-lodesta-site-id="site_runtime_test" data-lodesta-analytics="${analyticsEnabled}"><head><meta charset="utf-8"><script src="/_lodesta/runtime/site-runtime-v1.js" defer></script></head><body><button type="button" data-lodesta-menu-toggle aria-controls="menu" aria-expanded="false">Menu</button><nav id="menu"></nav><div data-lodesta-gallery="gallery"><button type="button" aria-controls="gallery-track" data-lodesta-gallery-direction="previous">Previous</button><div id="gallery-track"></div><button type="button" aria-controls="gallery-track" data-lodesta-gallery-direction="next">Next</button></div><section data-lodesta-map="location_primary"><a href="#directions" data-lodesta-map-fallback>Directions</a></section><form data-lodesta-form-id="form_runtime_test" data-lodesta-success-message="Sent."><label>Name<input name="name" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></body></html>`;
+  return `<!doctype html><html data-lodesta-site-id="site_runtime_test" data-lodesta-version-id="version_runtime_test" data-lodesta-analytics="${analyticsEnabled}"><head><meta charset="utf-8"><script src="/_lodesta/runtime/site-runtime-v1.js" defer></script></head><body><button type="button" data-lodesta-menu-toggle aria-controls="menu" aria-expanded="false">Menu</button><nav id="menu"></nav><div data-lodesta-gallery="gallery"><button type="button" aria-controls="gallery-track" data-lodesta-gallery-direction="previous">Previous</button><div id="gallery-track"></div><button type="button" aria-controls="gallery-track" data-lodesta-gallery-direction="next">Next</button></div><section data-lodesta-map="location_primary"><a href="#directions" data-lodesta-map-fallback>Directions</a></section><form data-lodesta-form-id="form_runtime_test" data-lodesta-success-message="Sent."><label>Name<input name="name" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></body></html>`;
 }
 
 async function jsonBody(request: import("node:http").IncomingMessage) {

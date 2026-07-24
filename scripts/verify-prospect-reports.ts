@@ -1,23 +1,21 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import type { ProspectReportRecord, ProspectWebsiteKind } from "../packages/platform-operations";
 import {
-  bucketForStandardCriterion,
   classifyProspectWebsite,
-  prospectReportContainsForbiddenGoogleData,
+  noOwnedWebsiteProspectReport,
+  prospectReportFromAssessment,
   publicProspectReport,
-  runProspectPresenceReport,
-  unmappedStandardCriteria,
+  sourceKeyForNameAndLocality,
+  sourceKeyForWebsite,
   withProspectScanSlot
 } from "../packages/acquisition/prospect-reports";
-import { standardCriteria } from "../lib/standard";
+import {
+  prospectPresenceReportResultSchema,
+  type ProspectReportRecord
+} from "../packages/platform-operations";
+import { buildWebsiteAssessment } from "../packages/website-assessment/engine";
+import { assessmentCriteria, assessmentDimensions } from "../packages/website-assessment/rubric";
 
-type CheckResult = {
-  name: string;
-  ok: true;
-  detail: string;
-};
-
+type CheckResult = { name: string; ok: true; detail: string };
 const checks: CheckResult[] = [];
 const now = new Date().toISOString();
 
@@ -31,38 +29,41 @@ async function recordAsync(name: string, detail: string, fn: () => Promise<void>
   checks.push({ name, ok: true, detail });
 }
 
-function makeReport(input: {
-  websiteKind: ProspectWebsiteKind;
-  sourceUrl?: string;
-  sourceHost?: string;
-  result?: ProspectReportRecord["result"];
-  unlockedAt?: string;
-}): ProspectReportRecord {
-  return {
-    id: "prospect_report_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    placeId: "places/test-business",
-    status: input.result ? "completed" : "queued",
-    websiteKind: input.websiteKind,
-    sourceUrl: input.sourceUrl,
-    sourceHost: input.sourceHost,
-    result: input.result,
-    unlockedAt: input.unlockedAt,
-    createdAt: now,
-    updatedAt: now,
-    completedAt: input.result ? now : undefined
-  };
-}
+const assessment = buildWebsiteAssessment({
+  id: "website_assessment_test",
+  target: { kind: "public_url", sourceKey: "url:test", sourceUrl: "https://example.com/" },
+  siteUnderstanding: {
+    businessName: "Example Business",
+    services: ["Repairs"],
+    vertical: "general_local",
+    verticalConfidence: 0.35,
+    verticalEvidence: ["No strong vertical evidence."],
+    customerJourneys: ["Call the business"]
+  },
+  criteria: [{
+    id: "functional.home_reachable",
+    dimensionId: "functional_integrity",
+    title: "Homepage returns a usable response",
+    status: "fail",
+    impact: "critical",
+    certainty: "deterministic",
+    applicability: "universal",
+    explanation: "The homepage returned HTTP 500.",
+    businessConsequence: "Unavailable pages lose customers.",
+    recommendation: "Restore the homepage.",
+    evidence: [{ id: "home", kind: "http", summary: "HTTP 500.", observedAt: now }]
+  }],
+  inputHashSource: { fixture: true },
+  generatedAt: now
+});
 
 async function main() {
-  record("criterion_mapping", "Every Standard criterion maps to one public report bucket.", () => {
-    assert.deepEqual(unmappedStandardCriteria(), []);
-    assert.equal(new Set(standardCriteria.map((criterion) => criterion.id)).size, standardCriteria.length);
-    for (const criterion of standardCriteria) {
-      assert.ok(bucketForStandardCriterion(criterion), `${criterion.id} is missing a prospect report bucket.`);
-    }
-    assert.equal(bucketForStandardCriterion({ id: "accessibility.image_alt" }), "trust_mobile_readiness");
-    assert.equal(bucketForStandardCriterion({ id: "conversion.primary_action_above_fold" }), "website_conversion");
-    assert.equal(bucketForStandardCriterion({ id: "content.auto_body.before_after" }), "local_content_coverage");
+  record("canonical_rubric", "The canonical rubric has unique criteria and seven dimensions totaling 100% weight.", () => {
+    assert.equal(new Set(assessmentCriteria.map((criterion) => criterion.id)).size, assessmentCriteria.length);
+    assert.equal(assessmentDimensions.length, 7);
+    assert.equal(assessmentDimensions.reduce((total, dimension) => total + dimension.weight, 0), 100);
+    const vertical = assessment.dimensions.flatMap((dimension) => dimension.criteria).find((criterion) => criterion.id === "local_content.vertical_requirements");
+    assert.equal(vertical?.status, "not_applicable", "low-confidence vertical criteria must not penalize the site");
   });
 
   record("website_classification", "Owned, missing, social, and aggregator URLs route to the expected variant.", () => {
@@ -73,42 +74,40 @@ async function main() {
     assert.equal(classifyProspectWebsite("lodesta.com").kind, "owned_website");
   });
 
-  const noWebsiteResult = await runProspectPresenceReport(makeReport({ websiteKind: "no_website" }));
-  record("no_owned_website_report", "Missing websites get a fixed score and first-class report result.", () => {
-    assert.equal(noWebsiteResult.overallScore, 20);
-    assert.equal(noWebsiteResult.overallLabel, "No owned website detected");
-    assert.equal(noWebsiteResult.scoreSource, "no_owned_website");
+  const noWebsiteResult = noOwnedWebsiteProspectReport({ websiteKind: "no_website" });
+  record("no_owned_website_report", "Missing websites get a concrete finding without a fabricated score or verdict.", () => {
+    assert.equal(noWebsiteResult.kind, "prospect-presence-report");
+    assert.equal(noWebsiteResult.schemaVersion, 1);
     assert.equal(noWebsiteResult.findings[0]?.id, "no_owned_website");
+    assert.equal("overallScore" in noWebsiteResult, false);
+    assert.equal("overallLabel" in noWebsiteResult, false);
   });
 
-  const socialResult = await runProspectPresenceReport(
-    makeReport({
-      websiteKind: "social_or_aggregator",
-      sourceHost: "facebook.com"
-    })
-  );
-  record("social_url_report", "Social/profile URLs use the no-owned-website path instead of crawling.", () => {
-    assert.equal(socialResult.scoreSource, "no_owned_website");
-    assert.equal(socialResult.sourceHost, "facebook.com");
-    assert.equal(socialResult.stages.find((stage) => stage.id === "crawl")?.status, "skipped");
+  const owned = prospectReportFromAssessment(assessment);
+  record("findings_only_projection", "Public reports expose reasons and evidence but not internal composite fields.", () => {
+    assert.equal(prospectPresenceReportResultSchema.safeParse(owned).success, true);
+    assert.equal(owned.findings[0]?.id, "functional.home_reachable");
+    assert.match(owned.findings[0]?.evidence[0] ?? "", /HTTP 500/);
+    const serialized = JSON.stringify(owned);
+    assert.doesNotMatch(serialized, /"score"|"verdict"|"pointsEarned"|"pointsPossible"/);
+    assert.equal(prospectPresenceReportResultSchema.safeParse({ ...owned, score: 50 }).success, false);
   });
 
-  record("low_signal_bucket", "Buckets with fewer than two scored signals do not display a numeric sub-score.", () => {
-    const searchBucket = noWebsiteResult.buckets.find((bucket) => bucket.id === "search_visibility");
-    assert.ok(searchBucket);
-    assert.equal(searchBucket.scoredSignals, 1);
-    assert.equal(searchBucket.status, "not_enough_signal");
-    assert.equal(searchBucket.score, undefined);
-  });
-
-  record("gated_response_shape", "Gated plan is removed from public responses until a lead unlock is stored.", () => {
-    const locked = publicProspectReport(makeReport({ websiteKind: "no_website", result: noWebsiteResult }));
-    assert.equal(locked.unlocked, false);
+  record("gated_response_shape", "The detailed plan remains gated while findings stay visible.", () => {
+    const base: ProspectReportRecord = {
+      id: "prospect_report_test",
+      sourceKey: "url:test",
+      status: "completed",
+      websiteKind: "owned_website",
+      result: owned,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    };
+    const locked = publicProspectReport(base);
     assert.equal(locked.result?.gatedPlan, undefined);
-    const unlocked = publicProspectReport(
-      makeReport({ websiteKind: "no_website", result: noWebsiteResult, unlockedAt: now })
-    );
-    assert.equal(unlocked.unlocked, true);
+    assert.ok(locked.result?.findings.length);
+    const unlocked = publicProspectReport({ ...base, unlockedAt: now });
     assert.ok(unlocked.result?.gatedPlan);
   });
 
@@ -123,34 +122,15 @@ async function main() {
         blocked = true;
       }
     });
-    if (previous === undefined) {
-      delete process.env.LODESTA_PROSPECT_REPORT_SCAN_CONCURRENCY;
-    } else {
-      process.env.LODESTA_PROSPECT_REPORT_SCAN_CONCURRENCY = previous;
-    }
+    if (previous === undefined) delete process.env.LODESTA_PROSPECT_REPORT_SCAN_CONCURRENCY;
+    else process.env.LODESTA_PROSPECT_REPORT_SCAN_CONCURRENCY = previous;
     assert.equal(blocked, true);
   });
 
-  record("google_field_masks", "Places requests only ask for allowed place-id and business URL/location fields.", () => {
-    const source = readFileSync(new URL("../packages/acquisition/prospect-reports.ts", import.meta.url), "utf8");
-    const masks = [...source.matchAll(/"X-Goog-FieldMask":\s*"([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(masks, [
-      "suggestions.placePrediction.placeId,suggestions.placePrediction.text.text",
-      "id,websiteUri,formattedAddress,addressComponents,businessStatus,types"
-    ]);
-    for (const mask of masks) {
-      const normalized = mask.toLowerCase();
-      for (const forbidden of ["rating", "userratingcount", "review", "photo", "googlemapsuri"]) {
-        assert.equal(normalized.includes(forbidden), false, `${mask} includes forbidden Google field ${forbidden}.`);
-      }
-    }
-  });
-
-  record("google_policy_payload", "Stored report JSON does not contain forbidden Google ratings, reviews, photos, or Maps URLs.", () => {
-    assert.equal(prospectReportContainsForbiddenGoogleData(noWebsiteResult), false);
-    assert.equal(prospectReportContainsForbiddenGoogleData(socialResult), false);
-    assert.equal(prospectReportContainsForbiddenGoogleData({ fields: { rating: 4.8 } }), true);
-    assert.equal(prospectReportContainsForbiddenGoogleData({ googleMapsUri: "https://maps.google.com/example" }), true);
+  record("source_keys", "URL and normalized name/locality inputs produce stable source keys.", () => {
+    assert.equal(sourceKeyForWebsite("http://www.Example.com/?tracking=1"), sourceKeyForWebsite("https://example.com/"));
+    assert.equal(sourceKeyForNameAndLocality("Café Plumbing", "Austin, TX"), sourceKeyForNameAndLocality("Café  Plumbing", "Austin, TX"));
+    assert.notEqual(sourceKeyForNameAndLocality("Café Plumbing", "Austin, TX"), sourceKeyForNameAndLocality("Café Plumbing", "Dallas, TX"));
   });
 
   process.stdout.write(`${JSON.stringify({ ok: true, checks }, null, 2)}\n`);

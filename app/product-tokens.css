@@ -22,27 +22,27 @@
   --product-line-height-ui: 1.5;
   --product-line-height-body: 1.55;
 
-  --product-color-canvas: #f4f6f2;
-  --product-color-canvas-raised: #fafbf8;
+  --product-color-canvas: #f7f8f6;
+  --product-color-canvas-raised: #fbfcfa;
   --product-color-surface: #ffffff;
   --product-color-surface-translucent: rgba(255, 255, 255, 0.92);
   --product-color-surface-frosted: rgba(255, 255, 255, 0.78);
-  --product-color-surface-soft: #edf2eb;
+  --product-color-surface-soft: #f1f3f0;
   --product-color-surface-hover: #f6f8f4;
-  --product-color-surface-selected: #e3ebe0;
+  --product-color-surface-selected: #e7efea;
   --product-color-surface-disabled: #edf1ea;
   --product-color-surface-inverse: #121913;
 
   --product-color-text: #17211b;
   --product-color-text-subtle: #4e5b52;
   --product-color-text-muted: #667269;
-  --product-color-text-tertiary: #7a847c;
+  --product-color-text-tertiary: #68736b;
   --product-color-text-inverse: #ffffff;
   --product-color-text-inverse-muted: #e6ebe4;
   --product-color-nav: #26342d;
   --product-color-nav-subtle: #526057;
 
-  --product-color-border: #d8e0d5;
+  --product-color-border: #dfe4de;
   --product-color-border-subtle: #e7ede4;
   --product-color-border-strong: #c7d2c4;
   --product-color-border-emphasis: #aebdac;

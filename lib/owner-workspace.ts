@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { authRequired, hasPlatformAdminRole } from "@/lib/auth-policy";
 import { requirePlatformSiteOwnerAccess, type OwnerWorkspaceAccessMode } from "@/lib/page-access";
 import { getCurrentUser } from "@/lib/supabase/server";
+import { resolveOwnerIdentity } from "@/lib/owner-identity";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import type { PlatformSiteRecord } from "@/packages/site-contracts";
 
@@ -51,8 +52,7 @@ export async function requireOwnerWorkspace(slug: string, nextPath: string) {
     canAccessAdmin: access.canAccessAdmin,
     tokenAccess: access.tokenAccess,
     options,
-    accountLabel: access.user?.email ?? (access.mode === "local_open" ? "Local access" : "Admin access"),
-    accountEmail: access.user?.email ?? undefined,
+    accountIdentity: resolveOwnerIdentity(access.user, access.mode === "local_open" ? "Local access" : "Admin access"),
     authConfigured: access.configured
   };
 }

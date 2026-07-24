@@ -1,12 +1,12 @@
 import { DomUtils, parseDocument } from "htmlparser2";
 import {
   siteBuildArtifactSchema,
-  type FactDeclaration,
+  type FactBinding,
   type SiteBuildArtifact,
   type SitePublicBuildInput
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "@/packages/business-data";
-import { FactDeclarationValidator } from "./fact-declarations";
+import { FactBindingValidator } from "./fact-declarations";
 import {
   agentAuthoredArtifactSchema,
   normalizeRoutePath,
@@ -26,7 +26,7 @@ export type PreparedSiteArtifact = {
   authored: AgentAuthoredArtifact;
   files: PreparedArtifactFile[];
   routes: Array<{ path: string; htmlFile: string; title: string; description: string; html: string }>;
-  factDeclarations: FactDeclaration[];
+  factBindings: FactBinding[];
   capabilityBindings: AgentAuthoredArtifact["capabilityBindings"];
   findings: ArtifactGateFinding[];
   qualityMetrics: {
@@ -52,7 +52,7 @@ export function prepareSiteArtifact(input: {
   const allowedExternalHrefs = allowedExternalHrefsFor(input.buildInput);
   const allowedPhoneNumbers = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))));
   const allowedEmailAddresses = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()));
-  const cssResult = sanitizeAgentCss(authored.sharedCss);
+  const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
   const finalCss = `${platformCapabilityStyles}\n${cssResult.css}`;
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
   for (const page of input.buildInput.intent.pageRequirements.filter((item) => item.required)) {
@@ -81,17 +81,17 @@ export function prepareSiteArtifact(input: {
   });
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
-  const factDeclarations = new FactDeclarationValidator().validate({
+  findings.push(...validateManagedForms(sanitized, input.buildInput));
+  const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
-    declarations: authored.factDeclarations,
     buildInput: input.buildInput
   });
-  findings.push(...factDeclarations.findings);
+  findings.push(...factBindings.findings);
   const qualityMetrics = { routeSimilarity: routeSimilarityMetrics(sanitized) };
-  findings.push(...validateSiteStructure({ routes: sanitized, declarations: factDeclarations.declarations, buildInput: input.buildInput, similarities: qualityMetrics.routeSimilarity }));
+  findings.push(...validateSiteStructure({ routes: sanitized, bindings: factBindings.bindings, buildInput: input.buildInput, similarities: qualityMetrics.routeSimilarity }));
 
   const structured = structuredDataFor(input.buildInput);
-  const structuredDeclarations = structured.factDeclarations;
+  const structuredBindings = structured.factBindings;
   const platformBindings = input.buildInput.intent.enabledCapabilities.includes("analytics")
     ? sanitized.map((route, index) => ({ id: `capability_analytics_${index + 1}`, kind: "analytics" as const, route: route.path, config: {} }))
     : [];
@@ -131,7 +131,7 @@ export function prepareSiteArtifact(input: {
     authored,
     files,
     routes: routeOutputs,
-    factDeclarations: [...factDeclarations.declarations, ...structuredDeclarations],
+    factBindings: [...factBindings.bindings, ...structuredBindings],
     capabilityBindings,
     findings: dedupeFindings(findings),
     qualityMetrics
@@ -152,7 +152,10 @@ export function finalizePreparedArtifact(input: {
   createdAt?: string;
 }): { artifact: SiteBuildArtifact; files: PreparedArtifactFile[]; qualityMetrics: PreparedSiteArtifact["qualityMetrics"] } {
   const createdAt = input.createdAt ?? new Date().toISOString();
-  const findings = dedupeFindings([...input.prepared.findings, ...input.browserGate.findings]);
+  const findings = dedupeFindings([
+    ...input.prepared.findings,
+    ...input.browserGate.findings
+  ]);
   const fileRecords = input.prepared.files.map((file) => ({
     path: file.path,
     contentType: file.contentType,
@@ -163,7 +166,7 @@ export function finalizePreparedArtifact(input: {
   const artifactHash = sha256(stableJson({
     files: fileRecords.map(({ path, contentType, contentHash, bytes }) => ({ path, contentType, contentHash, bytes })),
     routes: input.prepared.routes.map(({ path, htmlFile, title, description }) => ({ path, htmlFile, title, description })),
-    factDeclarations: input.prepared.factDeclarations,
+    factBindings: input.prepared.factBindings,
     capabilityBindings: input.prepared.capabilityBindings,
     runtimeSeriesId: input.runtimeSeriesId
   }));
@@ -179,7 +182,7 @@ export function finalizePreparedArtifact(input: {
     storagePrefix: input.storagePrefix,
     files: fileRecords,
     routes: input.prepared.routes.map(({ path, htmlFile, title, description }) => ({ path, htmlFile, title, description })),
-    factDeclarations: input.prepared.factDeclarations,
+    factBindings: input.prepared.factBindings,
     capabilityBindings: input.prepared.capabilityBindings,
     runtimeSeriesId: input.runtimeSeriesId,
     runtimePatchAtFinalization: input.runtimePatchId,
@@ -199,7 +202,7 @@ export function finalizePreparedArtifact(input: {
 
 function validateSiteStructure(input: {
   routes: Array<{ path: string; title: string; description: string; bodyHtml: string }>;
-  declarations: FactDeclaration[];
+  bindings: FactBinding[];
   buildInput: SitePublicBuildInput;
   similarities: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
 }) {
@@ -218,15 +221,15 @@ function validateSiteStructure(input: {
     const route = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
     if (route !== "/" && !linkedRoutes.has(route)) findings.push(gateFinding("route.required_not_navigable", "route", `Requested route ${route} is not linked from the site.`, route, "warning"));
   }
-  for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.purpose === "service" && page.offeringId)) {
+  for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.required && page.purpose === "service" && page.offeringId)) {
     const routePath = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
     const route = input.routes.find((candidate) => candidate.path === routePath);
     const offering = input.buildInput.business.offerings.find((candidate) => candidate.id === requirement.offeringId);
-    if (!route || !offering) continue;
+    if (!route || !offering || offering.status !== "confirmed" || offering.visibility !== "public") continue;
     const factIds = new Set(offering.sourceFactIds);
     const boundInHtml = [...factIds].some((factId) => route.bodyHtml.includes(`data-lodesta-fact-id="${factId}"`));
-    const boundInClaim = input.declarations.some((claim) => normalizeRoutePath(claim.route) === routePath && claim.sourceFactIds.some((factId) => factIds.has(factId)));
-    if (!boundInHtml && !boundInClaim) findings.push(gateFinding("claim.service_detail_source", "claim", `Service page ${routePath} must render source-bound detail for ${offering.name}.`, routePath));
+    const boundInFact = input.bindings.some((binding) => normalizeRoutePath(binding.route) === routePath && binding.sourceFactIds.some((factId) => factIds.has(factId)));
+    if (!boundInHtml && !boundInFact) findings.push(gateFinding("fact.service_detail_source", "claim", `Service page ${routePath} must render source-bound detail for ${offering.name}.`, routePath));
   }
   for (const similarity of input.similarities) {
     if (similarity.jaccard >= 0.9 || similarity.smallerPageContainment >= 0.95) {
@@ -321,18 +324,85 @@ function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput:
   return findings;
 }
 
+function validateManagedForms(
+  routes: Array<{ path: string; bodyHtml: string }>,
+  buildInput: SitePublicBuildInput
+) {
+  const findings: ArtifactGateFinding[] = [];
+  const definitions = new Map(buildInput.forms.map((form) => [form.id, form]));
+  for (const route of routes) {
+    const document = parseDocument(route.bodyHtml, { decodeEntities: true });
+    const forms = DomUtils.findAll((node) => node.type === "tag" && node.name === "form" && Boolean(node.attribs["data-lodesta-form-id"]), document.children);
+    for (const form of forms) {
+      if (form.type !== "tag") continue;
+      const formId = form.attribs["data-lodesta-form-id"];
+      const definition = definitions.get(formId);
+      if (!definition) continue;
+      const controls = DomUtils.findAll(
+        (node) => node.type === "tag" && ["input", "textarea", "select"].includes(node.name),
+        form.children
+      );
+      const counts = new Map<string, number>();
+      for (const control of controls) {
+        const fieldId = control.attribs["data-lodesta-field-id"];
+        if (!fieldId) continue;
+        counts.set(fieldId, (counts.get(fieldId) ?? 0) + 1);
+        const id = control.attribs.id;
+        const label = id
+          ? DomUtils.findOne((node) => node.type === "tag" && node.name === "label" && node.attribs.for === id, form.children)
+          : undefined;
+        if (!id || !label) {
+          findings.push(gateFinding("capability.form_label", "capability", `Field ${fieldId} in form ${formId} must have a label associated by for/id.`, route.path));
+        }
+      }
+      const expected = new Set(definition.fields.map((field) => field.id));
+      for (const field of definition.fields) {
+        if ((counts.get(field.id) ?? 0) !== 1) {
+          findings.push(gateFinding("capability.form_field_count", "capability", `Form ${formId} must render field ${field.id} exactly once.`, route.path));
+        }
+      }
+      for (const fieldId of counts.keys()) {
+        if (!expected.has(fieldId)) {
+          findings.push(gateFinding("capability.form_unknown_field", "capability", `Form ${formId} renders unknown field ${fieldId}.`, route.path));
+        }
+      }
+      const submits = DomUtils.findAll(
+        (node) => node.type === "tag"
+          && ((node.name === "button" && node.attribs.type === "submit") || (node.name === "input" && node.attribs.type === "submit")),
+        form.children
+      );
+      if (submits.length !== 1) {
+        findings.push(gateFinding("capability.form_submit_count", "capability", `Form ${formId} must render exactly one submit control.`, route.path));
+      }
+      const statuses = DomUtils.findAll(
+        (node) => node.type === "tag" && node.attribs["data-lodesta-form-status"] !== undefined && node.attribs["aria-live"] === "polite",
+        form.children
+      );
+      if (statuses.length !== 1) {
+        findings.push(gateFinding("capability.form_status", "capability", `Form ${formId} must contain exactly one polite live status node.`, route.path));
+      }
+    }
+  }
+  return findings;
+}
+
 function structuredDataFor(buildInput: SitePublicBuildInput) {
+  if (buildInput.business.identityStatus !== "verified") {
+    return { value: undefined, factBindings: [] as FactBinding[] };
+  }
   const facts = new Map(buildInput.publicFacts.map((fact) => [fact.kind, fact]));
+  const nameFact = facts.get("business_name");
+  if (!nameFact) return { value: undefined, factBindings: [] as FactBinding[] };
   const location = buildInput.business.locations[0];
   const value: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": buildInput.domainContext?.structuredDataType ?? "LocalBusiness",
     name: buildInput.business.name
   };
-  const factDeclarations: FactDeclaration[] = [];
-  addStructuredFact(value, factDeclarations, "/", "name", facts.get("business_name"));
-  addStructuredFact(value, factDeclarations, "/", "telephone", facts.get("phone"));
-  addStructuredFact(value, factDeclarations, "/", "email", facts.get("email"));
+  const factBindings: FactBinding[] = [];
+  addStructuredFact(value, factBindings, "/", "name", nameFact);
+  addStructuredFact(value, factBindings, "/", "telephone", facts.get("phone"));
+  addStructuredFact(value, factBindings, "/", "email", facts.get("email"));
   if (location) {
     const addressFact = facts.get("address");
     if (addressFact) {
@@ -346,21 +416,21 @@ function structuredDataFor(buildInput: SitePublicBuildInput) {
       };
       for (const [key, item] of Object.entries(value.address as Record<string, unknown>)) {
         if (key === "@type" || item === undefined) continue;
-        factDeclarations.push(structuredClaim(`jsonld:address:${key}`, String(item), addressFact.id));
+        factBindings.push(structuredBinding(`jsonld:address:${key}`, String(item), addressFact.id));
       }
     }
   }
   const offeringFacts = buildInput.publicFacts.filter((fact) => fact.kind === "offering");
   if (offeringFacts.length) {
     value.makesOffer = offeringFacts.map((fact) => ({ "@type": "Offer", itemOffered: { "@type": "Service", name: String(fact.value) } }));
-    for (const fact of offeringFacts) factDeclarations.push(structuredClaim(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
+    for (const fact of offeringFacts) factBindings.push(structuredBinding(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
   }
-  return { value, factDeclarations };
+  return { value, factBindings };
 }
 
 function addStructuredFact(
   target: Record<string, unknown>,
-  factDeclarations: FactDeclaration[],
+  factBindings: FactBinding[],
   route: string,
   key: string,
   fact: SitePublicBuildInput["publicFacts"][number] | undefined
@@ -368,11 +438,11 @@ function addStructuredFact(
   if (!fact) return;
   const value = typeof fact.value === "string" ? fact.value : String(fact.value);
   target[key] = value;
-  factDeclarations.push({ ...structuredClaim(`jsonld:${key}`, value, fact.id), route });
+  factBindings.push({ ...structuredBinding(`jsonld:${key}`, value, fact.id), route });
 }
 
-function structuredClaim(id: string, text: string, factId: string): FactDeclaration {
-  return { id, route: "/", text, kind: "structured_data", sourceFactIds: [factId], autoDeclared: true };
+function structuredBinding(id: string, text: string, factId: string): FactBinding {
+  return { id, route: "/", text, origin: "structured_data", sourceFactIds: [factId] };
 }
 
 function documentHtml(input: {
@@ -401,7 +471,7 @@ function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
 
 function mapHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
   const address = [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ");
-  const query = location.googlePlaceId ? `place_id:${location.googlePlaceId}` : address || location.label;
+  const query = address || location.label;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 

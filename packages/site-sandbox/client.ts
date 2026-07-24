@@ -100,10 +100,10 @@ export class SiteSandboxClient {
       revision: string;
       versions: string[];
       sandboxManifest: {
-        schemaVersion: "site-sandbox-manifest-v1";
-        artifactContractVersion: string;
-        toolchainVersion: string;
-        sourcePolicyVersion: string;
+        kind: "site-sandbox-manifest";
+        artifactContractIdentity: string;
+        toolchainIdentity: string;
+        sourcePolicyIdentity: string;
       };
       placementId: string;
       processes: Array<{ id: string; command: string; status: string }>;
@@ -119,7 +119,7 @@ export class SiteSandboxClient {
   }
 
   private async call<T>(sessionId: string, action: string, method: "GET" | "POST", body?: unknown): Promise<T> {
-    if (!/^[a-z0-9-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
+    if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${sessionId}/${action}`, {
       method,
       headers: {

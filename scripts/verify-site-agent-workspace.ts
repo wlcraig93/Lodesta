@@ -2,20 +2,21 @@ import { access, readFile } from "node:fs/promises";
 
 const component = await readFile("components/SiteAgentWorkspace.tsx", "utf8");
 const css = await readFile("app/globals.css", "utf8");
-const editorRoute = await readFile("app/(owner-workspace)/workspace/[slug]/website/page.tsx", "utf8");
+const editorRoute = await readFile("app/(owner-workspace)/workspace/[slug]/editor/page.tsx", "utf8");
 const adminShell = await readFile("components/admin/AdminShell.tsx", "utf8");
 const adminSites = await readFile("app/admin/sites/page.tsx", "utf8");
 
-await access("app/(owner-workspace)/workspace/[slug]/website/page.tsx");
+await access("app/(owner-workspace)/workspace/[slug]/editor/page.tsx");
 await assertMissing("app/(workspace)/editor/[slug]/page.tsx");
 await assertMissing("app/(owner)/editor/[slug]/page.tsx");
 await assertMissing("app/(admin-app)/dashboard/page.tsx");
 await assertMissing("app/(owner)/dashboard/[slug]/page.tsx");
 
-assert(component.includes('const [discussMode, setDiscussMode] = useState(false)'), "Build is not the default workspace mode");
-assert(component.includes('discussMode ? "/api/site-agent/discuss" : "/api/site-agent/runs"'), "Discuss and Build do not use their canonical endpoints");
+assert(component.includes('const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit")'), "Edit is not the default workspace mode");
+assert(component.includes('const asking = composerMode === "ask"') && component.includes('asking ? "/api/site-agent/discuss" : "/api/site-agent/runs"'), "Ask and Edit do not use their canonical endpoints");
 assert(component.includes("result.discussion.requiresApply && result.discussion.proposedAction"), "Discussion suggestions are not captured from the response");
 assert(component.includes("setInstruction(discussionSuggestion.action)"), "Using a suggestion does not place the proposed action in the composer");
+assert(component.includes('setComposerMode("edit")'), "Using a suggestion does not return the composer to Edit");
 const useSuggestionBody = component.match(/function useSuggestion\(\) \{([\s\S]*?)\n  \}\n\n  function navigatePreview/)?.[1] ?? "";
 assert(useSuggestionBody.length > 0 && !useSuggestionBody.includes("submit("), "Using a suggestion auto-submits the Build request");
 assert(component.includes("frameWindow.location.assign(target)"), "Page selection does not navigate the mounted preview iframe");
@@ -32,13 +33,17 @@ assert(editorRoute.includes("requireOwnerWorkspace") && editorRoute.includes("is
 assert(!component.includes("manageSitesHref") && !component.includes("site-agent-site-menu"), "Workspace retains duplicate global navigation instead of using the owner shell");
 assert(!component.includes("Dashboard") && !component.includes("/dashboard"), "Workspace restores the retired dashboard concept");
 assert(component.includes("workspace.input?.business.name ?? initialInput.business.name"), "Editor identity does not use the canonical public build input business name");
-assert(component.includes("site-agent-command-title-desktop") && component.includes("Website · "), "Desktop editor header does not identify the active website and task");
+assert(component.includes("site-agent-command-title-desktop") && component.includes("Editor · "), "Desktop editor header does not identify the active website and task");
 assert(component.includes('className="site-agent-preview-primary"') && component.includes('className="site-agent-preview-outcome"'), "Preview toolbar does not separate context/tools from the outcome actions");
 assert(component.includes("site-agent-more-popover") && component.includes('aria-haspopup="dialog"') && component.includes('event.key !== "Escape"'), "Preview More menu is not keyboard-operable");
 for (const label of ["Compare with live", "Version history", "Restore selected", "Open live site", "Admin diagnostics"]) {
   assert(component.includes(label), `Preview More menu is missing ${label}`);
 }
 assert(!component.includes("site-agent-history-menu") && !component.includes("site-agent-diagnostics-menu") && !component.includes("site-agent-tool-link"), "Retired peer-level preview actions remain in the toolbar");
+assert(component.includes('className="site-agent-compose-mode"') && component.includes(">Edit</button>") && component.includes(">Ask</button>"), "Composer does not expose the canonical Edit and Ask modes");
+assert(component.includes("site-agent-starter-prompts") && component.includes("editorStarterPrompts"), "Empty editor does not provide contextual starter prompts");
+assert(component.includes("publishDisabledReason") && component.includes("aria-describedby"), "Disabled Publish does not explain its requirement");
+assert(component.includes("site-agent-mobile-back") && component.includes("site-agent-mobile-more") && component.includes("site-agent-publish-mobile"), "Mobile editor topbar controls are incomplete");
 assert(adminShell.includes('label: "Manage sites"') && adminShell.includes("<span>Admin</span>"), "Admin navigation and identity are not explicit");
 assert(adminSites.includes('title="Manage sites"'), "The admin inventory is not named Manage sites");
 
@@ -80,7 +85,8 @@ assert(!css.includes(".site-agent-rail"), "Retired rail CSS remains after the cl
 const previewBarCss = css.match(/\.site-agent-preview-bar \{([\s\S]*?)\n\}/)?.[1] ?? "";
 assert(previewBarCss.includes("grid-template-columns: minmax(0, 1fr) auto") && previewBarCss.includes("overflow: visible") && !previewBarCss.includes("overflow-x"), "Preview toolbar can still scroll Publish out of view");
 assert(css.includes(".site-agent-preview-outcome") && css.includes(".site-agent-more-popover") && css.includes("right: 0"), "Preview outcome actions and More menu are not pinned to the toolbar edge");
-assert(css.includes("grid-column: 1 / -1") && css.includes("grid-row: 2") && css.includes("max-height: calc(100dvh - 306px - env(safe-area-inset-bottom))"), "Mobile Preview does not use the two-row page/tools contract");
+assert(css.includes(".site-agent-more-mobile-tools") && css.includes("position: fixed") && css.includes("top: 66px"), "Mobile Preview tools do not move into the topbar More sheet");
+assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused mobile editor does not hide duplicate global chrome");
 
 console.log("Site agent workspace verification passed.");
 

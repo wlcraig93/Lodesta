@@ -18,6 +18,8 @@ import type {
 } from "@/packages/site-contracts";
 import type { OwnerSiteAgentRun } from "@/packages/site-platform";
 import type { SiteAgentMessage } from "@/packages/platform-data";
+import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
+import { ProductEmptyState, ProductSegmentedControl } from "@/components/ProductUI";
 
 type WorkspacePayload = {
   site: PlatformSiteRecord;
@@ -78,7 +80,7 @@ export function SiteAgentWorkspace({
     messages: [],
     runs: []
   });
-  const [discussMode, setDiscussMode] = useState(false);
+  const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit");
   const [discussionSuggestion, setDiscussionSuggestion] = useState<DiscussionSuggestion>();
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
   const [mobilePane, setMobilePane] = useState<"chat" | "preview">("chat");
@@ -102,12 +104,14 @@ export function SiteAgentWorkspace({
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
   const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
   const previewMoreId = useId();
+  const publishReasonId = useId();
   const workspaceRef = useRef<HTMLElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const previewMoreRef = useRef<HTMLDivElement>(null);
   const previewMoreTriggerRef = useRef<HTMLButtonElement>(null);
+  const previewMoreMobileTriggerRef = useRef<HTMLButtonElement>(null);
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
@@ -146,7 +150,14 @@ export function SiteAgentWorkspace({
       }));
   const selectedPageExists = pages.some((page) => page.path === selectedPagePath);
   const selectedPageValue = selectedPageExists ? selectedPagePath : "/";
-  const status = workspaceStatus({ site: workspace.site, activeRun, latestCandidate, readiness: workspace.readiness });
+  const status = deriveOwnerSiteLifecycle({
+    slug: workspace.site.slug,
+    site: workspace.site,
+    versions: workspace.versions,
+    runs: workspace.runs,
+    readiness: workspace.readiness,
+    attention: { operatorItems: workspace.openFindings?.length }
+  });
   const diagnosticRuns = workspace.runs.slice(0, 4);
   const businessName = workspace.input?.business.name ?? initialInput.business.name;
   const compareDisabled = !publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id);
@@ -154,6 +165,16 @@ export function SiteAgentWorkspace({
   const desktopPanelCollapsed = desktopPanelActive && panelMode === "collapsed";
   const desktopFullChat = desktopPanelActive && panelMode === "full-chat";
   const panelStyle = { "--site-agent-panel-width": `${panelWidth}px` } as CSSProperties;
+  const starterPrompts = editorStarterPrompts(workspace.input ?? initialInput);
+  const publishDisabledReason = activeRun
+    ? "Finish the current website update before publishing."
+    : busy
+      ? "Wait for the workspace to finish loading."
+      : !latestCandidate
+        ? "Create a verified website update before publishing."
+        : workspace.readiness?.status !== "ready"
+          ? `${workspace.readiness?.blockers.length ?? 1} publishing requirement${(workspace.readiness?.blockers.length ?? 1) === 1 ? "" : "s"} must be resolved first.`
+          : undefined;
 
   async function refresh() {
     const response = await fetch(`/api/site-agent/sessions?siteId=${encodeURIComponent(initialSite.id)}`, { cache: "no-store" });
@@ -231,14 +252,14 @@ export function SiteAgentWorkspace({
 
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node;
-      if (previewMoreRef.current?.contains(target) || previewMoreTriggerRef.current?.contains(target)) return;
+      if (previewMoreRef.current?.contains(target) || previewMoreTriggerRef.current?.contains(target) || previewMoreMobileTriggerRef.current?.contains(target)) return;
       setPreviewMoreOpen(false);
     }
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setPreviewMoreOpen(false);
-      previewMoreTriggerRef.current?.focus();
+      (previewMoreMobileTriggerRef.current ?? previewMoreTriggerRef.current)?.focus();
     }
 
     document.addEventListener("pointerdown", onPointerDown);
@@ -351,18 +372,19 @@ export function SiteAgentWorkspace({
     setNotice(undefined);
     setDiscussionSuggestion(undefined);
     try {
-      const endpoint = discussMode ? "/api/site-agent/discuss" : "/api/site-agent/runs";
+      const asking = composerMode === "ask";
+      const endpoint = asking ? "/api/site-agent/discuss" : "/api/site-agent/runs";
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: workspace.session.id,
           selection,
-          ...(discussMode ? { message } : { instruction: message, resumeRunId: waitingRun?.id })
+          ...(asking ? { message } : { instruction: message, resumeRunId: waitingRun?.id })
         })
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      if (discussMode) {
+      if (asking) {
         const result = await response.json() as DiscussionResult;
         if (result.discussion.requiresApply && result.discussion.proposedAction) {
           setDiscussionSuggestion({ response: result.discussion.response, action: result.discussion.proposedAction });
@@ -379,7 +401,7 @@ export function SiteAgentWorkspace({
 
   function useSuggestion() {
     if (!discussionSuggestion) return;
-    setDiscussMode(false);
+    setComposerMode("edit");
     setInstruction(discussionSuggestion.action);
     setDiscussionSuggestion(undefined);
     window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -611,12 +633,13 @@ export function SiteAgentWorkspace({
     >
       <header className="site-agent-workspace-header">
         <div className="site-agent-brand-bar">
+          <Link className="site-agent-mobile-back" href={`/workspace/${workspace.site.slug}`} aria-label="Back to website overview">←</Link>
           <button className="site-agent-collapsed-toggle" type="button" aria-label="Expand chat panel" title="Expand chat panel" onClick={restoreSplitPanel}>
             <ChatIcon />
           </button>
           <div className="site-agent-command-title">
-            <strong><span className="site-agent-command-title-desktop">{businessName}</span><span className="site-agent-command-title-mobile">Website</span></strong>
-            <small className={`is-${status.tone}`}><span className="site-agent-command-title-desktop">Website · </span>{status.label}</small>
+            <strong>{businessName}</strong>
+            <small className={`is-${status.tone}`}><span className="site-agent-command-title-desktop">Editor · </span>{status.label}</small>
           </div>
           <div className="site-agent-panel-controls" aria-label="Chat panel controls">
             {panelMode === "full-chat" ? (
@@ -635,9 +658,34 @@ export function SiteAgentWorkspace({
             )}
           </div>
           <div className="site-agent-mobile-switch" aria-label="Workspace pane">
-            <button type="button" className={mobilePane === "chat" ? "is-active" : ""} onClick={() => setMobilePane("chat")}>Chat</button>
-            <button type="button" className={mobilePane === "preview" ? "is-active" : ""} onClick={() => setMobilePane("preview")}>Preview</button>
+            <button type="button" className={mobilePane === "chat" ? "is-active" : ""} onClick={() => { setMobilePane("chat"); setPreviewMoreOpen(false); }}>Chat</button>
+            <button type="button" className={mobilePane === "preview" ? "is-active" : ""} onClick={() => { setMobilePane("preview"); setPreviewMoreOpen(false); }}>Preview</button>
           </div>
+          {mobilePane === "preview" ? (
+            <button
+              ref={previewMoreMobileTriggerRef}
+              className="site-agent-mobile-more"
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls={previewMoreId}
+              aria-expanded={previewMoreOpen}
+              aria-label="Preview options"
+              onClick={() => setPreviewMoreOpen((current) => !current)}
+            >
+              •••
+            </button>
+          ) : null}
+          {publishDisabledReason ? <span className="site-agent-visually-hidden" id={`${publishReasonId}-mobile`}>{publishDisabledReason}</span> : null}
+          <button
+            className="button primary site-agent-publish site-agent-publish-mobile"
+            type="button"
+            disabled={Boolean(publishDisabledReason)}
+            aria-describedby={publishDisabledReason ? `${publishReasonId}-mobile` : undefined}
+            title={publishDisabledReason}
+            onClick={() => void publish()}
+          >
+            Publish
+          </button>
         </div>
 
         <div className="site-agent-preview-bar">
@@ -670,6 +718,23 @@ export function SiteAgentWorkspace({
               </button>
               {previewMoreOpen ? (
                 <div ref={previewMoreRef} className="site-agent-more-popover" id={previewMoreId} role="dialog" aria-label="More preview actions">
+                  <section className="site-agent-more-section site-agent-more-mobile-tools">
+                    <span className="site-agent-more-heading">Preview tools</span>
+                    <label className="site-agent-page-picker">
+                      <span>Page</span>
+                      <select value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+                        {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
+                      </select>
+                    </label>
+                    <div className="site-agent-preview-controls" aria-label="Preview viewport">
+                      <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
+                      <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
+                    </div>
+                    <button className={`site-agent-more-action ${selectionMode ? "is-selected" : ""}`} type="button" aria-pressed={selectionMode} onClick={() => setSelectionMode((value) => !value)}>
+                      <span><strong>Select an element</strong><small>Choose part of the preview for your next edit</small></span>
+                      <small>{selectionMode ? "On" : "Off"}</small>
+                    </button>
+                  </section>
                   <section className="site-agent-more-section">
                     <span className="site-agent-more-heading">Preview</span>
                     <button
@@ -711,7 +776,10 @@ export function SiteAgentWorkspace({
                 </div>
               ) : null}
             </div>
-            <button className="button primary site-agent-publish" type="button" disabled={!latestCandidate || workspace.readiness?.status !== "ready" || busy || Boolean(activeRun)} onClick={() => void publish()}>Publish</button>
+            <div className="site-agent-publish-wrap">
+              {publishDisabledReason ? <span id={publishReasonId}>{publishDisabledReason}</span> : null}
+              <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} title={publishDisabledReason} onClick={() => void publish()}>Publish</button>
+            </div>
           </div>
         </div>
       </header>
@@ -734,10 +802,15 @@ export function SiteAgentWorkspace({
                 </div>
               </div>
             ) : workspace.messages.length === 0 ? (
-              <div className="site-agent-empty-message">
-                <strong>What should we work on?</strong>
-                <span>Describe a change to the site, or switch to Discuss when you only want advice.</span>
-              </div>
+              <ProductEmptyState
+                className="site-agent-empty-message"
+                title="What would you like to improve?"
+                detail="Describe a change, or choose Ask when you want advice without editing the website."
+              >
+                <div className="site-agent-starter-prompts">
+                  {starterPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setComposerMode("edit"); setInstruction(prompt); window.requestAnimationFrame(() => composerRef.current?.focus()); }}>{prompt}</button>)}
+                </div>
+              </ProductEmptyState>
             ) : null}
             {workspace.messages.map((message) => (
               <article key={message.id} className={`site-agent-message is-${message.role}`} aria-label={messageAuthorLabel(message.role)}>
@@ -789,23 +862,22 @@ export function SiteAgentWorkspace({
               ref={composerRef}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder={discussMode ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
+              placeholder={composerMode === "ask" ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void submit();
               }}
               rows={1}
             />
             <div className="site-agent-compose-footer">
-              <label className={`site-agent-discuss-toggle ${discussMode ? "is-active" : ""}`}>
-                <input type="checkbox" checked={discussMode} onChange={(event) => setDiscussMode(event.target.checked)} />
-                <span aria-hidden="true" />
-                Discuss
-              </label>
+              <ProductSegmentedControl className="site-agent-compose-mode" label="Composer mode">
+                <button type="button" className={composerMode === "edit" ? "is-active" : ""} aria-pressed={composerMode === "edit"} onClick={() => setComposerMode("edit")}>Edit</button>
+                <button type="button" className={composerMode === "ask" ? "is-active" : ""} aria-pressed={composerMode === "ask"} onClick={() => setComposerMode("ask")}>Ask</button>
+              </ProductSegmentedControl>
               <button
                 className="site-agent-send-button"
                 type="button"
-                aria-label={busy ? "Working" : discussMode ? "Send discussion message" : "Build requested change"}
-                title={busy ? "Working" : discussMode ? "Send discussion message" : "Build requested change"}
+                aria-label={busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
+                title={busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
                 aria-busy={busy ? true : undefined}
                 disabled={!instruction.trim() || busy || Boolean(activeRun)}
                 onClick={() => void submit()}
@@ -850,7 +922,7 @@ export function SiteAgentWorkspace({
           ) : null}
           <div className={`site-agent-preview-stage is-${viewport} ${compare ? "is-comparing" : ""}`}>
             {previewBaseUrl === "about:blank" ? (
-              <div className="site-agent-empty-preview"><strong>{busy ? "Opening workspace" : "No preview yet"}</strong><span>The first verified preview will appear here.</span></div>
+              <div className="site-agent-empty-preview"><strong>{busy ? "Opening workspace" : "Your preview will appear here"}</strong><span>Ask for a website change, then review the verified result in this pane.</span></div>
             ) : (
               <iframe ref={previewRef} key={previewIdentity} name="site-agent-preview" title="Website preview" src={iframeSrc} onLoad={handlePreviewLoad} />
             )}
@@ -954,23 +1026,6 @@ function previewRouteFromPath(pathname: string) {
   return normalizePagePath(marker);
 }
 
-function workspaceStatus({
-  site,
-  activeRun,
-  latestCandidate,
-  readiness
-}: {
-  site: PlatformSiteRecord;
-  activeRun?: OwnerSiteAgentRun;
-  latestCandidate?: SiteVersion;
-  readiness?: SitePublicationReadiness;
-}) {
-  if (activeRun) return { label: stageLabel(activeRun), tone: "working" };
-  if (latestCandidate && readiness?.status === "ready") return { label: "Ready to publish", tone: "ready" };
-  if (latestCandidate) return { label: "Review required", tone: "review" };
-  return { label: site.status.replaceAll("_", " "), tone: site.status };
-}
-
 function stageLabel(run: OwnerSiteAgentRun) {
   return ({
     queued: "Queued",
@@ -982,6 +1037,20 @@ function stageLabel(run: OwnerSiteAgentRun) {
     candidate_ready: "Candidate ready",
     failed: "Needs review"
   } as const)[run.stage];
+}
+
+function editorStarterPrompts(input: SitePublicBuildInput) {
+  const offering = input.business.offerings[0]?.name;
+  const contactPrompt = input.business.contacts.phone
+    ? "Make the phone number easier to find"
+    : input.business.contacts.email
+      ? "Make the contact option more prominent"
+      : "Strengthen the primary call to action";
+  return [
+    offering ? `Make ${offering} more prominent on the homepage` : "Clarify the homepage headline",
+    contactPrompt,
+    "Improve the mobile homepage layout"
+  ];
 }
 
 function elapsedLabel(durationMs: number) {

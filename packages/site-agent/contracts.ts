@@ -1,7 +1,9 @@
 import { z } from "zod";
-import { type SiteElementSelection, type SitePublicBuildInput } from "@/packages/site-contracts";
+import { type SiteAgentApiProvider, type SiteElementSelection, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { validateWorkspaceSourcePolicy } from "./source-policy";
 import type { ManagerTaskKind } from "./skills";
+import type { AuthoringContextPacket } from "./authoring-context";
+import { imageCreationActions, imageCreationPurposes, imageCreationSizes } from "./image-creation";
 
 export const workspaceSourceFileSchema = z.object({
   path: z.string().regex(/^src\/[a-zA-Z0-9_.\/-]+\.(?:ts|tsx|css)$/).refine((value) => !value.split("/").some((part) => part === ".." || part === "." || !part), "Unsafe source path."),
@@ -24,11 +26,14 @@ export function assertCompleteWorkspace(files: WorkspaceSourceFile[]) {
 
 export type ManagerRunRequest = {
   buildInput: SitePublicBuildInput;
+  authoringContext: AuthoringContextPacket;
+  runId?: string;
   instruction: string;
   kind: ManagerTaskKind;
   selection?: SiteElementSelection;
   limits?: Partial<ManagerRunLimits>;
   signal?: AbortSignal;
+  mediaSheet?: { dataUrl: string; assetCount: number };
 };
 
 export type ManagerRunLimits = {
@@ -55,6 +60,7 @@ export const managerToolNameSchema = z.enum([
   "write_file",
   "delete_file",
   "apply_patch",
+  "create_image",
   "build_preview",
   "inspect_site",
   "request_input",
@@ -74,6 +80,21 @@ export const managerToolArguments = {
   write_file: z.object({ path: workspaceSourceFileSchema.shape.path, content: workspaceSourceFileSchema.shape.content }).strict(),
   delete_file: z.object({ path: workspaceSourceFileSchema.shape.path }).strict(),
   apply_patch: z.object({ files: z.array(patchFileSchema).min(1).max(80) }).strict(),
+  create_image: z.object({
+    action: z.enum(imageCreationActions),
+    purpose: z.enum(imageCreationPurposes),
+    prompt: z.string().min(1).max(8000),
+    sourceAssetIds: z.array(z.string().min(1).max(160)).max(4),
+    size: z.enum(imageCreationSizes),
+    alt: z.string().min(1).max(500)
+  }).strict().superRefine((value, context) => {
+    if (value.action === "generate" && value.sourceAssetIds.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Generate does not accept source assets.", path: ["sourceAssetIds"] });
+    }
+    if (value.action === "edit" && value.sourceAssetIds.length < 1) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Edit requires at least one source asset.", path: ["sourceAssetIds"] });
+    }
+  }),
   build_preview: z.object({}).strict(),
   inspect_site: z.object({}).strict(),
   request_input: z.object({ question: z.string().min(1).max(600) }).strict(),
@@ -115,10 +136,19 @@ export type ManagerRunEvent = {
   name: string;
   status: "running" | "succeeded" | "failed";
   turnIndex: number;
+  apiProvider?: SiteAgentApiProvider;
   modelId?: string;
+  servedModelId?: string;
+  upstreamProvider?: string;
+  providerRequestId?: string;
   inputTokens?: number;
   cachedInputTokens?: number;
+  reasoningTokens?: number;
   outputTokens?: number;
+  costUsd?: number;
+  costSource?: ManagerCostSource;
+  upstreamInferenceCostUsd?: number;
+  modelDurationMs?: number;
   summary: Record<string, unknown>;
   payload?: Record<string, unknown>;
   errorCode?: string;
@@ -137,8 +167,12 @@ export type ManagerDiscussion = z.infer<typeof managerDiscussionSchema>;
 export type ManagerModelUsage = {
   inputTokens: number;
   cachedInputTokens: number;
+  reasoningTokens: number;
   outputTokens: number;
-  estimatedCostUsd: number;
-  costEstimateStatus: "configured" | "unavailable";
+  costUsd: number;
+  costSource: ManagerCostSource;
+  upstreamInferenceCostUsd: number;
   durationMs: number;
 };
+
+export type ManagerCostSource = "provider_reported" | "catalog_estimate" | "mixed" | "unavailable";

@@ -28,7 +28,7 @@ export function OwnerInbox({ siteId, slug, initialInquiries, eventsByInquiry, re
   function selectInquiry(id: string) {
     setSelectedId(id);
     setMobileDetailOpen(true);
-    router.replace(`/workspace/${slug}/inbox?inquiry=${encodeURIComponent(id)}`, { scroll: false });
+    router.replace(`/workspace/${slug}/leads?inquiry=${encodeURIComponent(id)}`, { scroll: false });
   }
 
   function updateStatus(id: string, status: Inquiry["status"]) {
@@ -53,7 +53,7 @@ export function OwnerInbox({ siteId, slug, initialInquiries, eventsByInquiry, re
       <section className="owner-inbox-detail" aria-live="polite">
         {selected ? <>
           <header className="owner-inbox-detail-header">
-            <button className="owner-inbox-mobile-back" type="button" onClick={() => setMobileDetailOpen(false)}>← Inbox</button>
+            <button className="owner-inbox-mobile-back" type="button" onClick={() => setMobileDetailOpen(false)}>← Leads</button>
             <div><span>Received {formatWorkspaceDate(selected.createdAt)}</span><h2>{selected.contactName ?? "Website inquiry"}</h2><p>{[selected.contactEmail, selected.contactPhone].filter(Boolean).join(" · ") || "No contact details extracted"}</p></div>
             <WorkspaceStatus tone={statusTone(selected.status)}>{humanize(selected.status)}</WorkspaceStatus>
           </header>
@@ -66,7 +66,7 @@ export function OwnerInbox({ siteId, slug, initialInquiries, eventsByInquiry, re
           </div>
 
           <section className="workspace-panel owner-inbox-history"><div className="workspace-panel-heading"><div><span>History</span><h3>Inquiry activity</h3></div><small>{selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}</small></div><div className="owner-inbox-timeline">{selectedEvents.map((event) => <article key={event.id}><span /><div><strong>{humanize(event.type)}</strong><p>{event.messageText ?? eventSummary(event)}</p><small>{humanize(event.actor)} · {formatWorkspaceDate(event.createdAt)}</small></div></article>)}</div></section>
-        </> : <div className="workspace-empty-state is-centered"><strong>Your inbox is clear</strong><p>New website inquiries will appear here with contact details and Lodesta triage.</p><Link className="button secondary" href={`/workspace/${slug}/website`}>Review website forms</Link></div>}
+        </> : <div className="workspace-empty-state is-centered"><strong>No leads need attention</strong><p>New website inquiries will appear here with contact details and Lodesta triage.</p><Link className="button secondary" href={`/workspace/${slug}/editor`}>Review website forms</Link></div>}
       </section>
     </div>
   );

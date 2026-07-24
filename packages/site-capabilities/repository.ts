@@ -1,7 +1,16 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import type { AnalyticsEvent, AnalyticsSummary, Inquiry, InquiryEvent, InquiryStatus } from "./contracts";
-import { summarizeAnalytics } from "@/lib/analytics";
+import type {
+  AnalyticsCollectionHealth,
+  AnalyticsCollectionReason,
+  AnalyticsEvent,
+  AnalyticsReport,
+  AnalyticsReportQuery,
+  Inquiry,
+  InquiryEvent,
+  InquiryStatus
+} from "./contracts";
+import { analyticsReportFromDatabase, buildAnalyticsReport } from "@/lib/analytics";
 import {
   extractInquiryContact,
   inquiryDedupeKey,
@@ -21,6 +30,7 @@ export type CreateCapabilityInquiryInput = {
   sourceUrl?: string;
   userAgent?: string;
   ipHash?: string;
+  analyticsEvent?: AnalyticsEvent;
 };
 
 export type CreateCapabilityInquiryResult = {
@@ -35,18 +45,20 @@ export interface SiteCapabilityRepository {
   getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
   listInquiryEvents(inquiryId: string): Promise<InquiryEvent[]>;
   updateInquiryStatus(input: { siteId: string; inquiryId: string; status: InquiryStatus }): Promise<Inquiry | null>;
-  recordAnalyticsEvent(event: AnalyticsEvent): Promise<AnalyticsEvent>;
+  recordAnalyticsEvent(event: AnalyticsEvent): Promise<{ event: AnalyticsEvent; duplicate: boolean }>;
+  recordAnalyticsCollection(siteId: string, reason: AnalyticsCollectionReason, at?: string): Promise<void>;
   listAnalyticsEvents(siteId: string): Promise<AnalyticsEvent[]>;
-  analyticsSummary(siteId: string): Promise<AnalyticsSummary>;
+  analyticsReport(siteId: string, query: AnalyticsReportQuery): Promise<AnalyticsReport>;
 }
 
 type LocalCapabilityState = {
   inquiries: Inquiry[];
   inquiryEvents: InquiryEvent[];
   analyticsEvents: AnalyticsEvent[];
+  analyticsCollection: Record<string, AnalyticsCollectionHealth>;
 };
 
-const emptyLocalState = (): LocalCapabilityState => ({ inquiries: [], inquiryEvents: [], analyticsEvents: [] });
+const emptyLocalState = (): LocalCapabilityState => ({ inquiries: [], inquiryEvents: [], analyticsEvents: [], analyticsCollection: {} });
 
 class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
   private queue = Promise.resolve();
@@ -64,8 +76,12 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
     });
     let result: CreateCapabilityInquiryResult | undefined;
     await this.write((state) => {
-      const duplicate = state.inquiryEvents.find((event) => event.dedupeKey === dedupeKey);
-      const existing = duplicate ? state.inquiries.find((inquiry) => inquiry.id === duplicate.inquiryId) : undefined;
+      const duplicateEvent = state.inquiryEvents.find((event) => event.dedupeKey === dedupeKey);
+      const existing = duplicateEvent ? state.inquiries.find((inquiry) => inquiry.id === duplicateEvent.inquiryId) : undefined;
+      if (existing && duplicateEvent) {
+        result = { inquiry: existing, event: duplicateEvent, duplicate: true };
+        return;
+      }
       const now = new Date().toISOString();
       const inquiry: Inquiry = existing ?? {
         id: crypto.randomUUID(), siteId: input.siteId, sourceChannel: "form",
@@ -84,7 +100,14 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
       };
       if (!existing) state.inquiries.push(inquiry);
       state.inquiryEvents.push(event);
-      result = { inquiry, event, duplicate: Boolean(existing) };
+      if (input.analyticsEvent) {
+        const isDuplicateAnalytics = state.analyticsEvents.some((item) => item.siteId === input.analyticsEvent?.siteId && item.eventId === input.analyticsEvent?.eventId);
+        if (!isDuplicateAnalytics) {
+          state.analyticsEvents.push(input.analyticsEvent);
+          incrementLocalCollection(state, input.siteId, "accepted", input.analyticsEvent.occurredAt);
+        }
+      }
+      result = { inquiry, event, duplicate: false };
     });
     if (!result) throw new Error("Inquiry write did not complete.");
     return result;
@@ -115,20 +138,38 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
   }
 
   async recordAnalyticsEvent(event: AnalyticsEvent) {
-    const sanitized = sanitizedAnalyticsEvent(event);
-    await this.write((state) => { state.analyticsEvents.push(sanitized); });
-    return sanitized;
+    let duplicate = false;
+    await this.write((state) => {
+      duplicate = state.analyticsEvents.some((item) => item.siteId === event.siteId && item.eventId === event.eventId);
+      if (!duplicate) state.analyticsEvents.push(event);
+      incrementLocalCollection(state, event.siteId, duplicate ? "duplicate" : "accepted", event.occurredAt);
+    });
+    return { event, duplicate };
+  }
+
+  async recordAnalyticsCollection(siteId: string, reason: AnalyticsCollectionReason, at = new Date().toISOString()) {
+    await this.write((state) => incrementLocalCollection(state, siteId, reason, at));
   }
 
   async listAnalyticsEvents(siteId: string) {
-    return (await this.read()).analyticsEvents.filter((event) => event.siteId === siteId).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return (await this.read()).analyticsEvents.filter((event) => event.siteId === siteId).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   }
 
-  async analyticsSummary(siteId: string) { return summarizeAnalytics(siteId, await this.listAnalyticsEvents(siteId)); }
+  async analyticsReport(siteId: string, query: AnalyticsReportQuery) {
+    const state = await this.read();
+    return buildAnalyticsReport(siteId, query, state.analyticsEvents.filter((event) => event.siteId === siteId), state.analyticsCollection?.[siteId]);
+  }
 
   private async read() {
     const raw = await readFile(this.path, "utf8").catch(() => undefined);
-    return raw ? JSON.parse(raw) as LocalCapabilityState : emptyLocalState();
+    if (!raw) return emptyLocalState();
+    const parsed = JSON.parse(raw) as Partial<LocalCapabilityState>;
+    return {
+      inquiries: parsed.inquiries ?? [],
+      inquiryEvents: parsed.inquiryEvents ?? [],
+      analyticsEvents: (parsed.analyticsEvents ?? []).filter((event) => event.schemaVersion === 1),
+      analyticsCollection: parsed.analyticsCollection ?? {}
+    };
   }
 
   private write(operation: (state: LocalCapabilityState) => void | Promise<void>) {
@@ -161,8 +202,11 @@ type InquiryEventRow = {
 };
 
 type AnalyticsRow = {
-  site_id: string; session_id: string; visitor_id: string | null; page_id: string | null;
-  event_type: AnalyticsEvent["eventType"]; event: unknown; occurred_at: string;
+  id: string; schema_version: 1; site_id: string; site_version_id: string; event_id: string;
+  event_type: AnalyticsEvent["eventType"]; visitor_key: string; visit_id: string; page_path: string;
+  landing_path: string; channel: AnalyticsEvent["channel"]; source: string | null; medium: string | null;
+  campaign: string | null; referrer_host: string | null; device_category: AnalyticsEvent["deviceCategory"];
+  properties: Record<string, string | number | boolean>; occurred_at: string; created_at: string;
 };
 
 class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
@@ -185,7 +229,8 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
         p_contact_name: contact.contactName ?? null, p_contact_email: contact.contactEmail ?? null,
         p_contact_email_normalized: contact.contactEmailNormalized ?? null, p_contact_phone: contact.contactPhone ?? null,
         p_contact_phone_normalized: contact.contactPhoneNormalized ?? null,
-        p_message_text: inquiryMessageText(input.form, input.payload) ?? null, p_dedupe_key: dedupeKey
+        p_message_text: inquiryMessageText(input.form, input.payload) ?? null, p_dedupe_key: dedupeKey,
+        p_analytics_event: input.analyticsEvent ?? null
       }),
       "Create inquiry from form"
     );
@@ -218,13 +263,39 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
   }
 
   async recordAnalyticsEvent(event: AnalyticsEvent) {
-    const sanitized = sanitizedAnalyticsEvent(event);
-    await requireData(this.client.from("analytics_events").insert({
-      id: crypto.randomUUID(), site_id: sanitized.siteId, session_id: sanitized.sessionId,
-      visitor_id: sanitized.visitorId, page_id: sanitized.pageId, event_type: sanitized.eventType,
-      event: sanitized, occurred_at: sanitized.timestamp
-    }).select("id").single(), "Record analytics event");
-    return sanitized;
+    const { data, error } = await this.client.from("analytics_events").upsert({
+      id: `analytics_${crypto.randomUUID().replaceAll("-", "")}`,
+      schema_version: event.schemaVersion,
+      site_id: event.siteId,
+      site_version_id: event.siteVersionId,
+      event_id: event.eventId,
+      event_type: event.eventType,
+      visitor_key: event.visitorKey,
+      visit_id: event.visitId,
+      page_path: event.pagePath,
+      landing_path: event.landingPath,
+      channel: event.channel,
+      source: event.source,
+      medium: event.medium,
+      campaign: event.campaign,
+      referrer_host: event.referrerHost,
+      device_category: event.deviceCategory,
+      properties: event.properties,
+      occurred_at: event.occurredAt,
+      created_at: event.createdAt
+    }, { onConflict: "site_id,event_id", ignoreDuplicates: true }).select("id");
+    if (error) throw new Error(`Record analytics event: ${error.message}`);
+    const duplicate = !data?.length;
+    await this.recordAnalyticsCollection(event.siteId, duplicate ? "duplicate" : "accepted", event.occurredAt);
+    return { event, duplicate };
+  }
+
+  async recordAnalyticsCollection(siteId: string, reason: AnalyticsCollectionReason, at = new Date().toISOString()) {
+    await requireData(this.client.rpc("record_analytics_collection", {
+      p_site_id: siteId,
+      p_reason: reason,
+      p_at: at
+    }), "Record analytics collection health");
   }
 
   async listAnalyticsEvents(siteId: string) {
@@ -232,16 +303,28 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
     return rows.map(rowToAnalyticsEvent);
   }
 
-  async analyticsSummary(siteId: string) { return summarizeAnalytics(siteId, await this.listAnalyticsEvents(siteId)); }
+  async analyticsReport(siteId: string, query: AnalyticsReportQuery) {
+    const value = await requireData<unknown>(this.client.rpc("analytics_report", {
+      p_site_id: siteId,
+      p_from: query.from,
+      p_to: query.to,
+      p_compare_from: query.compareFrom ?? null,
+      p_compare_to: query.compareTo ?? null,
+      p_interval: query.interval,
+      p_timezone: query.timezone,
+      p_channel: query.filters.channel ?? null,
+      p_source: query.filters.source ?? null,
+      p_page: query.filters.page ?? null,
+      p_action: query.filters.action ?? null,
+      p_device: query.filters.device ?? null
+    }), "Load analytics report");
+    return analyticsReportFromDatabase(siteId, query, value);
+  }
 }
 
 export const siteCapabilityRepository: SiteCapabilityRepository = process.env.LODESTA_REPOSITORY === "local"
   ? new LocalSiteCapabilityRepository()
   : new SupabaseSiteCapabilityRepository();
-
-function sanitizedAnalyticsEvent(event: AnalyticsEvent): AnalyticsEvent {
-  return { ...event, timestamp: event.timestamp || new Date().toISOString(), metadata: sanitizeAnalyticsMetadata(event.metadata) };
-}
 
 function rowToInquiry(row: InquiryRow): Inquiry {
   return {
@@ -267,12 +350,30 @@ function rowToInquiryEvent(row: InquiryEventRow): InquiryEvent {
 }
 
 function rowToAnalyticsEvent(row: AnalyticsRow): AnalyticsEvent {
-  const event = row.event as AnalyticsEvent;
   return {
-    ...event, siteId: row.site_id, sessionId: row.session_id,
-    visitorId: row.visitor_id ?? event.visitorId, pageId: row.page_id ?? event.pageId,
-    eventType: row.event_type, timestamp: event.timestamp ?? row.occurred_at
+    schemaVersion: row.schema_version, eventId: row.event_id, siteId: row.site_id,
+    siteVersionId: row.site_version_id, eventType: row.event_type, visitorKey: row.visitor_key,
+    visitId: row.visit_id, pagePath: row.page_path, landingPath: row.landing_path,
+    channel: row.channel, source: row.source ?? undefined, medium: row.medium ?? undefined,
+    campaign: row.campaign ?? undefined, referrerHost: row.referrer_host ?? undefined,
+    deviceCategory: row.device_category, properties: row.properties ?? {},
+    occurredAt: row.occurred_at, createdAt: row.created_at
   };
+}
+
+function incrementLocalCollection(
+  state: LocalCapabilityState,
+  siteId: string,
+  reason: AnalyticsCollectionReason,
+  at: string
+) {
+  state.analyticsCollection ??= {};
+  const health = state.analyticsCollection[siteId] ?? {
+    accepted: 0, internal: 0, bot: 0, preview: 0, duplicate: 0, invalid: 0
+  };
+  health[reason] += 1;
+  if (reason === "accepted" && (!health.lastAcceptedAt || health.lastAcceptedAt < at)) health.lastAcceptedAt = at;
+  state.analyticsCollection[siteId] = health;
 }
 
 async function requireData<T>(query: PromiseLike<{ data: unknown; error: { message: string } | null }>, operation: string) {

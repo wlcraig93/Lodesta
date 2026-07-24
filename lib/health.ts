@@ -10,7 +10,7 @@ export type HealthReport = { status: HealthState; timestamp: string; checks: Hea
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
     checkUrl(), checkRepository(), checkAuth(), checkAdmin(), checkSandbox(),
-    checkArtifactBroker(), checkOpenAi(), checkHashSecret(), checkEmail(), checkPlaces()
+    checkArtifactBroker(), checkOpenAi(), checkOpenRouter(), checkHashSecret(), checkEmail()
   ];
   if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
   return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
@@ -53,9 +53,9 @@ function checkArtifactBroker() {
 }
 
 function checkOpenAi() { return process.env.OPENAI_API_KEY ? ok("openai", "Website manager model", "OpenAI is configured.") : error("openai", "Website manager model", "OPENAI_API_KEY is required for site construction and edits."); }
+function checkOpenRouter() { return process.env.OPENROUTER_API_KEY ? ok("openrouter", "Optional model router", "OpenRouter routing is available.") : warning("openrouter", "Optional model router", "OPENROUTER_API_KEY is not configured; the active OpenAI route is unchanged."); }
 function checkHashSecret() { if (hasConfiguredHashSecret()) return ok("hash_secret", "Privacy hash secret", "Stable visitor hashing uses a deployment secret."); return (deployed() ? error : warning)("hash_secret", "Privacy hash secret", usesDevelopmentHashSecret() ? "Using the development hash secret." : "LODESTA_HASH_SECRET is missing."); }
 function checkEmail() { return process.env.RESEND_API_KEY ? ok("email", "Operational email", "Resend is configured.") : warning("email", "Operational email", "Email notifications are disabled."); }
-function checkPlaces() { return process.env.GOOGLE_PLACES_API_KEY ? ok("places", "Google Places", "Places enrichment is configured.") : warning("places", "Google Places", "Places enrichment is disabled."); }
 
 async function checkRepositoryReadiness() {
   try { const sites = await sitePlatformRepository.listSites(); return ok("repository_readiness", "Repository readiness", `Repository responded with ${sites.length} site(s).`); }

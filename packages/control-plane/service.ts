@@ -5,13 +5,11 @@ import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/si
 import {
   operatorQueueItemSchema,
   businessStateSchema,
-  assetRevisionSchema,
   controlPlaneChangeRequestSchema,
   siteAgentSessionSchema,
   siteIntentSchema,
   sourceSnapshotSchema,
   type BusinessState,
-  type AssetRevision,
   type ControlPlaneChangePayload,
   type ControlPlaneChangeRequest,
   type SiteIntent,
@@ -73,7 +71,7 @@ export class ControlPlaneService {
     let authorityApplied = false;
     try {
       if (request.payload.kind === "request_site_edit") {
-        const session = await this.workflow.getOrCreateSession({ siteId: site.id, ownerId: actorId });
+        const session = await this.workflow.getOrCreateSession({ siteId: site.id, principal: { kind: "owner", id: actorId } });
         const { run } = await this.workflow.enqueueEdit({
           session, instruction: request.payload.instruction,
           selection: request.payload.selection, requestedBy: actorId
@@ -83,36 +81,25 @@ export class ControlPlaneService {
         return { request: applied, applied: true as const, run };
       }
 
-      const ownerSnapshot = await this.ownerInputSnapshot(request);
+      let ownerSnapshot = await this.ownerInputSnapshot(request);
       let nextState = state;
       let nextIntent = intent;
       if (request.targetAuthority === "business_state") {
-        let attestedAsset: AssetRevision | undefined;
-        if (request.payload.kind === "attest_asset_rights") {
-          const currentAsset = await this.repository.getAssetRevision(request.payload.assetRevisionId);
-          if (!currentAsset || currentAsset.businessId !== state.businessId) throw new Error("Asset revision was not found.");
-          attestedAsset = assetRevisionSchema.parse({
-            ...currentAsset,
-            id: id("asset_revision"),
-            rightsStatus: "owner_attested",
-            attestation: { attestedBy: actorId, attestedAt: new Date().toISOString(), statement: request.payload.statement },
-            createdAt: new Date().toISOString()
-          });
-          await this.repository.saveAssetRevision(attestedAsset);
-        }
         if (request.payload.kind === "register_asset") {
           if (request.payload.revision.businessId !== state.businessId || request.payload.asset.assetId !== request.payload.revision.assetId || request.payload.asset.revisionId !== request.payload.revision.id) {
             throw new Error("Registered asset does not belong to this business or revision.");
           }
           await this.repository.saveAssetRevision(request.payload.revision);
         }
-        nextState = mutateBusinessState(state, request.payload, ownerSnapshot, attestedAsset);
+        nextState = mutateBusinessState(state, request.payload, ownerSnapshot);
         await this.repository.saveSourceSnapshot(ownerSnapshot);
         await this.repository.saveBusinessState(nextState);
+        await this.repository.markUnpublishedVersionsStale(site.id);
         authorityApplied = true;
       } else if (request.targetAuthority === "site_intent" && request.payload.kind === "update_site_intent") {
         nextIntent = mutateSiteIntent(intent, request.payload.patch);
         await this.repository.saveSiteIntent(nextIntent);
+        await this.repository.markUnpublishedVersionsStale(site.id);
         authorityApplied = true;
       } else if (request.targetAuthority === "site_intent" && request.payload.kind === "update_agent_access_policy") {
         nextIntent = mutateSiteIntent(intent, { agentAccessPolicy: request.payload.policy });
@@ -138,10 +125,12 @@ export class ControlPlaneService {
       });
       await this.repository.savePublicBuildInput(buildInput);
       await this.repository.setCurrentPublicBuildInput(site.id, buildInput.id);
-      let session = await this.workflow.getOrCreateSession({ siteId: site.id, ownerId: actorId, buildInput });
+      let session = await this.workflow.getOrCreateSession({ siteId: site.id, principal: { kind: "owner", id: actorId }, buildInput });
       session = siteAgentSessionSchema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
       await this.repository.saveAgentSession(session);
-      const kind = request.impact === "deterministic" ? "rebase" as const : "edit" as const;
+      const identityCorrected = request.payload.kind === "confirm_identity"
+        && normalizedText(request.payload.name) !== normalizedText(state.identity.name);
+      const kind = request.impact === "deterministic" && !identityCorrected ? "rebase" as const : "edit" as const;
       const run = await this.workflow.enqueueRun({
         session, kind, instruction: instructionFor(request.payload), requestedBy: actorId,
         origin: "control_plane", deferBehindActive: true,
@@ -184,9 +173,9 @@ export class ControlPlaneService {
     return site ? this.repository.getBusinessState(site.businessId) : undefined;
   }
 
-  private async ownerInputSnapshot(request: ControlPlaneChangeRequest): Promise<SourceSnapshot> {
+  private async ownerInputSnapshot(request: ControlPlaneChangeRequest, details?: Record<string, unknown>): Promise<SourceSnapshot> {
     const now = new Date().toISOString();
-    const payload = { requestId: request.id, requestedBy: request.requestedBy, change: request.payload };
+    const payload = { requestId: request.id, requestedBy: request.requestedBy, change: request.payload, ...details };
     return sourceSnapshotSchema.parse({
       schemaVersion: 1, id: id("source"), businessId: request.businessId,
       sourceType: "owner_input", contentHash: sha256(stableJson(payload)), capturedAt: now, payload
@@ -203,9 +192,9 @@ function policyFor(kind: ControlPlaneChangePayload["kind"]): {
 } {
   switch (kind) {
     case "confirm_facts":
+    case "confirm_identity":
     case "update_contact":
     case "update_hours":
-    case "attest_asset_rights": return { targetAuthority: "business_state", impact: "deterministic", reviewRequired: false };
     case "set_offering":
     case "add_offering":
     case "register_asset":
@@ -218,7 +207,7 @@ function policyFor(kind: ControlPlaneChangePayload["kind"]): {
   }
 }
 
-function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePayload, source: SourceSnapshot, attestedAsset?: AssetRevision) {
+function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePayload, source: SourceSnapshot) {
   const now = new Date().toISOString();
   const next = structuredClone(state);
   if (payload.kind === "confirm_facts") {
@@ -230,6 +219,11 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
       fact.source = { factId: fact.id, sourceSnapshotId: source.id, observedAt: now, confidence: 1, ownerConfirmed: true };
       fact.publicEligible = true;
     }
+  } else if (payload.kind === "confirm_identity") {
+    const name = payload.name.replace(/\s+/g, " ").trim();
+    next.identity.name = name;
+    next.identity.status = "verified";
+    upsertFact(next, "business_name", "Business name", name, source, now);
   } else if (payload.kind === "update_contact") {
     if (!payload.phone && !payload.email) throw new Error("A phone or email value is required.");
     if (payload.phone) { next.contacts.phone = payload.phone; upsertFact(next, "phone", "Phone", payload.phone, source, now); }
@@ -289,13 +283,6 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
       throw new Error("Asset is already registered.");
     }
     next.assets.push(payload.asset);
-  } else if (payload.kind === "attest_asset_rights") {
-    if (!attestedAsset) throw new Error("Attested asset revision is required.");
-    const asset = next.assets.find((item) => item.revisionId === payload.assetRevisionId);
-    if (!asset) throw new Error("Asset reference was not found.");
-    asset.revisionId = attestedAsset.id;
-    asset.rightsStatus = "owner_attested";
-    asset.activeForFutureBuilds = true;
   } else if (payload.kind === "update_external_link") {
     const link = next.links.find((item) => item.id === payload.linkId);
     if (!link) throw new Error("External link was not found.");
@@ -339,14 +326,14 @@ function mutateSiteIntent(intent: SiteIntent, patch: Partial<SiteIntent>) {
 function instructionFor(payload: ControlPlaneChangePayload) {
   switch (payload.kind) {
     case "confirm_facts": return "Recompile the existing design against the owner-confirmed business facts.";
+    case "confirm_identity": return "Use BusinessName for every visible identity mention and update the website to the owner-confirmed business name.";
     case "update_contact": return "Recompile the existing design against the confirmed contact update.";
     case "update_hours": return "Recompile the existing design against the confirmed hours update.";
     case "add_offering": return `Add the owner-confirmed ${payload.name} service throughout the site and create the requested page architecture.`;
     case "set_offering": return `${payload.enabled ? "Add or update" : "Remove"} the selected service throughout the site and page architecture.`;
     case "set_proof": return `${payload.enabled ? "Add" : "Remove"} the selected verified proof item without inventing claims.`;
     case "set_asset_active": return `${payload.active ? "Incorporate" : "Remove"} the selected asset while preserving the site's visual quality.`;
-    case "register_asset": return "Incorporate the newly uploaded owner-approved asset while preserving the site's visual quality.";
-    case "attest_asset_rights": return "Recompile the existing design against the owner-attested asset revision.";
+    case "register_asset": return "Incorporate the newly uploaded owner asset while preserving the site's visual quality.";
     case "update_external_link": return "Apply the approved external-link update.";
     case "update_site_intent": return "Update the website to reflect the approved site-intent change.";
     case "update_agent_access_policy": return "Apply the owner-recorded agent access policy.";

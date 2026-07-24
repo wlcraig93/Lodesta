@@ -1,4 +1,3 @@
-import type { AnalyticsEvent } from "@/packages/site-capabilities/contracts";
 import { hmacSha256Hex } from "./hash-secret";
 
 export function ipHashForRequest(request: Request, input: { siteId: string; at?: Date }) {
@@ -23,9 +22,9 @@ export function clientIpFromHeaders(headers: Headers) {
   return candidates.map((candidate) => candidate?.trim()).find(Boolean);
 }
 
-export function sanitizeAnalyticsMetadata(metadata: AnalyticsEvent["metadata"]) {
+export function sanitizeAnalyticsMetadata(metadata: Record<string, string | number | boolean> | undefined) {
   if (!metadata) return undefined;
-  const sanitized: NonNullable<AnalyticsEvent["metadata"]> = {};
+  const sanitized: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(metadata)) {
     if (isSensitiveMetadataKey(key)) continue;
     const cleanValue = sanitizeAnalyticsMetadataValue(value);

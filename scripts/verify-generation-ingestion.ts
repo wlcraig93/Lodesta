@@ -8,7 +8,6 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
-import { canonicalizeUnderstandingEvidenceQuotes, understandWebsite, validateUnderstandingEvidence } from "../packages/business-data/understanding";
 
 const squarespaceRules = parseRobotsPolicy("User-agent: *\nDisallow: /*?author=*\n");
 assert.equal(robotsAllows("https://fixture.example/", squarespaceRules.rules), true, "Squarespace query rules blocked the homepage.");
@@ -262,71 +261,11 @@ const browserLifecycleHtml = await fetchGenerationPageWithBrowser(
 );
 assert(browserLifecycleHtml.includes("Browser lifecycle"), "browser closed before page content serialization completed");
 
-const block = fetched.ingestion.modelBlocks.find((candidate) => candidate.canonicalTokens.length > 0);
-assert(block, "generation crawl did not retain reconstructible source tokens");
-const token = block.canonicalTokens[0];
-const evidence = {
-  sourceBlockId: block.id,
-  sourceUrl: block.sourceUrl,
-  startToken: 0,
-  endToken: 1,
-  quote: block.displayText.slice(token.displayStart, token.displayEnd),
-  evidenceClass: block.evidenceClass
-};
-const understanding = {
-  schemaVersion: 1 as const,
-  businessName: { value: "Northstar Repair", evidence: [evidence] },
-  observedCategory: { value: "Collision repair", confidence: 0.9, evidence: [evidence] },
-  cleanedServices: [{ value: "Collision repair", evidence: [evidence] }],
-  primaryConversion: { goal: "form_first" as const, evidence: [evidence] },
-  locationOrServiceArea: { value: "Austin", evidence: [evidence] },
-  businessStory: null,
-  brandExpression: { voiceRegister: "direct" as const, evidence: [evidence], paletteSeed: { preferredHex: null } }
-};
-assert.deepEqual(validateUnderstandingEvidence(understanding, fetched.ingestion), []);
-assert(validateUnderstandingEvidence({ ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: "not reconstructible" }] } }, fetched.ingestion).some((failure) => failure.includes("quote is not reconstructible")), "invalid model evidence was not rejected");
-const canonicalized = canonicalizeUnderstandingEvidenceQuotes(
-  { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: `${evidence.quote}.` }] } },
-  fetched.ingestion
-);
-assert.equal(canonicalized.businessName.evidence[0].quote, evidence.quote, "valid token-span quote was not canonicalized from source text");
-const recoveredSpan = canonicalizeUnderstandingEvidenceQuotes(
-  { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, endToken: 999 }] } },
-  fetched.ingestion
-);
-assert.equal(recoveredSpan.businessName.evidence[0].startToken, evidence.startToken, "unique exact quote did not recover its source token start");
-assert.equal(recoveredSpan.businessName.evidence[0].endToken, evidence.endToken, "unique exact quote did not recover its source token end");
-assert.deepEqual(validateUnderstandingEvidence(recoveredSpan, fetched.ingestion), []);
+const block = fetched.ingestion.modelBlocks[0];
+assert(block, "generation crawl did not retain authoring text blocks");
+assert.deepEqual(Object.keys(block).sort(), ["displayText", "evidenceClass", "id", "sourceUrl"], "authoring block retained obsolete token-offset machinery");
 
-const understandingRequests: Array<Record<string, unknown>> = [];
-const priorApiKey = process.env.OPENAI_API_KEY;
-process.env.OPENAI_API_KEY = "test-only-key";
-try {
-  const understood = await understandWebsite({
-    sourceUrl: "https://fixture.example/",
-    ingestion: fetched.ingestion,
-    modelOverride: "test-understanding-model",
-    fetchImpl: async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      understandingRequests.push(body);
-      const modelOutput = understandingRequests.length === 1
-        ? { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, endToken: 999, quote: "invalid first attempt" }] } }
-        : { ...understanding, businessName: { ...understanding.businessName, evidence: [{ ...evidence, quote: `${evidence.quote}.` }] } };
-      return Response.json({ output: [{ content: [{ type: "output_text", text: JSON.stringify(modelOutput) }] }] });
-    }
-  });
-  assert.equal(understood.provenance.attempts, 2, "understanding did not retry exactly once after evidence validation failed");
-  assert.equal(understood.provenance.promptVersion, "website-understanding-v3.1");
-  assert.equal(understood.businessName.evidence[0].quote, evidence.quote, "successful understanding did not retain the canonical source quote");
-  const secondRequest = JSON.stringify(understandingRequests[1]);
-  assert(secondRequest.includes("invalid token span"), "understanding retry did not receive structured validation failures");
-  assert(secondRequest.includes('"schemaVersion":{"type":"number","const":1}'), "understanding output retained a string or historical schema discriminator.");
-} finally {
-  if (priorApiKey === undefined) delete process.env.OPENAI_API_KEY;
-  else process.env.OPENAI_API_KEY = priorApiKey;
-}
-
-console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", reconstructibleEvidence: "pass", understandingRetry: "pass" }));
+console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", authoringBlocks: "pass" }));
 
 function pageHtml(title: string, href: string, copy: string) {
   return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${copy}"></head><body><main><h1>${title}</h1><p>${copy} ${copy} ${copy}</p><a href="${href}">Continue</a><form><input type="tel" name="phone"><button>Request estimate</button></form></main></body></html>`;

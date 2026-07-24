@@ -24,6 +24,7 @@ const baseInput = {
   ownerUserId: "owner-a",
   sourceUrl: "https://example.com/",
   normalizedSource: "https://example.com/",
+  reportingTimezone: "America/Chicago",
   idempotencyKey: "request-0001",
   creationRequestHash: hashA
 };
@@ -146,7 +147,7 @@ const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previ
   readFile("app/api/website-setups/auth.ts", "utf8"),
   readFile("lib/website-setup-jobs.ts", "utf8"),
   readFile("lib/website-setups.ts", "utf8"),
-  readFile("app/preview/[token]/[[...path]]/route.ts", "utf8"),
+  readFile("app/preview/[previewId]/[[...path]]/route.ts", "utf8"),
   readFile("app/(owner)/account/onboarding/page.tsx", "utf8"),
   readFile("app/(owner)/account/onboarding/[setupId]/page.tsx", "utf8"),
   readFile("app/(owner-workspace)/workspace/[slug]/page.tsx", "utf8"),
@@ -166,7 +167,14 @@ assert(setupRoute.includes("validateWebsiteSetupSource") && setupUpdateRoute.inc
 assert(setupAuth.includes("setup.ownerUserId !== auth.user.id") && !setupAuth.includes("ownerEmail"), "Setup access is not exact user-ID equality.");
 assert(setupWorker.includes("bootstrapFromUrl") && !setupWorker.includes("ExistingSourceCollision"), "Setup worker retains collision reuse.");
 await assert.rejects(access("app/api/website-setups/[id]/preview/[[...path]]/route.ts"), "Obsolete setup-preview route remains.");
-assert(previewTokenRoute.includes("readVerifiedManifestPreviewFile") && previewTokenRoute.includes('"x-lodesta-preview": "1"') && previewTokenRoute.includes('"cache-control": "private, no-store"'), "Existing preview-token routes lost their verified reader or response contract.");
+assert(
+  previewTokenRoute.includes("readVerifiedManifestPreviewFile") &&
+    previewTokenRoute.includes("hasValidPreviewSession") &&
+    previewTokenRoute.includes("location.hash.slice(1)") &&
+    previewTokenRoute.includes('"x-lodesta-preview": "1"') &&
+    previewTokenRoute.includes('"cache-control": "private, no-store"'),
+  "Private preview routes lost their fragment exchange, verified reader, or response contract."
+);
 assert(onboardingPage.includes("Sign in to create a website") && onboardingPage.includes("authentication is disabled"), "Local-open setup does not fail closed with an actionable notice.");
 assert(setupPage.includes('redirect(view.openPath)') && !setupPage.includes("<iframe") && !setupPage.includes("failureReason"), "Linked setup redirect or safe progress rendering is incomplete.");
 assert(!workspacePage.includes("failed.failureReason") && !workspaceClient.includes("failedRun.failureReason"), "Stored authoring diagnostics leak into owner surfaces.");
@@ -177,6 +185,6 @@ assert(!domainRoute.includes("getDomainByHostname") && domainSettings.includes("
 assert(adminSites.includes("Abandoned setup") && adminSites.includes('setup.status === "canceled"'), "Canceled linked drafts are not visible to administrators.");
 assert(baseline.includes("pg_advisory_xact_lock") && baseline.includes("private_user_active_operation_count"), "Combined database capacity is not atomic.");
 assert(baseline.includes("active_domains") && baseline.includes("claim_domain_ownership"), "Verified hostname exclusivity is missing.");
-assert(typedFailureMigration.includes("where failure_code = 'website_crawl_failed'") && typedFailureMigration.includes("crawl_temporarily_unavailable"), "Legacy crawl failures are not remapped to a retriable typed code.");
+assert(typedFailureMigration.includes("where failure_code = 'website_crawl_failed'") && typedFailureMigration.includes("crawl_temporarily_unavailable"), "Retired crawl failures are not remapped to a retriable typed code.");
 
 console.log(JSON.stringify({ ok: true, reusableSources: true, capacity: 3, directWorkspaceHandoff: true, proofFirstDomains: true }));

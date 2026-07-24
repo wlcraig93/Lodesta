@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   const actor = await authorizedSiteActor(request, parsed.data.siteId);
   if (!actor.ok) return actor.response;
   try {
-    await siteAuthoringWorkflow.getOrCreateSession({ siteId: parsed.data.siteId, ownerId: actor.actorId });
+    await siteAuthoringWorkflow.getOrCreateSession({ siteId: parsed.data.siteId, principal: { kind: "owner", id: actor.actorId } });
     return NextResponse.json(await workspacePayload(parsed.data.siteId, actor.actorId));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
 async function workspacePayload(siteId: string, actorId: string) {
   const site = await sitePlatformRepository.getSite(siteId);
   if (!site) return { site: null };
-  const session = await sitePlatformRepository.getActiveAgentSession(siteId, actorId);
+  const session = await sitePlatformRepository.getActiveAgentSession(siteId, { kind: "owner", id: actorId });
   const [input, versions, messages, runs] = await Promise.all([
     site.currentPublicBuildInputId ? sitePlatformRepository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined,
     sitePlatformRepository.listSiteVersions(siteId),

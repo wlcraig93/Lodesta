@@ -1,0 +1,32 @@
+# Copy next to ~/.codex/config.toml as lodesta-operator.config.toml and start
+# Codex with --profile lodesta-operator. Keep the bearer token in the named
+# environment variable; never paste it into this file.
+forced_login_method = "chatgpt"
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+
+[[skills.config]]
+path = "/ABSOLUTE/PATH/TO/Lodesta/integrations/codex/skills/lodesta-external-authoring"
+enabled = true
+
+[mcp_servers.lodesta]
+url = "https://lodesta.example/api/operator/mcp/"
+bearer_token_env_var = "LODESTA_MCP_BEARER_TOKEN"
+enabled = true
+required = true
+startup_timeout_sec = 30
+tool_timeout_sec = 1200
+default_tools_approval_mode = "approve"
+enabled_tools = [
+  "claim_next_site",
+  "get_execution_status",
+  "list_files",
+  "read_file",
+  "write_file",
+  "delete_file",
+  "apply_patch",
+  "build_preview",
+  "inspect_site",
+  "request_input",
+  "finish",
+]

@@ -15,7 +15,7 @@ const prepared = await createSiteRuntimePatch({
   id: `runtime_patch_${crypto.randomUUID().replaceAll("-", "")}`,
   seriesId,
   sourceRevision: process.env.RAILWAY_GIT_COMMIT_SHA ?? "verified-working-tree",
-  builderVersion: "trusted-runtime-builder-v1",
+  builderVersion: "trusted-runtime-builder@sha256:31d24faf0bf5265f2af840b87c7c5f2e2b6811780b68e949086e5b55da80cf61",
   securityStatus: "audited",
   compatibilityStatus: "passed"
 });

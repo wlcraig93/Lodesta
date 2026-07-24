@@ -4,18 +4,23 @@ import { platformOperationsRepository as repository } from "@/packages/platform-
 import {
   classifyProspectWebsite,
   consumeProspectBudget,
+  noOwnedWebsiteProspectReport,
   publicProspectReport,
   recentProspectReportCutoff,
-  resolveGoogleProspectPlace
+  resolveProspectBusiness,
+  withProspectScanSlot
 } from "@/packages/acquisition/prospect-reports";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { processNextProspectReportJob } from "@/packages/acquisition/prospect-report-jobs";
+import { processNextWebsiteAssessmentJob } from "@/packages/website-assessment/jobs";
+import {
+  websiteAssessmentRubricIdentity,
+  websiteAssessmentScannerIdentity
+} from "@/packages/website-assessment/rubric";
 
 export const runtime = "nodejs";
 
 const createReportSchema = z.object({
-  placeId: z.string().trim().regex(/^[A-Za-z0-9:_-]{8,256}$/),
-  sessionToken: z.string().trim().min(8).max(128).optional()
+  query: z.string().trim().min(2).max(300)
 });
 
 export async function POST(request: Request) {
@@ -35,17 +40,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const reusable = await repository.findReusableProspectReportByPlaceId(
-    parsed.data.placeId,
-    recentProspectReportCutoff()
-  );
-  if (reusable) {
-    return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(reusable), reused: true }), limit);
-  }
-  const active = await repository.findActiveProspectReportByPlaceId(parsed.data.placeId);
-  if (active) {
-    return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(active), reused: true }), limit);
-  }
   if (!consumeProspectBudget("prospect_scan")) {
     return applyRateLimitHeaders(
       NextResponse.json({ error: "Presence report scans are temporarily over their daily budget. Try again later." }, { status: 429 }),
@@ -53,39 +47,73 @@ export async function POST(request: Request) {
     );
   }
 
-  let details;
+  let resolution;
   try {
-    details = await resolveGoogleProspectPlace(parsed.data);
+    resolution = await withProspectScanSlot(() => resolveProspectBusiness({ query: parsed.data.query }));
   } catch {
     return applyRateLimitHeaders(NextResponse.json({ error: "Unable to resolve the selected business." }, { status: 502 }), limit);
   }
-  if (!details.usMarket) {
+  if (!resolution.usMarket) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Lodesta reports are currently limited to US businesses." }, { status: 400 }), limit);
   }
 
-  const website = classifyProspectWebsite(details.websiteUri);
+  const reusable = await repository.findReusableProspectReportBySourceKey(resolution.sourceKey, recentProspectReportCutoff());
+  if (reusable) {
+    return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(reusable), reused: true }), limit);
+  }
+  const active = await repository.findActiveProspectReportBySourceKey(resolution.sourceKey);
+  if (active) {
+    return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(active), reused: true }), limit);
+  }
+
+  const website = resolution.website ?? classifyProspectWebsite(undefined);
   let report;
   try {
     report = await repository.createProspectReport({
-      placeId: details.placeId,
+      sourceKey: resolution.sourceKey,
       sourceUrl: website.kind === "owned_website" ? website.url : undefined,
       sourceHost: website.host,
-      websiteKind: website.kind
+      websiteKind: website.kind,
+      businessStrength: resolution.businessStrength,
+      resolutionUsage: resolution.usage
     });
   } catch {
-    const concurrent = await repository.findActiveProspectReportByPlaceId(details.placeId);
+    const concurrent = await repository.findActiveProspectReportBySourceKey(resolution.sourceKey);
     if (!concurrent) {
       return applyRateLimitHeaders(NextResponse.json({ error: "Unable to create the report." }, { status: 500 }), limit);
     }
     return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(concurrent), reused: true }), limit);
   }
 
-  const job = await repository.enqueueProspectReportJob(report.id);
-  report = (await repository.updateProspectReport({ reportId: report.id, jobId: job.id })) ?? report;
+  if (website.kind !== "owned_website" || !website.url) {
+    report = (await repository.updateProspectReport({
+      reportId: report.id,
+      status: "completed",
+      result: noOwnedWebsiteProspectReport({
+        websiteKind: website.kind === "owned_website" ? "no_website" : website.kind,
+        sourceUrl: website.url,
+        sourceHost: website.host
+      }),
+      completedAt: new Date().toISOString()
+    })) ?? report;
+    return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(report), reused: false }), limit);
+  }
 
+  const assessment = await repository.createWebsiteAssessment({
+    targetKind: "public_url",
+    sourceKey: resolution.sourceKey,
+    sourceUrl: website.url,
+    rubricIdentity: websiteAssessmentRubricIdentity,
+    scannerIdentity: websiteAssessmentScannerIdentity
+  });
+  report = (await repository.updateProspectReport({ reportId: report.id, assessmentId: assessment.id })) ?? report;
+  const job = await repository.enqueueWebsiteAssessmentJob({
+    assessmentId: assessment.id,
+    prospectReportId: report.id
+  });
   after(async () => {
     try {
-      await processNextProspectReportJob({ workerId: `prospect-after-${job.id}` });
+      await processNextWebsiteAssessmentJob({ workerId: `prospect-after-${job.id}` });
     } catch (error) {
       console.error(JSON.stringify({
         event: "prospect_report_after_failed",

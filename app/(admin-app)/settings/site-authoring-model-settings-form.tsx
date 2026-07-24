@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { AdminButton, AdminButtonRow } from "@/components/admin/AdminButton";
 
 type SettingsSnapshot = {
-  settings: { siteAgentModel: string; ingestionModel: string };
+  settings: { siteAgentProvider: "openai" | "openrouter"; siteAgentModel: string; ingestionModel: string };
   version: number;
   source: string;
   updatedBy?: string;
@@ -44,8 +44,16 @@ export function SiteAuthoringModelSettingsForm({ initialSnapshot }: { initialSna
   return (
     <form className="editor-form settings-form" onSubmit={saveSettings}>
       <label>
-        Website manager
+        Website manager API provider
+        <select value={form.siteAgentProvider} onChange={(event) => setForm({ ...form, siteAgentProvider: event.target.value as SettingsSnapshot["settings"]["siteAgentProvider"] })}>
+          <option value="openai">OpenAI (direct)</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+      </label>
+      <label>
+        Website manager model
         <input value={form.siteAgentModel} onChange={(event) => setForm({ ...form, siteAgentModel: event.target.value })} />
+        <small className="muted">{form.siteAgentProvider === "openrouter" ? "Use a provider-qualified OpenRouter slug, for example openai/gpt-5." : "Direct OpenAI uses the existing priced model catalog."}</small>
       </label>
       <label>
         Business ingestion

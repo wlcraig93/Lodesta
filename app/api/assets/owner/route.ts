@@ -16,6 +16,7 @@ import { controlPlaneService } from "@/packages/control-plane";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import type { AssetRevisionRef, AssetRevision } from "@/packages/site-contracts";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
+import sharp from "sharp";
 
 export const runtime = "nodejs";
 
@@ -24,31 +25,22 @@ const maxBase64Length = Math.ceil((maxOwnerAssetBytes * 4) / 3) + 128;
 
 const assetInputSchema = z.object({
   url: z.string().refine(isAllowedOwnerAssetUrl, "Asset URL must be an HTTP(S) image URL or a platform-hosted asset URL."),
-  alt: z.string().min(1).max(180),
-  rightsConfirmed: z.boolean()
+  alt: z.string().min(1).max(180)
 });
 
 const uploadInputSchema = z.object({
   base64: z.string().min(1).max(maxBase64Length),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
   alt: z.string().min(1).max(180),
-  fileName: z.string().max(180).optional(),
-  rightsConfirmed: z.boolean()
+  fileName: z.string().max(180).optional()
 });
 
-const scrapedAttestationSchema = z.object({
-  assetId: z.string().min(1).max(120),
-  rightsConfirmed: z.boolean()
-});
-
-// Rights are confirmed per image — there is deliberately no blanket field.
 const ownerAssetsSchema = z.object({
   siteId: z.string().min(1),
   logo: assetInputSchema.optional(),
   photos: z.array(assetInputSchema).max(12).optional(),
   logoUpload: uploadInputSchema.optional(),
-  photoUploads: z.array(uploadInputSchema).max(12).optional(),
-  scrapedAttestations: z.array(scrapedAttestationSchema).max(12).optional()
+  photoUploads: z.array(uploadInputSchema).max(12).optional()
 });
 
 export async function POST(request: Request) {
@@ -73,7 +65,7 @@ export async function POST(request: Request) {
   }
 
   const auth = await getCurrentUser();
-  const attestedBy = auth.user?.id ?? "platform_admin";
+  const uploadedBy = auth.user?.id ?? "platform_admin";
 
   const site = await sitePlatformRepository.getSite(parsed.data.siteId);
   const state = site ? await sitePlatformRepository.getBusinessState(site.businessId) : undefined;
@@ -85,28 +77,21 @@ export async function POST(request: Request) {
       businessId: state.businessId,
       kind: "logo",
       rows: retainedLogo,
-      attestedBy
+      uploadedBy
     }),
     ...assetRegistrations({
       businessId: state.businessId,
       kind: "photo",
       rows: retainedPhotos,
-      attestedBy
-    }),
-    ...(parsed.data.scrapedAttestations ?? [])
-      .filter((item) => item.rightsConfirmed)
-      .map((item) => ({
-        kind: "attest_asset_rights" as const,
-        assetRevisionId: state.assets.find((asset) => asset.assetId === item.assetId)?.revisionId ?? item.assetId,
-        statement: "Owner attests they own this image or hold rights to use it on the managed website."
-      }))
+      uploadedBy
+    })
   ];
   if (!requested.length) {
-    return applyRateLimitHeaders(NextResponse.json({ error: "No owner-approved assets were provided." }, { status: 400 }), limit);
+    return applyRateLimitHeaders(NextResponse.json({ error: "No owner assets were provided." }, { status: 400 }), limit);
   }
   try {
     for (const payload of requested) {
-      await controlPlaneService.submit({ siteId: parsed.data.siteId, payload, requestedBy: attestedBy });
+      await controlPlaneService.submit({ siteId: parsed.data.siteId, payload, requestedBy: uploadedBy });
     }
   } catch (error) {
     return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
@@ -119,8 +104,8 @@ export async function POST(request: Request) {
   return applyRateLimitHeaders(
     NextResponse.json({
       ok: true,
-      logo: logoAsset ? { url: logoAsset.publicUrl, alt: logoAsset.alt, rightsConfirmed: true } : undefined,
-      photos: photoAssets.map((asset) => ({ url: asset.publicUrl!, alt: asset.alt, rightsConfirmed: true })),
+      logo: logoAsset ? { url: logoAsset.publicUrl, alt: logoAsset.alt } : undefined,
+      photos: photoAssets.map((asset) => ({ url: asset.publicUrl!, alt: asset.alt })),
       assets
     }),
     limit
@@ -131,10 +116,9 @@ function assetRegistrations(input: {
   businessId: string;
   kind: "logo" | "photo";
   rows: OwnerAssetRow[];
-  attestedBy: string;
+  uploadedBy: string;
 }) {
   return input.rows.map((row) => {
-    if (!row.rightsConfirmed) throw new Error(`Rights confirmation is required for ${row.alt}.`);
     const now = new Date().toISOString();
     const contentHash = prefixedSha256(row.contentHash);
     const assetId = `asset_${crypto.randomUUID().replace(/-/g, "")}`;
@@ -150,8 +134,14 @@ function assetRegistrations(input: {
       publicUrl,
       mimeType: row.mimeType,
       bytes: row.bytes,
-      rightsStatus: "owner_attested",
-      attestation: { attestedBy: input.attestedBy, attestedAt: now, statement: "Owner attests they own this image or hold rights to use it." },
+      width: row.width,
+      height: row.height,
+      origin: "owner_upload",
+      provenance: {
+        origin: "owner_upload",
+        uploadedBy: input.uploadedBy,
+        ...(row.fileName ? { originalFileName: row.fileName } : {})
+      },
       createdAt: now
     };
     const asset: AssetRevisionRef = {
@@ -163,7 +153,9 @@ function assetRegistrations(input: {
       storageKey: row.storagePath,
       publicUrl,
       mimeType: row.mimeType,
-      rightsStatus: "owner_attested",
+      width: row.width,
+      height: row.height,
+      origin: "owner_upload",
       sourceFactIds: [],
       activeForFutureBuilds: true
     };
@@ -174,22 +166,23 @@ function assetRegistrations(input: {
 type OwnerAssetRow = {
   url: string;
   alt: string;
-  rightsConfirmed: boolean;
+  fileName?: string;
   contentHash: string;
   storagePath: string;
   mimeType: AssetRevision["mimeType"];
   bytes: number;
+  width: number;
+  height: number;
 };
 
-function isOwnerAssetRow(value: unknown): value is { url: string; alt: string; rightsConfirmed: boolean } {
+function isOwnerAssetRow(value: unknown): value is { url: string; alt: string } {
   return Boolean(value && typeof value === "object" && "url" in value);
 }
 
-async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt: string; rightsConfirmed: boolean } & Partial<OwnerAssetRow>>) {
+async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt: string } & Partial<OwnerAssetRow>>) {
   const retained: OwnerAssetRow[] = [];
   for (const row of rows) {
-    if (!row.rightsConfirmed) throw new Error(`Rights confirmation is required for ${row.alt}.`);
-    if (row.contentHash && row.storagePath && row.mimeType && row.bytes) {
+    if (row.contentHash && row.storagePath && row.mimeType && row.bytes && row.width && row.height) {
       retained.push(row as OwnerAssetRow);
       continue;
     }
@@ -199,14 +192,15 @@ async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt:
       if (!stored || !isSupportedAssetMimeType(stored.mimeType) || !imageMimeTypeMatchesBytes(stored.mimeType, stored.bytes)) {
         throw new Error(`Retained owner asset ${row.alt} could not be read.`);
       }
+      const dimensions = await imageDimensions(stored.bytes);
       retained.push({
         url: row.url,
         alt: row.alt,
-        rightsConfirmed: true,
         contentHash: `sha256:${createHash("sha256").update(stored.bytes).digest("hex")}`,
         storagePath: localPath,
         mimeType: stored.mimeType,
-        bytes: stored.bytes.byteLength
+        bytes: stored.bytes.byteLength,
+        ...dimensions
       });
       continue;
     }
@@ -223,6 +217,7 @@ async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt:
     if (!bytes.byteLength || bytes.byteLength > maxOwnerAssetBytes || !imageMimeTypeMatchesBytes(mimeType, bytes)) {
       throw new Error(`Owner asset ${row.alt} failed image validation.`);
     }
+    const dimensions = await imageDimensions(bytes);
     const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const stored = await storeAssetBytes({
       siteId,
@@ -234,11 +229,11 @@ async function retainOwnerAssets(siteId: string, rows: Array<{ url: string; alt:
     retained.push({
       url: stored.url,
       alt: row.alt,
-      rightsConfirmed: true,
       contentHash,
       storagePath: stored.storagePath,
       mimeType,
-      bytes: stored.bytes
+      bytes: stored.bytes,
+      ...dimensions
     });
   }
   return retained;
@@ -269,43 +264,34 @@ async function parseMultipartOwnerAssetsRequest(request: Request): Promise<Parse
   const logoFile = fileValue(formData.get("logoFile") ?? formData.get("logo"));
   const photoFiles = formData.getAll("photoFiles").map(fileValue).filter((file): file is File => Boolean(file));
   const photoAlts = formData.getAll("photoAlt").map(stringValue);
-  const photoRights = formData.getAll("photoRights").map((value) => booleanValue(value));
   const photoUrls = formData
     .getAll("photoUrl")
     .map(stringValue)
     .filter(Boolean);
   const photoUrlAlts = formData.getAll("photoUrlAlt").map(stringValue);
-  const photoUrlRights = formData.getAll("photoUrlRights").map((value) => booleanValue(value));
-  const scrapedAssetIds = formData.getAll("scrapedAssetId").map(stringValue).filter(Boolean);
 
   const data = {
     siteId: stringValue(formData.get("siteId")),
     logo: stringValue(formData.get("logoUrl"))
       ? {
           url: stringValue(formData.get("logoUrl")),
-          alt: stringValue(formData.get("logoAlt")) || "Owner-provided logo",
-          rightsConfirmed: booleanValue(formData.get("logoRights"))
+          alt: stringValue(formData.get("logoAlt")) || "Owner-provided logo"
         }
       : undefined,
     photos: photoUrls.map((url, index) => ({
       url,
-      alt: photoUrlAlts[index] || `Owner-provided photo ${index + 1}`,
-      rightsConfirmed: photoUrlRights[index] ?? false
+      alt: photoUrlAlts[index] || `Owner-provided photo ${index + 1}`
     })),
     logoUpload: logoFile
       ? {
-          ...(await uploadFromFile(logoFile, stringValue(formData.get("logoAlt")) || "Owner-provided logo")),
-          rightsConfirmed: booleanValue(formData.get("logoRights"))
+          ...(await uploadFromFile(logoFile, stringValue(formData.get("logoAlt")) || "Owner-provided logo"))
         }
       : undefined,
     photoUploads: await Promise.all(
       photoFiles.slice(0, 12).map(async (file, index) => ({
-        ...(await uploadFromFile(file, photoAlts[index] || `Owner-provided photo ${index + 1}`)),
-        rightsConfirmed: photoRights[index] ?? false
+        ...(await uploadFromFile(file, photoAlts[index] || `Owner-provided photo ${index + 1}`))
       }))
-    ),
-    // Multipart attestation checkboxes only submit checked ids — presence means confirmed.
-    scrapedAttestations: scrapedAssetIds.map((assetId) => ({ assetId, rightsConfirmed: true }))
+    )
   };
   const parsed = ownerAssetsSchema.safeParse(data);
   if (!parsed.success) {
@@ -365,6 +351,8 @@ async function storeOwnerAssetUpload(input: {
   if (!imageMimeTypeMatchesBytes(input.upload.mimeType as SupportedAssetMimeType, bytes)) {
     return { error: "Owner asset upload content does not match the declared image type." };
   }
+  const dimensions = await imageDimensions(bytes).catch(() => undefined);
+  if (!dimensions) return { error: "Owner asset upload is corrupt or has unsupported dimensions." };
 
   const stored = await storeAssetBytes({
     siteId: input.siteId,
@@ -378,20 +366,17 @@ async function storeOwnerAssetUpload(input: {
   return {
     url: stored.url,
     alt: input.upload.alt,
-    rightsConfirmed: input.upload.rightsConfirmed,
+    fileName: input.upload.fileName,
     contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
     storagePath: stored.storagePath,
     mimeType: input.upload.mimeType as AssetRevision["mimeType"],
-    bytes: stored.bytes
+    bytes: stored.bytes,
+    ...dimensions
   };
 }
 
 function stringValue(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function booleanValue(value: FormDataEntryValue | null) {
-  return value === "true" || value === "on" || value === "1";
 }
 
 function fileValue(value: FormDataEntryValue | null) {
@@ -421,4 +406,10 @@ function absolutePublicAssetUrl(value: string) {
 
 function prefixedSha256(value: string) {
   return value.startsWith("sha256:") ? value : `sha256:${value}`;
+}
+
+async function imageDimensions(bytes: Buffer) {
+  const metadata = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false }).metadata();
+  if (!metadata.width || !metadata.height) throw new Error("Image dimensions could not be decoded.");
+  return { width: metadata.width, height: metadata.height };
 }

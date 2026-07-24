@@ -62,102 +62,132 @@ export type CapabilityFormDefinition = {
   fields: Array<{ id: string; label: string; type: "text" | "email" | "phone" | "textarea" | "select" }>;
 };
 
+export const analyticsEventTypes = [
+  "page_view",
+  "engagement",
+  "form_start",
+  "form_submit",
+  "call_click",
+  "email_click",
+  "directions_click",
+  "booking_click",
+  "ordering_click",
+  "outbound_click",
+  "web_vital"
+] as const;
+
+export type AnalyticsEventType = typeof analyticsEventTypes[number];
+export type AnalyticsActionType = Extract<AnalyticsEventType,
+  "form_submit" | "call_click" | "email_click" | "directions_click" | "booking_click" | "ordering_click"
+>;
+export type AnalyticsDeviceCategory = "mobile" | "tablet" | "desktop";
+export type AnalyticsChannel = "campaign" | "organic_search" | "social" | "referral" | "direct";
+export type AnalyticsTrafficClass = "human" | "lodesta_internal" | "known_bot" | "invalid";
+export type AnalyticsCollectionReason = "accepted" | "internal" | "bot" | "preview" | "duplicate" | "invalid";
+
 export type AnalyticsEvent = {
+  schemaVersion: 1;
+  eventId: string;
   siteId: string;
-  sessionId: string;
-  visitorId?: string;
-  pageId?: string;
-  eventType:
-    | "pageview"
-    | "click"
-    | "section_view"
-    | "form_start"
-    | "form_submit"
-    | "tel_click"
-    | "outbound_click"
-    | "engagement"
-    | "scroll_depth"
-    | "web_vital"
-    | "agent_readable_request"
-    | "places_ui";
-  timestamp: string;
-  sectionId?: string;
-  elementRole?: string;
-  elementType?: string;
-  hrefType?: "internal" | "tel" | "mailto" | "booking" | "ordering" | "external";
-  normalizedX?: number;
-  normalizedY?: number;
-  viewport?: { width: number; height: number };
-  deviceType?: "mobile" | "tablet" | "desktop";
-  value?: number;
-  metadata?: Record<string, string | number | boolean>;
+  siteVersionId: string;
+  eventType: AnalyticsEventType;
+  visitorKey: string;
+  visitId: string;
+  pagePath: string;
+  landingPath: string;
+  channel: AnalyticsChannel;
+  source?: string;
+  medium?: string;
+  campaign?: string;
+  referrerHost?: string;
+  deviceCategory: AnalyticsDeviceCategory;
+  properties: Record<string, string | number | boolean>;
+  occurredAt: string;
+  createdAt: string;
 };
 
-export type AnalyticsSummary = {
-  siteId: string;
-  events: number;
-  sessions: number;
-  pageviews: number;
-  clicks: number;
-  telClicks: number;
-  formStarts: number;
-  formSubmits: number;
-  outboundClicks: number;
-  primaryActions: number;
-  actionRate: number;
-  engagedMs: number;
-  avgEngagedSeconds: number;
-  avgTimeToActionMs?: number;
-  medianTimeToActionMs?: number;
-  avgScrollDepth: number;
-  webVitals: Array<{ metric?: string | number | boolean; value?: number; timestamp: string }>;
-  agentReadableRequests: number;
-  agentReadableByResource: AnalyticsAgentReadableResource[];
-  placesUi: { loads: number; failures: number; fallbacks: number; fallbackRate: number; estimatedCostUsd: number };
-  outcomesByPage: AnalyticsOutcomeRow[];
-  outcomesByCtaRole: AnalyticsOutcomeRow[];
-  outcomesBySection: AnalyticsOutcomeRow[];
-  funnelDropoffs: AnalyticsFunnelDropoff[];
-  sectionConversionPaths: AnalyticsSectionConversionPath[];
-  outcomesBySource: AnalyticsOutcomeRow[];
-  clickMap: AnalyticsClickMapPoint[];
-  standardCorrelations: AnalyticsStandardCorrelation[];
-  baselineComparison: {
-    status: "collecting" | "ready";
-    baselineStart?: string;
-    baselineEnd?: string;
-    currentStart?: string;
-    currentEnd?: string;
-    baseline: AnalyticsOutcomeTotals;
-    current: AnalyticsOutcomeTotals;
-    delta: { sessions: number; primaryActions: number; actionRate: number };
+export type AnalyticsReportView = "overview" | "traffic" | "content" | "actions";
+export type AnalyticsReportInterval = "day" | "week" | "month";
+export type AnalyticsReportQuery = {
+  view: AnalyticsReportView;
+  from: string;
+  to: string;
+  compareFrom?: string;
+  compareTo?: string;
+  interval: AnalyticsReportInterval;
+  timezone: string;
+  filters: {
+    channel?: AnalyticsChannel;
+    source?: string;
+    page?: string;
+    action?: AnalyticsActionType;
+    device?: AnalyticsDeviceCategory;
   };
 };
 
-export type AnalyticsAgentReadableResource = { key: string; label: string; requests: number; sessions: number; latestAt?: string };
-export type AnalyticsFunnelDropoff = { key: string; from: string; to: string; fromCount: number; toCount: number; dropoffCount: number; conversionRate: number; dropoffRate: number };
-export type AnalyticsSectionConversionPath = { key: string; sectionId: string; exposedSessions: number; exposures: number; actionSessions: number; primaryActions: number; telClicks: number; formSubmits: number; outboundClicks: number; actionRate: number; avgTimeToActionMs?: number; medianTimeToActionMs?: number };
-export type AnalyticsClickMapPoint = { key: string; label: string; count: number; primaryActions: number; pageId?: string; sectionId?: string; elementRole?: string; hrefType?: AnalyticsEvent["hrefType"]; deviceType?: AnalyticsEvent["deviceType"]; normalizedX: number; normalizedY: number };
-export type AnalyticsStandardCorrelation = { criterionId: string; title: string; layer: "technical_seo" | "conversion" | "trust" | "content_structure"; metric: string; events: number; primaryActions: number; rate: number; signal: "collecting" | "positive" | "watch" | "weak"; insight: string };
-
-export type AnalyticsOutcomeTotals = {
-  sessions: number;
-  pageviews: number;
-  telClicks: number;
-  formStarts: number;
-  formSubmits: number;
-  outboundClicks: number;
-  primaryActions: number;
+export type AnalyticsTotals = {
+  visitors: number;
+  visits: number;
+  pageViews: number;
+  leads: number;
+  customerActions: number;
+  actionVisits: number;
   actionRate: number;
-  engagedMs: number;
-  avgEngagedSeconds: number;
-  avgTimeToActionMs?: number;
-  medianTimeToActionMs?: number;
-  avgScrollDepth: number;
+  formStarts: number;
+  engagedSeconds: number;
+  medianSecondsToAction?: number;
 };
 
-export type AnalyticsOutcomeRow = AnalyticsOutcomeTotals & {
+export type AnalyticsReportRow = {
   key: string;
   label: string;
-  events: number;
+  visitors: number;
+  visits: number;
+  pageViews: number;
+  customerActions: number;
+  actionRate: number;
+  engagedSeconds: number;
+  exits: number;
+};
+
+export type AnalyticsTrendPoint = {
+  bucket: string;
+  visits: number;
+  customerActions: number;
+};
+
+export type AnalyticsCollectionHealth = {
+  lastAcceptedAt?: string;
+  accepted: number;
+  internal: number;
+  bot: number;
+  preview: number;
+  duplicate: number;
+  invalid: number;
+};
+
+export type AnalyticsRecommendation = {
+  key: string;
+  title: string;
+  detail: string;
+  denominator: string;
+};
+
+export type AnalyticsReport = {
+  siteId: string;
+  query: AnalyticsReportQuery;
+  current: AnalyticsTotals;
+  comparison?: AnalyticsTotals;
+  trend: AnalyticsTrendPoint[];
+  channels: AnalyticsReportRow[];
+  sources: AnalyticsReportRow[];
+  campaigns: AnalyticsReportRow[];
+  pages: AnalyticsReportRow[];
+  landingPages: AnalyticsReportRow[];
+  actions: AnalyticsReportRow[];
+  devices: AnalyticsReportRow[];
+  visitorTypes: AnalyticsReportRow[];
+  collectionHealth: AnalyticsCollectionHealth;
+  sufficiency: "empty" | "early" | "sufficient";
+  recommendations: AnalyticsRecommendation[];
 };

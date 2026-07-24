@@ -15,23 +15,25 @@ const cssPaths = (await readdir(sourceRoot, { recursive: true }))
   .filter((path) => path.endsWith(".css"))
   .sort((left, right) => left === "styles.css" ? -1 : right === "styles.css" ? 1 : left.localeCompare(right));
 const sharedCss = (await Promise.all(cssPaths.map(async (path) => `/* ${path} */\n${await readFile(join(sourceRoot, path), "utf8")}`))).join("\n");
-const previewCss = `${platformCapabilityStyles}\n${sharedCss}`;
-const routes = siteDefinition.routes.map((route) => ({
-  path: normalizeRoute(route.path),
-  title: route.title,
-  description: route.description,
-  bodyHtml: removeReactImagePreloads(renderToStaticMarkup(<LodestaSite input={publicInput}>{route.element as ReactElement}</LodestaSite>))
-}));
-if ("claims" in siteDefinition) {
-  throw new Error("siteDefinition.claims is retired. Use optional free-text factDeclarations instead.");
+const previewCss = previewCssBindings(`${platformCapabilityStyles}\n${sharedCss}`, publicInput);
+const routes = siteDefinition.routes.map((route) => {
+  const path = normalizeRoute(route.path);
+  return {
+    path,
+    title: routeMetadata(route.title, fallbackRouteTitle(path, publicInput.business.name), 200),
+    description: routeMetadata(route.description, `${publicInput.business.name}.`, 500),
+    bodyHtml: removeReactImagePreloads(renderToStaticMarkup(<LodestaSite input={publicInput}>{route.element as ReactElement}</LodestaSite>))
+  };
+});
+if ("siteName" in siteDefinition || "claims" in siteDefinition || "factDeclarations" in siteDefinition) {
+  throw new Error("siteDefinition accepts routes only. The compiler owns siteName and fact bindings.");
 }
 const artifact = {
-  schemaVersion: "agent-authored-artifact-v2",
+  kind: "agent-authored-artifact",
   compilerManifest,
-  siteName: siteDefinition.siteName,
+  siteName: publicInput.business.name,
   sharedCss,
   routes,
-  factDeclarations: siteDefinition.factDeclarations ?? [],
   capabilityBindings: deriveCapabilityBindings(routes)
 };
 
@@ -44,6 +46,15 @@ for (const route of routes) {
 }
 
 function normalizeRoute(value: string) { const route = `/${value.trim().replace(/^\/+|\/+$/g, "")}`; return route === "/" ? route : route.replace(/\/$/, ""); }
+function routeMetadata(value: unknown, fallback: string, maximumLength: number) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return (normalized || fallback).slice(0, maximumLength);
+}
+function fallbackRouteTitle(path: string, siteName: string) {
+  if (path === "/") return siteName;
+  const label = path.split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+  return label ? `${label} | ${siteName}` : siteName;
+}
 // React 19 injects image preload links into static markup. The platform owns
 // document metadata, so these toolchain-generated nodes cannot enter body HTML.
 function removeReactImagePreloads(value: string) {
@@ -87,6 +98,13 @@ function escapeHtml(value: string) { return value.replace(/&/g, "&amp;").replace
 function previewBindings(body: string, input: { business?: { assets?: Array<{ assetId: string; revisionId: string; publicUrl?: string }> } }) {
   const assets = new Map((input.business?.assets ?? []).map((asset) => [asset.assetId, asset]));
   return body.replace(/asset:\/\/([a-zA-Z0-9_.:-]+)/g, (_match, assetId: string) => {
+    const asset = assets.get(assetId);
+    return asset ? `/_lodesta/assets/${encodeURIComponent(asset.revisionId)}` : "/_lodesta/asset-unavailable.svg";
+  });
+}
+function previewCssBindings(css: string, input: { business?: { assets?: Array<{ assetId: string; revisionId: string }> } }) {
+  const assets = new Map((input.business?.assets ?? []).map((asset) => [asset.assetId, asset]));
+  return css.replace(/asset:\/\/([a-zA-Z0-9_.:-]+)/g, (_match, assetId: string) => {
     const asset = assets.get(assetId);
     return asset ? `/_lodesta/assets/${encodeURIComponent(asset.revisionId)}` : "/_lodesta/asset-unavailable.svg";
   });

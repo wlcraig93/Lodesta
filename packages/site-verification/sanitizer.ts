@@ -1,5 +1,7 @@
 import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
+import postcss from "postcss";
+import valueParser from "postcss-value-parser";
 import type { AssetRevisionRef } from "@/packages/site-contracts";
 import { normalizeRoutePath, type ArtifactGateFinding } from "./contracts";
 
@@ -66,27 +68,78 @@ export function sanitizeAgentHtml(input: SanitizeArtifactInput) {
   return { html: DomUtils.getInnerHTML(document), findings: dedupeFindings(findings) };
 }
 
-export function sanitizeAgentCss(css: string) {
+export function sanitizeAgentCss(css: string, eligibleAssets: AssetRevisionRef[]) {
   const findings: ArtifactGateFinding[] = [];
-  if (/@import\b/i.test(css)) findings.push(finding("css.import", "css", "CSS @import is not allowed."));
-  if (/@font-face\b/i.test(css)) findings.push(finding("css.font_face", "css", "Agent-authored font loading is not allowed."));
-  if (/expression\s*\(|javascript\s*:|(?:^|[;{])\s*behavior\s*:|-moz-binding/i.test(css)) {
-    findings.push(finding("css.executable", "css", "CSS contains executable or binding syntax."));
-  }
-  if (/url\s*\(/i.test(css)) {
-    findings.push(finding("css.url", "css", "CSS URL loading is not allowed; assets must use HTML asset bindings."));
-  }
   if (/<\/style|<script/i.test(css)) findings.push(finding("css.breakout", "css", "CSS contains an HTML breakout sequence."));
+  const assets = new Map(eligibleAssets.map((asset) => [asset.assetId, asset]));
+  let root: postcss.Root;
+  try {
+    root = postcss.parse(css);
+  } catch (error) {
+    findings.push(finding("css.parse", "css", `CSS could not be parsed safely: ${error instanceof Error ? error.message : String(error)}`));
+    return { css: "", findings: dedupeFindings(findings) };
+  }
+  root.walkAtRules((rule) => {
+    const name = decodeCssEscapes(rule.name).toLowerCase();
+    if (name === "import") {
+      findings.push(finding("css.import", "css", "CSS @import is not allowed."));
+      rule.remove();
+    } else if (name === "font-face") {
+      findings.push(finding("css.font_face", "css", "Agent-authored font loading is not allowed."));
+      rule.remove();
+    }
+  });
+  root.walkDecls((declaration) => {
+    const executable = `${decodeCssEscapes(declaration.prop)}:${decodeCssEscapes(declaration.value)}`;
+    if (/expression\s*\(|javascript\s*:|(?:^|;)\s*behavior\s*:|-moz-binding/i.test(executable)) {
+      findings.push(finding("css.executable", "css", "CSS contains executable or binding syntax."));
+      declaration.remove();
+      return;
+    }
+    const parsed = valueParser(declaration.value);
+    parsed.walk((node) => {
+      if (node.type !== "function" || decodeCssEscapes(node.value).toLowerCase() !== "url") return;
+      const raw = valueParser.stringify(node.nodes).trim().replace(/^(['"])(.*)\1$/, "$2");
+      const decoded = decodeCssEscapes(raw);
+      const assetId = decoded.match(/^asset:\/\/([a-zA-Z0-9_.:-]+)$/)?.[1];
+      const asset = assetId ? assets.get(assetId) : undefined;
+      if (!asset) {
+        findings.push(finding("css.url", "css", `CSS URL must reference an eligible asset:// ID: ${decoded || "empty URL"}.`));
+        node.nodes = [{ type: "string", quote: "\"", value: "/_lodesta/asset-unavailable.svg", sourceIndex: 0, sourceEndIndex: 0 }];
+        return;
+      }
+      node.value = "url";
+      node.nodes = [{
+        type: "string",
+        quote: "\"",
+        value: `/_lodesta/assets/${encodeURIComponent(asset.revisionId)}`,
+        sourceIndex: 0,
+        sourceEndIndex: 0
+      }];
+    });
+    declaration.value = parsed.toString();
+  });
+  const output = root.toString().replace(/<\/style/gi, "<\\/style");
+  try {
+    const verified = postcss.parse(output);
+    verified.walkDecls((declaration) => {
+      valueParser(declaration.value).walk((node) => {
+        if (node.type !== "function" || decodeCssEscapes(node.value).toLowerCase() !== "url") return;
+        const value = valueParser.stringify(node.nodes).trim().replace(/^(['"])(.*)\1$/, "$2");
+        if (!/^\/_lodesta\/(?:assets\/[A-Za-z0-9_.:%-]+|asset-unavailable\.svg)$/.test(value)) {
+          findings.push(finding("css.url_unresolved", "css", `Final CSS contains an unresolved URL: ${value}.`));
+        }
+      });
+    });
+  } catch {
+    findings.push(finding("css.final_parse", "css", "Final CSS failed its parser round-trip."));
+  }
+  return { css: output, findings: dedupeFindings(findings) };
+}
 
-  return {
-    css: css
-      .replace(/@import[^;]+;?/gi, "")
-      .replace(/@font-face\s*\{[^}]*\}/gi, "")
-      .replace(/url\s*\([^)]*\)/gi, "none")
-      .replace(/<\/style/gi, "<\\/style")
-      .replace(/<script/gi, ""),
-    findings: dedupeFindings(findings)
-  };
+function decodeCssEscapes(value: string) {
+  return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex: string | undefined, escaped: string | undefined) =>
+    hex ? String.fromCodePoint(Number.parseInt(hex, 16)) : escaped ?? "");
 }
 
 function sanitizeAttributes(element: Element, tag: string, findings: ArtifactGateFinding[], route: string) {

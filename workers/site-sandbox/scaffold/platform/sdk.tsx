@@ -5,9 +5,11 @@ type PublicInput = {
   siteId: string;
   publicFacts: Array<{ id: string; kind: string; label: string; value: unknown }>;
   business: {
+    name: string;
+    identityStatus: "verified" | "provisional";
     assets: Array<{ assetId: string; alt: string }>;
     links: Array<{ id: string; url: string }>;
-    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; googlePlaceId?: string; hours?: Record<string, string>; sourceFactIds?: string[] }>;
+    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; hours?: Record<string, string>; sourceFactIds?: string[] }>;
   };
   forms: Array<{ id: string; fields: Array<{ id: string; label: string; type: string; required: boolean; options?: string[] }>; submitLabel: string; successMessage: string }>;
 };
@@ -24,23 +26,86 @@ export function Fact({ id, as: Tag = "span", className }: { id: string; as?: key
   return <Tag className={className} data-lodesta-fact-id={id}>{displayFactValue(fact)}</Tag>;
 }
 
+export function BusinessName({ as: Tag = "span", className }: { as?: keyof React.JSX.IntrinsicElements; className?: string }) {
+  const input = useInput();
+  const fact = input.business.identityStatus === "verified"
+    ? input.publicFacts.find((item) => item.kind === "business_name" && displayValue(item.value) === input.business.name)
+    : undefined;
+  return <Tag
+    className={className}
+    data-lodesta-business-name=""
+    data-lodesta-identity-status={input.business.identityStatus}
+    {...(fact ? { "data-lodesta-fact-id": fact.id } : {})}
+  >{input.business.name}</Tag>;
+}
+
 export function Asset({ id, className, alt }: { id: string; className?: string; alt?: string }) {
   const asset = useInput().business.assets.find((item) => item.assetId === id);
   if (!asset) throw new Error(`Unknown eligible asset ${id}.`);
   return <img className={className} src={`asset://${id}`} alt={alt ?? asset.alt} />;
 }
 
-export function ManagedForm({ id, className }: { id: string; className?: string }) {
+type ManagedFormDefinition = PublicInput["forms"][number];
+const FormContext = createContext<ManagedFormDefinition | null>(null);
+
+export function ManagedForm({ id, className, children }: { id: string; className?: string; children?: ReactNode }) {
   const form = useInput().forms.find((item) => item.id === id);
   if (!form) throw new Error(`Unknown form ${id}.`);
   return <form className={className} data-lodesta-form-id={id} data-lodesta-success-message={form.successMessage}>
-    {form.fields.map((field) => <label key={field.id}>{field.label}{field.type === "textarea"
-      ? <textarea name={field.id} required={field.required} />
-      : field.type === "select"
-        ? <select name={field.id} required={field.required}>{field.options?.map((option) => <option key={option}>{option}</option>)}</select>
-        : <input name={field.id} type={field.type} required={field.required} />}</label>)}
-    <button type="submit">{form.submitLabel}</button><p data-lodesta-form-status aria-live="polite" />
+    <FormContext.Provider value={form}>
+      {children ?? <>
+        {form.fields.map((field) => <ManagedField key={field.id} id={field.id} />)}
+        <ManagedSubmit />
+      </>}
+    </FormContext.Provider>
+    <p data-lodesta-form-status aria-live="polite" aria-atomic="true" />
   </form>;
+}
+
+export function ManagedField({
+  id,
+  className,
+  labelClassName,
+  controlClassName,
+  label,
+  placeholder,
+  rows
+}: {
+  id: string;
+  className?: string;
+  labelClassName?: string;
+  controlClassName?: string;
+  label?: string;
+  placeholder?: string;
+  rows?: number;
+}) {
+  const form = useContext(FormContext);
+  if (!form) throw new Error("ManagedField must be rendered inside ManagedForm.");
+  const field = form.fields.find((item) => item.id === id);
+  if (!field) throw new Error(`Unknown managed field ${id} for form ${form.id}.`);
+  const controlId = `${form.id}-${field.id}`;
+  const common = {
+    id: controlId,
+    name: field.id,
+    className: controlClassName,
+    required: field.required,
+    placeholder,
+    "data-lodesta-field-id": field.id
+  };
+  return <div className={className} data-lodesta-managed-field={field.id}>
+    <label className={labelClassName} htmlFor={controlId}>{label ?? field.label}</label>
+    {field.type === "textarea"
+      ? <textarea {...common} rows={rows} />
+      : field.type === "select"
+        ? <select {...common}>{field.options?.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+        : <input {...common} type={field.type === "phone" ? "tel" : field.type} />}
+  </div>;
+}
+
+export function ManagedSubmit({ className, children }: { className?: string; children?: ReactNode }) {
+  const form = useContext(FormContext);
+  if (!form) throw new Error("ManagedSubmit must be rendered inside ManagedForm.");
+  return <button className={className} type="submit" data-lodesta-form-submit>{children ?? form.submitLabel}</button>;
 }
 
 export function SafeLink({ id, children, className }: { id: string; children: ReactNode; className?: string }) {
@@ -54,12 +119,12 @@ export function ManagedMap({ locationId, className }: { locationId: string; clas
   const location = input.business.locations.find((item) => item.id === locationId);
   if (!location) throw new Error(`Unknown location ${locationId}.`);
   const address = [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ");
-  const query = location.googlePlaceId ? `place_id:${location.googlePlaceId}` : address || location.label;
+  const query = address || location.label;
   const href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   const addressFact = input.publicFacts.find((fact) => fact.kind === "address" && location.sourceFactIds?.includes(fact.id));
   const hoursFact = input.publicFacts.find((fact) => fact.kind === "hours" && location.sourceFactIds?.includes(fact.id));
   const hours = orderedLocationHours(location.hours);
-  return <section className={className} data-lodesta-map={locationId} data-lodesta-place-id={location.googlePlaceId}>
+  return <section className={className} data-lodesta-map={locationId}>
     <div data-lodesta-map-surface aria-label={`Location details for ${location.label}`}>
       <div data-lodesta-location-heading><span data-lodesta-location-verified>Verified location</span><strong data-lodesta-location-name>{location.label}</strong></div>
       {addressFact ? <address data-lodesta-location-address data-lodesta-fact-id={addressFact.id}>{displayValue(addressFact.value)}</address> : null}
@@ -82,6 +147,11 @@ function stableId(value: string) { return value.toLowerCase().replace(/[^a-z0-9]
 
 function displayFactValue(fact: PublicInput["publicFacts"][number]) {
   if (fact.kind === "phone" && typeof fact.value === "string") return formatPhoneForDisplay(fact.value);
+  if (fact.kind === "hours" && fact.value && typeof fact.value === "object" && !Array.isArray(fact.value)) {
+    return orderedLocationHours(fact.value as Record<string, string>)
+      .map((item) => `${item.label}: ${item.value}`)
+      .join(", ");
+  }
   return displayValue(fact.value);
 }
 

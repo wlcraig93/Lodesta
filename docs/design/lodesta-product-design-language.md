@@ -12,7 +12,7 @@ Design around the actual operating objects in the product:
 
 - Agent runs: generation, crawl, objective QA, final visual judgment, publication, maintenance, and telemetry steps.
 - Evidence: source facts, crawl notes, rendered screenshots, scores, checks, leads, and analytics signals.
-- Approvals: owner-confirmed facts, asset-rights attestations, objective QA gates, publish confirmation, and safe apply actions.
+- Approvals: owner-confirmed facts, objective QA gates, publish confirmation, and safe apply actions. Media records expose origin, not an owner-rights attestation workflow.
 - Next actions: the smallest useful operator or owner action available from the current state.
 - Comparisons: source site versus generated site, current version versus draft, failing checks versus resolved checks.
 
@@ -28,8 +28,9 @@ Design around the actual operating objects in the product:
 ## Color Roles
 
 - Forest (`--product-color-primary`) is the primary product action color. Use it for decisive actions, active states, progress fills, and focused product intent.
-- Amber (`--product-color-intelligence`) is reserved for agent/intelligence signals: automation highlights, recommendations, suggested next steps, pending attention, and generated insight. Do not use amber for ordinary primary buttons.
+- Amber (`--product-color-intelligence`) is reserved for agent/intelligence signals: automation highlights, recommendations, suggested next steps, pending attention, and generated insight. Owner-facing `needs_attention` states use the amber surface, border, and text roles. Do not use amber for ordinary primary buttons or generic in-progress activity.
 - Status colors are semantic only: success, warning, error, and info states should use the matching status tokens.
+- Passive product structure is intentionally warm-neutral rather than green-tinted. Canvas `#f7f8f6`, raised canvas `#fbfcfa`, soft surface `#f1f3f0`, default border `#dfe4de`, and selected surface `#e7efea` keep forest reserved for active product meaning.
 - Customer-site color is separate. Do not use `--site-*` to style Lodesta-owned UI, and do not change generated customer-site styling to satisfy product UI needs.
 
 ## Tokens
@@ -41,6 +42,7 @@ Lodesta-owned UI uses `--product-*` CSS custom properties from `app/product-toke
 - Border tokens describe strength: default, subtle, strong, emphasis, dashed.
 - Elevation tokens describe use: card, soft card, preview, focus, and error.
 - Token names are mode-ready so future dark-mode overrides can be added without changing call sites.
+- Visible product metadata never renders below the 12px `--product-font-size-micro` token.
 
 ## Typography
 
@@ -77,7 +79,7 @@ Use for the object and task currently in focus. Prefer one short label, one clea
 
 ### Toolbar
 
-Use for filters, mode switches, and view-level actions. Controls should remain compact and predictable.
+Use for filters, mode switches, and view-level actions. Controls should remain compact and predictable. Use 32px for compact desktop controls, 40px for default controls, and at least 44px for mobile touch targets.
 
 ### Panel
 
@@ -93,7 +95,7 @@ Use for lists where comparison matters. Keep headings terse, labels stable, and 
 
 ### Badge
 
-Use for status, category, severity, or provenance. Badges should be semantic, not decorative.
+Use for status, category, severity, or provenance. Badges should be semantic, not decorative. `needs_attention` uses the intelligence/amber role; live and ready states use positive forest treatment; building and update activity stay neutral or forest-tinted.
 
 ### Button
 

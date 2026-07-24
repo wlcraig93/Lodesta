@@ -1,4 +1,3 @@
-import { getStandardCriterion } from "./standard";
 import { validatePublicFetchUrl } from "./url-safety";
 import { extractSourceTextBlocks, type SourceTextBlock } from "./source-text-blocks";
 import {
@@ -6,6 +5,7 @@ import {
   normalizeObservedBusinessHours,
   preferBusinessNameCandidate
 } from "./business-fact-normalization";
+import { generationCrawlerUserAgent } from "@/packages/business-data/robots-policy";
 
 export type CrawlAssessment = {
   url: string;
@@ -32,7 +32,6 @@ export type CrawlAssessment = {
   assetReferences: CrawlAssetReference[];
   sampledInternalPages: string[];
   pageSummaries: CrawlPageSummary[];
-  score: CrawlQualityScore;
   findings: string[];
   error?: string;
 };
@@ -121,8 +120,8 @@ export type ExtractedBusinessFacts = {
 export type CrawlAssetReference = {
   url: string;
   alt?: string;
-  kind: "image" | "logo";
-  rightsStatus: "reference_only";
+  kind: "image" | "logo" | "icon";
+  sourcePageUrl: string;
 };
 
 export type CrawlFormReference = {
@@ -140,25 +139,6 @@ export type CrawlLinkReference = {
   href: string;
   text?: string;
   kind: "internal" | "external" | "tel" | "mailto" | "booking" | "ordering" | "social" | "press_video";
-};
-
-export type CrawlQualityScore = {
-  overall: number;
-  max: number;
-  percent: number;
-  grade: "excellent" | "good" | "needs_work" | "poor";
-  checks: CrawlQualityCheck[];
-};
-
-export type CrawlQualityCheck = {
-  id: string;
-  standardCriterionId: string;
-  label: string;
-  category: "technical" | "seo" | "conversion" | "trust" | "accessibility";
-  passed: boolean;
-  points: number;
-  maxPoints: number;
-  consequence: string;
 };
 
 export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Promise<CrawlAssessment> {
@@ -182,19 +162,14 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
     assetReferences: [],
     sampledInternalPages: [],
     pageSummaries: [],
-    score: emptyScore(),
     findings: []
   };
   const urlSafety = await validatePublicFetchUrl(url);
   if (!urlSafety.ok) {
-    const failed = {
+    return {
       ...assessment,
       error: urlSafety.error,
       findings: [urlSafety.error]
-    };
-    return {
-      ...failed,
-      score: scoreCrawlAssessment(failed)
     };
   }
 
@@ -206,15 +181,11 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
     const robotsPolicy = await fetchRobotsPolicy(crawlBase);
     assessment.robotsFound = robotsPolicy.found;
     if (!robotsPolicy.allowed(safeUrl)) {
-      const blocked = {
+      return {
         ...assessment,
         finalUrl: safeUrl,
         error: "Crawl blocked by robots.txt for this URL.",
         findings: ["robots.txt disallows crawling the requested URL."]
-      };
-      return {
-        ...blocked,
-        score: scoreCrawlAssessment(blocked)
       };
     }
 
@@ -262,17 +233,12 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
     }
 
     assessment.findings = makeFindings(assessment);
-    assessment.score = scoreCrawlAssessment(assessment);
     return assessment;
   } catch (error) {
-    const failed = {
+    return {
       ...assessment,
       error: error instanceof Error ? error.message : "Unknown crawl error",
       findings: ["Could not fetch the site with the cheap crawler; queue Playwright or external browser fallback."]
-    };
-    return {
-      ...failed,
-      score: scoreCrawlAssessment(failed)
     };
   }
 }
@@ -417,37 +383,9 @@ function mergePageSummaryIntoAssessment(assessment: CrawlAssessment, summary: Cr
  */
 function capAssetReferences(references: CrawlAssetReference[]): CrawlAssetReference[] {
   return [
-    ...references.filter((reference) => reference.kind === "logo").slice(0, 6),
+    ...references.filter((reference) => reference.kind === "logo" || reference.kind === "icon").slice(0, 6),
     ...references.filter((reference) => reference.kind === "image").slice(0, 12)
   ];
-}
-
-export function scoreCrawlAssessment(assessment: CrawlAssessment): CrawlQualityScore {
-  const checks: CrawlQualityCheck[] = [
-    check("technical.https", "technical", isHttpsUrl(assessment.finalUrl ?? assessment.url), 10),
-    check("technical.healthy_response", "technical", Boolean(assessment.fetched && assessment.status && assessment.status < 400), 10),
-    check("technical.mobile_viewport", "technical", assessment.hasViewportMeta, 10),
-    check("seo.local_business_schema", "seo", assessment.hasLocalBusinessSchema, 15),
-    check("seo.title.unique", "seo", Boolean(assessment.title && assessment.title.length >= 25), 10),
-    check("seo.meta_description", "seo", Boolean(assessment.metaDescription && assessment.metaDescription.length >= 80), 10),
-    check("seo.canonical", "seo", Boolean(assessment.canonical), 5),
-    check("seo.clean_urls", "seo", hasCleanUrl(assessment.finalUrl ?? assessment.url, assessment.canonical), 5),
-    check("seo.robots_txt", "technical", assessment.robotsFound, 5),
-    check("seo.sitemap", "technical", assessment.sitemapFound, 5),
-    check("conversion.mobile_click_to_call", "conversion", assessment.hasTelLink, 15),
-    check("conversion.lead_form", "conversion", assessment.formCount > 0, 10),
-    check("accessibility.image_alt", "accessibility", assessment.imageCount === 0 || assessment.imagesWithoutAlt === 0, 5)
-  ];
-  const max = checks.reduce((total, item) => total + item.maxPoints, 0);
-  const overall = checks.reduce((total, item) => total + item.points, 0);
-  const percent = max > 0 ? Math.round((overall / max) * 100) : 0;
-  return {
-    overall,
-    max,
-    percent,
-    grade: percent >= 90 ? "excellent" : percent >= 75 ? "good" : percent >= 55 ? "needs_work" : "poor",
-    checks
-  };
 }
 
 function makeFindings(assessment: CrawlAssessment) {
@@ -491,40 +429,11 @@ function cleanUrlCandidate(value: string | undefined) {
   }
 }
 
-function emptyScore(): CrawlQualityScore {
-  return {
-    overall: 0,
-    max: 100,
-    percent: 0,
-    grade: "poor",
-    checks: []
-  };
-}
-
-function check(
-  standardCriterionId: string,
-  category: CrawlQualityCheck["category"],
-  passed: boolean,
-  maxPoints: number
-): CrawlQualityCheck {
-  const criterion = getStandardCriterion(standardCriterionId);
-  return {
-    id: standardCriterionId,
-    standardCriterionId,
-    label: criterion?.title ?? standardCriterionId,
-    category,
-    passed,
-    points: passed ? maxPoints : 0,
-    maxPoints,
-    consequence: criterion?.businessConsequence ?? "This issue may reduce local-business performance."
-  };
-}
-
 async function fetchWithPresenceHeaders(url: string) {
   return fetch(url, {
     redirect: "follow",
     headers: {
-      "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)",
+      "User-Agent": generationCrawlerUserAgent,
       Accept: "text/html,application/xhtml+xml"
     },
     signal: AbortSignal.timeout(8000)
@@ -536,7 +445,7 @@ async function probeUrl(url: string) {
     const response = await fetch(url, {
       method: "GET",
       redirect: "follow",
-      headers: { "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)" },
+      headers: { "User-Agent": generationCrawlerUserAgent },
       signal: AbortSignal.timeout(4000)
     });
     return response.ok;
@@ -581,7 +490,7 @@ async function fetchSitemapText(url: string) {
       method: "GET",
       redirect: "follow",
       headers: {
-        "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)",
+        "User-Agent": generationCrawlerUserAgent,
         Accept: "application/xml,text/xml,text/plain"
       },
       signal: AbortSignal.timeout(4000)
@@ -631,7 +540,7 @@ async function fetchRobotsPolicy(base: URL): Promise<RobotsPolicy> {
     const response = await fetch(robotsUrl, {
       method: "GET",
       redirect: "follow",
-      headers: { "User-Agent": "LodestaPresenceBot/0.1 (+https://example.com/bot)" },
+      headers: { "User-Agent": generationCrawlerUserAgent },
       signal: AbortSignal.timeout(4000)
     });
     if (!response.ok) return allowAllRobotsPolicy(false);
@@ -934,7 +843,7 @@ function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetRefe
     try {
       const url = new URL(href, sourceUrl);
       if (!["http:", "https:"].includes(url.protocol)) continue;
-      references.push({ url: url.href, alt: "Website icon reference", kind: "logo", rightsStatus: "reference_only" });
+      references.push({ url: url.href, alt: "Website icon", kind: "icon", sourcePageUrl: sourceUrl });
     } catch {
       // Ignore malformed icon URLs.
     }
@@ -949,7 +858,7 @@ function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetRefe
     try {
       const url = new URL(content, sourceUrl);
       if (!["http:", "https:"].includes(url.protocol)) continue;
-      references.push({ url: url.href, alt: "Social share image", kind: "image", rightsStatus: "reference_only" });
+      references.push({ url: url.href, alt: "Social share image", kind: "image", sourcePageUrl: sourceUrl });
     } catch {
       // Ignore malformed share image URLs.
     }
@@ -966,7 +875,7 @@ function extractAssetReferences(html: string, sourceUrl: string): CrawlAssetRefe
       const alt = cleanText(extractAttribute(tag, "alt"));
       const className = extractAttribute(tag, "class") ?? "";
       const kind = /logo|brand/i.test(`${alt ?? ""} ${className} ${url.pathname}`) ? "logo" : "image";
-      references.push({ url: url.href, alt, kind, rightsStatus: "reference_only" });
+      references.push({ url: url.href, alt, kind, sourcePageUrl: sourceUrl });
     } catch {
       // Ignore malformed asset URLs.
     }

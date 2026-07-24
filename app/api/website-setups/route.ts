@@ -11,10 +11,15 @@ import {
 } from "@/packages/platform-operations";
 import { requireWebsiteSetupUser } from "./auth";
 
+function validTimezone(value: string) {
+  try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; } catch { return false; }
+}
+
 const createSchema = z.object({
   sourceUrl: z.string().trim().min(1).max(2048),
   idempotencyKey: z.string().trim().min(8).max(160),
-  confirmDuplicate: z.boolean().optional()
+  confirmDuplicate: z.boolean().optional(),
+  reportingTimezone: z.string().min(1).max(100).refine(validTimezone, "Enter a valid IANA timezone.")
 }).strict();
 
 export async function GET(request: Request) {
@@ -37,7 +42,10 @@ export async function POST(request: Request) {
   const source = await validateWebsiteSetupSource(parsed.data.sourceUrl);
   if (!source.ok) return applyRateLimitHeaders(NextResponse.json({ error: source.error }, { status: 400 }), limit);
 
-  const creationRequestHash = sha256(stableJson({ normalizedSource: source.normalizedSource }));
+  const creationRequestHash = sha256(stableJson({
+    normalizedSource: source.normalizedSource,
+    reportingTimezone: parsed.data.reportingTimezone
+  }));
   const [setups, sites] = await Promise.all([
     platformOperationsRepository.listWebsiteSetupsForOwner(auth.user.id),
     sitePlatformRepository.getSitesByOwnerUserId(auth.user.id)
@@ -96,7 +104,8 @@ export async function POST(request: Request) {
       sourceUrl: source.url,
       normalizedSource: source.normalizedSource,
       idempotencyKey: parsed.data.idempotencyKey,
-      creationRequestHash
+      creationRequestHash,
+      reportingTimezone: parsed.data.reportingTimezone
     });
     return applyRateLimitHeaders(NextResponse.json({ view: await getWebsiteSetupView(setup), existing: false }, { status: 202 }), limit);
   } catch (error) {

@@ -30,7 +30,7 @@ export function CreateSiteForm() {
       });
       const payload = await response.json().catch(() => ({})) as BootstrapResponse;
       if (!response.ok || !payload.site?.slug) throw new Error(payload.error ?? "Site creation failed.");
-      router.push(`/workspace/${encodeURIComponent(payload.site.slug)}/website`);
+      router.push(`/workspace/${encodeURIComponent(payload.site.slug)}/editor`);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

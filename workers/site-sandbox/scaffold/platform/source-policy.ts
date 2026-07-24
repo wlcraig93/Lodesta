@@ -1,5 +1,7 @@
 import ts from "typescript";
-import { sandboxSourcePolicyVersion } from "../version-manifest";
+import postcss from "postcss";
+import valueParser from "postcss-value-parser";
+import { sandboxSourcePolicyIdentity } from "../component-manifest";
 
 export type WorkspaceSourcePolicyFinding = {
   id: string;
@@ -7,7 +9,7 @@ export type WorkspaceSourcePolicyFinding = {
   message: string;
 };
 
-export const workspaceSourcePolicyVersion = sandboxSourcePolicyVersion;
+export const workspaceSourcePolicyIdentity = sandboxSourcePolicyIdentity;
 
 export type WorkspaceSourcePolicyFile = { path: string; content: string };
 
@@ -23,13 +25,6 @@ const forbiddenCalls = new Map<string, string>([
   ["setTimeout", "timers"], ["setInterval", "timers"], ["queueMicrotask", "timers"]
 ]);
 const forbiddenJsxElements = new Set(["link", "script", "style"]);
-const forbiddenCss: Array<[string, RegExp]> = [
-  ["import", /@import\b/i],
-  ["font_face", /@font-face\b/i],
-  ["external_url", /url\s*\(/i],
-  ["executable", /(?:expression|javascript\s*:|behavior\s*:|-moz-binding)\b/i]
-];
-
 export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) {
   const findings: WorkspaceSourcePolicyFinding[] = [];
   const paths = new Set(files.map((file) => file.path));
@@ -42,9 +37,7 @@ export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]
       continue;
     }
     if (file.path.endsWith(".css")) {
-      for (const [id, pattern] of forbiddenCss) {
-        if (pattern.test(file.content)) findings.push({ id: `source.css_${id}`, path: file.path, message: `Generated CSS uses forbidden ${id.replaceAll("_", " ")} syntax.` });
-      }
+      findings.push(...validateCss(file));
       continue;
     }
 
@@ -55,6 +48,64 @@ export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]
     findings.push({ id: "source.byte_limit", path: "src", message: "Workspace source may contain at most 4 MB." });
   }
   return dedupe(findings);
+}
+
+function validateCss(file: WorkspaceSourcePolicyFile) {
+  const findings: WorkspaceSourcePolicyFinding[] = [];
+  try {
+    const root = postcss.parse(file.content);
+    root.walkAtRules((rule) => {
+      const name = decodeCssEscapes(rule.name).toLowerCase();
+      if (name === "import" || name === "font-face") {
+        const id = name === "font-face" ? "font_face" : name;
+        findings.push({
+          id: `source.css_${id}`,
+          path: file.path,
+          message: `Generated CSS uses forbidden ${id.replaceAll("_", " ")} syntax.`
+        });
+      }
+    });
+    root.walkDecls((declaration) => {
+      const property = decodeCssEscapes(declaration.prop).toLowerCase();
+      const decodedValue = decodeCssEscapes(declaration.value);
+      const parsedValue = valueParser(decodedValue);
+      let executable = property === "behavior" || property === "-moz-binding" || /javascript\s*:/i.test(decodedValue);
+      parsedValue.walk((node) => {
+        if (node.type === "function" && decodeCssEscapes(node.value).toLowerCase() === "expression") executable = true;
+      });
+      if (executable) {
+        findings.push({
+          id: "source.css_executable",
+          path: file.path,
+          message: "Generated CSS uses forbidden executable syntax."
+        });
+      }
+      parsedValue.walk((node) => {
+        if (node.type !== "function" || decodeCssEscapes(node.value).toLowerCase() !== "url") return;
+        const raw = valueParser.stringify(node.nodes).trim().replace(/^(['"])(.*)\1$/, "$2");
+        const decoded = decodeCssEscapes(raw);
+        if (!/^asset:\/\/[a-zA-Z0-9_.:-]+$/.test(decoded)) {
+          findings.push({
+            id: "source.css_external_url",
+            path: file.path,
+            message: `Generated CSS URL must use an asset:// ID, received ${JSON.stringify(decoded)}.`
+          });
+        }
+      });
+    });
+  } catch (error) {
+    findings.push({
+      id: "source.css_parse",
+      path: file.path,
+      message: `Generated CSS could not be parsed safely: ${error instanceof Error ? error.message : String(error)}`
+    });
+  }
+  return findings;
+}
+
+function decodeCssEscapes(value: string) {
+  return value.replace(/\\([0-9a-f]{1,6})(?:\s)?|\\(.)/gi, (_match, hex: string | undefined, escaped: string | undefined) =>
+    hex ? String.fromCodePoint(Number.parseInt(hex, 16)) : escaped ?? "");
 }
 
 export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) {
@@ -73,7 +124,14 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       const moduleId = statement.moduleSpecifier.text;
-      if (!statement.importClause) add("import_syntax", "Only explicit static imports from the source allowlist are permitted.");
+      if (!statement.importClause) {
+        add(
+          "import_syntax",
+          moduleId.endsWith(".css")
+            ? "Do not import CSS files from TypeScript; the compiler automatically includes every CSS file beneath src/."
+            : "Only explicit static imports from the source allowlist are permitted."
+        );
+      }
       if (!allowedImport(file.path, moduleId)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
     } else if (ts.isImportEqualsDeclaration(statement) || (ts.isExportDeclaration(statement) && statement.moduleSpecifier)) {
       if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
@@ -83,9 +141,6 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
   }
 
   const visit = (node: ts.Node) => {
-    if (ts.isJsxText(node) && /&(?:#\d+|#x[a-f0-9]+|[a-z][a-z0-9]+);/i.test(node.getText(source))) {
-      add("escaped_entity", "Generated JSX contains an HTML entity source sequence; write the intended Unicode or ASCII punctuation directly.");
-    }
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(source).toLowerCase();
       if (forbiddenJsxElements.has(tag)) {
@@ -117,7 +172,12 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
     if (ts.isElementAccessExpression(node) && node.argumentExpression) {
       const property = staticString(node.argumentExpression);
       if (property === undefined && !ts.isNumericLiteral(node.argumentExpression)) {
-        add("computed_property", "Generated source uses a dynamic computed property access, which is outside the source allowlist.");
+        const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        const expression = node.getText(source).replace(/\s+/g, " ").slice(0, 240);
+        add(
+          "computed_property",
+          `Generated source uses dynamic computed property access at ${line + 1}:${character + 1} (${expression}). Replace it with a statically named property, a switch, or an explicit conditional.`
+        );
       } else if (property === "constructor" || forbiddenReferences.has(property ?? "") || forbiddenCalls.has(property ?? "")) {
         add("code_generation", `Generated source uses forbidden computed property ${JSON.stringify(property)}.`);
       }

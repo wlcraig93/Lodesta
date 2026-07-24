@@ -91,6 +91,6 @@ process.stdout.write(`${JSON.stringify({
   workspaceRevisionId: version.workspaceRevisionId,
   publicBuildInputId: version.publicBuildInputId,
   assetRevisionIds: version.assetRevisionIds,
-  mediaRights: buildInput.business.assets.map((asset) => ({ revisionId: asset.revisionId, rightsStatus: asset.rightsStatus })),
+  mediaOrigins: buildInput.business.assets.map((asset) => ({ revisionId: asset.revisionId, origin: asset.origin })),
   routes: results
 })}\n`);

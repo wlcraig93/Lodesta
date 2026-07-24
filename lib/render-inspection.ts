@@ -1,5 +1,7 @@
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { assertPublicFetchUrl } from "@/lib/url-safety";
+import { generationCrawlerUserAgent } from "@/packages/business-data/robots-policy";
 import type {
   RenderInspectionFinding,
   RenderInspectionResult,
@@ -18,6 +20,7 @@ export type InspectUrlRenderInput = {
   qaRunId?: string;
   captureScreenshots?: boolean;
   artifactRoot?: string;
+  enforcePublicUrlSafety?: boolean;
 };
 
 const viewports = [
@@ -29,22 +32,36 @@ const viewports = [
 export async function inspectUrlRender(input: InspectUrlRenderInput): Promise<RenderInspectionResult> {
   const capturedAt = new Date().toISOString();
   try {
+    const requestedUrl = input.enforcePublicUrlSafety
+      ? await assertPublicFetchUrl(input.url)
+      : input.url;
+    const requestedHostname = new URL(requestedUrl).hostname;
     const { chromium } = await import("playwright");
     const browser = await chromium.launch({ headless: true });
+    const validatedOrigins = new Map<string, Promise<void>>();
     const screenshots: RenderScreenshotArtifact[] = [];
     const metricsByViewport: Partial<Record<RenderViewportName, RenderViewportMetrics>> = {};
     const findings: RenderInspectionFinding[] = [];
     let finalUrl: string | undefined;
     try {
       for (const viewport of viewports) {
-        const page = await browser.newPage({ viewport });
+        const page = await browser.newPage({
+          viewport,
+          userAgent: input.enforcePublicUrlSafety ? generationCrawlerUserAgent : undefined
+        });
         const consoleErrors: string[] = [];
         page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
         page.on("pageerror", (error) => consoleErrors.push(error.message));
         try {
-          const response = await page.goto(input.url, { waitUntil: "domcontentloaded", timeout: timeoutMs() });
+          if (input.enforcePublicUrlSafety) {
+            await installPublicRequestGuard(page, requestedHostname, validatedOrigins);
+          }
+          const response = await page.goto(requestedUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs() });
           await page.waitForTimeout(500);
-          finalUrl ??= page.url();
+          const pageUrl = input.enforcePublicUrlSafety
+            ? await assertSamePublicSite(page.url(), requestedHostname)
+            : page.url();
+          finalUrl ??= pageUrl;
           const measured = await page.evaluate(measurePage);
           const metrics: RenderViewportMetrics = {
             ...measured,
@@ -55,7 +72,7 @@ export async function inspectUrlRender(input: InspectUrlRenderInput): Promise<Re
           metricsByViewport[viewport.name] = metrics;
           findings.push(...findingsFor(metrics, response?.status()));
           if (input.captureScreenshots !== false) {
-            const directory = join(input.artifactRoot ?? ".data/render-inspections", safeName(input.siteId ?? new URL(input.url).hostname), safeName(capturedAt));
+            const directory = join(input.artifactRoot ?? ".data/render-inspections", safeName(input.siteId ?? new URL(requestedUrl).hostname), safeName(capturedAt));
             await mkdir(directory, { recursive: true });
             const path = join(directory, `${viewport.name}.png`);
             await page.screenshot({ path, fullPage: true, type: "png" });
@@ -101,8 +118,14 @@ function measurePage() {
   const fontSizes = readable.map((element) => Number.parseFloat(getComputedStyle(element).fontSize)).filter(Number.isFinite);
   const headings = visible.filter((element) => /^H[1-6]$/.test(element.tagName));
   const actions = visible.filter((element) => element.matches("a[href],button,input[type=submit]"));
-  const firstAction = actions.map((element) => ({ element, rect: element.getBoundingClientRect() })).sort((a, b) => a.rect.top - b.rect.top)[0];
-  const sticky = actions.find((element) => {
+  const primaryActionPattern = /\b(call|contact|book|schedule|reserve|order|quote|estimate|appointment|consult|request|inquire|get started)\b/i;
+  const primaryActions = actions.filter((element) => {
+    const href = element instanceof HTMLAnchorElement ? element.href : "";
+    const label = `${element.textContent ?? ""} ${element.getAttribute("aria-label") ?? ""} ${element.getAttribute("value") ?? ""}`;
+    return /^(?:tel:|mailto:)/i.test(href) || primaryActionPattern.test(label);
+  });
+  const firstPrimaryAction = primaryActions.map((element) => ({ element, rect: element.getBoundingClientRect() })).sort((a, b) => a.rect.top - b.rect.top)[0];
+  const sticky = primaryActions.find((element) => {
     const position = getComputedStyle(element).position;
     const rect = element.getBoundingClientRect();
     return (position === "fixed" || position === "sticky") && rect.bottom >= innerHeight - 24;
@@ -119,7 +142,9 @@ function measurePage() {
     imageCount: images.length,
     loadedImageCount: images.filter((image) => image.complete && image.naturalWidth > 0).length,
     brokenImageCount: images.filter((image) => !image.complete || image.naturalWidth === 0).length,
-    aboveFoldCtaDetected: Boolean(firstAction && firstAction.rect.top < innerHeight),
+    aboveFoldCtaDetected: Boolean(firstPrimaryAction && firstPrimaryAction.rect.top < innerHeight),
+    primaryHeroCtaDetected: Boolean(firstPrimaryAction),
+    primaryHeroCtaAboveFold: Boolean(firstPrimaryAction && firstPrimaryAction.rect.top < innerHeight),
     siteHeaderDetected: Boolean(document.querySelector("header")),
     siteFooterDetected: Boolean(document.querySelector("footer")),
     horizontalOverflowPx: Math.max(0, root.scrollWidth - root.clientWidth),
@@ -128,7 +153,7 @@ function measurePage() {
     headingOverflowCount: headings.filter((heading) => heading.scrollWidth - heading.clientWidth > 2).length,
     headingOverflowSamples: headings.filter((heading) => heading.scrollWidth - heading.clientWidth > 2).slice(0, 5).map((heading) => heading.textContent?.trim().slice(0, 100) ?? "heading"),
     rects: {
-      primaryHeroCta: firstAction ? rectValue(firstAction.rect) : undefined,
+      primaryHeroCta: firstPrimaryAction ? rectValue(firstPrimaryAction.rect) : undefined,
       stickyCta: sticky ? rectValue(sticky.getBoundingClientRect()) : undefined
     }
   };
@@ -153,7 +178,9 @@ async function fetchFallback(input: InspectUrlRenderInput, capturedAt: string, r
   let html = "";
   let finalUrl = input.url;
   try {
-    const response = await fetch(input.url, { redirect: "follow", signal: AbortSignal.timeout(timeoutMs()) });
+    const response = input.enforcePublicUrlSafety
+      ? await fetchPublicPage(input.url)
+      : await fetch(input.url, { redirect: "follow", signal: AbortSignal.timeout(timeoutMs()) });
     html = await response.text();
     finalUrl = response.url;
   } catch {
@@ -176,6 +203,63 @@ async function fetchFallback(input: InspectUrlRenderInput, capturedAt: string, r
     metricsByViewport: {},
     unavailableReason: reason
   };
+}
+
+async function installPublicRequestGuard(
+  page: import("playwright").Page,
+  sourceHostname: string,
+  validatedOrigins: Map<string, Promise<void>>
+) {
+  await page.route("**/*", async (route) => {
+    try {
+      const requestUrl = route.request().url();
+      const parsed = new URL(requestUrl);
+      if (route.request().isNavigationRequest() && !sameSite(parsed.hostname, sourceHostname)) {
+        throw new Error("Cross-site browser navigation blocked.");
+      }
+      let validation = validatedOrigins.get(parsed.origin);
+      if (!validation) {
+        validation = assertPublicFetchUrl(requestUrl).then(() => undefined);
+        validatedOrigins.set(parsed.origin, validation);
+      }
+      await validation;
+      await route.continue();
+    } catch {
+      await route.abort("blockedbyclient");
+    }
+  });
+}
+
+async function assertSamePublicSite(value: string, sourceHostname: string) {
+  const validated = await assertPublicFetchUrl(value);
+  if (!sameSite(new URL(validated).hostname, sourceHostname)) {
+    throw new Error("Cross-site browser navigation blocked.");
+  }
+  return validated;
+}
+
+async function fetchPublicPage(value: string) {
+  let current = await assertPublicFetchUrl(value);
+  const sourceHostname = new URL(current).hostname;
+  for (let redirects = 0; redirects <= 5; redirects += 1) {
+    const response = await fetch(current, {
+      redirect: "manual",
+      headers: {
+        "User-Agent": generationCrawlerUserAgent,
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1"
+      },
+      signal: AbortSignal.timeout(timeoutMs())
+    });
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location) {
+      await response.body?.cancel().catch(() => undefined);
+      if (redirects === 5) throw new Error("Render fallback exceeded the redirect limit.");
+      current = await assertSamePublicSite(new URL(location, current).href, sourceHostname);
+      continue;
+    }
+    return response;
+  }
+  throw new Error("Render fallback exceeded the redirect limit.");
 }
 
 function withoutViewport(metrics: RenderViewportMetrics): RenderInspectionResult["metrics"] {
@@ -204,4 +288,9 @@ function timeoutMs() {
 
 function safeName(value: string) {
   return value.replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "render";
+}
+
+function sameSite(left: string, right: string) {
+  const normalize = (hostname: string) => hostname.toLowerCase().replace(/^www\./, "");
+  return normalize(left) === normalize(right);
 }

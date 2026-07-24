@@ -75,7 +75,6 @@ export const websiteGenerationIngestionSchema = z.object({
     id: z.string().min(1),
     sourceUrl: z.string().url(),
     displayText: z.string().min(1),
-    canonicalTokens: z.array(z.object({ value: z.string(), displayStart: z.number().int().nonnegative(), displayEnd: z.number().int().positive() }).strict()),
     evidenceClass: evidenceClassSchema
   }).strict()),
   skipped: z.array(z.object({ url: z.string().url(), reason: skipReasonSchema }).strict()),
@@ -405,14 +404,13 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
     assetReferences: orderedPages.flatMap((page) => page.assetReferences).slice(0, 100),
     sampledInternalPages: orderedPages.slice(1).map((page) => page.url),
     pageSummaries: orderedPages,
-    score: { overall: 0, max: 0, percent: 0, grade: "needs_work", checks: [] },
     findings: ingestion.coverage === "complete" ? [] : [`Generation crawl coverage: ${ingestion.coverage}.`],
     error: ingestion.coverage === "incomplete" ? "Website crawl coverage was incomplete." : undefined
   };
 }
 
 function boundedModelBlocks(blocks: Array<SourceTextBlock & { evidenceClass: EvidenceClass }>, maximumCharacters: number) {
-  const output: Array<{ id: string; sourceUrl: string; displayText: string; canonicalTokens: SourceTextBlock["canonicalTokens"]; evidenceClass: EvidenceClass }> = [];
+  const output: Array<{ id: string; sourceUrl: string; displayText: string; evidenceClass: EvidenceClass }> = [];
   let characters = 0;
   for (const block of blocks) {
     if (characters >= maximumCharacters) break;
@@ -422,7 +420,6 @@ function boundedModelBlocks(blocks: Array<SourceTextBlock & { evidenceClass: Evi
       id: block.id,
       sourceUrl: block.sourceUrl,
       displayText,
-      canonicalTokens: block.canonicalTokens.filter((token) => token.displayEnd <= displayText.length),
       evidenceClass: block.evidenceClass
     });
     characters += displayText.length;
@@ -445,7 +442,7 @@ export async function fetchGenerationPageWithBrowser(url: string, signal: AbortS
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ userAgent: generationCrawlerUserAgent });
     await page.route("**/*", async (route) => {
       try {
         const validator = route.request().isNavigationRequest() ? validateNavigation : validateUrl;

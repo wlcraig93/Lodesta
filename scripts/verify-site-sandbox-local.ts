@@ -13,15 +13,14 @@ const files = [
   {
     path: "src/site.tsx",
     content: `import React from "react";
-import { Fact, ManagedForm } from "../platform/sdk";
+import { BusinessName, Fact, ManagedForm } from "../platform/sdk";
 import { LocalIntro } from "./components/LocalIntro";
 export const siteDefinition = {
-  siteName: "Multi-file sandbox verification",
-  routes: [{ path: "/", title: "Multi-file sandbox verification", description: "Multi-file verification",
-    element: <main><LocalIntro /><h1><Fact id="${input.publicFacts.find((fact) => fact.kind === "business_name")?.id}" /></h1><ManagedForm id="${input.forms[0]?.id}" /></main> }]
+  routes: [{ path: "/",
+    element: <main><LocalIntro /><h1><BusinessName /></h1><Fact id="fact_phone" /><Fact id="fact_hours" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
 };`
   },
-  { path: "src/styles.css", content: "body{margin:0;font:16px Arial,sans-serif}" },
+  { path: "src/styles.css", content: "html{scroll-behavior:smooth}body{margin:0;font:16px Arial,sans-serif}" },
   { path: "src/components/LocalIntro.tsx", content: `import React from "react"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered.</p>; }` },
   { path: "src/components/local-intro.css", content: ".intro{font-weight:700;letter-spacing:.01em}" }
 ];
@@ -31,7 +30,7 @@ try {
     cp(join(scaffold, "platform"), join(workspace, "platform"), { recursive: true }),
     cp(join(scaffold, "package.json"), join(workspace, "package.json")),
     cp(join(scaffold, "vite.config.ts"), join(workspace, "vite.config.ts")),
-    cp(join(scaffold, "version-manifest.ts"), join(workspace, "version-manifest.ts")),
+    cp(join(scaffold, "component-manifest.ts"), join(workspace, "component-manifest.ts")),
     cp(join(scaffold, "lodesta-manifest.json"), join(workspace, "lodesta-manifest.json"))
   ]);
   await symlink(join(scaffold, "node_modules"), join(workspace, "node_modules"), "dir");
@@ -47,16 +46,15 @@ try {
   }
   await execute(join(workspace, "node_modules", ".bin", "tsx"), ["platform/build.tsx"], workspace);
   const artifact = JSON.parse(await readFile(join(workspace, "dist", "lodesta-artifact.json"), "utf8")) as {
-    schemaVersion?: string;
+    kind?: string;
     compilerManifest?: Record<string, unknown>;
     sharedCss?: string;
-    routes?: Array<{ path?: string; bodyHtml?: string }>;
-    factDeclarations?: unknown[];
+    routes?: Array<{ path?: string; title?: string; description?: string; bodyHtml?: string }>;
     capabilityBindings?: unknown[];
   };
-  assert.equal(artifact.schemaVersion, "agent-authored-artifact-v2", "sandbox emitted the retired artifact contract");
+  assert.equal(artifact.kind, "agent-authored-artifact", "sandbox did not emit the canonical artifact contract");
   assert.deepEqual(artifact.compilerManifest, expectedSiteSandboxManifest, "artifact omitted or drifted from the actual compiler manifest");
-  assert.deepEqual(artifact.factDeclarations, [], "omitted fact declarations were not compiler-normalized");
+  assert(!Object.hasOwn(artifact, "factDeclarations") && !Object.hasOwn(artifact, "claims"), "sandbox retained model-authored declarations");
   assert.deepEqual(artifact.capabilityBindings, [{
     id: "capability_form___1",
     kind: "form",
@@ -64,7 +62,11 @@ try {
     config: { formId: "form_estimate" }
   }], "compiler did not derive SDK capabilities from rendered markup");
   assert(artifact.sharedCss?.includes(".intro{font-weight:700"), "nested CSS module was not included in the artifact");
+  assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
+  assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered."), "local TSX module was not rendered");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("(512) 555-0142"), "compiler did not render the canonical formatted phone");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday: 8:00 AM-5:30 PM"), "compiler did not render labeled canonical hours");
   process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, localImports: "pass", nestedCss: "pass" })}\n`);
 } finally {
   await rm(workspace, { recursive: true, force: true });

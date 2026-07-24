@@ -40,7 +40,8 @@ const liveResults = [];
 for (const value of configuredUrls) liveResults.push(await verifyLiveSite(value));
 
 const report = {
-  schemaVersion: "agent-ready-sites-report-v1",
+  schemaVersion: 1,
+  kind: "agent-ready-sites-report",
   checkedAt: new Date().toISOString(),
   ok: true,
   botMappingVersion: botMappings.version,

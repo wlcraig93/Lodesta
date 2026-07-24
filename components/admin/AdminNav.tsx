@@ -29,7 +29,9 @@ function isActivePath(pathname: string, href: string) {
   if (href === "/admin/sites") return pathname === href || pathname.startsWith("/admin/sites/");
   if (href === "/admin/site-queue") return pathname === href || pathname.startsWith("/admin/site-queue/");
   if (href === "/admin/runs") return pathname === href || pathname.startsWith("/admin/runs/");
+  if (href === "/admin/assessments") return pathname === href || pathname.startsWith("/admin/assessments/");
   if (href === "/settings") return pathname === href || pathname.startsWith("/settings/");
   if (href === "/outbound") return pathname === href || pathname.startsWith("/outbound/");
+  if (href === "/authoring-batches") return pathname === href || pathname.startsWith("/authoring-batches/");
   return pathname === href;
 }

@@ -2,7 +2,7 @@ export type ManagerTaskKind = "initial_build" | "edit" | "rebase";
 
 export type ManagerTaskSkill = {
   id: "website-authoring";
-  version: "website-authoring-v1";
+  identity: "website-authoring@sha256:9c25afc1fd2a27567e9eed1823ef0392d8b553ca7bd488f3d56bf9a2a2f4db4b";
   objective: string;
   knowledge: string[];
 };
@@ -24,5 +24,10 @@ export function taskSkillFor(kind: ManagerTaskKind): ManagerTaskSkill {
     : kind === "rebase"
       ? "Reconcile the current website with the supplied canonical business evidence while preserving its presentation."
       : "Apply the owner's requested website change precisely while preserving unrelated working behavior.";
-  return { id: "website-authoring", version: "website-authoring-v1", objective, knowledge: [...universalKnowledge] };
+  return {
+    id: "website-authoring",
+    identity: "website-authoring@sha256:9c25afc1fd2a27567e9eed1823ef0392d8b553ca7bd488f3d56bf9a2a2f4db4b",
+    objective,
+    knowledge: [...universalKnowledge]
+  };
 }

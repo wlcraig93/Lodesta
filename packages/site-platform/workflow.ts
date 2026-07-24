@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { deserialize, serialize } from "node:v8";
+import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { createPublicBuildInput, assertNoPrivateBuildInputFields, ingestWebsite, sha256, stableJson } from "@/packages/business-data";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
 import {
@@ -12,16 +14,21 @@ import {
 } from "@/packages/site-artifacts";
 import {
   classifySiteAuthoringFailure,
+  createImageBytes,
+  createAuthoringContextPacket,
   isSiteAuthoringTerminalError,
   managerLimitsForKind,
   ManagerNeedsInputError,
   SiteAuthoringTerminalError,
   WebsiteManagerAgent,
   taskSkillFor,
-  websiteManagerPromptVersion,
+  websiteManagerPromptIdentity,
   workspaceSourceFileSchema,
-  workspaceSourcePolicyVersion,
+  workspaceSourcePolicyIdentity,
+  type ManagerToolExecution,
+  type ManagerToolName,
   type ManagerRunRequest,
+  type CreateImageRequest,
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 import {
@@ -31,15 +38,22 @@ import {
   type SiteSandboxClient
 } from "@/packages/site-sandbox";
 import {
-  siteAuthoringPlatformVersion,
+  siteAuthoringPlatformIdentity,
   operatorQueueItemSchema,
+  assetRevisionSchema,
+  businessStateSchema,
   siteAgentRunSchema,
+  siteAgentApiProviderSchema,
   siteAgentSessionSchema,
   platformSiteRecordSchema,
   siteVersionSchema,
   siteWorkspaceRevisionSchema,
   verticalDemandEventSchema,
   type SiteAgentRun,
+  type AssetRevision,
+  type AssetRevisionRef,
+  type BusinessState,
+  type SiteAgentPrincipal,
   type SiteAgentSession,
   type SiteBuildArtifact,
   type SiteElementSelection,
@@ -51,25 +65,43 @@ import {
 import {
   expectedSiteSandboxManifest,
   sandboxImageDigest,
-  siteToolchainVersion,
-  siteVerificationPolicyVersion
-} from "@/packages/site-contracts/platform-versions";
+  siteToolchainIdentity,
+  siteVerificationPolicyIdentity
+} from "@/packages/site-contracts/platform-manifest";
 import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
+  createMediaContactSheet,
+  createArtifactThumbnail,
+  logThumbnailFailure,
   prepareSiteArtifact,
   runArtifactBrowserGate
 } from "@/packages/site-verification";
 import { createSiteRuntimePatch } from "@/packages/trusted-runtime";
-import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
-import { WorkspaceManagerRuntime, type RuntimeInspection } from "./manager-runtime";
+import {
+  draftPreviewGrant,
+  platformOperationsRepository,
+  type PlatformOperationsRepository
+} from "@/packages/platform-operations";
+import {
+  WorkspaceManagerRuntime,
+  type RuntimeInspection,
+  type WorkspaceManagerRuntimeSnapshot
+} from "./manager-runtime";
 import { deriveSitePublicationReadiness } from "./publication-readiness";
 import { SiteAgentEventRecorder } from "./run-events";
 import { normalizeBootstrapSourceUrl } from "./source-url";
 import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
+import {
+  authoringExecutionBundleSchema,
+  authoringOutboxEventSchema,
+  externalAuthoringExecutionSchema,
+  stagedBlobReceiptSchema
+} from "@/packages/external-authoring/contracts";
+import { externalAuthoringRepository } from "@/packages/external-authoring/repository";
 
 const runtimeSeriesId = "site-runtime-v1";
-export { siteAuthoringPlatformVersion, siteToolchainVersion };
+export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 const idleLeaseMs = 10 * 60_000;
 const rotationMs = 2 * 60 * 60_000;
 export const initialGenerationDeadlineMs = 60 * 60_000;
@@ -81,12 +113,14 @@ export class SiteAuthoringWorkflow {
     private readonly blobStore: ArtifactBlobStore = lazyExternalClient(configuredArtifactBlobStore),
     private readonly sandbox: SiteSandboxClient = lazyExternalClient(configuredSiteSandboxClient),
     private readonly manager = new WebsiteManagerAgent(),
-    private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository
+    private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository,
+    private readonly imageCreator: typeof createImageBytes = createImageBytes
   ) {}
 
   async bootstrapFromUrl(input: {
     url: string;
     ownerId: string;
+    reportingTimezone?: string;
     slug?: string;
     signal?: AbortSignal;
   }) {
@@ -100,12 +134,11 @@ export class SiteAuthoringWorkflow {
       signal: workflowSignal
     });
     if (!ingested.domainContext) {
-      const understanding = ingested.sourceSnapshots[0]?.payload.understanding as { observedCategory?: { value?: string } } | undefined;
       await this.repository.saveVerticalDemandEvent(verticalDemandEventSchema.parse({
         schemaVersion: "vertical-demand-event",
         id: id("vertical_demand"),
         sourceUrl: input.url,
-        observedVertical: understanding?.observedCategory?.value,
+        observedVertical: ingested.state.identity.categories[0],
         requestedBy: input.ownerId,
         status: "open",
         createdAt: new Date().toISOString()
@@ -132,7 +165,8 @@ export class SiteAuthoringWorkflow {
     const site = {
       ...ingested.site,
       sourceUrl: input.url,
-      normalizedSource: normalizeBootstrapSourceUrl(input.url)
+      normalizedSource: normalizeBootstrapSourceUrl(input.url),
+      reportingTimezone: input.reportingTimezone ?? "UTC"
     };
     const persistedSite = await this.bootstrapWithUniqueSlug({
       site,
@@ -144,19 +178,602 @@ export class SiteAuthoringWorkflow {
       publicBuildInput: buildInput
     });
     await this.ensureRuntime();
-    const session = await this.getOrCreateSession({ siteId: persistedSite.id, ownerId: input.ownerId, buildInput });
-    const run = await this.enqueueRun({
+    const session = await this.getOrCreateSession({ siteId: persistedSite.id, principal: { kind: "owner", id: input.ownerId }, buildInput });
+    let run = await this.enqueueRun({
       session,
       kind: "initial_build",
       instruction: "Create the complete initial customer website from the canonical public business input.",
       requestedBy: input.ownerId,
       workflowStartedAt
     });
+    if (ingested.researchUsage) {
+      run = await this.updateRun(run, {
+        modelId: ingested.researchUsage.modelId,
+        usage: {
+          kind: "model_reported",
+          inputTokens: ingested.researchUsage.inputTokens,
+          cachedInputTokens: ingested.researchUsage.cachedInputTokens,
+          reasoningTokens: 0,
+          outputTokens: ingested.researchUsage.outputTokens,
+          costUsd: ingested.researchUsage.estimatedCostUsd,
+          costSource: "catalog_estimate",
+          upstreamInferenceCostUsd: 0,
+          durationMs: ingested.researchUsage.durationMs
+        }
+      });
+    }
     return { site: persistedSite, session, run, buildInput };
   }
 
-  async getOrCreateSession(input: { siteId: string; ownerId: string; buildInput?: SitePublicBuildInput }) {
-    const existing = await this.repository.getActiveAgentSession(input.siteId, input.ownerId);
+  async prepareExternalSite(input: {
+    url: string;
+    operatorId: string;
+    batchItemId: string;
+    preparationKey: `sha256:${string}`;
+    signal?: AbortSignal;
+  }) {
+    const now = new Date().toISOString();
+    const siteId = deterministicId("site", { schemaVersion: 1, preparationKey: input.preparationKey });
+    const businessId = deterministicId("business", { schemaVersion: 1, preparationKey: input.preparationKey });
+    const publicBuildInputId = deterministicId("input", { schemaVersion: 1, preparationKey: input.preparationKey });
+    const retainedSite = await this.repository.getSite(siteId);
+    const prepared = retainedSite
+      ? await (async () => {
+          if (
+            retainedSite.businessId !== businessId
+            || retainedSite.normalizedSource !== normalizeBootstrapSourceUrl(input.url)
+            || retainedSite.currentPublicBuildInputId !== publicBuildInputId
+          ) {
+            throw new Error("External preparation idempotency conflict.");
+          }
+          const [state, buildInput] = await Promise.all([
+            this.repository.getBusinessState(businessId),
+            this.repository.getPublicBuildInput(publicBuildInputId)
+          ]);
+          if (!state || !buildInput || buildInput.siteId !== retainedSite.id || buildInput.businessId !== businessId) {
+            throw new Error("Retained external preparation is incomplete.");
+          }
+          return { site: retainedSite, state, buildInput };
+        })()
+      : await (async () => {
+          const ingested = await ingestWebsite({
+            url: input.url,
+            siteId,
+            businessId,
+            signal: input.signal,
+            researchMode: "disabled"
+          });
+          const buildInput = createPublicBuildInput({
+            id: publicBuildInputId,
+            state: ingested.state,
+            intent: ingested.intent,
+            forms: ingested.forms,
+            domainContext: ingested.domainContext,
+            sourceSnapshotIds: ingested.sourceSnapshots.map((source) => source.id),
+            runtimeSeriesId
+          });
+          assertNoPrivateBuildInputFields(buildInput);
+          for (const asset of ingested.retainedAssets) {
+            await this.blobStore.putImmutable({
+              key: asset.revision.storageKey,
+              bytes: asset.bytes,
+              contentType: asset.revision.mimeType,
+              contentHash: asContentHash(asset.revision.contentHash)
+            });
+          }
+          const site = await this.bootstrapWithUniqueSlug({
+            site: {
+              ...ingested.site,
+              sourceUrl: input.url,
+              normalizedSource: normalizeBootstrapSourceUrl(input.url)
+            },
+            state: ingested.state,
+            intent: ingested.intent,
+            forms: ingested.forms,
+            sourceSnapshots: ingested.sourceSnapshots,
+            assetRevisions: ingested.retainedAssets.map((asset) => asset.revision),
+            publicBuildInput: buildInput
+          });
+          return { site, state: ingested.state, buildInput };
+        })();
+    const { site: persistedSite, state: preparedState, buildInput } = prepared;
+    await this.ensureRuntime();
+    const session = await this.getOrCreateSession({
+      siteId: persistedSite.id,
+      principal: { kind: "operator", id: input.operatorId },
+      buildInput
+    });
+    const instruction = "Create the complete prospect-preview website from the canonical public business input. This is an unowned sales preview; do not publish it or imply customer approval.";
+    const runId = deterministicId("run", { schemaVersion: 1, preparationKey: input.preparationKey });
+    const bundleId = deterministicId("bundle", { schemaVersion: 1, runId });
+    const proposedRun = siteAgentRunSchema.parse({
+      schemaVersion: "site-agent-run",
+      id: runId,
+      sessionId: session.id,
+      siteId: persistedSite.id,
+      publicBuildInputId: buildInput.id,
+      origin: "external_batch",
+      executionDriver: "external_mcp",
+      externalProvenance: {
+        clientAuthExpectation: "chatgpt",
+        clientAuthVerification: "operator_configured",
+        skillContractExpectation: "lodesta-operator-authoring@sha256:385de911c209d7a7d24f585866fcb710f1d27d6cd2aa8d7033fa2812326422cf",
+        skillContractVerification: "operator_configured",
+        modelUsage: "unavailable"
+      },
+      authoringExecutionBundleId: bundleId,
+      requestedBy: input.operatorId,
+      publishAfterSuccess: false,
+      kind: "initial_build",
+      status: "queued",
+      stage: "queued",
+      executionNumber: 0,
+      skillVersions: {
+        manager: websiteManagerPromptIdentity,
+        domainContext: buildInput.domainContext?.version ?? "none",
+        [taskSkillFor("initial_build").id]: taskSkillFor("initial_build").identity
+      },
+      limits: managerLimitsForKind("initial_build"),
+      usage: {
+        kind: "external_unavailable",
+        modelUsage: "unavailable",
+        sandboxDurationMs: 0,
+        browserDurationMs: 0,
+        storageBytes: 0,
+        durationMs: 0
+      },
+      startedAt: now
+    });
+    const retainedRun = await this.repository.getAgentRun(runId);
+    let run = retainedRun;
+    if (run) {
+      if (
+        run.siteId !== persistedSite.id
+        || run.sessionId !== session.id
+        || run.publicBuildInputId !== buildInput.id
+        || run.executionDriver !== "external_mcp"
+      ) {
+        throw new Error("External preparation run idempotency conflict.");
+      }
+    } else {
+      try {
+        run = await this.repository.enqueueAgentRun(proposedRun);
+      } catch (error) {
+        run = await this.repository.getAgentRun(runId);
+        if (!run) throw error;
+      }
+    }
+    const operatorMessage = {
+      schemaVersion: "site-agent-message",
+      id: deterministicId("message", { schemaVersion: 1, runId, role: "operator" }),
+      sessionId: session.id,
+      runId,
+      role: "operator",
+      content: instruction,
+      createdAt: now
+    } as const;
+    const retainedMessages = await this.repository.listAgentMessages(session.id);
+    if (!retainedMessages.some((message) => message.id === operatorMessage.id)) {
+      try {
+        await this.repository.appendAgentMessage(operatorMessage);
+      } catch (error) {
+        const afterLostResponse = await this.repository.listAgentMessages(session.id);
+        if (!afterLostResponse.some((message) => message.id === operatorMessage.id)) throw error;
+      }
+    }
+    const taskSkill = taskSkillFor("initial_build");
+    const bundleSeed = {
+      schemaVersion: 1,
+      runId,
+      instructionVersion: "external-prospect-initial@sha256:2efb91f90026d0fafd1c839a8d613d34571a3b187d7d0a382cf51582bb0f055d",
+      instructionHash: sha256(instruction),
+      skillContractVersion: taskSkill.identity,
+      skillContractHash: sha256(stableJson(taskSkill)),
+      publicBuildInputId: buildInput.id,
+      publicBuildInputHash: buildInput.inputHash,
+      sourcePolicyVersion: workspaceSourcePolicyIdentity,
+      sourcePolicyHash: sha256(stableJson({ identity: workspaceSourcePolicyIdentity, manifest: expectedSiteSandboxManifest })),
+      verificationPolicyVersion: siteVerificationPolicyIdentity,
+      verificationPolicyHash: sha256(stableJson({ identity: siteVerificationPolicyIdentity })),
+      toolSchemaHash: sha256(stableJson({
+        identity: "manager-tool-contract@sha256:b20ca6b1645658edd47da28dd3172d1f128f885b38f3542dbbd3500a016c392d",
+        tools: ["list_files", "read_file", "write_file", "delete_file", "apply_patch", "build_preview", "inspect_site", "request_input", "finish"]
+      })),
+      toolchainVersion: siteToolchainIdentity,
+      sandboxImageDigest: configuredSandboxImageDigest()
+    };
+    const proposedBundle = authoringExecutionBundleSchema.parse({
+      ...bundleSeed,
+      id: bundleId,
+      bundleHash: sha256(stableJson(bundleSeed)),
+      createdAt: now
+    });
+    const executionId = deterministicId("execution", { schemaVersion: 1, runId });
+    const proposedExecution = externalAuthoringExecutionSchema.parse({
+      schemaVersion: 1,
+      id: executionId,
+      runId,
+      batchItemId: input.batchItemId,
+      bundleId,
+      status: "queued",
+      stateRevision: 0,
+      createdAt: now,
+      updatedAt: now
+    });
+    const retainedBundle = await externalAuthoringRepository.getBundle(bundleId);
+    const bundle = retainedBundle ?? proposedBundle;
+    if (retainedBundle && retainedBundle.bundleHash !== proposedBundle.bundleHash) {
+      throw new Error("External preparation bundle idempotency conflict.");
+    }
+    if (!retainedBundle) await externalAuthoringRepository.saveBundle(bundle);
+    const retainedExecution = await externalAuthoringRepository.getExecution(executionId);
+    const execution = retainedExecution ?? proposedExecution;
+    if (
+      retainedExecution
+      && (
+        retainedExecution.runId !== run.id
+        || retainedExecution.batchItemId !== input.batchItemId
+        || retainedExecution.bundleId !== bundle.id
+      )
+    ) {
+      throw new Error("External preparation execution idempotency conflict.");
+    }
+    if (!retainedExecution) await externalAuthoringRepository.saveExecution(execution);
+    return {
+      site: persistedSite,
+      state: preparedState,
+      session,
+      run,
+      buildInput,
+      bundle,
+      execution
+    };
+  }
+
+  async executeExternalTool(input: {
+    executionId: string;
+    operationId: string;
+    toolName: ManagerToolName;
+    arguments: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<{
+    execution: NonNullable<Awaited<ReturnType<typeof externalAuthoringRepository.getExecution>>>;
+    tool: ManagerToolExecution;
+    workspaceHash?: `sha256:${string}`;
+    checkpoint: { key: string; contentHash: `sha256:${string}`; bytes: number; receiptId: string };
+    finalization?: {
+      finalizationKey: `sha256:${string}`;
+      revision: SiteWorkspaceRevision;
+      artifact: SiteBuildArtifact;
+      version: SiteVersion;
+      run: SiteAgentRun;
+      session: SiteAgentSession;
+      previewGrant: ReturnType<typeof draftPreviewGrant>;
+      outbox: ReturnType<typeof candidateOutbox>;
+      receiptIds: string[];
+    };
+  }> {
+    const execution = await externalAuthoringRepository.getExecution(input.executionId);
+    if (!execution?.bundleId) throw new Error("External execution is unavailable or unpinned.");
+    const [bundle, run] = await Promise.all([
+      externalAuthoringRepository.getBundle(execution.bundleId),
+      this.repository.getAgentRun(execution.runId)
+    ]);
+    if (!bundle || !run || run.executionDriver !== "external_mcp") throw new Error("External authoring bundle or run is unavailable.");
+    const [session, buildInput] = await Promise.all([
+      this.repository.getAgentSession(run.sessionId),
+      this.repository.getPublicBuildInput(bundle.publicBuildInputId)
+    ]);
+    if (!session || !buildInput) throw new Error("External authoring session or public input is unavailable.");
+    if (
+      buildInput.inputHash !== bundle.publicBuildInputHash
+      || bundle.sourcePolicyVersion !== workspaceSourcePolicyIdentity
+      || bundle.verificationPolicyVersion !== siteVerificationPolicyIdentity
+      || bundle.toolchainVersion !== siteToolchainIdentity
+      || bundle.sandboxImageDigest !== configuredSandboxImageDigest()
+    ) {
+      throw new Error("execution_bundle_stale_restart_required");
+    }
+
+    type RevisionDraft = Omit<SiteWorkspaceRevision, "sourceArchiveKey">;
+    type Checkpoint = Awaited<ReturnType<SiteAuthoringWorkflow["verifySandboxArtifact"]>> & { revisionDraft: RevisionDraft };
+    let snapshot: WorkspaceManagerRuntimeSnapshot<Checkpoint> | undefined;
+    if (execution.checkpointKey) {
+      const retained = await this.blobStore.get(execution.checkpointKey);
+      if (!retained || retained.contentHash !== execution.checkpointHash) throw new Error("External authoring checkpoint is unavailable.");
+      snapshot = deserialize(retained.bytes) as WorkspaceManagerRuntimeSnapshot<Checkpoint>;
+      if (snapshot.schemaVersion !== 1) throw new Error("External authoring checkpoint schema is unsupported.");
+    }
+    let activeSession = session;
+    let activeSandboxRevision = snapshot?.sandboxRevision ?? "deferred";
+    const ensureBuildSandbox = async () => {
+      if (activeSession.sandboxId && activeSandboxRevision !== "deferred") return;
+      const state = await this.ensureSandbox(activeSession, buildInput);
+      activeSession = state.session;
+      activeSandboxRevision = state.revision;
+    };
+    const runtime = new WorkspaceManagerRuntime<Checkpoint>({
+      kind: run.kind,
+      publicBuildInputId: buildInput.id,
+      toolchainVersion: siteToolchainIdentity,
+      sandboxImageDigest: configuredSandboxImageDigest(),
+      initialFiles: snapshot ? undefined : run.kind === "initial_build" ? undefined : await this.loadWorkspaceSource(run.exactParentRevisionId),
+      initialSandboxRevision: activeSandboxRevision,
+      initialSnapshot: snapshot,
+      applyBuild: async (files) => {
+        await ensureBuildSandbox();
+        const started = Date.now();
+        const applied = await this.sandbox.apply(activeSession.sandboxId!, activeSandboxRevision, files);
+        activeSandboxRevision = applied.revision;
+        return {
+          ...applied,
+          buildDurationMs: applied.buildDurationMs ?? Date.now() - started,
+          previewPath: `/api/operator/external-authoring/executions/${encodeURIComponent(execution.id)}/preview`
+        };
+      },
+      retainDiagnostic: async (kind, content) => {
+        const bytes = Buffer.from(content);
+        const contentHash = sha256(bytes);
+        const key = `external-authoring/diagnostics/${execution.id}/${kind}-${contentHash.slice("sha256:".length)}.txt`;
+        await this.blobStore.putImmutable({ key, bytes, contentType: "text/plain; charset=utf-8", contentHash });
+        return { key, contentHash, bytes: bytes.length };
+      },
+      inspect: async (files, sandboxRevision): Promise<RuntimeInspection<Checkpoint>> => {
+        const site = await this.repository.getSite(run.siteId);
+        if (!site) throw new Error("Site not found.");
+        const parent = site.currentWorkspaceRevisionId ? await this.repository.getWorkspaceRevision(site.currentWorkspaceRevisionId) : undefined;
+        const sourceHash = sha256(stableJson(files));
+        const workspaceRevisionId = deterministicId("workspace_revision", {
+          schemaVersion: 1,
+          runId: run.id,
+          siteId: run.siteId,
+          parentRevisionId: site.currentWorkspaceRevisionId ?? null,
+          sourceHash
+        });
+        const finalized = await this.verifySandboxArtifact({
+          run,
+          session: activeSession,
+          buildInput,
+          workspaceRevisionId,
+          signal: input.signal
+        });
+        const errors = finalized.artifact.qa.findings.filter((finding) => finding.severity === "error");
+        const warnings = finalized.artifact.qa.findings.filter((finding) => finding.severity === "warning");
+        const runtimePatch = await this.repository.getRuntimePatch(finalized.artifact.runtimePatchAtFinalization);
+        if (!runtimePatch) throw new Error("Finalized runtime patch is unavailable.");
+        const inspectionHash = sha256(stableJson({
+          schemaVersion: 1,
+          workspaceHash: sourceHash,
+          publicBuildInputHash: buildInput.inputHash,
+          verificationPolicyVersion: siteVerificationPolicyIdentity,
+          sourcePolicyVersion: workspaceSourcePolicyIdentity,
+          toolchainVersion: siteToolchainIdentity,
+          sandboxImageDigest: configuredSandboxImageDigest(),
+          runtimePatchHash: runtimePatch.contentHash,
+          artifactContentHash: semanticArtifactContentHash(finalized.artifact),
+          hardGate: finalized.artifact.qa.hardGate,
+          findings: normalizedInspectionFindings(finalized.artifact.qa.findings),
+          captures: finalized.browserCaptures
+            .map((capture) => ({ route: capture.route, viewport: capture.viewport, contentHash: sha256(capture.bytes) }))
+            .sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
+        }));
+        const checkpoint = finalized.artifact.qa.hardGate === "passed" ? {
+          ...finalized,
+          revisionDraft: {
+            schemaVersion: 1 as const,
+            id: workspaceRevisionId,
+            siteId: run.siteId,
+            parentRevisionId: site.currentWorkspaceRevisionId,
+            revisionNumber: (parent?.revisionNumber ?? 0) + 1,
+            sourceHash,
+            files: files.map((file) => ({
+              path: file.path,
+              contentHash: sha256(file.content),
+              bytes: Buffer.byteLength(file.content)
+            })),
+            createdAt: new Date().toISOString(),
+            createdBy: { kind: "agent" as const, id: run.id }
+          }
+        } : undefined;
+        return {
+          passed: finalized.artifact.qa.hardGate === "passed",
+          inspectionHash,
+          modelSummary: {
+            ok: finalized.artifact.qa.hardGate === "passed",
+            workspaceHash: sourceHash,
+            sandboxRevision,
+            publicBuildInputId: buildInput.id,
+            toolchainVersion: siteToolchainIdentity,
+            inspectionHash,
+            routes: finalized.artifact.routes,
+            findingCount: finalized.artifact.qa.findings.length,
+            blockerCount: errors.length,
+            advisoryCount: warnings.length,
+            blockers: errors.slice(0, 100),
+            advisories: warnings.slice(0, 8)
+          },
+          diagnosticSummary: {
+            ok: finalized.artifact.qa.hardGate === "passed",
+            workspaceHash: sourceHash,
+            sandboxRevision,
+            inspectionHash,
+            artifactHash: finalized.artifact.artifactHash,
+            findingCount: finalized.artifact.qa.findings.length,
+            errorCount: errors.length,
+            warningCount: warnings.length,
+            screenshotKeys: finalized.artifact.qa.screenshotKeys
+          },
+          images: finalized.contactSheet ? [{
+            type: "input_image",
+            image_url: `data:image/png;base64,${finalized.contactSheet.toString("base64")}`,
+            detail: "high"
+          }] : undefined,
+          checkpoint
+        };
+      }
+    });
+    const tool = await runtime.execute({
+      callId: input.operationId,
+      name: input.toolName,
+      arguments: input.arguments
+    });
+    const runtimeSnapshot = runtime.snapshot();
+    const serialized = serialize(runtimeSnapshot);
+    const contentHash = sha256(serialized);
+    const key = `external-authoring/checkpoints/${execution.id}/${input.operationId}-${contentHash.slice("sha256:".length)}.bin`;
+    await this.blobStore.putImmutable({
+      key,
+      bytes: serialized,
+      contentType: "application/vnd.lodesta.external-authoring-checkpoint",
+      contentHash
+    });
+    const retained = await this.blobStore.get(key);
+    if (!retained || retained.contentHash !== contentHash) throw new Error("External authoring checkpoint verification failed.");
+    const receiptId = deterministicId("blob_receipt", { schemaVersion: 1, key, contentHash });
+    await externalAuthoringRepository.saveStagedBlobReceipt(stagedBlobReceiptSchema.parse({
+      schemaVersion: 1,
+      id: receiptId,
+      storageKey: key,
+      contentHash,
+      bytes: serialized.length,
+      etag: contentHash,
+      stagedAt: new Date().toISOString()
+    }));
+
+    let finalization: {
+      finalizationKey: `sha256:${string}`;
+      revision: SiteWorkspaceRevision;
+      artifact: SiteBuildArtifact;
+      version: SiteVersion;
+      run: SiteAgentRun;
+      session: SiteAgentSession;
+      previewGrant: ReturnType<typeof draftPreviewGrant>;
+      outbox: ReturnType<typeof candidateOutbox>;
+      receiptIds: string[];
+    } | undefined;
+    if (tool.completion) {
+      const checkpoint = runtime.finalCheckpoint();
+      await ensureBuildSandbox();
+      const backup = await this.sandbox.backup(activeSession.sandboxId!);
+      const revision = siteWorkspaceRevisionSchema.parse({
+        ...checkpoint.revisionDraft,
+        sourceArchiveKey: backup.backup.key
+      });
+      await this.persistVerificationCaptures(checkpoint);
+      const sourceSidecar = await this.persistWorkspaceSourceSidecar(revision, runtime.currentFiles(), backup.backup);
+      await persistFinalArtifact({ artifact: checkpoint.artifact, files: checkpoint.files, store: this.blobStore });
+      const candidate = await this.createCandidateDraft(
+        checkpoint.artifact,
+        revision.id,
+        buildInput,
+        run,
+        tool.completion.inspectionHash
+      );
+      const finalizationManifestBytes = Buffer.from(stableJson({
+        schemaVersion: 1,
+        finalizationKey: candidate.finalizationKey,
+        checkpoint: { key, contentHash, bytes: serialized.length },
+        workspaceArchive: {
+          key: backup.backup.key,
+          contentHash: backup.backup.contentHash,
+          bytes: backup.backup.size
+        },
+        workspaceSourceSidecar: sourceSidecar,
+        artifact: {
+          id: checkpoint.artifact.id,
+          artifactHash: checkpoint.artifact.artifactHash,
+          files: checkpoint.artifact.files.map((file) => ({
+            storageKey: file.storageKey,
+            contentHash: file.contentHash,
+            bytes: file.bytes
+          }))
+        },
+        captures: [
+          ...checkpoint.browserCaptures.map((capture) => ({
+            storageKey: capture.key,
+            contentHash: sha256(capture.bytes),
+            bytes: capture.bytes.length
+          })),
+          {
+            storageKey: checkpoint.contactSheetKey,
+            contentHash: sha256(checkpoint.contactSheet),
+            bytes: checkpoint.contactSheet.length
+          }
+        ]
+      }));
+      const finalizationManifestHash = sha256(finalizationManifestBytes);
+      const finalizationManifestKey = `external-authoring/finalizations/${candidate.finalizationKey.slice("sha256:".length)}.json`;
+      await this.blobStore.putImmutable({
+        key: finalizationManifestKey,
+        bytes: finalizationManifestBytes,
+        contentType: "application/json; charset=utf-8",
+        contentHash: finalizationManifestHash
+      });
+      const retainedManifest = await this.blobStore.get(finalizationManifestKey);
+      if (!retainedManifest || retainedManifest.contentHash !== finalizationManifestHash) {
+        throw new Error("External authoring finalization manifest verification failed.");
+      }
+      const finalizationReceiptId = deterministicId("blob_receipt", {
+        schemaVersion: 1,
+        key: finalizationManifestKey,
+        contentHash: finalizationManifestHash
+      });
+      await externalAuthoringRepository.saveStagedBlobReceipt(stagedBlobReceiptSchema.parse({
+        schemaVersion: 1,
+        id: finalizationReceiptId,
+        storageKey: finalizationManifestKey,
+        contentHash: finalizationManifestHash,
+        bytes: finalizationManifestBytes.length,
+        etag: finalizationManifestHash,
+        finalizationKey: candidate.finalizationKey,
+        stagedAt: new Date().toISOString()
+      }));
+      const completedAt = new Date().toISOString();
+      const completedRun = siteAgentRunSchema.parse({
+        ...run,
+        status: "succeeded",
+        stage: "candidate_ready",
+        outputRevisionId: revision.id,
+        outputArtifactId: checkpoint.artifact.id,
+        screenshotKeys: checkpoint.artifact.qa.screenshotKeys,
+        candidateVersionId: candidate.version.id,
+        completedAt
+      });
+      const completedSession = siteAgentSessionSchema.parse({
+        ...activeSession,
+        status: "active",
+        currentWorkspaceRevisionId: revision.id,
+        leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
+        updatedAt: completedAt
+      });
+      const previewGrant = draftPreviewGrant({
+        previewId: deterministicId("preview", { schemaVersion: 1, finalizationKey: candidate.finalizationKey }),
+        siteId: run.siteId,
+        siteVersionId: candidate.version.id
+      });
+      finalization = {
+        finalizationKey: candidate.finalizationKey,
+        revision,
+        artifact: checkpoint.artifact,
+        version: candidate.version,
+        run: completedRun,
+        session: completedSession,
+        previewGrant,
+        outbox: candidateOutbox(checkpoint.artifact, candidate.version),
+        receiptIds: [receiptId, finalizationReceiptId]
+      };
+    }
+    return {
+      execution,
+      tool,
+      workspaceHash: runtimeSnapshot.workspaceHash,
+      checkpoint: { key, contentHash, bytes: serialized.length, receiptId },
+      finalization
+    };
+  }
+
+  async getOrCreateSession(input: { siteId: string; principal: SiteAgentPrincipal; buildInput?: SitePublicBuildInput }) {
+    const existing = await this.repository.getActiveAgentSession(input.siteId, input.principal);
     if (existing) return existing;
     const site = await this.repository.getSite(input.siteId);
     if (!site) throw new Error("Site not found.");
@@ -168,7 +785,7 @@ export class SiteAuthoringWorkflow {
       schemaVersion: "site-agent-session",
       id: id("session"),
       siteId: site.id,
-      ownerId: input.ownerId,
+      principal: input.principal,
       status: "active",
       currentWorkspaceRevisionId: site.currentWorkspaceRevisionId,
       publicBuildInputId: buildInput.id,
@@ -220,6 +837,9 @@ export class SiteAuthoringWorkflow {
     const buildInput = await this.requireBuildInput(current.currentPublicBuildInputId);
     const now = new Date().toISOString();
     const taskSkill = taskSkillFor(input.kind);
+    const modelSettings = await getSiteAuthoringModelSettings();
+    const apiProvider = siteAgentApiProviderSchema.parse(process.env.LODESTA_SITE_AGENT_PROVIDER?.trim() || modelSettings.settings.siteAgentProvider);
+    const modelId = process.env.LODESTA_SITE_AGENT_MODEL?.trim() || modelSettings.settings.siteAgentModel;
     const coalesced = input.origin === "control_plane"
       ? sessionRuns.find((candidate) => candidate.status === "queued" && candidate.origin === "control_plane")
       : undefined;
@@ -234,14 +854,14 @@ export class SiteAuthoringWorkflow {
         deferredUntilRunId: runningRun?.id ?? coalesced.deferredUntilRunId,
         publishAfterSuccess: coalesced.publishAfterSuccess && Boolean(input.publishAfterSuccess) && kind === "rebase",
         skillVersions: {
-          manager: websiteManagerPromptVersion,
+          manager: websiteManagerPromptIdentity,
           domainContext: buildInput.domainContext?.version ?? "none",
-          [mergedSkill.id]: mergedSkill.version
+          [mergedSkill.id]: mergedSkill.identity
         }
       });
       await this.repository.appendAgentMessage({
         schemaVersion: "site-agent-message", id: id("message"), sessionId: input.session.id, runId: updated.id,
-        role: input.requestedBy === input.session.ownerId ? "owner" : "operator",
+        role: messageRole(input.session, input.requestedBy),
         content: input.instruction, selection: input.selection, createdAt: now
       });
       return updated;
@@ -253,6 +873,7 @@ export class SiteAuthoringWorkflow {
       siteId: input.session.siteId,
       publicBuildInputId: buildInput.id,
       origin: input.origin ?? (input.kind === "initial_build" ? "system" : "owner_request"),
+      executionDriver: "responses_api",
       requestedBy: input.requestedBy,
       publishAfterSuccess: Boolean(input.publishAfterSuccess),
       kind: input.kind,
@@ -260,15 +881,16 @@ export class SiteAuthoringWorkflow {
       stage: "queued",
       exactParentRevisionId: current.currentWorkspaceRevisionId,
       deferredUntilRunId: input.deferBehindActive ? activeRun?.id : undefined,
-      modelId: process.env.LODESTA_SITE_AGENT_MODEL ?? "configured-at-run",
+      apiProvider,
+      modelId,
       executionNumber: 0,
       skillVersions: {
-        manager: websiteManagerPromptVersion,
+        manager: websiteManagerPromptIdentity,
         domainContext: buildInput.domainContext?.version ?? "none",
-        [taskSkill.id]: taskSkill.version
+        [taskSkill.id]: taskSkill.identity
       },
       limits: managerLimitsForKind(input.kind),
-      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 },
+      usage: { kind: "model_reported", inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 },
       startedAt: input.workflowStartedAt ?? now
     });
     await this.repository.enqueueAgentRun(run);
@@ -277,7 +899,7 @@ export class SiteAuthoringWorkflow {
       id: id("message"),
       sessionId: input.session.id,
       runId: run.id,
-      role: input.requestedBy === input.session.ownerId ? "owner" : "operator",
+      role: messageRole(input.session, input.requestedBy),
       content: input.instruction,
       selection: input.selection,
       createdAt: now
@@ -334,6 +956,9 @@ export class SiteAuthoringWorkflow {
       const currentFiles = run.kind === "initial_build"
         ? undefined
         : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId);
+      const snapshots = (await Promise.all(buildInput.sourceSnapshotIds.map((id) => this.repository.getSourceSnapshot(id))))
+        .filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
+      const authoringContext = createAuthoringContextPacket({ buildInput, snapshots });
       const requestMessages = (await this.repository.listAgentMessages(session.id)).filter((message) => message.runId === run.id && (message.role === "owner" || message.role === "operator"));
       const ownerMessage = requestMessages.map((message) => message.content).join("\n\n")
         || "Apply the requested site change.";
@@ -341,6 +966,7 @@ export class SiteAuthoringWorkflow {
         run,
         session: sandboxState.session,
         buildInput,
+        authoringContext,
         sandboxRevision: sandboxState.revision,
         currentFiles,
         instruction: ownerMessage,
@@ -350,13 +976,6 @@ export class SiteAuthoringWorkflow {
       });
       run = outcome.run;
       if (outcome.artifact.qa.hardGate === "failed") {
-        await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
-          schemaVersion: "operator-queue-item",
-          id: id("operator"), siteId: run.siteId, runId: run.id,
-          reason: "verification_failure", severity: "high", status: "open",
-          findings: outcome.artifact.qa.findings,
-          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-        }));
         throw new SiteAuthoringTerminalError(
           "authoring_unresolved",
           "authoring",
@@ -364,15 +983,38 @@ export class SiteAuthoringWorkflow {
           "Candidate failed the release hard gate."
         );
       }
-      const version = await this.createCandidateVersion(outcome.artifact, outcome.revision.id, buildInput, run);
-      run = await this.updateRun(run, {
+      const candidate = await this.createCandidateDraft(outcome.artifact, outcome.revision.id, outcome.buildInput, run, outcome.inspectionHash);
+      const completedAt = new Date().toISOString();
+      const completedRun = siteAgentRunSchema.parse({
+        ...run,
         status: "succeeded",
         stage: "candidate_ready",
         fastPreviewPath: undefined,
         outputRevisionId: outcome.revision.id,
-        candidateVersionId: version.id,
-        completedAt: new Date().toISOString()
+        candidateVersionId: candidate.version.id,
+        completedAt
       });
+      const completedSession = siteAgentSessionSchema.parse({
+        ...outcome.session,
+        status: "active",
+        currentWorkspaceRevisionId: outcome.revision.id,
+        leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
+        updatedAt: completedAt
+      });
+      const outbox = candidateOutbox(outcome.artifact, candidate.version);
+      const finalized = await this.repository.finalizeVerifiedAuthoring({
+        finalizationKey: candidate.finalizationKey,
+        revision: outcome.revision,
+        artifact: outcome.artifact,
+        version: candidate.version,
+        run: completedRun,
+        session: completedSession,
+        outboxDocument: outbox,
+        mediaAdoption: outcome.mediaAdoption
+      });
+      await externalAuthoringRepository.enqueueOutbox(outbox);
+      run = finalized.run;
+      const version = finalized.version;
       await this.repository.appendAgentMessage({
         schemaVersion: "site-agent-message", id: id("message"), sessionId: run.sessionId, runId: run.id, role: "agent",
         content: outcome.ownerMessage, createdAt: new Date().toISOString()
@@ -406,7 +1048,7 @@ export class SiteAuthoringWorkflow {
             site, business: state, kind: "website_input_needed",
             subject: "Your website update needs one answer",
             summaryLines: [error.question, "The update is paused and no editing sandbox is being held while we wait."],
-            actionPath: `/workspace/${site.slug}/website`
+            actionPath: `/workspace/${site.slug}/editor`
           }).catch(() => undefined);
         }
         return waiting;
@@ -463,7 +1105,7 @@ export class SiteAuthoringWorkflow {
       this.repository.listAgentMessages(waiting.sessionId)
     ]);
     if (!site) throw new Error("Site not found.");
-    if (session.ownerId !== input.actorId) throw new Error("Session owner mismatch.");
+    if (session.principal.id !== input.actorId) throw new Error("Session principal mismatch.");
     await this.assertAiInputAllowed(site.id);
     const answer = input.answer.trim();
     if (!answer) throw new Error("clarification_answer_required");
@@ -484,7 +1126,7 @@ export class SiteAuthoringWorkflow {
       return this.enqueueRun({
         session: currentSession,
         kind: waiting.kind,
-        instruction: `${original}\n\nOwner clarification: ${answer}`,
+        instruction: `${original}\n\n${principalLabel(session)} clarification: ${answer}`,
         requestedBy: input.actorId,
         origin: waiting.origin
       });
@@ -493,8 +1135,8 @@ export class SiteAuthoringWorkflow {
       throw new Error("session_has_active_run");
     }
     await this.repository.appendAgentMessage({
-      schemaVersion: "site-agent-message", id: id("message"), sessionId: currentSession.id, runId: waiting.id, role: "owner",
-      content: `Owner clarification: ${answer}`, createdAt: now
+      schemaVersion: "site-agent-message", id: id("message"), sessionId: currentSession.id, runId: waiting.id,
+      role: session.principal.kind, content: `${principalLabel(session)} clarification: ${answer}`, createdAt: now
     });
     return this.updateRun(waiting, {
       status: "queued",
@@ -516,7 +1158,7 @@ export class SiteAuthoringWorkflow {
     signal?: AbortSignal;
   }) {
     const session = await this.requireSession(input.sessionId);
-    if (session.ownerId !== input.ownerId) throw new Error("Session owner mismatch.");
+    if (session.principal.kind !== "owner" || session.principal.id !== input.ownerId) throw new Error("Session owner mismatch.");
     await this.assertAiInputAllowed(session.siteId);
     const buildInput = await this.requireBuildInput(session.publicBuildInputId);
     const source = session.currentWorkspaceRevisionId ? await this.loadWorkspaceSource(session.currentWorkspaceRevisionId) : undefined;
@@ -550,10 +1192,10 @@ export class SiteAuthoringWorkflow {
       if (result.status !== "running") recovered.push(run.id);
     }
     const now = new Date().toISOString();
-    for (const run of await this.repository.listRecentAgentRuns({ status: "needs_input", limit: 100 })) {
+    for (const run of (await this.repository.listRecentAgentRuns({ status: "needs_input", limit: 100 })).filter((item) => item.executionDriver === "responses_api")) {
       if (run.inputExpiresAt && run.inputExpiresAt <= now) await this.updateRun(run, { status: "cancelled", completedAt: now });
     }
-    const queued = await this.repository.listQueuedAgentRuns(limit);
+    const queued = (await this.repository.listQueuedAgentRuns(limit)).filter((run) => run.executionDriver === "responses_api");
     const processed: SiteAgentRun[] = [];
     for (const run of queued) processed.push(await this.executeRunAndFinalize(run.id));
     return { reaped, recovered, processed };
@@ -639,7 +1281,7 @@ export class SiteAuthoringWorkflow {
     if (!targetRevision || !buildInput) throw new Error("Retained version inputs are unavailable.");
     const backupId = targetRevision.sourceArchiveKey.match(/^workspace-backups\/([a-f0-9]{64})\.tar\.gz$/)?.[1];
     if (!backupId) throw new Error("Retained workspace backup is unavailable.");
-    let session = await this.getOrCreateSession({ siteId: site.id, ownerId: actorId, buildInput });
+    let session = await this.getOrCreateSession({ siteId: site.id, principal: { kind: "owner", id: actorId }, buildInput });
     session = siteAgentSessionSchema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
     await this.repository.saveAgentSession(session);
     const sandbox = await this.ensureSandbox(session, buildInput);
@@ -657,6 +1299,7 @@ export class SiteAuthoringWorkflow {
     run: SiteAgentRun;
     session: SiteAgentSession;
     buildInput: SitePublicBuildInput;
+    authoringContext: ReturnType<typeof createAuthoringContextPacket>;
     sandboxRevision: string;
     currentFiles?: WorkspaceSourceFile[];
     instruction: string;
@@ -665,6 +1308,37 @@ export class SiteAuthoringWorkflow {
     signal?: AbortSignal;
   }) {
     let run = await this.updateRun(input.run, { stage: "authoring" });
+    const baseState = await this.repository.getBusinessState(input.buildInput.businessId);
+    if (!baseState || baseState.revision !== input.buildInput.businessStateRevision) {
+      throw new Error("Authoring input does not match the canonical business state.");
+    }
+    let effectiveState = baseState;
+    let effectiveBuildInput = input.buildInput;
+    const generatedRevisions: AssetRevision[] = [];
+    const generatedRefs: AssetRevisionRef[] = [];
+    const refreshEffectiveMedia = (refs: AssetRevisionRef[]) => {
+      if (!refs.length) {
+        effectiveState = baseState;
+        effectiveBuildInput = input.buildInput;
+        return;
+      }
+      const revisionIds = new Set(refs.map((item) => item.revisionId));
+      effectiveState = prospectiveMediaState(baseState, refs);
+      effectiveBuildInput = createPublicBuildInput({
+        id: deterministicId("input", {
+          schemaVersion: 1,
+          runId: run.id,
+          generatedAssetRevisionIds: generatedRevisions.filter((item) => revisionIds.has(item.id)).map((item) => item.id)
+        }),
+        state: effectiveState,
+        intent: input.buildInput.intent,
+        forms: input.buildInput.forms,
+        domainContext: input.buildInput.domainContext,
+        sourceSnapshotIds: input.buildInput.sourceSnapshotIds,
+        runtimeSeriesId
+      });
+    };
+    const mediaSheet = await this.mediaSheetFor(input.buildInput);
     const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
     const runEvent = await recorder.open({
       kind: "run",
@@ -672,28 +1346,127 @@ export class SiteAuthoringWorkflow {
       summary: { kind: input.kind, publicBuildInputId: input.buildInput.id }
     });
     const fastPreviewPath = `/api/site-agent/sessions/${input.session.id}/preview`;
+    if (run.usage.kind !== "model_reported") throw new Error("responses_run_usage_required");
     const baseUsage = { ...run.usage };
+    const configuredLimits = run.limits ?? managerLimitsForKind(input.kind);
+    if (baseUsage.inputTokens >= configuredLimits.maxInputTokens) {
+      throw new SiteAuthoringTerminalError("input_budget_exhausted", "budget", false, "research_exhausted_initial_input_budget");
+    }
+    if (baseUsage.outputTokens >= configuredLimits.maxOutputTokens) {
+      throw new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, "research_exhausted_initial_output_budget");
+    }
+    if (baseUsage.durationMs >= configuredLimits.maxDurationMs) {
+      throw new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "research_exhausted_initial_model_deadline");
+    }
+    const remainingLimits = {
+      maxInputTokens: configuredLimits.maxInputTokens - baseUsage.inputTokens,
+      maxOutputTokens: configuredLimits.maxOutputTokens - baseUsage.outputTokens,
+      maxDurationMs: configuredLimits.maxDurationMs - baseUsage.durationMs
+    };
     let activeSession = input.session;
     let activeSandboxRevision = input.sandboxRevision;
+    let sandboxPublicBuildInputId = activeSession.sandboxId && activeSandboxRevision !== "deferred"
+      ? input.buildInput.id
+      : undefined;
     const ensureBuildSandbox = async () => {
-      if (activeSession.sandboxId && activeSandboxRevision !== "deferred") return;
-      const state = await this.ensureSandbox(activeSession, input.buildInput);
-      activeSession = state.session;
-      activeSandboxRevision = state.revision;
+      if (!activeSession.sandboxId || activeSandboxRevision === "deferred") {
+        const state = await this.ensureSandbox(activeSession, effectiveBuildInput);
+        activeSession = state.session;
+        activeSandboxRevision = state.revision;
+        sandboxPublicBuildInputId = effectiveBuildInput.id;
+      }
+      if (sandboxPublicBuildInputId !== effectiveBuildInput.id) {
+        const rebased = await this.sandbox.rebase(activeSession.sandboxId!, activeSandboxRevision, effectiveBuildInput);
+        activeSandboxRevision = rebased.revision;
+        sandboxPublicBuildInputId = effectiveBuildInput.id;
+      }
     };
     type RevisionDraft = Omit<SiteWorkspaceRevision, "sourceArchiveKey">;
     type Checkpoint = Awaited<ReturnType<SiteAuthoringWorkflow["verifySandboxArtifact"]>> & { revisionDraft: RevisionDraft };
     const runtime = new WorkspaceManagerRuntime<Checkpoint>({
       kind: input.kind,
       publicBuildInputId: input.buildInput.id,
-      toolchainVersion: siteToolchainVersion,
+      getPublicBuildInputId: () => effectiveBuildInput.id,
+      toolchainVersion: siteToolchainIdentity,
       sandboxImageDigest: configuredSandboxImageDigest(),
       initialFiles: input.currentFiles,
       initialSandboxRevision: input.sandboxRevision,
+      createImage: async (rawArgs) => {
+        const args = rawArgs as CreateImageRequest;
+        const sources = await Promise.all(args.sourceAssetIds.map(async (assetId) => {
+          const asset = effectiveBuildInput.business.assets.find((candidate) => candidate.assetId === assetId);
+          if (!asset) throw new Error(`Unknown source asset ${assetId}.`);
+          const blob = await this.blobStore.get(asset.storageKey);
+          if (!blob) throw new Error(`Source asset bytes are unavailable for ${assetId}.`);
+          return { revisionId: asset.revisionId, mimeType: asset.mimeType, bytes: blob.bytes };
+        }));
+        const created = await this.imageCreator(args, sources, { signal: input.signal });
+        const contentHash = sha256(created.bytes);
+        const assetId = id("asset_generated");
+        const revisionId = id("asset_revision");
+        const storageKey = `site-assets/${input.buildInput.businessId}/${contentHash.slice("sha256:".length)}`;
+        const revision = assetRevisionSchema.parse({
+          schemaVersion: 1,
+          id: revisionId,
+          assetId,
+          businessId: input.buildInput.businessId,
+          contentHash,
+          storageKey,
+          mimeType: created.mimeType,
+          bytes: created.bytes.length,
+          width: created.width,
+          height: created.height,
+          origin: "platform_generated",
+          provenance: {
+            origin: "platform_generated",
+            provider: "openai",
+            model: "gpt-image-2",
+            action: args.action,
+            purpose: args.purpose,
+            prompt: args.prompt,
+            sourceAssetRevisionIds: created.sourceAssetRevisionIds
+          },
+          createdAt: new Date().toISOString()
+        });
+        const ref: AssetRevisionRef = {
+          assetId,
+          revisionId,
+          kind: args.purpose === "logo" ? "logo" : "photo",
+          contentHash,
+          storageKey,
+          mimeType: created.mimeType,
+          alt: args.alt,
+          width: created.width,
+          height: created.height,
+          origin: "platform_generated",
+          sourceFactIds: [],
+          activeForFutureBuilds: true
+        };
+        await this.blobStore.putImmutable({ key: storageKey, bytes: created.bytes, contentType: created.mimeType, contentHash });
+        generatedRevisions.push(revision);
+        generatedRefs.push(ref);
+        refreshEffectiveMedia(generatedRefs);
+        return {
+          modelOutput: [
+            { type: "input_text", text: JSON.stringify({ ok: true, assetId, revisionId, width: created.width, height: created.height, alt: args.alt, publicBuildInputId: effectiveBuildInput.id }) },
+            { type: "input_image", image_url: `data:${created.mimeType};base64,${created.bytes.toString("base64")}`, detail: "high" }
+          ],
+          diagnosticOutput: {
+            ok: true,
+            assetId,
+            revisionId,
+            width: created.width,
+            height: created.height,
+            contentHash,
+            publicBuildInputId: effectiveBuildInput.id
+          }
+        };
+      },
       applyBuild: async (files, expectedRevision) => {
         run = await this.updateRun(run, { stage: "building" });
         await ensureBuildSandbox();
-        const revision = expectedRevision === "deferred" ? activeSandboxRevision : expectedRevision;
+        const revision = activeSandboxRevision;
+        void expectedRevision;
         let applied: Awaited<ReturnType<SiteSandboxClient["apply"]>>;
         try {
           applied = await this.sandbox.apply(activeSession.sandboxId!, revision, files);
@@ -717,15 +1490,39 @@ export class SiteAuthoringWorkflow {
         const site = await this.repository.getSite(run.siteId);
         if (!site) throw new Error("Site not found.");
         const parent = site.currentWorkspaceRevisionId ? await this.repository.getWorkspaceRevision(site.currentWorkspaceRevisionId) : undefined;
-        const workspaceRevisionId = id("workspace_revision");
         const sourceHash = sha256(stableJson(files));
-        const finalized = await this.verifySandboxArtifact({
+        const workspaceRevisionId = deterministicId("workspace_revision", {
+          schemaVersion: 1,
+          runId: run.id,
+          siteId: run.siteId,
+          parentRevisionId: site.currentWorkspaceRevisionId ?? null,
+          sourceHash
+        });
+        let finalized = await this.verifySandboxArtifact({
           run,
           session: activeSession,
-          buildInput: input.buildInput,
+          buildInput: effectiveBuildInput,
           workspaceRevisionId,
           signal: input.signal
         });
+        if (finalized.artifact.qa.hardGate === "passed" && generatedRefs.length) {
+          const source = files.map((file) => file.content).join("\n");
+          const usedGeneratedRefs = generatedRefs.filter((asset) => source.includes(asset.assetId) || source.includes(asset.revisionId));
+          const activeRunGeneratedCount = generatedRefs.filter((asset) => effectiveBuildInput.assetRevisionIds.includes(asset.revisionId)).length;
+          if (usedGeneratedRefs.length !== activeRunGeneratedCount) {
+            refreshEffectiveMedia(usedGeneratedRefs);
+            const rebased = await this.sandbox.rebase(activeSession.sandboxId!, activeSandboxRevision, effectiveBuildInput);
+            activeSandboxRevision = rebased.revision;
+            sandboxPublicBuildInputId = effectiveBuildInput.id;
+            finalized = await this.verifySandboxArtifact({
+              run,
+              session: activeSession,
+              buildInput: effectiveBuildInput,
+              workspaceRevisionId,
+              signal: input.signal
+            });
+          }
+        }
         const errors = finalized.artifact.qa.findings.filter((finding) => finding.severity === "error");
         const warnings = finalized.artifact.qa.findings.filter((finding) => finding.severity === "warning");
         let checkpoint: Checkpoint | undefined;
@@ -743,18 +1540,23 @@ export class SiteAuthoringWorkflow {
           } satisfies RevisionDraft;
           checkpoint = { ...finalized, revisionDraft };
         }
+        const runtimePatch = await this.repository.getRuntimePatch(finalized.artifact.runtimePatchAtFinalization);
+        if (!runtimePatch) throw new Error("Finalized runtime patch is unavailable.");
         const inspectionHash = sha256(stableJson({
+          schemaVersion: 1,
           workspaceHash: sourceHash,
-          publicBuildInputHash: input.buildInput.inputHash,
-          verificationPolicyVersion: siteVerificationPolicyVersion,
-          sourcePolicyVersion: workspaceSourcePolicyVersion,
-          toolchainVersion: siteToolchainVersion,
+          publicBuildInputHash: effectiveBuildInput.inputHash,
+          verificationPolicyVersion: siteVerificationPolicyIdentity,
+          sourcePolicyVersion: workspaceSourcePolicyIdentity,
+          toolchainVersion: siteToolchainIdentity,
           sandboxImageDigest: configuredSandboxImageDigest(),
-          runtimePatchId: finalized.artifact.runtimePatchAtFinalization,
-          artifactHash: finalized.artifact.artifactHash,
+          runtimePatchHash: runtimePatch.contentHash,
+          artifactContentHash: semanticArtifactContentHash(finalized.artifact),
           hardGate: finalized.artifact.qa.hardGate,
-          findings: finalized.artifact.qa.findings,
-          screenshotKeys: finalized.artifact.qa.screenshotKeys
+          findings: normalizedInspectionFindings(finalized.artifact.qa.findings),
+          captures: finalized.browserCaptures
+            .map((capture) => ({ route: capture.route, viewport: capture.viewport, contentHash: sha256(capture.bytes) }))
+            .sort((left, right) => stableJson(left).localeCompare(stableJson(right)))
         }));
         return {
           passed: finalized.artifact.qa.hardGate === "passed",
@@ -763,8 +1565,8 @@ export class SiteAuthoringWorkflow {
             ok: finalized.artifact.qa.hardGate === "passed",
             workspaceHash: sourceHash,
             sandboxRevision,
-            publicBuildInputId: input.buildInput.id,
-            toolchainVersion: siteToolchainVersion,
+            publicBuildInputId: effectiveBuildInput.id,
+            toolchainVersion: siteToolchainIdentity,
             sandboxImageDigest: configuredSandboxImageDigest(),
             inspectionHash,
             routes: finalized.artifact.routes,
@@ -794,39 +1596,54 @@ export class SiteAuthoringWorkflow {
     });
     const managerResult = await this.manager.run({
       buildInput: input.buildInput,
+      authoringContext: input.authoringContext,
+      runId: run.id,
       instruction: input.instruction,
       kind: input.kind,
-      limits: run.limits ?? managerLimitsForKind(input.kind),
+      limits: remainingLimits,
       selection: input.selection,
       signal: input.signal,
+      mediaSheet: mediaSheet
+        ? { dataUrl: `data:image/png;base64,${mediaSheet.toString("base64")}`, assetCount: input.buildInput.business.assets.length }
+        : undefined,
       runtime,
       onEvents: async (events) => {
-        const selectedModel = events.find((event) => event.kind === "model_request" && event.modelId)?.modelId;
-        if (selectedModel && run.modelId !== selectedModel) run = await this.updateRun(run, { modelId: selectedModel });
+        const selectedRoute = events.find((event) => event.kind === "model_request" && event.modelId && event.apiProvider);
+        if (selectedRoute && (run.modelId !== selectedRoute.modelId || run.apiProvider !== selectedRoute.apiProvider)) {
+          run = await this.updateRun(run, { apiProvider: selectedRoute.apiProvider, modelId: selectedRoute.modelId });
+        }
         await recorder.recordManagerEvents(events);
       },
-      onUsage: async ({ usage, modelId }) => {
+      onUsage: async ({ usage, apiProvider, modelId }) => {
         run = await this.updateRun(run, {
+          apiProvider,
           modelId,
           usage: {
+            kind: "model_reported",
             inputTokens: baseUsage.inputTokens + usage.inputTokens,
             cachedInputTokens: baseUsage.cachedInputTokens + usage.cachedInputTokens,
+            reasoningTokens: baseUsage.reasoningTokens + usage.reasoningTokens,
             outputTokens: baseUsage.outputTokens + usage.outputTokens,
-            estimatedCostUsd: baseUsage.estimatedCostUsd + usage.estimatedCostUsd,
-            costEstimateStatus: baseUsage.costEstimateStatus === "configured" && usage.costEstimateStatus === "configured" ? "configured" : usage.costEstimateStatus,
+            costUsd: baseUsage.costUsd + usage.costUsd,
+            costSource: combinedRunCostSource(baseUsage, usage),
+            upstreamInferenceCostUsd: baseUsage.upstreamInferenceCostUsd + usage.upstreamInferenceCostUsd,
             durationMs: baseUsage.durationMs + usage.durationMs
           }
         });
       },
-      onProgress: async ({ usage, modelId }) => {
+      onProgress: async ({ usage, apiProvider, modelId }) => {
         run = await this.updateRun(run, {
+          apiProvider,
           modelId,
           usage: {
+            kind: "model_reported",
             inputTokens: baseUsage.inputTokens + usage.inputTokens,
             cachedInputTokens: baseUsage.cachedInputTokens + usage.cachedInputTokens,
+            reasoningTokens: baseUsage.reasoningTokens + usage.reasoningTokens,
             outputTokens: baseUsage.outputTokens + usage.outputTokens,
-            estimatedCostUsd: baseUsage.estimatedCostUsd + usage.estimatedCostUsd,
-            costEstimateStatus: baseUsage.costEstimateStatus === "configured" && usage.costEstimateStatus === "configured" ? "configured" : usage.costEstimateStatus,
+            costUsd: baseUsage.costUsd + usage.costUsd,
+            costSource: combinedRunCostSource(baseUsage, usage),
+            upstreamInferenceCostUsd: baseUsage.upstreamInferenceCostUsd + usage.upstreamInferenceCostUsd,
             durationMs: baseUsage.durationMs + usage.durationMs
           }
         });
@@ -839,7 +1656,16 @@ export class SiteAuthoringWorkflow {
     await this.persistVerificationCaptures(finalized);
     await this.persistWorkspaceSourceSidecar(revision, runtime.currentFiles(), backup.backup);
     await persistFinalArtifact({ artifact: finalized.artifact, files: finalized.files, store: this.blobStore });
-    await this.repository.commitVerifiedBuild({ revision, artifact: finalized.artifact });
+    const adoptedGeneratedRevisionIds = new Set(effectiveBuildInput.assetRevisionIds);
+    const adoptedGeneratedRevisions = generatedRevisions.filter((revision) => adoptedGeneratedRevisionIds.has(revision.id));
+    if (adoptedGeneratedRevisions.length) {
+      activeSession = siteAgentSessionSchema.parse({
+        ...activeSession,
+        publicBuildInputId: effectiveBuildInput.id,
+        updatedAt: new Date().toISOString()
+      });
+      run = siteAgentRunSchema.parse({ ...run, publicBuildInputId: effectiveBuildInput.id });
+    }
     const session = siteAgentSessionSchema.parse({
       ...activeSession,
       status: "active",
@@ -847,16 +1673,22 @@ export class SiteAuthoringWorkflow {
       leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(),
       updatedAt: new Date().toISOString()
     });
-    await this.repository.saveAgentSession(session);
     run = await this.updateRun(run, {
       outputArtifactId: finalized.artifact.id,
       screenshotKeys: finalized.artifact.qa.screenshotKeys
     });
     await recorder.close(runEvent, {
       status: "succeeded",
+      apiProvider: managerResult.apiProvider,
+      modelId: managerResult.modelId,
       inputTokens: managerResult.usage.inputTokens,
       cachedInputTokens: managerResult.usage.cachedInputTokens,
+      reasoningTokens: managerResult.usage.reasoningTokens,
       outputTokens: managerResult.usage.outputTokens,
+      costUsd: managerResult.usage.costUsd,
+      costSource: managerResult.usage.costSource,
+      upstreamInferenceCostUsd: managerResult.usage.upstreamInferenceCostUsd,
+      modelDurationMs: managerResult.usage.durationMs,
       summary: {
         hardGate: finalized.artifact.qa.hardGate,
         workspaceRevisionId: revision.id,
@@ -870,6 +1702,16 @@ export class SiteAuthoringWorkflow {
       files: runtime.currentFiles(),
       revision,
       artifact: finalized.artifact,
+      buildInput: effectiveBuildInput,
+      mediaAdoption: adoptedGeneratedRevisions.length
+        ? {
+            expectedBusinessRevision: baseState.revision,
+            assetRevisions: adoptedGeneratedRevisions,
+            businessState: effectiveState,
+            publicBuildInput: effectiveBuildInput
+          }
+        : undefined,
+      inspectionHash: managerResult.completion.inspectionHash,
       ownerMessage: managerResult.completion.ownerMessage
     };
   }
@@ -939,19 +1781,32 @@ export class SiteAuthoringWorkflow {
       await this.persistVerificationCaptures(finalized);
       await this.persistWorkspaceSourceSidecar(revision, files, backup.backup);
       await persistFinalArtifact({ artifact: finalized.artifact, files: finalized.files, store: this.blobStore });
-      await this.repository.commitVerifiedBuild({ revision, artifact: finalized.artifact });
       assertWithinDeadline();
       const session = siteAgentSessionSchema.parse({
         ...input.session, status: "active", currentWorkspaceRevisionId: revision.id,
         leaseExpiresAt: new Date(Date.now() + idleLeaseMs).toISOString(), updatedAt: new Date().toISOString()
       });
-      await this.repository.saveAgentSession(session);
-      const version = await this.createCandidateVersion(finalized.artifact, revision.id, input.buildInput, run);
-      run = await this.updateRun(run, {
+      const candidate = await this.createCandidateDraft(finalized.artifact, revision.id, input.buildInput, run);
+      const completedAt = new Date().toISOString();
+      const completedRun = siteAgentRunSchema.parse({
+        ...run,
         status: "succeeded", stage: "candidate_ready", fastPreviewPath: undefined, outputRevisionId: revision.id,
         outputArtifactId: finalized.artifact.id, screenshotKeys: finalized.artifact.qa.screenshotKeys,
-        candidateVersionId: version.id, completedAt: new Date().toISOString()
+        candidateVersionId: candidate.version.id, completedAt
       });
+      const outbox = candidateOutbox(finalized.artifact, candidate.version);
+      const result = await this.repository.finalizeVerifiedAuthoring({
+        finalizationKey: candidate.finalizationKey,
+        revision,
+        artifact: finalized.artifact,
+        version: candidate.version,
+        run: completedRun,
+        session,
+        outboxDocument: outbox
+      });
+      await externalAuthoringRepository.enqueueOutbox(outbox);
+      const version = result.version;
+      run = result.run;
       await recorder.close(runEvent, { status: "succeeded", summary: { workspaceRevisionId: revision.id, artifactId: finalized.artifact.id, candidateVersionId: version.id } });
       await this.repository.appendAgentMessage({
         schemaVersion: "site-agent-message", id: id("message"), sessionId: run.sessionId, runId: run.id, role: "agent",
@@ -1000,15 +1855,22 @@ export class SiteAuthoringWorkflow {
       }
       const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
       const runtime = await this.ensureRuntime();
-      const artifactId = id("artifact");
+      const artifactId = deterministicId("artifact", {
+        schemaVersion: 1,
+        runId: input.run.id,
+        siteId: input.run.siteId,
+        workspaceRevisionId: input.workspaceRevisionId,
+        publicBuildInputHash: input.buildInput.inputHash
+      });
       const capturePrefix = `site-captures/${input.run.siteId}/${artifactId}`;
       const browserGate = await runArtifactBrowserGate({ prepared, buildInput: input.buildInput, blobStore: this.blobStore, capturePrefix, signal: input.signal });
       const contactSheet = await createArtifactContactSheet(browserGate.captures);
       const contactSheetKey = `${capturePrefix}/contact-sheet.png`;
+      const thumbnail = await createArtifactThumbnail(browserGate.captures, capturePrefix);
       const finalized = finalizePreparedArtifact({
         prepared, buildInput: input.buildInput, artifactId, workspaceRevisionId: input.workspaceRevisionId,
         runtimeSeriesId, runtimePatchId: runtime.patch.id, storagePrefix: `site-artifacts/${input.run.siteId}/${artifactId}`,
-        toolchainVersion: siteToolchainVersion, sandboxImageDigest: configuredSandboxImageDigest(),
+        toolchainVersion: siteToolchainIdentity, sandboxImageDigest: configuredSandboxImageDigest(),
         browserGate: { findings: browserGate.findings, screenshotKeys: [...browserGate.captures.map((capture) => capture.key), contactSheetKey],
           routesChecked: browserGate.routesChecked, linksChecked: browserGate.linksChecked }
       });
@@ -1016,6 +1878,7 @@ export class SiteAuthoringWorkflow {
         ...finalized,
         contactSheet,
         contactSheetKey,
+        thumbnail,
         browserCaptures: browserGate.captures
       };
     } catch (error) {
@@ -1023,16 +1886,18 @@ export class SiteAuthoringWorkflow {
     }
   }
 
-  private async createCandidateVersion(
+  private async createCandidateDraft(
     artifact: SiteBuildArtifact,
     workspaceRevisionId: string,
     buildInput: SitePublicBuildInput,
-    run: SiteAgentRun
+    run: SiteAgentRun,
+    inspectionHash: string = semanticArtifactContentHash(artifact)
   ) {
     const versions = await this.repository.listSiteVersions(run.siteId);
+    const finalizationKey = sha256(stableJson({ schemaVersion: 1, executionId: run.id, inspectionHash }));
     const version = siteVersionSchema.parse({
       schemaVersion: 1,
-      id: id("version"),
+      id: deterministicId("version", { schemaVersion: 1, finalizationKey }),
       siteId: run.siteId,
       number: (versions[0]?.number ?? 0) + 1,
       status: "candidate",
@@ -1046,8 +1911,7 @@ export class SiteAuthoringWorkflow {
       createdAt: new Date().toISOString(),
       createdBy: { kind: "agent", id: run.id }
     });
-    await this.repository.createSiteVersion(version);
-    return version;
+    return { version, finalizationKey };
   }
 
   private async persistWorkspaceSourceSidecar(
@@ -1078,12 +1942,14 @@ export class SiteAuthoringWorkflow {
     const retained = await this.blobStore.get(key);
     if (!retained || retained.contentHash !== contentHash) throw new Error(`Workspace source sidecar verification failed at ${key}.`);
     this.assertWorkspaceSidecarMatchesRevision(workspaceSourceSidecarSchema.parse(JSON.parse(retained.bytes.toString("utf8"))), revision);
+    return { storageKey: key, contentHash, bytes: bytes.length };
   }
 
   private async persistVerificationCaptures(input: {
     browserCaptures: Array<{ key: string; bytes: Buffer }>;
     contactSheet: Buffer;
     contactSheetKey: string;
+    thumbnail?: { key: string; bytes: Buffer };
   }) {
     await Promise.all([
       ...input.browserCaptures.map((capture) => this.blobStore.putImmutable({
@@ -1099,6 +1965,14 @@ export class SiteAuthoringWorkflow {
         contentHash: sha256(input.contactSheet)
       })
     ]);
+    if (input.thumbnail) {
+      await this.blobStore.putImmutable({
+        key: input.thumbnail.key,
+        bytes: input.thumbnail.bytes,
+        contentType: "image/webp",
+        contentHash: sha256(input.thumbnail.bytes)
+      }).catch((error) => logThumbnailFailure("store", error));
+    }
   }
 
   private async loadWorkspaceSource(revisionId: string | undefined): Promise<WorkspaceSourceFile[]> {
@@ -1315,6 +2189,7 @@ export class SiteAuthoringWorkflow {
     run: SiteAgentRun,
     failure: ReturnType<typeof classifySiteAuthoringFailure>
   ) {
+    if (failure.retryableByOwner) return;
     const existing = (await this.repository.listOperatorQueue()).some((item) => item.runId === run.id && item.status !== "resolved" && item.status !== "dismissed");
     if (existing) return;
     const now = new Date().toISOString();
@@ -1324,7 +2199,7 @@ export class SiteAuthoringWorkflow {
       siteId: run.siteId,
       runId: run.id,
       reason: "authoring_runtime_failure",
-      severity: "high",
+      severity: run.origin === "control_plane" ? "urgent" : "high",
       status: "open",
       findings: [{
         stage: run.stage,
@@ -1338,6 +2213,19 @@ export class SiteAuthoringWorkflow {
     }));
   }
 
+  private async mediaSheetFor(buildInput: SitePublicBuildInput) {
+    const retained = await Promise.all(buildInput.business.assets.map(async (asset) => {
+      const blob = await this.blobStore.get(asset.storageKey).catch(() => undefined);
+      if (!blob) return undefined;
+      const revision = await this.repository.getAssetRevision(asset.revisionId).catch(() => undefined);
+      const sourcePageUrl = revision?.provenance.origin === "source_website"
+        ? revision.provenance.sourcePageUrl
+        : undefined;
+      return { asset, bytes: blob.bytes, sourcePageUrl };
+    }));
+    return createMediaContactSheet(retained.filter((item): item is NonNullable<typeof item> => Boolean(item)));
+  }
+
   private async ensureRuntime() {
     const existingSeries = await this.repository.getRuntimeSeries(runtimeSeriesId);
     if (existingSeries) {
@@ -1349,7 +2237,7 @@ export class SiteAuthoringWorkflow {
       id: id("runtime_patch"),
       seriesId: runtimeSeriesId,
       sourceRevision: process.env.RAILWAY_GIT_COMMIT_SHA ?? "working-tree",
-      builderVersion: "trusted-runtime-builder-v1",
+      builderVersion: "trusted-runtime-builder@sha256:31d24faf0bf5265f2af840b87c7c5f2e2b6811780b68e949086e5b55da80cf61",
       securityStatus: "audited",
       compatibilityStatus: "passed"
     });
@@ -1384,11 +2272,22 @@ export class SiteAuthoringWorkflow {
   }
 
   private async bootstrapWithUniqueSlug(input: Parameters<SitePlatformRepository["bootstrapSite"]>[0]): Promise<PlatformSiteRecord> {
+    const retained = await this.repository.getSite(input.site.id);
+    if (retained) {
+      if (retained.businessId !== input.site.businessId || retained.normalizedSource !== input.site.normalizedSource) {
+        throw new Error("Site bootstrap idempotency conflict.");
+      }
+      return retained;
+    }
     try {
       await this.repository.bootstrapSite(input);
       return input.site;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const afterLostResponse = await this.repository.getSite(input.site.id);
+      if (afterLostResponse?.businessId === input.site.businessId && afterLostResponse.normalizedSource === input.site.normalizedSource) {
+        return afterLostResponse;
+      }
       if (!/slug|site id or slug already exists|duplicate key.*sites.*slug/i.test(message)) throw error;
       const suffix = input.site.id.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-8);
       const site = platformSiteRecordSchema.parse({
@@ -1474,6 +2373,25 @@ export class SiteAuthoringWorkflow {
 
 export const siteAuthoringWorkflow = new SiteAuthoringWorkflow();
 
+function combinedRunCostSource(
+  base: Extract<SiteAgentRun["usage"], { kind: "model_reported" }>,
+  next: { inputTokens: number; outputTokens: number; costSource: Extract<SiteAgentRun["usage"], { kind: "model_reported" }>["costSource"] }
+): Extract<SiteAgentRun["usage"], { kind: "model_reported" }>["costSource"] {
+  const baseHasUsage = base.inputTokens > 0 || base.outputTokens > 0;
+  const nextHasUsage = next.inputTokens > 0 || next.outputTokens > 0;
+  if (!baseHasUsage) return next.costSource;
+  if (!nextHasUsage) return base.costSource;
+  return base.costSource === next.costSource ? base.costSource : "mixed";
+}
+
+function messageRole(session: SiteAgentSession, actorId: string): "owner" | "operator" {
+  return session.principal.id === actorId ? session.principal.kind : "operator";
+}
+
+function principalLabel(session: SiteAgentSession) {
+  return session.principal.kind === "owner" ? "Owner" : "Operator";
+}
+
 export const siteAgentRecoveryStaleAfterMs = 45 * 60_000;
 
 export function configuredSandboxImageDigest() {
@@ -1498,6 +2416,44 @@ function provisionedDurationMs(startedAt: string | undefined, destroyedAt: strin
 
 function id(prefix: string) {
   return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function deterministicId(prefix: string, value: unknown) {
+  return `${prefix}_${sha256(stableJson(value)).slice("sha256:".length, "sha256:".length + 32)}`;
+}
+
+function prospectiveMediaState(base: BusinessState, generatedAssets: AssetRevisionRef[]) {
+  const next = {
+    ...structuredClone(base),
+    revision: base.revision + 1,
+    assets: [...base.assets, ...generatedAssets],
+    updatedAt: new Date().toISOString()
+  };
+  const { stateHash: _previousHash, ...withoutHash } = next;
+  return businessStateSchema.parse({ ...withoutHash, stateHash: sha256(stableJson(withoutHash)) });
+}
+
+function semanticArtifactContentHash(artifact: SiteBuildArtifact) {
+  return sha256(stableJson({
+    schemaVersion: 1,
+    siteId: artifact.siteId,
+    publicBuildInputId: artifact.publicBuildInputId,
+    files: artifact.files
+      .map((file) => ({ path: file.path, contentType: file.contentType, contentHash: file.contentHash, bytes: file.bytes }))
+      .sort((left, right) => left.path.localeCompare(right.path)),
+    routes: [...artifact.routes].sort((left, right) => left.path.localeCompare(right.path)),
+    factBindings: [...artifact.factBindings].sort((left, right) => stableJson(left).localeCompare(stableJson(right))),
+    capabilityBindings: [...artifact.capabilityBindings].sort((left, right) => stableJson(left).localeCompare(stableJson(right))),
+    runtimeSeriesId: artifact.runtimeSeriesId,
+    toolchainVersion: artifact.toolchainVersion,
+    sandboxImageDigest: artifact.sandboxImageDigest
+  }));
+}
+
+function normalizedInspectionFindings(findings: SiteBuildArtifact["qa"]["findings"]) {
+  return findings
+    .map(({ severity, area, message, route }) => ({ severity, area, message, route }))
+    .sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
 }
 
 function sandboxManifestMatches(value: unknown) {
@@ -1553,4 +2509,23 @@ function lazyExternalClient<T extends object>(factory: () => T): T {
 function failureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]`;
+}
+
+function candidateOutbox(artifact: SiteBuildArtifact, version: SiteVersion) {
+  const createdAt = new Date().toISOString();
+  return authoringOutboxEventSchema.parse({
+    schemaVersion: 1,
+    id: deterministicId("authoring_outbox", { schemaVersion: 1, candidateVersionId: version.id }),
+    eventType: "site_candidate_finalized",
+    aggregateId: version.id,
+    payload: {
+      siteId: version.siteId,
+      artifactId: artifact.id,
+      candidateVersionId: version.id
+    },
+    status: "pending",
+    attempts: 0,
+    runAfter: createdAt,
+    createdAt
+  });
 }

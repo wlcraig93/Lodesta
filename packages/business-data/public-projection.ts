@@ -65,7 +65,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     if (offering.status === "rejected" || offering.status === "inactive" || !eligibleSource(offering.sourceFactIds)) return false;
     return offering.visibility === "public" || offering.visibility === "preview";
   });
-  const assets = state.assets.filter((asset) => asset.activeForFutureBuilds && eligibleSource(asset.sourceFactIds));
+  const assets = state.assets.filter((asset) => asset.activeForFutureBuilds);
   const links = state.links.filter((link) => link.publicEligible && eligibleSource(link.sourceFactIds));
   const serviceAreas = state.serviceAreas.filter((area) => eligibleSource(area.sourceFactIds));
   const locations = state.locations.flatMap((location) => {
@@ -84,7 +84,6 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
         country: location.country
       } : { country: location.country }),
       ...(hours ? { hours: location.hours } : {}),
-      ...(location.googlePlaceId ? { googlePlaceId: location.googlePlaceId } : {}),
       sourceFactIds: location.sourceFactIds.filter((id) => publicFactById.has(id))
     }];
   });
@@ -98,8 +97,11 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     }
   }
   const businessNameFact = publicFacts.find((fact) => fact.kind === "business_name");
-  if (!businessNameFact || String(businessNameFact.value).trim() !== state.identity.name.trim()) {
+  if (state.identity.status === "verified" && (!businessNameFact || String(businessNameFact.value).trim() !== state.identity.name.trim())) {
     throw new Error("Public build input requires a source-backed business-name fact matching canonical identity.");
+  }
+  if (state.identity.status === "provisional" && businessNameFact) {
+    throw new Error("Provisional identity cannot expose a canonical business-name fact.");
   }
   const descriptionFact = publicFacts.find((fact) => fact.kind === "description" && sameFactValue(fact.value, state.identity.description));
   const phoneFact = publicFacts.find((fact) => fact.kind === "phone" && sameFactValue(fact.value, state.contacts.phone));
@@ -122,6 +124,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     domainContext,
     business: {
       name: state.identity.name,
+      identityStatus: state.identity.status,
       description: descriptionFact ? state.identity.description : undefined,
       contacts: {
         phone: phoneFact ? state.contacts.phone : undefined,

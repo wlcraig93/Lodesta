@@ -8,12 +8,18 @@ export const dynamic = "force-dynamic";
 
 export default async function OutboundPage() {
   await requireAdminPageAccess("/outbound");
-  const [summary, campaigns, prospects, events] = await Promise.all([
+  const [summary, campaigns, prospects, events, reports] = await Promise.all([
     repository.outboundSummary(),
     repository.listOutboundCampaigns(),
     repository.listOutboundProspects(),
-    repository.listOutboundEvents()
+    repository.listOutboundEvents(),
+    repository.listProspectReports(20)
   ]);
+  const assessmentIds = reports.flatMap((report) => report.assessmentId ? [report.assessmentId] : []);
+  const assessments = assessmentIds.length
+    ? await repository.listWebsiteAssessments({ ids: assessmentIds, limit: assessmentIds.length })
+    : [];
+  const assessmentsById = new Map(assessments.map((assessment) => [assessment.id, assessment]));
 
   return (
     <main className="admin-page">
@@ -56,6 +62,29 @@ export default async function OutboundPage() {
 
       <div className="admin-grid">
         <section className="panel">
+          <h2>Target fit</h2>
+          <p className="muted">Business strength is separate from website quality and never appears in the public report.</p>
+          <div className="finding-list">
+            {reports.map((report) => {
+              const assessment = report.assessmentId ? assessmentsById.get(report.assessmentId)?.assessment : undefined;
+              return (
+                <article key={report.id} className="finding-card">
+                  <span className="badge">{report.businessStrength?.tier ?? "business signal incomplete"}</span>
+                  <h3>{report.sourceHost ?? report.sourceKey}</h3>
+                  <p>
+                    Business strength {report.businessStrength?.score ?? "—"} · Website quality {assessment?.score?.value ?? "—"}
+                  </p>
+                  <small>
+                    Business coverage {Math.round((report.businessStrength?.coverage ?? 0) * 100)}% · Website coverage {Math.round((assessment?.coverage.value ?? 0) * 100)}%
+                  </small>
+                </article>
+              );
+            })}
+            {!reports.length ? <p>No prospect evidence has been collected yet.</p> : null}
+          </div>
+        </section>
+
+        <section className="panel">
           <h2>Campaigns</h2>
           <div className="finding-list">
             {campaigns.map((campaign) => (
@@ -73,7 +102,7 @@ export default async function OutboundPage() {
                 <span className="badge">{prospect.status.replace("_", " ")}</span>
                 <h3>{prospect.businessName}</h3>
                 <p>
-                  {prospect.vertical ?? "unknown vertical"} · {prospect.previewToken ? "preview linked" : "no preview token"}
+                  {prospect.vertical ?? "unknown vertical"} · {prospect.previewId ? "preview linked" : "no preview"}
                 </p>
               </article>
             ))}

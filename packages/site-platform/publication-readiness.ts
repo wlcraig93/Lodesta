@@ -24,14 +24,14 @@ export async function deriveSitePublicationReadiness(input: {
     Promise.all(version.formDefinitionIds.map((formId) => input.repository.getFormDefinition(formId)))
   ]);
   const blockers: SitePublicationReadiness["blockers"] = [];
-  if (!buildInput || !state || !intent || buildInput.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, buildInput.intent)) {
+  if (version.status === "stale" || !buildInput || !state || !intent || buildInput.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, buildInput.intent)) {
     blockers.push(blocker("stale_input", "This candidate predates the current verified business state or site intent.", version.publicBuildInputId));
+  }
+  if (buildInput?.business.identityStatus !== "verified") {
+    blockers.push(blocker("business_identity", "Confirm or correct the business name before publishing.", version.publicBuildInputId));
   }
   if (!artifact || artifact.artifactHash !== version.artifactHash || artifact.qa.hardGate !== "passed") {
     blockers.push(blocker("objective_qa", "The exact candidate artifact has not passed objective QA.", version.artifactId));
-  }
-  if (buildInput?.business.assets.some((asset) => !["platform_cleared", "owner_attested"].includes(asset.rightsStatus))) {
-    blockers.push(blocker("asset_rights", "One or more rendered assets do not have publication rights.", version.publicBuildInputId));
   }
   if (forms.some((form) => !form || form.siteId !== site.id || form.status === "retired")) {
     blockers.push(blocker("unsafe_form", "The candidate references a missing, retired, or foreign form definition.", version.id));

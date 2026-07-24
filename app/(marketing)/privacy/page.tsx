@@ -37,7 +37,7 @@ const privacySections = [
   },
   {
     title: "6. Service providers",
-    body: "Lodesta uses service providers to operate the platform. These currently include Supabase for authentication and database services, Railway for application hosting, Cloudflare and R2 for networking and artifact storage, OpenAI for website understanding and generation, Google Places for public business-information enrichment, and Resend for operational email. These providers may process information only as needed to perform their respective services."
+    body: "Lodesta uses service providers to operate the platform. These currently include Supabase for authentication and database services, Railway for application hosting, Cloudflare and R2 for networking and artifact storage, OpenAI for website research and generation, OpenRouter when its optional model-routing capability is enabled, and Resend for operational email. These providers may process information only as needed to perform their respective services."
   },
   {
     title: "7. Sharing and sale of information",
@@ -45,7 +45,7 @@ const privacySections = [
   },
   {
     title: "8. Retention",
-    body: "We retain information for as long as needed to provide the service, keep owned websites and retained published versions functional, meet security, audit, legal, and dispute-resolution obligations, and maintain reliable records. Retention periods vary by data type and account status. When information is no longer required, we delete or de-identify it where reasonably practical."
+    body: "Raw first-party website analytics events are retained for 14 months so site owners can make year-over-year comparisons. A site-scoped pseudonymous visitor identifier may remain in a visitor’s browser for up to 13 months and is not used to identify a person across Lodesta websites. We retain other information for as long as needed to provide the service, keep owned websites and retained published versions functional, meet security, audit, legal, and dispute-resolution obligations, and maintain reliable records. When information is no longer required, we delete or de-identify it where reasonably practical."
   },
   {
     title: "9. Security",

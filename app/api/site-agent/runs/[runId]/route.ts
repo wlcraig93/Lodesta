@@ -9,6 +9,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ runI
   const actor = await authorizedSiteActor(request, run.siteId);
   if (!actor.ok) return actor.response;
   const session = await sitePlatformRepository.getAgentSession(run.sessionId);
-  if (!session || !canAccessAgentSession(actor, session.ownerId)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+  if (!session || session.principal.kind !== "owner" || !canAccessAgentSession(actor, session.principal.id)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
   return NextResponse.json({ run });
 }

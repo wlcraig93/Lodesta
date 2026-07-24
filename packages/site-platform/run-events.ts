@@ -29,10 +29,19 @@ export class SiteAgentEventRecorder {
         name: event.name,
         status: event.status,
         turnIndex: event.turnIndex,
+        apiProvider: event.apiProvider,
         modelId: event.modelId,
+        servedModelId: event.servedModelId,
+        upstreamProvider: event.upstreamProvider,
+        providerRequestId: event.providerRequestId,
         inputTokens: event.inputTokens,
         cachedInputTokens: event.cachedInputTokens,
+        reasoningTokens: event.reasoningTokens,
         outputTokens: event.outputTokens,
+        costUsd: event.costUsd,
+        costSource: event.costSource,
+        upstreamInferenceCostUsd: event.upstreamInferenceCostUsd,
+        modelDurationMs: event.modelDurationMs,
         summary: boundedSummary(event.summary),
         ...payload,
         errorCode: event.errorCode,
@@ -48,6 +57,7 @@ export class SiteAgentEventRecorder {
     kind: SiteAgentRunEvent["kind"];
     name: string;
     summary?: Record<string, unknown>;
+    apiProvider?: SiteAgentRunEvent["apiProvider"];
     modelId?: string;
   }) {
     const runEvent = siteAgentRunEventSchema.parse({
@@ -58,6 +68,7 @@ export class SiteAgentEventRecorder {
       kind: input.kind,
       name: input.name,
       status: "running",
+      apiProvider: input.apiProvider,
       modelId: input.modelId,
       summary: boundedSummary(input.summary ?? {}),
       startedAt: new Date().toISOString()
@@ -72,8 +83,17 @@ export class SiteAgentEventRecorder {
     errorCode?: string;
     inputTokens?: number;
     cachedInputTokens?: number;
+    reasoningTokens?: number;
     outputTokens?: number;
+    costUsd?: number;
+    costSource?: SiteAgentRunEvent["costSource"];
+    upstreamInferenceCostUsd?: number;
+    modelDurationMs?: number;
+    apiProvider?: SiteAgentRunEvent["apiProvider"];
     modelId?: string;
+    servedModelId?: string;
+    upstreamProvider?: string;
+    providerRequestId?: string;
   }) {
     const payload = input.payload ? await this.persistPayload(runEvent.id, input.payload) : {};
     const completed = siteAgentRunEventSchema.parse({
@@ -84,8 +104,17 @@ export class SiteAgentEventRecorder {
       errorCode: input.errorCode,
       inputTokens: input.inputTokens,
       cachedInputTokens: input.cachedInputTokens,
+      reasoningTokens: input.reasoningTokens,
       outputTokens: input.outputTokens,
+      costUsd: input.costUsd,
+      costSource: input.costSource,
+      upstreamInferenceCostUsd: input.upstreamInferenceCostUsd,
+      modelDurationMs: input.modelDurationMs,
+      apiProvider: input.apiProvider ?? runEvent.apiProvider,
       modelId: input.modelId ?? runEvent.modelId,
+      servedModelId: input.servedModelId,
+      upstreamProvider: input.upstreamProvider,
+      providerRequestId: input.providerRequestId,
       completedAt: new Date().toISOString()
     });
     return (await this.repository.saveAgentRunEvents([completed]))[0] ?? completed;

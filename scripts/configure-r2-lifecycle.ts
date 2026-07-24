@@ -22,7 +22,8 @@ const reportPath = resolve(process.cwd(), ".data/maintenance/r2-lifecycle-audit.
 const current = await listLifecycleRules();
 assertNoConflictingRules(current);
 const payload = {
-  schemaVersion: "r2-lifecycle-audit-v1",
+  schemaVersion: 1,
+  kind: "r2-lifecycle-audit",
   bucket,
   current,
   requestedOperations: requestedOperations(current),

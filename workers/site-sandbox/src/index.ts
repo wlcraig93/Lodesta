@@ -38,7 +38,7 @@ export default {
     if (url.pathname === "/health") return json({ ok: true, provider: "cloudflare-sandbox", transport: env.SANDBOX_TRANSPORT });
     if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
 
-    const previewMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9-]{1,80})\/preview(\/.*)?$/);
+    const previewMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/preview(\/.*)?$/);
     if (request.method === "GET" && previewMatch) {
       const sandbox = sandboxFor(env, previewMatch[1]);
       const built = await sandbox.exists(`${workspaceRoot}/dist/index.html`);
@@ -56,7 +56,7 @@ export default {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
 
-    const match = url.pathname.match(/^\/v1\/sessions\/([a-z0-9-]{1,80})\/(bootstrap|apply|rebase|artifact|source|backup|restore|destroy|diagnostics)$/);
+    const match = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/(bootstrap|apply|rebase|artifact|source|backup|restore|destroy|diagnostics)$/);
     if (!match) return json({ error: "not_found" }, 404);
     const sessionId = match[1];
     const action = match[2];

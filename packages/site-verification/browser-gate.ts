@@ -1,5 +1,8 @@
 import { createServer, type Server } from "node:http";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import axeCore from "axe-core";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import type { PreparedSiteArtifact } from "./finalizer";
@@ -73,6 +76,12 @@ async function runArtifactBrowserGateOnce(input: {
         if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
         await settleImages(page);
         const metrics = await inspectPage(page);
+        if (viewport.name === "desktop") {
+          routeFindings.push(...await verifyManagedFormSubmissions(page, route.path));
+        }
+        if (viewport.name === "mobile") {
+          routeFindings.push(...await inspectAutomatedAccessibility(page, route.path));
+        }
         linksChecked += metrics.links.length;
         if (metrics.horizontalOverflowPx > 2) {
           routeFindings.push(finding("render.horizontal_overflow", `Horizontal overflow is ${metrics.horizontalOverflowPx}px at ${viewport.name}.`, route.path, "render", "warning"));
@@ -155,12 +164,18 @@ async function startHarness(input: {
   const routeFiles = new Map(input.prepared.routes.map((route) => [route.path, route.html]));
   const assetKeys = new Map(input.buildInput.business.assets.map((asset) => [asset.revisionId, asset.storageKey]));
   const css = input.prepared.files.find((file) => file.path === "site.css")?.bytes;
+  const runtimeSource = await readFile(resolve(process.cwd(), "packages/trusted-runtime/site-runtime-v1.js"));
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (url.pathname === "/site.css" && css) return send(response, 200, css, "text/css; charset=utf-8");
-      if (url.pathname.startsWith("/_lodesta/runtime/")) return send(response, 200, Buffer.from(""), "application/javascript; charset=utf-8");
+      if (url.pathname.startsWith("/_lodesta/runtime/")) return send(response, 200, runtimeSource, "application/javascript; charset=utf-8");
       if (url.pathname === "/api/analytics") return send(response, 204, Buffer.alloc(0), "application/json");
+      if (url.pathname === "/api/forms/submit") {
+        if (request.method !== "POST") return send(response, 405, Buffer.from(JSON.stringify({ accepted: false })), "application/json");
+        await readRequestBody(request);
+        return send(response, 200, Buffer.from(JSON.stringify({ accepted: true })), "application/json");
+      }
       const assetId = decodeURIComponent(url.pathname.match(/^\/_lodesta\/assets\/([^/]+)$/)?.[1] ?? "");
       if (assetId) {
         const key = assetKeys.get(assetId);
@@ -290,6 +305,71 @@ async function inspectPage(page: Page): Promise<BrowserPageMetrics> {
   return await page.evaluate(browserInspectionSource) as BrowserPageMetrics;
 }
 
+async function verifyManagedFormSubmissions(page: Page, route: string) {
+  const forms = page.locator("form[data-lodesta-form-id]");
+  const findings: ArtifactGateFinding[] = [];
+  for (let index = 0; index < await forms.count(); index += 1) {
+    const form = forms.nth(index);
+    const formId = await form.getAttribute("data-lodesta-form-id") ?? `form_${index + 1}`;
+    try {
+      for (const field of await form.locator("input:not([type=hidden]):not([type=submit]), textarea").all()) {
+        const type = (await field.getAttribute("type") ?? "text").toLowerCase();
+        await field.fill(type === "email" ? "browser-gate@example.com" : type === "tel" ? "5125550100" : "Browser gate verification");
+      }
+      for (const select of await form.locator("select").all()) {
+        const options = await select.locator("option").all();
+        const value = options.length > 1 ? await options[1].getAttribute("value") : options.length ? await options[0].getAttribute("value") : undefined;
+        if (value !== undefined && value !== null) await select.selectOption(value);
+      }
+      await form.evaluate((element) => (element as HTMLFormElement).requestSubmit());
+      const status = form.locator("[data-lodesta-form-status]");
+      await status.waitFor({ state: "visible", timeout: 5_000 });
+      await page.waitForFunction((id) => {
+        const target = document.querySelector(`form[data-lodesta-form-id="${CSS.escape(String(id))}"] [data-lodesta-form-status]`);
+        return Boolean(target?.textContent && target.textContent !== "Sending...");
+      }, formId, { timeout: 5_000 });
+      const message = (await status.textContent())?.trim() ?? "";
+      if (!message || /could not send/i.test(message)) {
+        findings.push(finding("capability.form_submit", `Managed form ${formId} did not complete the trusted-runtime submission path.`, route, "capability"));
+      }
+    } catch (error) {
+      findings.push(finding("capability.form_submit", `Managed form ${formId} failed browser submission verification: ${error instanceof Error ? error.message : String(error)}`, route, "capability"));
+    }
+  }
+  return findings;
+}
+
+async function inspectAutomatedAccessibility(page: Page, route: string) {
+  await page.addScriptTag({ content: axeCore.source });
+  const result = await page.evaluate(async () => {
+    const runtime = (globalThis as typeof globalThis & {
+      axe: { version: string; run: (context?: unknown, options?: unknown) => Promise<{
+        violations: Array<{ id: string; impact: string | null; help: string; nodes: Array<{ target: string[] }> }>;
+      }> };
+    }).axe;
+    return {
+      version: runtime.version,
+      violations: (await runtime.run(document, {
+        resultTypes: ["violations"],
+        runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"] }
+      })).violations
+    };
+  });
+  const findings: ArtifactGateFinding[] = [
+    finding("accessibility.axe.complete", `axe-core ${result.version} completed on the mobile route.`, route, "accessibility", "info")
+  ];
+  for (const violation of result.violations.filter((item) => item.impact === "critical" || item.impact === "serious")) {
+    findings.push(finding(
+      `accessibility.axe.${violation.impact}.${violation.id}`,
+      `${violation.help}: ${violation.nodes.length} node(s). Examples: ${violation.nodes.slice(0, 3).map((node) => node.target.join(" ")).join("; ")}.`,
+      route,
+      "accessibility",
+      "warning"
+    ));
+  }
+  return findings;
+}
+
 async function settleImages(page: Page) {
   await page.evaluate(() => {
     for (const image of document.images) image.loading = "eager";
@@ -352,4 +432,16 @@ function send(response: import("node:http").ServerResponse, status: number, body
 
 function stopServer(server: Server) {
   return new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+function readRequestBody(request: import("node:http").IncomingMessage) {
+  return new Promise<void>((resolveBody, reject) => {
+    let bytes = 0;
+    request.on("data", (chunk: Buffer) => {
+      bytes += chunk.byteLength;
+      if (bytes > 64 * 1024) request.destroy(new Error("Harness form payload exceeded 64 KiB."));
+    });
+    request.on("end", resolveBody);
+    request.on("error", reject);
+  });
 }

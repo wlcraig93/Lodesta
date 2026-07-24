@@ -8,11 +8,74 @@ const migrationDirectory = "supabase/migrations";
 const migrations = (await readdir(migrationDirectory)).filter((name) => name.endsWith(".sql")).sort();
 assert.deepEqual(
   migrations,
-  ["202607230001_canonical_baseline.sql", "202607230002_typed_website_setup_failures.sql"],
+  [
+    "202607230001_canonical_baseline.sql",
+    "202607230002_typed_website_setup_failures.sql",
+    "202607230003_owner_site_disposition.sql",
+    "202607230004_site_version_stale_status.sql",
+    "202607230005_prospect_source_keys.sql",
+    "202607230006_web_research_source_snapshots.sql",
+    "202607230007_canonical_website_assessments.sql",
+    "202607230008_asset_revision_business_scope.sql",
+    "202607230009_site_agent_model_routing_telemetry.sql",
+    "202607230010_external_codex_authoring.sql",
+    "202607230011_canonical_website_analytics.sql",
+    "202607230012_media_origin_clean_cut.sql",
+    "202607230013_canonical_media_publication.sql"
+  ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
 const baseline = await readFile(`${migrationDirectory}/${migrations[0]}`, "utf8");
 const typedFailures = await readFile(`${migrationDirectory}/${migrations[1]}`, "utf8");
+const ownerSiteDisposition = await readFile(`${migrationDirectory}/${migrations[2]}`, "utf8");
+const staleVersionStatus = await readFile(`${migrationDirectory}/${migrations[3]}`, "utf8");
+const prospectSourceKeys = await readFile(`${migrationDirectory}/${migrations[4]}`, "utf8");
+const webResearchSnapshots = await readFile(`${migrationDirectory}/${migrations[5]}`, "utf8");
+const websiteAssessments = await readFile(`${migrationDirectory}/${migrations[6]}`, "utf8");
+const assetRevisionScope = await readFile(`${migrationDirectory}/${migrations[7]}`, "utf8");
+const modelRoutingTelemetry = await readFile(`${migrationDirectory}/${migrations[8]}`, "utf8");
+const externalCodexAuthoring = await readFile(`${migrationDirectory}/${migrations[9]}`, "utf8");
+const websiteAnalytics = await readFile(`${migrationDirectory}/${migrations[10]}`, "utf8");
+const mediaOriginCleanCut = await readFile(`${migrationDirectory}/${migrations[11]}`, "utf8");
+const canonicalMediaPublication = await readFile(`${migrationDirectory}/${migrations[12]}`, "utf8");
+assert(
+  baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
+    && !baseline.includes("rights_status")
+    && !baseline.includes("attestation jsonb"),
+  "Canonical asset persistence must use typed origin without media-rights attestation columns."
+);
+assert(
+  externalCodexAuthoring.includes("media_adoption_document")
+    && externalCodexAuthoring.includes("stale_generated_media_adoption")
+    && externalCodexAuthoring.includes("current_public_build_input_id"),
+  "Verified finalization must atomically adopt generated media and its exact public build input."
+);
+assert(
+  websiteAnalytics.includes("drop table public.analytics_events")
+    && websiteAnalytics.includes("unique (site_id, event_id)")
+    && websiteAnalytics.includes("create function public.analytics_report")
+    && websiteAnalytics.includes("create table public.analytics_collection_daily")
+    && websiteAnalytics.includes("reporting_timezone")
+    && websiteAnalytics.includes("target_reporting_timezone")
+    && websiteAnalytics.includes("p_source text")
+    && !websiteAnalytics.includes("'Direct / unknown'"),
+  "Canonical website analytics schema, reporting, diagnostics, or timezone storage is incomplete."
+);
+assert(
+  mediaOriginCleanCut.includes("media_origin_cutover_requires_empty_authorities")
+    && mediaOriginCleanCut.includes("alter column origin set not null")
+    && mediaOriginCleanCut.includes("alter column provenance set not null")
+    && mediaOriginCleanCut.includes("drop column if exists rights_status")
+    && mediaOriginCleanCut.includes("drop column if exists attestation"),
+  "The pre-launch media-origin hard cut must reject retained authorities and remove the retired rights columns."
+);
+assert(
+  canonicalMediaPublication.includes("canonical_media_publication_requires_empty_external_batches")
+    && canonicalMediaPublication.includes("drop column if exists reference_asset_preview_policy_accepted_at")
+    && canonicalMediaPublication.includes("create or replace function public.promote_site_version")
+    && !canonicalMediaPublication.includes("asset.reference_only"),
+  "The canonical media publication cut must remove external approval state and media-specific publication blocking."
+);
 
 const requiredTables = [
   "businesses", "sites", "business_states", "site_intents", "source_snapshots", "asset_revisions",
@@ -32,7 +95,7 @@ const requiredFunctions = [
   "create_website_setup", "enqueue_site_agent_run", "link_website_setup", "claim_next_website_setup",
   "cancel_website_setup", "update_website_setup_source", "retry_website_setup",
   "claim_site_agent_run", "claim_domain_ownership", "consume_adoption_invitation",
-  "claim_prospect_report_job", "bootstrap_site", "commit_verified_site_build", "promote_site_version"
+  "claim_prospect_report_job", "bootstrap_site", "promote_site_version"
 ];
 const declaredFunctions = [...baseline.matchAll(/^create function ([a-z0-9_]+)\s*\(/gm)].map((match) => match[1]).sort();
 const browserRevokedFunctions = [...baseline.matchAll(/^revoke all on function ([a-z0-9_]+)\s*\(/gm)].map((match) => match[1]).sort();
@@ -43,8 +106,7 @@ for (const name of requiredFunctions) {
 }
 for (const retired of [
   "claims", "jobs", "site_version_approvals", "worker_heartbeats", "experiments", "experiment_learnings",
-  "agent_runs", "agent_run_spans", "agent_model_calls", "workspaces", "inquiry_deliveries",
-  "website_setups_v1", "site_versions_v4", "business_states_v3", "site_intents_v3", "form_definitions_v2"
+  "agent_runs", "agent_run_spans", "agent_model_calls", "workspaces", "inquiry_deliveries"
 ]) {
   assert(!new RegExp(`create table ${retired}\\s*\\(`).test(baseline), `Retired table ${retired} remains in the baseline.`);
 }
@@ -57,7 +119,57 @@ assert(baseline.includes("revoke all on schema public from public, anon, authent
 assert(
   typedFailures.includes("failure_code = 'crawl_temporarily_unavailable'")
     && !baseline.includes("'website_crawl_failed'"),
-  "Legacy website crawl failures must be remapped to the canonical typed failure set."
+  "Retired website crawl failures must be remapped to the canonical typed failure set."
+);
+assert(
+  assetRevisionScope.includes("asset_revisions_business_content_hash_idx")
+    && assetRevisionScope.includes("business_id, content_hash"),
+  "Asset revision content-hash uniqueness must remain scoped to its business."
+);
+assert(
+  modelRoutingTelemetry.includes("add column api_provider text")
+    && modelRoutingTelemetry.includes("cost_usd numeric(20, 10)")
+    && modelRoutingTelemetry.includes("site_agent_run_events_run_sequence_idx")
+    && modelRoutingTelemetry.includes("run_document->>'apiProvider'")
+    && modelRoutingTelemetry.includes("jsonb_set(value, '{siteAgentProvider}', '\"openai\"', true)"),
+  "Site-agent provider routing and per-turn cost telemetry migration is incomplete."
+);
+assert(
+  ownerSiteDisposition.includes("create or replace function dispose_owned_site")
+    && ownerSiteDisposition.includes("owner_user_id = target_owner_user_id")
+    && ownerSiteDisposition.includes("status = 'paused', owner_user_id = null"),
+  "Owner site disposition is not atomic and owner-scoped."
+);
+assert(
+  ownerSiteDisposition.includes("revoke all on function dispose_owned_site(text,uuid) from public, anon, authenticated")
+    && ownerSiteDisposition.includes("grant execute on function dispose_owned_site(text,uuid) to service_role"),
+  "Owner site disposition is not restricted to the service role."
+);
+assert(
+  staleVersionStatus.includes("add column if not exists stale_reason text")
+    && staleVersionStatus.includes("'stale'")
+    && staleVersionStatus.includes("status in ('candidate', 'superseded')")
+    && !staleVersionStatus.includes("status in ('candidate', 'stale', 'superseded')"),
+  "Stale site versions must be retained but never promotable."
+);
+assert(
+  prospectSourceKeys.includes("rename column place_id to source_key")
+    && prospectSourceKeys.includes("resolution_usage jsonb")
+    && prospectSourceKeys.includes("prospect_reports_source_key_idx"),
+  "Prospect reports must use source keys and retain paid-resolution usage."
+);
+assert(
+  webResearchSnapshots.includes("'web_research'")
+    && !webResearchSnapshots.includes("'google_places'"),
+  "Source snapshots must use web research rather than Google Places."
+);
+assert(
+  websiteAssessments.includes("create table public.website_assessments")
+    && websiteAssessments.includes("create table public.website_assessment_jobs")
+    && websiteAssessments.includes("for update skip locked")
+    && websiteAssessments.includes("drop table public.prospect_report_jobs")
+    && websiteAssessments.includes("enable row level security"),
+  "The canonical website-assessment cutover is incomplete."
 );
 const businessesBody = baseline.match(/create table businesses\s*\((.*?)\n\);/s)?.[1] ?? "";
 const businessColumns = [...businessesBody.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((match) => match[1]);
@@ -69,10 +181,21 @@ assert.deepEqual(
 
 if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
   const admin = getSupabaseAdminClient();
-  for (const table of requiredTables) {
+  const liveTables = [
+    ...requiredTables.filter((table) => table !== "prospect_report_jobs"),
+    "website_assessments",
+    "website_assessment_jobs",
+    "analytics_collection_daily"
+  ];
+  for (const table of liveTables) {
     const { error } = await admin.from(table).select("*").limit(1);
     assert(!error, `${table}: ${error?.message}`);
   }
+  const { error: dispositionProbe } = await admin.rpc("dispose_owned_site", {
+    target_site_id: "site_disposition_probe_missing",
+    target_owner_user_id: "00000000-0000-0000-0000-000000000000"
+  }).maybeSingle();
+  assert(!dispositionProbe, `dispose_owned_site: ${dispositionProbe?.message}`);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
   assert(url && anonKey, "Public Supabase Auth configuration is required for browser-role denial verification.");

@@ -50,7 +50,8 @@ const totals = {
   estimatedMemoryCostUsd: ratePerGiBSecond === undefined ? undefined : round(sessions.reduce((total, session) => total + (session.estimatedMemoryCostUsd ?? 0), 0), 6)
 };
 const payload = {
-  schemaVersion: "sandbox-cost-audit-v1",
+  schemaVersion: 1,
+  kind: "sandbox-cost-audit",
   estimationBasis: "session-wall-time-upper-bound",
   memoryGiB,
   ratePerGiBSecond,

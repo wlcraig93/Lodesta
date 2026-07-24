@@ -135,7 +135,7 @@ expect_empty_route_404 "missing runtime patch reaches encoded route" "/_lodesta/
 
 request POST "/api/forms/submit" '{"siteId":"site_missing","formId":"form_missing","payload":{"name":"Smoke"}}'
 expect_status "unreferenced form rejected" "404"
-request POST "/api/analytics" '{"siteId":"site_missing","sessionId":"smoke","pageId":"home","eventType":"pageview"}'
+request POST "/api/analytics" '{"siteId":"site_missing","eventId":"event_smoke_missing","visitorId":"visitor_smoke_missing","visitId":"visit_smoke_missing","eventType":"page_view","pagePath":"/","deviceCategory":"desktop"}'
 expect_status "unknown analytics site rejected" "404"
 
 request GET "/api/site-agent/runs/run_missing"
@@ -143,9 +143,13 @@ expect_status "unknown agent run rejected" "404"
 request POST "/api/site-agent/runs" '{"sessionId":"session_missing","instruction":"Change the heading"}'
 expect_status "unknown agent session rejected" "404"
 
-for path in "/api/intake" "/api/sites/regenerate" "/api/sites/versions" "/api/preview-tokens"; do
+for path in "/api/intake" "/api/preview-tokens"; do
   request GET "$path"
-  expect_status "deleted legacy route $path" "404"
+  expect_status "removed route $path" "404"
+done
+for path in "/api/sites/regenerate" "/api/sites/versions"; do
+  request GET "$path"
+  expect_status "removed route $path is not callable through the canonical site resource" "405"
 done
 
 echo "Smoke checks passed for $BASE_URL"

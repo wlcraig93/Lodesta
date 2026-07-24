@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AccountActionList, AccountIdentity, AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import type { OwnerWorkspaceAccessMode } from "@/lib/page-access";
+import type { OwnerIdentity } from "@/lib/owner-identity";
 import type { OwnerWorkspaceSiteOption } from "@/lib/owner-workspace";
 
 type ProductAppShellProps = {
@@ -14,20 +15,19 @@ type ProductAppShellProps = {
   accessMode: OwnerWorkspaceAccessMode;
   canAccessAdmin: boolean;
   tokenAccess?: boolean;
-  accountLabel: string;
-  accountEmail?: string;
+  accountIdentity: OwnerIdentity;
   authConfigured: boolean;
 };
 
 const websiteNavigation = [
   { key: "overview", label: "Overview", suffix: "", icon: HomeIcon },
-  { key: "website", label: "Website", suffix: "/website", icon: WebsiteIcon },
-  { key: "inbox", label: "Inbox", suffix: "/inbox", icon: InboxIcon },
-  { key: "results", label: "Results", suffix: "/results", icon: ResultsIcon },
-  { key: "business", label: "Business info", suffix: "/business", icon: BusinessIcon }
+  { key: "editor", label: "Editor", suffix: "/editor", icon: WebsiteIcon },
+  { key: "leads", label: "Leads", suffix: "/leads", icon: InboxIcon },
+  { key: "analytics", label: "Analytics", suffix: "/analytics", icon: ResultsIcon },
+  { key: "business-details", label: "Business details", suffix: "/business-details", icon: BusinessIcon }
 ] as const;
 
-const SHELL_STORAGE_KEY = "lodesta:product-app-shell:v1";
+const SHELL_STORAGE_KEY = "lodesta:product-app-shell";
 
 export function ProductAppShell({
   children,
@@ -36,8 +36,7 @@ export function ProductAppShell({
   accessMode,
   canAccessAdmin,
   tokenAccess = false,
-  accountLabel,
-  accountEmail,
+  accountIdentity,
   authConfigured
 }: ProductAppShellProps) {
   const pathname = usePathname();
@@ -47,12 +46,12 @@ export function ProductAppShell({
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const base = site ? `/workspace/${site.slug}` : "/account";
-  const websiteHref = site ? `${base}/website` : undefined;
-  const focusedEditor = Boolean(websiteHref && (pathname === websiteHref || pathname.startsWith(`${websiteHref}/`)));
+  const editorHref = site ? `${base}/editor` : undefined;
+  const focusedEditor = Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
   const compactNavigation = focusedEditor || (ready && collapsed);
   const adminPreview = accessMode === "platform_admin_preview";
-  const sessionLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : "Owner account";
-  const accountActions = productAccountActions({ base, siteSlug: site?.slug, canAccessAdmin, tokenAccess, authConfigured, accountEmail });
+  const contextLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : undefined;
+  const accountActions = productAccountActions({ base, siteSlug: site?.slug, canAccessAdmin, tokenAccess, authConfigured, accountEmail: accountIdentity.email });
 
   useEffect(() => {
     try {
@@ -137,7 +136,9 @@ export function ProductAppShell({
           ) : null}
         </div>
 
-        <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} />
+        {site
+          ? <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} />
+          : <AccountNavigation compact={compactNavigation} pathname={pathname} />}
 
         {site ? (
           <nav className="owner-workspace-nav" aria-label="Website workspace">
@@ -174,7 +175,7 @@ export function ProductAppShell({
               <span>Website settings</span>
             </Link>
           ) : null}
-          <AccountMenu label={accountLabel} sessionLabel={sessionLabel} actions={accountActions} compact={compactNavigation} />
+          <AccountMenu displayName={accountIdentity.displayName} email={accountIdentity.email} contextLabel={contextLabel} actions={accountActions} compact={compactNavigation} />
         </div>
       </aside>
 
@@ -194,7 +195,7 @@ export function ProductAppShell({
             const Icon = item.icon;
             return <Link key={item.key} href={href} aria-current={active ? "page" : undefined}><Icon /><span>{item.label}</span></Link>;
           })}
-          <MoreButton buttonRef={moreTriggerRef} open={moreOpen} active={pathname.startsWith(`${base}/business`) || pathname.startsWith(`${base}/settings`)} onClick={() => setMoreOpen((value) => !value)} />
+          <MoreButton buttonRef={moreTriggerRef} open={moreOpen} active={pathname.startsWith(`${base}/business-details`) || pathname.startsWith(`${base}/settings`)} onClick={() => setMoreOpen((value) => !value)} />
         </nav>
       ) : (
         <nav className="owner-workspace-mobile-nav product-account-mobile-nav" aria-label="Account">
@@ -210,13 +211,13 @@ export function ProductAppShell({
           <button className="owner-workspace-sheet-backdrop" type="button" aria-label="Close menu" onClick={closeMore} />
           <div ref={moreSheetRef}>
             <header><strong>{site?.name ?? "Your Lodesta account"}</strong><button type="button" onClick={closeMore} aria-label="Close menu">×</button></header>
-            {site ? <Link href={`${base}/business`} onClick={() => setMoreOpen(false)}><BusinessIcon /><span>Business info</span></Link> : null}
+            {site ? <Link href={`${base}/business-details`} onClick={() => setMoreOpen(false)}><BusinessIcon /><span>Business details</span></Link> : null}
             {site ? <Link href={`${base}/settings`} onClick={() => setMoreOpen(false)}><SettingsIcon /><span>Website settings</span></Link> : null}
             <Link href="/account" onClick={() => setMoreOpen(false)}><AllWebsitesIcon /><span>All websites</span></Link>
             <Link href="/account/onboarding" onClick={() => setMoreOpen(false)}><AddIcon /><span>Add website</span></Link>
             {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} onClick={() => setMoreOpen(false)}><WebsiteIcon /><span>{option.name}</span></Link>)}
             <section className="owner-workspace-mobile-account" aria-label="Account">
-              <AccountIdentity label={accountLabel} sessionLabel={sessionLabel} />
+              <AccountIdentity displayName={accountIdentity.displayName} email={accountIdentity.email} contextLabel={contextLabel} />
               <AccountActionList actions={accountActions} onAction={() => setMoreOpen(false)} />
             </section>
           </div>
@@ -246,6 +247,33 @@ function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerW
         <Link href="/account/onboarding"><span className="owner-workspace-site-avatar" aria-hidden="true"><AddIcon /></span><span><strong>Add website</strong><small>Create a private draft</small></span></Link>
       </div>
     </details>
+  );
+}
+
+function AccountNavigation({ compact, pathname }: { compact: boolean; pathname: string }) {
+  const items = [
+    { href: "/account", label: "Websites", icon: AllWebsitesIcon, active: pathname === "/account" },
+    { href: "/account/onboarding", label: "Add website", icon: AddIcon, active: pathname.startsWith("/account/onboarding") },
+    { href: "/account/settings", label: "Account settings", icon: AccountIcon, active: pathname === "/account/settings" }
+  ];
+  return (
+    <nav className="owner-workspace-nav product-account-navigation" aria-label="Account">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={item.active ? "page" : undefined}
+            aria-label={compact ? item.label : undefined}
+            data-sidebar-tooltip={compact ? item.label : undefined}
+          >
+            <Icon />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

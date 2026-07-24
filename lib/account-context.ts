@@ -1,15 +1,23 @@
 import { getOwnerSiteInventory } from "@/lib/owner-workspace";
+import { deriveOwnerSiteLifecycle, type OwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { getWebsiteSetupView, type WebsiteSetupView } from "@/lib/website-setups";
+import { siteCapabilityRepository } from "@/packages/site-capabilities";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform";
 
 export type AccountRelationship = {
   id: string;
   kind: "setup" | "site";
   name: string;
   detail: string;
-  statusLabel: string;
+  hostname?: string;
+  recentLabel: string;
+  thumbnailUrl?: string;
+  lifecycle: OwnerSiteLifecycle;
   nextHref: string;
-  nextLabel: string;
+  siteId?: string;
+  setupId?: string;
   setupView?: WebsiteSetupView;
 };
 
@@ -18,6 +26,7 @@ export async function getAccountContext() {
   if (!inventory.auth.user) return { ...inventory, relationships: [] as AccountRelationship[] };
 
   const setups = await platformOperationsRepository.listWebsiteSetupsForOwner(inventory.auth.user.id);
+  const queue = await sitePlatformRepository.listOperatorQueue();
   const ownedSiteIds = new Set(inventory.sites.map((site) => site.id));
   const currentSetups = setups.filter((setup) =>
     setup.status !== "canceled"
@@ -31,38 +40,89 @@ export async function getAccountContext() {
     const name = site?.name ?? hostnameLabel(setup.sourceUrl);
     return {
       id: `setup:${setup.id}`,
+      setupId: setup.id,
       kind: "setup",
       name,
+      hostname: hostnameLabel(setup.sourceUrl),
       detail: setupDetail(view),
-      statusLabel: setupStatusLabel(view),
+      recentLabel: formatRecent(setup.updatedAt, view.phase === "needs_attention" ? "Updated" : "Started"),
+      lifecycle: setupLifecycle(view, `/account/onboarding/${setup.id}`),
       nextHref: `/account/onboarding/${setup.id}`,
-      nextLabel: setupNextLabel(view),
       setupView: view
     };
   }));
 
-  const siteRelationships: AccountRelationship[] = inventory.options.map((site) => ({
-    id: `site:${site.id}`,
-    kind: "site",
-    name: site.name,
-    detail: "Website project",
-    statusLabel: site.published ? "Live" : "Draft",
-    nextHref: `/workspace/${site.slug}`,
-    nextLabel: "Open overview"
+  const sitesById = new Map(inventory.sites.map((site) => [site.id, site]));
+  const siteRelationships = await Promise.all(inventory.options.map(async (option): Promise<AccountRelationship> => {
+    const site = sitesById.get(option.id);
+    if (!site) throw new Error(`Owner inventory is missing site ${option.id}.`);
+    const [versions, runs, state, inquiries, domains] = await Promise.all([
+      sitePlatformRepository.listSiteVersions(site.id),
+      sitePlatformRepository.listRecentAgentRuns({ siteId: site.id, limit: 8 }),
+      sitePlatformRepository.getBusinessState(site.businessId),
+      siteCapabilityRepository.listInquiries(site.id),
+      platformOperationsRepository.listDomains(site.id)
+    ]);
+    const candidate = versions.find((version) => version.status === "candidate");
+    const readiness = candidate
+      ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository })
+      : undefined;
+    const lifecycle = deriveOwnerSiteLifecycle({
+      slug: site.slug,
+      site,
+      versions,
+      runs,
+      readiness,
+      attention: {
+        operatorItems: queue.filter((item) => item.siteId === site.id && ["open", "in_review"].includes(item.status)).length,
+        pendingProof: state?.proof.filter((item) => item.status === "observed").length,
+        replyInquiries: inquiries.filter((inquiry) => inquiry.status === "new" || inquiry.status === "needs_reply").length,
+        domainAttention: domains.some((domain) => domain.status === "attention_required")
+      }
+    });
+    const published = versions.find((version) => version.status === "published");
+    const recentAt = runs[0]?.completedAt ?? runs[0]?.startedAt ?? published?.publishedAt ?? site.updatedAt;
+    const recentPrefix = published?.publishedAt === recentAt ? "Published" : "Updated";
+    return {
+      id: `site:${site.id}`,
+      siteId: site.id,
+      kind: "site",
+      name: option.name,
+      hostname: hostnameLabel(site.sourceUrl ?? `https://${site.slug}.lodesta.com`),
+      detail: lifecycle.detail,
+      recentLabel: formatRecent(recentAt, recentPrefix),
+      thumbnailUrl: `/api/sites/${encodeURIComponent(site.id)}/thumbnail`,
+      lifecycle,
+      nextHref: `/workspace/${site.slug}`
+    };
   }));
 
   return { ...inventory, setups, relationships: [...setupRelationships, ...siteRelationships] };
 }
 
 function hostnameLabel(value: string) { try { return new URL(value).hostname.replace(/^www\./, ""); } catch { return "New website"; } }
-function setupStatusLabel(view: WebsiteSetupView) {
-  if (view.phase === "needs_attention") return "Needs attention";
-  if (view.phase === "building") return "Building";
-  return "Queued";
-}
-function setupNextLabel(view: WebsiteSetupView) { return view.phase === "needs_attention" ? "View next step" : "View progress"; }
 function setupDetail(view: WebsiteSetupView) {
   if (view.phase === "needs_attention") return view.message ?? "This setup needs your attention.";
   if (view.phase === "building") return "Lodesta is reading your website and building the first version.";
   return "Your website is waiting for the setup worker.";
+}
+
+function setupLifecycle(view: WebsiteSetupView, href: string): OwnerSiteLifecycle {
+  if (view.phase === "needs_attention") {
+    return { state: "needs_attention", tone: "attention", label: "Needs attention", title: "Your website setup needs attention", detail: setupDetail(view), nextAction: { href, label: "View next step" } };
+  }
+  return {
+    state: "building",
+    tone: view.phase === "building" ? "info" : "neutral",
+    label: view.phase === "building" ? "Building" : "Queued",
+    title: view.phase === "building" ? "Your website is being prepared" : "Your website setup is queued",
+    detail: setupDetail(view),
+    nextAction: { href, label: "View progress" }
+  };
+}
+
+function formatRecent(value: string, prefix: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return prefix;
+  return `${prefix} ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(date)}`;
 }

@@ -98,11 +98,13 @@ async function listAllObjects() {
 
 async function collectReferencedObjects() {
   const objects = new Map<string, ArtifactBlobLocator>();
-  const [assetRows, workspaceRows, runtimeRows, artifactRows] = await Promise.all([
+  const [assetRows, workspaceRows, runtimeRows, artifactRows, executionRows, stagedReceiptRows] = await Promise.all([
     selectAll("asset_revisions", "storage_path"),
     selectAll("site_workspace_revisions", "source_archive_key"),
     selectAll("trusted_runtime_patches", "storage_key"),
-    selectAll("site_build_artifacts", "artifact")
+    selectAll("site_build_artifacts", "artifact"),
+    selectAll("external_authoring_executions", "checkpoint_key"),
+    selectAll("staged_blob_receipts", "storage_key,consumed_at")
   ]);
   for (const row of assetRows) addObject(objects, "artifact", row.storage_path, "asset_revisions.storage_path");
   for (const row of workspaceRows) {
@@ -115,6 +117,12 @@ async function collectReferencedObjects() {
     const artifact = siteBuildArtifactSchema.parse(row.artifact);
     for (const file of artifact.files) addObject(objects, "artifact", file.storageKey, "site_build_artifacts.artifact.files.storageKey");
     for (const screenshotKey of artifact.qa.screenshotKeys) addObject(objects, "artifact", screenshotKey, "site_build_artifacts.artifact.qa.screenshotKeys");
+  }
+  for (const row of executionRows) {
+    if (row.checkpoint_key) addObject(objects, "artifact", row.checkpoint_key, "external_authoring_executions.checkpoint_key");
+  }
+  for (const row of stagedReceiptRows) {
+    if (row.consumed_at) addObject(objects, "artifact", row.storage_key, "consumed staged_blob_receipts.storage_key");
   }
   return objects.values();
 }
@@ -132,9 +140,15 @@ async function selectAll(table: string, columns: string) {
 }
 
 async function assertPlatformQuiescent() {
-  const { count, error } = await client.from("site_agent_runs").select("id", { count: "exact", head: true }).in("status", ["queued", "running"]);
-  if (error) throw new Error(`Check active site-agent runs: ${error.message}`);
-  if ((count ?? 0) > 0) throw new Error(`Artifact deletion requires a quiescent platform; ${count} site-agent run(s) are queued or running.`);
+  const [runs, external] = await Promise.all([
+    client.from("site_agent_runs").select("id", { count: "exact", head: true }).in("status", ["queued", "running", "needs_input"]),
+    client.from("external_authoring_executions").select("id", { count: "exact", head: true }).in("status", ["queued", "claimed", "needs_input", "authoring", "finalizing"])
+  ]);
+  if (runs.error) throw new Error(`Check active site-agent runs: ${runs.error.message}`);
+  if (external.error) throw new Error(`Check active external authoring executions: ${external.error.message}`);
+  if ((runs.count ?? 0) > 0 || (external.count ?? 0) > 0) {
+    throw new Error(`Artifact deletion requires a quiescent platform; ${runs.count ?? 0} site-agent and ${external.count ?? 0} external execution(s) remain active.`);
+  }
 }
 
 function addObject(objects: Map<string, ArtifactBlobLocator>, storeName: ArtifactBlobLocator["store"], value: unknown, source: string) {

@@ -14,39 +14,6 @@ export type Vertical =
   | "creative_studio"
   | "general_local";
 
-export type FieldProvenance = {
-  source: "website" | "google" | "places_api" | "owner" | "manual" | "other";
-  sourceUrl?: string;
-  confidence: number;
-  verified: boolean;
-  observedAt: string;
-};
-
-export type PublicPresenceSignal = {
-  id: string;
-  siteId: string;
-  provider: "google_places";
-  source: "places_api" | "google";
-  sourceUrl?: string;
-  placeId?: string;
-  confidence: number;
-  observedAt: string;
-  fields: {
-    name?: string;
-    phone?: string;
-    websiteUri?: string;
-    googleMapsUri?: string;
-    address?: { street?: string; city?: string; region?: string; postalCode?: string; country?: string };
-    geo?: { latitude: number; longitude: number };
-    categories?: string[];
-    hours?: Record<string, string>;
-    rating?: number;
-    userRatingCount?: number;
-  };
-  provenance: Record<string, FieldProvenance>;
-  notes: string[];
-};
-
 export type StandardCriterion = {
   id: string;
   layer: "technical_seo" | "conversion" | "trust" | "content_structure";
@@ -57,26 +24,6 @@ export type StandardCriterion = {
   businessConsequence: string;
   generationRule: string;
   auditEligible: boolean;
-};
-
-export type StandardCheckResult = {
-  criterionId: string;
-  title: string;
-  layer: StandardCriterion["layer"];
-  vertical: StandardCriterion["vertical"];
-  checkMethod: StandardCriterion["checkMethod"];
-  passed: boolean;
-  severity: "pass" | "warning" | "fail";
-  evidence: string;
-  businessConsequence: string;
-};
-
-export type StandardEvaluation = {
-  source: "crawl" | "site_model";
-  siteId?: string;
-  sourceUrl?: string;
-  score: { overall: number; max: number; percent: number; grade: "excellent" | "good" | "needs_work" | "poor" };
-  checks: StandardCheckResult[];
 };
 
 export type RenderViewportName = "desktop" | "tablet" | "mobile";
@@ -225,16 +172,4 @@ export type RenderInspectionResult = {
   metrics: Omit<RenderViewportMetrics, "viewport">;
   metricsByViewport?: Partial<Record<RenderViewportName, RenderViewportMetrics>>;
   unavailableReason?: string;
-};
-
-export type PresenceAssessment = {
-  siteId: string;
-  sourceUrl?: string;
-  standardEvaluation?: StandardEvaluation;
-  renderInspection?: RenderInspectionResult;
-  publicPresenceSignals?: PublicPresenceSignal[];
-  technicalNotes: string[];
-  visualNotes: string[];
-  brandNotes: string[];
-  publicPresenceNotes: string[];
 };

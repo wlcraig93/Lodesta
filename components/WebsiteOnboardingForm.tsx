@@ -60,7 +60,8 @@ export function WebsiteOnboardingForm() {
       body: JSON.stringify({
         sourceUrl: pendingSource.current,
         idempotencyKey: idempotencyKey.current,
-        confirmDuplicate
+        confirmDuplicate,
+        reportingTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
       })
     });
     const result = await response.json().catch(() => ({})) as {

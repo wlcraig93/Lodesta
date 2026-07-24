@@ -11,7 +11,7 @@ import {
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 
-type BuildResult = {
+export type BuildResult = {
   revision: string;
   buildDurationMs: number;
   previewPath: string;
@@ -25,6 +25,17 @@ export type RuntimeInspection<Checkpoint> = {
   diagnosticSummary: Record<string, unknown>;
   images?: Array<{ type: "input_image"; image_url: string; detail: "high" | "low" }>;
   checkpoint?: Checkpoint;
+};
+
+export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
+  schemaVersion: 1;
+  files: WorkspaceSourceFile[];
+  workspaceHash?: `sha256:${string}`;
+  sandboxRevision: string;
+  successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
+  inspection?: RuntimeInspection<Checkpoint>;
+  metrics: { builds: number; inspections: number; readCalls: number; readBytes: number; readLines: number };
+  mutatedWorkspace: boolean;
 };
 
 /**
@@ -47,17 +58,33 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   constructor(private readonly options: {
     kind: ManagerRunRequest["kind"];
     publicBuildInputId: string;
+    getPublicBuildInputId?(): string;
     toolchainVersion: string;
     sandboxImageDigest: `sha256:${string}`;
     initialFiles?: WorkspaceSourceFile[];
     initialSandboxRevision: string;
+    initialSnapshot?: WorkspaceManagerRuntimeSnapshot<Checkpoint>;
     applyBuild(files: WorkspaceSourceFile[], expectedRevision: string): Promise<BuildResult>;
     inspect(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeInspection<Checkpoint>>;
+    createImage?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
     retainDiagnostic?(kind: string, content: string): Promise<{ key: string; contentHash: `sha256:${string}`; bytes: number }>;
   }) {
-    this.sandboxRevision = options.initialSandboxRevision;
-    for (const file of options.initialFiles ?? []) this.files.set(file.path, file.content);
-    this.refreshWorkspaceHash();
+    const snapshot = options.initialSnapshot;
+    this.sandboxRevision = snapshot?.sandboxRevision ?? options.initialSandboxRevision;
+    for (const file of snapshot?.files ?? options.initialFiles ?? []) this.files.set(file.path, file.content);
+    if (snapshot) {
+      this.workspaceHash = snapshot.workspaceHash;
+      this.successfulBuild = snapshot.successfulBuild;
+      this.inspection = snapshot.inspection;
+      this.builds = snapshot.metrics.builds;
+      this.inspections = snapshot.metrics.inspections;
+      this.readCalls = snapshot.metrics.readCalls;
+      this.readBytes = snapshot.metrics.readBytes;
+      this.readLines = snapshot.metrics.readLines;
+      this.mutatedWorkspace = snapshot.mutatedWorkspace;
+    } else {
+      this.refreshWorkspaceHash();
+    }
   }
 
   async execute(call: ManagerToolCall): Promise<ManagerToolExecution> {
@@ -67,6 +94,15 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       case "write_file": return this.write(call.arguments);
       case "delete_file": return this.delete(call.arguments);
       case "apply_patch": return this.patch(call.arguments);
+      case "create_image": {
+        if (!this.options.createImage) return result({ ok: false, error: "image_generation_unavailable" });
+        const created = await this.options.createImage(call.arguments);
+        if (created.diagnosticOutput.ok !== false) {
+          this.successfulBuild = undefined;
+          this.inspection = undefined;
+        }
+        return created;
+      }
       case "build_preview": return this.build();
       case "inspect_site": return this.inspect();
       case "request_input": return this.requestInput(call.arguments);
@@ -87,6 +123,19 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   metrics() {
     return { builds: this.builds, inspections: this.inspections, readCalls: this.readCalls, readBytes: this.readBytes, readLines: this.readLines };
+  }
+
+  snapshot(): WorkspaceManagerRuntimeSnapshot<Checkpoint> {
+    return {
+      schemaVersion: 1,
+      files: this.currentFiles(),
+      workspaceHash: this.workspaceHash,
+      sandboxRevision: this.sandboxRevision,
+      successfulBuild: this.successfulBuild ? structuredClone(this.successfulBuild) : undefined,
+      inspection: this.inspection ? structuredClone(this.inspection) : undefined,
+      metrics: this.metrics(),
+      mutatedWorkspace: this.mutatedWorkspace
+    };
   }
 
   stateSummary() {
@@ -140,6 +189,9 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   private write(args: Record<string, unknown>): ManagerToolExecution {
     const file = workspaceSourceFileSchema.parse({ path: args.path, content: args.content });
+    if (this.files.get(file.path) === file.content) {
+      return result({ ok: true, unchanged: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
+    }
     this.files.set(file.path, file.content);
     this.mutated();
     return result({ ok: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
@@ -149,7 +201,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const path = workspaceSourceFileSchema.shape.path.parse(args.path);
     const existed = this.files.delete(path);
     if (existed) this.mutated();
-    return result({ ok: true, path, deleted: existed, workspaceHash: this.workspaceHash });
+    return result({ ok: true, unchanged: !existed, path, deleted: existed, workspaceHash: this.workspaceHash });
   }
 
   private patch(args: Record<string, unknown>): ManagerToolExecution {
@@ -163,9 +215,12 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       if (change.content === null) next.delete(path);
       else next.set(path, workspaceSourceFileSchema.shape.content.parse(change.content));
     }
-    this.files = next;
-    this.mutated();
-    return result({ ok: true, changedFiles: [...paths], workspaceHash: this.workspaceHash });
+    const changedFiles = [...paths].filter((path) => this.files.get(path) !== next.get(path));
+    if (changedFiles.length) {
+      this.files = next;
+      this.mutated();
+    }
+    return result({ ok: true, unchanged: changedFiles.length === 0, changedFiles, workspaceHash: this.workspaceHash });
   }
 
   private async build(): Promise<ManagerToolExecution> {
@@ -219,7 +274,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       ownerMessage: args.ownerMessage,
       workspaceHash: this.workspaceHash,
       sandboxRevision: this.sandboxRevision,
-      publicBuildInputId: this.options.publicBuildInputId,
+      publicBuildInputId: this.options.getPublicBuildInputId?.() ?? this.options.publicBuildInputId,
       toolchainVersion: this.options.toolchainVersion,
       sandboxImageDigest: this.options.sandboxImageDigest,
       inspectionHash: this.inspection.inspectionHash

@@ -29,6 +29,7 @@ import {
   type SiteAgentRun,
   type SiteAgentRunEvent,
   type SiteAgentMessage,
+  type SiteAgentPrincipal,
   type SiteAgentSession,
   type SiteBuildArtifact,
   type SiteIntent,
@@ -62,6 +63,32 @@ export type BootstrapSiteV1Input = {
   publicBuildInput: SitePublicBuildInput;
 };
 
+export type FinalizeVerifiedAuthoringInput = {
+  finalizationKey: `sha256:${string}`;
+  revision: SiteWorkspaceRevision;
+  artifact: SiteBuildArtifact;
+  version: SiteVersion;
+  run: SiteAgentRun;
+  session: SiteAgentSession;
+  outboxDocument: Record<string, unknown>;
+  previewGrantDocument?: Record<string, unknown>;
+  mediaAdoption?: {
+    expectedBusinessRevision: number;
+    assetRevisions: AssetRevision[];
+    businessState: BusinessState;
+    publicBuildInput: SitePublicBuildInput;
+  };
+  external?: {
+    executionId: string;
+    batchItemId: string;
+    claimId: string;
+    leaseGeneration: number;
+    capabilityHash: `sha256:${string}`;
+    expectedStateRevision: number;
+    receiptIds?: string[];
+  };
+};
+
 export interface SitePlatformRepository {
   bootstrapSite(input: BootstrapSiteV1Input): Promise<void>;
   createSite(site: PlatformSiteRecord): Promise<void>;
@@ -71,6 +98,8 @@ export interface SitePlatformRepository {
   getSitesByOwnerUserId(ownerUserId: string): Promise<PlatformSiteRecord[]>;
   getSitesByIds(siteIds: string[]): Promise<PlatformSiteRecord[]>;
   assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
+  disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
+  updateReportingTimezone(siteId: string, timezone: string): Promise<PlatformSiteRecord | undefined>;
   setCurrentPublicBuildInput(siteId: string, inputId: string): Promise<void>;
   saveSourceSnapshot(snapshot: SourceSnapshot): Promise<void>;
   getSourceSnapshot(id: string): Promise<SourceSnapshot | undefined>;
@@ -88,12 +117,13 @@ export interface SitePlatformRepository {
   getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinition | undefined>;
   savePublicBuildInput(input: SitePublicBuildInput): Promise<void>;
   getPublicBuildInput(id: string): Promise<SitePublicBuildInput | undefined>;
-  commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }): Promise<void>;
+  finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput): Promise<{ version: SiteVersion; run: SiteAgentRun }>;
   getWorkspaceRevision(id: string): Promise<SiteWorkspaceRevision | undefined>;
   getBuildArtifact(id: string): Promise<SiteBuildArtifact | undefined>;
   createSiteVersion(version: SiteVersion): Promise<void>;
   getSiteVersion(id: string): Promise<SiteVersion | undefined>;
   listSiteVersions(siteId: string): Promise<SiteVersion[]>;
+  markUnpublishedVersionsStale(siteId: string): Promise<void>;
   promoteSiteVersion(versionId: string, actorId: string): Promise<void>;
   saveRuntimePatch(patch: TrustedRuntimePatch): Promise<void>;
   getRuntimePatch(id: string): Promise<TrustedRuntimePatch | undefined>;
@@ -102,7 +132,7 @@ export interface SitePlatformRepository {
   getRuntimeSeries(id: string): Promise<TrustedRuntimeSeries | undefined>;
   saveAgentSession(session: SiteAgentSession): Promise<void>;
   getAgentSession(id: string): Promise<SiteAgentSession | undefined>;
-  getActiveAgentSession(siteId: string, ownerId: string): Promise<SiteAgentSession | undefined>;
+  getActiveAgentSession(siteId: string, principal: SiteAgentPrincipal): Promise<SiteAgentSession | undefined>;
   listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSession[]>;
   enqueueAgentRun(run: SiteAgentRun): Promise<SiteAgentRun>;
   saveAgentRun(run: SiteAgentRun): Promise<void>;
@@ -153,15 +183,16 @@ type LocalState = {
   controlPlaneChanges: Record<string, ControlPlaneChangeRequest>;
   operatorQueue: Record<string, OperatorQueueItem>;
   verticalDemandEvents: Record<string, VerticalDemandEvent>;
+  finalizations: Record<string, { versionId: string; runId: string }>;
 };
 
 const emptyLocalState = (): LocalState => ({
   sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {},
-  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}
+  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}, finalizations: {}
 });
 
 export class LocalSitePlatformRepository implements SitePlatformRepository {
-  private queue = Promise.resolve();
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly path = resolve(process.cwd(), ".data", "site-platform", "repository.json")) {}
 
@@ -212,6 +243,29 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       const site = store.sites[siteId];
       if (!site || (site.ownerUserId && site.ownerUserId !== ownerUserId)) return;
       site.ownerUserId = ownerUserId;
+      site.updatedAt = new Date().toISOString();
+      result = clone(site) as PlatformSiteRecord;
+    });
+    return result;
+  }
+  async disposeOwnedSite(siteId: string, ownerUserId: string) {
+    let result: PlatformSiteRecord | undefined;
+    await this.write((store) => {
+      const site = store.sites[siteId];
+      if (!site || site.ownerUserId !== ownerUserId) return;
+      site.status = "paused";
+      site.ownerUserId = undefined;
+      site.updatedAt = new Date().toISOString();
+      result = clone(site) as PlatformSiteRecord;
+    });
+    return result;
+  }
+  async updateReportingTimezone(siteId: string, timezone: string) {
+    let result: PlatformSiteRecord | undefined;
+    await this.write((store) => {
+      const site = store.sites[siteId];
+      if (!site) return;
+      site.reportingTimezone = timezone;
       site.updatedAt = new Date().toISOString();
       result = clone(site) as PlatformSiteRecord;
     });
@@ -275,10 +329,26 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   savePublicBuildInput(input: SitePublicBuildInput) { return this.insertImmutable("buildInputs", sitePublicBuildInputSchema.parse(input)); }
   async getPublicBuildInput(id: string) { return clone((await this.read()).buildInputs[id]); }
 
-  commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }) {
+  finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput) {
     return this.write((store) => {
       const revision = siteWorkspaceRevisionSchema.parse(input.revision);
       const artifact = siteBuildArtifactSchema.parse(input.artifact);
+      const requestedVersion = siteVersionSchema.parse(input.version);
+      const run = siteAgentRunSchema.parse(input.run);
+      const session = siteAgentSessionSchema.parse(input.session);
+      const adoption = input.mediaAdoption && {
+        expectedBusinessRevision: input.mediaAdoption.expectedBusinessRevision,
+        assetRevisions: input.mediaAdoption.assetRevisions.map((item) => assetRevisionSchema.parse(item)),
+        businessState: businessStateSchema.parse(input.mediaAdoption.businessState),
+        publicBuildInput: sitePublicBuildInputSchema.parse(input.mediaAdoption.publicBuildInput)
+      };
+      const prior = store.finalizations[input.finalizationKey];
+      if (prior) {
+        const version = store.versions[prior.versionId];
+        const priorRun = store.runs[prior.runId];
+        if (!version || !priorRun) throw new Error("Finalization result is incomplete.");
+        return { version: clone(version) as SiteVersion, run: clone(priorRun) as SiteAgentRun };
+      }
       if (artifact.qa.hardGate !== "passed") throw new Error("Only hard-gate-passed builds can be committed.");
       if (artifact.siteId !== revision.siteId || artifact.workspaceRevisionId !== revision.id) {
         throw new Error("Verified artifact and workspace revision do not match.");
@@ -293,10 +363,46 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       if ((site.currentWorkspaceRevisionId ?? undefined) !== (revision.parentRevisionId ?? undefined)) {
         throw new Error("stale_parent_revision");
       }
+      if (adoption) {
+        const currentState = store.businessStates[adoption.businessState.businessId];
+        if (
+          !currentState ||
+          currentState.revision !== adoption.expectedBusinessRevision ||
+          adoption.businessState.revision !== adoption.expectedBusinessRevision + 1 ||
+          adoption.publicBuildInput.businessStateRevision !== adoption.businessState.revision ||
+          adoption.publicBuildInput.id !== artifact.publicBuildInputId ||
+          requestedVersion.publicBuildInputId !== adoption.publicBuildInput.id
+        ) {
+          throw new Error("stale_generated_media_adoption");
+        }
+        for (const asset of adoption.assetRevisions) {
+          if (store.assetRevisions[asset.id]) throw new Error("Generated asset revision is not immutable.");
+          store.assetRevisions[asset.id] = asset;
+        }
+        store.businessStates[adoption.businessState.businessId] = adoption.businessState;
+        store.buildInputs[adoption.publicBuildInput.id] = adoption.publicBuildInput;
+        for (const candidate of Object.values(store.versions)) {
+          if (candidate.siteId === site.id && candidate.status === "candidate") {
+            candidate.status = "stale";
+            candidate.staleReason = "stale_input";
+          }
+        }
+        site.currentPublicBuildInputId = adoption.publicBuildInput.id;
+      }
       store.workspaceRevisions[revision.id] = revision;
       store.artifacts[artifact.id] = artifact;
+      const version = siteVersionSchema.parse({
+        ...requestedVersion,
+        number: Math.max(0, ...Object.values(store.versions).filter((item) => item.siteId === site.id).map((item) => item.number)) + 1
+      });
+      if (store.versions[version.id]) throw new Error("Site versions are immutable.");
+      store.versions[version.id] = version;
+      store.runs[run.id] = run;
+      store.sessions[session.id] = session;
+      store.finalizations[input.finalizationKey] = { versionId: version.id, runId: run.id };
       site.currentWorkspaceRevisionId = revision.id;
       site.updatedAt = revision.createdAt;
+      return { version: clone(version) as SiteVersion, run: clone(run) as SiteAgentRun };
     });
   }
   async getWorkspaceRevision(id: string) { return clone((await this.read()).workspaceRevisions[id]); }
@@ -306,6 +412,15 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async getSiteVersion(id: string) { return clone((await this.read()).versions[id]); }
   async listSiteVersions(siteId: string) {
     return Object.values((await this.read()).versions).filter((item) => item.siteId === siteId).sort((a, b) => b.number - a.number).map((item) => clone(item) as SiteVersion);
+  }
+  markUnpublishedVersionsStale(siteId: string) {
+    return this.write((store) => {
+      for (const version of Object.values(store.versions)) {
+        if (version.siteId !== siteId || version.status !== "candidate") continue;
+        version.status = "stale";
+        version.staleReason = "stale_input";
+      }
+    });
   }
   promoteSiteVersion(versionId: string, actorId: string) {
     return this.write((store) => {
@@ -318,9 +433,6 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       const intent = Object.values(store.intents).find((item) => item.siteId === target.siteId);
       if (!input || !state || !intent || input.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, input.intent)) {
         throw new Error("stale_candidate");
-      }
-      if (input.business.assets.some((asset) => !["platform_cleared", "owner_attested"].includes(asset.rightsStatus))) {
-        throw new Error("candidate_contains_unpublishable_media");
       }
       const prior = Object.values(store.versions).find((item) => item.siteId === target.siteId && item.status === "published");
       if (prior) prior.status = "superseded";
@@ -353,8 +465,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return this.write((store) => { store.sessions[session.id] = siteAgentSessionSchema.parse(session); });
   }
   async getAgentSession(id: string) { return clone((await this.read()).sessions[id]); }
-  async getActiveAgentSession(siteId: string, ownerId: string) {
-    return clone(Object.values((await this.read()).sessions).find((session) => session.siteId === siteId && session.ownerId === ownerId && ["active", "checkpointed", "rotating"].includes(session.status)));
+  async getActiveAgentSession(siteId: string, principal: SiteAgentPrincipal) {
+    return clone(Object.values((await this.read()).sessions).find((session) => session.siteId === siteId
+      && session.principal.kind === principal.kind
+      && session.principal.id === principal.id
+      && ["active", "checkpointed", "rotating"].includes(session.status)));
   }
   async listExpiredAgentSessions(expiredBefore: string, limit: number) {
     return Object.values((await this.read()).sessions)
@@ -367,11 +482,15 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
   async enqueueAgentRun(run: SiteAgentRun) {
     const value = siteAgentRunSchema.parse(run);
-    const state = await this.read();
-    const active = Object.values(state.runs).filter((candidate) =>
-      candidate.requestedBy === value.requestedBy && ["queued", "running"].includes(candidate.status)
-    ).length;
-    if (active >= 3) throw new Error("concurrent_project_limit");
+    if (value.executionDriver === "responses_api") {
+      const state = await this.read();
+      const active = Object.values(state.runs).filter((candidate) =>
+        candidate.executionDriver === "responses_api"
+        && candidate.requestedBy === value.requestedBy
+        && ["queued", "running"].includes(candidate.status)
+      ).length;
+      if (active >= 3) throw new Error("concurrent_project_limit");
+    }
     await this.saveAgentRun(value);
     return value;
   }
@@ -380,10 +499,10 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     let claimed: SiteAgentRun | undefined;
     await this.write((store) => {
       const current = store.runs[runId];
-      if (!current || current.status !== "queued") return;
+      if (!current || current.status !== "queued" || current.executionDriver !== "responses_api") return;
       const now = new Date().toISOString();
       if (store.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) return;
-      if (Object.values(store.runs).filter((run) => run.status === "running").length >= 4) return;
+      if (Object.values(store.runs).filter((run) => run.status === "running" && run.executionDriver === "responses_api").length >= 4) return;
       claimed = siteAgentRunSchema.parse({ ...current, status: "running", stage: "authoring", executionNumber: current.executionNumber + 1, heartbeatAt: now });
       store.runs[runId] = claimed;
     });
@@ -407,11 +526,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return (await this.listRecentAgentRuns(input)).map((run) => ({ id: run.id, schemaVersion: run.schemaVersion, run }));
   }
   async listQueuedAgentRuns(limit: number) {
-    return Object.values((await this.read()).runs).filter((run) => run.status === "queued")
+    return Object.values((await this.read()).runs).filter((run) => run.status === "queued" && run.executionDriver === "responses_api")
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
-    return Object.values((await this.read()).runs).filter((run) => run.status === "running" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
+    return Object.values((await this.read()).runs).filter((run) => run.status === "running" && run.executionDriver === "responses_api" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
       .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
   saveAgentRunEvents(events: SiteAgentRunEvent[]) {
@@ -529,14 +648,15 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return raw ? { ...emptyLocalState(), ...JSON.parse(raw) as LocalState } : emptyLocalState();
   }
 
-  private write(operation: (state: LocalState) => void | Promise<void>) {
+  private write<T>(operation: (state: LocalState) => T | Promise<T>) {
     const next = this.queue.then(async () => {
       const state = await this.read();
-      await operation(state);
+      const result = await operation(state);
       await mkdir(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${process.pid}.tmp`;
       await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
       await rename(temporary, this.path);
+      return result;
     });
     this.queue = next.catch(() => undefined);
     return next;
@@ -605,6 +725,27 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return row ? siteFromRow(row) : undefined;
   }
+  async disposeOwnedSite(siteId: string, ownerUserId: string) {
+    const row = await requireData<Record<string, unknown> | null>(
+      this.client.rpc("dispose_owned_site", {
+        target_site_id: siteId,
+        target_owner_user_id: ownerUserId
+      }).maybeSingle(),
+      "Dispose owned site"
+    );
+    return row ? siteFromRow(row) : undefined;
+  }
+  async updateReportingTimezone(siteId: string, timezone: string) {
+    const row = await requireData<Record<string, unknown> | null>(
+      this.client.from("sites")
+        .update({ reporting_timezone: timezone, updated_at: new Date().toISOString() })
+        .eq("id", siteId)
+        .select("*")
+        .maybeSingle(),
+      "Update reporting timezone"
+    );
+    return row ? siteFromRow(row) : undefined;
+  }
   async setCurrentPublicBuildInput(siteId: string, inputId: string) {
     const input = await this.getPublicBuildInput(inputId);
     if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
@@ -643,7 +784,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       schema_version: value.schemaVersion, content_hash: value.contentHash, storage_path: value.storageKey,
       public_url: value.publicUrl, mime_type: value.mimeType, bytes: value.bytes,
       width: value.width, height: value.height, provenance: value.provenance,
-      rights_status: value.rightsStatus, attestation: value.attestation, created_at: value.createdAt
+      origin: value.origin, created_at: value.createdAt
     }), "Save asset revision");
   }
   async getAssetRevision(id: string) {
@@ -652,8 +793,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       schemaVersion: row.schema_version, id: row.id, assetId: row.asset_id, businessId: row.business_id,
       contentHash: row.content_hash, storageKey: row.storage_path, publicUrl: row.public_url ?? undefined,
       mimeType: row.mime_type, bytes: row.bytes, width: row.width ?? undefined, height: row.height ?? undefined,
-      provenance: row.provenance ?? undefined, rightsStatus: row.rights_status,
-      attestation: row.attestation ?? undefined, createdAt: row.created_at
+      origin: row.origin, provenance: row.provenance, createdAt: row.created_at
     }) : undefined;
   }
   async getAssetRevisionByStorageKey(storageKey: string) {
@@ -662,8 +802,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       schemaVersion: row.schema_version, id: row.id, assetId: row.asset_id, businessId: row.business_id,
       contentHash: row.content_hash, storageKey: row.storage_path, publicUrl: row.public_url ?? undefined,
       mimeType: row.mime_type, bytes: row.bytes, width: row.width ?? undefined, height: row.height ?? undefined,
-      provenance: row.provenance ?? undefined, rightsStatus: row.rights_status,
-      attestation: row.attestation ?? undefined, createdAt: row.created_at
+      origin: row.origin, provenance: row.provenance, createdAt: row.created_at
     }) : undefined;
   }
   async isAssetRevisionPublic(id: string) {
@@ -746,16 +885,28 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     await insertRefs(this.client, "site_public_build_input_forms", "input_id", value.id, "form_definition_id", value.forms.map((form) => form.id));
   }
   async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputSchema); }
-  async commitVerifiedBuild(input: { revision: SiteWorkspaceRevision; artifact: SiteBuildArtifact }) {
+  async finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput) {
     const revision = siteWorkspaceRevisionSchema.parse(input.revision);
     const artifact = siteBuildArtifactSchema.parse(input.artifact);
-    if (artifact.qa.hardGate !== "passed" || artifact.siteId !== revision.siteId || artifact.workspaceRevisionId !== revision.id) {
-      throw new Error("Verified artifact and workspace revision do not match.");
-    }
-    await requireData(this.client.rpc("commit_verified_site_build", {
+    const version = siteVersionSchema.parse(input.version);
+    const run = siteAgentRunSchema.parse(input.run);
+    const session = siteAgentSessionSchema.parse(input.session);
+    const result = await requireData<{ version: unknown; run: unknown }>(this.client.rpc("finalize_verified_authoring", {
+      target_finalization_key: input.finalizationKey,
       revision_document: revision,
-      artifact_document: artifact
-    }), "Commit verified site build");
+      artifact_document: artifact,
+      version_document: version,
+      run_document: run,
+      session_document: session,
+      outbox_document: input.outboxDocument,
+      preview_grant_document: input.previewGrantDocument,
+      external_document: input.external ?? null,
+      media_adoption_document: input.mediaAdoption ?? null
+    }), "Finalize verified authoring");
+    return {
+      version: siteVersionSchema.parse(result.version),
+      run: siteAgentRunSchema.parse(result.run)
+    };
   }
   async getWorkspaceRevision(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("site_workspace_revisions").select("*").eq("id", id).maybeSingle(), "Load workspace revision");
@@ -795,6 +946,20 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(siteVersionFromRow);
   }
+  async markUnpublishedVersionsStale(siteId: string) {
+    const candidates = (await this.listSiteVersions(siteId)).filter((version) => version.status === "candidate");
+    for (const version of candidates) {
+      const stale = siteVersionSchema.parse({ ...version, status: "stale", staleReason: "stale_input" });
+      await requireOk(
+        this.client.from("site_versions").update({
+          status: "stale",
+          stale_reason: "stale_input",
+          version: stale
+        }).eq("id", stale.id).eq("status", "candidate"),
+        "Mark site version stale"
+      );
+    }
+  }
   async promoteSiteVersion(versionId: string, actorId: string) {
     await requireData(this.client.rpc("promote_site_version", { target_version_id: versionId, actor_id: actorId }), "Promote site version");
   }
@@ -826,7 +991,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   async saveAgentSession(session: SiteAgentSession) {
     const value = siteAgentSessionSchema.parse(session);
     await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_sessions").upsert({
-        id: value.id, site_id: value.siteId, owner_id: value.ownerId, schema_version: value.schemaVersion,
+        id: value.id, site_id: value.siteId, principal_kind: value.principal.kind, principal_id: value.principal.id, schema_version: value.schemaVersion,
         status: value.status, current_workspace_revision_id: value.currentWorkspaceRevisionId ?? null,
         public_build_input_id: value.publicBuildInputId, sandbox_provider: value.sandboxProvider,
         sandbox_id: value.sandboxId ?? null, lease_token_hash: value.leaseTokenHash,
@@ -840,9 +1005,10 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("site_agent_sessions").select("*").eq("id", id).maybeSingle(), "Load agent session");
     return row ? sessionFromRow(row) : undefined;
   }
-  async getActiveAgentSession(siteId: string, ownerId: string) {
+  async getActiveAgentSession(siteId: string, principal: SiteAgentPrincipal) {
     const row = await requireData<Record<string, unknown> | null>(
-      this.client.from("site_agent_sessions").select("*").eq("site_id", siteId).eq("owner_id", ownerId)
+      this.client.from("site_agent_sessions").select("*").eq("site_id", siteId)
+        .eq("principal_kind", principal.kind).eq("principal_id", principal.id)
         .in("status", ["active", "checkpointed", "rotating"]).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
       "Load active agent session"
     );
@@ -865,7 +1031,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs").upsert({
         id: value.id, session_id: value.sessionId, site_id: value.siteId, schema_version: value.schemaVersion,
         kind: value.kind, status: value.status, exact_parent_revision_id: value.exactParentRevisionId,
-        output_revision_id: value.outputRevisionId, model_id: value.modelId, run: value,
+        output_revision_id: value.outputRevisionId, execution_driver: value.executionDriver,
+        api_provider: value.apiProvider, model_id: value.modelId, run: value,
         started_at: value.startedAt, completed_at: value.completedAt
       }), "Save agent run"), "Save agent run");
   }
@@ -913,14 +1080,14 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async listQueuedAgentRuns(limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs").select("run").eq("status", "queued").order("started_at").limit(limit),
+      this.client.from("site_agent_runs").select("run").eq("status", "queued").eq("execution_driver", "responses_api").order("started_at").limit(limit),
       "List queued site agent runs"
     );
     return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
+      this.client.from("site_agent_runs").select("run").eq("status", "running").eq("execution_driver", "responses_api").order("started_at").limit(Math.max(limit, 100)),
       "List running site agent runs"
     );
     return rows.map((row) => siteAgentRunSchema.parse(row.run))
@@ -937,10 +1104,19 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       name: value.name,
       status: value.status,
       turn_index: value.turnIndex,
+      api_provider: value.apiProvider,
       model_id: value.modelId,
+      served_model_id: value.servedModelId,
+      upstream_provider: value.upstreamProvider,
+      provider_request_id: value.providerRequestId,
       input_tokens: value.inputTokens,
       cached_input_tokens: value.cachedInputTokens,
+      reasoning_tokens: value.reasoningTokens,
       output_tokens: value.outputTokens,
+      cost_usd: value.costUsd,
+      cost_source: value.costSource,
+      upstream_inference_cost_usd: value.upstreamInferenceCostUsd,
+      model_duration_ms: value.modelDurationMs,
       summary: value.summary,
       payload_ref: value.payloadRef,
       payload_hash: value.payloadHash,
@@ -1161,7 +1337,8 @@ function siteFromRow(row: Record<string, unknown>) {
   return platformSiteRecordSchema.parse({
     id: row.id, ownerUserId: row.owner_user_id ?? undefined, sourceUrl: row.source_url ?? undefined,
     normalizedSource: row.normalized_source ?? undefined, businessId: row.business_id, slug: row.slug,
-    status: row.status, publishedVersionId: row.published_version_id ?? undefined,
+    status: row.status, reportingTimezone: row.reporting_timezone ?? "UTC",
+    publishedVersionId: row.published_version_id ?? undefined,
     currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     currentPublicBuildInputId: row.current_public_build_input_id ?? undefined,
     createdAt: row.created_at, updatedAt: row.updated_at ?? row.created_at
@@ -1206,7 +1383,8 @@ function runtimeSeriesFromRow(row: Record<string, unknown>) {
 
 function sessionFromRow(row: Record<string, unknown>) {
   return siteAgentSessionSchema.parse({
-    schemaVersion: row.schema_version, id: row.id, siteId: row.site_id, ownerId: row.owner_id,
+    schemaVersion: row.schema_version, id: row.id, siteId: row.site_id,
+    principal: { kind: row.principal_kind, id: row.principal_id },
     status: row.status, currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     publicBuildInputId: row.public_build_input_id, sandboxProvider: row.sandbox_provider,
     sandboxId: row.sandbox_id ?? undefined,
@@ -1266,10 +1444,19 @@ function runEventFromRow(row: Record<string, unknown>) {
     name: row.name,
     status: row.status,
     turnIndex: row.turn_index ?? undefined,
+    apiProvider: row.api_provider ?? undefined,
     modelId: row.model_id ?? undefined,
+    servedModelId: row.served_model_id ?? undefined,
+    upstreamProvider: row.upstream_provider ?? undefined,
+    providerRequestId: row.provider_request_id ?? undefined,
     inputTokens: row.input_tokens ?? undefined,
     cachedInputTokens: row.cached_input_tokens ?? undefined,
+    reasoningTokens: row.reasoning_tokens ?? undefined,
     outputTokens: row.output_tokens ?? undefined,
+    costUsd: row.cost_usd === null || row.cost_usd === undefined ? undefined : Number(row.cost_usd),
+    costSource: row.cost_source ?? undefined,
+    upstreamInferenceCostUsd: row.upstream_inference_cost_usd === null || row.upstream_inference_cost_usd === undefined ? undefined : Number(row.upstream_inference_cost_usd),
+    modelDurationMs: row.model_duration_ms === null || row.model_duration_ms === undefined ? undefined : Number(row.model_duration_ms),
     summary: row.summary ?? {},
     payloadRef: row.payload_ref ?? undefined,
     payloadHash: row.payload_hash ?? undefined,

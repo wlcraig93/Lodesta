@@ -2,10 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { isSupportedSiteAgentModel } from "@/packages/site-agent/run-policy";
+import { siteAgentApiProviderSchema } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "./supabase/client";
 
 export const SITE_AUTHORING_MODEL_SETTING_KEY = "site_authoring_models";
 export const SITE_AUTHORING_MODEL_DEFAULTS = {
+  siteAgentProvider: "openai",
   siteAgentModel: "gpt-5.6-sol",
   ingestionModel: "gpt-5.6-sol"
 } as const;
@@ -13,12 +15,25 @@ export const SITE_AUTHORING_MODEL_DEFAULTS = {
 const cacheTtlMs = 60_000;
 const lkgMaxAgeMs = 10 * 60_000;
 const localSettingsFile = join(process.cwd(), ".data", "operator-settings.json");
-const modelSlugSchema = z.string().trim().min(1).regex(/^[A-Za-z0-9._:-]+$/, "Model must be a valid model slug.");
-const settingsSchema = z.object({
-  siteAgentModel: modelSlugSchema.refine(isSupportedSiteAgentModel, "Site agent model must have a configured pricing entry."),
+const modelSlugSchema = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._~:/-]+$/, "Model must be a valid model slug.");
+const settingsObjectSchema = z.object({
+  siteAgentProvider: siteAgentApiProviderSchema,
+  siteAgentModel: modelSlugSchema,
   ingestionModel: modelSlugSchema
 }).strict();
-const updateSchema = settingsSchema.extend({ version: z.coerce.number().int().min(0) });
+function refineSettings(
+  value: z.infer<typeof settingsObjectSchema>,
+  context: z.RefinementCtx
+) {
+  if (value.siteAgentProvider === "openai" && !isSupportedSiteAgentModel(value.siteAgentModel)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "Direct OpenAI site agent models must have a configured pricing entry." });
+  }
+  if (value.siteAgentProvider === "openrouter" && !value.siteAgentModel.includes("/")) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "OpenRouter models must use a provider-qualified slug such as openai/gpt-5." });
+  }
+}
+const settingsSchema = settingsObjectSchema.superRefine(refineSettings);
+const updateSchema = settingsObjectSchema.extend({ version: z.coerce.number().int().min(0) }).superRefine(refineSettings);
 
 export type SiteAuthoringModelSettings = z.infer<typeof settingsSchema>;
 export type SiteAuthoringModelSettingsSource = "db" | "file" | "cache" | "lkg" | "default";

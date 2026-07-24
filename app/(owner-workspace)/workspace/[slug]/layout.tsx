@@ -21,8 +21,7 @@ export default async function SiteWorkspaceLayout({ children, params }: { childr
       accessMode={context.accessMode}
       canAccessAdmin={context.canAccessAdmin}
       tokenAccess={context.tokenAccess}
-      accountLabel={context.accountLabel}
-      accountEmail={context.accountEmail}
+      accountIdentity={context.accountIdentity}
       authConfigured={context.authConfigured}
     >
       {children}

@@ -2,12 +2,6 @@ import { createHash } from "node:crypto";
 import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
 
-export type SourceTextToken = {
-  value: string;
-  displayStart: number;
-  displayEnd: number;
-};
-
 export type SourceTextBlock = {
   id: string;
   sourceUrl: string;
@@ -15,8 +9,12 @@ export type SourceTextBlock = {
   containerId: string;
   order: number;
   displayText: string;
-  canonicalTokens: SourceTextToken[];
 };
+
+export function canonicalSourceTokens(value: string) {
+  return [...value.normalize("NFKC").toLocaleLowerCase("en-US").matchAll(/[\p{L}\p{N}]+/gu)]
+    .map((match) => ({ value: match[0] }));
+}
 
 const semanticBlockTags = new Set([
   "address",
@@ -64,35 +62,9 @@ export function extractSourceTextBlocks(html: string, sourceUrl: string): Source
         sourcePageHash,
         containerId,
         order,
-        displayText,
-        canonicalTokens: canonicalSourceTokens(displayText)
+        displayText
       };
     });
-}
-
-export function canonicalSourceTokens(displayText: string): SourceTextToken[] {
-  const normalized = normalizeWithDisplayOffsets(displayText);
-  const tokens: SourceTextToken[] = [];
-  for (const match of normalized.value.matchAll(/[\p{L}\p{N}]+/gu)) {
-    const normalizedStart = match.index;
-    const normalizedEnd = normalizedStart + match[0].length;
-    const first = normalized.offsets[normalizedStart];
-    const last = normalized.offsets[normalizedEnd - 1];
-    if (!first || !last) continue;
-    tokens.push({
-      value: match[0],
-      displayStart: first.start,
-      displayEnd: last.end
-    });
-  }
-  return tokens;
-}
-
-export function reconstructSourceTokenSpan(block: Pick<SourceTextBlock, "canonicalTokens" | "displayText">, startToken: number, endToken: number) {
-  const first = block.canonicalTokens[startToken];
-  const last = block.canonicalTokens[endToken - 1];
-  if (!first || !last || startToken < 0 || endToken <= startToken) return undefined;
-  return block.displayText.slice(first.displayStart, last.displayEnd);
 }
 
 function visit(nodes: AnyNode[], insideIgnoredElement: boolean, collect: (element: Element) => void) {
@@ -139,30 +111,6 @@ function elementPath(element: Element) {
 
 function normalizeDisplayText(value: string) {
   return value.replace(/\s+/gu, " ").trim();
-}
-
-function normalizeWithDisplayOffsets(displayText: string) {
-  let value = "";
-  const offsets: Array<{ start: number; end: number }> = [];
-  let displayOffset = 0;
-  for (const character of displayText) {
-    const displayStart = displayOffset;
-    displayOffset += character.length;
-    const canonical = canonicalCharacter(character);
-    value += canonical;
-    for (let index = 0; index < canonical.length; index += 1) {
-      offsets.push({ start: displayStart, end: displayOffset });
-    }
-  }
-  return { value, offsets };
-}
-
-function canonicalCharacter(value: string) {
-  return value
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-    .replace(/[\u2010-\u2015]/g, "-");
 }
 
 function hash(value: string) {

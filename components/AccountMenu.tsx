@@ -12,13 +12,15 @@ export type AccountAction =
   | { id: string; kind: "note"; label: string; section: AccountActionSection };
 
 export function AccountMenu({
-  label,
-  sessionLabel,
+  displayName,
+  email,
+  contextLabel,
   actions,
   compact = false
 }: {
-  label: string;
-  sessionLabel: string;
+  displayName: string;
+  email?: string;
+  contextLabel?: string;
   actions: AccountAction[];
   compact?: boolean;
 }) {
@@ -57,19 +59,19 @@ export function AccountMenu({
         aria-haspopup="true"
         aria-controls={popoverId}
         aria-expanded={open}
-        aria-label={compact ? `Open account menu for ${label}` : undefined}
+        aria-label={compact ? `Open account menu for ${displayName}` : undefined}
         data-sidebar-tooltip={compact ? "Account" : undefined}
         onClick={() => setOpen((current) => !current)}
       >
-        <AccountAvatar label={label} />
+        <AccountAvatar label={displayName} />
         <span className="account-menu-copy">
-          <strong>{label}</strong>
-          <small>{sessionLabel}</small>
+          <strong>{displayName}</strong>
+          {contextLabel ? <small>{contextLabel}</small> : null}
         </span>
       </button>
       {open ? (
         <section className="account-menu-popover" id={popoverId} aria-label="Account options">
-          <AccountIdentity label={label} sessionLabel={sessionLabel} />
+          <AccountIdentity displayName={displayName} email={email} contextLabel={contextLabel} />
           <AccountActionList actions={actions} onAction={() => setOpen(false)} />
         </section>
       ) : null}
@@ -77,13 +79,22 @@ export function AccountMenu({
   );
 }
 
-export function AccountIdentity({ label, sessionLabel }: { label: string; sessionLabel: string }) {
+export function AccountIdentity({
+  displayName,
+  email,
+  contextLabel
+}: {
+  displayName: string;
+  email?: string;
+  contextLabel?: string;
+}) {
   return (
     <div className="account-menu-identity">
-      <AccountAvatar label={label} />
+      <AccountAvatar label={displayName} />
       <div>
-        <strong>{label}</strong>
-        <span>{sessionLabel}</span>
+        <strong>{displayName}</strong>
+        {email || contextLabel ? <span>{email ?? contextLabel}</span> : null}
+        {email && contextLabel ? <small>{contextLabel}</small> : null}
       </div>
     </div>
   );

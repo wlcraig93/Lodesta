@@ -375,26 +375,16 @@ Lodesta default:
 - Do not promise organic SERP review stars for self-serving local-business review markup.
 - Use visible reviews for user trust, not as a rich-snippet hack.
 
-### Google Places API And Attribution
+### Third-Party Web Research
 
-Google Places Place Details can provide rating, reviews, address, phone, website, hours, and other business facts. Usage must follow field-mask, attribution, display, and caching requirements.
-
-Sources:
-
-- [Google Places API Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details)
-- [Google Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies)
-- [Places UI Kit overview](https://developers.google.com/maps/documentation/javascript/places-ui-kit/overview?hl=en)
-- [Google Maps Platform pricing](https://developers.google.com/maps/billing-and-pricing/pricing?hl=en)
+Lodesta may use cited web research to understand reputation patterns, market context, and the business’s broader public presence. Research context guides design and authoring but never creates publishable facts automatically.
 
 Lodesta default:
 
-- Prefer Places UI Kit Query for live Google-powered rating/review display.
-- Use custom Places API rendering only when the customer tier and conversion value justify the higher cost and implementation policy surface.
-- Fetch only fields needed for custom rendered features.
-- Display required Google attribution.
-- Respect caching and display rules.
-- Store provenance for all externally sourced facts.
-- See [Social Proof Agent Brief](social-proof-agent-brief.md) before implementing review or rating modules.
+- Keep consulted URLs and provider/model provenance.
+- Keep first-party facts, owner-confirmed facts, and third-party observations distinct.
+- Require canonical facts or confirmed proof before rendering sensitive claims.
+- Do not copy third-party reviews or media into a public site without an explicit rights and verification path.
 
 ## Maps, Directions, Hours, And Local Action
 
@@ -861,12 +851,6 @@ Lodesta should not ship:
 - [Google Local Business structured data](https://developers.google.com/search/docs/appearance/structured-data/local-business)
 - [Google Maps URLs](https://developers.google.com/maps/documentation/urls/get-started)
 - [Google mobile-first indexing best practices](https://developers.google.com/search/docs/crawling-indexing/mobile/mobile-sites-mobile-first-indexing)
-- [Google Places API Place Details](https://developers.google.com/maps/documentation/places/web-service/place-details)
-- [Google Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies)
-- [Google Places UI Kit overview](https://developers.google.com/maps/documentation/javascript/places-ui-kit/overview?hl=en)
-- [Google Places UI Kit Place Details Elements](https://developers.google.com/maps/documentation/javascript/places-ui-kit/place-details)
-- [Google Places UI Kit custom styling](https://developers.google.com/maps/documentation/javascript/places-ui-kit/custom-styling)
-- [Google Maps Platform pricing](https://developers.google.com/maps/billing-and-pricing/pricing?hl=en)
 - [Google review snippet structured data rules](https://developers.google.com/search/docs/appearance/structured-data/review-snippet?hl=en)
 - [Google SEO Starter Guide](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)
 - [Google spam policies](https://developers.google.com/search/docs/essentials/spam-policies)

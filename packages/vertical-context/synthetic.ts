@@ -3,7 +3,7 @@ import type { VerticalContextModule } from "@/packages/site-contracts";
 export const syntheticContextModule: VerticalContextModule = {
   schemaVersion: 1,
   id: "synthetic_test_vertical",
-  version: "synthetic-v1",
+  version: "synthetic@sha256:b3cc0475bb78a5026098858e9889acf666d31062d513d303314eca31d36e72f2",
   status: "test_only",
   aliases: ["synthetic test module"],
   classificationSignals: ["Appears only in architecture tests."],

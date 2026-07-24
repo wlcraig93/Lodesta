@@ -70,6 +70,6 @@ export async function getWebsiteSetupView(setup: WebsiteSetup): Promise<WebsiteS
     canRetry: isRetriableWebsiteSetupFailure(setup),
     canCancel: setup.status !== "canceled" && !site?.publishedVersionId,
     message: setup.status === "failed" ? websiteSetupOwnerMessage(setup.failureCode) : undefined,
-    openPath: site ? `/workspace/${site.slug}/website` : undefined
+    openPath: site ? `/workspace/${site.slug}/editor` : undefined
   };
 }

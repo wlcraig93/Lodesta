@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       changedBy,
       attemptedValue: body,
       error: parsed.issues.join("; ")
-    }).catch((error) => console.warn(`Unable to audit rejected OpenAI settings save: ${error instanceof Error ? error.message : String(error)}`));
+    }).catch((error) => console.warn(`Unable to audit rejected model settings save: ${error instanceof Error ? error.message : String(error)}`));
     return NextResponse.json({ error: "Invalid agent model settings", issues: parsed.issues }, { status: 400 });
   }
 

@@ -17,9 +17,8 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
   const stale = records.filter((record) => !record.run);
   const monitoredRuns = runs.filter((run) => ["succeeded", "failed", "cancelled"].includes(run.status)).slice(0, 20);
   const monitoredEvents = await Promise.all(monitoredRuns.map((run) => sitePlatformRepository.listAgentRunEvents(run.id, { limit: 500 })));
-  const configuredCosts = monitoredRuns
-    .filter((run) => run.usage.costEstimateStatus === "configured")
-    .map((run) => run.usage.estimatedCostUsd)
+  const knownCosts = monitoredRuns
+    .flatMap((run) => run.usage.kind === "model_reported" && run.usage.costSource !== "unavailable" ? [run.usage.costUsd] : [])
     .sort((left, right) => left - right);
   const modelRequests = monitoredEvents.reduce(
     (total, events) => total + events.filter((event) => event.kind === "model_request").length,
@@ -35,8 +34,8 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
     <AdminPageHeader eyebrow="Debug" title="Agent activity" description="Inspect manager turns, tools, usage, visual review, failures, and candidate output." />
     <section className="metric-row">
       <Metric label={`Success rate · last ${monitoredRuns.length}`} value={monitoredRuns.length ? `${Math.round(monitoredRuns.filter((run) => run.status === "succeeded").length / monitoredRuns.length * 100)}%` : "—"} />
-      <Metric label="Median cost" value={formatPercentile(configuredCosts, 0.5)} />
-      <Metric label="P95 cost" value={formatPercentile(configuredCosts, 0.95)} />
+      <Metric label="Median cost" value={formatPercentile(knownCosts, 0.5)} />
+      <Metric label="P95 cost" value={formatPercentile(knownCosts, 0.95)} />
       <Metric label="Model requests" value={monitoredRuns.length ? `${modelRequests} · ${(modelRequests / monitoredRuns.length).toFixed(1)}/run` : "—"} />
     </section>
     {failureCounts.length ? <section className="panel"><strong>Terminal failures · last 20</strong><p className="muted">{failureCounts.map(([code, count]) => `${code}: ${count}`).join(" · ")}</p></section> : null}
@@ -44,8 +43,10 @@ export default async function AdminRunsPage({ searchParams }: { searchParams: Pr
     <section className="panel admin-section"><table className="data-table"><thead><tr><th>Status</th><th>Run</th><th>Site</th><th>Model</th><th>Usage</th><th>Started</th></tr></thead><tbody>{runs.map((run) => <tr key={run.id}>
       <td><span className={`badge status-${run.status}`}>{run.status}</span><small>{run.stage}</small></td>
       <td><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><small>{run.id}</small>{run.failureCode ? <small className="error-text">{run.failureCategory} · {run.failureCode}</small> : null}{run.failureReason ? <small className="error-text">{run.failureReason}</small> : null}</td>
-      <td>{siteById.get(run.siteId)?.slug ?? run.siteId}</td><td>{run.modelId}</td>
-      <td>{(run.usage.inputTokens + run.usage.outputTokens).toLocaleString()} tokens<small>{run.usage.cachedInputTokens.toLocaleString()} cached · {formatCost(run.usage.estimatedCostUsd, run.usage.costEstimateStatus)}</small><small>{formatDuration(run.usage.durationMs)} model time · execution {run.executionNumber}</small></td>
+      <td>{siteById.get(run.siteId)?.slug ?? run.siteId}</td><td>{run.modelId ?? run.externalProvenance?.clientReportedModelId ?? "Codex"}<small>{run.apiProvider ?? run.executionDriver}</small></td>
+      <td>{run.usage.kind === "model_reported"
+        ? <>{(run.usage.inputTokens + run.usage.outputTokens).toLocaleString()} tokens<small>{run.usage.cachedInputTokens.toLocaleString()} cached · {formatCost(run.usage.costUsd, run.usage.costSource)}</small></>
+        : <>Model usage unavailable<small>{run.usage.storageBytes.toLocaleString()} platform bytes</small></>}<small>{formatDuration(run.usage.durationMs)} execution time · execution {run.executionNumber}</small></td>
       <td>{new Date(run.startedAt).toLocaleString()}</td>
     </tr>)}</tbody></table>{!runs.length && !stale.length ? <p className="muted">No runs match.</p> : null}{stale.map((record) => <p className="error-text" key={record.id}><Link href={`/admin/runs/${record.id}`}>{record.id}</Link>: {record.issue}</p>)}</section>
   </main>;
@@ -55,8 +56,10 @@ function isRunStatus(value: string | undefined): value is SiteAgentRun["status"]
   return Boolean(value && ["queued", "running", "needs_input", "succeeded", "failed", "cancelled"].includes(value));
 }
 function formatDuration(value: number) { return `${Math.round(value / 1000)}s`; }
-function formatCost(value: number, status: SiteAgentRun["usage"]["costEstimateStatus"]) {
-  return status === "configured" ? `$${value.toFixed(4)}` : "cost unavailable";
+function formatCost(value: number, source: Extract<SiteAgentRun["usage"], { kind: "model_reported" }>["costSource"]) {
+  if (source === "unavailable") return "cost unavailable";
+  const provenance = source === "provider_reported" ? "billed" : source === "catalog_estimate" ? "estimated" : "mixed";
+  return `$${value.toFixed(4)} ${provenance}`;
 }
 function formatPercentile(values: number[], percentile: number) {
   if (!values.length) return "—";

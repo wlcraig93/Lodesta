@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { readStoredAsset } from "@/lib/asset-storage";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { platformOperationsRepository } from "@/packages/platform-operations";
 
 export const runtime = "nodejs";
 
@@ -16,14 +15,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ site
   if (!revision || revision.businessId !== site.businessId) return notFound();
 
   const publiclyReferenced = await sitePlatformRepository.isAssetRevisionPublic(revision.id);
-  let previewReferenced = false;
-  const previewToken = new URL(request.url).searchParams.get("previewToken");
-  if (!publiclyReferenced && previewToken) {
-    const token = await platformOperationsRepository.resolvePreviewToken(previewToken);
-    const version = token?.siteId === siteId ? await sitePlatformRepository.getSiteVersion(token.siteVersionId) : undefined;
-    previewReferenced = Boolean(version?.assetRevisionIds.includes(revision.id));
-  }
-  if (!publiclyReferenced && !previewReferenced) {
+  if (!publiclyReferenced) {
     const unauthorized = await requireAdminOrSiteOwner(request, siteId);
     if (unauthorized) return notFound();
   }

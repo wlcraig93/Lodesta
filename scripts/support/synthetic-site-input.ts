@@ -48,6 +48,7 @@ export function buildSyntheticSiteInput() {
     domainContext: autoBodyContextModule,
     business: {
       name: "Northstar Collision Repair",
+      identityStatus: "verified" as const,
       description: "Local collision and cosmetic vehicle repair.",
       contacts: { phone: "+15125550142" },
       locations: [{
@@ -58,7 +59,6 @@ export function buildSyntheticSiteInput() {
         region: "TX",
         postalCode: "78701",
         country: "US",
-        googlePlaceId: "ChIJ-synthetic-location",
         hours: { Monday: "8:00 AM-5:30 PM", Tuesday: "8:00 AM-5:30 PM", Wednesday: "8:00 AM-5:30 PM", Thursday: "8:00 AM-5:30 PM", Friday: "8:00 AM-5:30 PM", Saturday: "Closed", Sunday: "Closed" },
         sourceFactIds: ["fact_address", "fact_hours"]
       }],

@@ -49,7 +49,7 @@ export function classifyModelProviderError(error: unknown): SiteAuthoringTermina
   const nested = record.error && typeof record.error === "object" ? record.error as Record<string, unknown> : {};
   const providerCode = String(nested.code ?? record.code ?? "");
   const status = typeof record.status === "number" ? record.status : undefined;
-  if (/insufficient_quota|quota_exceeded|billing_hard_limit/i.test(`${providerCode} ${message}`)) {
+  if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits/i.test(`${providerCode} ${message}`)) {
     return new SiteAuthoringTerminalError("provider_quota_exhausted", "provider", false, message, { cause: error });
   }
   if (status === 429 || (status !== undefined && status >= 500) || /rate.?limit|timeout|timed out|connection|socket|network/i.test(message)) {

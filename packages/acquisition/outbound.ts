@@ -8,6 +8,7 @@ import type {
 type Vertical = string;
 
 export type CreateOutboundCampaignInput = {
+  id?: string;
   name: string;
   channel?: OutboundCampaign["channel"];
   status?: OutboundCampaign["status"];
@@ -29,7 +30,7 @@ export type UpsertOutboundProspectInput = {
   businessName: string;
   vertical?: Vertical;
   sourceUrl?: string;
-  previewToken?: string;
+  previewId?: string;
   mailingCode?: string;
   status?: OutboundProspect["status"];
   metadata?: Record<string, string | number | boolean>;
@@ -66,7 +67,7 @@ export type OutboundMailerManifestRow = {
 export function newOutboundCampaign(input: CreateOutboundCampaignInput): OutboundCampaign {
   const now = new Date().toISOString();
   return {
-    id: crypto.randomUUID(),
+    id: input.id ?? crypto.randomUUID(),
     name: input.name.trim(),
     channel: input.channel ?? "direct_mail",
     status: input.status ?? "draft",
@@ -121,7 +122,7 @@ export function newOutboundProspect(input: UpsertOutboundProspectInput): Outboun
     businessName: input.businessName.trim(),
     vertical: input.vertical,
     sourceUrl: input.sourceUrl,
-    previewToken: input.previewToken,
+    previewId: input.previewId,
     mailingCode: input.mailingCode,
     status: input.status ?? "queued",
     createdAt: now,
@@ -231,7 +232,7 @@ export function buildOutboundMailerManifest(
   campaigns: OutboundCampaign[],
   prospects: OutboundProspect[],
   campaignId: string | undefined,
-  previewBaseUrl: string
+  previewLinks: ReadonlyMap<string, string>
 ): OutboundMailerManifestRow[] {
   const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
   const suppressedKeys = outboundSuppressionKeys(prospects);
@@ -257,7 +258,7 @@ export function buildOutboundMailerManifest(
         vertical,
         status: prospect.status,
         sourceUrl: prospect.sourceUrl ?? "",
-        previewUrl: prospect.previewToken ? previewUrl(previewBaseUrl, prospect.previewToken) : "",
+        previewUrl: prospect.previewId ? previewLinks.get(prospect.previewId) ?? "" : "",
         mailingCode: prospect.mailingCode ?? "",
         mailedAt: prospect.mailedAt ?? "",
         firstPreviewViewedAt: prospect.firstPreviewViewedAt ?? "",
@@ -450,14 +451,6 @@ function hasEmailCompliance(metadata: Record<string, string | number | boolean> 
 function stringMetadata(metadata: Record<string, string | number | boolean> | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function previewUrl(baseUrl: string, token: string) {
-  try {
-    return new URL(`/preview/${encodeURIComponent(token)}`, baseUrl).href;
-  } catch {
-    return `/preview/${encodeURIComponent(token)}`;
-  }
 }
 
 function csvCell(value: string) {

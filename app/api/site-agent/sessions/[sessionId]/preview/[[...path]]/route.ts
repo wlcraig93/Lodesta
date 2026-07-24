@@ -12,7 +12,7 @@ export async function GET(
   if (!session) return new Response(null, { status: 404 });
   const actor = await authorizedSiteActor(request, session.siteId);
   if (!actor.ok) return actor.response;
-  if (!canAccessAgentSession(actor, session.ownerId)) return new Response(null, { status: 404 });
+  if (session.principal.kind !== "owner" || !canAccessAgentSession(actor, session.principal.id)) return new Response(null, { status: 404 });
   const runs = await sitePlatformRepository.listAgentRuns(session.id);
   const latest = [...runs].sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
   if (!session.sandboxId) {

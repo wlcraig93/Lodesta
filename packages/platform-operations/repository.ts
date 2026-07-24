@@ -17,26 +17,34 @@ import {
 } from "@/packages/acquisition/outbound";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { websiteAssessmentSchema } from "@/packages/website-assessment/contracts";
+import {
+  businessStrengthAssessmentSchema,
+  prospectPresenceReportResultSchema
+} from "./assessment-schemas";
 import type {
   AdoptionInvitation,
   CreateWebsiteSetupInput,
   CreateOutboundCampaignInput,
   CreateProspectReportInput,
   CreateProspectReportLeadInput,
+  CreateWebsiteAssessmentInput,
   DomainRecord,
   OutboundCampaign,
   OutboundEvent,
   OutboundProspect,
   OutboundSummary,
-  ProspectReportJob,
   ProspectReportLead,
   ProspectReportRecord,
   RecordOutboundEventInput,
   RegisterDomainInput,
   SiteRedirectRule,
-  SitePreviewToken,
+  SitePreviewGrant,
   UpsertSiteRedirectInput,
   UpdateProspectReportInput,
+  UpdateWebsiteAssessmentInput,
+  WebsiteAssessmentJob,
+  WebsiteAssessmentRecord,
   WebsiteSetupFailureCode,
   WebsiteSetupSourceUpdate,
   WebsiteSetup,
@@ -57,9 +65,18 @@ export interface PlatformOperationsRepository {
   claimNextWebsiteSetup(workerId: string): Promise<WebsiteSetup | null>;
   linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }): Promise<WebsiteSetup | null>;
   failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }): Promise<WebsiteSetup | null>;
-  createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }): Promise<SitePreviewToken>;
-  resolvePreviewToken(token: string): Promise<SitePreviewToken | null>;
-  listPreviewTokens(siteId?: string): Promise<SitePreviewToken[]>;
+  createPreviewGrant(input: {
+    id?: string;
+    siteId: string;
+    siteVersionId: string;
+    secretHash: string;
+    keyVersion: string;
+    secretVersion?: number;
+    expiresAt: string;
+  }): Promise<SitePreviewGrant>;
+  getPreviewGrant(previewId: string): Promise<SitePreviewGrant | null>;
+  listPreviewGrants(siteId?: string): Promise<SitePreviewGrant[]>;
+  revokePreviewGrant(previewId: string): Promise<SitePreviewGrant | null>;
   registerDomain(input: RegisterDomainInput): Promise<DomainRecord | null>;
   refreshDomain(input: { domainId: string }): Promise<DomainRecord | null>;
   listDomains(siteId?: string): Promise<DomainRecord[]>;
@@ -74,20 +91,25 @@ export interface PlatformOperationsRepository {
   listOutboundCampaigns(): Promise<OutboundCampaign[]>;
   upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
   listOutboundProspects(campaignId?: string): Promise<OutboundProspect[]>;
-  findOutboundProspectByPreviewToken(previewToken: string): Promise<OutboundProspect | null>;
+  findOutboundProspectByPreviewId(previewId: string): Promise<OutboundProspect | null>;
   recordOutboundEvent(input: RecordOutboundEventInput): Promise<OutboundEvent>;
   listOutboundEvents(campaignId?: string): Promise<OutboundEvent[]>;
   outboundSummary(campaignId?: string): Promise<OutboundSummary>;
   createProspectReport(input: CreateProspectReportInput): Promise<ProspectReportRecord>;
   getProspectReport(reportId: string): Promise<ProspectReportRecord | null>;
-  findActiveProspectReportByPlaceId(placeId: string): Promise<ProspectReportRecord | null>;
-  findReusableProspectReportByPlaceId(placeId: string, since: string): Promise<ProspectReportRecord | null>;
+  listProspectReports(limit?: number): Promise<ProspectReportRecord[]>;
+  findActiveProspectReportBySourceKey(sourceKey: string): Promise<ProspectReportRecord | null>;
+  findReusableProspectReportBySourceKey(sourceKey: string, since: string): Promise<ProspectReportRecord | null>;
   updateProspectReport(input: UpdateProspectReportInput): Promise<ProspectReportRecord | null>;
   createProspectReportLead(input: CreateProspectReportLeadInput): Promise<ProspectReportLead | null>;
-  enqueueProspectReportJob(reportId: string): Promise<ProspectReportJob>;
-  claimNextProspectReportJob(workerId: string): Promise<ProspectReportJob | null>;
-  completeProspectReportJob(jobId: string): Promise<void>;
-  failProspectReportJob(jobId: string, error: string): Promise<void>;
+  createWebsiteAssessment(input: CreateWebsiteAssessmentInput): Promise<WebsiteAssessmentRecord>;
+  getWebsiteAssessment(assessmentId: string): Promise<WebsiteAssessmentRecord | null>;
+  listWebsiteAssessments(input?: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number }): Promise<WebsiteAssessmentRecord[]>;
+  updateWebsiteAssessment(input: UpdateWebsiteAssessmentInput): Promise<WebsiteAssessmentRecord | null>;
+  enqueueWebsiteAssessmentJob(input: { assessmentId: string; prospectReportId?: string }): Promise<WebsiteAssessmentJob>;
+  claimNextWebsiteAssessmentJob(workerId: string): Promise<WebsiteAssessmentJob | null>;
+  completeWebsiteAssessmentJob(jobId: string): Promise<void>;
+  failWebsiteAssessmentJob(jobId: string, error: string): Promise<void>;
 }
 
 export class IdempotencyKeyConflictError extends Error {
@@ -109,7 +131,7 @@ export class ConcurrentProjectLimitError extends Error {
 type LocalState = {
   adoptionInvitations: AdoptionInvitation[];
   websiteSetups: WebsiteSetup[];
-  previewTokens: SitePreviewToken[];
+  previewGrants: SitePreviewGrant[];
   domains: DomainRecord[];
   redirects: SiteRedirectRule[];
   campaigns: OutboundCampaign[];
@@ -117,10 +139,11 @@ type LocalState = {
   events: OutboundEvent[];
   reports: ProspectReportRecord[];
   leads: ProspectReportLead[];
-  prospectReportJobs: ProspectReportJob[];
+  websiteAssessments: WebsiteAssessmentRecord[];
+  websiteAssessmentJobs: WebsiteAssessmentJob[];
 };
 
-const emptyState = (): LocalState => ({ adoptionInvitations: [], websiteSetups: [], previewTokens: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], prospectReportJobs: [] });
+const emptyState = (): LocalState => ({ adoptionInvitations: [], websiteSetups: [], previewGrants: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], websiteAssessments: [], websiteAssessmentJobs: [] });
 
 export class LocalPlatformOperationsRepository implements PlatformOperationsRepository {
   private queue = Promise.resolve();
@@ -180,6 +203,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
         ownerUserId: input.ownerUserId,
         sourceUrl: input.sourceUrl,
         normalizedSource: input.normalizedSource,
+        reportingTimezone: input.reportingTimezone,
         sourceRevision: 1,
         status: "queued",
         attempts: 0,
@@ -291,19 +315,56 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return result;
   }
 
-  async createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }) {
+  async createPreviewGrant(input: {
+    id?: string;
+    siteId: string;
+    siteVersionId: string;
+    secretHash: string;
+    keyVersion: string;
+    secretVersion?: number;
+    expiresAt: string;
+  }) {
     const [site, version] = await Promise.all([sitePlatformRepository.getSite(input.siteId), sitePlatformRepository.getSiteVersion(input.siteVersionId)]);
     if (!site || !version || version.siteId !== site.id) throw new Error("Preview version does not belong to the site.");
-    const token = { token: crypto.randomUUID().replaceAll("-", ""), siteId: input.siteId, siteVersionId: input.siteVersionId, expiresAt: input.expiresAt, createdAt: new Date().toISOString() };
-    await this.write((store) => { store.previewTokens.push(token); });
-    return token;
+    const grant: SitePreviewGrant = {
+      id: input.id ?? `preview_${crypto.randomUUID().replaceAll("-", "")}`,
+      siteId: input.siteId,
+      siteVersionId: input.siteVersionId,
+      secretHash: input.secretHash,
+      keyVersion: input.keyVersion,
+      secretVersion: input.secretVersion ?? 1,
+      expiresAt: input.expiresAt,
+      createdAt: new Date().toISOString()
+    };
+    await this.write((store) => {
+      const existing = store.previewGrants.find((item) => item.id === grant.id);
+      if (existing) {
+        if (existing.siteId !== grant.siteId || existing.siteVersionId !== grant.siteVersionId || existing.secretHash !== grant.secretHash) {
+          throw new Error("Preview grant idempotency conflict.");
+        }
+        Object.assign(grant, existing);
+        return;
+      }
+      store.previewGrants.push(grant);
+    });
+    return grant;
   }
-  async resolvePreviewToken(token: string) {
-    const found = (await this.read()).previewTokens.find((item) => item.token === token);
-    if (!found || (found.expiresAt && Date.parse(found.expiresAt) <= Date.now())) return null;
+  async getPreviewGrant(previewId: string) {
+    const found = (await this.read()).previewGrants.find((item) => item.id === previewId);
+    if (!found) return null;
     return structuredClone(found);
   }
-  async listPreviewTokens(siteId?: string) { return (await this.read()).previewTokens.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
+  async listPreviewGrants(siteId?: string) { return (await this.read()).previewGrants.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
+  async revokePreviewGrant(previewId: string) {
+    let result: SitePreviewGrant | null = null;
+    await this.write((store) => {
+      const grant = store.previewGrants.find((item) => item.id === previewId);
+      if (!grant) return;
+      grant.revokedAt ??= new Date().toISOString();
+      result = structuredClone(grant);
+    });
+    return result;
+  }
 
   async registerDomain(input: RegisterDomainInput) {
     if (!await sitePlatformRepository.getSite(input.siteId)) return null;
@@ -407,7 +468,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return structuredClone((await this.read()).redirects.find((item) => item.siteId === siteId && item.sourcePath === sourcePath && item.status === "active") ?? null);
   }
 
-  async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); await this.write((s) => { s.campaigns.push(value); }); return value; }
+  async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); await this.write((s) => { const existing = s.campaigns.find((item) => item.id === value.id); if (!existing) s.campaigns.push(value); else Object.assign(value, existing); }); return value; }
   async listOutboundCampaigns() { return (await this.read()).campaigns.sort(byCreatedDesc); }
   async upsertOutboundProspect(input: UpsertOutboundProspectInput) {
     let result!: OutboundProspect;
@@ -419,7 +480,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return result;
   }
   async listOutboundProspects(campaignId?: string) { return (await this.read()).prospects.filter((item) => !campaignId || item.campaignId === campaignId).sort(byCreatedDesc); }
-  async findOutboundProspectByPreviewToken(token: string) { return structuredClone((await this.read()).prospects.find((item) => item.previewToken === token) ?? null); }
+  async findOutboundProspectByPreviewId(previewId: string) { return structuredClone((await this.read()).prospects.find((item) => item.previewId === previewId) ?? null); }
   async recordOutboundEvent(input: RecordOutboundEventInput) {
     const event = newOutboundEvent(input);
     await this.write((store) => {
@@ -436,19 +497,21 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 
   async createProspectReport(input: CreateProspectReportInput) {
     const now = new Date().toISOString();
-    const report: ProspectReportRecord = { id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, placeId: input.placeId, status: "queued", jobId: input.jobId, sourceUrl: input.sourceUrl, sourceHost: input.sourceHost, websiteKind: input.websiteKind, createdAt: now, updatedAt: now };
+    const report: ProspectReportRecord = { id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, sourceKey: input.sourceKey, status: "queued", assessmentId: input.assessmentId, sourceUrl: input.sourceUrl, sourceHost: input.sourceHost, websiteKind: input.websiteKind, businessStrength: input.businessStrength, resolutionUsage: input.resolutionUsage, createdAt: now, updatedAt: now };
     await this.write((store) => { store.reports.push(report); });
     return report;
   }
   async getProspectReport(id: string) { return structuredClone((await this.read()).reports.find((item) => item.id === id) ?? null); }
-  async findActiveProspectReportByPlaceId(placeId: string) { return structuredClone((await this.read()).reports.filter((item) => item.placeId === placeId && ["queued", "running"].includes(item.status)).sort(byCreatedDesc)[0] ?? null); }
-  async findReusableProspectReportByPlaceId(placeId: string, since: string) { return structuredClone((await this.read()).reports.filter((item) => item.placeId === placeId && item.status === "completed" && (item.completedAt ?? "") >= since).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))[0] ?? null); }
+  async listProspectReports(limit = 50) { return (await this.read()).reports.sort(byCreatedDesc).slice(0, Math.max(1, Math.min(limit, 500))); }
+  async findActiveProspectReportBySourceKey(sourceKey: string) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && ["queued", "running"].includes(item.status)).sort(byCreatedDesc)[0] ?? null); }
+  async findReusableProspectReportBySourceKey(sourceKey: string, since: string) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && item.status === "completed" && (item.completedAt ?? "") >= since).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))[0] ?? null); }
   async updateProspectReport(input: UpdateProspectReportInput) {
     let result: ProspectReportRecord | null = null;
     await this.write((store) => {
       const report = store.reports.find((item) => item.id === input.reportId);
       if (!report) return;
-      Object.assign(report, Object.fromEntries(Object.entries(input).filter(([key, value]) => key !== "reportId" && value !== undefined)), { updatedAt: new Date().toISOString() });
+      Object.assign(report, Object.fromEntries(Object.entries(input).filter(([key, value]) => !["reportId", "clearError"].includes(key) && value !== undefined)), { updatedAt: new Date().toISOString() });
+      if (input.clearError) delete report.errorCode;
       result = structuredClone(report);
     });
     return result;
@@ -459,23 +522,70 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     await this.write((store) => { store.leads.push(lead); const report = store.reports.find((item) => item.id === input.reportId); if (report) { report.unlockedAt = lead.createdAt; report.leadId = lead.id; report.updatedAt = lead.createdAt; } });
     return lead;
   }
-  async enqueueProspectReportJob(reportId: string) {
+  async createWebsiteAssessment(input: CreateWebsiteAssessmentInput) {
     const now = new Date().toISOString();
-    const job: ProspectReportJob = { id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, reportId, status: "queued", attempts: 0, maxAttempts: 2, runAfter: now, createdAt: now, updatedAt: now };
-    await this.write((store) => { store.prospectReportJobs.push(job); });
+    const assessment: WebsiteAssessmentRecord = {
+      id: input.id ?? `website_assessment_${crypto.randomUUID().replaceAll("-", "")}`,
+      status: "queued",
+      targetKind: input.targetKind,
+      sourceKey: input.sourceKey,
+      sourceUrl: input.sourceUrl,
+      siteId: input.siteId,
+      artifactId: input.artifactId,
+      versionId: input.versionId,
+      rubricIdentity: input.rubricIdentity,
+      scannerIdentity: input.scannerIdentity,
+      createdAt: now,
+      updatedAt: now
+    };
+    await this.write((store) => { store.websiteAssessments.push(assessment); });
+    return assessment;
+  }
+  async getWebsiteAssessment(assessmentId: string) {
+    return structuredClone((await this.read()).websiteAssessments.find((item) => item.id === assessmentId) ?? null);
+  }
+  async listWebsiteAssessments(input: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number } = {}) {
+    const ids = input.ids ? new Set(input.ids.slice(0, 500)) : undefined;
+    return (await this.read()).websiteAssessments
+      .filter((item) => (!input.siteId || item.siteId === input.siteId) && (!input.sourceKey || item.sourceKey === input.sourceKey) && (!ids || ids.has(item.id)))
+      .sort(byCreatedDesc)
+      .slice(0, Math.max(1, Math.min(input.limit ?? 100, 500)));
+  }
+  async updateWebsiteAssessment(input: UpdateWebsiteAssessmentInput) {
+    let result: WebsiteAssessmentRecord | null = null;
+    await this.write((store) => {
+      const assessment = store.websiteAssessments.find((item) => item.id === input.assessmentId);
+      if (!assessment) return;
+      if (assessment.status === "completed" && (input.assessment || input.status && input.status !== "completed")) {
+        throw new Error("Completed website assessments are immutable.");
+      }
+      Object.assign(assessment, Object.fromEntries(Object.entries(input).filter(([key, value]) => !["assessmentId", "clearError"].includes(key) && value !== undefined)), { updatedAt: new Date().toISOString() });
+      if (input.clearError) delete assessment.errorCode;
+      result = structuredClone(assessment);
+    });
+    return result;
+  }
+  async enqueueWebsiteAssessmentJob(input: { assessmentId: string; prospectReportId?: string }) {
+    const now = new Date().toISOString();
+    const job: WebsiteAssessmentJob = { id: `website_assessment_job_${crypto.randomUUID().replaceAll("-", "")}`, assessmentId: input.assessmentId, prospectReportId: input.prospectReportId, status: "queued", attempts: 0, maxAttempts: 2, runAfter: now, createdAt: now, updatedAt: now };
+    await this.write((store) => { store.websiteAssessmentJobs.push(job); });
     return job;
   }
-  async claimNextProspectReportJob(workerId: string) {
-    let result: ProspectReportJob | null = null;
+  async claimNextWebsiteAssessmentJob(workerId: string) {
+    let result: WebsiteAssessmentJob | null = null;
     await this.write((store) => {
-      const job = store.prospectReportJobs.filter((item) => item.status === "queued" && item.runAfter <= new Date().toISOString()).sort(byCreatedDesc).at(-1);
+      const staleBefore = Date.now() - 30 * 60_000;
+      const job = store.websiteAssessmentJobs
+        .filter((item) => (item.status === "queued" && item.runAfter <= new Date().toISOString()) || (item.status === "running" && item.updatedAt && Date.parse(item.updatedAt) < staleBefore))
+        .sort(byCreatedDesc)
+        .at(-1);
       if (!job) return;
       job.status = "running"; job.attempts += 1; job.lockedBy = workerId; job.updatedAt = new Date().toISOString(); result = structuredClone(job);
     });
     return result;
   }
-  async completeProspectReportJob(jobId: string) { await this.write((store) => { const job = store.prospectReportJobs.find((item) => item.id === jobId); if (job) { job.status = "completed"; job.updatedAt = new Date().toISOString(); } }); }
-  async failProspectReportJob(jobId: string, error: string) { await this.write((store) => { const job = store.prospectReportJobs.find((item) => item.id === jobId); if (!job) return; job.error = error; job.status = job.attempts < job.maxAttempts ? "queued" : "failed"; job.runAfter = new Date(Date.now() + 30_000).toISOString(); job.updatedAt = new Date().toISOString(); }); }
+  async completeWebsiteAssessmentJob(jobId: string) { await this.write((store) => { const job = store.websiteAssessmentJobs.find((item) => item.id === jobId); if (job) { job.status = "completed"; job.completedAt = new Date().toISOString(); job.updatedAt = job.completedAt; } }); }
+  async failWebsiteAssessmentJob(jobId: string, error: string) { await this.write((store) => { const job = store.websiteAssessmentJobs.find((item) => item.id === jobId); if (!job) return; job.error = error; job.status = job.attempts < job.maxAttempts ? "queued" : "failed"; job.runAfter = new Date(Date.now() + 30_000).toISOString(); job.lockedBy = undefined; job.completedAt = job.status === "failed" ? new Date().toISOString() : undefined; job.updatedAt = new Date().toISOString(); }); }
 
   private async read() {
     const raw = await readFile(this.path, "utf8").catch(() => undefined);
@@ -488,8 +598,18 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 }
 
 type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null };
-type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
-type PreviewTokenRow = { token: string; site_id: string; site_version_id: string | null; expires_at: string | null; created_at: string };
+type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
+type PreviewGrantRow = {
+  id: string;
+  site_id: string;
+  site_version_id: string;
+  secret_hash: string;
+  key_version: string;
+  secret_version: number;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+};
 type DomainRow = {
   id: string;
   site_id: string;
@@ -518,11 +638,12 @@ type DomainRow = {
 };
 type RedirectRow = { id: string; site_id: string; source_path: string; destination_path: string; status: SiteRedirectRule["status"]; created_at: string; updated_at: string };
 type CampaignRow = { id: string; name: string; channel: OutboundCampaign["channel"]; status: OutboundCampaign["status"]; metadata: unknown; created_at: string; started_at: string | null; ended_at: string | null };
-type ProspectRow = { id: string; campaign_id: string; site_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_token: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
+type ProspectRow = { id: string; campaign_id: string; site_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_id: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
 type EventRow = { id: string; campaign_id: string; prospect_id: string | null; site_id: string | null; type: OutboundEvent["type"]; occurred_at: string; value: number | null; metadata: unknown };
-type ReportRow = { id: string; place_id: string; status: ProspectReportRecord["status"]; job_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; unlocked_at: string | null; lead_id: string | null; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
+type ReportRow = { id: string; source_key: string; status: ProspectReportRecord["status"]; assessment_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; business_strength_json: unknown; resolution_usage: unknown; unlocked_at: string | null; lead_id: string | null; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
 type LeadRow = { id: string; report_id: string; email: string; contact_name: string | null; phone: string | null; ip_hash: string | null; metadata: unknown; created_at: string };
-type JobRow = { id: string; report_id: string; status: ProspectReportJob["status"]; error: string | null; attempts: number; max_attempts: number; run_after: string; locked_by: string | null; created_at: string; updated_at: string };
+type WebsiteAssessmentRow = { id: string; status: WebsiteAssessmentRecord["status"]; target_kind: WebsiteAssessmentRecord["targetKind"]; source_key: string; source_url: string | null; site_id: string | null; artifact_id: string | null; version_id: string | null; rubric_identity: string; scanner_identity: string; assessment_json: unknown; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
+type WebsiteAssessmentJobRow = { id: string; assessment_id: string; prospect_report_id: string | null; status: WebsiteAssessmentJob["status"]; error: string | null; attempts: number; max_attempts: number; run_after: string; locked_by: string | null; created_at: string; updated_at: string; completed_at: string | null };
 
 class SupabasePlatformOperationsRepository implements PlatformOperationsRepository {
   private get client() { return getSupabaseAdminClient(); }
@@ -554,6 +675,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       target_owner_user_id: input.ownerUserId,
       target_source_url: input.sourceUrl,
       target_normalized_source: input.normalizedSource,
+      target_reporting_timezone: input.reportingTimezone,
       target_idempotency_key: input.idempotencyKey,
       target_creation_request_hash: input.creationRequestHash
     }).maybeSingle();
@@ -617,14 +739,31 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     return row ? websiteSetupFromRow(row) : null;
   }
 
-  async createPreviewToken(input: { siteId: string; siteVersionId: string; expiresAt?: string }) {
+  async createPreviewGrant(input: {
+    id?: string;
+    siteId: string;
+    siteVersionId: string;
+    secretHash: string;
+    keyVersion: string;
+    secretVersion?: number;
+    expiresAt: string;
+  }) {
     const version = await sitePlatformRepository.getSiteVersion(input.siteVersionId);
     if (!version || version.siteId !== input.siteId) throw new Error("Preview version does not belong to the site.");
-    const row = await data<PreviewTokenRow>(this.client.from("preview_tokens").insert({ token: crypto.randomUUID().replaceAll("-", ""), site_id: input.siteId, site_version_id: input.siteVersionId, expires_at: input.expiresAt }).select("*").single(), "Create preview token");
-    return previewFromRow(row);
+    const row = await data<PreviewGrantRow>(this.client.from("preview_grants").upsert({
+      id: input.id ?? `preview_${crypto.randomUUID().replaceAll("-", "")}`,
+      site_id: input.siteId,
+      site_version_id: input.siteVersionId,
+      secret_hash: input.secretHash,
+      key_version: input.keyVersion,
+      secret_version: input.secretVersion ?? 1,
+      expires_at: input.expiresAt
+    }, { onConflict: "id", ignoreDuplicates: false }).select("*").single(), "Create preview grant");
+    return previewGrantFromRow(row);
   }
-  async resolvePreviewToken(token: string) { const row = await maybe<PreviewTokenRow>(this.client.from("preview_tokens").select("*").eq("token", token).maybeSingle(), "Resolve preview token"); if (!row || !row.site_version_id || (row.expires_at && Date.parse(row.expires_at) <= Date.now())) return null; return previewFromRow(row); }
-  async listPreviewTokens(siteId?: string) { let query = this.client.from("preview_tokens").select("*").not("site_version_id", "is", null).order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<PreviewTokenRow[]>(query, "List preview tokens")).map(previewFromRow); }
+  async getPreviewGrant(previewId: string) { const row = await maybe<PreviewGrantRow>(this.client.from("preview_grants").select("*").eq("id", previewId).maybeSingle(), "Get preview grant"); return row ? previewGrantFromRow(row) : null; }
+  async listPreviewGrants(siteId?: string) { let query = this.client.from("preview_grants").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<PreviewGrantRow[]>(query, "List preview grants")).map(previewGrantFromRow); }
+  async revokePreviewGrant(previewId: string) { const row = await maybe<PreviewGrantRow>(this.client.from("preview_grants").update({ revoked_at: new Date().toISOString() }).eq("id", previewId).is("revoked_at", null).select("*").maybeSingle(), "Revoke preview grant"); return row ? previewGrantFromRow(row) : this.getPreviewGrant(previewId); }
 
   async registerDomain(input: RegisterDomainInput) {
     if (!await sitePlatformRepository.getSite(input.siteId)) return null;
@@ -700,25 +839,30 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async getRedirectById(id: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects").select("*").eq("id", id).maybeSingle(), "Get site redirect"); return row ? redirectFromRow(row) : null; }
   async resolveRedirect(siteId: string, sourcePath: string) { const row = await maybe<RedirectRow>(this.client.from("site_redirects").select("*").eq("site_id", siteId).eq("source_path", sourcePath).eq("status", "active").maybeSingle(), "Resolve site redirect"); return row ? redirectFromRow(row) : null; }
 
-  async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); return campaignFromRow(await data<CampaignRow>(this.client.from("outbound_campaigns").insert({ id: value.id, name: value.name, channel: value.channel, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt, started_at: value.startedAt, ended_at: value.endedAt }).select("*").single(), "Create campaign")); }
+  async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); return campaignFromRow(await data<CampaignRow>(this.client.from("outbound_campaigns").upsert({ id: value.id, name: value.name, channel: value.channel, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt, started_at: value.startedAt, ended_at: value.endedAt }, { onConflict: "id", ignoreDuplicates: false }).select("*").single(), "Create campaign")); }
   async listOutboundCampaigns() { return (await data<CampaignRow[]>(this.client.from("outbound_campaigns").select("*").order("created_at", { ascending: false }), "List campaigns")).map(campaignFromRow); }
-  async upsertOutboundProspect(input: UpsertOutboundProspectInput) { const value = newOutboundProspect(input); return prospectFromRow(await data<ProspectRow>(this.client.from("outbound_prospects").upsert({ id: value.id, campaign_id: value.campaignId, site_id: value.siteId, business_name: value.businessName, vertical: value.vertical, source_url: value.sourceUrl, preview_token: value.previewToken, mailing_code: value.mailingCode, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt }).select("*").single(), "Upsert prospect")); }
+  async upsertOutboundProspect(input: UpsertOutboundProspectInput) { const value = newOutboundProspect(input); return prospectFromRow(await data<ProspectRow>(this.client.from("outbound_prospects").upsert({ id: value.id, campaign_id: value.campaignId, site_id: value.siteId, business_name: value.businessName, vertical: value.vertical, source_url: value.sourceUrl, preview_id: value.previewId, mailing_code: value.mailingCode, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt }).select("*").single(), "Upsert prospect")); }
   async listOutboundProspects(campaignId?: string) { let query = this.client.from("outbound_prospects").select("*").order("created_at", { ascending: false }); if (campaignId) query = query.eq("campaign_id", campaignId); return (await data<ProspectRow[]>(query, "List prospects")).map(prospectFromRow); }
-  async findOutboundProspectByPreviewToken(token: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("preview_token", token).maybeSingle(), "Find prospect"); return row ? prospectFromRow(row) : null; }
+  async findOutboundProspectByPreviewId(previewId: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("preview_id", previewId).maybeSingle(), "Find prospect"); return row ? prospectFromRow(row) : null; }
   async recordOutboundEvent(input: RecordOutboundEventInput) { const value = newOutboundEvent(input); const row = await data<EventRow>(this.client.from("outbound_events").insert({ id: value.id, campaign_id: value.campaignId, prospect_id: value.prospectId, site_id: value.siteId, type: value.type, occurred_at: value.occurredAt, value: value.value, metadata: value.metadata ?? {} }).select("*").single(), "Record outbound event"); const event = eventFromRow(row); const prospectId = event.prospectId ?? (event.siteId ? (await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("campaign_id", event.campaignId).eq("site_id", event.siteId).maybeSingle(), "Find prospect by site"))?.id : undefined); if (prospectId) await this.applyEvent(prospectId, event); return event; }
   async listOutboundEvents(campaignId?: string) { let query = this.client.from("outbound_events").select("*").order("occurred_at", { ascending: false }); if (campaignId) query = query.eq("campaign_id", campaignId); return (await data<EventRow[]>(query, "List outbound events")).map(eventFromRow); }
   async outboundSummary(campaignId?: string) { return summarizeOutbound(await this.listOutboundCampaigns(), await this.listOutboundProspects(campaignId), await this.listOutboundEvents(campaignId), campaignId); }
 
-  async createProspectReport(input: CreateProspectReportInput) { const now = new Date().toISOString(); return reportFromRow(await data<ReportRow>(this.client.from("prospect_reports").insert({ id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, place_id: input.placeId, status: "queued", job_id: input.jobId, source_url: input.sourceUrl, source_host: input.sourceHost, website_kind: input.websiteKind, created_at: now, updated_at: now }).select("*").single(), "Create report")); }
+  async createProspectReport(input: CreateProspectReportInput) { const now = new Date().toISOString(); return reportFromRow(await data<ReportRow>(this.client.from("prospect_reports").insert({ id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, source_key: input.sourceKey, status: "queued", assessment_id: input.assessmentId, source_url: input.sourceUrl, source_host: input.sourceHost, website_kind: input.websiteKind, business_strength_json: input.businessStrength, resolution_usage: input.resolutionUsage, created_at: now, updated_at: now }).select("*").single(), "Create report")); }
   async getProspectReport(id: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("id", id).maybeSingle(), "Get report"); return row ? reportFromRow(row) : null; }
-  async findActiveProspectReportByPlaceId(placeId: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("place_id", placeId).in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle(), "Find active report"); return row ? reportFromRow(row) : null; }
-  async findReusableProspectReportByPlaceId(placeId: string, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("place_id", placeId).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
-  async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", jobId: "job_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", unlockedAt: "unlocked_at", leadId: "lead_id", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
+  async listProspectReports(limit = 50) { return (await data<ReportRow[]>(this.client.from("prospect_reports").select("*").order("created_at", { ascending: false }).limit(Math.max(1, Math.min(limit, 500))), "List prospect reports")).map(reportFromRow); }
+  async findActiveProspectReportBySourceKey(sourceKey: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle(), "Find active report"); return row ? reportFromRow(row) : null; }
+  async findReusableProspectReportBySourceKey(sourceKey: string, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
+  async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", assessmentId: "assessment_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", unlockedAt: "unlocked_at", leadId: "lead_id", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
   async createProspectReportLead(input: CreateProspectReportLeadInput) { const now = new Date().toISOString(); const row = await data<LeadRow>(this.client.from("prospect_report_leads").insert({ id: `prospect_lead_${crypto.randomUUID().replaceAll("-", "")}`, report_id: input.reportId, email: input.email.toLowerCase(), contact_name: input.contactName, phone: input.phone, ip_hash: input.ipHash, metadata: input.metadata ?? {}, created_at: now }).select("*").single(), "Create report lead"); await this.updateProspectReport({ reportId: input.reportId, unlockedAt: now, leadId: row.id }); return leadFromRow(row); }
-  async enqueueProspectReportJob(reportId: string) { const now = new Date().toISOString(); const row = await data<JobRow>(this.client.from("prospect_report_jobs").insert({ id: `prospect_job_${crypto.randomUUID().replaceAll("-", "")}`, report_id: reportId, status: "queued", attempts: 0, max_attempts: 2, run_after: now, created_at: now, updated_at: now }).select("*").single(), "Enqueue report job"); return jobFromRow(row); }
-  async claimNextProspectReportJob(workerId: string) { const row = await maybe<JobRow>(this.client.rpc("claim_prospect_report_job", { worker_id: workerId }).maybeSingle(), "Claim report job"); return row ? jobFromRow(row) : null; }
-  async completeProspectReportJob(jobId: string) { await data(this.client.from("prospect_report_jobs").update({ status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", jobId).select("id").single(), "Complete report job"); }
-  async failProspectReportJob(jobId: string, error: string) { const row = await data<JobRow>(this.client.from("prospect_report_jobs").select("*").eq("id", jobId).single(), "Read failed report job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("prospect_report_jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail report job"); }
+  async createWebsiteAssessment(input: CreateWebsiteAssessmentInput) { const now = new Date().toISOString(); const row = await data<WebsiteAssessmentRow>(this.client.from("website_assessments").insert({ id: input.id ?? `website_assessment_${crypto.randomUUID().replaceAll("-", "")}`, status: "queued", target_kind: input.targetKind, source_key: input.sourceKey, source_url: input.sourceUrl, site_id: input.siteId, artifact_id: input.artifactId, version_id: input.versionId, rubric_identity: input.rubricIdentity, scanner_identity: input.scannerIdentity, created_at: now, updated_at: now }).select("*").single(), "Create website assessment"); return websiteAssessmentFromRow(row); }
+  async getWebsiteAssessment(assessmentId: string) { const row = await maybe<WebsiteAssessmentRow>(this.client.from("website_assessments").select("*").eq("id", assessmentId).maybeSingle(), "Get website assessment"); return row ? websiteAssessmentFromRow(row) : null; }
+  async listWebsiteAssessments(input: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number } = {}) { if (input.ids && !input.ids.length) return []; let query = this.client.from("website_assessments").select("*").order("created_at", { ascending: false }).limit(Math.max(1, Math.min(input.limit ?? 100, 500))); if (input.siteId) query = query.eq("site_id", input.siteId); if (input.sourceKey) query = query.eq("source_key", input.sourceKey); if (input.ids?.length) query = query.in("id", input.ids.slice(0, 500)); return (await data<WebsiteAssessmentRow[]>(query, "List website assessments")).map(websiteAssessmentFromRow); }
+  async updateWebsiteAssessment(input: UpdateWebsiteAssessmentInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", assessment: "assessment_json", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateWebsiteAssessmentInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<WebsiteAssessmentRow>(this.client.from("website_assessments").update(patch).eq("id", input.assessmentId).select("*").maybeSingle(), "Update website assessment"); return row ? websiteAssessmentFromRow(row) : null; }
+  async enqueueWebsiteAssessmentJob(input: { assessmentId: string; prospectReportId?: string }) { const now = new Date().toISOString(); const row = await data<WebsiteAssessmentJobRow>(this.client.from("website_assessment_jobs").insert({ id: `website_assessment_job_${crypto.randomUUID().replaceAll("-", "")}`, assessment_id: input.assessmentId, prospect_report_id: input.prospectReportId, status: "queued", attempts: 0, max_attempts: 2, run_after: now, created_at: now, updated_at: now }).select("*").single(), "Enqueue website assessment job"); return websiteAssessmentJobFromRow(row); }
+  async claimNextWebsiteAssessmentJob(workerId: string) { const row = await maybe<WebsiteAssessmentJobRow>(this.client.rpc("claim_website_assessment_job", { worker_id: workerId }).maybeSingle(), "Claim website assessment job"); return row ? websiteAssessmentJobFromRow(row) : null; }
+  async completeWebsiteAssessmentJob(jobId: string) { const now = new Date().toISOString(); await data(this.client.from("website_assessment_jobs").update({ status: "completed", completed_at: now, updated_at: now }).eq("id", jobId).select("id").single(), "Complete website assessment job"); }
+  async failWebsiteAssessmentJob(jobId: string, error: string) { const row = await data<WebsiteAssessmentJobRow>(this.client.from("website_assessment_jobs").select("*").eq("id", jobId).single(), "Read failed website assessment job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("website_assessment_jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail website assessment job"); }
 
   private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = prospectFromRow(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
 }
@@ -727,9 +871,9 @@ export const platformOperationsRepository: PlatformOperationsRepository = proces
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined }; }
-function previewFromRow(row: PreviewTokenRow): SitePreviewToken { if (!row.site_version_id) throw new Error("Preview token does not reference a site version."); return { token: row.token, siteId: row.site_id, siteVersionId: row.site_version_id, expiresAt: row.expires_at ?? undefined, createdAt: row.created_at }; }
+function previewGrantFromRow(row: PreviewGrantRow): SitePreviewGrant { return { id: row.id, siteId: row.site_id, siteVersionId: row.site_version_id, secretHash: row.secret_hash, keyVersion: row.key_version, secretVersion: row.secret_version, expiresAt: row.expires_at, revokedAt: row.revoked_at ?? undefined, createdAt: row.created_at }; }
 function domainFromRow(row: DomainRow): DomainRecord {
   return {
     id: row.id,
@@ -788,11 +932,33 @@ function domainToRow(value: DomainRecord) {
 }
 function redirectFromRow(row: RedirectRow): SiteRedirectRule { return { id: row.id, siteId: row.site_id, sourcePath: row.source_path, destinationPath: row.destination_path, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function campaignFromRow(row: CampaignRow): OutboundCampaign { return { id: row.id, name: row.name, channel: row.channel, status: row.status, metadata: row.metadata as OutboundCampaign["metadata"], createdAt: row.created_at, startedAt: row.started_at ?? undefined, endedAt: row.ended_at ?? undefined }; }
-function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewToken: row.preview_token ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
+function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewId: row.preview_id ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
 function eventFromRow(row: EventRow): OutboundEvent { return { id: row.id, campaignId: row.campaign_id, prospectId: row.prospect_id ?? undefined, siteId: row.site_id ?? undefined, type: row.type, occurredAt: row.occurred_at, value: row.value ?? undefined, metadata: row.metadata as OutboundEvent["metadata"] }; }
-function reportFromRow(row: ReportRow): ProspectReportRecord { return { id: row.id, placeId: row.place_id, status: row.status, jobId: row.job_id ?? undefined, sourceUrl: row.source_url ?? undefined, sourceHost: row.source_host ?? undefined, websiteKind: row.website_kind, result: row.report_json as ProspectReportRecord["result"] | undefined, unlockedAt: row.unlocked_at ?? undefined, leadId: row.lead_id ?? undefined, errorCode: row.error_code ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
+function reportFromRow(row: ReportRow): ProspectReportRecord {
+  const report = row.report_json === null ? undefined : prospectPresenceReportResultSchema.safeParse(row.report_json);
+  const businessStrength = row.business_strength_json === null ? undefined : businessStrengthAssessmentSchema.safeParse(row.business_strength_json);
+  return {
+    id: row.id,
+    sourceKey: row.source_key,
+    status: row.status,
+    assessmentId: row.assessment_id ?? undefined,
+    sourceUrl: row.source_url ?? undefined,
+    sourceHost: row.source_host ?? undefined,
+    websiteKind: row.website_kind,
+    result: report?.success ? report.data : undefined,
+    businessStrength: businessStrength?.success ? businessStrength.data : undefined,
+    resolutionUsage: row.resolution_usage as ProspectReportRecord["resolutionUsage"] | undefined,
+    unlockedAt: row.unlocked_at ?? undefined,
+    leadId: row.lead_id ?? undefined,
+    errorCode: row.error_code ?? (report && !report.success ? "stale_schema_rebuild_required" : undefined),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at ?? undefined
+  };
+}
 function leadFromRow(row: LeadRow): ProspectReportLead { return { id: row.id, reportId: row.report_id, email: row.email, contactName: row.contact_name ?? undefined, phone: row.phone ?? undefined, ipHash: row.ip_hash ?? undefined, metadata: row.metadata as ProspectReportLead["metadata"], createdAt: row.created_at }; }
-function jobFromRow(row: JobRow): ProspectReportJob { return { id: row.id, reportId: row.report_id, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function websiteAssessmentFromRow(row: WebsiteAssessmentRow): WebsiteAssessmentRecord { const parsed = row.assessment_json === null ? undefined : websiteAssessmentSchema.safeParse(row.assessment_json); return { id: row.id, status: row.status, targetKind: row.target_kind, sourceKey: row.source_key, sourceUrl: row.source_url ?? undefined, siteId: row.site_id ?? undefined, artifactId: row.artifact_id ?? undefined, versionId: row.version_id ?? undefined, rubricIdentity: row.rubric_identity, scannerIdentity: row.scanner_identity, assessment: parsed && parsed.success ? parsed.data : undefined, errorCode: row.error_code ?? (parsed && !parsed.success ? "stale_schema_rebuild_required" : undefined), createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
+function websiteAssessmentJobFromRow(row: WebsiteAssessmentJobRow): WebsiteAssessmentJob { return { id: row.id, assessmentId: row.assessment_id, prospectReportId: row.prospect_report_id ?? undefined, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function byCreatedDesc<T extends { createdAt: string }>(a: T, b: T) { return b.createdAt.localeCompare(a.createdAt); }
 function isRetriableSetupFailure(code?: WebsiteSetupFailureCode) { return code === "crawl_temporarily_unavailable" || code === "bootstrap_failed" || code === "worker_interrupted"; }
 async function data<T = unknown>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, operation: string) { const result = await query; if (result.error) throw new Error(`${operation}: ${result.error.message}`); if (result.data === null) throw new Error(`${operation}: no data returned`); return result.data; }

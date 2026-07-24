@@ -1,6 +1,6 @@
 # Lodesta Pre-Launch Rollout
 
-**Status:** Canonical account-owned builder implemented; destructive reset remains gated
+**Status:** Canonical account-owned builder implemented; development cutover completed and each additional environment remains manifest-gated
 
 ## Product contract
 
@@ -11,7 +11,7 @@
 - `sites.owner_user_id` is the sole owner authorization source.
 - Custom hostnames are exclusive only after exact, site-bound TXT proof. The owner configures the ownership TXT record and routing CNAME/ALIAS together.
 - Billing is not part of this release.
-- Imported images remain `reference_only` until replaced by a platform-cleared asset or explicitly attested by the site owner.
+- Every retained image carries a typed origin (`source_website`, `owner_upload`, or `platform_generated`) and immutable provenance; media rights are not represented as a separate approval workflow.
 
 ## Verification before infrastructure work
 
@@ -29,7 +29,7 @@ npm run smoke:dev
 
 ## Canonical reset
 
-The repository intentionally contains one from-zero application migration. Never apply it over the historical public schema.
+The repository intentionally contains one from-zero canonical baseline followed by reviewed forward migrations. Never apply the baseline over a historical public schema.
 
 1. Finish and review the coordinated code/schema change.
 2. Quiesce web and workers.
@@ -38,7 +38,7 @@ The repository intentionally contains one from-zero application migration. Never
 5. Restore that snapshot into an isolated Supabase environment and verify rows, `auth.users` foreign keys, blobs, and hashes.
 6. Apply the canonical migration chain from zero in a separate empty Supabase environment and run the full suite with `LODESTA_VERIFY_LIVE_DATABASE=true`.
 7. Require the exact operator confirmation `reset-prelaunch:<manifest-hash>`.
-8. Preserve Supabase Auth, reset only application-owned public schema and managed artifact storage, and apply the baseline.
+8. Preserve Supabase Auth, reset only application-owned public schema and managed artifact storage, and apply the canonical migration chain.
 9. Seed the trusted runtime and operator defaults.
 10. Deploy web and worker together, then run live boundary verification before reopening traffic.
 

@@ -1,657 +1,397 @@
+import { hmacSha256Hex } from "./hash-secret";
 import type {
-  AnalyticsClickMapPoint,
-  AnalyticsAgentReadableResource,
+  AnalyticsActionType,
+  AnalyticsChannel,
+  AnalyticsCollectionHealth,
+  AnalyticsDeviceCategory,
   AnalyticsEvent,
-  AnalyticsFunnelDropoff,
-  AnalyticsOutcomeRow,
-  AnalyticsOutcomeTotals,
-  AnalyticsSectionConversionPath,
-  AnalyticsStandardCorrelation,
-  AnalyticsSummary
+  AnalyticsReport,
+  AnalyticsReportQuery,
+  AnalyticsReportRow,
+  AnalyticsTotals,
+  AnalyticsTrafficClass
 } from "@/packages/site-capabilities/contracts";
-import { getStandardCriterion } from "./standard";
-import { formatWebVitalValue, normalizeWebVitalMetric, webVitalWithinThreshold } from "./web-vitals-standard";
 
-const primaryActionEvents = new Set<AnalyticsEvent["eventType"]>(["tel_click", "form_submit", "outbound_click"]);
-const clickEventTypes = new Set<AnalyticsEvent["eventType"]>(["click", "tel_click", "outbound_click"]);
+export const analyticsActionTypes = new Set<AnalyticsActionType>([
+  "form_submit",
+  "call_click",
+  "email_click",
+  "directions_click",
+  "booking_click",
+  "ordering_click"
+]);
 
-export function summarizeAnalytics(siteId: string, events: AnalyticsEvent[]): AnalyticsSummary {
-  const siteEvents = events.filter((event) => event.siteId === siteId);
-  const totals = outcomeTotals(siteEvents);
+export const analyticsSufficiency = {
+  rates: 20,
+  recommendations: { visits: 50, actions: 5 }
+} as const;
 
-  return {
+const knownBots = /bot\b|crawler\b|spider\b|slurp\b|bingpreview\b|facebookexternalhit\b|googleother\b|google-inspectiontool\b|headlesschrome\b|lighthouse\b|curl\/|wget\/|python-requests|go-http-client|postmanruntime/i;
+const lodestaAgents = /\bLodesta(?:GenerationCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i;
+const searchHosts = /(^|\.)((google|bing|yahoo|duckduckgo|brave)\.[a-z.]+|search\.aol\.com)$/i;
+const socialHosts = /(^|\.)(facebook\.com|instagram\.com|linkedin\.com|pinterest\.com|reddit\.com|tiktok\.com|x\.com|twitter\.com|youtube\.com)$/i;
+
+export function classifyAnalyticsTraffic(userAgent: string | null): AnalyticsTrafficClass {
+  const value = userAgent?.trim() ?? "";
+  if (lodestaAgents.test(value)) return "lodesta_internal";
+  if (!value || knownBots.test(value)) return "known_bot";
+  return "human";
+}
+
+export function normalizeAnalyticsVisitor(siteId: string, visitorId: string) {
+  return `v1:${hmacSha256Hex(`analytics-visitor-v1\n${siteId}\n${visitorId}`).slice(0, 40)}`;
+}
+
+export function classifyAnalyticsChannel(input: {
+  utmSource?: string;
+  utmMedium?: string;
+  referrerHost?: string;
+}): AnalyticsChannel {
+  if (input.utmSource || input.utmMedium) return "campaign";
+  const host = normalizeReferrerHost(input.referrerHost);
+  if (!host) return "direct";
+  if (searchHosts.test(host)) return "organic_search";
+  if (socialHosts.test(host)) return "social";
+  return "referral";
+}
+
+export function normalizeAnalyticsPath(value: string | undefined) {
+  if (!value) return "/";
+  try {
+    const url = new URL(value, "https://lodesta.invalid");
+    const path = url.pathname.replace(/\/{2,}/g, "/").slice(0, 500);
+    return path.startsWith("/") ? path || "/" : `/${path}`;
+  } catch {
+    return "/";
+  }
+}
+
+export function normalizeReferrerHost(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    const host = value.includes("://") ? new URL(value).hostname : value.split("/")[0];
+    const normalized = host?.toLowerCase().replace(/^www\./, "").replace(/\.$/, "").slice(0, 253);
+    return normalized && /^[a-z0-9.-]+$/.test(normalized) ? normalized : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeCampaignValue(value: string | undefined) {
+  const normalized = value?.trim().replace(/\s+/g, " ").slice(0, 160);
+  return normalized || undefined;
+}
+
+export function buildAnalyticsReport(
+  siteId: string,
+  query: AnalyticsReportQuery,
+  events: AnalyticsEvent[],
+  collectionHealth: AnalyticsCollectionHealth = emptyCollectionHealth()
+): AnalyticsReport {
+  const currentEvents = filterEvents(events, query, query.from, query.to);
+  const comparisonEvents = query.compareFrom && query.compareTo
+    ? filterEvents(events, query, query.compareFrom, query.compareTo)
+    : undefined;
+  const current = totals(currentEvents);
+  const comparison = comparisonEvents ? totals(comparisonEvents) : undefined;
+  const report: AnalyticsReport = {
     siteId,
-    events: siteEvents.length,
-    sessions: totals.sessions,
-    pageviews: totals.pageviews,
-    clicks: siteEvents.filter((event) => event.eventType === "click").length,
-    telClicks: totals.telClicks,
-    formStarts: totals.formStarts,
-    formSubmits: totals.formSubmits,
-    outboundClicks: totals.outboundClicks,
-    primaryActions: totals.primaryActions,
-    actionRate: totals.actionRate,
-    engagedMs: totals.engagedMs,
-    avgEngagedSeconds: totals.avgEngagedSeconds,
-    avgTimeToActionMs: totals.avgTimeToActionMs,
-    medianTimeToActionMs: totals.medianTimeToActionMs,
-    avgScrollDepth: totals.avgScrollDepth,
-    webVitals: siteEvents
-      .filter((event) => event.eventType === "web_vital")
-      .map((event) => ({ metric: event.metadata?.metric, value: event.value, timestamp: event.timestamp })),
-    agentReadableRequests: siteEvents.filter((event) => event.eventType === "agent_readable_request").length,
-    agentReadableByResource: summarizeAgentReadableResources(siteEvents),
-    placesUi: summarizePlacesUi(siteEvents),
-    outcomesByPage: summarizeBy(siteEvents, (event) => event.pageId ?? "unknown", (key) => key),
-    outcomesByCtaRole: summarizeBy(
-      siteEvents.filter((event) => event.eventType === "click" || primaryActionEvents.has(event.eventType)),
-      (event) => `${event.elementRole ?? "unknown"}:${event.hrefType ?? "unknown"}`,
-      (key) => key.replace(":", " / ")
-    ),
-    outcomesBySection: summarizeBy(
-      siteEvents.filter((event) => event.sectionId || event.eventType === "section_view"),
-      (event) => event.sectionId ?? "unknown",
-      (key) => key
-    ),
-    funnelDropoffs: summarizeFunnelDropoffs(siteEvents),
-    sectionConversionPaths: summarizeSectionConversionPaths(siteEvents),
-    outcomesBySource: summarizeSources(siteEvents),
-    clickMap: summarizeClickMap(siteEvents),
-    standardCorrelations: summarizeStandardCorrelations(siteEvents, totals),
-    baselineComparison: baselineComparison(siteEvents)
-  };
-}
-
-function summarizePlacesUi(events: AnalyticsEvent[]): AnalyticsSummary["placesUi"] {
-  const places = events.filter((event) => event.eventType === "places_ui");
-  const loads = places.filter((event) => stringMetadata(event, "event") === "load").length;
-  const failures = places.filter((event) => stringMetadata(event, "event") === "failure").length;
-  const fallbacks = places.filter((event) => stringMetadata(event, "event") === "fallback").length;
-  return {
-    loads,
-    failures,
-    fallbacks,
-    fallbackRate: rate(fallbacks, loads + fallbacks),
-    estimatedCostUsd: Math.round(places.reduce((sum, event) => sum + (numericMetadata(event, "estimatedCostUsd") ?? 0), 0) * 1000) / 1000
-  };
-}
-
-function summarizeAgentReadableResources(events: AnalyticsEvent[]): AnalyticsAgentReadableResource[] {
-  const groups = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    if (event.eventType !== "agent_readable_request") continue;
-    const key = stringMetadata(event, "resource") || "unknown";
-    const group = groups.get(key) ?? [];
-    group.push(event);
-    groups.set(key, group);
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({
-      key,
-      label: key.replace(/_/g, " "),
-      requests: group.length,
-      sessions: new Set(group.map((event) => event.sessionId)).size,
-      latestAt: group.map((event) => event.timestamp).sort().at(-1)
-    }))
-    .sort((left, right) => right.requests - left.requests || left.label.localeCompare(right.label));
-}
-
-function summarizeFunnelDropoffs(events: AnalyticsEvent[]): AnalyticsFunnelDropoff[] {
-  const allSessions = sessionSet(events);
-  const pageviewSessions = sessionSet(events.filter((event) => event.eventType === "pageview"));
-  const sectionViewSessions = sessionSet(events.filter((event) => event.eventType === "section_view"));
-  const primaryActionSessions = sessionSet(events.filter((event) => primaryActionEvents.has(event.eventType)));
-  const formStartSessions = sessionSet(events.filter((event) => event.eventType === "form_start"));
-  const formSubmitSessions = sessionSet(events.filter((event) => event.eventType === "form_submit"));
-  const sectionActionSessions = sessionsWithSectionExposureBeforeAction(events);
-
-  return [
-    funnelDropoff("visit_to_primary_action", "Sessions", "Primary action sessions", allSessions.size, primaryActionSessions.size),
-    funnelDropoff("pageview_to_section_view", "Pageview sessions", "Section-view sessions", pageviewSessions.size, sectionViewSessions.size),
-    funnelDropoff(
-      "section_view_to_primary_action",
-      "Section-view sessions",
-      "Action after section exposure",
-      sectionViewSessions.size,
-      sectionActionSessions.size
-    ),
-    funnelDropoff("form_start_to_submit", "Form-start sessions", "Form-submit sessions", formStartSessions.size, formSubmitSessions.size)
-  ];
-}
-
-function funnelDropoff(key: string, from: string, to: string, fromCount: number, toCount: number): AnalyticsFunnelDropoff {
-  const boundedTo = Math.min(toCount, fromCount);
-  const dropoffCount = Math.max(fromCount - boundedTo, 0);
-  return {
-    key,
-    from,
-    to,
-    fromCount,
-    toCount,
-    dropoffCount,
-    conversionRate: rate(boundedTo, fromCount),
-    dropoffRate: rate(dropoffCount, fromCount)
-  };
-}
-
-function sessionSet(events: AnalyticsEvent[]) {
-  return new Set(events.map((event) => event.sessionId));
-}
-
-function sessionsWithSectionExposureBeforeAction(events: AnalyticsEvent[]) {
-  const sessions = new Set<string>();
-  const bySession = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    const group = bySession.get(event.sessionId) ?? [];
-    group.push(event);
-    bySession.set(event.sessionId, group);
-  }
-
-  for (const [sessionId, sessionEvents] of bySession.entries()) {
-    const sorted = [...sessionEvents].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-    const firstSectionView = sorted.find((event) => event.eventType === "section_view");
-    if (!firstSectionView) continue;
-    const exposureTime = new Date(firstSectionView.timestamp).getTime();
-    if (!Number.isFinite(exposureTime)) continue;
-    const laterAction = sorted.some((event) => {
-      if (!primaryActionEvents.has(event.eventType)) return false;
-      const actionTime = new Date(event.timestamp).getTime();
-      return Number.isFinite(actionTime) && actionTime >= exposureTime;
-    });
-    if (laterAction) sessions.add(sessionId);
-  }
-  return sessions;
-}
-
-function summarizeBy(
-  events: AnalyticsEvent[],
-  keyFor: (event: AnalyticsEvent) => string,
-  labelFor: (key: string) => string
-): AnalyticsOutcomeRow[] {
-  const groups = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    const key = keyFor(event);
-    const group = groups.get(key) ?? [];
-    group.push(event);
-    groups.set(key, group);
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({ key, label: labelFor(key), events: group.length, ...outcomeTotals(group) }))
-    .sort((a, b) => b.primaryActions - a.primaryActions || b.events - a.events)
-    .slice(0, 12);
-}
-
-function summarizeSectionConversionPaths(events: AnalyticsEvent[]): AnalyticsSectionConversionPath[] {
-  type SectionPathGroup = {
-    sectionId: string;
-    exposedSessions: Set<string>;
-    actionSessions: Set<string>;
-    exposures: number;
-    primaryActions: number;
-    telClicks: number;
-    formSubmits: number;
-    outboundClicks: number;
-    timeToActionMs: number[];
-  };
-
-  const bySession = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    const sessionEvents = bySession.get(event.sessionId) ?? [];
-    sessionEvents.push(event);
-    bySession.set(event.sessionId, sessionEvents);
-  }
-
-  const groups = new Map<string, SectionPathGroup>();
-  const groupFor = (sectionId: string) => {
-    const existing = groups.get(sectionId);
-    if (existing) return existing;
-    const created: SectionPathGroup = {
-      sectionId,
-      exposedSessions: new Set(),
-      actionSessions: new Set(),
-      exposures: 0,
-      primaryActions: 0,
-      telClicks: 0,
-      formSubmits: 0,
-      outboundClicks: 0,
-      timeToActionMs: []
-    };
-    groups.set(sectionId, created);
-    return created;
-  };
-
-  for (const [sessionId, sessionEvents] of bySession.entries()) {
-    const sorted = [...sessionEvents].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-    const firstExposureBySection = new Map<string, AnalyticsEvent>();
-    for (const event of sorted) {
-      if (event.eventType !== "section_view" || !event.sectionId) continue;
-      const group = groupFor(event.sectionId);
-      group.exposures += 1;
-      group.exposedSessions.add(sessionId);
-      if (!firstExposureBySection.has(event.sectionId)) firstExposureBySection.set(event.sectionId, event);
-    }
-
-    const primaryActions = sorted.filter((event) => primaryActionEvents.has(event.eventType));
-    for (const [sectionId, exposure] of firstExposureBySection.entries()) {
-      const exposureTime = new Date(exposure.timestamp).getTime();
-      if (!Number.isFinite(exposureTime)) continue;
-      const laterActions = primaryActions.filter((event) => {
-        const actionTime = new Date(event.timestamp).getTime();
-        return Number.isFinite(actionTime) && actionTime >= exposureTime;
-      });
-      if (laterActions.length === 0) continue;
-      const group = groupFor(sectionId);
-      group.actionSessions.add(sessionId);
-      group.primaryActions += laterActions.length;
-      group.telClicks += laterActions.filter((event) => event.eventType === "tel_click").length;
-      group.formSubmits += laterActions.filter((event) => event.eventType === "form_submit").length;
-      group.outboundClicks += laterActions.filter((event) => event.eventType === "outbound_click").length;
-      const firstAction = laterActions[0];
-      const firstActionTime = new Date(firstAction.timestamp).getTime();
-      const explicit = numericMetadata(firstAction, "elapsedMs");
-      const exposureElapsed = numericMetadata(exposure, "elapsedMs");
-      const delta = explicit !== undefined && exposureElapsed !== undefined ? explicit - exposureElapsed : firstActionTime - exposureTime;
-      if (Number.isFinite(delta) && delta >= 0) group.timeToActionMs.push(delta);
-    }
-  }
-
-  return Array.from(groups.values())
-    .map((group) => ({
-      key: group.sectionId,
-      sectionId: group.sectionId,
-      exposedSessions: group.exposedSessions.size,
-      exposures: group.exposures,
-      actionSessions: group.actionSessions.size,
-      primaryActions: group.primaryActions,
-      telClicks: group.telClicks,
-      formSubmits: group.formSubmits,
-      outboundClicks: group.outboundClicks,
-      actionRate: rate(group.actionSessions.size, group.exposedSessions.size),
-      avgTimeToActionMs: average(group.timeToActionMs),
-      medianTimeToActionMs: median(group.timeToActionMs)
-    }))
-    .sort((left, right) => right.primaryActions - left.primaryActions || right.actionRate - left.actionRate || right.exposures - left.exposures)
-    .slice(0, 12);
-}
-
-function summarizeSources(events: AnalyticsEvent[]): AnalyticsOutcomeRow[] {
-  const sourceBySession = new Map<string, string>();
-  const sourceByVisitor = new Map<string, string>();
-  const sorted = [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-  for (const event of sorted) {
-    const label = sourceLabel(event);
-    if (!sourceBySession.has(event.sessionId)) sourceBySession.set(event.sessionId, label);
-    if (event.visitorId && !sourceByVisitor.has(event.visitorId) && label !== "direct / unknown") {
-      sourceByVisitor.set(event.visitorId, label);
-    }
-  }
-
-  const groups = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    const sessionSource = sourceBySession.get(event.sessionId) ?? "direct / unknown";
-    const key =
-      sessionSource !== "direct / unknown"
-        ? sessionSource
-        : event.visitorId
-          ? sourceByVisitor.get(event.visitorId) ?? sessionSource
-          : sessionSource;
-    const group = groups.get(key) ?? [];
-    group.push(event);
-    groups.set(key, group);
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => ({ key, label: key, events: group.length, ...outcomeTotals(group) }))
-    .sort((a, b) => b.sessions - a.sessions || b.primaryActions - a.primaryActions || b.events - a.events)
-    .slice(0, 12);
-}
-
-function summarizeClickMap(events: AnalyticsEvent[]): AnalyticsClickMapPoint[] {
-  type ClickGroup = {
-    events: AnalyticsEvent[];
-    xTotal: number;
-    yTotal: number;
-    sample: AnalyticsEvent;
-  };
-  const groups = new Map<string, ClickGroup>();
-
-  for (const event of events) {
-    if (!clickEventTypes.has(event.eventType)) continue;
-    if (typeof event.normalizedX !== "number" || typeof event.normalizedY !== "number") continue;
-    const bucketX = coordinateBucket(event.normalizedX);
-    const bucketY = coordinateBucket(event.normalizedY);
-    const role = event.elementRole ?? "unknown";
-    const hrefType = event.hrefType ?? "unknown";
-    const key = [
-      event.pageId ?? "unknown",
-      event.sectionId ?? "unknown",
-      role,
-      hrefType,
-      event.deviceType ?? "unknown",
-      bucketX,
-      bucketY
-    ].join(":");
-    const group = groups.get(key) ?? { events: [], xTotal: 0, yTotal: 0, sample: event };
-    group.events.push(event);
-    group.xTotal += event.normalizedX;
-    group.yTotal += event.normalizedY;
-    groups.set(key, group);
-  }
-
-  return Array.from(groups.entries())
-    .map(([key, group]) => {
-      const primaryActions = group.events.filter((event) => primaryActionEvents.has(event.eventType)).length;
-      const count = group.events.length;
-      return {
-        key,
-        label: `${group.sample.elementRole ?? "unknown"} / ${group.sample.hrefType ?? group.sample.eventType}`,
-        count,
-        primaryActions,
-        pageId: group.sample.pageId,
-        sectionId: group.sample.sectionId,
-        elementRole: group.sample.elementRole,
-        hrefType: group.sample.hrefType,
-        deviceType: group.sample.deviceType,
-        normalizedX: round(group.xTotal / count, 3),
-        normalizedY: round(group.yTotal / count, 3)
-      };
-    })
-    .sort((left, right) => right.primaryActions - left.primaryActions || right.count - left.count)
-    .slice(0, 20);
-}
-
-function summarizeStandardCorrelations(
-  events: AnalyticsEvent[],
-  totals: AnalyticsOutcomeTotals
-): AnalyticsStandardCorrelation[] {
-  const sessions = totals.sessions;
-  const mobileEvents = events.filter((event) => event.deviceType === "mobile");
-  const telEvents = events.filter((event) => event.eventType === "tel_click");
-  const formStartEvents = events.filter((event) => event.eventType === "form_start");
-  const formSubmitEvents = events.filter((event) => event.eventType === "form_submit");
-  const aboveFoldClicks = events.filter(
-    (event) => clickEventTypes.has(event.eventType) && typeof event.normalizedY === "number" && event.normalizedY <= 0.35
-  );
-  const stickyActions = events.filter((event) => event.elementRole === "sticky-tel");
-
-  const correlations: AnalyticsStandardCorrelation[] = [
-    standardCorrelation({
-      criterionId: "conversion.mobile_click_to_call",
-      metric: "Mobile call actions",
-      events: telEvents.length,
-      primaryActions: telEvents.length,
-      rate: rate(telEvents.length, Math.max(mobileEvents.length ? new Set(mobileEvents.map((event) => event.sessionId)).size : sessions, 1)),
-      insight: telEvents.length
-        ? "Tracked call clicks are proving the click-to-call path."
-        : "No tracked call clicks yet; keep watching mobile sessions."
-    }),
-    standardCorrelation({
-      criterionId: "conversion.lead_form",
-      metric: "Form submit rate after starts",
-      events: formStartEvents.length + formSubmitEvents.length,
-      primaryActions: formSubmitEvents.length,
-      rate: formStartEvents.length ? rate(formSubmitEvents.length, formStartEvents.length) : rate(formSubmitEvents.length, sessions),
-      insight: formStartEvents.length && formSubmitEvents.length === 0
-        ? "Visitors are starting forms without submitting, which should feed form-friction recommendations."
-        : "Form starts and submits are being measured for the lead-form Standard."
-    }),
-    standardCorrelation({
-      criterionId: "conversion.primary_action_above_fold",
-      metric: "Above-fold click share",
-      events: aboveFoldClicks.length,
-      primaryActions: aboveFoldClicks.filter((event) => primaryActionEvents.has(event.eventType)).length,
-      rate: rate(aboveFoldClicks.length, Math.max(events.filter((event) => clickEventTypes.has(event.eventType)).length, 1)),
-      insight: aboveFoldClicks.length
-        ? "Early clicks are visible enough to connect above-fold CTA decisions to outcomes."
-        : "No above-fold clicks have been tracked yet."
-    }),
-    standardCorrelation({
-      criterionId: "conversion.mobile_sticky_action",
-      metric: "Sticky action usage",
-      events: stickyActions.length,
-      primaryActions: stickyActions.filter((event) => primaryActionEvents.has(event.eventType)).length,
-      rate: rate(stickyActions.length, Math.max(mobileEvents.length ? new Set(mobileEvents.map((event) => event.sessionId)).size : sessions, 1)),
-      insight: stickyActions.length
-        ? "Sticky mobile action usage is measurable for Experiment Mode and monthly recommendations."
-        : "No sticky action clicks yet; this remains a watch item for mobile traffic."
-    })
-  ];
-  const performance = webVitalPerformanceCorrelation(events);
-  if (performance) correlations.push(performance);
-  return correlations;
-}
-
-function baselineComparison(events: AnalyticsEvent[]): AnalyticsSummary["baselineComparison"] {
-  const sorted = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  if (sorted.length === 0) {
-    return {
-      status: "collecting",
-      baseline: emptyTotals(),
-      current: emptyTotals(),
-      delta: { sessions: 0, primaryActions: 0, actionRate: 0 }
-    };
-  }
-
-  const first = new Date(sorted[0].timestamp).getTime();
-  const last = new Date(sorted.at(-1)?.timestamp ?? sorted[0].timestamp).getTime();
-  const midpoint = first + Math.max(1, Math.floor((last - first) / 2));
-  const baselineEvents = sorted.filter((event) => new Date(event.timestamp).getTime() <= midpoint);
-  const currentEvents = sorted.filter((event) => new Date(event.timestamp).getTime() > midpoint);
-  const baseline = outcomeTotals(baselineEvents);
-  const current = outcomeTotals(currentEvents);
-
-  return {
-    status: last - first >= 1000 * 60 * 60 * 24 * 7 && currentEvents.length > 0 ? "ready" : "collecting",
-    baselineStart: sorted[0].timestamp,
-    baselineEnd: baselineEvents.at(-1)?.timestamp,
-    currentStart: currentEvents[0]?.timestamp,
-    currentEnd: sorted.at(-1)?.timestamp,
-    baseline,
+    query,
     current,
-    delta: {
-      sessions: current.sessions - baseline.sessions,
-      primaryActions: current.primaryActions - baseline.primaryActions,
-      actionRate: Number((current.actionRate - baseline.actionRate).toFixed(4))
-    }
+    comparison,
+    trend: trend(currentEvents, query),
+    channels: rows(currentEvents, (event) => event.channel, channelLabel),
+    sources: rows(currentEvents, (event) => event.source ?? event.referrerHost ?? "direct", titleCase),
+    campaigns: rows(currentEvents.filter((event) => Boolean(event.campaign)), (event) => event.campaign ?? "", titleCase),
+    pages: rows(currentEvents, (event) => event.pagePath, pageLabel),
+    landingPages: rows(currentEvents, (event) => event.landingPath, pageLabel),
+    actions: rows(currentEvents.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType)), (event) => event.eventType, actionLabel),
+    devices: rows(currentEvents, (event) => event.deviceCategory, titleCase),
+    visitorTypes: rows(
+      currentEvents.filter((event) => event.eventType === "page_view"),
+      (event) => event.properties.returning === true ? "returning" : "new",
+      titleCase
+    ),
+    collectionHealth,
+    sufficiency: current.visits === 0 ? "empty" : current.visits < analyticsSufficiency.rates ? "early" : "sufficient",
+    recommendations: []
   };
+  report.recommendations = recommendations(report);
+  return report;
 }
 
-function standardCorrelation(input: {
-  criterionId: string;
-  metric: string;
-  events: number;
-  primaryActions: number;
-  rate: number;
-  insight: string;
-}): AnalyticsStandardCorrelation {
-  const criterion = getStandardCriterion(input.criterionId);
-  return {
-    criterionId: input.criterionId,
-    title: criterion?.title ?? input.criterionId,
-    layer: criterion?.layer ?? "conversion",
-    metric: input.metric,
-    events: input.events,
-    primaryActions: input.primaryActions,
-    rate: input.rate,
-    signal: analyticsSignal(input),
-    insight: input.insight
+export function analyticsReportFromDatabase(siteId: string, query: AnalyticsReportQuery, value: unknown): AnalyticsReport {
+  const raw = isRecord(value) ? value : {};
+  const current = databaseTotals(raw.current);
+  const report: AnalyticsReport = {
+    siteId,
+    query,
+    current,
+    comparison: raw.comparison ? databaseTotals(raw.comparison) : undefined,
+    trend: array(raw.trend).map((item) => ({
+      bucket: text(item.bucket),
+      visits: integer(item.visits),
+      customerActions: integer(item.customerActions ?? item.customer_actions)
+    })),
+    channels: databaseRows(raw.channels),
+    sources: databaseRows(raw.sources),
+    campaigns: databaseRows(raw.campaigns),
+    pages: databaseRows(raw.pages),
+    landingPages: databaseRows(raw.landingPages ?? raw.landing_pages),
+    actions: databaseRows(raw.actions),
+    devices: databaseRows(raw.devices),
+    visitorTypes: databaseRows(raw.visitorTypes ?? raw.visitor_types),
+    collectionHealth: databaseHealth(raw.collectionHealth ?? raw.collection_health),
+    sufficiency: current.visits === 0 ? "empty" : current.visits < analyticsSufficiency.rates ? "early" : "sufficient",
+    recommendations: []
   };
+  report.recommendations = recommendations(report);
+  return report;
 }
 
-function analyticsSignal(input: { events: number; primaryActions: number; rate: number }): AnalyticsStandardCorrelation["signal"] {
-  if (input.events === 0) return "collecting";
-  if (input.primaryActions > 0 && input.rate >= 0.15) return "positive";
-  if (input.primaryActions === 0) return "weak";
-  return "watch";
+function filterEvents(events: AnalyticsEvent[], query: AnalyticsReportQuery, from: string, to: string) {
+  const start = localDateBoundary(from, query.timezone);
+  const end = localDateBoundary(addDays(to, 1), query.timezone);
+  const actionVisitIds = query.filters.action
+    ? new Set(events.filter((event) => event.eventType === query.filters.action).map((event) => event.visitId))
+    : undefined;
+  return events.filter((event) => {
+    const at = Date.parse(event.occurredAt);
+    return event.schemaVersion === 1
+      && at >= start && at < end
+      && (!query.filters.channel || event.channel === query.filters.channel)
+      && (!query.filters.source || (event.source ?? event.referrerHost ?? "direct") === query.filters.source)
+      && (!query.filters.page || event.pagePath === query.filters.page || event.landingPath === query.filters.page)
+      && (!query.filters.device || event.deviceCategory === query.filters.device)
+      && (!actionVisitIds || actionVisitIds.has(event.visitId));
+  });
 }
 
-function webVitalPerformanceCorrelation(events: AnalyticsEvent[]): AnalyticsStandardCorrelation | undefined {
-  const webVitalEvents = events.filter((event) => event.eventType === "web_vital");
-  if (webVitalEvents.length === 0) return undefined;
-
-  const mobileEvents = webVitalEvents.filter((event) => event.deviceType === "mobile");
-  const scopedEvents = mobileEvents.length ? mobileEvents : webVitalEvents;
-  const latest = new Map<string, { metric: ReturnType<typeof normalizeWebVitalMetric>; value: number; timestamp: string }>();
-  for (const event of scopedEvents) {
-    const metric = normalizeWebVitalMetric(event.metadata?.metric);
-    if (!metric || typeof event.value !== "number") continue;
-    const existing = latest.get(metric);
-    if (!existing || event.timestamp > existing.timestamp) {
-      latest.set(metric, { metric, value: event.value, timestamp: event.timestamp });
-    }
-  }
-  const values = Array.from(latest.values()).filter(
-    (item): item is { metric: NonNullable<ReturnType<typeof normalizeWebVitalMetric>>; value: number; timestamp: string } =>
-      Boolean(item.metric)
-  );
-  if (values.length === 0) return undefined;
-
-  const passing = values.filter((item) => webVitalWithinThreshold(item.metric, item.value));
-  const failing = values.filter((item) => !webVitalWithinThreshold(item.metric, item.value));
-  const criterion = getStandardCriterion("technical.mobile_performance");
-  const metricLabel = mobileEvents.length ? "Mobile Web Vitals within target" : "Web Vitals within target";
-  const badList = failing.map((item) => `${item.metric} ${formatWebVitalValue(item.metric, item.value)}`).join(", ");
-
+function totals(events: AnalyticsEvent[]): AnalyticsTotals {
+  const visits = new Set(events.map((event) => event.visitId));
+  const actionEvents = events.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType));
+  const actionVisits = new Set(actionEvents.map((event) => event.visitId));
   return {
-    criterionId: "technical.mobile_performance",
-    title: criterion?.title ?? "Mobile Core Web Vitals stay within launch thresholds",
-    layer: criterion?.layer ?? "technical_seo",
-    metric: metricLabel,
-    events: scopedEvents.length,
-    primaryActions: 0,
-    rate: rate(passing.length, values.length),
-    signal: failing.length === 0 ? "positive" : failing.length >= 2 ? "weak" : "watch",
-    insight: failing.length
-      ? `${badList} exceeded launch thresholds and should feed performance recommendations.`
-      : "Latest measured Web Vitals are inside launch thresholds."
-  };
-}
-
-function sourceLabel(event: AnalyticsEvent) {
-  const utmSource = stringMetadata(event, "utmSource");
-  const utmCampaign = stringMetadata(event, "utmCampaign");
-  if (utmSource) return `utm:${utmSource}${utmCampaign ? ` / ${utmCampaign}` : ""}`;
-
-  const referrerHost = stringMetadata(event, "referrerHost");
-  if (referrerHost) return `referrer:${referrerHost}`;
-
-  return "direct / unknown";
-}
-
-function stringMetadata(event: AnalyticsEvent, key: string) {
-  const value = event.metadata?.[key];
-  return typeof value === "string" && value.trim() ? value.trim() : "";
-}
-
-function coordinateBucket(value: number) {
-  return round(Math.max(0, Math.min(1, value)) * 20, 0) / 20;
-}
-
-function rate(numerator: number, denominator: number) {
-  return denominator ? Number((numerator / denominator).toFixed(4)) : 0;
-}
-
-function outcomeTotals(events: AnalyticsEvent[]): AnalyticsOutcomeTotals {
-  const sessions = new Set(events.map((event) => event.sessionId)).size;
-  const telClicks = events.filter((event) => event.eventType === "tel_click").length;
-  const formSubmits = events.filter((event) => event.eventType === "form_submit").length;
-  const outboundClicks = events.filter((event) => event.eventType === "outbound_click").length;
-  const primaryActions = telClicks + formSubmits + outboundClicks;
-  const engagedMs = events
-    .filter((event) => event.eventType === "engagement")
-    .reduce((total, event) => total + (typeof event.value === "number" ? event.value : 0), 0);
-  const timeToActionMs = timeToFirstActions(events);
-  const scrollDepths = maxScrollDepths(events);
-
-  return {
-    sessions,
-    pageviews: events.filter((event) => event.eventType === "pageview").length,
-    telClicks,
+    visitors: new Set(events.map((event) => event.visitorKey)).size,
+    visits: visits.size,
+    pageViews: events.filter((event) => event.eventType === "page_view").length,
+    leads: events.filter((event) => event.eventType === "form_submit").length,
+    customerActions: actionEvents.length,
+    actionVisits: actionVisits.size,
+    actionRate: visits.size ? actionVisits.size / visits.size : 0,
     formStarts: events.filter((event) => event.eventType === "form_start").length,
-    formSubmits,
-    outboundClicks,
-    primaryActions,
-    actionRate: sessions ? Number((primaryActions / sessions).toFixed(4)) : 0,
-    engagedMs,
-    avgEngagedSeconds: sessions ? round(engagedMs / sessions / 1000, 1) : 0,
-    avgTimeToActionMs: average(timeToActionMs),
-    medianTimeToActionMs: median(timeToActionMs),
-    avgScrollDepth: round(average(scrollDepths) ?? 0, 1)
+    engagedSeconds: Math.round(events.filter((event) => event.eventType === "engagement")
+      .reduce((sum, event) => sum + numberProperty(event, "engagedMs") / 1000, 0)),
+    medianSecondsToAction: median(actionEvents.map((event) => numberProperty(event, "elapsedMs") / 1000))
   };
 }
 
-function emptyTotals(): AnalyticsOutcomeTotals {
+function rows(events: AnalyticsEvent[], keyFor: (event: AnalyticsEvent) => string, labelFor: (value: string) => string) {
+  const grouped = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    const key = keyFor(event) || "unknown";
+    grouped.set(key, [...(grouped.get(key) ?? []), event]);
+  }
+  return [...grouped.entries()].map(([key, scoped]) => {
+    const summary = totals(scoped);
+    return {
+      key,
+      label: labelFor(key),
+      visitors: summary.visitors,
+      visits: summary.visits,
+      pageViews: summary.pageViews,
+      customerActions: summary.customerActions,
+      actionRate: summary.actionRate,
+      engagedSeconds: summary.engagedSeconds,
+      exits: scoped.filter((event) => event.eventType === "engagement").length
+    };
+  }).sort((left, right) => right.visits - left.visits || right.customerActions - left.customerActions).slice(0, 100);
+}
+
+function trend(events: AnalyticsEvent[], query: AnalyticsReportQuery) {
+  const grouped = new Map<string, AnalyticsEvent[]>();
+  for (const event of events) {
+    const bucket = localBucket(event.occurredAt, query.timezone, query.interval);
+    grouped.set(bucket, [...(grouped.get(bucket) ?? []), event]);
+  }
+  return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([bucket, scoped]) => ({
+    bucket,
+    visits: new Set(scoped.map((event) => event.visitId)).size,
+    customerActions: scoped.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType)).length
+  }));
+}
+
+function recommendations(report: AnalyticsReport) {
+  if (
+    report.current.visits < analyticsSufficiency.recommendations.visits
+    || report.current.customerActions < analyticsSufficiency.recommendations.actions
+  ) return [];
+  const result = [];
+  const leadingChannel = report.channels[0];
+  if (leadingChannel && leadingChannel.visits >= analyticsSufficiency.recommendations.visits) {
+    result.push({
+      key: `channel:${leadingChannel.key}`,
+      title: `${leadingChannel.label} is the leading source`,
+      detail: `Protect the message and landing experience that is converting this traffic.`,
+      denominator: `${leadingChannel.customerActions} actions from ${leadingChannel.visits} visits`
+    });
+  }
+  const leadingPage = report.pages.find((page) => page.customerActions >= analyticsSufficiency.recommendations.actions);
+  if (leadingPage) {
+    result.push({
+      key: `page:${leadingPage.key}`,
+      title: `${leadingPage.label} helps visitors act`,
+      detail: "Keep its primary action prominent and use the same proof pattern on related pages.",
+      denominator: `${leadingPage.customerActions} actions across ${leadingPage.visits} visits`
+    });
+  }
+  return result.slice(0, 2);
+}
+
+function localBucket(timestamp: string, timezone: string, interval: AnalyticsReportQuery["interval"]) {
+  const parts = localDateParts(new Date(timestamp), timezone);
+  if (interval === "month") return `${parts.year}-${two(parts.month)}-01`;
+  const date = `${parts.year}-${two(parts.month)}-${two(parts.day)}`;
+  if (interval === "day") return date;
+  const day = new Date(`${date}T12:00:00Z`);
+  const weekday = day.getUTCDay() || 7;
+  day.setUTCDate(day.getUTCDate() - weekday + 1);
+  return day.toISOString().slice(0, 10);
+}
+
+export function localDateBoundary(date: string, timezone: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  let guess = Date.UTC(year, month - 1, day);
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const parts = localDateParts(new Date(guess), timezone);
+    const represented = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour === 24 ? 0 : parts.hour, parts.minute, parts.second);
+    guess += Date.UTC(year, month - 1, day) - represented;
+  }
+  return guess;
+}
+
+function localDateParts(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value ?? 0);
+  return { year: part("year"), month: part("month"), day: part("day"), hour: part("hour"), minute: part("minute"), second: part("second") };
+}
+
+function addDays(date: string, amount: number) {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value.toISOString().slice(0, 10);
+}
+
+function numberProperty(event: AnalyticsEvent, key: string) {
+  const value = event.properties[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function channelLabel(value: string) {
+  return value === "direct" ? "Direct / unknown" : titleCase(value);
+}
+
+function actionLabel(value: string) {
+  return titleCase(value.replace(/_click$/, "").replace("form_submit", "form submission"));
+}
+
+function pageLabel(value: string) {
+  return value === "/" ? "Homepage" : titleCase(value.replace(/^\/+/, "").replaceAll("-", " ").replaceAll("/", " / "));
+}
+
+function titleCase(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function two(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function emptyCollectionHealth(): AnalyticsCollectionHealth {
+  return { accepted: 0, internal: 0, bot: 0, preview: 0, duplicate: 0, invalid: 0 };
+}
+
+function databaseTotals(value: unknown): AnalyticsTotals {
+  const item = isRecord(value) ? value : {};
+  const visits = integer(item.visits);
+  const actionVisits = integer(item.actionVisits ?? item.action_visits);
   return {
-    sessions: 0,
-    pageviews: 0,
-    telClicks: 0,
-    formStarts: 0,
-    formSubmits: 0,
-    outboundClicks: 0,
-    primaryActions: 0,
-    actionRate: 0,
-    engagedMs: 0,
-    avgEngagedSeconds: 0,
-    avgTimeToActionMs: undefined,
-    medianTimeToActionMs: undefined,
-    avgScrollDepth: 0
+    visitors: integer(item.visitors),
+    visits,
+    pageViews: integer(item.pageViews ?? item.page_views),
+    leads: integer(item.leads),
+    customerActions: integer(item.customerActions ?? item.customer_actions),
+    actionVisits,
+    actionRate: number(item.actionRate ?? item.action_rate) || (visits ? actionVisits / visits : 0),
+    formStarts: integer(item.formStarts ?? item.form_starts),
+    engagedSeconds: integer(item.engagedSeconds ?? item.engaged_seconds),
+    medianSecondsToAction: nullableNumber(item.medianSecondsToAction ?? item.median_seconds_to_action)
   };
 }
 
-function timeToFirstActions(events: AnalyticsEvent[]) {
-  const bySession = new Map<string, AnalyticsEvent[]>();
-  for (const event of events) {
-    const group = bySession.get(event.sessionId) ?? [];
-    group.push(event);
-    bySession.set(event.sessionId, group);
-  }
-
-  const values: number[] = [];
-  for (const sessionEvents of bySession.values()) {
-    const sorted = [...sessionEvents].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    const first = sorted[0];
-    const firstAction = sorted.find((event) => primaryActionEvents.has(event.eventType));
-    if (!first || !firstAction) continue;
-    const explicit = numericMetadata(firstAction, "elapsedMs");
-    if (explicit !== undefined) {
-      values.push(explicit);
-      continue;
-    }
-    const delta = new Date(firstAction.timestamp).getTime() - new Date(first.timestamp).getTime();
-    if (Number.isFinite(delta) && delta >= 0) values.push(delta);
-  }
-  return values;
+function databaseRows(value: unknown): AnalyticsReportRow[] {
+  return array(value).map((item) => ({
+    key: text(item.key),
+    label: text(item.label),
+    visitors: integer(item.visitors),
+    visits: integer(item.visits),
+    pageViews: integer(item.pageViews ?? item.page_views),
+    customerActions: integer(item.customerActions ?? item.customer_actions),
+    actionRate: number(item.actionRate ?? item.action_rate),
+    engagedSeconds: integer(item.engagedSeconds ?? item.engaged_seconds),
+    exits: integer(item.exits)
+  }));
 }
 
-function maxScrollDepths(events: AnalyticsEvent[]) {
-  const bySession = new Map<string, number>();
-  for (const event of events) {
-    if (event.eventType !== "scroll_depth" || typeof event.value !== "number") continue;
-    bySession.set(event.sessionId, Math.max(bySession.get(event.sessionId) ?? 0, event.value));
-  }
-  return Array.from(bySession.values());
+function databaseHealth(value: unknown): AnalyticsCollectionHealth {
+  const item = isRecord(value) ? value : {};
+  return {
+    lastAcceptedAt: text(item.lastAcceptedAt ?? item.last_accepted_at) || undefined,
+    accepted: integer(item.accepted),
+    internal: integer(item.internal),
+    bot: integer(item.bot),
+    preview: integer(item.preview),
+    duplicate: integer(item.duplicate),
+    invalid: integer(item.invalid)
+  };
 }
 
-function numericMetadata(event: AnalyticsEvent, key: string) {
-  const value = event.metadata?.[key];
+function array(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function text(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function number(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function integer(value: unknown) {
+  return Math.max(0, Math.round(number(value)));
+}
+
+function nullableNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function average(values: number[]) {
-  if (values.length === 0) return undefined;
-  return round(values.reduce((total, value) => total + value, 0) / values.length, 1);
-}
-
 function median(values: number[]) {
-  if (values.length === 0) return undefined;
-  const sorted = [...values].sort((a, b) => a - b);
+  if (!values.length) return undefined;
+  const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? round((sorted[middle - 1] + sorted[middle]) / 2, 1) : sorted[middle];
-}
-
-function round(value: number, digits: number) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }

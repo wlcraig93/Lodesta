@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCall, ResponseInputItem, Tool } from "openai/resources/responses/responses";
+import { configuredAppOrigin } from "@/lib/app-origin";
 import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { sha256, stableJson } from "@/packages/business-data";
-import type { SiteElementSelection, SitePublicBuildInput } from "@/packages/site-contracts";
+import { siteAgentApiProviderSchema, type SiteAgentApiProvider, type SiteElementSelection, type SitePublicBuildInput } from "@/packages/site-contracts";
 import {
   managerCompletionSchema,
   managerDiscussionSchema,
@@ -24,12 +25,19 @@ import {
   isSiteAuthoringTerminalError,
   SiteAuthoringTerminalError
 } from "./failures";
-import { managerBuildContext, managerEvidencePacket, websiteManagerPromptVersion, websiteManagerSystemPrompt } from "./prompts";
+import { managerBuildContext, managerEvidencePacket, websiteManagerPromptIdentity, websiteManagerSystemPrompt } from "./prompts";
 import { isSupportedSiteAgentModel, managerLimitsForKind, usageForModel } from "./run-policy";
 
 export type { ManagerRunRequest } from "./contracts";
 
-type ManagerResponse = Pick<Response, "output" | "output_text" | "usage" | "status" | "error" | "incomplete_details">;
+type ProviderResponseUsage = NonNullable<Response["usage"]> & {
+  cost?: number | null;
+  cost_details?: { upstream_inference_cost?: number | null } | null;
+};
+type ManagerResponse = Pick<Response, "id" | "model" | "output" | "output_text" | "status" | "error" | "incomplete_details"> & {
+  usage?: ProviderResponseUsage;
+  openrouter_metadata?: unknown;
+};
 
 export interface ManagerResponsesClient {
   create(params: ResponseCreateParamsNonStreaming, options?: { signal?: AbortSignal }): Promise<ManagerResponse>;
@@ -40,20 +48,22 @@ export class WebsiteManagerAgent {
 
   async run(input: ManagerRunRequest & {
     runtime: ManagerToolRuntime;
-    onUsage?: (progress: { usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; modelId: string }) => Promise<void>;
-    onProgress?: (progress: { toolRecord: ManagerToolRecord; usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; modelId: string }) => Promise<void>;
+    onUsage?: (progress: { usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; apiProvider: SiteAgentApiProvider; modelId: string }) => Promise<void>;
+    onProgress?: (progress: { toolRecord: ManagerToolRecord; usage: ManagerModelUsage; responseUsage: ManagerModelUsage; responseIndex: number; apiProvider: SiteAgentApiProvider; modelId: string }) => Promise<void>;
     onEvents?: (events: ManagerRunEvent[]) => Promise<void>;
   }): Promise<{
     completion: ManagerCompletion;
+    apiProvider: SiteAgentApiProvider;
     modelId: string;
-    promptVersion: string;
+    promptIdentity: string;
     usage: ManagerModelUsage;
     toolRecords: ManagerToolRecord[];
     responses: number;
   }> {
     const settings = await getSiteAuthoringModelSettings();
-    const modelId = selectedSiteAgentModel(settings.settings.siteAgentModel);
-    const client = this.injectedClient ?? configuredResponsesClient();
+    const route = selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
+    const { apiProvider, modelId } = route;
+    const client = this.injectedClient ?? configuredResponsesClient(apiProvider);
     const limits = limitsFor(input, input.limits);
     const startedAt = Date.now();
     const usage = emptyUsage();
@@ -64,11 +74,16 @@ export class WebsiteManagerAgent {
       type: "message",
       content: [{ type: "input_text", text: JSON.stringify(managerBuildContext({
         buildInput: input.buildInput,
+        authoringContext: input.authoringContext,
         verticalContext: input.buildInput.domainContext,
         instruction: input.instruction,
         kind: input.kind,
         selection: input.selection
-      })) }]
+      })) }, ...(input.mediaSheet ? [{
+        type: "input_image" as const,
+        image_url: input.mediaSheet.dataUrl,
+        detail: "high" as const
+      }] : [])]
     };
     const history: ResponseInputItem[] = [initialContext];
     let responseCount = 0;
@@ -82,12 +97,12 @@ export class WebsiteManagerAgent {
       const requestHistory = [...history, runtimeStateMessage(input.runtime.stateSummary())];
       await input.onEvents?.([
         runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "running", turnIndex, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length } }),
-        runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "running", turnIndex, modelId, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length } })
+        runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "running", turnIndex, apiProvider, modelId, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length } })
       ]);
       const responseStartedAt = Date.now();
       let response: ManagerResponse;
       try {
-        response = await createWithOneTransportRetry(client, {
+        response = await createWithOneTransportRetry(client, routedResponseParams({
           model: modelId,
           instructions: websiteManagerSystemPrompt,
           input: requestHistory,
@@ -99,12 +114,12 @@ export class WebsiteManagerAgent {
           reasoning: { effort: "high" },
           text: { verbosity: "low" },
           max_output_tokens: Math.min(64_000, Math.max(1, limits.maxOutputTokens - usage.outputTokens))
-        }, boundedSignal(input.signal, limits.maxDurationMs - (Date.now() - startedAt)));
+        }, apiProvider, input.runId), boundedSignal(input.signal, limits.maxDurationMs - (Date.now() - startedAt)));
       } catch (error) {
         const completedAt = new Date().toISOString();
         const errorCode = diagnosticErrorCode(error);
         await input.onEvents?.([
-          runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "failed", turnIndex, modelId, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode }, payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptVersion) }),
+          runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "failed", turnIndex, apiProvider, modelId, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode }, payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptIdentity, route) }),
           runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "failed", turnIndex, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode } })
         ]);
         throw classifyModelProviderError(error);
@@ -115,13 +130,12 @@ export class WebsiteManagerAgent {
       const calls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
       const modelCompletedAt = new Date().toISOString();
       await input.onEvents?.([runEvent({
-        id: modelIdValue, kind: "model_request", name: "responses.create", status: "succeeded", turnIndex, modelId,
-        startedAt: turnStartedAt, completedAt: modelCompletedAt, ...usageFields(responseUsage),
-        summary: { outputItems: response.output.length, functionCalls: calls.length }, payload: modelTurnPayload(requestHistory, response, websiteManagerPromptVersion)
+        id: modelIdValue, kind: "model_request", name: "responses.create", status: "succeeded", turnIndex,
+        startedAt: turnStartedAt, completedAt: modelCompletedAt, ...usageFields(responseUsage, route, response),
+        summary: { outputItems: response.output.length, functionCalls: calls.length }, payload: modelTurnPayload(requestHistory, response, websiteManagerPromptIdentity, route)
       })]);
       history.push(...response.output as ResponseInputItem[]);
-      await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, modelId });
-      assertWithinLimits({ limits, usage, startedAt });
+      await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
 
       if (!calls.length) {
         history.push({ role: "user", type: "message", content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }] });
@@ -183,15 +197,16 @@ export class WebsiteManagerAgent {
           payload: { arguments: parsedArguments, modelResult: readableModelResult(execution.modelOutput), diagnosticResult: execution.diagnosticOutput }
         })]);
         history.push({ type: "function_call_output", call_id: rawCall.call_id, output: execution.modelOutput as never });
-        await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, modelId });
+        await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
         if (terminalError) throw terminalError;
         if (execution.needsInput) throw new ManagerNeedsInputError(execution.needsInput.question);
         if (execution.completion) {
           await input.onEvents?.([runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "succeeded", turnIndex, startedAt: turnStartedAt, completedAt: new Date().toISOString(), summary: { toolName, completed: true } })]);
           return {
             completion: managerCompletionSchema.parse(execution.completion),
+            apiProvider,
             modelId,
-            promptVersion: websiteManagerPromptVersion,
+            promptIdentity: websiteManagerPromptIdentity,
             usage: { ...usage, durationMs: Date.now() - startedAt },
             toolRecords,
             responses: responseCount
@@ -210,9 +225,10 @@ export class WebsiteManagerAgent {
     signal?: AbortSignal;
   }) {
     const settings = await getSiteAuthoringModelSettings();
-    const modelId = selectedSiteAgentModel(settings.settings.siteAgentModel);
+    const route = selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
+    const { apiProvider, modelId } = route;
     const result = await structuredResponse({
-      client: this.injectedClient ?? configuredResponsesClient(), modelId, name: "manager_discussion_v1", schema: managerDiscussionJsonSchema,
+      client: this.injectedClient ?? configuredResponsesClient(apiProvider), route, name: "manager_discussion", schema: managerDiscussionJsonSchema,
       system: websiteManagerSystemPrompt,
       content: [{ type: "input_text", text: JSON.stringify({
         role: "Discuss the requested change without modifying source. Be concise, state what would change, and identify unsupported capability requests.",
@@ -221,7 +237,7 @@ export class WebsiteManagerAgent {
       }) }],
       signal: input.signal, maxOutputTokens: 2500
     });
-    return { discussion: managerDiscussionSchema.parse(result.value), modelId, usage: result.usage };
+    return { discussion: managerDiscussionSchema.parse(result.value), apiProvider, modelId, usage: result.usage };
   }
 
 }
@@ -233,7 +249,7 @@ export class ManagerNeedsInputError extends Error {
 
 async function structuredResponse(input: {
   client: ManagerResponsesClient;
-  modelId: string;
+  route: { apiProvider: SiteAgentApiProvider; modelId: string };
   name: string;
   schema: Record<string, unknown>;
   system: string;
@@ -243,27 +259,44 @@ async function structuredResponse(input: {
   signal?: AbortSignal;
 }) {
   const startedAt = Date.now();
-  const response = await createWithOneTransportRetry(input.client, {
-    model: input.modelId, instructions: input.system,
+  const response = await createWithOneTransportRetry(input.client, routedResponseParams({
+    model: input.route.modelId, instructions: input.system,
     input: [{ role: "user", type: "message", content: input.content as never }],
     store: false, parallel_tool_calls: false, reasoning: { effort: input.reasoningEffort ?? "high" },
     text: { verbosity: "low", format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
     max_output_tokens: input.maxOutputTokens
-  }, boundedSignal(input.signal, 10 * 60_000));
+  }, input.route.apiProvider), boundedSignal(input.signal, 10 * 60_000));
   if (!response.output_text) throw new Error("Website manager response did not contain structured output text.");
-  return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.modelId, response.usage, Date.now() - startedAt) };
+  return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.route.modelId, response.usage, Date.now() - startedAt) };
 }
 
-function configuredResponsesClient(): ManagerResponsesClient {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required for website manager runs.");
-  const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 10 * 60_000 });
+function configuredResponsesClient(apiProvider: SiteAgentApiProvider): ManagerResponsesClient {
+  const apiKey = apiProvider === "openrouter" ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error(`${apiProvider === "openrouter" ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY"} is required for website manager runs.`);
+  const origin = configuredAppOrigin();
+  const client = new OpenAI({
+    apiKey,
+    baseURL: apiProvider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
+    maxRetries: 0,
+    timeout: 10 * 60_000,
+    defaultHeaders: apiProvider === "openrouter"
+      ? {
+          ...(origin ? { "HTTP-Referer": origin } : {}),
+          "X-OpenRouter-Title": "Lodesta",
+          "X-OpenRouter-Metadata": "enabled"
+        }
+      : undefined
+  });
   return { create: (params, options) => client.responses.create(params, options) };
 }
 
-function selectedSiteAgentModel(configuredModelId: string) {
-  const modelId = process.env.LODESTA_SITE_AGENT_MODEL ?? configuredModelId;
-  if (!isSupportedSiteAgentModel(modelId)) {
+function selectedSiteAgentRoute(configuredProvider: SiteAgentApiProvider, configuredModelId: string) {
+  const apiProvider = siteAgentApiProviderSchema.safeParse(process.env.LODESTA_SITE_AGENT_PROVIDER?.trim() || configuredProvider);
+  if (!apiProvider.success) {
+    throw new SiteAuthoringTerminalError("unknown_internal_failure", "platform", false, "site_agent_api_provider_invalid");
+  }
+  const modelId = process.env.LODESTA_SITE_AGENT_MODEL?.trim() || configuredModelId;
+  if (apiProvider.data === "openai" && !isSupportedSiteAgentModel(modelId)) {
     throw new SiteAuthoringTerminalError(
       "unknown_internal_failure",
       "platform",
@@ -271,7 +304,28 @@ function selectedSiteAgentModel(configuredModelId: string) {
       `site_agent_model_pricing_missing:${modelId}`
     );
   }
-  return modelId;
+  if (apiProvider.data === "openrouter" && !modelId.includes("/")) {
+    throw new SiteAuthoringTerminalError(
+      "unknown_internal_failure",
+      "platform",
+      false,
+      `openrouter_model_slug_invalid:${modelId}`
+    );
+  }
+  return { apiProvider: apiProvider.data, modelId };
+}
+
+function routedResponseParams(params: ResponseCreateParamsNonStreaming, apiProvider: SiteAgentApiProvider, sessionId?: string) {
+  if (apiProvider !== "openrouter") return params;
+  return {
+    ...params,
+    provider: {
+      data_collection: "deny",
+      zdr: true,
+      require_parameters: true
+    },
+    ...(sessionId ? { session_id: sessionId.slice(0, 256) } : {})
+  } as ResponseCreateParamsNonStreaming;
 }
 
 async function createWithOneTransportRetry(client: ManagerResponsesClient, params: ResponseCreateParamsNonStreaming, signal: AbortSignal) {
@@ -319,22 +373,41 @@ function boundedSignal(signal: AbortSignal | undefined, durationMs: number) {
 }
 
 function emptyUsage(): ManagerModelUsage {
-  return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, estimatedCostUsd: 0, costEstimateStatus: "unavailable", durationMs: 0 };
+  return { inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 };
 }
 
 function mergeUsage(target: ManagerModelUsage, value: Response["usage"], startedAt: number, modelId: string) {
   const next = usageForModel(modelId, value, Date.now() - startedAt);
+  const hadUsage = target.inputTokens > 0 || target.outputTokens > 0;
   target.inputTokens += next.inputTokens;
   target.cachedInputTokens += next.cachedInputTokens;
+  target.reasoningTokens += next.reasoningTokens;
   target.outputTokens += next.outputTokens;
-  target.estimatedCostUsd += next.estimatedCostUsd;
-  target.costEstimateStatus = target.costEstimateStatus === "configured" && next.costEstimateStatus === "configured" ? "configured" : next.costEstimateStatus;
+  target.costUsd += next.costUsd;
+  target.costSource = combinedCostSource(target.costSource, next.costSource, hadUsage);
+  target.upstreamInferenceCostUsd += next.upstreamInferenceCostUsd;
   target.durationMs = Date.now() - startedAt;
 }
 
 function runEvent(event: ManagerRunEvent) { return event; }
 function eventId(prefix: string) { return `${prefix}_${Date.now().toString(36)}${randomUUID().replaceAll("-", "")}`; }
-function usageFields(usage: ManagerModelUsage) { return { inputTokens: usage.inputTokens, cachedInputTokens: usage.cachedInputTokens, outputTokens: usage.outputTokens }; }
+function usageFields(usage: ManagerModelUsage, route: { apiProvider: SiteAgentApiProvider; modelId: string }, response: ManagerResponse) {
+  return {
+    apiProvider: route.apiProvider,
+    modelId: route.modelId,
+    servedModelId: response.model,
+    upstreamProvider: selectedUpstreamProvider(response, route.apiProvider),
+    providerRequestId: response.id,
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    reasoningTokens: usage.reasoningTokens,
+    outputTokens: usage.outputTokens,
+    costUsd: usage.costUsd,
+    costSource: usage.costSource,
+    upstreamInferenceCostUsd: usage.upstreamInferenceCostUsd,
+    modelDurationMs: usage.durationMs
+  };
+}
 function boundedError(error: unknown) { const message = error instanceof Error ? error.message : String(error); return message.length > 4000 ? `${message.slice(0, 3980)}... [truncated]` : message; }
 function diagnosticErrorCode(error: unknown) { const message = typeof error === "string" ? error : boundedError(error); return message.length > 160 ? `${message.slice(0, 157)}...` : message; }
 function readableModelResult(value: ManagerToolExecution["modelOutput"]) { if (typeof value !== "string") return value; try { return JSON.parse(value) as unknown; } catch { return value; } }
@@ -344,11 +417,30 @@ function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputIte
   return { role: "user", type: "message", content: [{ type: "input_text", text: `Current deterministic workspace state:\n${JSON.stringify(summary)}` }] };
 }
 
-function modelTurnPayload(history: ResponseInputItem[], response: ManagerResponse | undefined, promptVersion: string) {
+function modelTurnPayload(history: ResponseInputItem[], response: ManagerResponse | undefined, promptIdentity: string, route: { apiProvider: SiteAgentApiProvider; modelId: string }) {
   return {
-    request: { promptVersion, input: history, toolChoice: "required", parallelToolCalls: false, store: false, reasoningEffort: "high" },
+    request: { promptIdentity, apiProvider: route.apiProvider, modelId: route.modelId, input: history, toolChoice: "required", parallelToolCalls: false, store: false, reasoningEffort: "high" },
     response: response ? { status: response.status, error: response.error, incompleteDetails: response.incomplete_details, output: response.output, outputText: response.output_text } : undefined
   };
+}
+
+function combinedCostSource(left: ManagerModelUsage["costSource"], right: ManagerModelUsage["costSource"], hadUsage: boolean): ManagerModelUsage["costSource"] {
+  if (!hadUsage) return right;
+  if (left === right) return left;
+  return "mixed";
+}
+
+function selectedUpstreamProvider(response: ManagerResponse, apiProvider: SiteAgentApiProvider) {
+  if (apiProvider === "openai") return "openai";
+  const metadata = record(response.openrouter_metadata);
+  const endpoints = record(metadata?.endpoints);
+  const available = Array.isArray(endpoints?.available) ? endpoints.available : [];
+  const selected = available.map(record).find((item) => item?.selected === true);
+  return typeof selected?.provider === "string" ? selected.provider : undefined;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 const sourcePathSchema = { type: "string", pattern: "^src/[a-zA-Z0-9_./-]+\\.(?:ts|tsx|css)$" };
@@ -370,8 +462,18 @@ const managerTools: Tool[] = [
       files: { type: "array", minItems: 1, maxItems: 80, items: { type: "object", additionalProperties: false, required: ["path", "content"], properties: { path: sourcePathSchema, content: { type: ["string", "null"] } } } }
     }
   }),
+  tool("create_image", "Generate a new image or edit 1-4 available business assets with GPT Image 2. Use this only when it materially improves the site; return value includes the new asset ID and image pixels.", {
+    type: "object", additionalProperties: false, required: ["action", "purpose", "prompt", "sourceAssetIds", "size", "alt"],
+    properties: {
+      action: { type: "string", enum: ["generate", "edit"] },
+      purpose: { type: "string", enum: ["hero", "section", "background", "gallery", "logo", "other"] },
+      prompt: { type: "string", minLength: 1, maxLength: 8000 },
+      sourceAssetIds: { type: "array", minItems: 0, maxItems: 4, items: { type: "string" } },
+      size: { type: "string", enum: ["1536x1024", "1024x1536", "1024x1024"] },
+      alt: { type: "string", minLength: 1, maxLength: 500 }
+    }
+  }),
   tool("build_preview", "Validate and build the current workspace. Returns compiler or policy errors directly.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
-  tool("inspect_site", "Optionally run the same release verification used by finalization and return actionable blockers, advisories, and screenshots.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
   tool("request_input", "Before the first source mutation only, pause and ask one essential owner question when proceeding would require a consequential guess.", {
     type: "object", additionalProperties: false, required: ["question"], properties: { question: { type: "string", minLength: 1, maxLength: 600 } }
   }),

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { DomUtils, parseDocument } from "htmlparser2";
-import type { AnyNode } from "domhandler";
-import { factDeclarationSchema } from "@/packages/site-contracts";
+import { agentAuthoredArtifactIdentity } from "@/packages/site-contracts/platform-manifest";
 
 export const agentAuthoredRouteSchema = z.object({
   path: z.string().startsWith("/").max(180),
@@ -11,17 +10,16 @@ export const agentAuthoredRouteSchema = z.object({
 }).strict();
 
 export const agentAuthoredArtifactSchema = z.object({
-  schemaVersion: z.literal("agent-authored-artifact-v2"),
+  kind: z.literal("agent-authored-artifact"),
   compilerManifest: z.object({
-    schemaVersion: z.literal("site-sandbox-manifest-v1"),
-    artifactContractVersion: z.literal("agent-authored-artifact-v2"),
-    toolchainVersion: z.string().min(1).max(120),
-    sourcePolicyVersion: z.string().min(1).max(120)
+    kind: z.literal("site-sandbox-manifest"),
+    artifactContractIdentity: z.literal(agentAuthoredArtifactIdentity),
+    toolchainIdentity: z.string().min(1).max(180),
+    sourcePolicyIdentity: z.string().min(1).max(180)
   }).strict(),
   siteName: z.string().min(1).max(200),
   sharedCss: z.string().min(1).max(200_000),
   routes: z.array(agentAuthoredRouteSchema).min(1).max(40),
-  factDeclarations: z.array(factDeclarationSchema).max(500),
   capabilityBindings: z.array(z.object({
     id: z.string().min(1).max(160),
     kind: z.enum(["form", "analytics", "map", "gallery", "disclosure"]),
@@ -50,12 +48,8 @@ export function normalizeAgentAuthoredArtifact(value: unknown) {
   const routes = Array.isArray(artifact.routes)
     ? artifact.routes.filter((route): route is Record<string, unknown> => Boolean(route) && typeof route === "object")
     : [];
-  const factDeclarations = Array.isArray(artifact.factDeclarations)
-    ? artifact.factDeclarations.flatMap((declaration, declarationIndex) => normalizeFactDeclaration(declaration, declarationIndex, routes))
-    : [];
   return {
     ...artifact,
-    factDeclarations,
     capabilityBindings: deriveCapabilityBindings(routes)
   };
 }
@@ -71,35 +65,6 @@ export type ArtifactGateFinding = {
 export function normalizeRoutePath(value: string) {
   const path = `/${value.trim().replace(/^\/+|\/+$/g, "")}`;
   return path === "/" ? path : path.replace(/\/$/, "");
-}
-
-function normalizeFactDeclaration(declaration: unknown, declarationIndex: number, routes: Record<string, unknown>[]) {
-  if (!declaration || typeof declaration !== "object") return [declaration];
-  const record = declaration as Record<string, unknown>;
-  const text = typeof record.text === "string" ? record.text.trim() : "";
-  const sourceFactIds = stringArray(record.sourceFactIds).length
-    ? stringArray(record.sourceFactIds)
-    : stringArray(record.factIds);
-  const declaredRoute = typeof record.route === "string" && record.route.startsWith("/")
-    ? normalizeRoutePath(record.route)
-    : undefined;
-  const matchingRoutes = routes.flatMap((route) => {
-    const path = typeof route.path === "string" ? normalizeRoutePath(route.path) : undefined;
-    const html = typeof route.bodyHtml === "string" ? visibleRouteText(route.bodyHtml) : "";
-    return path && text && normalizedText(html).includes(normalizedText(text)) ? [path] : [];
-  });
-  const declarationRoutes = declaredRoute ? [declaredRoute] : matchingRoutes.length ? [...new Set(matchingRoutes)] : ["/"];
-  return declarationRoutes.map((route, routeIndex) => ({
-    id: validIdentifier(record.id) && declarationRoutes.length === 1
-      ? record.id
-      : `fact_declaration_authored_${declarationIndex + 1}_${routeIndex + 1}`,
-    route,
-    ...(typeof record.selector === "string" && record.selector.trim() ? { selector: record.selector.trim() } : {}),
-    text,
-    kind: "free_text",
-    sourceFactIds,
-    autoDeclared: false
-  }));
 }
 
 function deriveCapabilityBindings(routes: Record<string, unknown>[]) {
@@ -135,33 +100,4 @@ function deriveCapabilityBindings(routes: Record<string, unknown>[]) {
     }
     return bindings;
   });
-}
-
-function visibleRouteText(html: string) {
-  const document = parseDocument(html, { decodeEntities: true });
-  return textNodeContent(document.children);
-}
-
-function textNodeContent(nodes: AnyNode[]) {
-  const parts: string[] = [];
-  const visit = (items: AnyNode[]) => {
-    for (const node of items) {
-      if (node.type === "text") parts.push(node.data);
-      else if ("children" in node && Array.isArray(node.children)) visit(node.children);
-    }
-  };
-  visit(nodes);
-  return parts.join(" ").replace(/\s+/g, " ").trim();
-}
-
-function stringArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
-}
-
-function validIdentifier(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 160 && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(value);
-}
-
-function normalizedText(value: string) {
-  return value.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, " ").trim();
 }

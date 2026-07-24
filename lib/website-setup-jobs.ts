@@ -28,7 +28,8 @@ export async function processNextWebsiteSetup(workerId = `website_setup_worker_$
 
     const bootstrapped = await siteAuthoringWorkflow.bootstrapFromUrl({
       url: source.url,
-      ownerId: setup.ownerUserId
+      ownerId: setup.ownerUserId,
+      reportingTimezone: setup.reportingTimezone
     });
     const linked = await platformOperationsRepository.linkWebsiteSetup({
       setupId: setup.id,

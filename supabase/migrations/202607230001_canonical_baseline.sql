@@ -53,7 +53,7 @@ create table source_snapshots (
   id text primary key,
   business_id text not null references businesses(id) on delete restrict,
   schema_version integer not null check (schema_version = 1),
-  source_type text not null check (source_type in ('website', 'google_places', 'owner_input', 'operator_input')),
+  source_type text not null check (source_type in ('website', 'web_research', 'owner_input', 'operator_input')),
   source_url text,
   content_hash text not null,
   captured_at timestamptz not null,
@@ -67,19 +67,19 @@ create table asset_revisions (
   asset_id text not null,
   business_id text not null references businesses(id) on delete restrict,
   schema_version integer not null check (schema_version = 1),
-  content_hash text not null unique,
+  content_hash text not null,
   storage_path text not null unique,
   public_url text,
   mime_type text not null check (mime_type in ('image/png', 'image/jpeg', 'image/webp')),
   bytes integer not null check (bytes > 0),
   width integer,
   height integer,
-  provenance jsonb,
-  rights_status text not null check (rights_status in ('platform_cleared', 'owner_attested', 'reference_only', 'unknown')),
-  attestation jsonb,
+  origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated')),
+  provenance jsonb not null,
   created_at timestamptz not null
 );
 create index asset_revisions_business_id_idx on asset_revisions(business_id);
+create unique index asset_revisions_business_content_hash_idx on asset_revisions(business_id, content_hash);
 
 create table form_definitions (
   id text primary key,
@@ -182,7 +182,7 @@ create table site_versions (
   site_id text not null references sites(id) on delete restrict,
   schema_version integer not null check (schema_version = 1),
   version_number integer not null check (version_number > 0),
-  status text not null check (status in ('candidate', 'published', 'superseded', 'rolled_back', 'rejected')),
+  status text not null check (status in ('candidate', 'stale', 'published', 'superseded', 'rolled_back', 'rejected')),
   artifact_id text not null references site_build_artifacts(id) on delete restrict,
   workspace_revision_id text not null references site_workspace_revisions(id) on delete restrict,
   public_build_input_id text not null references site_public_build_inputs(id) on delete restrict,
@@ -219,7 +219,8 @@ create table site_version_forms (
 create table site_agent_sessions (
   id text primary key,
   site_id text not null references sites(id) on delete restrict,
-  owner_id text not null,
+  principal_kind text not null check (principal_kind in ('owner', 'operator')),
+  principal_id text not null,
   schema_version text not null check (schema_version = 'site-agent-session'),
   status text not null check (status in ('active', 'checkpointed', 'rotating', 'closed', 'failed')),
   current_workspace_revision_id text references site_workspace_revisions(id) on delete restrict,
@@ -246,13 +247,19 @@ create table site_agent_runs (
   status text not null check (status in ('queued', 'running', 'needs_input', 'succeeded', 'failed', 'cancelled')),
   exact_parent_revision_id text references site_workspace_revisions(id) on delete restrict,
   output_revision_id text references site_workspace_revisions(id) on delete restrict,
-  model_id text not null,
+  execution_driver text not null default 'responses_api' check (execution_driver in ('responses_api', 'external_mcp')),
+  model_id text,
   run jsonb not null,
   started_at timestamptz not null,
-  completed_at timestamptz
+  completed_at timestamptz,
+  check (
+    (execution_driver = 'responses_api' and model_id is not null)
+    or (execution_driver = 'external_mcp' and model_id is null)
+  )
 );
 create index site_agent_runs_queue_idx on site_agent_runs(started_at) where status in ('queued', 'running');
 create index site_agent_runs_site_idx on site_agent_runs(site_id, started_at desc);
+create index site_agent_sessions_principal_idx on site_agent_sessions(site_id, principal_kind, principal_id, updated_at desc);
 
 create table site_agent_messages (
   id text primary key,
@@ -320,13 +327,18 @@ create index website_setups_owner_source_idx on website_setups(owner_user_id, no
 create index website_setups_owner_updated_idx on website_setups(owner_user_id, updated_at desc);
 create index website_setups_queue_idx on website_setups(created_at) where status in ('queued', 'processing');
 
-create table preview_tokens (
-  token text primary key,
+create table preview_grants (
+  id text primary key,
   site_id text not null references sites(id) on delete restrict,
   site_version_id text not null references site_versions(id) on delete restrict,
-  expires_at timestamptz,
+  secret_hash text not null,
+  key_version text not null,
+  secret_version integer not null default 1 check (secret_version > 0),
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
   created_at timestamptz not null default now()
 );
+create index preview_grants_site_idx on preview_grants(site_id, created_at desc);
 
 create table adoption_invitations (
   id text primary key,
@@ -509,7 +521,7 @@ create table outbound_prospects (
   business_name text not null,
   vertical text,
   source_url text,
-  preview_token text,
+  preview_id text references preview_grants(id) on delete restrict,
   mailing_code text,
   status text not null default 'queued' check (status in ('queued', 'mailed', 'preview_viewed', 'adoption_started', 'adopted', 'published', 'disqualified')),
   metadata jsonb not null default '{}',
@@ -534,13 +546,14 @@ create table outbound_events (
 
 create table prospect_reports (
   id text primary key,
-  place_id text not null,
+  source_key text not null,
   status text not null check (status in ('queued', 'running', 'completed', 'failed')),
   job_id text,
   source_url text,
   source_host text,
   website_kind text not null,
   report_json jsonb,
+  resolution_usage jsonb,
   unlocked_at timestamptz,
   lead_id text,
   error_code text,
@@ -548,7 +561,7 @@ create table prospect_reports (
   updated_at timestamptz not null,
   completed_at timestamptz
 );
-create index prospect_reports_place_idx on prospect_reports(place_id, created_at desc);
+create index prospect_reports_source_key_idx on prospect_reports(source_key, created_at desc);
 create table prospect_report_leads (
   id text primary key,
   report_id text not null references prospect_reports(id) on delete restrict,
@@ -902,12 +915,12 @@ begin
   for item in select * from jsonb_array_elements(asset_documents) loop
     insert into asset_revisions (
       id, asset_id, business_id, schema_version, content_hash, storage_path, public_url,
-      mime_type, bytes, width, height, provenance, rights_status, attestation, created_at
+      mime_type, bytes, width, height, origin, provenance, created_at
     ) values (
       item->>'id', item->>'assetId', item->>'businessId', (item->>'schemaVersion')::integer,
       item->>'contentHash', item->>'storageKey', item->>'publicUrl', item->>'mimeType',
       (item->>'bytes')::integer, (item->>'width')::integer, (item->>'height')::integer,
-      item->'provenance', item->>'rightsStatus', item->'attestation', (item->>'createdAt')::timestamptz
+      item->>'origin', item->'provenance', (item->>'createdAt')::timestamptz
     );
   end loop;
   insert into site_public_build_inputs (
@@ -937,53 +950,6 @@ begin
 end;
 $$;
 
-create function commit_verified_site_build(revision_document jsonb, artifact_document jsonb)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if artifact_document#>>'{qa,hardGate}' <> 'passed'
-    or artifact_document->>'siteId' <> revision_document->>'siteId'
-    or artifact_document->>'workspaceRevisionId' <> revision_document->>'id' then
-    raise exception 'verified_artifact_mismatch';
-  end if;
-  perform 1 from sites
-    where id = revision_document->>'siteId'
-      and current_workspace_revision_id is not distinct from nullif(revision_document->>'parentRevisionId', '')
-    for update;
-  if not found then raise exception 'stale_parent_revision'; end if;
-  insert into site_workspace_revisions (
-    id, site_id, schema_version, parent_revision_id, revision_number, source_hash,
-    source_archive_key, files, created_by_kind, created_by_id, created_at
-  ) values (
-    revision_document->>'id', revision_document->>'siteId', (revision_document->>'schemaVersion')::integer,
-    nullif(revision_document->>'parentRevisionId', ''), (revision_document->>'revisionNumber')::integer,
-    revision_document->>'sourceHash', revision_document->>'sourceArchiveKey', revision_document->'files',
-    revision_document#>>'{createdBy,kind}', revision_document#>>'{createdBy,id}',
-    (revision_document->>'createdAt')::timestamptz
-  );
-  insert into site_build_artifacts (
-    id, site_id, workspace_revision_id, public_build_input_id, runtime_series_id,
-    runtime_patch_at_finalization, schema_version, artifact_hash, storage_prefix, artifact,
-    hard_gate_status, toolchain_version, sandbox_image_digest, created_at
-  ) values (
-    artifact_document->>'id', artifact_document->>'siteId', artifact_document->>'workspaceRevisionId',
-    artifact_document->>'publicBuildInputId', artifact_document->>'runtimeSeriesId',
-    artifact_document->>'runtimePatchAtFinalization', (artifact_document->>'schemaVersion')::integer,
-    artifact_document->>'artifactHash', artifact_document->>'storagePrefix', artifact_document,
-    artifact_document#>>'{qa,hardGate}', artifact_document->>'toolchainVersion',
-    artifact_document->>'sandboxImageDigest', (artifact_document->>'createdAt')::timestamptz
-  );
-  update sites set
-    current_workspace_revision_id = revision_document->>'id',
-    updated_at = (revision_document->>'createdAt')::timestamptz
-    where id = revision_document->>'siteId';
-  return jsonb_build_object('revisionId', revision_document->>'id', 'artifactId', artifact_document->>'id');
-end;
-$$;
-
 create function promote_site_version(target_version_id text, actor_id text)
 returns jsonb
 language plpgsql
@@ -1000,10 +966,6 @@ begin
   if not exists (select 1 from site_build_artifacts where id = target_artifact_id and hard_gate_status = 'passed') then
     raise exception 'artifact_hard_gate_failed';
   end if;
-  if exists (
-    select 1 from site_version_assets va join asset_revisions ar on ar.id = va.asset_revision_id
-    where va.version_id = target_version_id and ar.rights_status not in ('platform_cleared', 'owner_attested')
-  ) then raise exception 'candidate_contains_unpublishable_media'; end if;
   select id into previous_id from site_versions where site_id = target_site_id and status = 'published' for update;
   update site_versions set status = 'superseded', version = jsonb_set(version, '{status}', '"superseded"', true)
     where id = previous_id;
@@ -1191,7 +1153,7 @@ begin
     'trusted_runtime_patches','trusted_runtime_series','site_build_artifacts','site_versions',
     'site_version_sources','site_version_assets','site_version_forms','site_agent_sessions',
     'site_agent_runs','site_agent_messages','site_agent_run_events','site_agent_maintenance_leases',
-    'website_setups','preview_tokens','adoption_invitations','domains','active_domains',
+    'website_setups','preview_grants','adoption_invitations','domains','active_domains',
     'site_redirects','inquiries','inquiry_events','analytics_events','control_plane_change_requests',
     'site_operator_queue','vertical_demand_events','operator_settings','operator_setting_audits',
     'outbound_campaigns','outbound_prospects','outbound_events','prospect_reports',
@@ -1214,7 +1176,6 @@ revoke all on function retry_website_setup(text,uuid) from public, anon, authent
 revoke all on function enqueue_site_agent_run(jsonb) from public, anon, authenticated;
 revoke all on function claim_site_agent_run(text) from public, anon, authenticated;
 revoke all on function bootstrap_site(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb) from public, anon, authenticated;
-revoke all on function commit_verified_site_build(jsonb,jsonb) from public, anon, authenticated;
 revoke all on function promote_site_version(text,text) from public, anon, authenticated;
 revoke all on function set_trusted_runtime_series(jsonb) from public, anon, authenticated;
 revoke all on function claim_domain_ownership(text,timestamptz) from public, anon, authenticated;
@@ -1238,7 +1199,6 @@ grant execute on function retry_website_setup(text,uuid) to service_role;
 grant execute on function enqueue_site_agent_run(jsonb) to service_role;
 grant execute on function claim_site_agent_run(text) to service_role;
 grant execute on function bootstrap_site(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb) to service_role;
-grant execute on function commit_verified_site_build(jsonb,jsonb) to service_role;
 grant execute on function promote_site_version(text,text) to service_role;
 grant execute on function set_trusted_runtime_series(jsonb) to service_role;
 grant execute on function claim_domain_ownership(text,timestamptz) to service_role;

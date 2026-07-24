@@ -1,12 +1,20 @@
+import { createHash } from "node:crypto";
 import type {
   AssessmentApplicability,
   AssessmentDimensionId,
   AssessmentImpact
 } from "./contracts";
+import {
+  agentReadinessCheckDefinitions,
+  agentReadinessMethodologyIdentity
+} from "./agent-readiness";
+import {
+  visualQualityCheckDefinitions,
+  visualQualityEvaluatorIdentity,
+  visualQualityMethodologyIdentity,
+  visualQualityPromptIdentity
+} from "./visual-quality";
 
-export const websiteAssessmentRubricIdentity = "local-business-rubric@sha256:3396a8d9c0f35cdf9de57c2f61862786bc2d68071c1638dea7edcb948fe149f8";
-export const websiteAssessmentScannerIdentity = "website-assessment-scanner@sha256:605276032a84195a3ec561d51955f0a0f8e09be7b15e94bf257904cb7c71ff32";
-export const websiteAssessmentProducerIdentity = "lodesta-website-assessment@sha256:605276032a84195a3ec561d51955f0a0f8e09be7b15e94bf257904cb7c71ff32";
 export const minimumScoreCoverage = 0.7;
 export const minimumVerticalConfidence = 0.8;
 export const serviceAreaOptionalVerticals: ReadonlySet<string> = new Set([
@@ -103,8 +111,91 @@ export const assessmentCriteria: ReadonlyArray<AssessmentCriterionDefinition> = 
   criterion("accessibility.form_labels", "automated_accessibility", "Form controls have accessible names", "critical", "Unlabelled fields prevent some customers from completing an inquiry.", "Associate every field with a visible label or an equivalent accessible name.", 2)
 ] as const;
 
+export const artifactAssessmentCalibrationManifest = {
+  version: "artifact-calibration@2026-07-24",
+  readableText: {
+    pass: "current retained browser evidence with no sub-16px body/control finding",
+    warning: "retained sub-16px body/control finding",
+    tinyTextReportingPx: 12,
+    sampleSpecificFailureFloor: false
+  },
+  serviceDetail: "substantive distinct service routes without thin or repetitive-content findings",
+  imageAlt: "descriptive retained rendered evidence; non-empty alone receives no credit",
+  objectiveFunctionalFindings: ["render.managed_content_clipped", "render.empty_control"],
+  orphanRoutes: "advisory",
+  fieldMetricsWithoutIndependentEvidence: "unknown"
+} as const;
+
+export const websiteAssessmentRubricIdentity = contentIdentity("local-business-rubric", {
+  dimensions: assessmentDimensions,
+  criteria: assessmentCriteria,
+  artifactCalibration: artifactAssessmentCalibrationManifest,
+  agentReadiness: agentReadinessCheckDefinitions,
+  visualQuality: visualQualityCheckDefinitions
+});
+export const websiteAssessmentScannerManifest = {
+  detector: "canonical-public-and-artifact-scanner",
+  artifactCalibration: artifactAssessmentCalibrationManifest,
+  visualQuality: {
+    methodologyIdentity: visualQualityMethodologyIdentity,
+    evaluatorIdentity: visualQualityEvaluatorIdentity,
+    promptIdentity: visualQualityPromptIdentity,
+    maximumRoutes: 3,
+    screenshotViewports: ["desktop", "mobile"],
+    homepageMeasurementViewports: ["desktop", "tablet", "mobile"],
+    singleBoundedModelRequest: true,
+    maximumContactSheetWidth: 1_600,
+    maximumContactSheetHeight: 4_096,
+    maximumImageBytes: 20_000_000,
+    modelFailureIsAdvisory: true,
+    publicFindingMinimumConfidence: 0.9
+  },
+  readiness: {
+    maximumDedicatedSameOriginProbes: 12,
+    reusedResources: ["robots_txt", "html_home"],
+    requestedResources: [
+      "markdown_home",
+      "llms_txt",
+      "web_bot_auth",
+      "agent_skills",
+      "api_catalog",
+      "oauth_authorization_server",
+      "oauth_protected_resource",
+      "mcp_server_card",
+      "ucp",
+      "acp"
+    ],
+    maximumResponseBytes: 65_536,
+    requestTimeoutMs: 10_000,
+    requestStartSpacingMs: 500,
+    maximumRedirects: 5,
+    protocolDocuments: "content-type-and-bounded-schema-validated",
+    markdownParity: { pass: 0.8, warning: 0.5 },
+    semanticContentSource: "initial-html-response",
+    directAnswersRequireQuestionSignals: true,
+    blockedAnswerAndUserTriggeredAgentsAreMajorFindings: true,
+    inferredPublicFindingMinimumConfidence: 0.85,
+    capabilityChecksDefaultToNotApplicable: true,
+    commerceRequiresOnDomainTransaction: true
+  }
+} as const;
+export const websiteAssessmentScannerIdentity = contentIdentity("website-assessment-scanner", {
+  methodologyIdentity: agentReadinessMethodologyIdentity,
+  visualQualityMethodologyIdentity,
+  visualQualityEvaluatorIdentity,
+  manifest: websiteAssessmentScannerManifest
+});
+export const websiteAssessmentProducerIdentity = contentIdentity("lodesta-website-assessment", {
+  rubricIdentity: websiteAssessmentRubricIdentity,
+  scannerIdentity: websiteAssessmentScannerIdentity
+});
+
 export function criterionDefinition(id: string) {
   const definition = assessmentCriteria.find((candidate) => candidate.id === id);
   if (!definition) throw new Error(`Unknown website assessment criterion: ${id}`);
   return definition;
+}
+
+function contentIdentity(name: string, value: unknown) {
+  return `${name}@sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }

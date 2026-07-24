@@ -112,6 +112,30 @@ const missingRobots = await crawlWebsiteForGeneration({
 });
 assert.equal(missingRobots.crawl.robotsFound, false, "A 404 robots response was reported as parsed.");
 
+const serviceAreaSite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://areas.example/</loc></url></urlset>" }],
+  ["/", {
+    type: "text/html",
+    body: `<!doctype html><html><head><title>Austin Plumbing</title></head><body><main>
+      <h1>Austin Plumbing</h1>
+      <p>Emergency plumbing and water heater repair are available 24 hours a day.</p>
+      <p>Areas we serve: Austin, Round Rock, and Cedar Park.</p>
+    </main></body></html>`
+  }]
+]);
+const serviceAreas = await crawlWebsiteForGeneration({
+  url: "https://areas.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(serviceAreaSite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+});
+assert.deepEqual(
+  serviceAreas.crawl.extractedFacts.serviceAreas,
+  ["Austin", "Round Rock", "Cedar Park"],
+  "Explicit visible service-area copy was not retained as structured first-party evidence."
+);
+
 for (const status of [408, 429, 500, 503]) {
   await expectCrawlFailure(crawlWebsiteForGeneration({
     url: `https://robots-${status}.example/`,
@@ -265,7 +289,7 @@ const block = fetched.ingestion.modelBlocks[0];
 assert(block, "generation crawl did not retain authoring text blocks");
 assert.deepEqual(Object.keys(block).sort(), ["displayText", "evidenceClass", "id", "sourceUrl"], "authoring block retained obsolete token-offset machinery");
 
-console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", authoringBlocks: "pass" }));
+console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", serviceAreaEvidence: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", authoringBlocks: "pass" }));
 
 function pageHtml(title: string, href: string, copy: string) {
   return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${copy}"></head><body><main><h1>${title}</h1><p>${copy} ${copy} ${copy}</p><a href="${href}">Continue</a><form><input type="tel" name="phone"><button>Request estimate</button></form></main></body></html>`;

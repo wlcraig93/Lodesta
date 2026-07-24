@@ -14,6 +14,20 @@ import { probeCrawlDestinations, type DestinationProbeResult } from "./destinati
 import { buildWebsiteAssessment } from "./engine";
 import { criterionDefinition, serviceAreaOptionalVerticals } from "./rubric";
 import { inferAssessmentVertical } from "./vertical";
+import {
+  collectAgentReadinessProbes,
+  type AgentReadinessProbeResult
+} from "./agent-readiness-probes";
+import { agentReadinessForPublicUrl } from "./agent-readiness-adapters";
+import {
+  evaluateVisualQuality,
+  visualQualityModelIsConfigured
+} from "./visual-quality-evaluator";
+import {
+  capturePublicVisualQuality,
+  type PublicVisualQualityCapture
+} from "./visual-quality-capture";
+import { unavailableVisualQuality } from "./visual-quality";
 
 export type PublicUrlAssessmentRun = {
   assessment: WebsiteAssessment;
@@ -23,6 +37,8 @@ export type PublicUrlAssessmentRun = {
   destinationProbes: DestinationProbeResult;
   performance: WebPerformanceEvidence;
   accessibility: AutomatedAccessibilityEvidence;
+  agentReadinessProbes: AgentReadinessProbeResult;
+  visualQualityCapture?: PublicVisualQualityCapture;
 };
 
 export async function assessPublicUrl(input: {
@@ -38,7 +54,7 @@ export async function assessPublicUrl(input: {
 }): Promise<PublicUrlAssessmentRun> {
   const sourceUrl = normalizePublicFetchUrlInput(input.url);
   if (!sourceUrl) throw new Error("A public website URL is required.");
-  const { ingestion, crawl } = await crawlWebsiteForGeneration({
+  const { ingestion, crawl, technicalEvidence } = await crawlWebsiteForGeneration({
     url: sourceUrl,
     signal: input.signal,
     limits: {
@@ -49,6 +65,12 @@ export async function assessPublicUrl(input: {
     }
   });
   const destinationProbes = await probeCrawlDestinations({ crawl, signal: input.signal });
+  await delay(500);
+  const agentReadinessProbes = await collectAgentReadinessProbes({
+    url: crawl.finalUrl ?? sourceUrl,
+    signal: input.signal,
+    existingEvidence: technicalEvidence
+  });
   await delay(500);
   const render = await inspectUrlRender({
     url: crawl.finalUrl ?? sourceUrl,
@@ -64,6 +86,52 @@ export async function assessPublicUrl(input: {
   });
   const vertical = inferAssessmentVertical({ sourceUrl, crawl, declaredVertical: input.declaredVertical });
   const generatedAt = new Date().toISOString();
+  const location = formattedLocation(crawl);
+  const customerJourneys = inferredJourneys(crawl);
+  const agentReadiness = agentReadinessForPublicUrl({
+    crawl,
+    ingestion,
+    probes: agentReadinessProbes,
+    generatedAt,
+    vertical: vertical.vertical,
+    verticalConfidence: vertical.confidence
+  });
+  let visualQualityCapture: PublicVisualQualityCapture | undefined;
+  const visualQuality = input.captureScreenshots === false
+    ? unavailableVisualQuality({
+        observedAt: generatedAt,
+        limitation: "Visual Quality was unavailable because screenshot capture was disabled."
+      })
+    : !visualQualityModelIsConfigured()
+      ? unavailableVisualQuality({
+          observedAt: generatedAt,
+          limitation: "Visual Quality was unavailable because the multimodal evaluator is not configured."
+        })
+      : await (async () => {
+          await delay(500);
+          visualQualityCapture = await capturePublicVisualQuality({
+            crawl,
+            homepageRender: render,
+            assessmentId: input.assessmentId,
+            signal: input.signal
+          });
+          return evaluateVisualQuality({
+            contactSheet: visualQualityCapture.contactSheet,
+            contactSheetMimeType: visualQualityCapture.contactSheetMimeType,
+            screenshots: visualQualityCapture.screenshots,
+            vertical: vertical.vertical,
+            verticalConfidence: vertical.confidence,
+            businessName: crawl.extractedFacts.name ?? crawl.title,
+            primaryLocation: location,
+            services: unique(crawl.extractedFacts.services).slice(0, 60),
+            customerJourneys,
+            deterministicContext: visualQualityCapture.deterministicContext,
+            hasMeaningfulImagery: visualQualityCapture.hasMeaningfulImagery,
+            limitations: visualQualityCapture.limitations,
+            observedAt: generatedAt,
+            signal: input.signal
+          });
+        })();
   const criteria = criteriaForPublicUrl({
     crawl,
     render,
@@ -75,7 +143,6 @@ export async function assessPublicUrl(input: {
     vertical: vertical.vertical,
     verticalConfidence: vertical.confidence
   });
-  const location = formattedLocation(crawl);
   const limitations = [
     ...destinationProbes.limitations,
     ingestion.coverage === "complete"
@@ -103,9 +170,12 @@ export async function assessPublicUrl(input: {
       vertical: vertical.vertical,
       verticalConfidence: vertical.confidence,
       verticalEvidence: vertical.evidence,
-      customerJourneys: inferredJourneys(crawl)
+      customerJourneys
     },
     criteria,
+    agentReadinessChecks: agentReadiness.checks,
+    agentReadinessLimitations: agentReadiness.limitations,
+    visualQuality,
     limitations,
     generatedAt,
     inputHashSource: {
@@ -113,6 +183,13 @@ export async function assessPublicUrl(input: {
       crawl: { ingestion, crawl },
       render: { adapter: render.adapter, metrics: render.metrics, metricsByViewport: render.metricsByViewport, findings: render.findings },
       destinationProbes,
+      agentReadinessProbes,
+      visualQuality: {
+        methodologyIdentity: visualQuality.methodologyIdentity,
+        evaluatorIdentity: visualQuality.evaluator.identity,
+        screenshotSetHash: visualQuality.evaluator.screenshotSetHash,
+        selectedRoutes: visualQualityCapture?.selectedRoutes ?? []
+      },
       performance: browserEvidence.performance,
       accessibility: browserEvidence.accessibility
     }
@@ -124,7 +201,9 @@ export async function assessPublicUrl(input: {
     render,
     destinationProbes,
     performance: browserEvidence.performance,
-    accessibility: browserEvidence.accessibility
+    accessibility: browserEvidence.accessibility,
+    agentReadinessProbes,
+    visualQualityCapture
   };
 }
 

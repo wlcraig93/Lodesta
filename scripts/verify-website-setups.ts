@@ -6,6 +6,7 @@ import { validatePublicFetchUrl } from "@/lib/url-safety";
 import { applyProviderExecutionFailure, applyProviderObservation, newDomainVerification } from "@/lib/domains";
 import { isDomainReconciliationDue } from "@/lib/domain-reconciliation";
 import { getWebsiteSetupView, websiteSetupOwnerMessage } from "@/lib/website-setups";
+import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { websiteSetupSourceFailureCode } from "@/lib/website-setup-jobs";
 import type { DomainRecord, WebsiteSetupFailureCode } from "@/packages/platform-operations/contracts";
 import {
@@ -87,6 +88,11 @@ assert.equal(failed?.status, "failed");
 const failedOwnerView = await getWebsiteSetupView(failed!);
 assert(!("failureReason" in failedOwnerView.setup), "Owner setup response exposed stored diagnostics.");
 assert.equal(failedOwnerView.message, "We couldn’t read this website right now. Try again.");
+assert.equal(
+  websiteSetupOwnerInstruction("https://example.com/"),
+  "Create a website for my business using https://example.com/.",
+  "The canonical initial owner instruction drifted."
+);
 const capacityBlockers = await Promise.all([1, 2, 3].map((index) => repository.createWebsiteSetup({
   ...baseInput,
   sourceUrl: `https://capacity-${index}.example/`,
@@ -141,7 +147,7 @@ assert.equal(invalid.status, "attention_required");
 assert.equal(isDomainReconciliationDue({ ...domain, status: "active", updatedAt: "2026-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), true);
 assert.equal(isDomainReconciliationDue({ ...domain, status: "expired", updatedAt: "2025-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), false);
 
-const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration] = await Promise.all([
+const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, setupWorkspace, workspaceFrame, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration, productShell] = await Promise.all([
   readFile("app/api/website-setups/route.ts", "utf8"),
   readFile("app/api/website-setups/[id]/route.ts", "utf8"),
   readFile("app/api/website-setups/auth.ts", "utf8"),
@@ -150,6 +156,8 @@ const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previ
   readFile("app/preview/[previewId]/[[...path]]/route.ts", "utf8"),
   readFile("app/(owner)/account/onboarding/page.tsx", "utf8"),
   readFile("app/(owner)/account/onboarding/[setupId]/page.tsx", "utf8"),
+  readFile("components/WebsiteSetupWorkspace.tsx", "utf8"),
+  readFile("components/WebsiteWorkspaceFrame.tsx", "utf8"),
   readFile("app/(owner-workspace)/workspace/[slug]/page.tsx", "utf8"),
   readFile("components/SiteAgentWorkspace.tsx", "utf8"),
   readFile("lib/account-context.ts", "utf8"),
@@ -159,7 +167,8 @@ const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previ
   readFile("app/(owner-workspace)/workspace/[slug]/settings/page.tsx", "utf8"),
   readFile("app/admin/sites/page.tsx", "utf8"),
   readFile("supabase/migrations/202607230001_canonical_baseline.sql", "utf8"),
-  readFile("supabase/migrations/202607230002_typed_website_setup_failures.sql", "utf8")
+  readFile("supabase/migrations/202607230002_typed_website_setup_failures.sql", "utf8"),
+  readFile("components/ProductAppShell.tsx", "utf8")
 ]);
 assert(setupRoute.includes("duplicate_source_confirmation_required") && setupRoute.includes("confirmDuplicate"), "Private duplicate confirmation is missing.");
 assert(setupRoute.includes("idempotency_key_conflict") && !setupRoute.includes("after("), "Setup idempotency or request/worker boundary is missing.");
@@ -176,7 +185,16 @@ assert(
   "Private preview routes lost their fragment exchange, verified reader, or response contract."
 );
 assert(onboardingPage.includes("Sign in to create a website") && onboardingPage.includes("authentication is disabled"), "Local-open setup does not fail closed with an actionable notice.");
-assert(setupPage.includes('redirect(view.openPath)') && !setupPage.includes("<iframe") && !setupPage.includes("failureReason"), "Linked setup redirect or safe progress rendering is incomplete.");
+assert(setupPage.includes('redirect(view.openPath)') && setupPage.includes("<WebsiteSetupWorkspace") && !setupPage.includes("failureReason"), "Linked setup redirect or safe progress rendering is incomplete.");
+assert(setupPage.includes('if (!setup) redirect("/account/onboarding")') && setupPage.includes("setup.ownerUserId !== access.user.id") && setupPage.includes("notFound()"), "Missing setup recovery or cross-owner fail-closed behavior is incomplete.");
+assert(setupWorkspace.includes("websiteSetupOwnerInstruction(view.setup.sourceUrl)") && workflow.includes("websiteSetupOwnerInstruction(input.url)"), "Setup and editor handoff do not share the canonical owner instruction.");
+assert(setupWorkspace.includes("activePollMs = 2_000") && setupWorkspace.includes("document.hidden ? hiddenPollMs : activePollMs"), "Setup polling does not use the visible/hidden cadence.");
+assert(setupWorkspace.includes("router.replace(result.view.openPath)") && setupWorkspace.includes("router.replace(next.openPath)"), "Linked setup does not replace browser history.");
+assert(setupWorkspace.includes("Available when your first draft is ready") && setupWorkspace.includes("disabled"), "Temporary setup composer is not visibly unavailable.");
+assert(setupWorkspace.includes("Waiting to begin") && setupWorkspace.includes("Learning about your business") && setupWorkspace.includes("Website setup needs attention"), "Owner-facing setup states are incomplete.");
+assert(setupWorkspace.includes("The latest progress could not be loaded. Lodesta will keep trying.") && setupWorkspace.includes("Preview paused"), "Transient polling or failure retention is incomplete.");
+assert(setupWorkspace.includes("<WebsiteWorkspaceFrame") && workspaceClient.includes("<WebsiteWorkspaceFrame") && workspaceFrame.includes('type DesktopPanelMode = "split" | "collapsed" | "full-chat"'), "Setup and editor do not share the canonical responsive frame.");
+assert(productShell.includes("focusedSetup") && productShell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Setup-detail routes do not use the focused product shell.");
 assert(!workspacePage.includes("failed.failureReason") && !workspaceClient.includes("failedRun.failureReason"), "Stored authoring diagnostics leak into owner surfaces.");
 assert(accountContext.includes("getOwnerSiteInventory") && ownerWorkspace.includes("getSitesByOwnerUserId") && ownerWorkspace.includes("getBusinessStatesByIds"), "Account inventory is not owner-scoped and bulk-loaded.");
 assert(!workflow.includes("existingSourcePolicy") && !workflow.includes("findExistingBootstrap"), "Global source collision logic remains.");

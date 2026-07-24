@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta awning-tile mark with classic serif L</title>
+  <desc id="desc">A warm-white classic serif L inside a dark forest-green box whose bottom edge forms three shallow awning scallops.</desc>
+  <path
+    fill="#24493A"
+    d="M140 64H372
+      C418 64 456 102 456 148
+      V338
+      C456 390 428 430 389.33 430
+      C350.67 430 322.67 390 322.67 338
+      C322.67 390 294.67 430 256 430
+      C217.33 430 189.33 390 189.33 338
+      C189.33 390 161.33 430 122.67 430
+      C84 430 56 390 56 338
+      V148
+      C56 102 94 64 140 64Z"
+  />
+  <path
+    fill="#FFFEFA"
+    transform="matrix(.78 0 0 .78 50 12)"
+    d="M164 130H272V151H260C252 151 247 156 247 166V324C247 333 252 338 262 338H322C337 338 346 331 349 316L352 300H369V371H164V349H178C188 349 193 344 193 334V166C193 156 188 151 178 151H164V130Z"
+  />
+</svg>

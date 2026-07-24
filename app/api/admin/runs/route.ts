@@ -1,22 +1,15 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/security";
+import { parseAdminRunQuery } from "@/lib/admin-run-query";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import type { SiteAgentRun } from "@/packages/site-contracts";
 
 export async function GET(request: Request) {
   const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
-  const params = new URL(request.url).searchParams;
-  const requestedStatus = params.get("status") ?? undefined;
-  const status = isStatus(requestedStatus) ? requestedStatus : undefined;
-  const records = await sitePlatformRepository.listRecentAgentRunAdminRecords({
-    siteId: params.get("siteId") ?? undefined,
-    status,
-    limit: Math.max(1, Math.min(Number(params.get("limit") ?? 100), 500))
-  });
-  return NextResponse.json({ runs: records.flatMap((record) => record.run ? [record.run] : []), stale: records.filter((record) => !record.run), total: records.length });
-}
-
-function isStatus(value: string | undefined): value is SiteAgentRun["status"] {
-  return Boolean(value && ["queued", "running", "succeeded", "failed", "cancelled"].includes(value));
+  const parsed = parseAdminRunQuery(new URL(request.url).searchParams);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid run inventory query", issues: parsed.error.issues }, { status: 400 });
+  }
+  const page = await sitePlatformRepository.listAgentRunAdminPage(parsed.data);
+  return NextResponse.json({ ...page, limit: parsed.data.limit ?? 50, offset: parsed.data.offset ?? 0 });
 }

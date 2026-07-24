@@ -21,6 +21,7 @@ export type InspectUrlRenderInput = {
   captureScreenshots?: boolean;
   artifactRoot?: string;
   enforcePublicUrlSafety?: boolean;
+  viewports?: RenderViewportName[];
 };
 
 const viewports = [
@@ -44,7 +45,10 @@ export async function inspectUrlRender(input: InspectUrlRenderInput): Promise<Re
     const findings: RenderInspectionFinding[] = [];
     let finalUrl: string | undefined;
     try {
-      for (const viewport of viewports) {
+      const selectedViewports = input.viewports?.length
+        ? viewports.filter((viewport) => input.viewports?.includes(viewport.name))
+        : viewports;
+      for (const viewport of selectedViewports) {
         const page = await browser.newPage({
           viewport,
           userAgent: input.enforcePublicUrlSafety ? generationCrawlerUserAgent : undefined
@@ -85,7 +89,7 @@ export async function inspectUrlRender(input: InspectUrlRenderInput): Promise<Re
     } finally {
       await browser.close();
     }
-    const desktop = metricsByViewport.desktop ?? metricsByViewport.mobile!;
+    const desktop = metricsByViewport.desktop ?? metricsByViewport.tablet ?? metricsByViewport.mobile!;
     return {
       target: input.target ?? "source_site",
       siteId: input.siteId,

@@ -3,11 +3,6 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type {
-  CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent
-} from "react";
-import type {
   OperatorQueueItem,
   PlatformSiteRecord,
   SiteAgentSession,
@@ -19,7 +14,8 @@ import type {
 import type { OwnerSiteAgentRun } from "@/packages/site-platform";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
-import { ProductEmptyState, ProductSegmentedControl } from "@/components/ProductUI";
+import { ProductEmptyState, ProductSegmentedControl, ProductSelect } from "@/components/ProductUI";
+import { WebsiteWorkspaceFrame } from "@/components/WebsiteWorkspaceFrame";
 
 type WorkspacePayload = {
   site: PlatformSiteRecord;
@@ -31,7 +27,6 @@ type WorkspacePayload = {
   runs: OwnerSiteAgentRun[];
   readiness?: SitePublicationReadiness;
   openFindings?: OperatorQueueItem[];
-  activeRunActivity?: string;
 };
 
 type DiscussionSuggestion = {
@@ -46,20 +41,6 @@ type DiscussionResult = {
     requiresApply: boolean;
   };
 };
-
-type DesktopPanelMode = "split" | "collapsed" | "full-chat";
-
-type StoredPanelLayout = {
-  version: 1;
-  width: number;
-  collapsed: boolean;
-};
-
-const DESKTOP_BREAKPOINT = 900;
-const COLLAPSED_PANEL_WIDTH = 52;
-const MIN_SPLIT_PANEL_WIDTH = 320;
-const FULL_CHAT_THRESHOLD = 0.6;
-const PANEL_STORAGE_VERSION = 1;
 
 export function SiteAgentWorkspace({
   initialSite,
@@ -83,8 +64,6 @@ export function SiteAgentWorkspace({
   const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit");
   const [discussionSuggestion, setDiscussionSuggestion] = useState<DiscussionSuggestion>();
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
-  const [mobilePane, setMobilePane] = useState<"chat" | "preview">("chat");
-  const [compactViewport, setCompactViewport] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState<string>();
@@ -95,17 +74,11 @@ export function SiteAgentWorkspace({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selection, setSelection] = useState<SiteElementSelection>();
   const [clock, setClock] = useState(Date.now());
-  const [panelMode, setPanelMode] = useState<DesktopPanelMode>("split");
-  const [panelWidth, setPanelWidth] = useState(400);
-  const [lastSplitWidth, setLastSplitWidth] = useState(400);
-  const [workspaceWidth, setWorkspaceWidth] = useState(0);
-  const [isResizing, setIsResizing] = useState(false);
-  const [panelLayoutReady, setPanelLayoutReady] = useState(false);
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
   const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
   const previewMoreId = useId();
   const publishReasonId = useId();
-  const workspaceRef = useRef<HTMLElement>(null);
+  const composerUnavailableId = useId();
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
@@ -115,10 +88,10 @@ export function SiteAgentWorkspace({
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
-  const activeResizePointerRef = useRef<number | undefined>(undefined);
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
   const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
+  const initialBuildActive = activeRun?.kind === "initial_build";
   const waitingRun = !activeRun ? workspace.runs.find((run) => run.status === "needs_input") : undefined;
   const failedRun = !activeRun ? workspace.runs.find((run) => run.status === "failed") : undefined;
   const selectedVersion = workspace.versions.find((version) => version.id === selectedVersionId)
@@ -161,10 +134,6 @@ export function SiteAgentWorkspace({
   const diagnosticRuns = workspace.runs.slice(0, 4);
   const businessName = workspace.input?.business.name ?? initialInput.business.name;
   const compareDisabled = !publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id);
-  const desktopPanelActive = workspaceWidth >= DESKTOP_BREAKPOINT;
-  const desktopPanelCollapsed = desktopPanelActive && panelMode === "collapsed";
-  const desktopFullChat = desktopPanelActive && panelMode === "full-chat";
-  const panelStyle = { "--site-agent-panel-width": `${panelWidth}px` } as CSSProperties;
   const starterPrompts = editorStarterPrompts(workspace.input ?? initialInput);
   const publishDisabledReason = activeRun
     ? "Finish the current website update before publishing."
@@ -240,14 +209,6 @@ export function SiteAgentWorkspace({
   }, [activeRun?.id]);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 899px)");
-    const update = () => setCompactViewport(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-
-  useEffect(() => {
     if (!previewMoreOpen) return;
 
     function onPointerDown(event: PointerEvent) {
@@ -271,72 +232,11 @@ export function SiteAgentWorkspace({
   }, [previewMoreOpen]);
 
   useEffect(() => {
-    const element = workspaceRef.current;
-    if (!element) return;
-    const observer = new ResizeObserver(([entry]) => setWorkspaceWidth(entry.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (workspaceWidth < DESKTOP_BREAKPOINT || panelLayoutReady) return;
-    const fallbackWidth = defaultPanelWidth(workspaceWidth);
-    const stored = readPanelLayout(initialSite.id);
-    const restoredWidth = clampSplitWidth(stored?.width ?? fallbackWidth, workspaceWidth);
-    setPanelWidth(restoredWidth);
-    setLastSplitWidth(restoredWidth);
-    setPanelMode(stored?.collapsed ? "collapsed" : "split");
-    setPanelLayoutReady(true);
-  }, [initialSite.id, panelLayoutReady, workspaceWidth]);
-
-  useEffect(() => {
-    if (workspaceWidth < DESKTOP_BREAKPOINT || !panelLayoutReady) return;
-    const clampedWidth = clampSplitWidth(lastSplitWidth, workspaceWidth);
-    if (clampedWidth === lastSplitWidth) return;
-    setLastSplitWidth(clampedWidth);
-    if (panelMode === "split") setPanelWidth(clampedWidth);
-  }, [lastSplitWidth, panelLayoutReady, panelMode, workspaceWidth]);
-
-  useEffect(() => {
-    if (workspaceWidth < DESKTOP_BREAKPOINT || !panelLayoutReady || panelMode === "full-chat") return;
-    writePanelLayout(initialSite.id, {
-      version: PANEL_STORAGE_VERSION,
-      width: clampSplitWidth(lastSplitWidth, workspaceWidth),
-      collapsed: panelMode === "collapsed"
-    });
-  }, [initialSite.id, lastSplitWidth, panelLayoutReady, panelMode, workspaceWidth]);
-
-  useEffect(() => {
     const textarea = composerRef.current;
     if (!textarea) return;
     textarea.style.height = "0px";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
   }, [instruction]);
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const move = (event: PointerEvent) => {
-      if (activeResizePointerRef.current === undefined || event.pointerId !== activeResizePointerRef.current) return;
-      const nextWidth = panelWidthAt(event.clientX);
-      setPanelWidth(nextWidth);
-    };
-    const finish = (event: PointerEvent) => {
-      if (activeResizePointerRef.current === undefined || event.pointerId !== activeResizePointerRef.current) return;
-      finishPanelResize(panelWidthAt(event.clientX));
-    };
-    const cancel = (event: PointerEvent) => {
-      if (activeResizePointerRef.current === undefined || event.pointerId !== activeResizePointerRef.current) return;
-      cancelPanelResize();
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", cancel);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", cancel);
-    };
-  }, [isResizing, lastSplitWidth, workspaceWidth]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "nearest" });
@@ -505,163 +405,20 @@ export function SiteAgentWorkspace({
     }
   }
 
-  function persistPanelLayout(collapsed: boolean, width: number) {
-    const measuredWorkspaceWidth = workspaceRef.current?.getBoundingClientRect().width ?? workspaceWidth;
-    if (measuredWorkspaceWidth < DESKTOP_BREAKPOINT) return;
-    writePanelLayout(initialSite.id, {
-      version: PANEL_STORAGE_VERSION,
-      width: clampSplitWidth(width, measuredWorkspaceWidth),
-      collapsed
-    });
-  }
-
-  function collapsePanel() {
-    const persistedWidth = panelMode === "split" && !isResizing
-      ? clampSplitWidth(panelWidth, workspaceWidth)
-      : lastSplitWidth;
-    if (panelMode === "split" && !isResizing) setLastSplitWidth(persistedWidth);
-    persistPanelLayout(true, persistedWidth);
-    activeResizePointerRef.current = undefined;
-    setIsResizing(false);
-    setPanelMode("collapsed");
-  }
-
-  function restoreSplitPanel() {
-    const restoredWidth = clampSplitWidth(lastSplitWidth || defaultPanelWidth(workspaceWidth), workspaceWidth);
-    setPanelWidth(restoredWidth);
-    setLastSplitWidth(restoredWidth);
-    activeResizePointerRef.current = undefined;
-    setIsResizing(false);
-    setPanelMode("split");
-    persistPanelLayout(false, restoredWidth);
-  }
-
-  function openFullChat() {
-    if (panelMode === "split" && !isResizing) setLastSplitWidth(clampSplitWidth(panelWidth, workspaceWidth));
-    activeResizePointerRef.current = undefined;
-    setIsResizing(false);
-    setPanelMode("full-chat");
-  }
-
-  function panelWidthAt(clientX: number) {
-    const bounds = workspaceRef.current?.getBoundingClientRect();
-    if (!bounds) return panelWidth;
-    return Math.max(COLLAPSED_PANEL_WIDTH, Math.min(clientX - bounds.left, bounds.width * FULL_CHAT_THRESHOLD));
-  }
-
-  function handleResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || panelMode !== "split") return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    activeResizePointerRef.current = event.pointerId;
-    setIsResizing(true);
-  }
-
-  function handleResizeMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isResizing || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    const nextWidth = panelWidthAt(event.clientX);
-    setPanelWidth(nextWidth);
-  }
-
-  function finishResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isResizing) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    finishPanelResize(panelWidthAt(event.clientX));
-  }
-
-  function finishPanelResize(nextWidth: number) {
-    activeResizePointerRef.current = undefined;
-    setIsResizing(false);
-    if (nextWidth <= MIN_SPLIT_PANEL_WIDTH) {
-      collapsePanel();
-      return;
-    }
-    if (nextWidth >= workspaceWidth * FULL_CHAT_THRESHOLD) {
-      openFullChat();
-      return;
-    }
-    const clampedWidth = clampSplitWidth(nextWidth, workspaceWidth);
-    setPanelWidth(clampedWidth);
-    setLastSplitWidth(clampedWidth);
-    persistPanelLayout(false, clampedWidth);
-  }
-
-  function cancelResize(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isResizing) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    cancelPanelResize();
-  }
-
-  function cancelPanelResize() {
-    const restoredWidth = clampSplitWidth(lastSplitWidth, workspaceWidth);
-    setPanelWidth(restoredWidth);
-    activeResizePointerRef.current = undefined;
-    setIsResizing(false);
-  }
-
-  function handleResizeKey(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (panelMode !== "split") return;
-    if (event.key === "Home") {
-      event.preventDefault();
-      collapsePanel();
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      openFullChat();
-      return;
-    }
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const direction = event.key === "ArrowLeft" ? -1 : 1;
-    const step = event.shiftKey ? 48 : 16;
-    const nextWidth = clampSplitWidth(panelWidth + direction * step, workspaceWidth);
-    setPanelWidth(nextWidth);
-    setLastSplitWidth(nextWidth);
-    persistPanelLayout(false, nextWidth);
-  }
-
   return (
-    <main
-      ref={workspaceRef}
-      className="site-agent-workspace"
-      data-mobile-pane={mobilePane}
-      data-panel-mode={panelMode}
-      data-panel-ready={panelLayoutReady ? "true" : undefined}
-      data-resizing={isResizing ? "true" : undefined}
-      style={panelStyle}
-    >
-      <header className="site-agent-workspace-header">
-        <div className="site-agent-brand-bar">
-          <Link className="site-agent-mobile-back" href={`/workspace/${workspace.site.slug}`} aria-label="Back to website overview">←</Link>
-          <button className="site-agent-collapsed-toggle" type="button" aria-label="Expand chat panel" title="Expand chat panel" onClick={restoreSplitPanel}>
-            <ChatIcon />
-          </button>
+    <WebsiteWorkspaceFrame
+      storageId={initialSite.id}
+      backHref={`/workspace/${workspace.site.slug}`}
+      backLabel="Back to website overview"
+      onMobilePaneChange={() => setPreviewMoreOpen(false)}
+      commandTitle={
           <div className="site-agent-command-title">
             <strong>{businessName}</strong>
             <small className={`is-${status.tone}`}><span className="site-agent-command-title-desktop">Editor · </span>{status.label}</small>
           </div>
-          <div className="site-agent-panel-controls" aria-label="Chat panel controls">
-            {panelMode === "full-chat" ? (
-              <button type="button" aria-label="Return to split view" title="Return to split view" onClick={restoreSplitPanel}>
-                <RestoreSplitIcon />
-              </button>
-            ) : (
-              <>
-                <button type="button" aria-label="Collapse chat panel" title="Collapse chat panel" onClick={collapsePanel}>
-                  <CollapsePanelIcon />
-                </button>
-                <button type="button" aria-label="Open full chat" title="Open full chat" onClick={openFullChat}>
-                  <FullChatIcon />
-                </button>
-              </>
-            )}
-          </div>
-          <div className="site-agent-mobile-switch" aria-label="Workspace pane">
-            <button type="button" className={mobilePane === "chat" ? "is-active" : ""} onClick={() => { setMobilePane("chat"); setPreviewMoreOpen(false); }}>Chat</button>
-            <button type="button" className={mobilePane === "preview" ? "is-active" : ""} onClick={() => { setMobilePane("preview"); setPreviewMoreOpen(false); }}>Preview</button>
-          </div>
-          {mobilePane === "preview" ? (
+      }
+      mobilePreviewActions={
+        <>
             <button
               ref={previewMoreMobileTriggerRef}
               className="site-agent-mobile-more"
@@ -674,7 +431,10 @@ export function SiteAgentWorkspace({
             >
               •••
             </button>
-          ) : null}
+        </>
+      }
+      mobileOutcomeAction={
+        <>
           {publishDisabledReason ? <span className="site-agent-visually-hidden" id={`${publishReasonId}-mobile`}>{publishDisabledReason}</span> : null}
           <button
             className="button primary site-agent-publish site-agent-publish-mobile"
@@ -686,16 +446,16 @@ export function SiteAgentWorkspace({
           >
             Publish
           </button>
-        </div>
-
-        <div className="site-agent-preview-bar">
+        </>
+      }
+      previewToolbar={
+        <>
           <div className="site-agent-preview-primary">
-            <span className="site-agent-preview-tab" aria-current="page">Preview</span>
             <label className="site-agent-page-picker">
               <span className="site-agent-visually-hidden">Website page</span>
-              <select value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+              <ProductSelect compact value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
                 {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
-              </select>
+              </ProductSelect>
             </label>
             <div className="site-agent-preview-controls" aria-label="Preview viewport">
               <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
@@ -722,9 +482,9 @@ export function SiteAgentWorkspace({
                     <span className="site-agent-more-heading">Preview tools</span>
                     <label className="site-agent-page-picker">
                       <span>Page</span>
-                      <select value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+                      <ProductSelect value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
                         {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
-                      </select>
+                      </ProductSelect>
                     </label>
                     <div className="site-agent-preview-controls" aria-label="Preview viewport">
                       <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
@@ -781,17 +541,10 @@ export function SiteAgentWorkspace({
               <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} title={publishDisabledReason} onClick={() => void publish()}>Publish</button>
             </div>
           </div>
-        </div>
-      </header>
-
-      <div className="site-agent-body">
-        <aside
-          className="site-agent-command"
-          aria-label="Website manager"
-          aria-hidden={compactViewport && mobilePane !== "chat" ? true : undefined}
-          inert={compactViewport && mobilePane !== "chat" ? true : undefined}
-        >
-          <div className="site-agent-command-content" aria-hidden={desktopPanelCollapsed ? true : undefined} inert={desktopPanelCollapsed ? true : undefined}>
+        </>
+      }
+      commandContent={
+        <>
           <div className="site-agent-messages" aria-live="polite" aria-busy={busy && !workspace.session ? true : undefined}>
             {busy && !workspace.session ? (
               <div className="site-agent-loading-message" role="status">
@@ -829,23 +582,28 @@ export function SiteAgentWorkspace({
             {activeRun ? (
               <div className="site-agent-runline">
                 <span />
-                <div><strong>{stageLabel(activeRun)}</strong><small>{elapsedLabel(clock - Date.parse(activeRun.startedAt))} · {workspace.activeRunActivity ?? "starting"}</small></div>
+                <div>
+                  <strong>{activeRun.progress.label}</strong>
+                  <small>{elapsedLabel(clock - Date.parse(activeRun.startedAt))}</small>
+                  <details className="site-agent-run-details">
+                    <summary>What Lodesta is doing</summary>
+                    <p>{activeRun.progress.detail}</p>
+                  </details>
+                </div>
               </div>
             ) : null}
             {waitingRun ? (
               <div className="site-agent-runline">
                 <span />
-                <div><strong>Your answer is needed</strong><small>{waitingRun.inputQuestion ?? "Answer the latest Lodesta question to continue this edit."}</small></div>
+                <div><strong>{waitingRun.progress.label}</strong><small>{waitingRun.progress.detail}</small></div>
               </div>
             ) : null}
             {failedRun ? (
               <div className="site-agent-runline is-error">
                 <span />
                 <div>
-                  <strong>{failedRun.kind === "initial_build" ? "Website build needs attention" : "Website change needs attention"}</strong>
-                  <small>{failedRun.retryableByOwner
-                    ? "The build was interrupted before it finished. You can try again."
-                    : "Lodesta hit an internal build problem. We’ve flagged it for review. You don’t need to keep retrying."}</small>
+                  <strong>{failedRun.progress.label}</strong>
+                  <small>{failedRun.progress.detail}</small>
                   {failedRun.retryableByOwner
                     ? <button className="button secondary" type="button" disabled={busy} onClick={() => void retry()}>Retry {failedRun.kind === "initial_build" ? "build" : "change"}</button>
                     : null}
@@ -856,13 +614,16 @@ export function SiteAgentWorkspace({
             <div ref={endRef} />
           </div>
 
-          <div className="site-agent-compose">
+          <div className={`site-agent-compose ${initialBuildActive ? "is-unavailable" : ""}`}>
             {selection ? <div className="site-agent-selection-strip"><span>Selected: {selection.selector}</span><button type="button" onClick={() => setSelection(undefined)}>Clear</button></div> : null}
+            {initialBuildActive ? <span className="site-agent-visually-hidden" id={composerUnavailableId}>Available when your first draft is ready.</span> : null}
             <textarea
               ref={composerRef}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder={composerMode === "ask" ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
+              placeholder={initialBuildActive ? "Available when your first draft is ready" : composerMode === "ask" ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
+              disabled={initialBuildActive}
+              aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void submit();
               }}
@@ -870,14 +631,15 @@ export function SiteAgentWorkspace({
             />
             <div className="site-agent-compose-footer">
               <ProductSegmentedControl className="site-agent-compose-mode" label="Composer mode">
-                <button type="button" className={composerMode === "edit" ? "is-active" : ""} aria-pressed={composerMode === "edit"} onClick={() => setComposerMode("edit")}>Edit</button>
-                <button type="button" className={composerMode === "ask" ? "is-active" : ""} aria-pressed={composerMode === "ask"} onClick={() => setComposerMode("ask")}>Ask</button>
+                <button type="button" className={composerMode === "edit" ? "is-active" : ""} aria-pressed={composerMode === "edit"} aria-describedby={initialBuildActive ? composerUnavailableId : undefined} disabled={initialBuildActive} onClick={() => setComposerMode("edit")}>Edit</button>
+                <button type="button" className={composerMode === "ask" ? "is-active" : ""} aria-pressed={composerMode === "ask"} aria-describedby={initialBuildActive ? composerUnavailableId : undefined} disabled={initialBuildActive} onClick={() => setComposerMode("ask")}>Ask</button>
               </ProductSegmentedControl>
               <button
                 className="site-agent-send-button"
                 type="button"
-                aria-label={busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
-                title={busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
+                aria-label={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
+                aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
+                title={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
                 aria-busy={busy ? true : undefined}
                 disabled={!instruction.trim() || busy || Boolean(activeRun)}
                 onClick={() => void submit()}
@@ -886,34 +648,10 @@ export function SiteAgentWorkspace({
               </button>
             </div>
           </div>
-          </div>
-        </aside>
-
-        <div
-          className="site-agent-panel-resizer"
-          role="separator"
-          aria-label="Resize chat panel"
-          aria-orientation="vertical"
-          aria-valuemin={COLLAPSED_PANEL_WIDTH}
-          aria-valuemax={Math.max(MIN_SPLIT_PANEL_WIDTH, Math.round(workspaceWidth * FULL_CHAT_THRESHOLD))}
-          aria-valuenow={Math.round(panelWidth)}
-          tabIndex={0}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={finishResize}
-          onPointerCancel={cancelResize}
-          onKeyDown={handleResizeKey}
-        >
-          <span aria-hidden="true" />
-        </div>
-        {isResizing ? <div className="site-agent-resize-shield" aria-hidden="true" /> : null}
-
-        <section
-          className="site-agent-preview-column"
-          aria-label="Website preview"
-          aria-hidden={(compactViewport && mobilePane !== "preview") || desktopFullChat ? true : undefined}
-          inert={(compactViewport && mobilePane !== "preview") || desktopFullChat ? true : undefined}
-        >
+        </>
+      }
+      previewContent={
+        <>
           {latestCandidate && workspace.readiness?.status === "blocked" ? (
             <details className="site-agent-blockers">
               <summary>{workspace.readiness.blockers.length} publication blocker{workspace.readiness.blockers.length === 1 ? "" : "s"}</summary>
@@ -922,15 +660,27 @@ export function SiteAgentWorkspace({
           ) : null}
           <div className={`site-agent-preview-stage is-${viewport} ${compare ? "is-comparing" : ""}`}>
             {previewBaseUrl === "about:blank" ? (
-              <div className="site-agent-empty-preview"><strong>{busy ? "Opening workspace" : "Your preview will appear here"}</strong><span>Ask for a website change, then review the verified result in this pane.</span></div>
+              <div className="site-agent-empty-preview">
+                <div className="site-agent-preview-skeleton" aria-hidden="true">
+                  <span className="site-agent-preview-skeleton-bar" />
+                  <span className="site-agent-preview-skeleton-hero" />
+                  <span className="site-agent-preview-skeleton-line" />
+                  <span className="site-agent-preview-skeleton-line is-short" />
+                  <div className="site-agent-preview-skeleton-row">
+                    <span /><span /><span />
+                  </div>
+                </div>
+                <strong>{busy ? "Opening workspace" : "Your preview will appear here"}</strong>
+                <span>Ask for a website change, then review the verified result in this pane.</span>
+              </div>
             ) : (
               <iframe ref={previewRef} key={previewIdentity} name="site-agent-preview" title="Website preview" src={iframeSrc} onLoad={handlePreviewLoad} />
             )}
             {compare && publishedPreviewUrl ? <iframe title="Published website comparison" src={previewRouteUrl(publishedPreviewUrl, selectedPagePath)} /> : null}
           </div>
-        </section>
-      </div>
-    </main>
+        </>
+      }
+    />
   );
 }
 
@@ -955,39 +705,6 @@ function normalizePagePath(path: string) {
   return suffix ? `/${suffix}` : "/";
 }
 
-function panelStorageKey(siteId: string) {
-  return `lodesta:site-agent-panel:v${PANEL_STORAGE_VERSION}:${siteId}`;
-}
-
-function readPanelLayout(siteId: string): StoredPanelLayout | undefined {
-  try {
-    const value = window.localStorage.getItem(panelStorageKey(siteId));
-    if (!value) return undefined;
-    const parsed = JSON.parse(value) as Partial<StoredPanelLayout>;
-    if (parsed.version !== PANEL_STORAGE_VERSION || !Number.isFinite(parsed.width) || typeof parsed.collapsed !== "boolean") return undefined;
-    return parsed as StoredPanelLayout;
-  } catch {
-    return undefined;
-  }
-}
-
-function writePanelLayout(siteId: string, layout: StoredPanelLayout) {
-  try {
-    window.localStorage.setItem(panelStorageKey(siteId), JSON.stringify(layout));
-  } catch {
-    // Private browsing and storage policies may make local persistence unavailable.
-  }
-}
-
-function defaultPanelWidth(workspaceWidth: number) {
-  return Math.min(430, Math.max(360, workspaceWidth * 0.3));
-}
-
-function clampSplitWidth(width: number, workspaceWidth: number) {
-  const maximum = Math.max(MIN_SPLIT_PANEL_WIDTH, workspaceWidth * FULL_CHAT_THRESHOLD - 1);
-  return Math.round(Math.min(maximum, Math.max(MIN_SPLIT_PANEL_WIDTH, Number.isFinite(width) ? width : defaultPanelWidth(workspaceWidth))));
-}
-
 function messageAuthorLabel(role: SiteAgentMessage["role"]) {
   if (role === "agent") return "Lodesta message";
   if (role === "owner") return "Your message";
@@ -999,22 +716,6 @@ function ArrowUpIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4m0 0L5.5 8.5M10 4l4.5 4.5" /></svg>;
 }
 
-function ChatIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4.5h12v8H9l-4 3v-3H4z" /></svg>;
-}
-
-function CollapsePanelIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4h13v12h-13zM7 4v12m5.5-8.5L10 10l2.5 2.5" /></svg>;
-}
-
-function FullChatIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h-4v4m9-4h4v4m-9 9h-4v-4m13 0v4h-4M7 7l-3.5-3.5M13 7l3.5-3.5M7 13l-3.5 3.5m9.5-3.5 3.5 3.5" /></svg>;
-}
-
-function RestoreSplitIcon() {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4h13v12h-13zM8 4v12m4-8.5L9.5 10l2.5 2.5" /></svg>;
-}
-
 function previewRouteUrl(base: string, path: string) {
   if (base === "about:blank") return base;
   const suffix = normalizePagePath(path).replace(/^\//, "");
@@ -1024,19 +725,6 @@ function previewRouteUrl(base: string, path: string) {
 function previewRouteFromPath(pathname: string) {
   const marker = pathname.match(/\/(?:artifact|preview)(\/.*)?$/)?.[1] ?? "/";
   return normalizePagePath(marker);
-}
-
-function stageLabel(run: OwnerSiteAgentRun) {
-  return ({
-    queued: "Queued",
-    authoring: "Designing",
-    building: "Building",
-    fast_preview: "Preview ready",
-    verifying: "Running QA",
-    needs_input: "Waiting for your answer",
-    candidate_ready: "Candidate ready",
-    failed: "Needs review"
-  } as const)[run.stage];
 }
 
 function editorStarterPrompts(input: SitePublicBuildInput) {

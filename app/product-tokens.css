@@ -1,4 +1,6 @@
-:root {
+:root,
+[data-theme="light"] {
+  color-scheme: light;
   --product-font-sans: var(--font-lodesta-product-sans, ui-sans-serif), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --brand-font-sans: var(--font-lodesta-brand-sans, var(--font-lodesta-product-sans, ui-sans-serif)), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --product-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -35,7 +37,7 @@
 
   --product-color-text: #17211b;
   --product-color-text-subtle: #4e5b52;
-  --product-color-text-muted: #667269;
+  --product-color-text-muted: #616c64;
   --product-color-text-tertiary: #68736b;
   --product-color-text-inverse: #ffffff;
   --product-color-text-inverse-muted: #e6ebe4;
@@ -73,6 +75,9 @@
   --product-color-danger-surface: #fff1f2;
   --product-color-info-surface: #eef3eb;
   --product-color-info-text: #2f4438;
+  --product-color-overlay: rgba(17, 26, 21, 0.48);
+  --product-color-preview-stage: #ecefe9;
+  --product-color-preview-frame: #ffffff;
 
   --product-space-0: 0;
   --product-space-1: 2px;
@@ -102,29 +107,78 @@
   --product-shadow-focus: 0 0 0 3px rgba(23, 63, 53, 0.18);
   --product-shadow-error: 0 8px 18px rgba(184, 50, 79, 0.28);
 
+  --product-control-height-compact: 32px;
+  --product-control-height-default: 40px;
+  --product-control-height-touch: 44px;
+
   --product-duration-fast: 150ms;
   --product-duration-normal: 250ms;
   --product-duration-slow: 400ms;
   --product-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+:root[data-theme="dark"],
 [data-theme="dark"] {
-  --product-color-canvas: #171915;
-  --product-color-canvas-raised: #1e211c;
-  --product-color-surface: #22251f;
-  --product-color-surface-translucent: rgba(34, 37, 31, 0.9);
-  --product-color-surface-frosted: rgba(34, 37, 31, 0.72);
-  --product-color-surface-soft: #2b2e27;
-  --product-color-surface-selected: #343a31;
-  --product-color-text: #eeece5;
-  --product-color-text-subtle: #c4c0b6;
-  --product-color-text-muted: #aaa69c;
-  --product-color-border: #3c4037;
-  --product-color-border-subtle: #30342d;
-  --product-color-border-strong: #4b5046;
-  --product-color-primary: #b8d4c3;
-  --product-color-primary-hover: #d1e6d7;
-  --product-color-primary-text: #172019;
-  --product-color-info-surface: #30342d;
-  --product-color-info-text: #d4d0c6;
+  color-scheme: dark;
+  --product-color-canvas: #151814;
+  --product-color-canvas-raised: #1a1e19;
+  --product-color-surface: #20241f;
+  --product-color-surface-translucent: rgba(32, 36, 31, 0.92);
+  --product-color-surface-frosted: rgba(32, 36, 31, 0.78);
+  --product-color-surface-soft: #292e27;
+  --product-color-surface-hover: #2c322a;
+  --product-color-surface-selected: #304037;
+  --product-color-surface-disabled: #272c26;
+  --product-color-surface-inverse: #090c0a;
+
+  --product-color-text: #edf1eb;
+  --product-color-text-subtle: #c4ccc4;
+  --product-color-text-muted: #a6b0a7;
+  --product-color-text-tertiary: #909b91;
+  --product-color-text-inverse: #f6f8f5;
+  --product-color-text-inverse-muted: #d9dfd9;
+  --product-color-nav: #e0e7e1;
+  --product-color-nav-subtle: #b4bfb6;
+
+  --product-color-border: #3a423a;
+  --product-color-border-subtle: #2d342d;
+  --product-color-border-strong: #4b564c;
+  --product-color-border-emphasis: #667367;
+  --product-color-border-dashed: #69766a;
+
+  --product-color-primary: #b9d8c5;
+  --product-color-primary-hover: #d0e7d8;
+  --product-color-primary-pressed: #a7c9b4;
+  --product-color-primary-text: #142019;
+  --product-color-primary-surface: #253b30;
+  --product-color-primary-grid: rgba(185, 216, 197, 0.1);
+  --product-color-intelligence: #e4ad55;
+  --product-color-intelligence-hover: #f0bd6d;
+  --product-color-intelligence-surface: #3a2e1d;
+  --product-color-intelligence-border: #66502e;
+  --product-color-intelligence-text: #f1cd8f;
+
+  --product-color-success-surface: #1e3828;
+  --product-color-success-border: #315f42;
+  --product-color-success-text: #8bdaa5;
+  --product-color-warning-surface: #3a301d;
+  --product-color-warning-border: #68552d;
+  --product-color-warning-text: #ecc876;
+  --product-color-error: #e1798e;
+  --product-color-error-surface: #3c2229;
+  --product-color-error-border: #6d3543;
+  --product-color-error-text: #f2a3b3;
+  --product-color-danger-surface: #382126;
+  --product-color-info-surface: #29342d;
+  --product-color-info-text: #cbd8ce;
+  --product-color-overlay: rgba(4, 7, 5, 0.72);
+  --product-color-preview-stage: #101310;
+  --product-color-preview-frame: #ffffff;
+
+  --product-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --product-shadow-card-soft: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --product-shadow-card-hover: 0 12px 30px rgba(0, 0, 0, 0.3);
+  --product-shadow-preview: 0 22px 52px rgba(0, 0, 0, 0.46);
+  --product-shadow-focus: 0 0 0 3px rgba(185, 216, 197, 0.24);
+  --product-shadow-error: 0 8px 18px rgba(99, 25, 42, 0.34);
 }

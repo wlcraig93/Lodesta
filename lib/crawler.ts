@@ -799,6 +799,7 @@ function extractBusinessFacts(
   facts.name ||= inferNameFromTitle(page.title, base.hostname);
   facts.hours ||= extractVisibleHours(html);
   facts.address ||= extractVisibleAddress(html);
+  facts.serviceAreas = unique([...facts.serviceAreas, ...extractVisibleServiceAreas(html)]);
   facts.services = unique([
     ...facts.services,
     ...extractVisibleServices(html, page, facts.name),
@@ -1318,6 +1319,35 @@ function extractAreas(node: Record<string, unknown>) {
       return undefined;
     })
     .filter((area): area is string => Boolean(area));
+}
+
+function extractVisibleServiceAreas(html: string) {
+  const values: string[] = [];
+  for (const line of htmlToTextLines(html)) {
+    const match = line.match(/\b(?:service areas?(?:\s+(?:include|are))?|areas? (?:we )?serve|we (?:proudly )?serve|serving)\s*(?::|-)?\s+(.{2,240})/i);
+    if (!match) continue;
+    const list = match[1]
+      .split(/[.!?]/, 1)[0]
+      .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
+      .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
+    for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
+      const area = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?(?:greater\s+)?/i, "").trim();
+      if (!area || !plausibleVisibleServiceArea(area)) continue;
+      values.push(area);
+    }
+  }
+  return unique(values).slice(0, 20);
+}
+
+function plausibleVisibleServiceArea(value: string) {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const words = normalized.split(" ").filter(Boolean);
+  return words.length >= 1
+    && words.length <= 6
+    && value.length <= 80
+    && /[a-z]/i.test(value)
+    && !/\b(?:areas?|customers?|clients?|homes?|businesses?|properties|residential|commercial|plumbing|repair|installation|service|needs?|community)\b/i.test(value)
+    && !/^(?:local|nearby|nationwide|everywhere|all|surrounding)$/.test(normalized);
 }
 
 function extractRating(node: Record<string, unknown>) {

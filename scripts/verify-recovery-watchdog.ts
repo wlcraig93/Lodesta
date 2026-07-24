@@ -6,6 +6,10 @@ import { automaticRecoveryLimit } from "../lib/recovery-watchdog";
 import { shouldScheduleStartupRecovery, triggerStartupRecovery } from "../instrumentation";
 import type { WebsiteAssessmentJob, WebsiteAssessmentRecord } from "../packages/platform-operations";
 import { buildWebsiteAssessment } from "../packages/website-assessment/engine";
+import {
+  websiteAssessmentRubricIdentity,
+  websiteAssessmentScannerIdentity
+} from "../packages/website-assessment/rubric";
 import { siteAgentRecoveryStaleAfterMs } from "../packages/site-platform";
 import { triggerRecoveryWatchdog } from "../workers/recovery-watchdog/src/index";
 
@@ -77,8 +81,8 @@ async function main() {
       status: "queued",
       targetKind: "public_url",
       sourceUrl: `https://example${index}.com/`,
-      rubricIdentity: "local-business-rubric@sha256:3396a8d9c0f35cdf9de57c2f61862786bc2d68071c1638dea7edcb948fe149f8",
-      scannerIdentity: "website-assessment-scanner@sha256:605276032a84195a3ec561d51955f0a0f8e09be7b15e94bf257904cb7c71ff32",
+      rubricIdentity: websiteAssessmentRubricIdentity,
+      scannerIdentity: websiteAssessmentScannerIdentity,
       createdAt: now,
       updatedAt: now
     });
@@ -126,6 +130,7 @@ async function main() {
       target: { kind: "public_url", sourceKey: record.sourceKey, sourceUrl: record.sourceUrl },
       siteUnderstanding: { services: [], vertical: "general_local", verticalConfidence: 0.35, verticalEvidence: [], customerJourneys: [] },
       criteria: [],
+      agentReadinessChecks: [],
       inputHashSource: { fixture: record.id }
     })
   });

@@ -21,7 +21,11 @@ assert.deepEqual(
     "202607230010_external_codex_authoring.sql",
     "202607230011_canonical_website_analytics.sql",
     "202607230012_media_origin_clean_cut.sql",
-    "202607230013_canonical_media_publication.sql"
+    "202607230013_canonical_media_publication.sql",
+    "202607230014_refresh_canonical_authority_functions.sql",
+    "202607230015_refresh_verified_authoring_finalizer.sql",
+    "202607230016_site_agent_runaway_guardrails.sql",
+    "202607230017_site_agent_run_admin_inventory.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -38,6 +42,10 @@ const externalCodexAuthoring = await readFile(`${migrationDirectory}/${migration
 const websiteAnalytics = await readFile(`${migrationDirectory}/${migrations[10]}`, "utf8");
 const mediaOriginCleanCut = await readFile(`${migrationDirectory}/${migrations[11]}`, "utf8");
 const canonicalMediaPublication = await readFile(`${migrationDirectory}/${migrations[12]}`, "utf8");
+const canonicalAuthorityRefresh = await readFile(`${migrationDirectory}/${migrations[13]}`, "utf8");
+const verifiedAuthoringFinalizerRefresh = await readFile(`${migrationDirectory}/${migrations[14]}`, "utf8");
+const siteAgentRunawayGuardrails = await readFile(`${migrationDirectory}/${migrations[15]}`, "utf8");
+const siteAgentRunAdminInventory = await readFile(`${migrationDirectory}/${migrations[16]}`, "utf8");
 assert(
   baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
     && !baseline.includes("rights_status")
@@ -47,8 +55,41 @@ assert(
 assert(
   externalCodexAuthoring.includes("media_adoption_document")
     && externalCodexAuthoring.includes("stale_generated_media_adoption")
-    && externalCodexAuthoring.includes("current_public_build_input_id"),
+    && externalCodexAuthoring.includes("current_public_build_input_id")
+    && !externalCodexAuthoring.includes("public_build_input_id = run_document->>'publicBuildInputId'"),
   "Verified finalization must atomically adopt generated media and its exact public build input."
+);
+assert(
+  verifiedAuthoringFinalizerRefresh.includes("pg_get_functiondef(finalizer_signature)")
+    && verifiedAuthoringFinalizerRefresh.includes("canonical_verified_authoring_finalizer_postcondition_failed")
+    && verifiedAuthoringFinalizerRefresh.includes("run = run_document")
+    && verifiedAuthoringFinalizerRefresh.includes(
+      "revoke all on function public.finalize_verified_authoring"
+    )
+    && verifiedAuthoringFinalizerRefresh.includes(
+      "grant execute on function public.finalize_verified_authoring"
+    ),
+  "The deployed verified-authoring finalizer repair or its service-role boundary is incomplete."
+);
+assert(
+  siteAgentRunawayGuardrails.includes("run - 'limits'")
+    && siteAgentRunawayGuardrails.includes("'maxCostUsd'")
+    && siteAgentRunawayGuardrails.includes("'maxConsecutiveIdenticalFailures'")
+    && siteAgentRunawayGuardrails.includes("site_agent_runaway_guardrail_cutover_failed"),
+  "The site-agent runaway-guardrail clean cut must remove token limits and verify canonical guardrails."
+);
+assert(
+  siteAgentRunAdminInventory.includes("create or replace view public.site_agent_run_admin_inventory")
+    && siteAgentRunAdminInventory.includes("with (security_invoker = true)")
+    && !siteAgentRunAdminInventory.includes("  runs.run,\n")
+    && siteAgentRunAdminInventory.includes("left join public.sites")
+    && siteAgentRunAdminInventory.includes("end as cost_usd")
+    && siteAgentRunAdminInventory.includes("end as duration_ms")
+    && siteAgentRunAdminInventory.includes("end as token_count")
+    && siteAgentRunAdminInventory.includes("as search_text")
+    && siteAgentRunAdminInventory.includes("revoke all on table public.site_agent_run_admin_inventory from public, anon, authenticated")
+    && siteAgentRunAdminInventory.includes("grant select on table public.site_agent_run_admin_inventory to service_role"),
+  "The admin run inventory must be a service-role-only security-invoker view with safe numeric projections."
 );
 assert(
   websiteAnalytics.includes("drop table public.analytics_events")
@@ -75,6 +116,30 @@ assert(
     && canonicalMediaPublication.includes("create or replace function public.promote_site_version")
     && !canonicalMediaPublication.includes("asset.reference_only"),
   "The canonical media publication cut must remove external approval state and media-specific publication blocking."
+);
+const refreshedBootstrap = functionBody(canonicalAuthorityRefresh, "bootstrap_site");
+const refreshedDisposition = functionBody(canonicalAuthorityRefresh, "dispose_owned_site");
+assert(
+  refreshedBootstrap.includes("origin, provenance")
+    && refreshedBootstrap.includes("item->>'origin'")
+    && refreshedBootstrap.includes("item->'provenance'")
+    && !refreshedBootstrap.includes("rights_status")
+    && !refreshedBootstrap.includes("rightsStatus")
+    && !refreshedBootstrap.includes("attestation"),
+  "The refreshed bootstrap authority must persist typed media origin without retired rights permissioning."
+);
+assert(
+  refreshedDisposition.includes("update preview_grants")
+    && !refreshedDisposition.includes("preview_tokens"),
+  "The refreshed owner disposition authority must revoke preview grants without the retired raw-token table."
+);
+assert(
+  canonicalAuthorityRefresh.includes("drop function if exists public.commit_verified_site_build(jsonb,jsonb)")
+    && canonicalAuthorityRefresh.includes("canonical_bootstrap_site_postcondition_failed")
+    && canonicalAuthorityRefresh.includes("canonical_dispose_owned_site_postcondition_failed")
+    && canonicalAuthorityRefresh.includes("revoke all on function public.bootstrap_site")
+    && canonicalAuthorityRefresh.includes("revoke all on function public.dispose_owned_site"),
+  "The authority refresh must remove the legacy finalizer, verify postconditions, and preserve service-role-only execution."
 );
 
 const requiredTables = [
@@ -191,6 +256,8 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
     const { error } = await admin.from(table).select("*").limit(1);
     assert(!error, `${table}: ${error?.message}`);
   }
+  const { error: adminRunInventoryProbe } = await admin.from("site_agent_run_admin_inventory").select("id").limit(1);
+  assert(!adminRunInventoryProbe, `site_agent_run_admin_inventory: ${adminRunInventoryProbe?.message}`);
   const { error: dispositionProbe } = await admin.rpc("dispose_owned_site", {
     target_site_id: "site_disposition_probe_missing",
     target_owner_user_id: "00000000-0000-0000-0000-000000000000"
@@ -213,3 +280,12 @@ console.log(JSON.stringify({
   functions: declaredFunctions.length,
   live: process.env.LODESTA_VERIFY_LIVE_DATABASE === "true"
 }));
+
+function functionBody(sql: string, name: string) {
+  const match = sql.match(new RegExp(
+    `create or replace function (?:public\\.)?${name}\\s*\\([\\s\\S]*?\\)\\s*returns[\\s\\S]*?as \\$\\$([\\s\\S]*?)\\$\\$;`,
+    "i"
+  ));
+  assert(match?.[1], `Migration is missing the ${name} function body.`);
+  return match[1];
+}

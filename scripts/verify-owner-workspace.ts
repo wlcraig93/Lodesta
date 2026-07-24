@@ -18,7 +18,7 @@ for (const retired of [
   "app/(owner)/status/[slug]/page.tsx"
 ]) await assertMissing(retired);
 
-const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware, agentWorkspace, agentSessionRoute, agentRetryRoute] = await Promise.all([
+const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware, agentWorkspace, agentSessionRoute, agentRetryRoute, ownerRunView, adminRunPage, adminRunInspector, adminRunTelemetry] = await Promise.all([
   readFile("components/ProductAppShell.tsx", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("lib/owner-workspace.ts", "utf8"),
@@ -33,7 +33,11 @@ const [shell, css, context, home, inbox, results, business, settings, account, r
   readFile("middleware.ts", "utf8"),
   readFile("components/SiteAgentWorkspace.tsx", "utf8"),
   readFile("app/api/site-agent/sessions/route.ts", "utf8"),
-  readFile("app/api/site-agent/runs/[runId]/retry/route.ts", "utf8")
+  readFile("app/api/site-agent/runs/[runId]/retry/route.ts", "utf8"),
+  readFile("packages/site-platform/owner-run-view.ts", "utf8"),
+  readFile("app/admin/runs/[runId]/page.tsx", "utf8"),
+  readFile("components/admin/RunTelemetryInspector.tsx", "utf8"),
+  readFile("lib/admin-run-telemetry.ts", "utf8")
 ]);
 
 for (const label of ["Overview", "Editor", "Leads", "Analytics", "Business details", "Website settings"]) assert(shell.includes(label), `Workspace navigation is missing ${label}`);
@@ -47,6 +51,7 @@ assert(shell.includes("data-sidebar-tooltip") && css.includes("content: attr(dat
 assert(css.includes(".owner-workspace-sidebar { position: relative; z-index: 80;") && css.includes("overflow: visible"), "Desktop sidebar overlays are still clipped by the navigation rail");
 assert(css.includes(".owner-workspace-sidebar .account-menu-popover { z-index: 100;") && css.includes("left: calc(100% + 18px)"), "Desktop account options do not overlay the page");
 assert(shell.includes('pathname.startsWith(`${editorHref}/`)') && shell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Editor routes do not opt into the focused editor shell");
+assert(shell.includes("focusedSetup") && shell.includes('^\\/account\\/onboarding\\/[^/]+\\/?$'), "Setup-detail routes do not opt into the focused workspace shell");
 assert(shell.includes("const compactNavigation = focusedEditor || (ready && collapsed)") && shell.includes("{!focusedEditor ? ("), "Focused editor navigation does not stay compact independently of the saved dashboard preference");
 assert(shell.includes("compact={compactNavigation}") && shell.includes('data-sidebar-tooltip={focusedEditor ? "All websites"'), "Focused editor rail does not retain compact site, account, and account-home access");
 assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] .owner-workspace-brand') && css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused editor shell does not expose the compact desktop rail and mobile editor takeover");
@@ -71,7 +76,13 @@ assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not pro
 assert(agentSessionRoute.includes("runs: runs.map(ownerSiteAgentRun)"), "Owner workspace API exposes raw agent-run telemetry.");
 assert(!agentRetryRoute.includes("failureCode"), "Owner retry API exposes internal failure diagnostics.");
 assert(!agentWorkspace.includes("failureReason") && !agentWorkspace.includes("estimatedCostUsd") && !agentWorkspace.includes("costUsd"), "Owner website workspace exposes internal failure or cost diagnostics.");
-assert(agentWorkspace.includes("failedRun.retryableByOwner") && agentWorkspace.includes("You don’t need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
+assert(agentWorkspace.includes("failedRun.retryableByOwner") && ownerRunView.includes("You do not need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
+for (const failureCode of ["authoring_stalled", "cost_limit_exhausted", "cost_telemetry_unavailable", "browser_verification_unavailable", "deadline_exhausted"]) {
+  assert(ownerRunView.includes(failureCode), `Owner failure UI does not explain ${failureCode}.`);
+  assert(adminRunTelemetry.includes(failureCode), `Admin run UI does not provide recovery guidance for ${failureCode}.`);
+}
+assert(ownerRunView.includes("retrying the unchanged request will not help"), "Owner stall messaging does not prevent ineffective retries.");
+assert(adminRunPage.includes("<RunTelemetryInspector") && adminRunInspector.includes('label="Recovery"') && adminRunInspector.includes("Metered model usage by request"), "Admin run UI does not expose guardrail recovery or complete metered-model telemetry.");
 
 console.log("Owner workspace verification passed.");
 

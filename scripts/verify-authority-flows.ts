@@ -97,6 +97,21 @@ try {
     ...stateWithoutHash,
     stateHash: sha256(stableJson(stateWithoutHash))
   });
+  assert.throws(
+    () => createPublicBuildInput({
+      id: "input_non_us_rejected",
+      state: {
+        ...state,
+        locations: state.locations.map((location) => ({ ...location, country: "CA" }))
+      },
+      intent: synthetic.intent,
+      forms: synthetic.forms,
+      domainContext: synthetic.domainContext,
+      sourceSnapshotIds: [websiteSnapshot.id]
+    }),
+    /supports US locations only/,
+    "A non-US location crossed the public build-input boundary."
+  );
   const buildInput = createPublicBuildInput({
     id: "input_authority",
     state,

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import type { ArtifactBlobStore, BlobListInput, ImmutableBlob } from "../packages/site-artifacts/blob-store";
-import { prepareSiteArtifact, runArtifactBrowserGate } from "../packages/site-verification";
+import {
+  BrowserVerificationUnavailableError,
+  prepareSiteArtifact,
+  runArtifactBrowserGate
+} from "../packages/site-verification";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
@@ -76,7 +80,35 @@ const browserErrors = browser.findings.filter((finding) => finding.severity === 
 assert.equal(browserErrors.length, 0, browserErrors.map((finding) => `${finding.route ?? "/"} ${finding.id}: ${finding.message}`).join("\n"));
 assert(!browser.findings.some((finding) => finding.id === "render.escaped_entity"), "A normal React numeric-entity round trip became visible entity source.");
 assert.equal(browser.routesChecked, 2);
-assert.equal(browser.captures.length, 6);
+assert.equal(browser.captures.length, 8);
+assert.equal(browser.captures.filter((capture) => capture.stage === "natural").length, 2, "Homepage natural-load evidence was not retained at desktop and mobile.");
+assert.equal(browser.captures.filter((capture) => capture.stage === "settled").length, 6, "Settled full-page evidence was not retained for every route and viewport.");
+assert.equal(browser.findings.filter((finding) => finding.id === "accessibility.axe.complete").length, 2, "Canonical axe-core verification did not run on every mobile route.");
+
+const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
+const axeUnavailablePrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => ({
+    ...route,
+    html: route.html.replace("</head>", `${axeSabotage}</head>`)
+  })),
+  files: prepared.files.map((file) => file.contentType.startsWith("text/html")
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</head>", `${axeSabotage}</head>`)) }
+    : file)
+};
+await assert.rejects(
+  () => runArtifactBrowserGate({
+    prepared: axeUnavailablePrepared,
+    buildInput,
+    blobStore: new MemoryBlobStore(),
+    capturePrefix: "verification/site-authoring-render-axe-unavailable"
+  }),
+  (error) => error instanceof BrowserVerificationUnavailableError
+    && error.details.attempt === 2
+    && error.details.stage === "readiness"
+    && error.details.route === "/",
+  "A missing canonical axe-core runtime did not receive exactly one fresh-browser retry and a typed failure."
+);
 
 const lowContrastPrepared = {
   ...prepared,
@@ -100,5 +132,72 @@ const lowContrastBrowser = await runArtifactBrowserGate({
 });
 const contrastFinding = lowContrastBrowser.findings.find((finding) => finding.id === "render.contrast");
 assert(contrastFinding?.message.includes("Examples:") && contrastFinding.message.includes("rgb("), "contrast findings do not identify actionable elements and computed colors");
+assert.equal(contrastFinding?.severity, "error", "Reliable solid-color body/control contrast did not block release.");
 assert(lowContrastBrowser.findings.some((finding) => finding.id === "render.escaped_entity" && finding.message.includes("&#x2019;")), "visible escaped HTML entity source was not rejected");
+
+const functionalDefectsPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? {
+        ...route,
+        html: route.html
+          .replace("</nav>", `<a class="blank-call" href="tel:${phone.value}" aria-label="Call ${name.value}"><span>${phone.value}</span></a></nav>`)
+          .replace("</main>", `<img class="lazy-hero" loading="lazy" src="/_lodesta/assets/missing-fixture" alt="plumber-near-me-austin-tx.jpg"></main>`)
+      }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? {
+        ...file,
+        bytes: Buffer.from(file.bytes.toString("utf8")
+          .replace("</nav>", `<a class="blank-call" href="tel:${phone.value}" aria-label="Call ${name.value}"><span>${phone.value}</span></a></nav>`)
+          .replace("</main>", `<img class="lazy-hero" loading="lazy" src="/_lodesta/assets/missing-fixture" alt="plumber-near-me-austin-tx.jpg"></main>`))
+      }
+    : file.path === "site.css"
+      ? {
+          ...file,
+          bytes: Buffer.from(`${file.bytes.toString("utf8")}
+[data-lodesta-map]{height:225px;overflow:hidden}.lazy-hero{display:block;width:320px;height:180px}
+@media(max-width:480px){.blank-call span{display:none}.blank-call{display:inline-flex;width:48px;height:48px;background:#9b2c20}}`)
+        }
+      : file)
+};
+const functionalDefectsBrowser = await runArtifactBrowserGate({
+  prepared: functionalDefectsPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-functional-defects"
+});
+assert(
+  functionalDefectsBrowser.findings.some((finding) => finding.id === "render.managed_content_clipped" && finding.severity === "error"),
+  "A managed capability block with unreachable clipped content did not block release."
+);
+assert(
+  functionalDefectsBrowser.findings.some((finding) => finding.id === "render.empty_control" && finding.severity === "error"),
+  "A visible mobile control with only an aria-label did not block release when its visible label disappeared."
+);
+assert(
+  functionalDefectsBrowser.findings.some((finding) => finding.id === "render.lazy_above_fold_image" && finding.severity === "warning"),
+  "An above-fold lazy image did not produce an advisory from the natural-load inspection."
+);
+assert(
+  functionalDefectsBrowser.findings.some((finding) => finding.id === "render.image_alt_quality" && finding.severity === "warning"),
+  "Filename/keyword-style image alt text did not produce an advisory."
+);
+
+const intentionalScrollPrepared = {
+  ...prepared,
+  files: prepared.files.map((file) => file.path === "site.css"
+    ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}[data-lodesta-map]{height:225px;overflow:auto}`) }
+    : file)
+};
+const intentionalScrollBrowser = await runArtifactBrowserGate({
+  prepared: intentionalScrollPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-intentional-scroll"
+});
+assert(
+  !intentionalScrollBrowser.findings.some((finding) => finding.id === "render.managed_content_clipped"),
+  "An intentionally scrollable managed block was incorrectly treated as unreachable content."
+);
 console.log(JSON.stringify({ ok: true, routes: browser.routesChecked, captures: browser.captures.length, links: browser.linksChecked }));

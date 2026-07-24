@@ -216,10 +216,28 @@ function validateSiteStructure(input: {
       else metadata.set(key, route.path);
     }
   }
-  const linkedRoutes = new Set(input.routes.flatMap((route) => internalRouteLinks(route.bodyHtml)));
-  for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.required)) {
-    const route = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
-    if (route !== "/" && !linkedRoutes.has(route)) findings.push(gateFinding("route.required_not_navigable", "route", `Requested route ${route} is not linked from the site.`, route, "warning"));
+  const linkedRoutes = new Set(input.routes.flatMap((route) =>
+    internalRouteLinks(route.bodyHtml).filter((destination) => destination !== route.path)));
+  for (const route of input.routes) {
+    if (route.path !== "/" && !linkedRoutes.has(route.path)) {
+      findings.push(gateFinding("route.orphan", "route", `Declared route ${route.path} has no inbound link from another site route.`, route.path, "warning"));
+    }
+  }
+  const purposeByRoute = new Map(input.buildInput.intent.pageRequirements.map((page) => [
+    normalizeRoutePath(page.slug ? `/${page.slug}` : "/"),
+    page.purpose
+  ]));
+  for (const route of input.routes.filter((candidate) => purposeByRoute.get(candidate.path) === "service")) {
+    const words = visibleMainWordCount(route.bodyHtml);
+    if (words < 150) {
+      findings.push(gateFinding(
+        "route.thin_service_content",
+        "route",
+        `Dedicated service-page main content contains ${words} words; target at least 150 substantive words excluding shared navigation and footer content.`,
+        route.path,
+        "warning"
+      ));
+    }
   }
   for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.required && page.purpose === "service" && page.offeringId)) {
     const routePath = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
@@ -272,6 +290,19 @@ function visibleBodyText(html: string) {
     if (node.type === "tag") DomUtils.removeElement(node);
   }
   return DomUtils.textContent(document).replace(/\s+/g, " ").trim();
+}
+
+function visibleMainWordCount(html: string) {
+  const document = parseDocument(html, { decodeEntities: true });
+  const main = DomUtils.findOne((candidate) => candidate.type === "tag" && candidate.name === "main", document.children);
+  const roots = main?.type === "tag" ? main.children : document.children;
+  for (const node of DomUtils.findAll(
+    (candidate) => candidate.type === "tag" && ["script", "style", "svg", "noscript", "header", "nav", "footer"].includes(candidate.name),
+    roots
+  )) {
+    if (node.type === "tag") DomUtils.removeElement(node);
+  }
+  return normalizeText(DomUtils.textContent(roots)).split(" ").filter(Boolean).length;
 }
 
 function fiveWordShingles(value: string) {

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { LeadStatusControls } from "@/components/LeadStatusControls";
-import { WorkspaceStatus, formatWorkspaceDate, humanize } from "@/components/OwnerWorkspaceUI";
+import { WorkspaceStatus } from "@/components/OwnerWorkspaceUI";
+import { formatProductDate, humanize } from "@/lib/product-format";
 import type { Inquiry, InquiryEvent } from "@/packages/site-capabilities";
 
 type InboxFilter = "all" | "needs_reply" | "active" | "won" | "archived";
@@ -54,7 +55,7 @@ export function OwnerInbox({ siteId, slug, initialInquiries, eventsByInquiry, re
         {selected ? <>
           <header className="owner-inbox-detail-header">
             <button className="owner-inbox-mobile-back" type="button" onClick={() => setMobileDetailOpen(false)}>← Leads</button>
-            <div><span>Received {formatWorkspaceDate(selected.createdAt)}</span><h2>{selected.contactName ?? "Website inquiry"}</h2><p>{[selected.contactEmail, selected.contactPhone].filter(Boolean).join(" · ") || "No contact details extracted"}</p></div>
+            <div><span>Received {formatProductDate(selected.createdAt)}</span><h2>{selected.contactName ?? "Website inquiry"}</h2><p>{[selected.contactEmail, selected.contactPhone].filter(Boolean).join(" · ") || "No contact details extracted"}</p></div>
             <WorkspaceStatus tone={statusTone(selected.status)}>{humanize(selected.status)}</WorkspaceStatus>
           </header>
 
@@ -65,7 +66,7 @@ export function OwnerInbox({ siteId, slug, initialInquiries, eventsByInquiry, re
             <aside className="workspace-panel"><div className="workspace-panel-heading"><div><span>Workflow</span><h3>Update status</h3></div></div><LeadStatusControls siteId={siteId} inquiryId={selected.id} initialStatus={selected.status} onStatusChange={(status) => updateStatus(selected.id, status)} /></aside>
           </div>
 
-          <section className="workspace-panel owner-inbox-history"><div className="workspace-panel-heading"><div><span>History</span><h3>Inquiry activity</h3></div><small>{selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}</small></div><div className="owner-inbox-timeline">{selectedEvents.map((event) => <article key={event.id}><span /><div><strong>{humanize(event.type)}</strong><p>{event.messageText ?? eventSummary(event)}</p><small>{humanize(event.actor)} · {formatWorkspaceDate(event.createdAt)}</small></div></article>)}</div></section>
+          <section className="workspace-panel owner-inbox-history"><div className="workspace-panel-heading"><div><span>History</span><h3>Inquiry activity</h3></div><small>{selectedEvents.length} event{selectedEvents.length === 1 ? "" : "s"}</small></div><div className="owner-inbox-timeline">{selectedEvents.map((event) => <article key={event.id}><span /><div><strong>{humanize(event.type)}</strong><p>{event.messageText ?? eventSummary(event)}</p><small>{humanize(event.actor)} · {formatProductDate(event.createdAt)}</small></div></article>)}</div></section>
         </> : <div className="workspace-empty-state is-centered"><strong>No leads need attention</strong><p>New website inquiries will appear here with contact details and Lodesta triage.</p><Link className="button secondary" href={`/workspace/${slug}/editor`}>Review website forms</Link></div>}
       </section>
     </div>

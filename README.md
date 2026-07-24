@@ -34,6 +34,8 @@ npm run dev
 
 The app runs at `http://localhost:4330` by default. `npm run dev` starts the Next.js app and a local-only fast recovery worker; use `npm run dev:web` when only the web process is needed. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
 
+For read-only local UI inspection without a browser sign-in, use `npm run dev:inspect`. The inspection launcher accepts only a loopback `HOST`, disables Supabase browser auth and admin-token access for that process, and does not start the background worker. Admin and owner pages remain available in the existing `local_open` mode, while mutating API requests remain unauthorized. Use the normal signed-in development flow whenever testing authentication, ownership, creation, publishing, or another write path.
+
 Important surfaces:
 
 - `/admin/sites`: admin site creation and management.

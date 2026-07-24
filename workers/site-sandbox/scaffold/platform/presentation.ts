@@ -2,9 +2,55 @@ const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 
 export function orderedLocationHours(value: Record<string, string> | undefined) {
   return Object.entries(value ?? {}).map(([rawLabel, itemValue], sourceIndex) => {
-    const firstDay = rawLabel.split("-", 1)[0] as (typeof days)[number];
-    return { key: `${rawLabel}:${sourceIndex}`, label: rawLabel, value: itemValue, order: days.indexOf(firstDay), sourceIndex };
+    const [firstLabel, lastLabel = firstLabel] = rawLabel.split("-").map((part) => part.trim()) as [(typeof days)[number], (typeof days)[number]?];
+    const order = days.indexOf(firstLabel);
+    const endOrder = days.indexOf(lastLabel);
+    return {
+      key: `${rawLabel}:${sourceIndex}`,
+      label: rawLabel,
+      value: itemValue,
+      order,
+      endOrder: endOrder >= order ? endOrder : order,
+      sourceIndex
+    };
   }).sort((left, right) => left.order - right.order || left.sourceIndex - right.sourceIndex);
+}
+
+export function summarizedLocationHours(value: Record<string, string> | undefined) {
+  const ordered = orderedLocationHours(value);
+  if (!ordered.length) return "";
+  if (ordered.every((item) => isOpen24Hours(item.value))) return "Open 24 hours daily";
+  const groups: Array<{ first: string; last: string; value: string; endOrder: number }> = [];
+  for (const item of ordered) {
+    const prior = groups.at(-1);
+    if (prior?.value === item.value && item.order === prior.endOrder + 1) {
+      prior.last = item.label;
+      prior.endOrder = item.endOrder;
+    } else {
+      groups.push({ first: item.label, last: item.label, value: item.value, endOrder: item.endOrder });
+    }
+  }
+  return groups
+    .map((group) => `${group.first === group.last ? group.first : `${group.first}–${group.last}`}: ${group.value}`)
+    .join("; ");
+}
+
+export function formatLocalAddress(location: {
+  street?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  country?: string;
+}) {
+  assertUsCountry(location.country);
+  const locality = [location.city, location.region].filter(Boolean).join(", ");
+  const localityAndPostal = [locality, location.postalCode].filter(Boolean).join(" ");
+  return [location.street, localityAndPostal].filter(Boolean).join(", ");
+}
+
+export function assertUsCountry(value: string | undefined) {
+  if (!value || value.toUpperCase() === "US") return;
+  throw new Error(`BusinessAddress.local supports US locations only; received ${value}.`);
 }
 
 export function formatPhoneForDisplay(value: string) {
@@ -12,4 +58,8 @@ export function formatPhoneForDisplay(value: string) {
   const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
   if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(national)) return value;
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
+}
+
+function isOpen24Hours(value: string) {
+  return /\b(?:open )?24 hours?\b/i.test(value);
 }

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta slab-awning icon concept</title>
+  <desc id="desc">A warm-white custom slab-serif L with a three-scallop awning integrated into its base, set inside a dark forest-green rounded square.</desc>
+  <rect x="48" y="48" width="416" height="416" rx="108" fill="#24493A"/>
+  <path
+    fill="#FFFEFA"
+    d="M140 120H246V166H218V310H382V344
+      C382 374 366 394 344.67 394
+      C323.33 394 307.33 374 307.33 344
+      C307.33 374 291.33 394 270 394
+      C248.67 394 232.67 374 232.67 344
+      C232.67 374 216.67 394 195.33 394
+      C174 394 158 374 158 344
+      V166H140V120Z"
+  />
+</svg>

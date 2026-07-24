@@ -65,7 +65,15 @@ const generated = await createImageBytes({
     images: {
       generate: async (request: Record<string, unknown>) => {
         generatedRequest = request;
-        return { data: [{ b64_json: generatedWebp.toString("base64") }] };
+        return {
+          data: [{ b64_json: generatedWebp.toString("base64") }],
+          usage: {
+            input_tokens: 120,
+            input_tokens_details: { text_tokens: 120, image_tokens: 0 },
+            output_tokens: 7_000,
+            total_tokens: 7_120
+          }
+        };
       }
     }
   } as never
@@ -75,6 +83,8 @@ assert.equal(generatedRequest?.quality, "high");
 assert.equal(generatedRequest?.output_format, "webp");
 assert.equal(generatedRequest?.moderation, "auto");
 assert.equal(generated.width, 1024);
+assert.equal(generated.usage.costSource, "catalog_estimate");
+assert.equal(generated.usage.costUsd, 0.2106);
 
 let builds = 0;
 const runtime = new WorkspaceManagerRuntime<string>({

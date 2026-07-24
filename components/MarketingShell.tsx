@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/supabase/server";
 
 export async function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className={`${lodestaBrandSans.variable} marketing-shell`}>
+    <div className={`${lodestaBrandSans.variable} marketing-shell`} data-theme="light">
       <MarketingHeader />
       {children}
       <MarketingFooter />

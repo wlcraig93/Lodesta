@@ -1,0 +1,13 @@
+.settingsGrid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settingsGrid > * {
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .settingsGrid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  }
+}

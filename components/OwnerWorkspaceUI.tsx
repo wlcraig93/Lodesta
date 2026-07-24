@@ -17,14 +17,3 @@ export function WorkspaceMetric({ label, value, detail, tone = "default" }: { la
 export function WorkspaceStatus({ children, tone = "neutral" }: { children: ReactNode; tone?: ProductStatusTone }) {
   return <ProductStatusBadge tone={tone}>{children}</ProductStatusBadge>;
 }
-
-export function humanize(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-export function formatWorkspaceDate(value: string, includeTime = true) {
-  return new Intl.DateTimeFormat("en", includeTime
-    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
-    : { month: "short", day: "numeric", year: "numeric" }
-  ).format(new Date(value));
-}

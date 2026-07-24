@@ -14,6 +14,16 @@ import {
 } from "../packages/platform-operations";
 import { buildWebsiteAssessment } from "../packages/website-assessment/engine";
 import { assessmentCriteria, assessmentDimensions } from "../packages/website-assessment/rubric";
+import {
+  agentReadinessCheck,
+  agentReadinessCheckDefinitions
+} from "../packages/website-assessment/agent-readiness";
+import {
+  buildVisualQuality,
+  currentVisualQualityEvaluatorIdentity,
+  visualEvidence,
+  visualQualityPromptIdentity
+} from "../packages/website-assessment/visual-quality";
 
 type CheckResult = { name: string; ok: true; detail: string };
 const checks: CheckResult[] = [];
@@ -53,6 +63,46 @@ const assessment = buildWebsiteAssessment({
     recommendation: "Restore the homepage.",
     evidence: [{ id: "home", kind: "http", summary: "HTTP 500.", observedAt: now }]
   }],
+  agentReadinessChecks: agentReadinessCheckDefinitions.map((definition) => agentReadinessCheck({
+    id: definition.id,
+    status: definition.id === "agent.basic.home_reachable" ? "fail" : definition.applicability === "capability" ? "not_applicable" : "pass",
+    alignment: definition.id === "agent.basic.home_reachable" ? "present_invalid" : definition.applicability === "capability" ? "not_detected" : "present_valid",
+    explanation: `${definition.title} fixture evidence.`,
+    evidence: { id: `${definition.id}.fixture`, kind: "system", summary: "Agent fixture evidence.", observedAt: now }
+  })),
+  visualQuality: buildVisualQuality({
+    observedAt: now,
+    evaluator: {
+      identity: currentVisualQualityEvaluatorIdentity(),
+      status: "completed",
+      provider: "openai",
+      modelId: process.env.LODESTA_VISUAL_ASSESSMENT_MODEL?.trim() || "gpt-5.6-sol",
+      promptIdentity: visualQualityPromptIdentity,
+      screenshotSetHash: `sha256:${"a".repeat(64)}`,
+      generatedAt: now,
+      inputTokens: 100,
+      cachedInputTokens: 0,
+      outputTokens: 50,
+      durationMs: 250,
+      estimatedCostUsd: 0.001
+    },
+    checks: [{
+      id: "visual.hierarchy.primary_action",
+      status: "warning",
+      certainty: "inferred",
+      confidence: 0.96,
+      explanation: "The primary call-to-action has the same visual weight as secondary navigation choices.",
+      evidence: [visualEvidence({
+        id: "visual-primary-action",
+        summary: "/ · mobile: The quote action uses the same size and treatment as secondary links.",
+        observedAt: now,
+        route: "/",
+        viewport: "mobile",
+        artifactKey: "/tmp/visual-primary-action.png",
+        sourceUrl: "https://example.com/"
+      })]
+    }]
+  }),
   inputHashSource: { fixture: true },
   generatedAt: now
 });
@@ -90,6 +140,15 @@ async function main() {
     assert.match(owned.findings[0]?.evidence[0] ?? "", /HTTP 500/);
     const serialized = JSON.stringify(owned);
     assert.doesNotMatch(serialized, /"score"|"verdict"|"pointsEarned"|"pointsPossible"/);
+    assert.equal(owned.agentReadiness?.findings[0]?.id, "agent.basic.home_reachable");
+    assert.match(owned.agentReadiness?.note ?? "", /not an official Cloudflare score/i);
+    assert((owned.agentReadiness?.findings.length ?? 0) + (owned.agentReadiness?.verified.length ?? 0) <= 6);
+    assert.doesNotMatch(JSON.stringify(owned.agentReadiness), /"grade"|"verdict"|"score"/);
+    assert.equal(owned.visualQuality?.findings[0]?.id, "visual.hierarchy.primary_action");
+    assert.match(owned.visualQuality?.note ?? "", /AI-assisted review/i);
+    assert((owned.visualQuality?.findings.length ?? 0) + (owned.visualQuality?.strengths.length ?? 0) <= 4);
+    assert.doesNotMatch(JSON.stringify(owned.visualQuality), /"grade"|"verdict"|"score"/);
+    assert.equal(prospectPresenceReportResultSchema.safeParse({ ...owned, visualQuality: undefined }).success, false);
     assert.equal(prospectPresenceReportResultSchema.safeParse({ ...owned, score: 50 }).success, false);
   });
 

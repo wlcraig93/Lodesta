@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta storefront-corner icon concept</title>
+  <desc id="desc">A warm-white geometric L sits beneath a separate three-scallop storefront canopy inside a dark forest-green rounded square.</desc>
+  <rect x="48" y="48" width="416" height="416" rx="108" fill="#24493A"/>
+  <path
+    fill="#FFFEFA"
+    d="M116 112H396V176
+      C396 206 378 226 350 226
+      C322 226 304 206 304 176
+      C304 206 286 226 258 226
+      C230 226 212 206 212 176
+      C212 206 194 226 166 226
+      C138 226 116 206 116 176
+      V112Z"
+  />
+  <path fill="#FFFEFA" d="M138 254H208V330H366V392H138V254Z"/>
+</svg>

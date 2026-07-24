@@ -12,8 +12,17 @@ export async function persistWebsiteAssessmentEvidence(input: {
   const store = input.store ?? configuredArtifactBlobStore();
   const stored = new Map<string, string>();
   let unavailable = 0;
-  for (const criterion of assessment.dimensions.flatMap((dimension) => dimension.criteria)) {
-    for (const item of criterion.evidence) {
+  const evidenceGroups = [
+    ...assessment.dimensions
+      .flatMap((dimension) => dimension.criteria)
+      .map((evidenceGroup) => ({ evidenceGroup, visual: false })),
+    ...assessment.visualQuality.groups
+      .flatMap((group) => group.checks)
+      .map((evidenceGroup) => ({ evidenceGroup, visual: true }))
+  ];
+  let unavailableVisual = 0;
+  for (const { evidenceGroup, visual } of evidenceGroups) {
+    for (const item of evidenceGroup.evidence) {
       const localPath = item.artifactKey;
       if (!localPath || !isLocalRenderPath(localPath)) continue;
       const existing = stored.get(localPath);
@@ -35,6 +44,7 @@ export async function persistWebsiteAssessmentEvidence(input: {
         item.artifactKey = key;
       } catch {
         unavailable += 1;
+        if (visual) unavailableVisual += 1;
         delete item.artifactKey;
       }
     }
@@ -42,6 +52,12 @@ export async function persistWebsiteAssessmentEvidence(input: {
   if (unavailable) {
     assessment.coverage.limitations.push(`${unavailable} local screenshot reference${unavailable === 1 ? " was" : "s were"} unavailable for immutable delivery.`);
     assessment.coverage.limitations = [...new Set(assessment.coverage.limitations)];
+  }
+  if (unavailableVisual) {
+    assessment.visualQuality.coverage.limitations.push(
+      `${unavailableVisual} cited Visual Quality screenshot${unavailableVisual === 1 ? " was" : "s were"} unavailable for immutable delivery.`
+    );
+    assessment.visualQuality.coverage.limitations = [...new Set(assessment.visualQuality.coverage.limitations)];
   }
   return websiteAssessmentSchema.parse(assessment);
 }

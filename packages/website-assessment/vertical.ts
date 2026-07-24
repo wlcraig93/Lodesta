@@ -19,6 +19,16 @@ const signals: VerticalSignal[] = [
   { vertical: "creative_studio", pattern: /\b(creative studio|photograph|videograph|design studio|branding studio)\b/i, label: "creative studio language", weight: 0.4 }
 ];
 
+const domainContextAssessmentVerticals: Readonly<Record<string, Vertical>> = {
+  auto_body: "auto_body",
+  plumbing: "home_services"
+};
+
+export function assessmentVerticalForDomainContext(domainContextId: string | undefined): Vertical | "general_local" {
+  if (!domainContextId) return "general_local";
+  return domainContextAssessmentVerticals[domainContextId] ?? "general_local";
+}
+
 export function inferAssessmentVertical(input: {
   sourceUrl?: string;
   crawl?: CrawlAssessment;

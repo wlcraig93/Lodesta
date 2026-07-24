@@ -4,6 +4,8 @@
 
 Lodesta-owned UI should feel like an AI operations workspace: modern, dense, calm, precise, evidence-forward, and action-oriented. The useful reference set is Ramp, Linear, and Roadrunner-style SaaS, adapted to Lodesta's managed website and local-presence workflows.
 
+The interaction direction is a calm agentic studio. Account and overview screens establish one dominant state or next action, while creation and editing center the conversation and the website artifact. Use open work surfaces, dividers, metric strips, checklists, and timelines before introducing another enclosing card.
+
 This document applies to Lodesta product, marketing, admin, editor, account, settings, and internal review surfaces. It does not apply to generated customer websites, which remain governed by `--site-*`, the public site renderer, and theme presets.
 
 ## Product Vocabulary
@@ -24,6 +26,8 @@ Design around the actual operating objects in the product:
 - Use panels for bounded work objects, not for every section of a page.
 - Make agent activity legible with stages, statuses, evidence, and outcomes.
 - Do not use decorative dashboards, generic website-builder chrome, gratuitous gradients, or marketing-first admin screens.
+- Keep product and admin shells on one responsive vocabulary: a 220px expanded rail, a 64px compact rail, task-focused mobile tabs, and secondary navigation in a More sheet.
+- Treat dark mode as a designed material system, not an inversion. Generated customer-site previews stay independent from Lodesta chrome in every mode.
 
 ## Color Roles
 
@@ -41,8 +45,17 @@ Lodesta-owned UI uses `--product-*` CSS custom properties from `app/product-toke
 - Text tokens describe role, not shade: default, subtle, muted, tertiary, inverse, nav, and nav-subtle.
 - Border tokens describe strength: default, subtle, strong, emphasis, dashed.
 - Elevation tokens describe use: card, soft card, preview, focus, and error.
-- Token names are mode-ready so future dark-mode overrides can be added without changing call sites.
+- Token names carry complete light and dark roles so a theme change never requires component-specific color overrides.
 - Visible product metadata never renders below the 12px `--product-font-size-micro` token.
+
+## Appearance
+
+- Product, owner, authentication, editor, and admin surfaces support System, Light, and Dark preferences.
+- System is the default. The device-local preference lives in the lower-left account menu and is resolved before hydration.
+- Marketing remains explicitly light and brand-led.
+- Dark mode uses warm charcoal surfaces, off-white text, restrained green actions, and mode-specific borders and shadows.
+- Native controls, focus treatment, overlays, status roles, and preview staging must remain legible in both modes.
+- Public and generated customer-site presentation is outside this appearance contract.
 
 ## Typography
 
@@ -73,6 +86,8 @@ Generated customer websites and all content rendered inside preview iframes are 
 
 Use for Lodesta-owned navigation and workspace structure. Keep navigation persistent, direct, and compact. The shell should help an operator understand where they are and what work object is active.
 
+Desktop owner and admin navigation uses a 220px expanded rail and a 64px icon rail. Account and appearance controls remain anchored at the bottom. Mobile navigation promotes the three most frequent tasks and moves the rest into a keyboard-managed More sheet; never stack a complete desktop sidebar above mobile content.
+
 ### Page Header
 
 Use for the object and task currently in focus. Prefer one short label, one clear title, concise supporting copy, and the most important action. Avoid hero-scale typography in operational screens.
@@ -84,6 +99,8 @@ Use for filters, mode switches, and view-level actions. Controls should remain c
 ### Panel
 
 Use for a bounded work object, such as a report section, run summary, QA group, or version group. Panels use default surface, border, radius, and card shadow tokens.
+
+Do not wrap metric strips, page-wide timelines, simple row lists, or every dashboard section in separate panels. Prefer a shared work surface with structural rules.
 
 ### Metric Card
 

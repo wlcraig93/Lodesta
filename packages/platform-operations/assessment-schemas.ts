@@ -16,6 +16,53 @@ const publicFindingSchema = z.object({
   recommendation: z.string().min(1).max(1_000)
 }).strict();
 
+const publicAgentReadinessSchema = z.object({
+  methodologyIdentity: z.string().regex(/^agent-readiness@sha256:[a-f0-9]{64}$/),
+  coverage: z.object({
+    value: z.number().min(0).max(1),
+    assessedChecks: z.number().int().nonnegative(),
+    applicableChecks: z.number().int().nonnegative(),
+    limitations: z.array(z.string().min(1).max(500)).max(40)
+  }).strict(),
+  verified: z.array(z.object({
+    id: z.string().min(1).max(180),
+    group: z.string().min(1).max(180),
+    title: z.string().min(1).max(240),
+    evidence: z.array(z.string().min(1).max(2_000)).max(30)
+  }).strict()).max(6),
+  findings: z.array(publicFindingSchema.extend({
+    authority: z.enum(["cloudflare", "lodesta"]),
+    countedByAuthority: z.boolean()
+  }).strict()).max(6),
+  note: z.string().min(1).max(1_000)
+}).strict();
+
+const publicVisualQualitySchema = z.object({
+  methodologyIdentity: z.string().regex(/^visual-quality@sha256:[a-f0-9]{64}$/),
+  coverage: z.object({
+    value: z.number().min(0).max(1),
+    assessedChecks: z.number().int().nonnegative(),
+    applicableChecks: z.number().int().nonnegative(),
+    limitations: z.array(z.string().min(1).max(500)).max(40)
+  }).strict(),
+  strengths: z.array(z.object({
+    id: z.string().min(1).max(180),
+    group: z.string().min(1).max(180),
+    title: z.string().min(1).max(240),
+    evidence: z.array(z.string().min(1).max(2_000)).max(12)
+  }).strict()).max(4),
+  findings: z.array(publicFindingSchema).max(4),
+  note: z.string().min(1).max(1_000)
+}).strict().superRefine((value, context) => {
+  if (value.strengths.length + value.findings.length > 4) {
+    context.addIssue({
+      code: "custom",
+      path: ["strengths"],
+      message: "Visual Quality exposes at most four combined strengths and findings."
+    });
+  }
+});
+
 export const prospectPresenceReportResultSchema: z.ZodType<ProspectPresenceReportResult> = z.object({
   schemaVersion: z.literal(1),
   kind: z.literal("prospect-presence-report"),
@@ -43,6 +90,8 @@ export const prospectPresenceReportResultSchema: z.ZodType<ProspectPresenceRepor
     evidence: z.array(z.string().min(1).max(2_000)).max(30)
   }).strict()).max(12),
   findings: z.array(publicFindingSchema).max(20),
+  agentReadiness: publicAgentReadinessSchema.optional(),
+  visualQuality: publicVisualQualitySchema.optional(),
   stages: z.array(z.object({
     id: z.string().min(1).max(80),
     label: z.string().min(1).max(180),
@@ -55,7 +104,22 @@ export const prospectPresenceReportResultSchema: z.ZodType<ProspectPresenceRepor
       detail: z.string().min(1).max(2_000)
     }).strict()).max(12)
   }).strict()
-}).strict();
+}).strict().superRefine((report, context) => {
+  if (report.websiteKind === "owned_website" && !report.agentReadiness) {
+    context.addIssue({
+      code: "custom",
+      path: ["agentReadiness"],
+      message: "Owned-website reports require the canonical Agent Readiness projection."
+    });
+  }
+  if (report.websiteKind === "owned_website" && !report.visualQuality) {
+    context.addIssue({
+      code: "custom",
+      path: ["visualQuality"],
+      message: "Owned-website reports require the canonical Visual Quality projection."
+    });
+  }
+});
 
 export const businessStrengthAssessmentSchema: z.ZodType<BusinessStrengthAssessment> = z.object({
   schemaVersion: z.literal(1),

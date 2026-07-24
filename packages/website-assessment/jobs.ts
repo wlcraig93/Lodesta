@@ -181,7 +181,7 @@ async function runAssessmentForRecord(record: WebsiteAssessmentRecord) {
     if (!artifact) throw new Error("Site build artifact not found.");
     const buildInput = await sitePlatformRepository.getPublicBuildInput(artifact.publicBuildInputId);
     if (!buildInput) throw new Error("Site public build input not found.");
-    return assessSiteArtifact({
+    return await assessSiteArtifact({
       artifact,
       buildInput,
       versionId: record.versionId,

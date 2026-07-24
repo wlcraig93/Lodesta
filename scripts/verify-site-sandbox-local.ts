@@ -5,19 +5,38 @@ import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import {
+  formatLocalAddress,
+  summarizedLocationHours
+} from "../workers/site-sandbox/scaffold/platform/presentation";
 
 const scaffold = resolve("workers/site-sandbox/scaffold");
 const workspace = await mkdtemp(join(tmpdir(), "lodesta-multifile-sandbox-"));
 const input = buildSyntheticSiteInput();
+input.business.assets.push({
+  assetId: "asset_hero",
+  revisionId: "asset_revision_hero",
+  kind: "photo",
+  contentHash: `sha256:${"9".repeat(64)}`,
+  storageKey: "site-assets/business_synthetic/hero",
+  mimeType: "image/jpeg",
+  alt: "Technician inspecting a vehicle panel",
+  width: 1440,
+  height: 900,
+  origin: "owner_upload",
+  sourceFactIds: [],
+  activeForFutureBuilds: true
+});
+input.assetRevisionIds.push("asset_revision_hero");
 const files = [
   {
     path: "src/site.tsx",
     content: `import React from "react";
-import { BusinessName, Fact, ManagedForm } from "../platform/sdk";
+import { Asset, BusinessAddress, BusinessHours, BusinessName, Fact, ManagedForm } from "../platform/sdk";
 import { LocalIntro } from "./components/LocalIntro";
 export const siteDefinition = {
   routes: [{ path: "/",
-    element: <main><LocalIntro /><h1><BusinessName /></h1><Fact id="fact_phone" /><Fact id="fact_hours" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
+    element: <main><LocalIntro /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><Asset id="asset_hero" loading="eager" fetchPriority="high" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
 };`
   },
   { path: "src/styles.css", content: "html{scroll-behavior:smooth}body{margin:0;font:16px Arial,sans-serif}" },
@@ -66,7 +85,22 @@ try {
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered."), "local TSX module was not rendered");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("(512) 555-0142"), "compiler did not render the canonical formatted phone");
-  assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday: 8:00 AM-5:30 PM"), "compiler did not render labeled canonical hours");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday–Friday: 8:00 AM-5:30 PM"), "compiler did not render a compact source-bound hours summary");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("<dt>Monday</dt><dd>8:00 AM-5:30 PM</dd>"), "compiler did not render structured weekly hours");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("1200 Main Street, Austin, TX 78701"), "compiler did not render the natural US address variant");
+  assert(!artifact.routes?.[0]?.bodyHtml?.includes(", US"), "compiler leaked a trailing country code into the local address variant");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('loading="eager"'), "Asset did not preserve explicit eager loading.");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('fetchPriority="high"'), "Asset did not preserve explicit fetch priority.");
+  assert.throws(
+    () => formatLocalAddress({ street: "1 King St", city: "Toronto", region: "ON", postalCode: "M5H 1A1", country: "CA" }),
+    /supports US locations only/,
+    "The local address formatter silently rendered a non-US address."
+  );
+  assert.equal(
+    summarizedLocationHours({ Monday: "Open", Wednesday: "Open" }),
+    "Monday: Open; Wednesday: Open",
+    "Compact hours formatting combined non-contiguous days into a false range."
+  );
   process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, localImports: "pass", nestedCss: "pass" })}\n`);
 } finally {
   await rm(workspace, { recursive: true, force: true });

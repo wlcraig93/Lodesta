@@ -270,6 +270,8 @@ function factValueRendered(fact: PublicFact, value: string, rendered: string) {
   if (fact.kind === "phone") return comparablePhoneDigits(rendered) === comparablePhoneDigits(value);
   if (fact.kind === "email") return rendered.trim().toLowerCase() === value.trim().toLowerCase();
   if (fact.kind === "hours") {
+    const summary = canonicalHoursSummary(fact.value);
+    if (summary && sameCompleteValue(summary, rendered)) return true;
     const components = canonicalDisplayComponents(fact.value);
     return components.length > 0 && components.every((component) => normalizedText(rendered).includes(normalizedText(component)));
   }
@@ -293,8 +295,40 @@ function comparablePhoneDigits(value: string) {
 }
 
 function factDisplayValues(fact: PublicFact): string[] {
-  return flattenDisplayValues(fact.value).filter(Boolean);
+  const values = flattenDisplayValues(fact.value).filter(Boolean);
+  const hoursSummary = fact.kind === "hours" ? canonicalHoursSummary(fact.value) : undefined;
+  return [...new Set([...values, ...(hoursSummary ? [hoursSummary] : [])])];
 }
+
+function canonicalHoursSummary(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const ordered = Object.entries(value as Record<string, unknown>)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && Boolean(entry[1].trim()))
+    .map(([label, itemValue], sourceIndex) => {
+      const [firstDay, lastDay = firstDay] = label.split("-").map((part) => part.trim());
+      const order = canonicalDays.indexOf(firstDay);
+      const endOrder = canonicalDays.indexOf(lastDay);
+      return { label, value: itemValue, sourceIndex, order, endOrder: endOrder >= order ? endOrder : order };
+    })
+    .sort((left, right) => left.order - right.order || left.sourceIndex - right.sourceIndex);
+  if (!ordered.length) return undefined;
+  if (ordered.every((item) => /\b(?:open )?24 hours?\b/i.test(item.value))) return "Open 24 hours daily";
+  const groups: Array<{ first: string; last: string; value: string; endOrder: number }> = [];
+  for (const item of ordered) {
+    const prior = groups.at(-1);
+    if (prior?.value === item.value && item.order === prior.endOrder + 1) {
+      prior.last = item.label;
+      prior.endOrder = item.endOrder;
+    } else {
+      groups.push({ first: item.label, last: item.label, value: item.value, endOrder: item.endOrder });
+    }
+  }
+  return groups
+    .map((group) => `${group.first === group.last ? group.first : `${group.first}–${group.last}`}: ${group.value}`)
+    .join("; ");
+}
+
+const canonicalDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 function canonicalDisplayComponents(value: unknown): string[] {
   if (typeof value === "string") return [value];

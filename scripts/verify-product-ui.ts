@@ -65,9 +65,18 @@ assert(thumbnail?.key === "site-captures/site-1/artifact-1/thumbnail.webp", "Thu
 const metadata = thumbnail ? await sharp(thumbnail.bytes).metadata() : undefined;
 assert(metadata?.format === "webp" && metadata.width === 640 && metadata.height === 400, "Thumbnail output is not a 640×400 WebP.");
 
-const [tokens, shell, account, removeWebsite, thumbnailRoute] = await Promise.all([
+const [tokens, layout, css, shell, accountMenu, themeControl, marketingShell, adminShell, adminSites, adminRuns, adminRunInspector, account, removeWebsite, thumbnailRoute] = await Promise.all([
   readFile("app/product-tokens.css", "utf8"),
+  readFile("app/layout.tsx", "utf8"),
+  readFile("app/globals.css", "utf8"),
   readFile("components/ProductAppShell.tsx", "utf8"),
+  readFile("components/AccountMenu.tsx", "utf8"),
+  readFile("components/ThemePreferenceControl.tsx", "utf8"),
+  readFile("components/MarketingShell.tsx", "utf8"),
+  readFile("components/admin/AdminShellClient.tsx", "utf8"),
+  readFile("app/admin/sites/page.tsx", "utf8"),
+  readFile("components/admin/AdminRunInventory.tsx", "utf8"),
+  readFile("components/admin/RunTelemetryInspector.tsx", "utf8"),
   readFile("components/AccountWebsiteCard.tsx", "utf8"),
   readFile("components/RemoveWebsiteButton.tsx", "utf8"),
   readFile("app/api/sites/[siteId]/thumbnail/route.ts", "utf8")
@@ -78,6 +87,41 @@ for (const token of ["#f7f8f6", "#fbfcfa", "#f1f3f0", "#dfe4de", "#e7efea", "#68
 for (const route of ["/editor", "/leads", "/analytics", "/business-details"]) {
   assert(shell.includes(route), `Product navigation is missing ${route}.`);
 }
+for (const token of [
+  "--product-color-surface-hover",
+  "--product-color-surface-disabled",
+  "--product-color-border-emphasis",
+  "--product-color-primary-pressed",
+  "--product-color-intelligence-surface",
+  "--product-color-success-surface",
+  "--product-color-warning-surface",
+  "--product-color-error-surface",
+  "--product-color-overlay",
+  "--product-color-preview-stage",
+  "--product-shadow-preview",
+  "--product-shadow-focus"
+]) {
+  const darkTheme = tokens.slice(tokens.indexOf(':root[data-theme="dark"]'));
+  assert(darkTheme.includes(token), `Dark theme is missing the ${token} semantic role.`);
+}
+assert(layout.includes("const themeBootstrap") && layout.includes("themePreference") && layout.includes("dataset.theme"), "Theme preference is not resolved before hydration.");
+assert(layout.includes("suppressHydrationWarning") && layout.includes("prefers-color-scheme: dark"), "Theme bootstrap does not support a stable system-mode first paint.");
+assert(themeControl.includes('export type ThemePreference = "system" | "light" | "dark"'), "Theme preference values are not canonical.");
+assert(themeControl.includes('THEME_STORAGE_KEY = "lodesta:theme-preference"'), "Theme preference storage key is not canonical.");
+assert(themeControl.includes("export function ThemePreferenceManager") && themeControl.includes('window.addEventListener("storage"') && themeControl.includes('colorQuery.addEventListener("change"'), "Theme preference does not synchronize tabs and system changes.");
+assert(layout.includes("<ThemePreferenceManager"), "The global theme preference manager is not mounted.");
+assert(themeControl.includes('role="radiogroup"') && themeControl.includes('role="radio"') && themeControl.includes("aria-checked"), "Appearance control is not exposed as an accessible radio group.");
+assert(themeControl.includes("onRadioKeyDown") && themeControl.includes('event.key === "ArrowRight"') && themeControl.includes("tabIndex={preference === option ? 0 : -1}"), "Appearance radio options do not support roving keyboard selection.");
+assert(accountMenu.includes("<ThemePreferenceControl") && shell.includes("<ThemePreferenceControl"), "Desktop and mobile account surfaces do not share the appearance control.");
+assert(marketingShell.includes('data-theme="light"'), "Marketing does not retain its explicit light appearance scope.");
+assert(adminShell.includes('data-modern-shell="true"') && adminShell.includes("ADMIN_SHELL_STORAGE_KEY"), "Admin does not use the canonical responsive shell.");
+assert(adminShell.includes("admin-mobile-nav") && adminShell.includes("admin-mobile-sheet"), "Admin mobile navigation does not use tabs and a More sheet.");
+assert(css.includes(".admin-shell[data-modern-shell=\"true\"]") && css.includes("grid-template-columns: 220px") && css.includes("grid-template-columns: 64px"), "Admin shell responsive rail contracts are missing.");
+assert(adminSites.includes("admin-mobile-inventory") && adminSites.includes("<details>") && adminSites.includes("admin-table-scroll"), "Admin inventory does not provide desktop and mobile-specific presentations.");
+assert(adminRuns.includes("admin-run-range-presets") && adminRuns.includes("admin-run-row") && adminRuns.includes("queryParams(filters)"), "Agent activity does not use the canonical filterable inventory.");
+assert(adminRunInspector.includes('role="tablist"') && adminRunInspector.includes("data-mobile-detail") && adminRunInspector.includes("run-event-list"), "Agent activity does not use the responsive telemetry inspector.");
+assert(css.includes(".run-inspector-workspace") && css.includes("grid-template-columns: 300px minmax(0, 1fr)"), "Telemetry inspector desktop composition is missing.");
+assert(css.includes(".workspace-now") && css.includes(".workspace-metric-strip") && css.includes(".workspace-home-section"), "Owner overview does not use the modern work-surface vocabulary.");
 assert(account.includes("aspect-ratio") === false, "Account cards contain inline visual styling instead of product CSS.");
 assert(account.includes("querySelector('[role=\"dialog\"]')"), "The website card closes its More menu while the removal dialog handles Escape.");
 assert(!account.includes("onOpen=") && removeWebsite.includes("setOpen(true)"), "Opening website removal unmounts its own confirmation dialog.");

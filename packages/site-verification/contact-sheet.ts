@@ -7,7 +7,7 @@ export async function createArtifactContactSheet(captures: BrowserGateCapture[])
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1100 }, deviceScaleFactor: 1 });
-    const cards = selected.map((capture) => `<article><header>${escapeHtml(capture.route)} · ${capture.viewport}</header><img src="data:image/png;base64,${capture.bytes.toString("base64")}" alt=""></article>`).join("");
+    const cards = selected.map((capture) => `<article><header>${escapeHtml(capture.route)} · ${capture.viewport} · ${capture.stage ?? "settled"}</header><img src="data:image/png;base64,${capture.bytes.toString("base64")}" alt=""></article>`).join("");
     await page.setContent(`<!doctype html><html><head><style>
       *{box-sizing:border-box}body{margin:0;padding:24px;background:#d7d9dc;color:#17191c;font:16px Arial,sans-serif}
       main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start}

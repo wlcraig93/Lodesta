@@ -16,6 +16,7 @@ import {
   websiteAssessmentRubricIdentity,
   websiteAssessmentScannerIdentity
 } from "@/packages/website-assessment/rubric";
+import { websiteAssessmentRecordIsCurrent } from "@/packages/website-assessment/service";
 
 export const runtime = "nodejs";
 
@@ -58,11 +59,11 @@ export async function POST(request: Request) {
   }
 
   const reusable = await repository.findReusableProspectReportBySourceKey(resolution.sourceKey, recentProspectReportCutoff());
-  if (reusable) {
+  if (reusable && await prospectReportUsesCurrentAssessment(reusable)) {
     return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(reusable), reused: true }), limit);
   }
   const active = await repository.findActiveProspectReportBySourceKey(resolution.sourceKey);
-  if (active) {
+  if (active && await prospectReportUsesCurrentAssessment(active)) {
     return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(active), reused: true }), limit);
   }
 
@@ -124,4 +125,14 @@ export async function POST(request: Request) {
   });
 
   return applyRateLimitHeaders(NextResponse.json({ report: publicProspectReport(report), reused: false }, { status: 202 }), limit);
+}
+
+async function prospectReportUsesCurrentAssessment(report: {
+  websiteKind: "owned_website" | "no_website" | "social_or_aggregator";
+  assessmentId?: string;
+}) {
+  if (report.websiteKind !== "owned_website") return true;
+  if (!report.assessmentId) return false;
+  const assessment = await repository.getWebsiteAssessment(report.assessmentId);
+  return Boolean(assessment && websiteAssessmentRecordIsCurrent(assessment));
 }

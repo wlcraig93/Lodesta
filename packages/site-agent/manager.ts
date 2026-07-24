@@ -12,7 +12,7 @@ import {
   managerToolNameSchema,
   type ManagerCompletion,
   type ManagerModelUsage,
-  type ManagerRunLimits,
+  type ManagerRunGuardrails,
   type ManagerRunRequest,
   type ManagerToolExecution,
   type ManagerToolRuntime,
@@ -26,7 +26,14 @@ import {
   SiteAuthoringTerminalError
 } from "./failures";
 import { managerBuildContext, managerEvidencePacket, websiteManagerPromptIdentity, websiteManagerSystemPrompt } from "./prompts";
-import { isSupportedSiteAgentModel, managerLimitsForKind, usageForModel } from "./run-policy";
+import {
+  isSupportedSiteAgentModel,
+  managerGuardrailsForKind,
+  siteAgentRunGuardrailDefaults,
+  siteAgentReasoningEffort,
+  siteAgentTextVerbosity,
+  usageForModel
+} from "./run-policy";
 
 export type { ManagerRunRequest } from "./contracts";
 
@@ -64,7 +71,7 @@ export class WebsiteManagerAgent {
     const route = selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
     const { apiProvider, modelId } = route;
     const client = this.injectedClient ?? configuredResponsesClient(apiProvider);
-    const limits = limitsFor(input, input.limits);
+    const guardrails = guardrailsFor(input, input.guardrails);
     const startedAt = Date.now();
     const usage = emptyUsage();
     const toolRecords: ManagerToolRecord[] = [];
@@ -87,9 +94,11 @@ export class WebsiteManagerAgent {
     };
     const history: ResponseInputItem[] = [initialContext];
     let responseCount = 0;
+    let consecutiveFailureFingerprint: string | undefined;
+    let consecutiveIdenticalFailures = 0;
 
     while (true) {
-      assertWithinLimits({ limits, usage, startedAt });
+      assertWithinCostGuardrail(usage, guardrails.maxCostUsd);
       const turnIndex = responseCount + 1;
       const turnId = eventId("turn");
       const modelIdValue = eventId("model");
@@ -111,10 +120,10 @@ export class WebsiteManagerAgent {
           parallel_tool_calls: false,
           store: false,
           include: ["reasoning.encrypted_content"],
-          reasoning: { effort: "high" },
-          text: { verbosity: "low" },
-          max_output_tokens: Math.min(64_000, Math.max(1, limits.maxOutputTokens - usage.outputTokens))
-        }, apiProvider, input.runId), boundedSignal(input.signal, limits.maxDurationMs - (Date.now() - startedAt)));
+          reasoning: { effort: siteAgentReasoningEffort },
+          text: { verbosity: siteAgentTextVerbosity },
+          max_output_tokens: 64_000
+        }, apiProvider, input.runId), input.signal);
       } catch (error) {
         const completedAt = new Date().toISOString();
         const errorCode = diagnosticErrorCode(error);
@@ -136,6 +145,14 @@ export class WebsiteManagerAgent {
       })]);
       history.push(...response.output as ResponseInputItem[]);
       await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
+      if (responseUsage.costSource === "unavailable") {
+        throw new SiteAuthoringTerminalError(
+          "cost_telemetry_unavailable",
+          "platform",
+          false,
+          `cost_telemetry_unavailable:${apiProvider}:${modelId}`
+        );
+      }
 
       if (!calls.length) {
         history.push({ role: "user", type: "message", content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }] });
@@ -150,6 +167,10 @@ export class WebsiteManagerAgent {
         let execution: ManagerToolExecution;
         let status: "succeeded" | "failed" = "succeeded";
         let terminalError: SiteAuthoringTerminalError | undefined;
+        let stalledError: SiteAuthoringTerminalError | undefined;
+        let metering: ManagerToolExecution["metering"];
+        let replayed = false;
+        const workspaceHashBefore = runtimeWorkspaceHash(input.runtime.stateSummary());
         try {
           name = managerToolNameSchema.parse(rawCall.name);
           parsedArguments = managerToolArguments[name].parse(JSON.parse(rawCall.arguments)) as Record<string, unknown>;
@@ -159,10 +180,23 @@ export class WebsiteManagerAgent {
           if (replay) {
             execution = replay.result;
             status = replay.status;
+            replayed = true;
           } else {
             try {
               execution = await input.runtime.execute({ callId: rawCall.call_id, name, arguments: parsedArguments });
               if (execution.diagnosticOutput.ok === false) status = "failed";
+              metering = execution.metering;
+              if (metering) {
+                mergeMeteredUsage(usage, metering.usage, startedAt);
+                if (metering.usage.costSource === "unavailable") {
+                  terminalError = new SiteAuthoringTerminalError(
+                    "cost_telemetry_unavailable",
+                    "platform",
+                    false,
+                    `tool_cost_telemetry_unavailable:${toolNameForMetering(name)}:${metering.apiProvider}:${metering.modelId}`
+                  );
+                }
+              }
             } catch (error) {
               status = "failed";
               execution = toolError(error);
@@ -174,6 +208,7 @@ export class WebsiteManagerAgent {
           status = "failed";
           execution = toolError(error);
         }
+        const workspaceHashAfter = runtimeWorkspaceHash(input.runtime.stateSummary());
         const toolName = name ?? rawCall.name;
         const inputHash = sha256(stableJson({ name: toolName, arguments: parsedArguments }));
         const outputHash = sha256(stableJson(execution.diagnosticOutput));
@@ -192,13 +227,42 @@ export class WebsiteManagerAgent {
         await input.onEvents?.([runEvent({
           id: eventId("tool"), kind: operationKind, name: toolName, status, turnIndex,
           startedAt: started, completedAt: toolRecord.completedAt,
+          ...(metering ? toolMeteringFields(metering) : {}),
           errorCode: status === "failed" ? diagnosticErrorCode(execution.diagnosticOutput.error ?? "tool_failed") : undefined,
-          summary: { callId: rawCall.call_id, inputHash, outputHash, ok: execution.diagnosticOutput.ok },
-          payload: { arguments: parsedArguments, modelResult: readableModelResult(execution.modelOutput), diagnosticResult: execution.diagnosticOutput }
+          summary: { callId: rawCall.call_id, inputHash, outputHash, ok: execution.diagnosticOutput.ok, replayed },
+          payload: {
+            arguments: parsedArguments,
+            modelResult: readableModelResult(execution.modelOutput),
+            diagnosticResult: execution.diagnosticOutput,
+            metering: metering ? { apiProvider: metering.apiProvider, modelId: metering.modelId, usage: metering.usage } : undefined
+          }
         })]);
         history.push({ type: "function_call_output", call_id: rawCall.call_id, output: execution.modelOutput as never });
         await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
         if (terminalError) throw terminalError;
+        const workspaceMutated = workspaceHashBefore !== workspaceHashAfter
+          || (toolName === "create_image" && status === "succeeded" && execution.diagnosticOutput.ok !== false);
+        if (workspaceMutated || (isReleaseTool(toolName) && status === "succeeded")) {
+          consecutiveFailureFingerprint = undefined;
+          consecutiveIdenticalFailures = 0;
+        } else if (isReleaseTool(toolName) && status === "failed") {
+          const failureFingerprint = releaseFailureFingerprint(toolName, workspaceHashAfter, execution);
+          if (failureFingerprint === consecutiveFailureFingerprint) {
+            consecutiveIdenticalFailures += 1;
+          } else {
+            consecutiveFailureFingerprint = failureFingerprint;
+            consecutiveIdenticalFailures = 1;
+          }
+          if (consecutiveIdenticalFailures >= guardrails.maxConsecutiveIdenticalFailures) {
+            stalledError = new SiteAuthoringTerminalError(
+              "authoring_stalled",
+              "authoring",
+              false,
+              `authoring_stalled:${toolName}:${failureFingerprint}:${consecutiveIdenticalFailures}`
+            );
+          }
+        }
+        if (stalledError) throw stalledError;
         if (execution.needsInput) throw new ManagerNeedsInputError(execution.needsInput.question);
         if (execution.completion) {
           await input.onEvents?.([runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "succeeded", turnIndex, startedAt: turnStartedAt, completedAt: new Date().toISOString(), summary: { toolName, completed: true } })]);
@@ -255,17 +319,16 @@ async function structuredResponse(input: {
   system: string;
   content: Array<Record<string, unknown>>;
   maxOutputTokens: number;
-  reasoningEffort?: "low" | "medium" | "high";
   signal?: AbortSignal;
 }) {
   const startedAt = Date.now();
   const response = await createWithOneTransportRetry(input.client, routedResponseParams({
     model: input.route.modelId, instructions: input.system,
     input: [{ role: "user", type: "message", content: input.content as never }],
-    store: false, parallel_tool_calls: false, reasoning: { effort: input.reasoningEffort ?? "high" },
-    text: { verbosity: "low", format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
+    store: false, parallel_tool_calls: false, reasoning: { effort: siteAgentReasoningEffort },
+    text: { verbosity: siteAgentTextVerbosity, format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
     max_output_tokens: input.maxOutputTokens
-  }, input.route.apiProvider), boundedSignal(input.signal, 10 * 60_000));
+  }, input.route.apiProvider), input.signal);
   if (!response.output_text) throw new Error("Website manager response did not contain structured output text.");
   return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.route.modelId, response.usage, Date.now() - startedAt) };
 }
@@ -278,7 +341,7 @@ function configuredResponsesClient(apiProvider: SiteAgentApiProvider): ManagerRe
     apiKey,
     baseURL: apiProvider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
     maxRetries: 0,
-    timeout: 10 * 60_000,
+    timeout: siteAgentRunGuardrailDefaults.initial_build.deadlineMs,
     defaultHeaders: apiProvider === "openrouter"
       ? {
           ...(origin ? { "HTTP-Referer": origin } : {}),
@@ -328,17 +391,17 @@ function routedResponseParams(params: ResponseCreateParamsNonStreaming, apiProvi
   } as ResponseCreateParamsNonStreaming;
 }
 
-async function createWithOneTransportRetry(client: ManagerResponsesClient, params: ResponseCreateParamsNonStreaming, signal: AbortSignal) {
+async function createWithOneTransportRetry(client: ManagerResponsesClient, params: ResponseCreateParamsNonStreaming, signal?: AbortSignal) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await client.create(params, { signal });
+      const response = await client.create(params, signal ? { signal } : undefined);
       if (response.status === "failed") throw new Error(response.error?.message ?? "manager_model_failed");
       if (response.status === "incomplete") throw new Error(`manager_model_incomplete:${response.incomplete_details?.reason ?? "unknown"}`);
       return response;
     } catch (error) {
       lastError = error;
-      if (attempt > 0 || signal.aborted || !transientTransportError(error)) throw error;
+      if (attempt > 0 || signal?.aborted || !transientTransportError(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
@@ -351,25 +414,57 @@ function transientTransportError(error: unknown) {
   return error instanceof TypeError || /timeout|timed out|connection|socket|network/i.test(boundedError(error));
 }
 
-function limitsFor(input: ManagerRunRequest, override?: Partial<ManagerRunLimits>): ManagerRunLimits {
-  return { ...managerLimitsForKind(input.kind), ...override };
+function guardrailsFor(input: ManagerRunRequest, override?: Partial<ManagerRunGuardrails>): ManagerRunGuardrails {
+  return { ...managerGuardrailsForKind(input.kind), ...override };
 }
 
-function assertWithinLimits(input: { limits: ManagerRunLimits; usage: ManagerModelUsage; startedAt: number }) {
-  if (input.usage.inputTokens >= input.limits.maxInputTokens) {
-    throw new SiteAuthoringTerminalError("input_budget_exhausted", "budget", false, "manager_input_token_limit_exhausted");
-  }
-  if (input.usage.outputTokens >= input.limits.maxOutputTokens) {
-    throw new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, "manager_output_token_limit_exhausted");
-  }
-  if (Date.now() - input.startedAt >= input.limits.maxDurationMs) {
-    throw new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "manager_duration_limit_exhausted");
+function assertWithinCostGuardrail(usage: ManagerModelUsage, maxCostUsd: number) {
+  if (usage.costUsd >= maxCostUsd) {
+    throw new SiteAuthoringTerminalError(
+      "cost_limit_exhausted",
+      "budget",
+      false,
+      `manager_cost_limit_exhausted:${usage.costUsd.toFixed(6)}:${maxCostUsd.toFixed(6)}`
+    );
   }
 }
 
-function boundedSignal(signal: AbortSignal | undefined, durationMs: number) {
-  const timeout = AbortSignal.timeout(Math.max(1, durationMs));
-  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+function runtimeWorkspaceHash(summary: Record<string, unknown>) {
+  const workspace = summary.workspace;
+  if (!workspace || typeof workspace !== "object") return undefined;
+  const hash = (workspace as Record<string, unknown>).hash;
+  return typeof hash === "string" ? hash : undefined;
+}
+
+function isReleaseTool(name: string): name is "build_preview" | "inspect_site" | "finish" {
+  return name === "build_preview" || name === "inspect_site" || name === "finish";
+}
+
+function releaseFailureFingerprint(
+  toolName: "build_preview" | "inspect_site" | "finish",
+  workspaceHash: string | undefined,
+  execution: ManagerToolExecution
+) {
+  const explicit = execution.diagnosticOutput.failureFingerprint;
+  if (typeof explicit === "string" && /^sha256:[a-f0-9]{64}$/.test(explicit)) {
+    return sha256(stableJson({ toolName, workspaceHash, failureFingerprint: explicit }));
+  }
+  return sha256(stableJson({
+    toolName,
+    workspaceHash,
+    failure: stableFailureValue(execution.diagnosticOutput)
+  }));
+}
+
+function stableFailureValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableFailureValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !/cached|duration|timestamp|startedAt|completedAt|storage|payloadRef|key$/i.test(key))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, stableFailureValue(nested)])
+  );
 }
 
 function emptyUsage(): ManagerModelUsage {
@@ -378,6 +473,10 @@ function emptyUsage(): ManagerModelUsage {
 
 function mergeUsage(target: ManagerModelUsage, value: Response["usage"], startedAt: number, modelId: string) {
   const next = usageForModel(modelId, value, Date.now() - startedAt);
+  mergeMeteredUsage(target, next, startedAt);
+}
+
+function mergeMeteredUsage(target: ManagerModelUsage, next: ManagerModelUsage, startedAt: number) {
   const hadUsage = target.inputTokens > 0 || target.outputTokens > 0;
   target.inputTokens += next.inputTokens;
   target.cachedInputTokens += next.cachedInputTokens;
@@ -387,6 +486,27 @@ function mergeUsage(target: ManagerModelUsage, value: Response["usage"], started
   target.costSource = combinedCostSource(target.costSource, next.costSource, hadUsage);
   target.upstreamInferenceCostUsd += next.upstreamInferenceCostUsd;
   target.durationMs = Date.now() - startedAt;
+}
+
+function toolMeteringFields(metering: NonNullable<ManagerToolExecution["metering"]>) {
+  return {
+    apiProvider: metering.apiProvider,
+    modelId: metering.modelId,
+    servedModelId: metering.servedModelId,
+    providerRequestId: metering.providerRequestId,
+    inputTokens: metering.usage.inputTokens,
+    cachedInputTokens: metering.usage.cachedInputTokens,
+    reasoningTokens: metering.usage.reasoningTokens,
+    outputTokens: metering.usage.outputTokens,
+    costUsd: metering.usage.costUsd,
+    costSource: metering.usage.costSource,
+    upstreamInferenceCostUsd: metering.usage.upstreamInferenceCostUsd,
+    modelDurationMs: metering.usage.durationMs
+  };
+}
+
+function toolNameForMetering(name: string | undefined) {
+  return name ?? "unknown_tool";
 }
 
 function runEvent(event: ManagerRunEvent) { return event; }
@@ -419,13 +539,24 @@ function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputIte
 
 function modelTurnPayload(history: ResponseInputItem[], response: ManagerResponse | undefined, promptIdentity: string, route: { apiProvider: SiteAgentApiProvider; modelId: string }) {
   return {
-    request: { promptIdentity, apiProvider: route.apiProvider, modelId: route.modelId, input: history, toolChoice: "required", parallelToolCalls: false, store: false, reasoningEffort: "high" },
+    request: {
+      promptIdentity,
+      apiProvider: route.apiProvider,
+      modelId: route.modelId,
+      input: history,
+      toolChoice: "required",
+      parallelToolCalls: false,
+      store: false,
+      reasoningEffort: siteAgentReasoningEffort,
+      textVerbosity: siteAgentTextVerbosity
+    },
     response: response ? { status: response.status, error: response.error, incompleteDetails: response.incomplete_details, output: response.output, outputText: response.output_text } : undefined
   };
 }
 
 function combinedCostSource(left: ManagerModelUsage["costSource"], right: ManagerModelUsage["costSource"], hadUsage: boolean): ManagerModelUsage["costSource"] {
   if (!hadUsage) return right;
+  if (left === "unavailable" || right === "unavailable") return "unavailable";
   if (left === right) return left;
   return "mixed";
 }
@@ -474,6 +605,7 @@ const managerTools: Tool[] = [
     }
   }),
   tool("build_preview", "Validate and build the current workspace. Returns compiler or policy errors directly.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
+  tool("inspect_site", "Optionally inspect the current successful build in Lodesta's browser and release verifier. Returns screenshots plus actionable blockers and advisories without requiring finalization.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
   tool("request_input", "Before the first source mutation only, pause and ask one essential owner question when proceeding would require a consequential guess.", {
     type: "object", additionalProperties: false, required: ["question"], properties: { question: { type: "string", minLength: 1, maxLength: 600 } }
   }),

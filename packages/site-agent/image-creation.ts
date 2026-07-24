@@ -4,6 +4,11 @@ import sharp from "sharp";
 export const imageCreationActions = ["generate", "edit"] as const;
 export const imageCreationPurposes = ["hero", "section", "background", "gallery", "logo", "other"] as const;
 export const imageCreationSizes = ["1536x1024", "1024x1536", "1024x1024"] as const;
+export const gptImage2Pricing = {
+  textInputUsdPerMillion: 5,
+  imageInputUsdPerMillion: 8,
+  imageOutputUsdPerMillion: 30
+} as const;
 
 export type CreateImageRequest = {
   action: (typeof imageCreationActions)[number];
@@ -20,6 +25,16 @@ export type CreateImageSource = {
   bytes: Buffer;
 };
 
+export type ImageCreationUsage = {
+  inputTokens: number;
+  textInputTokens: number;
+  imageInputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  costSource: "catalog_estimate" | "unavailable";
+  durationMs: number;
+};
+
 export async function createImageBytes(
   input: CreateImageRequest,
   sources: CreateImageSource[],
@@ -29,6 +44,7 @@ export async function createImageBytes(
   if (input.action === "edit" && (sources.length < 1 || sources.length > 4)) {
     throw new Error("Image edits require between one and four source assets.");
   }
+  const startedAt = Date.now();
   const client = options.client ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const common = {
     model: "gpt-image-2",
@@ -61,8 +77,56 @@ export async function createImageBytes(
     mimeType: "image/webp" as const,
     width: metadata.width,
     height: metadata.height,
-    sourceAssetRevisionIds: sources.map((source) => source.revisionId)
+    sourceAssetRevisionIds: sources.map((source) => source.revisionId),
+    usage: imageCreationUsage(response.usage, Date.now() - startedAt)
   };
+}
+
+export function imageCreationUsage(value: unknown, durationMs: number): ImageCreationUsage {
+  const usage = record(value);
+  const details = record(usage?.input_tokens_details);
+  const inputTokens = nonnegativeInteger(usage?.input_tokens);
+  const textInputTokens = nonnegativeInteger(details?.text_tokens);
+  const imageInputTokens = nonnegativeInteger(details?.image_tokens);
+  const outputTokens = nonnegativeInteger(usage?.output_tokens);
+  if (
+    inputTokens === undefined
+    || textInputTokens === undefined
+    || imageInputTokens === undefined
+    || outputTokens === undefined
+    || inputTokens !== textInputTokens + imageInputTokens
+  ) {
+    return {
+      inputTokens: inputTokens ?? 0,
+      textInputTokens: textInputTokens ?? 0,
+      imageInputTokens: imageInputTokens ?? 0,
+      outputTokens: outputTokens ?? 0,
+      costUsd: 0,
+      costSource: "unavailable",
+      durationMs
+    };
+  }
+  return {
+    inputTokens,
+    textInputTokens,
+    imageInputTokens,
+    outputTokens,
+    costUsd: (
+      textInputTokens * gptImage2Pricing.textInputUsdPerMillion
+      + imageInputTokens * gptImage2Pricing.imageInputUsdPerMillion
+      + outputTokens * gptImage2Pricing.imageOutputUsdPerMillion
+    ) / 1_000_000,
+    costSource: "catalog_estimate",
+    durationMs
+  };
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+function nonnegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function extensionFor(mimeType: CreateImageSource["mimeType"]) {

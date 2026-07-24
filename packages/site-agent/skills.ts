@@ -2,7 +2,7 @@ export type ManagerTaskKind = "initial_build" | "edit" | "rebase";
 
 export type ManagerTaskSkill = {
   id: "website-authoring";
-  identity: "website-authoring@sha256:9c25afc1fd2a27567e9eed1823ef0392d8b553ca7bd488f3d56bf9a2a2f4db4b";
+  identity: "website-authoring@sha256:2c10141a38d1fb2fd8339bdc09a463255caa472436f89be8b2dc0fac0673ba60";
   objective: string;
   knowledge: string[];
 };
@@ -10,6 +10,8 @@ export type ManagerTaskSkill = {
 const universalKnowledge = [
   "Honor the owner's exact requested outcome before considering optional improvements.",
   "Use only eligible facts, assets, forms, links, and capabilities from the public evidence packet.",
+  "Treat serviceBriefs as the source-backed service authority: preserve the supplied business wording, use its evidence blocks for concrete detail, and omit claims where the packet identifies an evidence gap.",
+  "Give each retained dedicated service route enough distinct, useful explanation to justify the route; do not create thin keyword variants or repeat the same generic paragraph across services.",
   "Keep claims concrete and evidence-bound; ordinary tone and marketing language do not require artificial claim declarations.",
   "Local-business sites should establish the specific business quickly, make navigation usable on small screens, and give the primary customer action a clear path without repeating it everywhere.",
   "Use business-specific facts, services, location, media, and brand constraints to make visual and content decisions; do not infer a fixed section order or layout recipe from this guidance.",
@@ -26,7 +28,7 @@ export function taskSkillFor(kind: ManagerTaskKind): ManagerTaskSkill {
       : "Apply the owner's requested website change precisely while preserving unrelated working behavior.";
   return {
     id: "website-authoring",
-    identity: "website-authoring@sha256:9c25afc1fd2a27567e9eed1823ef0392d8b553ca7bd488f3d56bf9a2a2f4db4b",
+    identity: "website-authoring@sha256:2c10141a38d1fb2fd8339bdc09a463255caa472436f89be8b2dc0fac0673ba60",
     objective,
     knowledge: [...universalKnowledge]
   };

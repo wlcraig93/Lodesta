@@ -6,7 +6,8 @@ import { platformOperationsRepository } from "@/packages/platform-operations";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { parseAnalyticsQuery } from "@/lib/analytics-query";
-import { WorkspaceMetric, WorkspacePageHeader, WorkspaceStatus, formatWorkspaceDate, humanize } from "@/components/OwnerWorkspaceUI";
+import { WorkspaceMetric, WorkspacePageHeader, WorkspaceStatus } from "@/components/OwnerWorkspaceUI";
+import { formatProductDate, humanize } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 
@@ -47,39 +48,56 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
       domainAttention: Boolean(domainAttention)
     }
   });
+  const now = domainAttention
+    ? {
+        eyebrow: "Domain connection",
+        title: `${domainAttention.hostname} needs to be re-verified`,
+        detail: "The Lodesta URL remains available. Check the DNS records to restore custom-domain routing.",
+        href: `/workspace/${slug}/settings#domain`,
+        actionLabel: "Review domain",
+        label: "Needs attention",
+        tone: "attention" as const
+      }
+    : {
+        eyebrow: "Next best action",
+        title: lifecycle.title,
+        detail: lifecycle.detail,
+        href: lifecycle.nextAction.href,
+        actionLabel: lifecycle.nextAction.label,
+        label: lifecycle.label,
+        tone: lifecycle.tone
+      };
+  const editorHref = `/workspace/${slug}/editor`;
+  const statusDetail = published
+    ? `Version ${published.number} published`
+    : candidate
+      ? `Version ${candidate.number} in review`
+      : "No version published yet";
 
   return (
     <main className="workspace-page workspace-home-page">
       <WorkspacePageHeader
-        eyebrow="Today"
+        eyebrow="Website"
         title={context.state.identity.name}
         description="Your website, customer interest, and the smallest useful next action—together in one place."
-        actions={<>{context.site.publishedVersionId ? <a className="button secondary" href={`/sites/${slug}`} target="_blank" rel="noreferrer">Open live site</a> : null}<Link className="button primary" href={`/workspace/${slug}/editor`}>Open editor</Link></>}
+        actions={<>{context.site.publishedVersionId ? <a className="button secondary" href={`/sites/${slug}`} target="_blank" rel="noreferrer">Open live site</a> : null}{now.href === editorHref ? null : <Link className="button primary" href={editorHref}>Open editor</Link>}</>}
       />
 
-      {domainAttention ? (
-        <section className="workspace-next-action is-attention" aria-label="Domain needs attention">
-          <div className="workspace-next-action-index" aria-hidden="true">!</div>
-          <div><span>Domain connection</span><h2>{domainAttention.hostname} needs to be re-verified</h2><p>The Lodesta URL remains available. Check the DNS records to restore custom-domain routing.</p></div>
-          <Link className="button primary" href={`/workspace/${slug}/settings#domain`}>Review domain</Link>
-        </section>
-      ) : null}
-
-      <section className={`workspace-next-action is-${lifecycle.tone}`} aria-labelledby="workspace-next-action-title">
-        <div className="workspace-next-action-index" aria-hidden="true">01</div>
-        <div><span>Next best action</span><h2 id="workspace-next-action-title">{lifecycle.title}</h2><p>{lifecycle.detail}</p></div>
-        <Link className="button primary" href={lifecycle.nextAction.href}>{lifecycle.nextAction.label}</Link>
+      <section className={`workspace-now is-${now.tone}`} aria-labelledby="workspace-now-title">
+        <div className="workspace-now-kicker"><span>{now.eyebrow}</span><WorkspaceStatus tone={now.tone}>{now.label}</WorkspaceStatus></div>
+        <div className="workspace-now-copy"><h2 id="workspace-now-title">{now.title}</h2><p>{now.detail}</p></div>
+        <Link className="button primary" href={now.href}>{now.actionLabel}</Link>
       </section>
 
-      <section className="workspace-metric-grid" aria-label="Site summary">
-        <WorkspaceMetric label="Website status" value={lifecycle.label} detail={lifecycle.detail} tone={lifecycle.tone === "attention" ? "attention" : lifecycle.tone === "success" ? "positive" : "default"} />
+      <section className="workspace-metric-grid workspace-metric-strip" aria-label="Site summary">
+        <WorkspaceMetric label="Website status" value={lifecycle.label} detail={statusDetail} tone={lifecycle.tone === "attention" ? "attention" : lifecycle.tone === "success" ? "positive" : "default"} />
         <WorkspaceMetric label="Needs reply" value={replyInquiries.length} detail={`${inquiries.length} total inquir${inquiries.length === 1 ? "y" : "ies"}`} tone={replyInquiries.length ? "attention" : "default"} />
-        <WorkspaceMetric label="Customer actions" value={analytics.current.customerActions} detail="Calls, forms, directions, bookings, and orders" />
+        <WorkspaceMetric label="Customer actions" value={analytics.current.customerActions} detail="Calls, forms, directions, and bookings" />
         <WorkspaceMetric label="Action rate" value={`${Math.round(analytics.current.actionRate * 100)}%`} detail={`${analytics.current.visits} visit${analytics.current.visits === 1 ? "" : "s"} in 30 days`} />
       </section>
 
       <div className="workspace-home-grid">
-        <section className="workspace-panel">
+        <section className="workspace-home-section">
           <div className="workspace-panel-heading"><div><span>Website readiness</span><h2>Publication and business details</h2></div><WorkspaceStatus tone={lifecycle.tone}>{lifecycle.label}</WorkspaceStatus></div>
           <div className="workspace-health-list">
             <HealthRow label="Publication review" value={readiness?.status === "blocked" ? `${readiness.blockers.length} requirement${readiness.blockers.length === 1 ? "" : "s"}` : candidate ? "Ready to publish" : published ? "Published" : "Building"} attention={readiness?.status === "blocked"} href={`/workspace/${slug}/editor`} />
@@ -89,10 +107,10 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
           </div>
         </section>
 
-        <section className="workspace-panel">
+        <section className="workspace-home-section">
           <div className="workspace-panel-heading"><div><span>Recent activity</span><h2>What Lodesta has done</h2></div><Link href={`/workspace/${slug}/editor`}>History</Link></div>
           <div className="workspace-activity-list">
-            {runs.slice(0, 5).map((run) => <article key={run.id}><span className={`workspace-activity-dot is-${run.status}`} /><div><strong>{humanize(run.kind)}</strong><p>{humanize(run.stage)} · {formatWorkspaceDate(run.startedAt)}</p></div><WorkspaceStatus tone={run.status === "failed" ? "danger" : run.status === "succeeded" ? "success" : "info"}>{humanize(run.status)}</WorkspaceStatus></article>)}
+            {runs.slice(0, 5).map((run) => <article key={run.id}><span className={`workspace-activity-dot is-${run.status}`} /><div><strong>{humanize(run.kind)}</strong><p>{humanize(run.stage)} · {formatProductDate(run.startedAt)}</p></div><WorkspaceStatus tone={run.status === "failed" ? "danger" : run.status === "succeeded" ? "success" : "info"}>{humanize(run.status)}</WorkspaceStatus></article>)}
             {!runs.length ? <div className="workspace-empty-state"><strong>No managed activity yet</strong><p>Your website changes and verification runs will appear here.</p></div> : null}
           </div>
         </section>

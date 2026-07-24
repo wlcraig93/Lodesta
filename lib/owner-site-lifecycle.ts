@@ -101,7 +101,7 @@ export function deriveOwnerSiteLifecycle(input: {
       `${base}/analytics`, "View analytics");
   }
   return lifecycle("building", "neutral", "Building",
-    "The first website version is being prepared.",
+    "Open the editor to follow along, or ask for a change while Lodesta works.",
     `${base}/editor`, "Open editor");
 }
 

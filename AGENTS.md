@@ -27,7 +27,7 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - The website agent gets broad freedom while authoring. Facts, security, capabilities, asset rights, and release integrity are enforced at the verification gate, release service, and trusted runtime.
 - When generation or editing fails or produces poor output, fix it by improving context, skills, prompts, tools, or the hard verification gate — never by adding orchestration between the model and its workspace.
 - Do not add planning phases, mandatory tool sequences, edit-anchor or replacement-count protocols, per-action budgets or counters, automatic critics, automatic repair continuations, or convergence checks. Reintroducing any of these requires an explicit product-owner decision recorded in a plan document.
-- The only standing run limits are the overall deadline, token budget, workspace size, and concurrency. Prefer deleting a constraint over tuning it.
+- The standing run limits are the overall deadline, metered model-cost fuse, workspace size, and concurrency. Input/output token totals are telemetry, not terminal budgets. The sole approved convergence exception is the exact deterministic release-failure guard recorded in `docs/site-authoring-runaway-guardrails-plan.md`. Prefer deleting a constraint over tuning it.
 - Subjective quality findings (design, copy, SEO/CRO heuristics) are advisory. Only safety, factual, capability, and functional violations block a candidate, and an explicit owner edit is never blocked by unrelated subjective findings.
 
 ## Stored Artifact Schema Changes

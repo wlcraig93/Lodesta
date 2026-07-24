@@ -5,9 +5,15 @@ import {
   preferBusinessNameCandidate
 } from "../lib/business-fact-normalization";
 import { canonicalOfferingCandidates } from "../packages/business-data/offering-normalization";
-import { deduplicateRetainedAssets } from "../packages/business-data/website-ingestion";
+import {
+  deduplicateRetainedAssets,
+  selectPerceptuallyDistinctRetainedAssets
+} from "../packages/business-data/website-ingestion";
 import { assetRevisionSchema } from "../packages/site-contracts";
 import { autoBodyContextModule } from "../packages/vertical-context/auto-body";
+import { plumbingContextModule } from "../packages/vertical-context/plumbing";
+import { matchVerticalContext } from "../packages/vertical-context";
+import { assessmentVerticalForDomainContext } from "../packages/website-assessment/vertical";
 
 assert.deepEqual(normalizeObservedBusinessHours([
   "Mo-Fr 11:00-21:00",
@@ -58,6 +64,52 @@ assert.deepEqual(canonicalOfferingCandidates(["Landscape Design", "Lawn Maintena
   { sourceName: "Landscape Design", name: "Landscape Design" },
   { sourceName: "Lawn Maintenance", name: "Lawn Maintenance" }
 ]);
+assert.equal(matchVerticalContext("Austin residential plumbing company and emergency plumber")?.id, "plumbing");
+assert.equal(assessmentVerticalForDomainContext("plumbing"), "home_services");
+const evidence = (blocks: number, score: number, directPageUrls: string[] = []) => ({
+  blocks: Array.from({ length: blocks }, (_, index) => ({
+    id: `block_${score}_${index}`,
+    sourceUrl: `https://plumber.example/source-${score}-${index}`,
+    evidenceClass: "first_party" as const
+  })),
+  directPageUrls,
+  score
+});
+assert.deepEqual(canonicalOfferingCandidates([
+  "Plumbing Company Near Me",
+  "Water Heater Repair Austin TX",
+  "Helpful Plumbing Tips",
+  "Drain Cleaning",
+  "Sewer Cleaning",
+  "Custom Hydrostatic Testing"
+], plumbingContextModule, {
+  evidenceFor: (name) => name === "Custom Hydrostatic Testing"
+    ? evidence(1, 100)
+    : name === "Drain Cleaning"
+      ? evidence(2, 70)
+      : name === "Sewer Cleaning"
+        ? evidence(2, 90)
+        : evidence(1, 60, name.includes("Water Heater") ? ["https://plumber.example/water-heater"] : [])
+}), [
+  {
+    sourceName: "Sewer Cleaning",
+    catalogId: "sewer_service",
+    name: "Sewer Line Service",
+    evidence: evidence(2, 90)
+  },
+  {
+    sourceName: "Drain Cleaning",
+    catalogId: "drain_cleaning",
+    name: "Drain Cleaning",
+    evidence: evidence(2, 70)
+  },
+  {
+    sourceName: "Water Heater Repair Austin TX",
+    catalogId: "water_heater",
+    name: "Water Heater Service",
+    evidence: evidence(1, 60, ["https://plumber.example/water-heater"])
+  }
+], "Generic SEO phrases survived normalization, weak custom services were retained, or evidence ranking was positional.");
 
 const repeatedAssetRevision = assetRevisionSchema.parse({
   schemaVersion: 1,
@@ -93,11 +145,43 @@ assert.equal(deduplicateRetainedAssets([
     bytes: Buffer.from("same")
   }
 ]).length, 1);
+const visuallySimilarRevision = assetRevisionSchema.parse({
+  ...repeatedAssetRevision,
+  id: "asset_revision_visually_similar",
+  assetId: "asset_source_visually_similar",
+  contentHash: `sha256:${"b".repeat(64)}`,
+  storageKey: `site-assets/business_repeated_content/${"b".repeat(64)}`,
+  provenance: {
+    ...repeatedAssetRevision.provenance,
+    sourceUrl: "https://example.com/recompressed-image.webp"
+  }
+});
+const visuallyDistinctRevision = assetRevisionSchema.parse({
+  ...repeatedAssetRevision,
+  id: "asset_revision_visually_distinct",
+  assetId: "asset_source_visually_distinct",
+  contentHash: `sha256:${"c".repeat(64)}`,
+  storageKey: `site-assets/business_repeated_content/${"c".repeat(64)}`,
+  provenance: {
+    ...repeatedAssetRevision.provenance,
+    sourceUrl: "https://example.com/distinct-image.webp"
+  }
+});
+assert.deepEqual(
+  selectPerceptuallyDistinctRetainedAssets([
+    { revision: repeatedAssetRevision, bytes: Buffer.from("primary"), perceptualHash: "0".repeat(64), sourceKind: "photo", rank: 100 },
+    { revision: visuallySimilarRevision, bytes: Buffer.from("recompressed"), perceptualHash: `${"0".repeat(63)}1`, sourceKind: "photo", rank: 90 },
+    { revision: visuallyDistinctRevision, bytes: Buffer.from("distinct"), perceptualHash: "1".repeat(64), sourceKind: "photo", rank: 80 }
+  ]).map((asset) => asset.revision.id),
+  [repeatedAssetRevision.id, visuallyDistinctRevision.id],
+  "Perceptual media deduplication kept a near-identical recompression or removed a distinct image."
+);
 
 console.log(JSON.stringify({
   ok: true,
   canonicalHours: "pass",
   crossPageBusinessIdentity: "pass",
   verticalOfferingDeduplication: "pass",
-  repeatedAssetContentDeduplication: "pass"
+  repeatedAssetContentDeduplication: "pass",
+  perceptualAssetDeduplication: "pass"
 }));

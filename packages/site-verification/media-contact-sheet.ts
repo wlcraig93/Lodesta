@@ -3,13 +3,13 @@ import type { AssetRevisionRef } from "@/packages/site-contracts";
 
 const columns = 3;
 const tileWidth = 400;
-const tileHeight = 310;
+const tileHeight = 350;
 const imageWidth = 360;
 const imageHeight = 220;
 const headerHeight = 76;
 
 export async function createMediaContactSheet(
-  assets: Array<{ asset: AssetRevisionRef; bytes: Buffer; sourcePageUrl?: string }>
+  assets: Array<{ asset: AssetRevisionRef; bytes: Buffer; sourcePageUrl?: string; sourceAssetUrl?: string }>
 ) {
   if (!assets.length) return undefined;
   const rows = Math.ceil(assets.length / columns);
@@ -34,15 +34,18 @@ export async function createMediaContactSheet(
       .png()
       .toBuffer();
     const sourceHost = sourceHostFor(item.sourcePageUrl);
+    const sourcePath = sourcePathFor(item.sourceAssetUrl);
     const label = [
       item.asset.assetId,
       `${item.asset.kind} · ${item.asset.width ?? "?"}×${item.asset.height ?? "?"} · ${item.asset.origin.replaceAll("_", " ")}`,
+      `alt: ${item.asset.alt || "(empty)"}`.slice(0, 58),
+      sourcePath ? `file: ${sourcePath}` : "",
       sourceHost ? `page: ${sourceHost}` : ""
     ].filter(Boolean);
     composites.push({ input: thumbnail, left, top });
     composites.push({
-      input: Buffer.from(svgText(imageWidth, 72, label.map((line, lineIndex) =>
-        `<text x="0" y="${18 + lineIndex * 20}" class="${lineIndex === 0 ? "id" : "meta"}">${escapeXml(line)}</text>`
+      input: Buffer.from(svgText(imageWidth, 112, label.map((line, lineIndex) =>
+        `<text x="0" y="${18 + lineIndex * 19}" class="${lineIndex === 0 ? "id" : "meta"}">${escapeXml(line)}</text>`
       ).join(""))),
       left,
       top: top + imageHeight + 8
@@ -74,6 +77,16 @@ function sourceHostFor(value: string | undefined) {
   try {
     const url = new URL(value);
     return `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`.slice(0, 46);
+  } catch {
+    return undefined;
+  }
+}
+
+function sourcePathFor(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return decodeURIComponent(url.pathname.split("/").filter(Boolean).at(-1) ?? "/").slice(0, 48);
   } catch {
     return undefined;
   }

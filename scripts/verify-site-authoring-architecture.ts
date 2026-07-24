@@ -148,6 +148,9 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^scripts\/verify-site-authoring-architecture\.ts$/
   ];
   if (boundaryFiles.some((pattern) => pattern.test(path))) return true;
+  if (path === "lib/model-catalog.ts") {
+    return ["api.openai.com/v1", "openrouter.ai/api/v1"].includes(label);
+  }
   if (path === "packages/site-platform/workflow.ts") return ["node:v8", "site-runtime-v1", "V1"].includes(label);
   if (path === "packages/site-agent/manager.ts") return label.endsWith("/v1");
   return false;

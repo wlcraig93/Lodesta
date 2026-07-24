@@ -37,8 +37,13 @@ export default function CrawlerPage() {
           <h2>What the crawler checks</h2>
           <p>
             A standard assessment fetches a bounded set of public same-site pages, renders selected pages in a
-            browser, and may verify internal destinations plus primary booking or ordering links. It does not sign
-            in, bypass access controls, purchase anything, or submit third-party forms.
+            browser, and may verify internal destinations plus primary booking or ordering links. Agent Readiness
+            adds no more than twelve same-origin requests for the homepage&apos;s Markdown representation,
+            <code> /llms.txt</code>, and relevant public <code>/.well-known/</code> discovery resources. Lodesta
+            may also capture desktop and mobile screenshots for at most three representative same-site pages and
+            submit one labeled contact sheet to a bounded AI-assisted visual review. That review does not browse
+            independently. Lodesta does not impersonate third-party AI crawlers, click page controls, invoke
+            advertised tools, sign in, bypass access controls, purchase anything, or submit third-party forms.
           </p>
         </section>
 

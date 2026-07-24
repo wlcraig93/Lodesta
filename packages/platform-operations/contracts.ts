@@ -272,6 +272,43 @@ export type ProspectReportFinding = {
   evidence: string[];
   recommendation: string;
 };
+export type ProspectReportAgentReadiness = {
+  methodologyIdentity: string;
+  coverage: {
+    value: number;
+    assessedChecks: number;
+    applicableChecks: number;
+    limitations: string[];
+  };
+  verified: Array<{
+    id: string;
+    group: string;
+    title: string;
+    evidence: string[];
+  }>;
+  findings: Array<ProspectReportFinding & {
+    authority: "cloudflare" | "lodesta";
+    countedByAuthority: boolean;
+  }>;
+  note: string;
+};
+export type ProspectReportVisualQuality = {
+  methodologyIdentity: string;
+  coverage: {
+    value: number;
+    assessedChecks: number;
+    applicableChecks: number;
+    limitations: string[];
+  };
+  strengths: Array<{
+    id: string;
+    group: string;
+    title: string;
+    evidence: string[];
+  }>;
+  findings: ProspectReportFinding[];
+  note: string;
+};
 export type BusinessStrengthSignal = {
   id: string;
   label: string;
@@ -317,6 +354,8 @@ export type ProspectPresenceReportResult = {
   };
   whatsWorking: Array<{ id: string; dimension: string; title: string; evidence: string[] }>;
   findings: ProspectReportFinding[];
+  agentReadiness?: ProspectReportAgentReadiness;
+  visualQuality?: ProspectReportVisualQuality;
   stages: ProspectReportStage[];
   gatedPlan: ProspectReportGatedPlan;
 };

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta open-awning icon concept</title>
+  <desc id="desc">A freestanding dark forest-green three-scallop awning symbol on warm paper.</desc>
+  <rect width="512" height="512" fill="#F6F7F3"/>
+  <path
+    fill="#24493A"
+    d="M96 148H416V220
+      C416 268 390 300 352 300
+      C314 300 288 268 288 220
+      C288 268 262 300 224 300
+      C186 300 160 268 160 220
+      C160 268 134 300 96 300
+      V148Z"
+  />
+</svg>

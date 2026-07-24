@@ -31,15 +31,14 @@ export type ManagerRunRequest = {
   instruction: string;
   kind: ManagerTaskKind;
   selection?: SiteElementSelection;
-  limits?: Partial<ManagerRunLimits>;
+  guardrails?: Partial<ManagerRunGuardrails>;
   signal?: AbortSignal;
   mediaSheet?: { dataUrl: string; assetCount: number };
 };
 
-export type ManagerRunLimits = {
-  maxInputTokens: number;
-  maxOutputTokens: number;
-  maxDurationMs: number;
+export type ManagerRunGuardrails = {
+  maxCostUsd: number;
+  maxConsecutiveIdenticalFailures: number;
 };
 
 export const managerCompletionSchema = z.object({
@@ -110,6 +109,13 @@ export type ManagerToolCall = {
 export type ManagerToolExecution = {
   modelOutput: string | Array<Record<string, unknown>>;
   diagnosticOutput: Record<string, unknown>;
+  metering?: {
+    apiProvider: SiteAgentApiProvider;
+    modelId: string;
+    servedModelId?: string;
+    providerRequestId?: string;
+    usage: ManagerModelUsage;
+  };
   completion?: ManagerCompletion;
   needsInput?: { question: string };
 };

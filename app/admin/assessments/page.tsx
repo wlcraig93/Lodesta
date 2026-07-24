@@ -4,6 +4,7 @@ import { requireAdminPageAccess } from "@/lib/page-access";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AssessmentScanForm } from "@/components/admin/AssessmentScanForm";
 import { platformOperationsRepository } from "@/packages/platform-operations";
+import { formatProductDate, statusTone } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
@@ -52,7 +53,7 @@ export default async function AssessmentsPage() {
           <tbody>
             {records.map((record) => (
               <tr key={record.id}>
-                <td><span className={`badge status-${record.status}`}>{record.status}</span></td>
+                <td><span className={`badge is-${statusTone(record.status)}`}>{record.status}</span></td>
                 <td>
                   <Link href={`/admin/assessments/${record.id}`}>{record.sourceUrl ?? record.artifactId ?? record.sourceKey}</Link>
                   <small>{record.targetKind.replaceAll("_", " ")} · {record.id}</small>
@@ -66,7 +67,7 @@ export default async function AssessmentsPage() {
                   <small>{record.assessment?.score ? `${record.assessment.score.value} provisional · ${record.assessment.score.verdict}` : "No eligible composite"}</small>
                 </td>
                 <td>{record.rubricIdentity}<small>{record.scannerIdentity}</small></td>
-                <td>{new Date(record.createdAt).toLocaleString()}</td>
+                <td>{formatProductDate(record.createdAt)}</td>
               </tr>
             ))}
           </tbody>

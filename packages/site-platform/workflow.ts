@@ -17,7 +17,9 @@ import {
   createImageBytes,
   createAuthoringContextPacket,
   isSiteAuthoringTerminalError,
-  managerLimitsForKind,
+  managerGuardrailsAfterPriorUsage,
+  siteAgentRunGuardrailDefaults,
+  siteAgentRunGuardrailsForKind,
   ManagerNeedsInputError,
   SiteAuthoringTerminalError,
   WebsiteManagerAgent,
@@ -69,6 +71,7 @@ import {
   siteVerificationPolicyIdentity
 } from "@/packages/site-contracts/platform-manifest";
 import {
+  BrowserVerificationUnavailableError,
   finalizePreparedArtifact,
   createArtifactContactSheet,
   createMediaContactSheet,
@@ -83,6 +86,7 @@ import {
   platformOperationsRepository,
   type PlatformOperationsRepository
 } from "@/packages/platform-operations";
+import { enqueuePublishedSiteAssessment } from "@/packages/website-assessment/service";
 import {
   WorkspaceManagerRuntime,
   type RuntimeInspection,
@@ -92,6 +96,7 @@ import { deriveSitePublicationReadiness } from "./publication-readiness";
 import { SiteAgentEventRecorder } from "./run-events";
 import { normalizeBootstrapSourceUrl } from "./source-url";
 import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
+import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import {
   authoringExecutionBundleSchema,
   authoringOutboxEventSchema,
@@ -104,8 +109,8 @@ const runtimeSeriesId = "site-runtime-v1";
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 const idleLeaseMs = 10 * 60_000;
 const rotationMs = 2 * 60 * 60_000;
-export const initialGenerationDeadlineMs = 60 * 60_000;
-export const siteEditDeadlineMs = 25 * 60_000;
+export const initialGenerationDeadlineMs = siteAgentRunGuardrailDefaults.initial_build.deadlineMs;
+export const siteEditDeadlineMs = siteAgentRunGuardrailDefaults.edit.deadlineMs;
 
 export class SiteAuthoringWorkflow {
   constructor(
@@ -182,7 +187,7 @@ export class SiteAuthoringWorkflow {
     let run = await this.enqueueRun({
       session,
       kind: "initial_build",
-      instruction: "Create the complete initial customer website from the canonical public business input.",
+      instruction: websiteSetupOwnerInstruction(input.url),
       requestedBy: input.ownerId,
       workflowStartedAt
     });
@@ -313,7 +318,6 @@ export class SiteAuthoringWorkflow {
         domainContext: buildInput.domainContext?.version ?? "none",
         [taskSkillFor("initial_build").id]: taskSkillFor("initial_build").identity
       },
-      limits: managerLimitsForKind("initial_build"),
       usage: {
         kind: "external_unavailable",
         modelUsage: "unavailable",
@@ -601,6 +605,7 @@ export class SiteAuthoringWorkflow {
             findingCount: finalized.artifact.qa.findings.length,
             errorCount: errors.length,
             warningCount: warnings.length,
+            findings: finalized.artifact.qa.findings,
             screenshotKeys: finalized.artifact.qa.screenshotKeys
           },
           images: finalized.contactSheet ? [{
@@ -849,7 +854,7 @@ export class SiteAuthoringWorkflow {
       const updated = await this.updateRun(coalesced, {
         publicBuildInputId: buildInput.id,
         kind,
-        limits: managerLimitsForKind(kind),
+        guardrails: siteAgentRunGuardrailsForKind(kind, coalesced.startedAt),
         exactParentRevisionId: current.currentWorkspaceRevisionId,
         deferredUntilRunId: runningRun?.id ?? coalesced.deferredUntilRunId,
         publishAfterSuccess: coalesced.publishAfterSuccess && Boolean(input.publishAfterSuccess) && kind === "rebase",
@@ -866,6 +871,7 @@ export class SiteAuthoringWorkflow {
       });
       return updated;
     }
+    const startedAt = input.workflowStartedAt ?? now;
     const run = siteAgentRunSchema.parse({
       schemaVersion: "site-agent-run",
       id: id("run"),
@@ -889,9 +895,9 @@ export class SiteAuthoringWorkflow {
         domainContext: buildInput.domainContext?.version ?? "none",
         [taskSkill.id]: taskSkill.identity
       },
-      limits: managerLimitsForKind(input.kind),
+      guardrails: siteAgentRunGuardrailsForKind(input.kind, startedAt),
       usage: { kind: "model_reported", inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 },
-      startedAt: input.workflowStartedAt ?? now
+      startedAt
     });
     await this.repository.enqueueAgentRun(run);
     await this.repository.appendAgentMessage({
@@ -937,7 +943,8 @@ export class SiteAuthoringWorkflow {
     const claimed = await this.repository.claimAgentRun(runId);
     if (!claimed) return this.requireRun(runId);
     let run: SiteAgentRun = claimed;
-    const deadlineAt = Date.parse(run.startedAt) + (run.kind === "initial_build" ? initialGenerationDeadlineMs : siteEditDeadlineMs);
+    if (!run.guardrails) throw new Error("responses_run_guardrails_required");
+    const deadlineAt = Date.parse(run.guardrails.deadlineAt);
     const remainingMs = deadlineAt - Date.now();
     try {
       if (remainingMs <= 0) throw new Error("workflow_deadline_exhausted");
@@ -1146,6 +1153,7 @@ export class SiteAuthoringWorkflow {
       inputQuestion: undefined,
       inputExpiresAt: undefined,
       startedAt: now,
+      guardrails: siteAgentRunGuardrailsForKind(waiting.kind, now),
       heartbeatAt: undefined
     });
   }
@@ -1266,7 +1274,25 @@ export class SiteAuthoringWorkflow {
     });
     if (readiness.status !== "ready") throw new Error(`publication_blocked:${readiness.blockers.map((blocker) => blocker.code).join(",")}`);
     await this.repository.promoteSiteVersion(versionId, actorId);
-    return this.repository.getSiteVersion(versionId);
+    const version = await this.repository.getSiteVersion(versionId);
+    if (version) {
+      try {
+        const site = await this.repository.getSite(version.siteId);
+        if (site) await enqueuePublishedSiteAssessment({
+          site,
+          version,
+          repository: this.operationsRepository
+        });
+      } catch (error) {
+        console.warn(JSON.stringify({
+          event: "published_site_assessment_schedule_failed",
+          siteId: version.siteId,
+          versionId: version.id,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      }
+    }
+    return version;
   }
 
   async restoreVersion(versionId: string, actorId: string) {
@@ -1348,21 +1374,8 @@ export class SiteAuthoringWorkflow {
     const fastPreviewPath = `/api/site-agent/sessions/${input.session.id}/preview`;
     if (run.usage.kind !== "model_reported") throw new Error("responses_run_usage_required");
     const baseUsage = { ...run.usage };
-    const configuredLimits = run.limits ?? managerLimitsForKind(input.kind);
-    if (baseUsage.inputTokens >= configuredLimits.maxInputTokens) {
-      throw new SiteAuthoringTerminalError("input_budget_exhausted", "budget", false, "research_exhausted_initial_input_budget");
-    }
-    if (baseUsage.outputTokens >= configuredLimits.maxOutputTokens) {
-      throw new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, "research_exhausted_initial_output_budget");
-    }
-    if (baseUsage.durationMs >= configuredLimits.maxDurationMs) {
-      throw new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "research_exhausted_initial_model_deadline");
-    }
-    const remainingLimits = {
-      maxInputTokens: configuredLimits.maxInputTokens - baseUsage.inputTokens,
-      maxOutputTokens: configuredLimits.maxOutputTokens - baseUsage.outputTokens,
-      maxDurationMs: configuredLimits.maxDurationMs - baseUsage.durationMs
-    };
+    if (!run.guardrails) throw new Error("responses_run_guardrails_required");
+    const remainingGuardrails = managerGuardrailsAfterPriorUsage(run.guardrails, baseUsage);
     let activeSession = input.session;
     let activeSandboxRevision = input.sandboxRevision;
     let sandboxPublicBuildInputId = activeSession.sandboxId && activeSandboxRevision !== "deferred"
@@ -1458,7 +1471,23 @@ export class SiteAuthoringWorkflow {
             width: created.width,
             height: created.height,
             contentHash,
-            publicBuildInputId: effectiveBuildInput.id
+            publicBuildInputId: effectiveBuildInput.id,
+            usage: created.usage
+          },
+          metering: {
+            apiProvider: "openai",
+            modelId: "gpt-image-2",
+            servedModelId: "gpt-image-2",
+            usage: {
+              inputTokens: created.usage.inputTokens,
+              cachedInputTokens: 0,
+              reasoningTokens: 0,
+              outputTokens: created.usage.outputTokens,
+              costUsd: created.usage.costUsd,
+              costSource: created.usage.costSource,
+              upstreamInferenceCostUsd: 0,
+              durationMs: created.usage.durationMs
+            }
           }
         };
       },
@@ -1586,6 +1615,7 @@ export class SiteAuthoringWorkflow {
             findingCount: finalized.artifact.qa.findings.length,
             errorCount: errors.length,
             warningCount: warnings.length,
+            findings: finalized.artifact.qa.findings,
             routeSimilarity: finalized.qualityMetrics.routeSimilarity,
             screenshotKeys: finalized.artifact.qa.screenshotKeys
           },
@@ -1600,7 +1630,10 @@ export class SiteAuthoringWorkflow {
       runId: run.id,
       instruction: input.instruction,
       kind: input.kind,
-      limits: remainingLimits,
+      guardrails: {
+        maxCostUsd: remainingGuardrails.maxCostUsd,
+        maxConsecutiveIdenticalFailures: remainingGuardrails.maxConsecutiveIdenticalFailures
+      },
       selection: input.selection,
       signal: input.signal,
       mediaSheet: mediaSheet
@@ -2221,7 +2254,10 @@ export class SiteAuthoringWorkflow {
       const sourcePageUrl = revision?.provenance.origin === "source_website"
         ? revision.provenance.sourcePageUrl
         : undefined;
-      return { asset, bytes: blob.bytes, sourcePageUrl };
+      const sourceAssetUrl = revision?.provenance.origin === "source_website"
+        ? revision.provenance.sourceUrl
+        : undefined;
+      return { asset, bytes: blob.bytes, sourcePageUrl, sourceAssetUrl };
     }));
     return createMediaContactSheet(retained.filter((item): item is NonNullable<typeof item> => Boolean(item)));
   }
@@ -2381,6 +2417,7 @@ function combinedRunCostSource(
   const nextHasUsage = next.inputTokens > 0 || next.outputTokens > 0;
   if (!baseHasUsage) return next.costSource;
   if (!nextHasUsage) return base.costSource;
+  if (base.costSource === "unavailable" || next.costSource === "unavailable") return "unavailable";
   return base.costSource === next.costSource ? base.costSource : "mixed";
 }
 
@@ -2468,6 +2505,15 @@ function isRepairableSandboxBuildError(error: unknown) {
 
 function platformTerminalError(error: unknown): SiteAuthoringTerminalError {
   if (isSiteAuthoringTerminalError(error)) return error;
+  if (error instanceof BrowserVerificationUnavailableError) {
+    return new SiteAuthoringTerminalError(
+      "browser_verification_unavailable",
+      "platform",
+      true,
+      error.message,
+      { cause: error }
+    );
+  }
   if (error instanceof SiteSandboxArtifactContractError) {
     return new SiteAuthoringTerminalError(
       "artifact_contract_invalid",

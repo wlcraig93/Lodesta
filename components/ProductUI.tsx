@@ -1,6 +1,14 @@
-import type { ReactNode } from "react";
+import type { ReactNode, SelectHTMLAttributes } from "react";
 
 export type ProductStatusTone = "neutral" | "attention" | "success" | "danger" | "info";
+
+export function ProductSelect({
+  compact,
+  className,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement> & { compact?: boolean }) {
+  return <select className={`product-select${compact ? " is-compact" : ""}${className ? ` ${className}` : ""}`} {...props} />;
+}
 
 export function ProductStatusBadge({ children, tone = "neutral" }: { children: ReactNode; tone?: ProductStatusTone }) {
   return <strong className={`product-status is-${tone}`} data-tone={tone}>{children}</strong>;

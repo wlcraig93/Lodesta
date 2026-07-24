@@ -1,5 +1,10 @@
 import React, { createContext, useContext, type ReactNode } from "react";
-import { formatPhoneForDisplay, orderedLocationHours } from "./presentation";
+import {
+  formatLocalAddress,
+  formatPhoneForDisplay,
+  orderedLocationHours,
+  summarizedLocationHours
+} from "./presentation";
 
 type PublicInput = {
   siteId: string;
@@ -9,7 +14,7 @@ type PublicInput = {
     identityStatus: "verified" | "provisional";
     assets: Array<{ assetId: string; alt: string }>;
     links: Array<{ id: string; url: string }>;
-    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; hours?: Record<string, string>; sourceFactIds?: string[] }>;
+    locations: Array<{ id: string; label: string; street?: string; city?: string; region?: string; postalCode?: string; country?: string; hours?: Record<string, string>; sourceFactIds?: string[] }>;
   };
   forms: Array<{ id: string; fields: Array<{ id: string; label: string; type: string; required: boolean; options?: string[] }>; submitLabel: string; successMessage: string }>;
 };
@@ -39,10 +44,77 @@ export function BusinessName({ as: Tag = "span", className }: { as?: keyof React
   >{input.business.name}</Tag>;
 }
 
-export function Asset({ id, className, alt }: { id: string; className?: string; alt?: string }) {
+export function Asset({
+  id,
+  className,
+  alt,
+  loading = "lazy",
+  fetchPriority
+}: {
+  id: string;
+  className?: string;
+  alt?: string;
+  loading?: "eager" | "lazy";
+  fetchPriority?: "high" | "low" | "auto";
+}) {
   const asset = useInput().business.assets.find((item) => item.assetId === id);
   if (!asset) throw new Error(`Unknown eligible asset ${id}.`);
-  return <img className={className} src={`asset://${id}`} alt={alt ?? asset.alt} />;
+  return <img className={className} src={`asset://${id}`} alt={alt ?? asset.alt} loading={loading} fetchPriority={fetchPriority} />;
+}
+
+export function BusinessHours({
+  locationId,
+  variant = "summary",
+  className
+}: {
+  locationId: string;
+  variant?: "summary" | "weekly";
+  className?: string;
+}) {
+  const input = useInput();
+  const location = input.business.locations.find((item) => item.id === locationId);
+  if (!location) throw new Error(`Unknown location ${locationId}.`);
+  const fact = input.publicFacts.find((item) => item.kind === "hours" && location.sourceFactIds?.includes(item.id));
+  const hours = orderedLocationHours(location.hours);
+  if (!fact || !hours.length) return null;
+  if (variant === "summary") {
+    return <span
+      className={className}
+      data-lodesta-business-hours=""
+      data-lodesta-hours-variant="summary"
+      data-lodesta-fact-id={fact.id}
+    >{summarizedLocationHours(location.hours)}</span>;
+  }
+  return <dl
+    className={className}
+    data-lodesta-business-hours=""
+    data-lodesta-hours-variant="weekly"
+    data-lodesta-fact-id={fact.id}
+  >{hours.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>;
+}
+
+export function BusinessAddress({
+  locationId,
+  variant = "local",
+  as: Tag = "address",
+  className
+}: {
+  locationId: string;
+  variant?: "local";
+  as?: "address" | "p" | "span";
+  className?: string;
+}) {
+  const input = useInput();
+  const location = input.business.locations.find((item) => item.id === locationId);
+  if (!location) throw new Error(`Unknown location ${locationId}.`);
+  const fact = input.publicFacts.find((item) => item.kind === "address" && location.sourceFactIds?.includes(item.id));
+  if (!fact) return null;
+  return <Tag
+    className={className}
+    data-lodesta-business-address=""
+    data-lodesta-address-variant={variant}
+    data-lodesta-fact-id={fact.id}
+  >{formatLocalAddress(location)}</Tag>;
 }
 
 type ManagedFormDefinition = PublicInput["forms"][number];
@@ -123,12 +195,11 @@ export function ManagedMap({ locationId, className }: { locationId: string; clas
   const href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   const addressFact = input.publicFacts.find((fact) => fact.kind === "address" && location.sourceFactIds?.includes(fact.id));
   const hoursFact = input.publicFacts.find((fact) => fact.kind === "hours" && location.sourceFactIds?.includes(fact.id));
-  const hours = orderedLocationHours(location.hours);
   return <section className={className} data-lodesta-map={locationId}>
     <div data-lodesta-map-surface aria-label={`Location details for ${location.label}`}>
       <div data-lodesta-location-heading><span data-lodesta-location-verified>Verified location</span><strong data-lodesta-location-name>{location.label}</strong></div>
-      {addressFact ? <address data-lodesta-location-address data-lodesta-fact-id={addressFact.id}>{displayValue(addressFact.value)}</address> : null}
-      {hours.length ? <dl data-lodesta-location-hours {...(hoursFact ? { "data-lodesta-fact-id": hoursFact.id } : {})}>{hours.map((item) => <div key={item.key}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl> : null}
+      {addressFact ? <div data-lodesta-location-address><BusinessAddress locationId={locationId} /></div> : null}
+      {hoursFact ? <div data-lodesta-location-hours><BusinessHours locationId={locationId} variant="weekly" /></div> : null}
     </div>
     <a href={href} target="_blank" rel="noopener noreferrer" data-lodesta-map-fallback>Get directions</a>
   </section>;

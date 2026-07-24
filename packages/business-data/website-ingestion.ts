@@ -26,7 +26,11 @@ import { matchVerticalContext } from "@/packages/vertical-context";
 import { WebsiteCrawlError } from "./crawl-errors";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
-import { canonicalOfferingCandidates, type CanonicalOfferingCandidate } from "./offering-normalization";
+import {
+  canonicalOfferingCandidates,
+  type CanonicalOfferingCandidate,
+  type OfferingEvidence
+} from "./offering-normalization";
 import { researchBusiness, type WebResearchUsage } from "./web-research";
 
 export type RetainedAssetBinary = {
@@ -117,12 +121,12 @@ export async function ingestWebsite(input: {
     value: unknown,
     confidence = 0.78,
     publicEligible = true,
-    evidence?: { sourceBlockId: string; sourceUrl: string; evidenceClass: EvidenceClass }
+    evidence?: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass }
   ) => {
     if (value === undefined || value === null || value === "") return undefined;
     const text = displayValue(value);
     const id = `fact_${kind}_${sha256(text).slice(7, 19)}`;
-    const block = evidence
+    const block = evidence?.sourceBlockId
       ? blockIndex.find((candidate) => candidate.id === evidence.sourceBlockId && candidate.sourceUrl === evidence.sourceUrl)
       : supportingBlock(blockIndex, text);
     const evidenceClass: EvidenceClass = evidence?.evidenceClass ?? (block ? evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" : "first_party");
@@ -135,7 +139,13 @@ export async function ingestWebsite(input: {
       source: {
         factId: id,
         sourceSnapshotId,
-        ...(block ? { sourceBlockId: block.id, sourceUrl: block.sourceUrl } : publicEligible ? { sourceUrl } : {}),
+        ...(block
+          ? { sourceBlockId: block.id, sourceUrl: block.sourceUrl }
+          : evidence
+            ? { sourceUrl: evidence.sourceUrl }
+            : publicEligible
+              ? { sourceUrl }
+              : {}),
         evidenceClass,
         observedAt: now,
         confidence,
@@ -163,14 +173,23 @@ export async function ingestWebsite(input: {
     sameValue(facts.hours, crawl.extractedFacts.hours)
   );
 
-  const serviceNames = unique(facts.services).filter((service) => serviceIsSourceBacked(service, crawl)).slice(0, 24);
-  const offerings = canonicalOfferingCandidates(serviceNames, domainContext)
+  const emergencyService = domainContext?.id === "plumbing" && supportsEmergencyPlumbing(crawl, facts.hours)
+    ? "Emergency Plumbing"
+    : undefined;
+  const serviceNames = unique([
+    ...facts.services,
+    ...(emergencyService ? [emergencyService] : [])
+  ]).filter((service) => service === emergencyService || serviceIsSourceBacked(service, crawl)).slice(0, 48);
+  const offerings = canonicalOfferingCandidates(serviceNames, domainContext, {
+    evidenceFor: (service) => offeringEvidenceFor(service, crawl, generationIngestion),
+    scoreBoostFor: (service) => service.catalogId === "emergency_plumbing" && emergencyService ? 40 : 0
+  })
     .slice(0, 24)
     .map((service, index) => offeringFromService(service, index, addFact));
   const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
-  const crawlServiceAreas = unique(crawl.extractedFacts.serviceAreas);
-  const serviceAreas = crawlServiceAreas.slice(0, 50).map((label, index) => {
-    const factId = addFact("service_area", "Service area", label, 0.7)!;
+  const crawlServiceAreas = verifiedServiceAreas(crawl, generationIngestion);
+  const serviceAreas = crawlServiceAreas.slice(0, 50).map(({ label, evidence }, index) => {
+    const factId = addFact("service_area", "Service area", label, 0.78, true, evidence)!;
     return { id: `service_area_${index + 1}`, label, sourceFactIds: [factId] };
   });
   void eligibleAddress;
@@ -190,8 +209,8 @@ export async function ingestWebsite(input: {
     storageKey: revision.storageKey,
     mimeType: revision.mimeType,
     alt: revision.provenance.origin === "source_website"
-      ? revision.provenance.alt ?? `${name} source photograph`
-      : `${name} source photograph`,
+      ? revision.provenance.alt ?? ""
+      : "",
     width: revision.width,
     height: revision.height,
     origin: "source_website",
@@ -211,7 +230,7 @@ export async function ingestWebsite(input: {
     city: clean(facts.address?.city),
     region: clean(facts.address?.region),
     postalCode: clean(facts.address?.postalCode),
-    country: clean(facts.address?.country)?.slice(0, 2).toUpperCase() || "US",
+    country: normalizeCountryCode(facts.address?.country),
     latitude: facts.geo?.latitude,
     longitude: facts.geo?.longitude,
     hours: facts.hours,
@@ -329,8 +348,12 @@ async function retainReferenceAssets(input: {
   now: string;
   signal?: AbortSignal;
 }) {
-  const candidates = uniqueBy(input.crawl.assetReferences, (asset) => asset.url);
-  const results: RetainedAssetBinary[] = [];
+  const candidates = uniqueBy(rankSourceAssetCandidates(input.crawl.assetReferences), (asset) => asset.url);
+  const results: Array<RetainedAssetBinary & {
+    perceptualHash: string;
+    sourceKind: "photo" | "logo" | "icon";
+    rank: number;
+  }> = [];
   for (const [index, candidate] of candidates.entries()) {
     try {
       const url = await assertPublicFetchUrl(candidate.url);
@@ -343,6 +366,7 @@ async function retainReferenceAssets(input: {
       const metadata = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false }).metadata();
       const mimeType = decodedImageMime(metadata.format);
       if (!mimeType || !metadata.width || !metadata.height) continue;
+      const perceptualHash = await imageDifferenceHash(bytes);
       const contentHash = sha256(bytes);
       const scopedAssetHash = sha256(stableJson({ businessId: input.businessId, contentHash }));
       const assetId = `asset_source_${index + 1}_${scopedAssetHash.slice(7, 17)}`;
@@ -363,16 +387,40 @@ async function retainReferenceAssets(input: {
           sourceUrl: url,
           sourcePageUrl: candidate.sourcePageUrl,
           sourceSnapshotId: input.sourceSnapshotId,
-          alt: candidate.alt ?? "Source business image"
+          ...(candidate.alt ? { alt: candidate.alt } : {})
         },
         createdAt: input.now
       });
-      results.push({ revision, bytes });
+      results.push({
+        revision,
+        bytes,
+        perceptualHash,
+        sourceKind: candidate.kind === "image" ? "photo" : candidate.kind,
+        rank: sourceAssetRank(candidate, metadata.width, metadata.height)
+      });
     } catch {
       // Individual media failures do not invalidate otherwise usable business evidence.
     }
   }
-  return deduplicateRetainedAssets(results);
+  return selectPerceptuallyDistinctRetainedAssets(results);
+}
+
+export function selectPerceptuallyDistinctRetainedAssets(candidates: Array<RetainedAssetBinary & {
+  perceptualHash: string;
+  sourceKind: "photo" | "logo" | "icon";
+  rank: number;
+}>) {
+  const ranked = [...candidates].sort((left, right) => right.rank - left.rank || left.revision.id.localeCompare(right.revision.id));
+  const selected: RetainedAssetBinary[] = [];
+  const retainedHashes: Array<{ kind: string; hash: string }> = [];
+  for (const candidate of ranked) {
+    if (selected.some((asset) => asset.revision.contentHash === candidate.revision.contentHash)) continue;
+    if (retainedHashes.some((retained) => retained.kind === candidate.sourceKind && hammingDistance(retained.hash, candidate.perceptualHash) <= 6)) continue;
+    selected.push({ revision: candidate.revision, bytes: candidate.bytes });
+    retainedHashes.push({ kind: candidate.sourceKind, hash: candidate.perceptualHash });
+    if (selected.length >= 24) break;
+  }
+  return deduplicateRetainedAssets(selected);
 }
 
 export function deduplicateRetainedAssets(assets: RetainedAssetBinary[]) {
@@ -391,6 +439,68 @@ export function deduplicateRetainedAssets(assets: RetainedAssetBinary[]) {
     }
   }
   return [...retained.values()];
+}
+
+function rankSourceAssetCandidates<T extends {
+  url: string;
+  alt?: string;
+  kind: "photo" | "image" | "logo" | "icon";
+  sourcePageUrl: string;
+}>(candidates: T[]) {
+  return [...candidates].sort((left, right) =>
+    sourceAssetCandidateRank(right) - sourceAssetCandidateRank(left)
+    || left.url.localeCompare(right.url));
+}
+
+function sourceAssetCandidateRank(candidate: {
+  alt?: string;
+  kind: "photo" | "image" | "logo" | "icon";
+  sourcePageUrl: string;
+}) {
+  return (candidate.kind === "logo" ? 500 : candidate.kind === "photo" || candidate.kind === "image" ? 350 : 100)
+    + (usefulSourceAlt(candidate.alt) ? 60 : 0)
+    + (new URL(candidate.sourcePageUrl).pathname === "/" ? 30 : 0);
+}
+
+function sourceAssetRank(
+  candidate: { alt?: string; kind: "photo" | "image" | "logo" | "icon"; sourcePageUrl: string },
+  width: number,
+  height: number
+) {
+  const areaScore = Math.min(300, Math.round((width * height) / 10_000));
+  const tooSmall = width < 240 || height < 160 ? -250 : 0;
+  return sourceAssetCandidateRank(candidate) + areaScore + tooSmall;
+}
+
+function usefulSourceAlt(value: string | undefined) {
+  const alt = value?.replace(/\s+/g, " ").trim() ?? "";
+  return alt.length >= 8
+    && alt.length <= 180
+    && !/\.(?:jpe?g|png|webp|gif|svg)\b|https?:\/\/|(?:^|[\s_-])(?:img|image|photo|dsc|screenshot)[\s_-]*\d*/i.test(alt);
+}
+
+async function imageDifferenceHash(bytes: Buffer) {
+  const { data } = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false })
+    .resize(9, 8, { fit: "fill" })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let bits = "";
+  for (let row = 0; row < 8; row += 1) {
+    for (let column = 0; column < 8; column += 1) {
+      bits += data[row * 9 + column] > data[row * 9 + column + 1] ? "1" : "0";
+    }
+  }
+  return bits;
+}
+
+function hammingDistance(left: string, right: string) {
+  if (left.length !== right.length) return Number.POSITIVE_INFINITY;
+  let distance = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) distance += 1;
+  }
+  return distance;
 }
 
 export function sourceSnapshotIdForBusiness(businessId: string, contentHash: string) {
@@ -434,9 +544,26 @@ function serviceIsSourceBacked(service: string, crawl: CrawlAssessment) {
 function offeringFromService(
   service: CanonicalOfferingCandidate,
   index: number,
-  addFact: (kind: BusinessFact["kind"], label: string, value: unknown, confidence?: number) => string | undefined
+  addFact: (
+    kind: BusinessFact["kind"],
+    label: string,
+    value: unknown,
+    confidence?: number,
+    publicEligible?: boolean,
+    evidence?: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass }
+  ) => string | undefined
 ): BusinessOffering {
-  const factId = addFact("offering", "Service", service.sourceName, 0.72)!;
+  const primaryEvidence = service.evidence?.blocks.find((block) => block.evidenceClass === "first_party")
+    ?? service.evidence?.blocks[0];
+  const directPageUrl = service.evidence?.directPageUrls[0];
+  const factId = addFact(
+    "offering",
+    "Service",
+    service.sourceName,
+    0.82,
+    true,
+    primaryEvidence ?? (directPageUrl ? { sourceUrl: directPageUrl, evidenceClass: "first_party" } : undefined)
+  )!;
   return {
     id: `offering_${index + 1}_${safeSlug(service.name).slice(0, 60)}`,
     ...(service.catalogId ? { catalogId: service.catalogId } : { customName: service.name }),
@@ -448,6 +575,113 @@ function offeringFromService(
     sourceFactIds: [factId]
   };
 }
+
+function offeringEvidenceFor(
+  service: string,
+  crawl: CrawlAssessment,
+  ingestion: WebsiteGenerationIngestion
+): OfferingEvidence {
+  const normalized = normalizedText(service);
+  const meaningfulTokens = normalized.split(" ").filter((token) => token.length >= 3 && !offeringStopWords.has(token));
+  const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
+    [page.url, page.evidenceClass] as const,
+    [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
+  ]));
+  const blocks = crawl.pageSummaries.flatMap((page) => page.sourceTextBlocks.flatMap((block) => {
+    const text = normalizedText(block.displayText);
+    const exactPhrase = normalized.length >= 3 && text.includes(normalized);
+    const emergencyAlias = normalized === "emergency plumbing"
+      && /\bemergency (?:plumb(?:er|ing)|service)|24[ -]?hour plumber\b/i.test(block.displayText);
+    const tokenCoverage = meaningfulTokens.length
+      ? meaningfulTokens.filter((token) => text.includes(token)).length / meaningfulTokens.length
+      : 0;
+    if (!exactPhrase && !emergencyAlias && tokenCoverage < 0.8) return [];
+    return [{
+      id: block.id,
+      sourceUrl: block.sourceUrl,
+      evidenceClass: evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" as EvidenceClass
+    }];
+  }));
+  const directPageUrls = crawl.pageSummaries.flatMap((page) => {
+    const pageSignal = normalizedText(`${page.title ?? ""} ${new URL(page.url).pathname}`);
+    const exactPhrase = pageSignal.includes(normalized);
+    const tokenCoverage = meaningfulTokens.length
+      ? meaningfulTokens.filter((token) => pageSignal.includes(token)).length / meaningfulTokens.length
+      : 0;
+    return (exactPhrase || tokenCoverage >= 0.8) && page.purposeTags.some((tag) => tag === "services" || tag === "service_detail")
+      ? [page.url]
+      : [];
+  });
+  const uniqueBlocks = uniqueBy(blocks, (block) => block.id);
+  const uniquePages = unique(directPageUrls);
+  const firstPartyBlocks = uniqueBlocks.filter((block) => block.evidenceClass === "first_party");
+  return {
+    blocks: uniqueBlocks,
+    directPageUrls: uniquePages,
+    score: uniquePages.length * 24
+      + new Set(firstPartyBlocks.map((block) => block.sourceUrl)).size * 12
+      + Math.min(firstPartyBlocks.length, 6) * 6
+  };
+}
+
+function supportsEmergencyPlumbing(crawl: CrawlAssessment, hours: ExtractedBusinessFacts["hours"]) {
+  const sourceText = crawl.pageSummaries
+    .flatMap((page) => page.sourceTextBlocks.map((block) => block.displayText))
+    .join("\n");
+  const emergency = /\bemergency (?:plumb(?:er|ing)|service)|24[ -]?hour plumber\b/i.test(sourceText);
+  const continuous = /\b24\s*\/\s*7\b|\b24[ -]?hours?(?: a day)?\b/i.test(sourceText)
+    || Boolean(hours && Object.keys(hours).length && Object.values(hours).every((value) => /\b(?:open )?24 hours?\b/i.test(value)));
+  return emergency && continuous;
+}
+
+function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
+  const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
+    [page.url, page.evidenceClass] as const,
+    [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
+  ]));
+  const candidates = new Map<string, {
+    label: string;
+    evidence: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass };
+    pageUrls: Set<string>;
+  }>();
+  for (const page of crawl.pageSummaries) {
+    for (const rawLabel of page.extractedFacts.serviceAreas) {
+      const label = clean(rawLabel);
+      if (!label || !plausibleServiceArea(label)) continue;
+      const identity = normalizedText(label);
+      const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(identity));
+      const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
+      if (evidenceClass !== "first_party") continue;
+      const existing = candidates.get(identity);
+      if (existing) {
+        existing.pageUrls.add(page.url);
+        continue;
+      }
+      candidates.set(identity, {
+        label,
+        evidence: {
+          ...(supporting ? { sourceBlockId: supporting.id, sourceUrl: supporting.sourceUrl } : { sourceUrl: page.url }),
+          evidenceClass
+        },
+        pageUrls: new Set([page.url])
+      });
+    }
+  }
+  return [...candidates.values()]
+    .sort((left, right) => right.pageUrls.size - left.pageUrls.size || left.label.localeCompare(right.label))
+    .map(({ label, evidence }) => ({ label, evidence }));
+}
+
+function plausibleServiceArea(value: string) {
+  const normalized = normalizedText(value);
+  return normalized.length >= 2
+    && normalized.length <= 100
+    && !/^(?:united states|usa|nationwide|everywhere|local area|surrounding areas?)$/.test(normalized);
+}
+
+const offeringStopWords = new Set([
+  "and", "the", "for", "with", "near", "company", "services", "service", "austin", "texas"
+]);
 
 function observedProof(
   crawl: CrawlAssessment,
@@ -553,6 +787,15 @@ function combinedSignal(signal: AbortSignal | undefined, timeoutMs: number) {
 
 function clean(value: unknown) {
   return typeof value === "string" && value.trim() ? value.replace(/\s+/g, " ").trim() : undefined;
+}
+
+function normalizeCountryCode(value: unknown) {
+  const normalized = clean(value)?.toUpperCase().replace(/[^A-Z]+/g, " ");
+  if (!normalized || ["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"].includes(normalized)) return "US";
+  if (["CA", "CANADA"].includes(normalized)) return "CA";
+  if (["MX", "MEXICO"].includes(normalized)) return "MX";
+  if (/^[A-Z]{2}$/.test(normalized)) return normalized;
+  throw new Error(`Unsupported country value ${JSON.stringify(value)}.`);
 }
 
 function safeHttpUrl(value: string) {

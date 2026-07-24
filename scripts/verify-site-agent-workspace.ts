@@ -1,9 +1,13 @@
 import { access, readFile } from "node:fs/promises";
 
 const component = await readFile("components/SiteAgentWorkspace.tsx", "utf8");
+const frame = await readFile("components/WebsiteWorkspaceFrame.tsx", "utf8");
+const setupWorkspace = await readFile("components/WebsiteSetupWorkspace.tsx", "utf8");
+const ownerRunView = await readFile("packages/site-platform/owner-run-view.ts", "utf8");
+const sessionRoute = await readFile("app/api/site-agent/sessions/route.ts", "utf8");
 const css = await readFile("app/globals.css", "utf8");
 const editorRoute = await readFile("app/(owner-workspace)/workspace/[slug]/editor/page.tsx", "utf8");
-const adminShell = await readFile("components/admin/AdminShell.tsx", "utf8");
+const adminShell = await readFile("components/admin/AdminShellClient.tsx", "utf8");
 const adminSites = await readFile("app/admin/sites/page.tsx", "utf8");
 
 await access("app/(owner-workspace)/workspace/[slug]/editor/page.tsx");
@@ -23,8 +27,9 @@ assert(component.includes("frameWindow.location.assign(target)"), "Page selectio
 assert(component.includes("setSelectedPagePath(route)"), "Iframe navigation does not synchronize the page picker");
 assert(component.includes("key={previewIdentity}"), "Preview remount identity is not isolated from the selected page path");
 assert(component.includes("event.target instanceof document.defaultView.Element"), "Element selection does not account for the iframe document realm");
-assert(component.includes('data-mobile-pane={mobilePane}'), "Mobile pane state is not exposed to the mounted workspace");
-assert(component.includes("inert={compactViewport && mobilePane"), "The inactive mobile pane is not made inert");
+assert(frame.includes('data-mobile-pane={mobilePane}'), "Mobile pane state is not exposed to the mounted workspace");
+assert(frame.includes("inert={compactViewport && mobilePane"), "The inactive mobile pane is not made inert");
+assert(component.includes("<WebsiteWorkspaceFrame") && setupWorkspace.includes("<WebsiteWorkspaceFrame"), "The editor and setup thread do not share the canonical workspace frame");
 assert(!component.includes("site-agent-rail"), "The retired pages and capabilities rail remains in the workspace");
 assert(component.includes("{isAdmin ? ("), "Workspace diagnostics are not restricted to admins");
 assert(component.includes("Admin diagnostics") && component.includes("workspace.site.id"), "Admin site diagnostics do not expose the site ID");
@@ -43,25 +48,25 @@ assert(!component.includes("site-agent-history-menu") && !component.includes("si
 assert(component.includes('className="site-agent-compose-mode"') && component.includes(">Edit</button>") && component.includes(">Ask</button>"), "Composer does not expose the canonical Edit and Ask modes");
 assert(component.includes("site-agent-starter-prompts") && component.includes("editorStarterPrompts"), "Empty editor does not provide contextual starter prompts");
 assert(component.includes("publishDisabledReason") && component.includes("aria-describedby"), "Disabled Publish does not explain its requirement");
-assert(component.includes("site-agent-mobile-back") && component.includes("site-agent-mobile-more") && component.includes("site-agent-publish-mobile"), "Mobile editor topbar controls are incomplete");
+assert(frame.includes("site-agent-mobile-back") && component.includes("site-agent-mobile-more") && component.includes("site-agent-publish-mobile"), "Mobile editor topbar controls are incomplete");
 assert(adminShell.includes('label: "Manage sites"') && adminShell.includes("<span>Admin</span>"), "Admin navigation and identity are not explicit");
 assert(adminSites.includes('title="Manage sites"'), "The admin inventory is not named Manage sites");
 
-assert(component.includes('type DesktopPanelMode = "split" | "collapsed" | "full-chat"'), "Desktop panel states are not explicit");
-assert(component.includes('data-panel-ready={panelLayoutReady ? "true" : undefined}'), "Panel hydration is not exposed for stable interaction");
-assert(component.includes("const MIN_SPLIT_PANEL_WIDTH = 320"), "Chat panel minimum width changed without updating the workspace contract");
-assert(component.includes("const FULL_CHAT_THRESHOLD = 0.6"), "Full-chat snap threshold changed without updating the workspace contract");
-assert(component.includes("new ResizeObserver"), "Workspace width is not measured from its actual container");
-assert(component.includes("setPointerCapture(event.pointerId)"), "Panel dragging does not use pointer capture");
-assert(component.includes('window.addEventListener("pointerup", finish)'), "Panel dragging does not recover pointer completion across the preview iframe");
-assert(component.includes('role="separator"') && component.includes('aria-orientation="vertical"'), "Panel resizer is not an accessible separator");
-assert(component.includes('event.key === "Home"') && component.includes('event.key === "End"'), "Panel keyboard collapse and full-chat controls are missing");
-assert(component.includes("site-agent-resize-shield"), "Panel dragging does not protect against iframe pointer interception");
-assert(component.includes("window.localStorage.getItem(panelStorageKey(siteId))"), "Panel layout is not restored per site");
-assert(component.includes("window.localStorage.setItem(panelStorageKey(siteId)"), "Panel layout is not persisted per site");
-assert(component.includes("persistPanelLayout(true, persistedWidth)"), "Collapse preferences are not persisted synchronously");
-assert(component.includes('panelMode === "full-chat"') && component.includes("return;\n    writePanelLayout"), "Full-chat mode is incorrectly persisted");
-assert(component.includes("desktopFullChat ? true : undefined"), "The mounted preview is not made inert in full-chat mode");
+assert(frame.includes('type DesktopPanelMode = "split" | "collapsed" | "full-chat"'), "Desktop panel states are not explicit");
+assert(frame.includes('data-panel-ready={panelLayoutReady ? "true" : undefined}'), "Panel hydration is not exposed for stable interaction");
+assert(frame.includes("const MIN_SPLIT_PANEL_WIDTH = 320"), "Chat panel minimum width changed without updating the workspace contract");
+assert(frame.includes("const FULL_CHAT_THRESHOLD = 0.6"), "Full-chat snap threshold changed without updating the workspace contract");
+assert(frame.includes("new ResizeObserver"), "Workspace width is not measured from its actual container");
+assert(frame.includes("setPointerCapture(event.pointerId)"), "Panel dragging does not use pointer capture");
+assert(frame.includes('window.addEventListener("pointerup", finish)'), "Panel dragging does not recover pointer completion across the preview iframe");
+assert(frame.includes('role="separator"') && frame.includes('aria-orientation="vertical"'), "Panel resizer is not an accessible separator");
+assert(frame.includes('event.key === "Home"') && frame.includes('event.key === "End"'), "Panel keyboard collapse and full-chat controls are missing");
+assert(frame.includes("site-agent-resize-shield"), "Panel dragging does not protect against iframe pointer interception");
+assert(frame.includes("window.localStorage.getItem(panelStorageKey(storageId))"), "Panel layout is not restored per workspace");
+assert(frame.includes("window.localStorage.setItem(panelStorageKey(storageId)"), "Panel layout is not persisted per workspace");
+assert(frame.includes("persistPanelLayout(true, persistedWidth)"), "Collapse preferences are not persisted synchronously");
+assert(frame.includes('panelMode === "full-chat"') && frame.includes("return;\n    writePanelLayout"), "Full-chat mode is incorrectly persisted");
+assert(frame.includes("desktopFullChat ? true : undefined"), "The mounted preview is not made inert in full-chat mode");
 
 assert(!component.includes('message.role === "agent" ? "Lodesta"'), "Visible chat author labels remain");
 assert(component.includes("messageAuthorLabel(message.role)"), "Chat authors are not exposed accessibly");
@@ -71,6 +76,22 @@ assert(css.includes(".site-agent-loading-message") && css.includes("site-agent-l
 assert(component.includes('className="site-agent-send-button"'), "Composer does not use the compact icon send control");
 assert(component.includes("<ArrowUpIcon />"), "Composer send control does not use the up-arrow icon");
 assert(component.includes("Math.min(textarea.scrollHeight, 140)"), "Composer textarea does not auto-grow to the bounded height");
+assert(component.includes('activeRun?.kind === "initial_build"'), "Initial-build composer lock is not tied to the active initial build");
+assert(component.includes('placeholder={initialBuildActive ? "Available when your first draft is ready"') && component.includes("disabled={initialBuildActive}"), "Initial-build composer does not explain and enforce its unavailable state");
+assert(component.includes("activeRun.progress.label") && component.includes("activeRun.progress.detail"), "Workspace progress does not use the owner-safe run projection");
+assert(!sessionRoute.includes("activeRunActivity"), "Owner session payload still exposes raw run event activity");
+for (const label of [
+  "Preparing your website",
+  "Designing your website",
+  "Building your private preview",
+  "Preview ready; finishing checks",
+  "Reviewing your website",
+  "Your answer is needed",
+  "Private draft ready",
+  "Website needs attention"
+]) {
+  assert(ownerRunView.includes(label), `Owner run projection is missing ${label}`);
+}
 
 assert(css.includes("grid-template-columns: var(--site-agent-panel-width"), "Desktop workspace does not use the resizable panel width");
 assert(css.includes('.site-agent-workspace[data-panel-mode="collapsed"]') && css.includes("grid-template-columns: 52px"), "Collapsed chat rail is not implemented");
@@ -87,6 +108,8 @@ assert(previewBarCss.includes("grid-template-columns: minmax(0, 1fr) auto") && p
 assert(css.includes(".site-agent-preview-outcome") && css.includes(".site-agent-more-popover") && css.includes("right: 0"), "Preview outcome actions and More menu are not pinned to the toolbar edge");
 assert(css.includes(".site-agent-more-mobile-tools") && css.includes("position: fixed") && css.includes("top: 66px"), "Mobile Preview tools do not move into the topbar More sheet");
 assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused mobile editor does not hide duplicate global chrome");
+const mobileTopbarControlCss = css.match(/\.site-agent-mobile-back,\n  \.site-agent-mobile-more \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+assert(mobileTopbarControlCss.includes("width: 44px") && mobileTopbarControlCss.includes("height: 44px"), "Mobile workspace topbar controls do not meet the 44px touch-target contract");
 
 console.log("Site agent workspace verification passed.");
 

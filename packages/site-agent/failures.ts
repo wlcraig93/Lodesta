@@ -31,13 +31,19 @@ export function classifySiteAuthoringFailure(error: unknown) {
     };
   }
   const message = boundedFailureMessage(error);
-  if (/manager_input_token_limit_exhausted|input_budget_exhausted/i.test(message)) {
-    return failure("input_budget_exhausted", "budget", false, message);
+  if (/manager_cost_limit_exhausted|cost_limit_exhausted/i.test(message)) {
+    return failure("cost_limit_exhausted", "budget", false, message);
   }
-  if (/manager_output_token_limit_exhausted|output_budget_exhausted/i.test(message)) {
-    return failure("output_budget_exhausted", "budget", false, message);
+  if (/cost_telemetry_unavailable/i.test(message)) {
+    return failure("cost_telemetry_unavailable", "platform", false, message);
   }
-  if (/workflow_deadline_exhausted|manager_duration_limit_exhausted|deadline_exhausted|aborted/i.test(message)) {
+  if (/browser_verification_unavailable/i.test(message)) {
+    return failure("browser_verification_unavailable", "platform", true, message);
+  }
+  if (/authoring_stalled/i.test(message)) {
+    return failure("authoring_stalled", "authoring", false, message);
+  }
+  if (/workflow_deadline_exhausted|deadline_exhausted|aborted/i.test(message)) {
     return failure("deadline_exhausted", "budget", false, message);
   }
   return failure("unknown_internal_failure", "platform", false, message);

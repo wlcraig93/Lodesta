@@ -1,0 +1,52 @@
+.catalogField {
+  display: grid;
+  gap: var(--product-space-3);
+  padding-top: var(--product-space-4);
+  border-top: 1px solid var(--product-color-border-subtle);
+}
+
+.fieldHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--product-space-6);
+}
+
+.fieldHeading label {
+  color: var(--product-color-text);
+  font-size: var(--product-font-size-control);
+  font-weight: var(--product-font-weight-medium);
+}
+
+.fieldHeading span {
+  color: var(--product-color-text-tertiary);
+  font-size: var(--product-font-size-meta);
+  font-weight: var(--product-font-weight-medium);
+  line-height: var(--product-line-height-meta);
+}
+
+.catalogSearch {
+  min-height: 44px;
+  background: var(--product-color-canvas-raised);
+}
+
+.catalogDescription {
+  display: flex;
+  min-height: 24px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--product-space-6);
+  color: var(--product-color-text-muted);
+}
+
+.catalogDescription small {
+  font-size: var(--product-font-size-meta);
+  font-weight: var(--product-font-weight-regular);
+  line-height: var(--product-line-height-meta);
+}
+
+@media (min-width: 760px) {
+  .catalogField {
+    gap: var(--product-space-4);
+  }
+}

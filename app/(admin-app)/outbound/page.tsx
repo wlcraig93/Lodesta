@@ -3,6 +3,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { outboundComplianceStatus } from "@/packages/acquisition/outbound";
+import { formatProductDate } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 
@@ -141,7 +142,7 @@ function CampaignCard({
       <span className="badge">{campaign.status}</span>
       <h3>{campaign.name}</h3>
       <p>
-        {campaign.channel.replace("_", " ")} · {new Date(campaign.createdAt).toLocaleDateString()}
+        {campaign.channel.replace("_", " ")} · {formatProductDate(campaign.createdAt)}
       </p>
       {compliance.highVolume ? (
         <small className="muted">

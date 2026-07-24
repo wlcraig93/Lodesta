@@ -54,25 +54,29 @@ attempts, retain archive tables, or create compatibility paths.
 There is no planner phase, frozen plan, edit-objective fixture, anchor protocol,
 replacement counter, per-tool budget, convergence detector, automatic critic, or
 automatic repair continuation. Correctable tool and compiler errors go back to the
-model in the same conversation.
+model in the same conversation. The sole approved convergence exception is the exact
+deterministic release-failure guard recorded in
+`docs/site-authoring-runaway-guardrails-plan.md`.
 
 ## Tools and limits
 
-The manager has nine tools:
+The manager has ten tools:
 
 - `list_files`
 - `read_file`
 - `write_file`
 - `delete_file`
 - `apply_patch`
+- `create_image`
 - `build_preview`
 - `inspect_site`
 - `request_input`
 - `finish`
 
-Standing limits are only the overall deadline, input/output tokens, workspace size, and
-platform concurrency. The workspace boundary currently permits at most 80 files and
-4 MB of authored source.
+Standing limits are the overall deadline, metered model-cost fuse, exact deterministic
+release-failure guard, workspace size, and platform concurrency. Input and output token
+totals remain telemetry and do not terminate a productive run. The workspace boundary
+currently permits at most 80 files and 4 MB of authored source.
 
 ## Evidence and skills
 

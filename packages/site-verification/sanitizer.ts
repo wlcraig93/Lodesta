@@ -15,7 +15,7 @@ const svgTags = new Set(["svg", "path", "circle", "line", "polyline", "polygon",
 const commonAttributes = new Set([
   "alt", "aria-atomic", "aria-controls", "aria-current", "aria-describedby", "aria-expanded", "aria-hidden", "aria-label", "aria-labelledby",
   "aria-live", "aria-pressed", "aria-selected", "autocomplete", "checked", "class", "cols", "colspan", "decoding", "disabled", "for", "height",
-  "href", "id", "loading", "max", "maxlength", "min", "minlength", "name", "open", "placeholder", "rel", "required", "role", "rows", "rowspan",
+  "fetchpriority", "href", "id", "loading", "max", "maxlength", "min", "minlength", "name", "open", "placeholder", "rel", "required", "role", "rows", "rowspan",
   "selected", "src", "target", "title", "type", "value", "width"
 ]);
 const svgAttributes = new Set([

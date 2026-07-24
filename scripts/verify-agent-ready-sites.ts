@@ -3,10 +3,21 @@ import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { markdownFromVerifiedHtml, requestAcceptsMarkdown, robotsTextForSite } from "../packages/site-platform/public-site";
+import {
+  agentReadinessCheckDefinitions,
+  agentReadinessMethodologyIdentity
+} from "../packages/website-assessment/agent-readiness";
 import botMappings from "../packages/site-platform/agent-bot-mappings.json";
 
 assert(/^\d{4}-\d{2}-\d{2}$/.test(botMappings.version), "agent bot mapping data needs an explicit version");
 assert(botMappings.bots.some((bot) => bot.userAgent === "GPTBot" && bot.categories.includes("ai_train")), "training bot mapping is missing");
+assert.match(agentReadinessMethodologyIdentity, /^agent-readiness@sha256:[a-f0-9]{64}$/);
+assert.equal(new Set(agentReadinessCheckDefinitions.map((check) => check.id)).size, agentReadinessCheckDefinitions.length, "Agent Readiness check IDs must be unique");
+assert(agentReadinessCheckDefinitions.filter((check) => check.standard.authority === "lodesta").every((check) => !check.standard.countedByAuthority), "Lodesta AEO checks cannot be labeled as Cloudflare-counted");
+assert.equal(agentReadinessCheckDefinitions.find((check) => check.id === "agent.content.llms_txt")?.standard.countedByAuthority, false, "llms.txt must retain Cloudflare's unscored designation");
+for (const id of ["agent.commerce.x402", "agent.commerce.ucp", "agent.commerce.acp"]) {
+  assert.equal(agentReadinessCheckDefinitions.find((check) => check.id === id)?.standard.countedByAuthority, false, `${id} must remain checked but unscored`);
+}
 
 const defaultRobots = robotsTextForSite({
   search: "allow",
@@ -36,8 +47,9 @@ assert(routeSource.includes("markdownRouteForRequest"), "clean /index.md serving
 assert(!routeSource.toLowerCase().includes('headers.set("content-signal"'), "Content-Signal must not be emitted as an HTTP header");
 
 const configuredUrls = (process.env.AGENT_READY_SITE_URLS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+const externalScanEnabled = process.env.AGENT_READY_EXTERNAL_SCAN === "true";
 const liveResults = [];
-for (const value of configuredUrls) liveResults.push(await verifyLiveSite(value));
+for (const value of configuredUrls) liveResults.push(await verifyLiveSite(value, externalScanEnabled));
 
 const report = {
   schemaVersion: 1,
@@ -45,9 +57,10 @@ const report = {
   checkedAt: new Date().toISOString(),
   ok: true,
   botMappingVersion: botMappings.version,
-  deterministicChecks: ["policy", "bot_mappings", "markdown_artifact_parity", "markdown_quality_values", "clean_markdown_routes", "cache_vary", "no_content_signal_header"],
+  methodologyIdentity: agentReadinessMethodologyIdentity,
+  deterministicChecks: ["methodology_manifest", "policy", "bot_mappings", "markdown_artifact_parity", "markdown_quality_values", "clean_markdown_routes", "cache_vary", "no_content_signal_header"],
   liveSites: liveResults,
-  externalScan: configuredUrls.length ? "passed" : "not_configured"
+  externalScan: externalScanEnabled && configuredUrls.length ? "passed" : "not_configured"
 };
 const reportPath = process.env.AGENT_READY_REPORT_PATH;
 if (reportPath) {
@@ -59,7 +72,7 @@ if (reportPath) {
 }
 process.stdout.write(`${JSON.stringify({ ...report, reportPath }, null, 2)}\n`);
 
-async function verifyLiveSite(value: string) {
+async function verifyLiveSite(value: string, runExternalScan: boolean) {
   const base = new URL(value);
   base.pathname = base.pathname.replace(/\/$/, "");
   const homepage = await fetch(base, { redirect: "follow" });
@@ -86,15 +99,16 @@ async function verifyLiveSite(value: string) {
   const sitemap = await fetch(new URL(`${base.pathname || ""}/sitemap.xml`, base));
   assert(sitemap.ok && (await sitemap.text()).includes("<urlset"), `${base}: sitemap failed`);
 
+  if (!runExternalScan) return { url: base.href, externalChecks: "not_requested" };
   const scan = await fetch("https://isitagentready.com/api/scan", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      url: base.href,
-      enabledChecks: ["robotsTxt", "sitemap", "linkHeaders", "markdownNegotiation", "robotsTxtAiRules", "contentSignals"]
-    }),
-    signal: AbortSignal.timeout(120_000)
-  });
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: base.href,
+        enabledChecks: ["robotsTxt", "sitemap", "linkHeaders", "markdownNegotiation", "robotsTxtAiRules", "contentSignals"]
+      }),
+      signal: AbortSignal.timeout(120_000)
+    });
   assert(scan.ok, `${base}: external Agent Ready scan failed with ${scan.status}`);
   const result = await scan.json() as { checks?: Record<string, Record<string, { status?: string }>>; siteError?: unknown };
   assert(!result.siteError, `${base}: external Agent Ready scan could not reach the site`);

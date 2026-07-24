@@ -86,13 +86,17 @@ export function AccountWebsiteCard({
       </div>
       <Link className="account-website-card-link" href={href} aria-label={`Open ${name}`} />
       <div className="account-website-card-body">
-        <div>
-          <h2>{name}</h2>
-          <p>{hostname ?? lifecycle.detail}</p>
+        <div className="account-website-card-heading">
+          <div>
+            {hostname ? <span className="account-website-card-domain">{hostname}</span> : null}
+            <h2>{name}</h2>
+          </div>
+          <ProductStatusBadge tone={lifecycle.tone}>{lifecycle.label}</ProductStatusBadge>
         </div>
+        <p>{lifecycle.detail}</p>
         <div className="account-website-card-meta">
           <span>{recentLabel}</span>
-          <ProductStatusBadge tone={lifecycle.tone}>{lifecycle.label}</ProductStatusBadge>
+          <strong>Open website <span aria-hidden="true">→</span></strong>
         </div>
       </div>
     </article>

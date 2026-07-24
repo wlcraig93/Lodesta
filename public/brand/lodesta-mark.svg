@@ -1,9 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Lodesta mark</title>
-  <desc id="desc">A white serif L centered inside a dark Lodesta green circle.</desc>
-  <circle cx="256" cy="256" r="208" fill="#24493A"/>
+  <desc id="desc">A warm-white serif L on a dark Lodesta green awning whose lower edge forms three scallops.</desc>
   <path
-    fill="#FFFFFF"
-    d="M164 130H272V151H260C252 151 247 156 247 166V324C247 333 252 338 262 338H322C337 338 346 331 349 316L352 300H369V371H164V349H178C188 349 193 344 193 334V166C193 156 188 151 178 151H164V130Z"
+    fill="#24493A"
+    d="M41 98A32 32 0 0 1 73 66H439A32 32 0 0 1 471 98V380A71.667 66 0 0 1 327.667 380A71.667 66 0 0 1 184.333 380A71.667 66 0 0 1 41 380Z"
+  />
+  <path
+    fill="#FFFEFA"
+    d="M178 128H264V154H238V302H308V276H334V328H178V302H204V154H178Z"
   />
 </svg>

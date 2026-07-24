@@ -33,6 +33,13 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   workspaceHash?: `sha256:${string}`;
   sandboxRevision: string;
   successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
+  failedBuild?: {
+    workspaceHash: `sha256:${string}`;
+    sandboxRevision: string;
+    error: string;
+    diagnostic?: { key: string; contentHash: `sha256:${string}`; bytes: number };
+    failureFingerprint: `sha256:${string}`;
+  };
   inspection?: RuntimeInspection<Checkpoint>;
   metrics: { builds: number; inspections: number; readCalls: number; readBytes: number; readLines: number };
   mutatedWorkspace: boolean;
@@ -47,6 +54,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private workspaceHash?: `sha256:${string}`;
   private sandboxRevision: string;
   private successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
+  private failedBuild?: WorkspaceManagerRuntimeSnapshot<Checkpoint>["failedBuild"];
   private inspection?: RuntimeInspection<Checkpoint>;
   private builds = 0;
   private inspections = 0;
@@ -75,6 +83,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (snapshot) {
       this.workspaceHash = snapshot.workspaceHash;
       this.successfulBuild = snapshot.successfulBuild;
+      this.failedBuild = snapshot.failedBuild;
       this.inspection = snapshot.inspection;
       this.builds = snapshot.metrics.builds;
       this.inspections = snapshot.metrics.inspections;
@@ -99,6 +108,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         const created = await this.options.createImage(call.arguments);
         if (created.diagnosticOutput.ok !== false) {
           this.successfulBuild = undefined;
+          this.failedBuild = undefined;
           this.inspection = undefined;
         }
         return created;
@@ -132,6 +142,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       workspaceHash: this.workspaceHash,
       sandboxRevision: this.sandboxRevision,
       successfulBuild: this.successfulBuild ? structuredClone(this.successfulBuild) : undefined,
+      failedBuild: this.failedBuild ? structuredClone(this.failedBuild) : undefined,
       inspection: this.inspection ? structuredClone(this.inspection) : undefined,
       metrics: this.metrics(),
       mutatedWorkspace: this.mutatedWorkspace
@@ -152,6 +163,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       },
       latestBuild: this.successfulBuild && this.successfulBuild.workspaceHash === this.workspaceHash
         ? { status: "passed", workspaceHash: this.successfulBuild.workspaceHash, sandboxRevision: this.successfulBuild.sandboxRevision, previewPath: this.successfulBuild.result.previewPath }
+        : this.failedBuild && this.failedBuild.workspaceHash === this.workspaceHash
+          ? { status: "failed", workspaceHash: this.failedBuild.workspaceHash, sandboxRevision: this.failedBuild.sandboxRevision, failureFingerprint: this.failedBuild.failureFingerprint }
         : { status: "not_run_or_stale" },
       latestInspection: this.inspection
         ? { status: this.inspection.passed ? "passed" : "failed", inspectionHash: this.inspection.inspectionHash, findings: summaryFindings(this.inspection.modelSummary) }
@@ -228,22 +241,33 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (this.successfulBuild?.workspaceHash === this.workspaceHash) {
       return result({ ok: true, cached: true, workspaceHash: this.workspaceHash, sandboxRevision: this.successfulBuild.sandboxRevision, previewPath: this.successfulBuild.result.previewPath, buildDurationMs: 0 });
     }
-    const files = assertCompleteWorkspace(this.currentFiles());
+    if (this.failedBuild?.workspaceHash === this.workspaceHash) {
+      return failedBuildResult(this.failedBuild, true);
+    }
     this.builds += 1;
     try {
+      const files = assertCompleteWorkspace(this.currentFiles());
       const built = await this.options.applyBuild(files, this.sandboxRevision);
       this.sandboxRevision = built.revision;
       this.successfulBuild = { workspaceHash: this.workspaceHash, sandboxRevision: built.revision, result: built };
+      this.failedBuild = undefined;
       this.inspection = undefined;
       return result({ ok: true, cached: false, workspaceHash: this.workspaceHash, sandboxRevision: built.revision, previewPath: built.previewPath, buildDurationMs: built.buildDurationMs, placementId: built.placementId });
     } catch (error) {
       if (isSiteAuthoringTerminalError(error)) throw error;
       const diagnostic = boundedError(error);
       const retained = await this.options.retainDiagnostic?.("build_failure", diagnostic);
-      return {
-        modelOutput: JSON.stringify({ ok: false, error: diagnostic, diagnostic: retained, workspaceHash: this.workspaceHash, sandboxRevision: this.sandboxRevision }),
-        diagnosticOutput: { ok: false, error: "build_failed", diagnostic: retained, workspaceHash: this.workspaceHash, sandboxRevision: this.sandboxRevision }
+      this.failedBuild = {
+        workspaceHash: this.workspaceHash,
+        sandboxRevision: this.sandboxRevision,
+        error: diagnostic,
+        diagnostic: retained,
+        failureFingerprint: sha256(stableJson({
+          workspaceHash: this.workspaceHash,
+          error: diagnostic
+        }))
       };
+      return failedBuildResult(this.failedBuild, false);
     }
   }
 
@@ -251,23 +275,25 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       return result({ ok: false, error: "inspection_requires_current_successful_build", workspaceHash: this.workspaceHash });
     }
+    const cached = Boolean(this.inspection);
     if (!this.inspection) {
       this.inspections += 1;
       this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
     }
-    return inspectionResult(this.inspection, this.inspections > 1);
+    return inspectionResult(this.inspection, cached);
   }
 
   private async finish(args: Record<string, unknown>): Promise<ManagerToolExecution> {
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       return result({ ok: false, error: "finish_requires_current_successful_build" });
     }
+    const cached = Boolean(this.inspection);
     if (!this.inspection) {
       this.inspections += 1;
       this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
     }
     if (!this.inspection.passed || !this.inspection.checkpoint) {
-      return inspectionResult(this.inspection, false, "finish_verification_failed");
+      return inspectionResult(this.inspection, cached, "finish_verification_failed");
     }
     const completion = managerCompletionSchema.parse({
       schemaVersion: "manager-completion",
@@ -292,6 +318,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     this.mutatedWorkspace = true;
     this.refreshWorkspaceHash();
     this.successfulBuild = undefined;
+    this.failedBuild = undefined;
     this.inspection = undefined;
   }
 
@@ -301,10 +328,62 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 }
 
 function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>, cached: boolean, error?: string): ManagerToolExecution {
-  const summary = { ...compactInspectionSummary(inspection.modelSummary), ok: inspection.passed, cached, ...(error ? { error } : {}) };
+  const guidance = !inspection.passed && cached
+    ? "Edit the workspace source before running the release check again."
+    : undefined;
+  const summary = {
+    ...compactInspectionSummary(inspection.modelSummary),
+    ok: inspection.passed,
+    cached,
+    ...(error ? { error } : {}),
+    ...(guidance ? { guidance } : {})
+  };
+  const failureFingerprint = inspection.passed
+    ? undefined
+    : sha256(stableJson({
+        inspectionHash: inspection.inspectionHash,
+        blockers: Array.isArray(inspection.modelSummary.blockers) ? inspection.modelSummary.blockers : []
+      }));
+  const includeImages = !inspection.passed && hasVisualBlocker(inspection.modelSummary);
   return {
-    modelOutput: inspection.images?.length ? [{ type: "input_text", text: JSON.stringify(summary) }, ...inspection.images] : JSON.stringify(summary),
-    diagnosticOutput: { ...inspection.diagnosticSummary, ok: inspection.passed, cached, ...(error ? { error } : {}) }
+    modelOutput: includeImages && inspection.images?.length ? [{ type: "input_text", text: JSON.stringify(summary) }, ...inspection.images] : JSON.stringify(summary),
+    diagnosticOutput: {
+      ...inspection.diagnosticSummary,
+      ok: inspection.passed,
+      cached,
+      ...(failureFingerprint ? { failureFingerprint } : {}),
+      ...(error ? { error } : {}),
+      ...(guidance ? { guidance } : {})
+    }
+  };
+}
+
+function failedBuildResult(
+  failed: NonNullable<WorkspaceManagerRuntimeSnapshot<unknown>["failedBuild"]>,
+  cached: boolean
+): ManagerToolExecution {
+  const guidance = "Edit the workspace source before running build_preview again.";
+  return {
+    modelOutput: JSON.stringify({
+      ok: false,
+      error: failed.error,
+      diagnostic: failed.diagnostic,
+      workspaceHash: failed.workspaceHash,
+      sandboxRevision: failed.sandboxRevision,
+      failureFingerprint: failed.failureFingerprint,
+      cached,
+      guidance
+    }),
+    diagnosticOutput: {
+      ok: false,
+      error: "build_failed",
+      diagnostic: failed.diagnostic,
+      workspaceHash: failed.workspaceHash,
+      sandboxRevision: failed.sandboxRevision,
+      failureFingerprint: failed.failureFingerprint,
+      cached,
+      guidance
+    }
   };
 }
 
@@ -325,15 +404,29 @@ function compactInspectionSummary(summary: Record<string, unknown>) {
   const blockers = Array.isArray(summary.blockers) ? summary.blockers : [];
   const advisories = Array.isArray(summary.advisories) ? summary.advisories : [];
   const { findings: _findings, blockers: _blockers, advisories: _advisories, ...rest } = summary;
-  return {
+  const common = {
     ...rest,
     findingCount: numericCount(summary.findingCount, findings.length),
     blockerCount: numericCount(summary.blockerCount, blockers.length),
     advisoryCount: numericCount(summary.advisoryCount, advisories.length),
-    blockers: blockers.slice(0, 100),
-    advisories: advisories.slice(0, 8),
-    advisoriesTruncated: numericCount(summary.advisoryCount, advisories.length) > 8
+    blockers: blockers.slice(0, 100)
   };
+  return blockers.length
+    ? { ...common, advisoriesOmitted: advisories.length > 0 }
+    : {
+        ...common,
+        advisories: advisories.slice(0, 8),
+        advisoriesTruncated: numericCount(summary.advisoryCount, advisories.length) > 8
+      };
+}
+
+function hasVisualBlocker(summary: Record<string, unknown>) {
+  const visualAreas = new Set(["html", "css", "asset", "accessibility", "render"]);
+  const blockers = Array.isArray(summary.blockers) ? summary.blockers : [];
+  return blockers.some((blocker) => {
+    if (!blocker || typeof blocker !== "object") return false;
+    return visualAreas.has(String((blocker as Record<string, unknown>).area ?? ""));
+  });
 }
 
 function numericCount(value: unknown, fallback: number) {

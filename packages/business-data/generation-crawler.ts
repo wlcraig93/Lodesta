@@ -86,6 +86,21 @@ export const websiteGenerationIngestionSchema = z.object({
 
 export type WebsiteGenerationIngestion = z.infer<typeof websiteGenerationIngestionSchema>;
 export type EvidenceClass = z.infer<typeof evidenceClassSchema>;
+export type GenerationCrawlTechnicalEvidence = {
+  robots: {
+    url: string;
+    found: boolean;
+    body?: string;
+  };
+  homepage?: {
+    url: string;
+    finalUrl: string;
+    status: number;
+    contentType?: string;
+    linkHeader?: string;
+    body: string;
+  };
+};
 
 type FetchLike = typeof fetch;
 type BrowserFetch = (url: string, signal: AbortSignal) => Promise<string>;
@@ -99,7 +114,11 @@ export async function crawlWebsiteForGeneration(input: {
   now?: () => number;
   limits?: Partial<GenerationIngestionLimitValues>;
   validateUrl?: (url: string) => Promise<string>;
-}): Promise<{ ingestion: WebsiteGenerationIngestion; crawl: CrawlAssessment }> {
+}): Promise<{
+  ingestion: WebsiteGenerationIngestion;
+  crawl: CrawlAssessment;
+  technicalEvidence: GenerationCrawlTechnicalEvidence;
+}> {
   const baseValidator = input.validateUrl ?? assertPublicFetchUrl;
   const sourceUrl = await baseValidator(input.url);
   const source = new URL(sourceUrl);
@@ -122,6 +141,7 @@ export async function crawlWebsiteForGeneration(input: {
   const skipped: Array<{ url: string; reason: z.infer<typeof skipReasonSchema> }> = [];
   const failures: Array<{ url: string; reason: z.infer<typeof failureReasonSchema>; status?: number; message: string }> = [];
   const pages = new Map<string, { summary: CrawlPageSummary; selectedReason: string; fetchAttempts: number; browserRendered: boolean; evidenceClass: EvidenceClass }>();
+  let homepageTechnicalEvidence: GenerationCrawlTechnicalEvidence["homepage"];
   let inventoryTruncated = false;
   let restricted = false;
   let deadlineReached = false;
@@ -206,6 +226,16 @@ export async function crawlWebsiteForGeneration(input: {
         skipped.push({ url: item.url, reason: "browser_limit" });
       }
       if (item.url !== source.href) summary = { ...summary, source: "sampled_internal" };
+      if (normalizeSameSite(item.url, source) === normalizeSameSite(source.href, source)) {
+        homepageTechnicalEvidence = {
+          url: item.url,
+          finalUrl: fetched.finalUrl ?? item.url,
+          status: fetched.status,
+          contentType: fetched.contentType,
+          linkHeader: fetched.linkHeader,
+          body: fetched.text
+        };
+      }
       const evidenceClass = classifyPageEvidence(summary);
       pages.set(item.url, { summary, selectedReason: item.reason, fetchAttempts: fetched.attempts, browserRendered: usedBrowser, evidenceClass });
       for (const link of summary.linkReferences.filter((link) => link.kind === "internal")) {
@@ -267,7 +297,18 @@ export async function crawlWebsiteForGeneration(input: {
     const failureCode = primaryFailureCode(sourceUrl, ingestion);
     throw new WebsiteCrawlError(failureCode, primaryFailureDiagnostic(sourceUrl, ingestion));
   }
-  return { ingestion, crawl };
+  return {
+    ingestion,
+    crawl,
+    technicalEvidence: {
+      robots: {
+        url: new URL("/robots.txt", source).href,
+        found: robots.found,
+        body: robots.text
+      },
+      homepage: homepageTechnicalEvidence
+    } satisfies GenerationCrawlTechnicalEvidence
+  };
 }
 
 class OriginScheduler {
@@ -303,7 +344,15 @@ async function fetchHtml(url: string, fetchImpl: FetchLike, scheduler: OriginSch
         return { ok: false, reason: "unsupported_content", status: response.status, message: contentType, attempts: attempt } as const;
       }
       const text = await responseTextWithin(response, limits.maximumHtmlBytes);
-      return { ok: true, text, attempts: attempt, finalUrl: fetched.finalUrl } as const;
+      return {
+        ok: true,
+        text,
+        attempts: attempt,
+        finalUrl: fetched.finalUrl,
+        status: response.status,
+        contentType,
+        linkHeader: response.headers.get("link") ?? undefined
+      } as const;
     } catch (error) {
       if (error instanceof PublicFetchUrlError) {
         throw new WebsiteCrawlError("source_invalid", error.message);
@@ -357,7 +406,7 @@ async function responseTextWithin(response: Response, maximumBytes: number) {
 
 async function readRobots(source: URL, fetchImpl: FetchLike, scheduler: OriginScheduler, signal: AbortSignal, limits: GenerationIngestionLimitValues, validateUrl: UrlValidator) {
   const response = await fetchHtml(new URL("/robots.txt", source).href, fetchImpl, scheduler, signal, limits, undefined, validateUrl);
-  if (response.ok) return { found: true, ...parseRobotsPolicy(response.text) };
+  if (response.ok) return { found: true, text: response.text, ...parseRobotsPolicy(response.text) };
   if (
     response.reason === "http"
     && response.status !== undefined
@@ -366,7 +415,7 @@ async function readRobots(source: URL, fetchImpl: FetchLike, scheduler: OriginSc
     && response.status !== 408
     && response.status !== 429
   ) {
-    return { found: false, rules: [] as RobotsRule[], sitemaps: [] as string[] };
+    return { found: false, text: undefined, rules: [] as RobotsRule[], sitemaps: [] as string[] };
   }
   throw new WebsiteCrawlError(
     "crawl_temporarily_unavailable",

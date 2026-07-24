@@ -1,7 +1,23 @@
-import type { ManagerModelUsage, ManagerRunLimits } from "./contracts";
+import type { ManagerModelUsage, ManagerRunGuardrails } from "./contracts";
+import { SiteAuthoringTerminalError } from "./failures";
 
 export const siteAgentModelPricing = {
   "gpt-5.6-sol": {
+    inputUsdPerMillion: 5,
+    cachedInputUsdPerMillion: 0.5,
+    outputUsdPerMillion: 30
+  },
+  "gpt-5.6-terra": {
+    inputUsdPerMillion: 2.5,
+    cachedInputUsdPerMillion: 0.25,
+    outputUsdPerMillion: 15
+  },
+  "gpt-5.6-luna": {
+    inputUsdPerMillion: 1,
+    cachedInputUsdPerMillion: 0.1,
+    outputUsdPerMillion: 6
+  },
+  "gpt-5.5": {
     inputUsdPerMillion: 5,
     cachedInputUsdPerMillion: 0.5,
     outputUsdPerMillion: 30
@@ -10,14 +26,68 @@ export const siteAgentModelPricing = {
 
 export type SupportedSiteAgentModel = keyof typeof siteAgentModelPricing;
 
+export const siteAgentReasoningEffort = "high" as const;
+export const siteAgentTextVerbosity = "low" as const;
+
+export const siteAgentRunGuardrailDefaults = {
+  initial_build: {
+    deadlineMs: 60 * 60_000,
+    maxCostUsd: 15,
+    maxConsecutiveIdenticalFailures: 3
+  },
+  edit: {
+    deadlineMs: 25 * 60_000,
+    maxCostUsd: 8,
+    maxConsecutiveIdenticalFailures: 3
+  },
+  rebase: {
+    deadlineMs: 25 * 60_000,
+    maxCostUsd: 8,
+    maxConsecutiveIdenticalFailures: 3
+  }
+} as const;
+
 export function isSupportedSiteAgentModel(modelId: string): modelId is SupportedSiteAgentModel {
   return Object.hasOwn(siteAgentModelPricing, modelId);
 }
 
-export function managerLimitsForKind(kind: "initial_build" | "edit" | "rebase"): ManagerRunLimits {
-  return kind === "initial_build"
-    ? { maxInputTokens: 650_000, maxOutputTokens: 40_000, maxDurationMs: 12 * 60_000 }
-    : { maxInputTokens: 250_000, maxOutputTokens: 25_000, maxDurationMs: 8 * 60_000 };
+export function managerGuardrailsForKind(kind: "initial_build" | "edit" | "rebase"): ManagerRunGuardrails {
+  const defaults = siteAgentRunGuardrailDefaults[kind];
+  return {
+    maxCostUsd: defaults.maxCostUsd,
+    maxConsecutiveIdenticalFailures: defaults.maxConsecutiveIdenticalFailures
+  };
+}
+
+export function siteAgentRunGuardrailsForKind(kind: "initial_build" | "edit" | "rebase", startedAt: string) {
+  const defaults = siteAgentRunGuardrailDefaults[kind];
+  return {
+    deadlineAt: new Date(Date.parse(startedAt) + defaults.deadlineMs).toISOString(),
+    maxCostUsd: defaults.maxCostUsd,
+    maxConsecutiveIdenticalFailures: defaults.maxConsecutiveIdenticalFailures
+  };
+}
+
+export function managerGuardrailsAfterPriorUsage(
+  guardrails: ManagerRunGuardrails,
+  usage: Pick<ManagerModelUsage, "inputTokens" | "outputTokens" | "costUsd" | "costSource">
+): ManagerRunGuardrails {
+  const hasUsage = usage.inputTokens > 0 || usage.outputTokens > 0;
+  if (hasUsage && usage.costSource === "unavailable") {
+    throw new SiteAuthoringTerminalError("cost_telemetry_unavailable", "platform", false, "research_cost_telemetry_unavailable");
+  }
+  if (usage.costUsd >= guardrails.maxCostUsd) {
+    throw new SiteAuthoringTerminalError(
+      "cost_limit_exhausted",
+      "budget",
+      false,
+      `research_exhausted_run_cost_limit:${usage.costUsd.toFixed(6)}:${guardrails.maxCostUsd.toFixed(6)}`
+    );
+  }
+  return {
+    maxCostUsd: guardrails.maxCostUsd - usage.costUsd,
+    maxConsecutiveIdenticalFailures: guardrails.maxConsecutiveIdenticalFailures
+  };
 }
 
 export function usageForModel(
@@ -56,13 +126,6 @@ export function usageForModel(
     upstreamInferenceCostUsd: nonnegativeFinite(value?.cost_details?.upstream_inference_cost) ?? 0,
     durationMs
   };
-}
-
-export function maximumRunCostUsd(modelId: string, limits: ManagerRunLimits) {
-  const pricing = modelPricing(modelId);
-  return pricing
-    ? (limits.maxInputTokens * pricing.inputUsdPerMillion + limits.maxOutputTokens * pricing.outputUsdPerMillion) / 1_000_000
-    : undefined;
 }
 
 function modelPricing(modelId: string) {

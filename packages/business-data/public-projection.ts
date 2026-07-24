@@ -47,6 +47,10 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
   if (state.siteId !== intent.siteId || forms.some((form) => form.siteId !== state.siteId)) {
     throw new Error("Public build input authorities must belong to the same site.");
   }
+  const nonUsLocation = state.locations.find((location) => location.country.toUpperCase() !== "US");
+  if (nonUsLocation) {
+    throw new Error(`Public build input supports US locations only; ${nonUsLocation.id} uses ${nonUsLocation.country}.`);
+  }
   const eligibleFactIds = new Set(state.facts
     .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"))
     .map((fact) => fact.id));

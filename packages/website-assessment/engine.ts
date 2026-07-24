@@ -3,9 +3,13 @@ import {
   websiteAssessmentSchema,
   type AssessmentCriterion,
   type AssessmentCriterionInput,
+  type AgentReadinessCheckInput,
+  type VisualQuality,
   type WebsiteAssessment,
   type WebsiteAssessmentTargetKind
 } from "./contracts";
+import { buildAgentReadiness } from "./agent-readiness";
+import { unavailableVisualQuality } from "./visual-quality";
 import {
   assessmentCriteria,
   assessmentDimensions,
@@ -28,6 +32,9 @@ export type BuildWebsiteAssessmentInput = {
   };
   siteUnderstanding: WebsiteAssessment["siteUnderstanding"];
   criteria: AssessmentCriterionInput[];
+  agentReadinessChecks: AgentReadinessCheckInput[];
+  agentReadinessLimitations?: string[];
+  visualQuality?: VisualQuality;
   limitations?: string[];
   generatedAt?: string;
   inputHashSource: unknown;
@@ -121,6 +128,15 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
     .sort((left, right) => impactRank(left.impact) - impactRank(right.impact));
   const warnings = criteria.filter((criterion) => criterion.status === "warning");
   const passes = criteria.filter((criterion) => criterion.status === "pass");
+  const agentReadiness = buildAgentReadiness({
+    checks: input.agentReadinessChecks,
+    limitations: input.agentReadinessLimitations,
+    observedAt: generatedAt
+  });
+  const visualQuality = input.visualQuality ?? unavailableVisualQuality({
+    observedAt: generatedAt,
+    limitation: "Visual Quality was not supplied by the assessment adapter."
+  });
   return websiteAssessmentSchema.parse({
     schemaVersion: 1,
     id: input.id ?? `website_assessment_${crypto.randomUUID().replaceAll("-", "")}`,
@@ -143,6 +159,8 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
     },
     score,
     dimensions,
+    agentReadiness,
+    visualQuality,
     summary: {
       strengths: passes.slice(0, 6).map((criterion) => criterion.explanation),
       opportunities: [...failed, ...warnings].slice(0, 8).map((criterion) => `${criterion.title}: ${criterion.explanation}`),

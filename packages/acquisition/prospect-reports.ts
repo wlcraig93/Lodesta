@@ -202,6 +202,8 @@ export function prospectReportFromAssessment(
     siteUnderstanding: projection.siteUnderstanding,
     whatsWorking: projection.whatsWorking,
     findings,
+    agentReadiness: projection.agentReadiness,
+    visualQuality: projection.visualQuality,
     stages: [
       stage("business", "Business resolved", "completed"),
       stage("website", "Owned website detected", "completed"),

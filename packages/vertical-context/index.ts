@@ -1,9 +1,11 @@
 import { verticalContextModuleSchema, type VerticalContextModule } from "@/packages/site-contracts";
 import { autoBodyContextModule } from "./auto-body";
+import { plumbingContextModule } from "./plumbing";
 import { syntheticContextModule } from "./synthetic";
 
 const productionModules = new Map<string, VerticalContextModule>([
-  [autoBodyContextModule.id, verticalContextModuleSchema.parse(autoBodyContextModule)]
+  [autoBodyContextModule.id, verticalContextModuleSchema.parse(autoBodyContextModule)],
+  [plumbingContextModule.id, verticalContextModuleSchema.parse(plumbingContextModule)]
 ]);
 
 const testModules = new Map<string, VerticalContextModule>([
@@ -58,4 +60,4 @@ function unique(values: string[]) {
   return [...new Set(values.map(normalize).filter(Boolean))];
 }
 
-export { autoBodyContextModule, syntheticContextModule };
+export { autoBodyContextModule, plumbingContextModule, syntheticContextModule };

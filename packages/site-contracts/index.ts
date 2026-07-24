@@ -628,9 +628,13 @@ export const siteAgentFailureCodeSchema = z.enum([
   "provider_temporarily_unavailable",
   "input_budget_exhausted",
   "output_budget_exhausted",
+  "cost_limit_exhausted",
+  "cost_telemetry_unavailable",
+  "browser_verification_unavailable",
   "deadline_exhausted",
   "execution_deadline_exceeded",
   "worker_interrupted",
+  "authoring_stalled",
   "authoring_unresolved",
   "unknown_internal_failure"
 ]);
@@ -673,10 +677,10 @@ export const siteAgentRunSchema = z.object({
   executionNumber: z.number().int().nonnegative().default(0),
   heartbeatAt: isoTimestamp.optional(),
   skillVersions: z.record(z.string(), z.string()),
-  limits: z.object({
-    maxInputTokens: z.number().int().positive(),
-    maxOutputTokens: z.number().int().positive(),
-    maxDurationMs: z.number().int().positive()
+  guardrails: z.object({
+    deadlineAt: isoTimestamp,
+    maxCostUsd: z.number().positive(),
+    maxConsecutiveIdenticalFailures: z.number().int().min(2).max(20)
   }).strict().optional(),
   usage: z.discriminatedUnion("kind", [
     z.object({
@@ -709,10 +713,10 @@ export const siteAgentRunSchema = z.object({
   completedAt: isoTimestamp.optional()
 }).strict().superRefine((value, context) => {
   if (value.executionDriver === "responses_api") {
-    if (!value.apiProvider || !value.modelId || value.usage.kind !== "model_reported" || value.externalProvenance) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: "Responses API runs require API model provenance and reported usage." });
+    if (!value.apiProvider || !value.modelId || value.usage.kind !== "model_reported" || value.externalProvenance || !value.guardrails) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Responses API runs require API model provenance, reported usage, and canonical guardrails." });
     }
-  } else if (!value.externalProvenance || value.usage.kind !== "external_unavailable" || value.apiProvider || value.modelId) {
+  } else if (!value.externalProvenance || value.usage.kind !== "external_unavailable" || value.apiProvider || value.modelId || value.guardrails) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "External MCP runs require external provenance and unavailable model usage." });
   }
 });

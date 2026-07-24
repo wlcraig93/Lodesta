@@ -53,6 +53,43 @@ type ReportResult = {
     evidence: string[];
     recommendation: string;
   }>;
+  agentReadiness?: {
+    methodologyIdentity: string;
+    coverage: {
+      value: number;
+      assessedChecks: number;
+      applicableChecks: number;
+      limitations: string[];
+    };
+    verified: Array<{
+      id: string;
+      group: string;
+      title: string;
+      evidence: string[];
+    }>;
+    findings: Array<ReportResult["findings"][number] & {
+      authority: "cloudflare" | "lodesta";
+      countedByAuthority: boolean;
+    }>;
+    note: string;
+  };
+  visualQuality?: {
+    methodologyIdentity: string;
+    coverage: {
+      value: number;
+      assessedChecks: number;
+      applicableChecks: number;
+      limitations: string[];
+    };
+    strengths: Array<{
+      id: string;
+      group: string;
+      title: string;
+      evidence: string[];
+    }>;
+    findings: ReportResult["findings"];
+    note: string;
+  };
   stages: Array<{
     id: string;
     label: string;
@@ -92,6 +129,37 @@ const reportResultSchema: z.ZodType<ReportResult> = z.object({
     status: z.enum(["fail", "warning"]), title: z.string(), explanation: z.string(),
     businessConsequence: z.string(), evidence: z.array(z.string()), recommendation: z.string()
   }).strict()),
+  agentReadiness: z.object({
+    methodologyIdentity: z.string(),
+    coverage: z.object({
+      value: z.number(), assessedChecks: z.number(), applicableChecks: z.number(), limitations: z.array(z.string())
+    }).strict(),
+    verified: z.array(z.object({
+      id: z.string(), group: z.string(), title: z.string(), evidence: z.array(z.string())
+    }).strict()),
+    findings: z.array(z.object({
+      id: z.string(), dimension: z.string(), severity: z.enum(["critical", "major", "minor", "advisory"]),
+      status: z.enum(["fail", "warning"]), title: z.string(), explanation: z.string(),
+      businessConsequence: z.string(), evidence: z.array(z.string()), recommendation: z.string(),
+      authority: z.enum(["cloudflare", "lodesta"]), countedByAuthority: z.boolean()
+    }).strict()),
+    note: z.string()
+  }).strict().optional(),
+  visualQuality: z.object({
+    methodologyIdentity: z.string(),
+    coverage: z.object({
+      value: z.number(), assessedChecks: z.number(), applicableChecks: z.number(), limitations: z.array(z.string())
+    }).strict(),
+    strengths: z.array(z.object({
+      id: z.string(), group: z.string(), title: z.string(), evidence: z.array(z.string())
+    }).strict()),
+    findings: z.array(z.object({
+      id: z.string(), dimension: z.string(), severity: z.enum(["critical", "major", "minor", "advisory"]),
+      status: z.enum(["fail", "warning"]), title: z.string(), explanation: z.string(),
+      businessConsequence: z.string(), evidence: z.array(z.string()), recommendation: z.string()
+    }).strict()),
+    note: z.string()
+  }).strict().optional(),
   stages: z.array(z.object({
     id: z.string(), label: z.string(), status: z.enum(["queued", "running", "completed", "skipped", "failed"])
   }).strict()),
@@ -253,6 +321,8 @@ export function PresenceReportClient() {
                 <Understanding result={completedResult} />
                 <WhatsWorking items={completedResult.whatsWorking} />
                 <FindingList findings={completedResult.findings} />
+                <VisualQualitySection visualQuality={completedResult.visualQuality} />
+                <AgentReadinessSection agentReadiness={completedResult.agentReadiness} />
                 {report.unlocked && completedResult.gatedPlan ? (
                   <GatedPlan plan={completedResult.gatedPlan} />
                 ) : (
@@ -358,6 +428,106 @@ function FindingList({ findings }: { findings: ReportResult["findings"] }) {
         </article>
       ))}
     </div>
+  );
+}
+
+function VisualQualitySection({ visualQuality }: { visualQuality?: ReportResult["visualQuality"] }) {
+  if (!visualQuality) return null;
+  return (
+    <section className="presence-agent-readiness presence-visual-quality">
+      <div className="presence-agent-readiness-heading">
+        <div>
+          <span className="badge">AI-assisted evidence</span>
+          <h2>Visual Experience</h2>
+        </div>
+        <p>
+          {visualQuality.coverage.assessedChecks} of {visualQuality.coverage.applicableChecks} applicable visual checks were assessed.
+        </p>
+      </div>
+      <p>{visualQuality.note}</p>
+      {visualQuality.strengths.length ? (
+        <div className="presence-finding-list">
+          <h3>Visual strengths</h3>
+          {visualQuality.strengths.map((item) => (
+            <article className="presence-finding-card" key={item.id}>
+              <span className="badge severity-pass">{item.group}</span>
+              <h3>{item.title}</h3>
+              <small>{item.evidence.join(" ")}</small>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {visualQuality.findings.length ? (
+        <div className="presence-finding-list">
+          <h3>Visual opportunities</h3>
+          {visualQuality.findings.map((finding) => (
+            <article className="presence-finding-card" key={finding.id}>
+              <span className={`badge severity-${finding.severity}`}>{finding.dimension}</span>
+              <h3>{finding.title}</h3>
+              <p>{finding.businessConsequence}</p>
+              <small>{finding.evidence.join(" ")}</small>
+              <strong>{finding.recommendation}</strong>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {visualQuality.coverage.limitations.length ? (
+        <p className="muted">Coverage limitations: {visualQuality.coverage.limitations.join(" ")}</p>
+      ) : null}
+    </section>
+  );
+}
+
+function AgentReadinessSection({ agentReadiness }: { agentReadiness?: ReportResult["agentReadiness"] }) {
+  if (!agentReadiness) return null;
+  return (
+    <section className="presence-agent-readiness">
+      <div className="presence-agent-readiness-heading">
+        <div>
+          <span className="badge">Evidence, not a grade</span>
+          <h2>AI and Agent Readiness</h2>
+        </div>
+        <p>
+          {agentReadiness.coverage.assessedChecks} of {agentReadiness.coverage.applicableChecks} applicable checks were verified.
+        </p>
+      </div>
+      <p>{agentReadiness.note}</p>
+      {agentReadiness.verified.length ? (
+        <div className="presence-finding-list">
+          <h3>Verified strengths</h3>
+          {agentReadiness.verified.map((item) => (
+            <article className="presence-finding-card" key={item.id}>
+              <span className="badge severity-pass">{item.group}</span>
+              <h3>{item.title}</h3>
+              <small>{item.evidence.join(" ")}</small>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {agentReadiness.findings.length ? (
+        <div className="presence-finding-list">
+          <h3>Agent-readiness opportunities</h3>
+          {agentReadiness.findings.map((finding) => (
+            <article className="presence-finding-card" key={finding.id}>
+              <span className={`badge severity-${finding.severity}`}>
+                {finding.dimension} · {finding.authority === "lodesta"
+                  ? "Lodesta AEO"
+                  : finding.countedByAuthority
+                    ? "Cloudflare-counted"
+                    : "Cloudflare-aligned, unscored"}
+              </span>
+              <h3>{finding.title}</h3>
+              <p>{finding.businessConsequence}</p>
+              <small>{finding.evidence.join(" ")}</small>
+              <strong>{finding.recommendation}</strong>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {agentReadiness.coverage.limitations.length ? (
+        <p className="muted">Coverage limitations: {agentReadiness.coverage.limitations.join(" ")}</p>
+      ) : null}
+    </section>
   );
 }
 

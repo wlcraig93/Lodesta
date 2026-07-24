@@ -1,6 +1,6 @@
 {
   "kind": "site-sandbox-manifest",
   "artifactContractIdentity": "agent-authored-artifact@sha256:82761c88ba2c9b8734972bdc6bd124f373d23048df951d55b2aa0e0e5b4e4900",
-  "toolchainIdentity": "lodesta-static-site-workspace@sha256:6be251de0bb93f72982fd73e6484b1cf509cebe4b2ed23d136ef343963ccfa14",
+  "toolchainIdentity": "lodesta-static-site-workspace@sha256:1282566c7ec4001160c29797e1b0a9fb1d932ae5275556aa4e3a948c60ddb96a",
   "sourcePolicyIdentity": "workspace-source-policy@sha256:d05531a635cec1d6a4f7f51c4d9d18e0c9992b4329747945592600c8fe4079f6"
 }

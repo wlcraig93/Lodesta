@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { ThemePreferenceControl } from "@/components/ThemePreferenceControl";
 
 export type AccountActionSection = "account" | "context" | "session";
 export type AccountActionIcon = "account" | "admin" | "workspace" | "sign-in" | "sign-out";
@@ -72,6 +73,7 @@ export function AccountMenu({
       {open ? (
         <section className="account-menu-popover" id={popoverId} aria-label="Account options">
           <AccountIdentity displayName={displayName} email={email} contextLabel={contextLabel} />
+          <ThemePreferenceControl compact={compact} />
           <AccountActionList actions={actions} onAction={() => setOpen(false)} />
         </section>
       ) : null}

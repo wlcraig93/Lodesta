@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lodesta fused-foot icon concept</title>
+  <desc id="desc">A warm-white geometric L whose bottom stroke becomes a three-scallop awning, set inside a dark forest-green rounded square.</desc>
+  <rect x="48" y="48" width="416" height="416" rx="108" fill="#24493A"/>
+  <path
+    fill="#FFFEFA"
+    d="M140 120H218V312H372V344
+      C372 378 356 400 333.33 400
+      C310.67 400 294.67 378 294.67 344
+      C294.67 378 278.67 400 256 400
+      C233.33 400 217.33 378 217.33 344
+      C217.33 378 201.33 400 178.67 400
+      C156 400 140 378 140 344
+      V120Z"
+  />
+</svg>

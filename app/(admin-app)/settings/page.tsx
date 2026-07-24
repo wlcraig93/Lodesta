@@ -2,6 +2,8 @@ import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { SiteAuthoringModelSettingsForm } from "./site-authoring-model-settings-form";
+import styles from "./settings-page.module.css";
+import { formatProductDate } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,7 @@ export default async function SettingsPage() {
         description="Manage the API provider and model policy used by ingestion and the website manager."
       />
 
-      <div className="admin-grid">
+      <div className={`admin-grid ${styles.settingsGrid}`}>
         <section className="panel">
           <h2>Agent models</h2>
           <SiteAuthoringModelSettingsForm initialSnapshot={snapshot} />
@@ -29,7 +31,7 @@ export default async function SettingsPage() {
             <article className="finding-card">
               <span className="badge">{snapshot.source}</span>
               <h3>Version {snapshot.version}</h3>
-              <p>{snapshot.updatedAt ? `Updated ${new Date(snapshot.updatedAt).toLocaleString()}` : "Using code defaults."}</p>
+              <p>{snapshot.updatedAt ? `Updated ${formatProductDate(snapshot.updatedAt)}` : "Using code defaults."}</p>
               {snapshot.updatedBy ? <small className="muted">{snapshot.updatedBy}</small> : null}
             </article>
             {snapshot.warning ? (

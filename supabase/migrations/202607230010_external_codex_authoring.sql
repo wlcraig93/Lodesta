@@ -964,7 +964,6 @@ begin
     where id = session_document->>'id';
   update site_agent_runs set
     status = run_document->>'status',
-    public_build_input_id = run_document->>'publicBuildInputId',
     output_revision_id = nullif(run_document->>'outputRevisionId', ''),
     execution_driver = run_document->>'executionDriver',
     api_provider = nullif(run_document->>'apiProvider', ''),

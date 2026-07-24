@@ -5,6 +5,7 @@ import {
   type AnalyticsUrlQuery
 } from "@/lib/analytics-query";
 import type { AnalyticsReport } from "@/packages/site-capabilities/contracts";
+import { ProductSelect } from "@/components/ProductUI";
 
 export function AnalyticsReportNav({ slug, query }: { slug: string; query: AnalyticsUrlQuery }) {
   return (
@@ -37,7 +38,7 @@ export function AnalyticsReportControls({
       <div className="analytics-control-row">
         <label>
           <span>Date range</span>
-          <select name="range" defaultValue={query.range}>
+          <ProductSelect name="range" defaultValue={query.range}>
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>
             <option value="7d">Last 7 days</option>
@@ -47,7 +48,7 @@ export function AnalyticsReportControls({
             <option value="ytd">Year to date</option>
             <option value="since_launch">Since launch</option>
             <option value="custom">Custom</option>
-          </select>
+          </ProductSelect>
         </label>
         <label>
           <span>From</span>
@@ -59,21 +60,21 @@ export function AnalyticsReportControls({
         </label>
         <label>
           <span>Compare</span>
-          <select name="compare" defaultValue={query.compare}>
+          <ProductSelect name="compare" defaultValue={query.compare}>
             <option value="off">Off</option>
             <option value="previous_period">Previous period</option>
             <option value="previous_year">Previous year</option>
             <option value="custom">Custom</option>
-          </select>
+          </ProductSelect>
         </label>
         <label>
           <span>Interval</span>
-          <select name="interval" defaultValue={query.requestedInterval}>
+          <ProductSelect name="interval" defaultValue={query.requestedInterval}>
             <option value="auto">Auto</option>
             <option value="day">Day</option>
             <option value="week">Week</option>
             <option value="month">Month</option>
-          </select>
+          </ProductSelect>
         </label>
       </div>
       {query.compare === "custom" ? (
@@ -87,32 +88,32 @@ export function AnalyticsReportControls({
         <div className="analytics-control-row">
           <label>
             <span>Channel</span>
-            <select name="channel" defaultValue={query.filters.channel ?? ""}>
+            <ProductSelect name="channel" defaultValue={query.filters.channel ?? ""}>
               <option value="">All channels</option>
               <option value="campaign">Campaign</option>
               <option value="organic_search">Organic search</option>
               <option value="social">Social</option>
               <option value="referral">Referral</option>
               <option value="direct">Direct / unknown</option>
-            </select>
+            </ProductSelect>
           </label>
           <label>
             <span>Source</span>
-            <select name="source" defaultValue={query.filters.source ?? ""}>
+            <ProductSelect name="source" defaultValue={query.filters.source ?? ""}>
               <option value="">All sources</option>
               {report.sources.map((row) => <option key={row.key} value={row.key}>{row.label}</option>)}
-            </select>
+            </ProductSelect>
           </label>
           <label>
             <span>Page</span>
-            <select name="page" defaultValue={query.filters.page ?? ""}>
+            <ProductSelect name="page" defaultValue={query.filters.page ?? ""}>
               <option value="">All pages</option>
               {uniqueRows([...report.pages, ...report.landingPages]).map((row) => <option key={row.key} value={row.key}>{row.label}</option>)}
-            </select>
+            </ProductSelect>
           </label>
           <label>
             <span>Customer action</span>
-            <select name="action" defaultValue={query.filters.action ?? ""}>
+            <ProductSelect name="action" defaultValue={query.filters.action ?? ""}>
               <option value="">All actions</option>
               <option value="form_submit">Form submissions</option>
               <option value="call_click">Calls</option>
@@ -120,16 +121,16 @@ export function AnalyticsReportControls({
               <option value="directions_click">Directions</option>
               <option value="booking_click">Bookings</option>
               <option value="ordering_click">Orders</option>
-            </select>
+            </ProductSelect>
           </label>
           <label>
             <span>Device</span>
-            <select name="device" defaultValue={query.filters.device ?? ""}>
+            <ProductSelect name="device" defaultValue={query.filters.device ?? ""}>
               <option value="">All devices</option>
               <option value="mobile">Mobile</option>
               <option value="tablet">Tablet</option>
               <option value="desktop">Desktop</option>
-            </select>
+            </ProductSelect>
           </label>
         </div>
       </details>

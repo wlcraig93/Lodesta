@@ -1,6 +1,6 @@
 {
-  "name": "Lodesta circle mark",
-  "source": "Lodesta Logo.png and selected circle-L concept",
+  "name": "Lodesta awning mark",
+  "source": "Refined from docs/brand/concepts/awning-tile/01-classic-serif.svg",
   "canvas": {
     "aspectRatio": "1:1",
     "svgViewBox": "0 0 512 512",
@@ -8,27 +8,35 @@
   },
   "colors": {
     "lodestaGreen": "#24493A",
-    "white": "#FFFFFF"
+    "warmWhite": "#FFFEFA"
+  },
+  "geometry": {
+    "badgeBox": "x 41-471, top y 66, valance attach y 380, scallop base y 446",
+    "cornerRadius": "32 (7.4% of badge width)",
+    "scallops": "3, rx 71.667, ry 66 (depth 46% of scallop width)",
+    "letterBox": "x 178-334, y 128-328 (cap height 200)",
+    "letterStrokes": "stem 34, thins 26 (contrast 1.31:1)",
+    "notes": "Valance depth, corner radius, and letter contrast are tuned so the silhouette and letter both survive a 16px favicon. Letter is optically centered between the solid-body center and the full-silhouette center, not centered in the body alone."
   },
   "exports": [
     {
       "file": "../../../public/brand/lodesta-mark.svg",
       "format": "SVG",
       "background": "transparent",
-      "letter": "white"
+      "letter": "warm white"
     },
     {
       "file": "../../../public/brand/lodesta-mark.png",
       "format": "PNG",
       "background": "transparent",
-      "letter": "white"
+      "letter": "warm white"
     },
     {
       "file": "../../../app/icon.png",
       "format": "PNG",
       "purpose": "Next.js application favicon",
       "background": "transparent",
-      "letter": "white"
+      "letter": "warm white"
     },
     {
       "file": "../../../public/brand/lodesta-mark-cutout.svg",
@@ -43,5 +51,6 @@
       "letter": "transparent cutout"
     }
   ],
-  "provenance": "Vector geometry was rebuilt deterministically from the selected visual direction. PNG files are rasterized directly from the corresponding SVG files. No font dependency or embedded raster image is used."
+  "provenance": "Vector geometry was rebuilt deterministically from the selected visual direction. PNG files are rasterized directly from the corresponding SVG files via sharp at 1024x1024. No font dependency or embedded raster image is used.",
+  "maskedContexts": "This mark's scalloped lower edge is clipped by circular and squircle avatar masks (iOS/Android app icons, Slack, Google, GitHub org avatars). No circle-masked variant is currently checked in; generate one before shipping to any of those surfaces."
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AccountActionList, AccountIdentity, AccountMenu, type AccountAction } from "@/components/AccountMenu";
+import { ThemePreferenceControl } from "@/components/ThemePreferenceControl";
 import type { OwnerWorkspaceAccessMode } from "@/lib/page-access";
 import type { OwnerIdentity } from "@/lib/owner-identity";
 import type { OwnerWorkspaceSiteOption } from "@/lib/owner-workspace";
@@ -47,7 +48,8 @@ export function ProductAppShell({
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const base = site ? `/workspace/${site.slug}` : "/account";
   const editorHref = site ? `${base}/editor` : undefined;
-  const focusedEditor = Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
+  const focusedSetup = /^\/account\/onboarding\/[^/]+\/?$/.test(pathname);
+  const focusedEditor = focusedSetup || Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
   const compactNavigation = focusedEditor || (ready && collapsed);
   const adminPreview = accessMode === "platform_admin_preview";
   const contextLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : undefined;
@@ -218,6 +220,7 @@ export function ProductAppShell({
             {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} onClick={() => setMoreOpen(false)}><WebsiteIcon /><span>{option.name}</span></Link>)}
             <section className="owner-workspace-mobile-account" aria-label="Account">
               <AccountIdentity displayName={accountIdentity.displayName} email={accountIdentity.email} contextLabel={contextLabel} />
+              <ThemePreferenceControl />
               <AccountActionList actions={accountActions} onAction={() => setMoreOpen(false)} />
             </section>
           </div>

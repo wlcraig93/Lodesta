@@ -40,8 +40,6 @@ async function workspacePayload(siteId: string, actorId: string) {
     session ? sitePlatformRepository.listAgentRuns(session.id) : []
   ]);
   const artifacts = await Promise.all(versions.map((version) => sitePlatformRepository.getBuildArtifact(version.artifactId)));
-  const activeRun = runs.find((run) => run.status === "queued" || run.status === "running");
-  const activeEvents = activeRun ? await sitePlatformRepository.listAgentRunEvents(activeRun.id, { limit: 500 }) : [];
   const candidate = versions.find((version) => version.status === "candidate");
   const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
   const versionRoutes = Object.fromEntries(versions.map((version, index) => [
@@ -57,7 +55,6 @@ async function workspacePayload(siteId: string, actorId: string) {
     messages,
     runs: runs.map(ownerSiteAgentRun),
     readiness,
-    openFindings: [],
-    activeRunActivity: activeEvents.at(-1)?.name
+    openFindings: []
   };
 }

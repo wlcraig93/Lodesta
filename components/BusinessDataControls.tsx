@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { BusinessState, SiteIntent } from "@/packages/site-contracts";
+import { ProductSelect } from "@/components/ProductUI";
 
 export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }: { siteId: string; state: BusinessState; intent: SiteIntent; sourceSnapshotId?: string }) {
   const router = useRouter();
@@ -59,7 +60,7 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
       <a href="#services">Services</a>
       <a href="#proof-media">Proof and media</a>
       <a href="#site-preferences">Site preferences</a>
-      <label><span>Jump to section</span><select defaultValue="" onChange={(event) => { if (event.target.value) window.location.hash = event.target.value; }}><option value="" disabled>Choose section</option><option value="contact">Contact</option><option value="hours">Hours</option><option value="services">Services</option><option value="proof-media">Proof and media</option><option value="site-preferences">Site preferences</option></select></label>
+      <label><span>Jump to section</span><ProductSelect defaultValue="" onChange={(event) => { if (event.target.value) window.location.hash = event.target.value; }}><option value="" disabled>Choose section</option><option value="contact">Contact</option><option value="hours">Hours</option><option value="services">Services</option><option value="proof-media">Proof and media</option><option value="site-preferences">Site preferences</option></ProductSelect></label>
     </nav>
     <div className="owner-authority-stack">
     {notice ? <div className="site-agent-notice" role="status">{notice}</div> : null}
@@ -84,12 +85,12 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
     <section className="panel" id="services"><div className="section-heading-row"><div><h2>Services</h2><p className="muted">Observed services can be confirmed, hidden, or assigned a dedicated page.</p></div><span className="badge">{state.offerings.length}</span></div>
       <form className="owner-authority-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit("offering:new", { kind: "add_offering", name: String(form.get("name") ?? ""), pageMode: form.get("pageMode") }); }}>
         <label>New service<input name="name" minLength={2} maxLength={160} placeholder="Service name" required /></label>
-        <label>Page<select name="pageMode" defaultValue="dedicated"><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></select></label>
+        <label>Page<ProductSelect name="pageMode" defaultValue="dedicated"><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></ProductSelect></label>
         <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "offering:new" ? "Adding" : "Add service"}</button>
       </form>
       <div className="owner-authority-list">{state.offerings.map((offering) => <form className="owner-authority-row" key={offering.id} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void submit(offering.id, { kind: "set_offering", offeringId: offering.id, enabled: form.get("enabled") === "on", pageMode: form.get("pageMode") }); }}>
         <label className="owner-authority-check"><input name="enabled" type="checkbox" defaultChecked={offering.status !== "inactive" && offering.status !== "rejected"} /><span><strong>{offering.name}</strong><small>{offering.catalogId ? "Catalog service" : "Custom service"} · {offering.status}</small></span></label>
-        <select name="pageMode" defaultValue={offering.pageMode}><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></select>
+        <ProductSelect name="pageMode" defaultValue={offering.pageMode}><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></ProductSelect>
         <button className="button secondary" type="submit" disabled={Boolean(busy)}>{busy === offering.id ? "Saving" : "Update"}</button>
       </form>)}</div>
     </section>
@@ -103,7 +104,7 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
     </section>
     <section className="panel"><div className="section-heading-row"><div><h2>Photos and logo</h2><p className="muted">Source-site, uploaded, and generated media are available to the website manager when they improve the result.</p></div><span className="badge">{state.assets.length}</span></div>
       <form className="owner-asset-upload" onSubmit={uploadAsset}>
-        <label>Type<select name="assetKind" defaultValue="photo"><option value="photo">Photo</option><option value="logo">Logo</option></select></label>
+        <label>Type<ProductSelect name="assetKind" defaultValue="photo"><option value="photo">Photo</option><option value="logo">Logo</option></ProductSelect></label>
         <label>Image<input name="assetFile" type="file" accept="image/png,image/jpeg,image/webp" required /></label>
         <label>Alt text<input name="assetAlt" maxLength={180} placeholder="Describe the image" required /></label>
         <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "asset-upload" ? "Uploading" : "Add asset"}</button>

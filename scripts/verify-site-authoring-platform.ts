@@ -4,10 +4,12 @@ import {
   agentAuthoredArtifactSchema,
   normalizeAgentAuthoredArtifact,
   prepareSiteArtifact,
-  sanitizeAgentCss
+  sanitizeAgentCss,
+  sanitizeAgentHtml
 } from "../packages/site-verification";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts/platform-manifest";
 import {
+  classifySiteAuthoringFailure,
   createAuthoringContextPacket,
   SiteAuthoringTerminalError,
   validateWorkspaceSourcePolicy
@@ -62,6 +64,71 @@ assert(prepared.factBindings.some((binding) => binding.sourceFactIds.includes(ph
 assert(prepared.factBindings.some((binding) => binding.origin === "structured_data" && !binding.span));
 assert(prepared.capabilityBindings.some((binding) => binding.kind === "form"));
 assert(prepared.capabilityBindings.some((binding) => binding.kind === "map"));
+
+const compactPresentation = prepareSiteArtifact({
+  authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>Visit the Austin shop</h1><span data-lodesta-business-hours data-lodesta-hours-variant="summary" data-lodesta-fact-id="${hours.id}">Monday–Friday: 8:00 AM-5:30 PM; Saturday–Sunday: Closed</span><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(
+  !errors(compactPresentation).some((finding) => finding.id === "fact.sdk_value_mismatch"),
+  "Canonical compact hours or local address presentation lost its source fact binding."
+);
+
+const serviceRouteInput = {
+  ...input,
+  intent: {
+    ...input.intent,
+    pageRequirements: [
+      ...input.intent.pageRequirements,
+      { id: "page_collision", purpose: "service" as const, slug: "collision-repair", title: "Collision Repair", required: true },
+      { id: "page_campaign", purpose: "custom" as const, slug: "campaign", title: "Campaign", required: false }
+    ]
+  }
+};
+const serviceRouteArtifact = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      {
+        path: "/",
+        title: "Northstar Collision Repair in Austin",
+        description: "Austin collision repair services, contact information, and next steps from Northstar Collision Repair.",
+        bodyHtml: `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong><nav><a href="/collision-repair">Collision repair</a></nav></header><main><h1>Collision repair in Austin</h1></main>`
+      },
+      {
+        path: "/collision-repair",
+        title: "Collision Repair | Northstar Collision Repair",
+        description: "Learn about collision repair from Northstar Collision Repair and request help from the Austin shop.",
+        bodyHtml: `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1 data-lodesta-fact-id="${offering.id}">${offering.value}</h1><p>Help with repair needs.</p></main>`
+      },
+      {
+        path: "/campaign",
+        title: "Campaign | Northstar Collision Repair",
+        description: "A standalone campaign route for Northstar Collision Repair with a direct contact action.",
+        bodyHtml: `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>Campaign</h1><a href="tel:${phone.value}" data-lodesta-fact-id="${phone.id}">Call the shop</a></main>`
+      }
+    ],
+    capabilityBindings: []
+  }),
+  buildInput: serviceRouteInput,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(
+  serviceRouteArtifact.findings.some((finding) => finding.id === "route.thin_service_content" && finding.route === "/collision-repair" && finding.severity === "warning"),
+  "A dedicated service route below the substantive-content floor was not reported."
+);
+assert(
+  serviceRouteArtifact.findings.some((finding) => finding.id === "route.orphan" && finding.route === "/campaign" && finding.severity === "warning"),
+  "A declared orphan route did not produce an IA advisory."
+);
+assert(
+  !serviceRouteArtifact.findings.some((finding) => finding.id === "route.orphan" && finding.severity === "error"),
+  "An orphan route was incorrectly promoted to an unconditional release blocker."
+);
 
 const provisionalInput = sitePublicBuildInputSchema.parse({
   ...input,
@@ -164,6 +231,18 @@ const asset = {
 assert.equal(sanitizeAgentCss(`.hero{background-image:url("asset://${asset.assetId}")}`, [asset]).findings.length, 0);
 assert(sanitizeAgentCss(`.hero{background-image:u\\72l("https://evil.example/x")}`, [asset]).findings.some((finding) => finding.severity === "error"));
 assert(sanitizeAgentCss(`.hero{background-image:url("asset://unknown")}`, [asset]).findings.some((finding) => finding.severity === "error"));
+const prioritizedAsset = sanitizeAgentHtml({
+  route: "/",
+  bodyHtml: `<img src="asset://${asset.assetId}" alt="Workshop exterior" loading="eager" fetchpriority="high">`,
+  declaredRoutes: new Set(["/"]),
+  assets: [asset],
+  allowedFormIds: new Set(),
+  allowedExternalHrefs: new Set(),
+  allowedPhoneNumbers: new Set(),
+  allowedEmailAddresses: new Set()
+});
+assert.equal(prioritizedAsset.findings.length, 0, "Explicit image loading hints were rejected by the public artifact sanitizer.");
+assert(prioritizedAsset.html.includes('loading="eager"') && prioritizedAsset.html.includes('fetchpriority="high"'), "The sanitizer dropped explicitly allowlisted image loading hints.");
 
 const ordinaryReact = validateWorkspaceSourcePolicy([
   {
@@ -206,9 +285,38 @@ const websiteSnapshot = sourceSnapshotSchema.parse({
     }
   }
 });
+const structuredContextSnapshot = sourceSnapshotSchema.parse({
+  ...websiteSnapshot,
+  id: "source_context_structured_fixture",
+  contentHash: `sha256:${"8".repeat(64)}`,
+  payload: {
+    ingestion: {
+      coverage: "complete",
+      modelBlocks: [
+        { id: "service_block_1", sourceUrl: "https://northstar.example/collision-repair", displayText: "Collision Repair includes documented body and paint damage repair.", evidenceClass: "first_party" },
+        { id: "service_block_2", sourceUrl: "https://northstar.example/collision-repair", displayText: "Collision Repair scope and timing depend on the vehicle damage and parts.", evidenceClass: "first_party" },
+        { id: "home_block_1", sourceUrl: "https://northstar.example/", displayText: "Northstar Collision Repair serves Austin.", evidenceClass: "first_party" }
+      ],
+      pages: [{
+        url: "https://northstar.example/collision-repair",
+        evidenceClass: "first_party",
+        summary: {
+          url: "https://northstar.example/collision-repair",
+          purposeTags: ["service_detail"]
+        }
+      }]
+    }
+  }
+});
+const structuredContext = createAuthoringContextPacket({ buildInput: input, snapshots: [structuredContextSnapshot] });
+assert.equal(structuredContext.serviceBriefs[0]?.name, "Collision Repair");
+assert.deepEqual(structuredContext.serviceBriefs[0]?.sourceWording, ["Collision Repair"]);
+assert.deepEqual(structuredContext.serviceBriefs[0]?.evidence.map((block) => block.id).sort(), ["service_block_1", "service_block_2"]);
+assert(!structuredContext.evidenceGaps.missing.includes("service_detail"), "Two source-backed service blocks were still reported as a service-detail evidence gap.");
+assert(structuredContext.supplementalContext.blocks.some((block) => block.id === "home_block_1"), "General first-party context disappeared when service briefs were structured.");
 const contextPacket = createAuthoringContextPacket({ buildInput: input, snapshots: [websiteSnapshot] });
 assert(contextPacket.truncated, "optional authoring blocks did not truncate at the packet boundary");
-assert.equal(contextPacket.crawl.blocks.length, 1, "authoring packet truncated inside or after the wrong block");
+assert.equal(contextPacket.supplementalContext.blocks.length, 1, "authoring packet truncated inside or after the wrong block");
 assert(!JSON.stringify(contextPacket).includes("canonicalTokens"), "authoring packet retained token-offset arrays");
 assert.throws(
   () => createAuthoringContextPacket({
@@ -218,7 +326,17 @@ assert.throws(
     } as SitePublicBuildInput,
     snapshots: []
   }),
-  (error) => error instanceof SiteAuthoringTerminalError && error.code === "input_budget_exhausted"
+  (error) => error instanceof SiteAuthoringTerminalError && error.code === "artifact_contract_invalid"
+);
+assert.deepEqual(
+  classifySiteAuthoringFailure(new Error("browser_verification_unavailable:axe-core")),
+  {
+    code: "browser_verification_unavailable",
+    category: "platform",
+    retryableByOwner: true,
+    message: "browser_verification_unavailable:axe-core"
+  },
+  "Canonical browser instrumentation failures are not owner-retryable."
 );
 
 process.stdout.write(`${JSON.stringify({

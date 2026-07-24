@@ -53,6 +53,52 @@ export type SiteAgentRunAdminRecord = {
   issue?: string;
 };
 
+export type SiteAgentRunAdminSort =
+  | "newest"
+  | "oldest"
+  | "highest_cost"
+  | "lowest_cost"
+  | "longest_duration";
+
+export type SiteAgentRunAdminQuery = {
+  search?: string;
+  statuses?: SiteAgentRun["status"][];
+  siteId?: string;
+  range?: "24h" | "7d" | "30d";
+  startedAfter?: string;
+  startedBefore?: string;
+  sort?: SiteAgentRunAdminSort;
+  offset?: number;
+  limit?: number;
+};
+
+export type SiteAgentRunAdminListItem = {
+  id: string;
+  siteId: string;
+  siteSlug?: string;
+  status: SiteAgentRun["status"];
+  stage: SiteAgentRun["stage"];
+  kind: SiteAgentRun["kind"];
+  executionDriver: SiteAgentRun["executionDriver"];
+  apiProvider?: SiteAgentRun["apiProvider"];
+  modelId?: string;
+  tokenCount?: number;
+  costUsd?: number;
+  costSource?: Extract<SiteAgentRun["usage"], { kind: "model_reported" }>["costSource"];
+  durationMs: number;
+  startedAt: string;
+  completedAt?: string;
+  failureCode?: string;
+  failureCategory?: string;
+  failurePreview?: string;
+  issue?: string;
+};
+
+export type SiteAgentRunAdminPage = {
+  items: SiteAgentRunAdminListItem[];
+  total: number;
+};
+
 export type BootstrapSiteV1Input = {
   site: PlatformSiteRecord;
   state: BusinessState;
@@ -141,10 +187,11 @@ export interface SitePlatformRepository {
   getAgentRunAdminRecord(id: string): Promise<SiteAgentRunAdminRecord | undefined>;
   listAgentRuns(sessionId: string): Promise<SiteAgentRun[]>;
   listRecentAgentRuns(input?: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number }): Promise<SiteAgentRun[]>;
-  listRecentAgentRunAdminRecords(input?: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number }): Promise<SiteAgentRunAdminRecord[]>;
+  listAgentRunAdminPage(input?: SiteAgentRunAdminQuery): Promise<SiteAgentRunAdminPage>;
   listQueuedAgentRuns(limit: number): Promise<SiteAgentRun[]>;
   listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRun[]>;
   saveAgentRunEvents(events: SiteAgentRunEvent[]): Promise<SiteAgentRunEvent[]>;
+  getAgentRunEvent(runId: string, eventId: string): Promise<SiteAgentRunEvent | undefined>;
   listAgentRunEvents(runId: string, input?: { afterSequence?: number; limit?: number }): Promise<SiteAgentRunEvent[]>;
   failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string): Promise<void>;
   acquireMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
@@ -522,8 +569,23 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, Math.max(1, Math.min(input.limit ?? 100, 500)))
       .map((run) => clone(run) as SiteAgentRun);
   }
-  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
-    return (await this.listRecentAgentRuns(input)).map((run) => ({ id: run.id, schemaVersion: run.schemaVersion, run }));
+  async listAgentRunAdminPage(input: SiteAgentRunAdminQuery = {}) {
+    const state = await this.read();
+    const offset = Math.max(0, input.offset ?? 0);
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
+    const search = input.search?.trim().toLocaleLowerCase();
+    const items = Object.values(state.runs)
+      .map((run) => adminRunListItem(run, state.sites[run.siteId]?.slug))
+      .filter((item) => {
+        if (input.statuses?.length && !input.statuses.includes(item.status)) return false;
+        if (input.siteId && item.siteId !== input.siteId) return false;
+        if (input.startedAfter && item.startedAt < input.startedAfter) return false;
+        if (input.startedBefore && item.startedAt > input.startedBefore) return false;
+        if (!search) return true;
+        return adminRunSearchText(item).includes(search);
+      })
+      .sort(adminRunSort(input.sort ?? "newest"));
+    return { items: items.slice(offset, offset + limit), total: items.length };
   }
   async listQueuedAgentRuns(limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "queued" && run.executionDriver === "responses_api")
@@ -545,6 +607,10 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         store.runEvents[parsed.id] = parsed;
       }
     }).then(() => this.listAgentRunEventsForIds(events.map((event) => event.id)));
+  }
+  async getAgentRunEvent(runId: string, eventId: string) {
+    const event = (await this.read()).runEvents[eventId];
+    return event?.runId === runId ? clone(event) as SiteAgentRunEvent : undefined;
   }
   async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
     return Object.values((await this.read()).runEvents ?? {}).filter((event) => event.runId === runId && event.sequence > (input.afterSequence ?? -1))
@@ -1070,13 +1136,30 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Array<{ run: unknown }>>(query, "List recent site agent runs");
     return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
-  async listRecentAgentRunAdminRecords(input: { siteId?: string; status?: SiteAgentRun["status"]; limit?: number } = {}) {
-    let query = this.client.from("site_agent_runs").select("id,schema_version,run").order("started_at", { ascending: false })
-      .limit(Math.max(1, Math.min(input.limit ?? 100, 500)));
+  async listAgentRunAdminPage(input: SiteAgentRunAdminQuery = {}) {
+    const offset = Math.max(0, input.offset ?? 0);
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
+    let query = this.client.from("site_agent_run_admin_inventory")
+      .select("*", { count: "exact" });
+    if (input.search?.trim()) query = query.ilike("search_text", `%${escapeLike(input.search.trim())}%`);
+    if (input.statuses?.length) query = query.in("status", input.statuses);
     if (input.siteId) query = query.eq("site_id", input.siteId);
-    if (input.status) query = query.eq("status", input.status);
-    const rows = await requireData<Array<{ id: string; schema_version: string; run: unknown }>>(query, "List site-agent runs for admin");
-    return rows.map(adminRunRecord);
+    if (input.startedAfter) query = query.gte("started_at", input.startedAfter);
+    if (input.startedBefore) query = query.lte("started_at", input.startedBefore);
+    const sort = input.sort ?? "newest";
+    if (sort === "highest_cost" || sort === "lowest_cost") {
+      query = query.order("cost_usd", { ascending: sort === "lowest_cost", nullsFirst: false });
+    } else if (sort === "longest_duration") {
+      query = query.order("duration_ms", { ascending: false, nullsFirst: false });
+    } else {
+      query = query.order("started_at", { ascending: sort === "oldest" });
+    }
+    if (!["newest", "oldest"].includes(sort)) query = query.order("started_at", { ascending: false });
+    query = query.order("id", { ascending: true }).range(offset, offset + limit - 1);
+    const response = await query;
+    if (response.error) throw new Error(`List site-agent runs for admin: ${response.error.message}`);
+    const rows = (response.data ?? []) as Record<string, unknown>[];
+    return { items: rows.map(adminRunListItemFromRow), total: response.count ?? rows.length };
   }
   async listQueuedAgentRuns(limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
@@ -1126,6 +1209,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       completed_at: value.completedAt
     })), { onConflict: "id" }).select("*"), "Save run events");
     return rows.map(runEventFromRow).sort((left, right) => left.sequence - right.sequence);
+  }
+  async getAgentRunEvent(runId: string, eventId: string) {
+    const row = await requireData<Record<string, unknown> | null>(
+      this.client.from("site_agent_run_events").select("*").eq("run_id", runId).eq("id", eventId).maybeSingle(),
+      "Load run event"
+    );
+    return row ? runEventFromRow(row) : undefined;
   }
   async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
     let query = this.client.from("site_agent_run_events").select("*").eq("run_id", runId).order("sequence")
@@ -1410,6 +1500,99 @@ function adminRunRecord(row: { id: string; schema_version: string; run: unknown 
   return parsed.success
     ? { id: row.id, schemaVersion: row.schema_version, run: parsed.data }
     : { id: row.id, schemaVersion: row.schema_version, issue: "stale schema - rebuild" };
+}
+
+function adminRunListItem(run: SiteAgentRun, siteSlug?: string): SiteAgentRunAdminListItem {
+  const usage = run.usage.kind === "model_reported" ? run.usage : undefined;
+  return {
+    id: run.id,
+    siteId: run.siteId,
+    siteSlug,
+    status: run.status,
+    stage: run.stage,
+    kind: run.kind,
+    executionDriver: run.executionDriver,
+    apiProvider: run.apiProvider,
+    modelId: run.modelId ?? run.externalProvenance?.clientReportedModelId,
+    tokenCount: usage ? usage.inputTokens + usage.outputTokens : undefined,
+    costUsd: usage?.costSource === "unavailable" ? undefined : usage?.costUsd,
+    costSource: usage?.costSource,
+    durationMs: run.usage.durationMs,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    failureCode: run.failureCode,
+    failureCategory: run.failureCategory,
+    failurePreview: run.failureReason ? boundedPreview(run.failureReason) : undefined
+  };
+}
+
+function adminRunListItemFromRow(row: Record<string, unknown>): SiteAgentRunAdminListItem {
+  return {
+    id: String(row.id),
+    siteId: String(row.site_id),
+    siteSlug: typeof row.site_slug === "string" ? row.site_slug : undefined,
+    status: row.status as SiteAgentRun["status"],
+    stage: (row.stage ?? "failed") as SiteAgentRun["stage"],
+    kind: row.kind as SiteAgentRun["kind"],
+    executionDriver: row.execution_driver as SiteAgentRun["executionDriver"],
+    apiProvider: row.api_provider as SiteAgentRun["apiProvider"] | undefined,
+    modelId: typeof row.model_id === "string" ? row.model_id : undefined,
+    tokenCount: numeric(row.token_count),
+    costUsd: numeric(row.cost_usd),
+    costSource: row.cost_source as SiteAgentRunAdminListItem["costSource"],
+    durationMs: numeric(row.duration_ms) ?? 0,
+    startedAt: String(row.started_at),
+    completedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
+    failureCode: typeof row.failure_code === "string" ? row.failure_code : undefined,
+    failureCategory: typeof row.failure_category === "string" ? row.failure_category : undefined,
+    failurePreview: typeof row.failure_reason === "string" ? boundedPreview(row.failure_reason) : undefined,
+    issue: typeof row.issue === "string" ? row.issue : undefined
+  };
+}
+
+function adminRunSearchText(item: SiteAgentRunAdminListItem) {
+  return [
+    item.id,
+    item.siteId,
+    item.siteSlug,
+    item.modelId,
+    item.apiProvider,
+    item.executionDriver,
+    item.kind,
+    item.failureCode
+  ].filter(Boolean).join(" ").toLocaleLowerCase();
+}
+
+function adminRunSort(sort: SiteAgentRunAdminSort) {
+  return (left: SiteAgentRunAdminListItem, right: SiteAgentRunAdminListItem) => {
+    if (sort === "newest") return right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id);
+    if (sort === "oldest") return left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id);
+    if (sort === "longest_duration") {
+      return right.durationMs - left.durationMs || right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id);
+    }
+    const leftCost = left.costUsd;
+    const rightCost = right.costUsd;
+    if (leftCost === undefined && rightCost === undefined) return right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id);
+    if (leftCost === undefined) return 1;
+    if (rightCost === undefined) return -1;
+    return (sort === "highest_cost" ? rightCost - leftCost : leftCost - rightCost)
+      || right.startedAt.localeCompare(left.startedAt)
+      || left.id.localeCompare(right.id);
+  };
+}
+
+function boundedPreview(value: string) {
+  return value.length <= 240 ? value : `${value.slice(0, 237)}...`;
+}
+
+function numeric(value: unknown) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function escapeLike(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }
 
 function controlPlaneChangeFromRow(row: Record<string, unknown>) {

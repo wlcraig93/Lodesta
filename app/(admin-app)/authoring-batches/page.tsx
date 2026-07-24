@@ -7,6 +7,7 @@ import {
   getExternalAuthoringBatchView
 } from "@/packages/external-authoring/service";
 import { externalAuthoringRepository } from "@/packages/external-authoring/repository";
+import { humanize } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 
@@ -69,8 +70,4 @@ export default async function AuthoringBatchesPage() {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
-}
-
-function humanize(value: string) {
-  return value.replaceAll("_", " ");
 }

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { z } from "zod";
 import type { SiteRedirectRule } from "@/packages/platform-operations";
 import { parseJsonResponse } from "@/lib/client-json";
+import { ProductSelect } from "@/components/ProductUI";
 
 const redirectResponseSchema = z.object({ error: z.string().optional() }).passthrough();
 
@@ -63,9 +64,9 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
         </label>
         <label>
           <span>Destination</span>
-          <select value={destinationPath} onChange={(event) => setDestinationPath(event.target.value)} disabled={disabled}>
+          <ProductSelect value={destinationPath} onChange={(event) => setDestinationPath(event.target.value)} disabled={disabled}>
             {routes.map((route) => <option key={route.path} value={route.path}>{route.title} ({route.path})</option>)}
-          </select>
+          </ProductSelect>
         </label>
         <button className="button primary" type="submit" disabled={disabled}>Save redirect</button>
         {disabled ? <p className="form-status">Publish a site version before adding redirects.</p> : null}

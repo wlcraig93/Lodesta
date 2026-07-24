@@ -29,8 +29,8 @@ export function AssessmentScanForm() {
   }
 
   return (
-    <form className="admin-filter-form" onSubmit={submit}>
-      <label className="sr-only" htmlFor="assessment-url">Public website URL</label>
+    <form className="admin-filter-form assessment-scan-form" onSubmit={submit}>
+      <label className="product-visually-hidden" htmlFor="assessment-url">Public website URL</label>
       <input
         id="assessment-url"
         value={url}

@@ -196,7 +196,7 @@ export interface SitePlatformRepository {
   listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRun[]>;
   saveAgentRunEvents(events: SiteAgentRunEvent[]): Promise<SiteAgentRunEvent[]>;
   getAgentRunEvent(runId: string, eventId: string): Promise<SiteAgentRunEvent | undefined>;
-  listAgentRunEvents(runId: string, input?: { afterSequence?: number; limit?: number }): Promise<SiteAgentRunEvent[]>;
+  listAgentRunEvents(runId: string, input?: { afterSequence?: number; limit?: number; order?: "ascending" | "descending" }): Promise<SiteAgentRunEvent[]>;
   failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string): Promise<void>;
   acquireMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
   renewMaintenanceLease(task: string, leaseTokenHash: string, now: string, leaseUntil: string): Promise<boolean>;
@@ -627,9 +627,10 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     const event = (await this.read()).runEvents[eventId];
     return event?.runId === runId ? clone(event) as SiteAgentRunEvent : undefined;
   }
-  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
+  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number; order?: "ascending" | "descending" } = {}) {
     return Object.values((await this.read()).runEvents ?? {}).filter((event) => event.runId === runId && event.sequence > (input.afterSequence ?? -1))
-      .sort((left, right) => left.sequence - right.sequence).slice(0, Math.max(1, Math.min(input.limit ?? 500, 1000)))
+      .sort((left, right) => (input.order === "descending" ? -1 : 1) * (left.sequence - right.sequence))
+      .slice(0, Math.max(1, Math.min(input.limit ?? 500, 1000)))
       .map((event) => clone(event) as SiteAgentRunEvent);
   }
   failOpenAgentRunEvents(runId: string, completedAt: string, errorCode: string) {
@@ -1248,8 +1249,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return row ? runEventFromRow(row) : undefined;
   }
-  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number } = {}) {
-    let query = this.client.from("site_agent_run_events").select("*").eq("run_id", runId).order("sequence")
+  async listAgentRunEvents(runId: string, input: { afterSequence?: number; limit?: number; order?: "ascending" | "descending" } = {}) {
+    let query = this.client.from("site_agent_run_events").select("*").eq("run_id", runId)
+      .order("sequence", { ascending: input.order !== "descending" })
       .limit(Math.max(1, Math.min(input.limit ?? 500, 1000)));
     if (input.afterSequence !== undefined) query = query.gt("sequence", input.afterSequence);
     return (await requireData<Record<string, unknown>[]>(query, "List run events")).map(runEventFromRow);

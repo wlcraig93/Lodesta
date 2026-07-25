@@ -2,6 +2,7 @@ import { chromium } from "playwright";
 import { appOriginEnvName } from "./app-origin";
 import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { expectedSiteSandboxManifest } from "@/packages/site-contracts";
 
 export type HealthState = "ok" | "warning" | "error";
 export type HealthCheck = { id: string; label: string; state: HealthState; detail: string };
@@ -62,11 +63,33 @@ async function checkRepositoryReadiness() {
   catch (caught) { return error("repository_readiness", "Repository readiness", message(caught)); }
 }
 
-async function checkSandboxReadiness() {
-  if (!process.env.LODESTA_SANDBOX_URL || !process.env.LODESTA_SANDBOX_TOKEN) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
+export async function checkSandboxReadiness(input: {
+  url?: string;
+  token?: string;
+  fetcher?: typeof fetch;
+  timeoutMs?: number;
+} = {}) {
+  const url = input.url ?? process.env.LODESTA_SANDBOX_URL;
+  const token = input.token ?? process.env.LODESTA_SANDBOX_TOKEN;
+  if (!url || !token) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
   try {
-    const response = await fetch(`${process.env.LODESTA_SANDBOX_URL.replace(/\/$/, "")}/health`, { headers: { authorization: `Bearer ${process.env.LODESTA_SANDBOX_TOKEN}` }, signal: AbortSignal.timeout(8_000) });
-    return response.ok ? ok("sandbox_readiness", "Sandbox readiness", "Cloudflare Sandbox responded.") : error("sandbox_readiness", "Sandbox readiness", `Sandbox returned ${response.status}.`);
+    const response = await (input.fetcher ?? fetch)(`${url.replace(/\/$/, "")}/health`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(input.timeoutMs ?? 8_000)
+    });
+    if (!response.ok) return error("sandbox_readiness", "Sandbox readiness", `Sandbox returned ${response.status}.`);
+    const payload = await response.json().catch(() => undefined) as { sandboxManifest?: unknown } | undefined;
+    if (!validSandboxManifest(payload?.sandboxManifest)) {
+      return error("sandbox_readiness", "Sandbox readiness", "Sandbox returned a malformed compatibility manifest.");
+    }
+    if (!sameSandboxManifest(payload.sandboxManifest, expectedSiteSandboxManifest)) {
+      return error(
+        "sandbox_readiness",
+        "Sandbox readiness",
+        `Sandbox manifest mismatch. Expected ${JSON.stringify(expectedSiteSandboxManifest)}; received ${JSON.stringify(payload.sandboxManifest)}.`
+      );
+    }
+    return ok("sandbox_readiness", "Sandbox readiness", "Cloudflare Sandbox is compatible with this controller.");
   } catch (caught) { return error("sandbox_readiness", "Sandbox readiness", message(caught)); }
 }
 
@@ -81,3 +104,27 @@ function worst(states: HealthState[]): HealthState { return states.includes("err
 function ok(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "ok", detail }; }
 function warning(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "warning", detail }; }
 function error(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "error", detail }; }
+
+type SandboxManifest = {
+  kind: "site-sandbox-manifest";
+  artifactContractIdentity: string;
+  toolchainIdentity: string;
+  sourcePolicyIdentity: string;
+};
+
+function validSandboxManifest(value: unknown): value is SandboxManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  return manifest.kind === "site-sandbox-manifest"
+    && typeof manifest.artifactContractIdentity === "string"
+    && typeof manifest.toolchainIdentity === "string"
+    && typeof manifest.sourcePolicyIdentity === "string"
+    && Object.keys(manifest).length === 4;
+}
+
+function sameSandboxManifest(left: SandboxManifest, right: SandboxManifest) {
+  return left.kind === right.kind
+    && left.artifactContractIdentity === right.artifactContractIdentity
+    && left.toolchainIdentity === right.toolchainIdentity
+    && left.sourcePolicyIdentity === right.sourcePolicyIdentity;
+}

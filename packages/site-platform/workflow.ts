@@ -2272,7 +2272,7 @@ export class SiteAuthoringWorkflow {
     const prepared = await createSiteRuntimePatch({
       id: id("runtime_patch"),
       seriesId: runtimeSeriesId,
-      sourceRevision: process.env.RAILWAY_GIT_COMMIT_SHA ?? "working-tree",
+      sourceRevision: process.env.LODESTA_RELEASE_GIT_SHA ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? "working-tree",
       builderVersion: "trusted-runtime-builder@sha256:31d24faf0bf5265f2af840b87c7c5f2e2b6811780b68e949086e5b55da80cf61",
       securityStatus: "audited",
       compatibilityStatus: "passed"
@@ -2431,8 +2431,13 @@ function principalLabel(session: SiteAgentSession) {
 
 export const siteAgentRecoveryStaleAfterMs = 45 * 60_000;
 
-export function configuredSandboxImageDigest() {
-  return sandboxImageDigest;
+export function configuredSandboxImageDigest(environment: NodeJS.ProcessEnv = process.env) {
+  const configured = environment.LODESTA_SANDBOX_IMAGE_DIGEST?.trim();
+  if (!configured) return sandboxImageDigest;
+  if (!/^sha256:[a-f0-9]{64}$/.test(configured)) {
+    throw new Error("LODESTA_SANDBOX_IMAGE_DIGEST must be a SHA-256 content digest.");
+  }
+  return configured as `sha256:${string}`;
 }
 
 function asContentHash(value: string) {

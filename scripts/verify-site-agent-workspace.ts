@@ -79,7 +79,7 @@ assert(frame.includes('panelMode === "full-chat"') && frame.includes("return;\n 
 assert(frame.includes("desktopFullChat ? true : undefined"), "The mounted preview is not made inert in full-chat mode");
 
 assert(!component.includes('message.role === "agent" ? "Lodesta"'), "Visible chat author labels remain");
-assert(component.includes("messageAuthorLabel(message.role)"), "Chat authors are not exposed accessibly");
+assert(component.includes("messageAuthorLabel(item.message.role)"), "Chat authors are not exposed accessibly");
 assert(component.includes("busy && !workspace.session ? (") && component.includes("Opening workspace"), "Initial workspace loading is not distinct from a genuinely empty conversation");
 assert(component.includes('aria-busy={busy && !workspace.session ? true : undefined}'), "Initial workspace loading is not exposed accessibly");
 assert(css.includes(".site-agent-loading-message") && css.includes("site-agent-loading-message > .site-agent-send-spinner"), "Initial workspace loading does not use the product loading treatment");
@@ -91,7 +91,12 @@ assert(component.includes("site-agent-voice-button") && component.includes("aria
 assert(component.includes("if (listening) stopDictation();") && component.includes("recognition.stop()"), "Composer voice input does not stop cleanly on user input and teardown");
 assert(component.includes('activeRun?.kind === "initial_build"'), "Initial-build composer lock is not tied to the active initial build");
 assert(component.includes('placeholder={initialBuildActive ? "Available when your first draft is ready"') && component.includes("disabled={initialBuildActive}"), "Initial-build composer does not explain and enforce its unavailable state");
-assert(component.includes("activeRun.progress.label") && component.includes("activeRun.progress.detail"), "Workspace progress does not use the owner-safe run projection");
+assert(component.includes("RunActivityCard") && component.includes("activitySnapshots[item.run.id]")
+  && component.includes("ownerTranscriptItems(workspace.messages, workspace.runs)"), "Workspace progress does not use owner-safe run activity snapshots");
+assert(component.includes("event.nativeEvent.isComposing") && component.includes("event.shiftKey")
+  && component.includes("event.preventDefault()"), "Composer Enter, Shift+Enter, or IME submission semantics are incomplete");
+assert(!component.includes('className="site-agent-messages" aria-live=')
+  && component.includes('aria-live="polite" aria-atomic="true"'), "High-frequency transcript activity remains in a live region");
 assert(!sessionRoute.includes("activeRunActivity"), "Owner session payload still exposes raw run event activity");
 for (const label of [
   "Preparing your website",
@@ -110,7 +115,7 @@ assert(css.includes("grid-template-columns: var(--site-agent-panel-width"), "Des
 assert(css.includes('.site-agent-workspace[data-panel-mode="collapsed"]') && css.includes("grid-template-columns: 52px"), "Collapsed chat rail is not implemented");
 assert(css.includes('.site-agent-workspace[data-panel-mode="full-chat"]') && css.includes("width: min(100%, 760px)"), "Full-chat composition is not implemented");
 assert(css.includes("max-height: 160px") && css.includes("border-radius: var(--product-radius-lg)") && css.includes("resize: none") && css.includes("caret-color: var(--product-color-primary)"), "Composer does not use the canonical content-hugging command-dock treatment");
-assert(css.includes(".site-agent-send-button") && css.includes("width: 40px"), "Desktop arrow send control is not compact");
+assert(css.includes(".site-agent-send-button") && css.includes("width: var(--product-control-height-compact)"), "Desktop arrow send control is not compact");
 assert(css.includes(".site-agent-voice-button,\n  .site-agent-send-button {\n    width: 44px") && css.includes(".site-agent-compose-mode-trigger") && css.includes(".site-agent-compose-mode-menu button"), "Mobile composer controls do not meet the touch-target contract");
 assert(css.includes("background: var(--product-color-primary-surface)"), "Owner messages do not retain the green surface");
 assert(css.includes('.site-agent-workspace[data-mobile-pane="chat"] .site-agent-preview-column'), "Mobile Chat mode does not hide the mounted preview pane");

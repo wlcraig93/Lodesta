@@ -11,7 +11,11 @@ import type {
   SitePublicBuildInput,
   SiteVersion
 } from "@/packages/site-contracts";
-import type { OwnerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
+import type {
+  OwnerActivityGroup,
+  OwnerActivitySnapshot,
+  OwnerSiteAgentRun
+} from "@/packages/site-platform/owner-run-view";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
@@ -43,6 +47,7 @@ type DiscussionResult = {
 };
 
 type VoiceSupport = "checking" | "supported" | "unsupported";
+type ActivityLoadState = "idle" | "loading" | "loaded" | "error";
 
 type SpeechRecognitionResultLike = {
   0?: { transcript?: string };
@@ -120,11 +125,16 @@ export function SiteAgentWorkspace({
   const [publishHintOpen, setPublishHintOpen] = useState(false);
   const [voiceSupport, setVoiceSupport] = useState<VoiceSupport>("checking");
   const [listening, setListening] = useState(false);
+  const [activitySnapshots, setActivitySnapshots] = useState<Record<string, OwnerActivitySnapshot>>({});
+  const [activityLoads, setActivityLoads] = useState<Record<string, ActivityLoadState>>({});
+  const [liveAnnouncement, setLiveAnnouncement] = useState("");
+  const [newActivity, setNewActivity] = useState(false);
   const previewMoreId = useId();
   const publishReasonId = useId();
   const composerUnavailableId = useId();
   const voiceStatusId = useId();
   const endRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const previewMoreRef = useRef<HTMLDivElement>(null);
@@ -135,12 +145,18 @@ export function SiteAgentWorkspace({
   const selectedPagePathRef = useRef("/");
   const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
   const dictationContextRef = useRef<DictationContext | undefined>(undefined);
+  const activityRequestsRef = useRef(new Map<string, AbortController>());
+  const announcedRunsRef = useRef(new Map<string, OwnerSiteAgentRun>());
+  const followsLatestRef = useRef(true);
+  const transcriptVersionRef = useRef("");
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
   const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
   const initialBuildActive = activeRun?.kind === "initial_build";
   const waitingRun = !activeRun ? workspace.runs.find((run) => run.status === "needs_input") : undefined;
-  const failedRun = !activeRun ? workspace.runs.find((run) => run.status === "failed") : undefined;
+  const latestCompletedRun = workspace.runs.find((run) =>
+    run.status === "succeeded" || run.status === "failed" || run.status === "cancelled"
+  );
   const selectedVersion = workspace.versions.find((version) => version.id === selectedVersionId)
     ?? latestCandidate
     ?? workspace.versions.find((version) => version.status === "published")
@@ -221,7 +237,7 @@ export function SiteAgentWorkspace({
     }
   }, []);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const response = await fetch(`/api/site-agent/sessions?siteId=${encodeURIComponent(initialSite.id)}`, { cache: "no-store" });
     if (!response.ok) throw new Error(await responseMessage(response));
     const next = await response.json() as WorkspacePayload;
@@ -232,7 +248,34 @@ export function SiteAgentWorkspace({
         ?? next.versions.find((version) => version.status === "published")?.id
         ?? next.versions[0]?.id;
     });
-  }
+  }, [initialSite.id]);
+
+  const loadRunActivity = useCallback(async (runId: string, force = false) => {
+    if (!force) {
+      const cached = readOwnerActivityCache(runId);
+      if (cached) {
+        setActivitySnapshots((current) => ({ ...current, [runId]: cached }));
+        setActivityLoads((current) => ({ ...current, [runId]: "loaded" }));
+        return cached;
+      }
+    }
+    if (activityRequestsRef.current.has(runId)) return undefined;
+    const controller = new AbortController();
+    activityRequestsRef.current.set(runId, controller);
+    setActivityLoads((current) => ({ ...current, [runId]: "loading" }));
+    try {
+      const snapshot = await requestOwnerActivity(runId, controller.signal);
+      setActivitySnapshots((current) => ({ ...current, [runId]: snapshot }));
+      setActivityLoads((current) => ({ ...current, [runId]: "loaded" }));
+      if (isSettledOwnerRun(snapshot.run)) writeOwnerActivityCache(snapshot);
+      return snapshot;
+    } catch (error) {
+      if (!controller.signal.aborted) setActivityLoads((current) => ({ ...current, [runId]: "error" }));
+      throw error;
+    } finally {
+      activityRequestsRef.current.delete(runId);
+    }
+  }, []);
 
   async function copyIdentifier(value: string, key: string) {
     try {
@@ -343,11 +386,90 @@ export function SiteAgentWorkspace({
 
   useEffect(() => {
     if (!activeRun) return;
-    const timer = window.setInterval(() => {
-      void refresh().catch((error) => setNotice(error instanceof Error ? error.message : String(error)));
-    }, 1800);
-    return () => window.clearInterval(timer);
-  }, [activeRun?.id]);
+    const runId = activeRun.id;
+    let stopped = false;
+    let inFlight = false;
+    let timer: number | undefined;
+    let controller: AbortController | undefined;
+    if (!announcedRunsRef.current.has(runId)) announcedRunsRef.current.set(runId, activeRun);
+
+    const schedule = (delay: number) => {
+      if (stopped || document.hidden) return;
+      timer = window.setTimeout(() => void poll(), delay);
+    };
+    const poll = async () => {
+      if (stopped || inFlight || document.hidden) return;
+      inFlight = true;
+      controller = new AbortController();
+      try {
+        const snapshot = await requestOwnerActivity(runId, controller.signal);
+        if (stopped) return;
+        const previous = announcedRunsRef.current.get(runId);
+        const announcement = ownerRunAnnouncement(previous, snapshot.run);
+        announcedRunsRef.current.set(runId, snapshot.run);
+        if (announcement) setLiveAnnouncement(announcement);
+        setActivitySnapshots((current) => ({ ...current, [runId]: snapshot }));
+        setActivityLoads((current) => ({ ...current, [runId]: "loaded" }));
+        setWorkspace((current) => ({
+          ...current,
+          runs: current.runs.map((run) => run.id === runId ? snapshot.run : run)
+        }));
+        if (isSettledOwnerRun(snapshot.run)) {
+          writeOwnerActivityCache(snapshot);
+          await refresh();
+          return;
+        }
+        schedule(1000);
+      } catch {
+        if (!stopped && !controller.signal.aborted) {
+          setActivityLoads((current) => ({ ...current, [runId]: "error" }));
+          schedule(3000);
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        if (timer !== undefined) window.clearTimeout(timer);
+        controller?.abort();
+        return;
+      }
+      void refresh()
+        .catch((error) => setNotice(error instanceof Error ? error.message : String(error)))
+        .finally(() => schedule(0));
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    void poll();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [activeRun?.id, refresh]);
+
+  useEffect(() => {
+    const autoLoadIds = [waitingRun?.id, latestCompletedRun?.id]
+      .filter((runId): runId is string => Boolean(runId && runId !== activeRun?.id));
+    for (const runId of new Set(autoLoadIds)) {
+      if (activitySnapshots[runId] || activityLoads[runId] === "loading" || activityLoads[runId] === "loaded") continue;
+      void loadRunActivity(runId).catch(() => undefined);
+    }
+  }, [
+    activeRun?.id,
+    waitingRun?.id,
+    latestCompletedRun?.id,
+    activitySnapshots,
+    activityLoads,
+    loadRunActivity
+  ]);
+
+  useEffect(() => () => {
+    for (const controller of activityRequestsRef.current.values()) controller.abort();
+    activityRequestsRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (!publishBlocked) setPublishHintOpen(false);
@@ -414,9 +536,19 @@ export function SiteAgentWorkspace({
     textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }, [instruction]);
 
+  const transcriptVersion = ownerTranscriptVersion(workspace.messages, workspace.runs, activitySnapshots, discussionSuggestion);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "nearest" });
-  }, [workspace.messages.length, activeRun?.stage, discussionSuggestion?.action]);
+    if (transcriptVersionRef.current === transcriptVersion) return;
+    const hadContent = Boolean(transcriptVersionRef.current);
+    transcriptVersionRef.current = transcriptVersion;
+    if (followsLatestRef.current) {
+      endRef.current?.scrollIntoView({ block: "nearest" });
+      setNewActivity(false);
+    } else if (hadContent) {
+      setNewActivity(true);
+    }
+  }, [transcriptVersion]);
 
   useEffect(() => {
     selectionModeRef.current = selectionMode;
@@ -567,12 +699,13 @@ export function SiteAgentWorkspace({
     }
   }
 
-  async function retry() {
-    if (!failedRun || busy || activeRun) return;
+  async function retry(runId: string) {
+    const failed = workspace.runs.find((run) => run.id === runId && run.status === "failed");
+    if (!failed || busy || activeRun) return;
     setBusy(true);
     setNotice(undefined);
     try {
-      const response = await fetch(`/api/site-agent/runs/${encodeURIComponent(failedRun.id)}/retry`, { method: "POST" });
+      const response = await fetch(`/api/site-agent/runs/${encodeURIComponent(failed.id)}/retry`, { method: "POST" });
       if (!response.ok) throw new Error(await responseMessage(response));
       await refresh();
     } catch (error) {
@@ -581,6 +714,27 @@ export function SiteAgentWorkspace({
       setBusy(false);
     }
   }
+
+  function handleTranscriptScroll() {
+    const element = messagesRef.current;
+    if (!element) return;
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+    followsLatestRef.current = nearBottom;
+    if (nearBottom) setNewActivity(false);
+  }
+
+  function showLatestActivity() {
+    followsLatestRef.current = true;
+    setNewActivity(false);
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  const autoActivityRunIds = new Set([
+    activeRun?.id,
+    waitingRun?.id,
+    latestCompletedRun?.id
+  ].filter((runId): runId is string => Boolean(runId)));
+  const transcriptItems = ownerTranscriptItems(workspace.messages, workspace.runs);
 
   return (
     <WebsiteWorkspaceFrame
@@ -728,74 +882,66 @@ export function SiteAgentWorkspace({
       }
       commandContent={
         <>
-          <div className="site-agent-messages" aria-live="polite" aria-busy={busy && !workspace.session ? true : undefined}>
-            {busy && !workspace.session ? (
-              <div className="site-agent-loading-message" role="status">
-                <span className="site-agent-send-spinner" aria-hidden="true" />
-                <div>
-                  <strong>Opening workspace</strong>
-                  <span>Loading conversation and site context.</span>
+          <div className="site-agent-transcript">
+            <div
+              ref={messagesRef}
+              className="site-agent-messages"
+              aria-busy={busy && !workspace.session ? true : undefined}
+              onScroll={handleTranscriptScroll}
+            >
+              {busy && !workspace.session ? (
+                <div className="site-agent-loading-message" role="status">
+                  <span className="site-agent-send-spinner" aria-hidden="true" />
+                  <div>
+                    <strong>Opening workspace</strong>
+                    <span>Loading conversation and site context.</span>
+                  </div>
                 </div>
-              </div>
-            ) : workspace.messages.length === 0 ? (
-              <ProductEmptyState
-                className="site-agent-empty-message"
-                title="What would you like to improve?"
-                detail="Describe a change, or choose Ask when you want advice without editing the website."
-              >
-                <div className="site-agent-starter-prompts">
-                  {starterPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setComposerMode("edit"); setInstruction(prompt); window.requestAnimationFrame(() => composerRef.current?.focus()); }}>{prompt}</button>)}
-                </div>
-              </ProductEmptyState>
-            ) : null}
-            {workspace.messages.map((message) => (
-              <article key={message.id} className={`site-agent-message is-${message.role}`} aria-label={messageAuthorLabel(message.role)}>
-                <p>{message.content}</p>
-              </article>
-            ))}
-            {discussionSuggestion ? (
-              <article className="site-agent-discussion-suggestion">
-                <strong>Suggested change ready</strong>
-                <div>
-                  <button className="button primary" type="button" onClick={useSuggestion}>Use this suggestion</button>
-                  <button className="button secondary" type="button" onClick={() => setDiscussionSuggestion(undefined)}>Dismiss</button>
-                </div>
-              </article>
-            ) : null}
-            {activeRun ? (
-              <div className="site-agent-runline">
-                <span />
-                <div>
-                  <strong>{activeRun.progress.label}</strong>
-                  <small>{elapsedLabel(clock - Date.parse(activeRun.startedAt))}</small>
-                  <details className="site-agent-run-details">
-                    <summary>What Lodesta is doing</summary>
-                    <p>{activeRun.progress.detail}</p>
-                  </details>
-                </div>
-              </div>
-            ) : null}
-            {waitingRun ? (
-              <div className="site-agent-runline">
-                <span />
-                <div><strong>{waitingRun.progress.label}</strong><small>{waitingRun.progress.detail}</small></div>
-              </div>
-            ) : null}
-            {failedRun ? (
-              <div className="site-agent-runline is-error">
-                <span />
-                <div>
-                  <strong>{failedRun.progress.label}</strong>
-                  <small>{failedRun.progress.detail}</small>
-                  {failedRun.retryableByOwner
-                    ? <button className="button secondary" type="button" disabled={busy} onClick={() => void retry()}>Retry {failedRun.kind === "initial_build" ? "build" : "change"}</button>
-                    : null}
-                </div>
-              </div>
-            ) : null}
-            {notice ? <div className="site-agent-inline-notice" role="status">{notice}</div> : null}
-            <div ref={endRef} />
+              ) : workspace.messages.length === 0 && workspace.runs.length === 0 ? (
+                <ProductEmptyState
+                  className="site-agent-empty-message"
+                  title="What would you like to improve?"
+                  detail="Describe a change, or choose Ask when you want advice without editing the website."
+                >
+                  <div className="site-agent-starter-prompts">
+                    {starterPrompts.map((prompt) => <button key={prompt} type="button" onClick={() => { setComposerMode("edit"); setInstruction(prompt); window.requestAnimationFrame(() => composerRef.current?.focus()); }}>{prompt}</button>)}
+                  </div>
+                </ProductEmptyState>
+              ) : null}
+              {transcriptItems.map((item) => item.kind === "message" ? (
+                <article key={item.message.id} className={`site-agent-message is-${item.message.role}`} aria-label={messageAuthorLabel(item.message.role)}>
+                  <p>{item.message.content}</p>
+                  <time dateTime={item.message.createdAt} suppressHydrationWarning>{quietTimestamp(item.message.createdAt)}</time>
+                </article>
+              ) : (
+                <RunActivityCard
+                  key={item.run.id}
+                  run={item.run}
+                  snapshot={activitySnapshots[item.run.id]}
+                  loadState={activityLoads[item.run.id] ?? "idle"}
+                  autoLoad={autoActivityRunIds.has(item.run.id)}
+                  clock={clock}
+                  busy={busy || Boolean(activeRun && activeRun.id !== item.run.id)}
+                  onShow={() => void loadRunActivity(item.run.id).catch(() => undefined)}
+                  onRetryActivity={() => void loadRunActivity(item.run.id, true).catch(() => undefined)}
+                  onRetryRun={() => void retry(item.run.id)}
+                />
+              ))}
+              {discussionSuggestion ? (
+                <article className="site-agent-discussion-suggestion">
+                  <strong>Suggested change ready</strong>
+                  <div>
+                    <button className="button primary" type="button" onClick={useSuggestion}>Use this suggestion</button>
+                    <button className="button secondary" type="button" onClick={() => setDiscussionSuggestion(undefined)}>Dismiss</button>
+                  </div>
+                </article>
+              ) : null}
+              {notice ? <div className="site-agent-inline-notice" role="status">{notice}</div> : null}
+              <div ref={endRef} />
+            </div>
+            {newActivity ? <button className="site-agent-new-activity" type="button" onClick={showLatestActivity}>New activity</button> : null}
           </div>
+          <span className="site-agent-visually-hidden" aria-live="polite" aria-atomic="true">{liveAnnouncement}</span>
 
           <div className={`site-agent-compose ${initialBuildActive ? "is-unavailable" : ""}`}>
             {selection ? <div className="site-agent-selection-strip"><span>Selected: {selection.selector}</span><button type="button" onClick={() => setSelection(undefined)}>Clear</button></div> : null}
@@ -811,7 +957,10 @@ export function SiteAgentWorkspace({
               disabled={initialBuildActive}
               aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
               onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void submit();
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                if (event.shiftKey && !event.metaKey && !event.ctrlKey) return;
+                event.preventDefault();
+                void submit();
               }}
               rows={1}
             />
@@ -885,6 +1034,193 @@ export function SiteAgentWorkspace({
       }
     />
   );
+}
+
+function RunActivityCard({
+  run,
+  snapshot,
+  loadState,
+  autoLoad,
+  clock,
+  busy,
+  onShow,
+  onRetryActivity,
+  onRetryRun
+}: {
+  run: OwnerSiteAgentRun;
+  snapshot?: OwnerActivitySnapshot;
+  loadState: ActivityLoadState;
+  autoLoad: boolean;
+  clock: number;
+  busy: boolean;
+  onShow: () => void;
+  onRetryActivity: () => void;
+  onRetryRun: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const active = run.status === "queued" || run.status === "running";
+  const timestamp = active
+    ? elapsedLabel(clock - Date.parse(run.startedAt))
+    : quietDateTime(run.completedAt ?? run.startedAt);
+
+  if (!autoLoad) {
+    return (
+      <article className={`site-agent-activity-card is-${run.status}`}>
+        <details
+          open={expanded}
+          onToggle={(event) => {
+            const open = event.currentTarget.open;
+            setExpanded(open);
+            if (open && loadState === "idle") onShow();
+          }}
+        >
+          <summary className="site-agent-activity-summary">
+            <ActivityDot status={run.status === "failed" ? "failed" : "succeeded"} />
+            <span>
+              <strong>{run.progress.label}</strong>
+              <small>{timestamp}</small>
+            </span>
+            <small>{expanded ? "Hide activity" : "Show activity"}</small>
+          </summary>
+          <div className="site-agent-activity-expanded">
+            <RunActivityBody
+              run={run}
+              snapshot={snapshot}
+              loadState={loadState}
+              detailed
+              onRetryActivity={onRetryActivity}
+            />
+            <RunFailureAction run={run} busy={busy} onRetry={onRetryRun} />
+          </div>
+        </details>
+      </article>
+    );
+  }
+
+  return (
+    <article className={`site-agent-activity-card is-${run.status}`}>
+      <header className="site-agent-activity-header">
+        <ActivityDot status={active ? "running" : run.status === "failed" ? "failed" : "succeeded"} />
+        <span>
+          <strong>{run.progress.label}</strong>
+          <small>{timestamp}</small>
+        </span>
+      </header>
+      <RunActivityBody
+        run={run}
+        snapshot={snapshot}
+        loadState={loadState}
+        onRetryActivity={onRetryActivity}
+      />
+      {snapshot && (snapshot.completed.length > 4 || snapshot.hasEarlierActivity) ? (
+        <details className="site-agent-activity-details">
+          <summary>Details</summary>
+          <div className="site-agent-activity-expanded">
+            <ActivityRows groups={snapshot.completed} />
+            {snapshot.hasEarlierActivity ? <small>Earlier activity is not shown.</small> : null}
+          </div>
+        </details>
+      ) : null}
+      <RunFailureAction run={run} busy={busy} onRetry={onRetryRun} />
+    </article>
+  );
+}
+
+function RunActivityBody({
+  run,
+  snapshot,
+  loadState,
+  detailed = false,
+  onRetryActivity
+}: {
+  run: OwnerSiteAgentRun;
+  snapshot?: OwnerActivitySnapshot;
+  loadState: ActivityLoadState;
+  detailed?: boolean;
+  onRetryActivity: () => void;
+}) {
+  const active = run.status === "queued" || run.status === "running";
+  if (!snapshot && loadState === "loading") {
+    return <div className="site-agent-activity-loading"><span className="site-agent-send-spinner" aria-hidden="true" /><span>Loading activity…</span></div>;
+  }
+  if (!snapshot && loadState === "error") {
+    return (
+      <div className="site-agent-activity-unavailable">
+        <span>Activity is temporarily unavailable.</span>
+        <button type="button" onClick={onRetryActivity}>Retry</button>
+      </div>
+    );
+  }
+
+  const completed = snapshot?.completed ?? [];
+  const visibleCompleted = detailed ? completed : completed.slice(-4);
+  const hasMappedActivity = Boolean(snapshot?.current || completed.length);
+  return (
+    <>
+      {snapshot?.current ? <ActivityRows groups={[snapshot.current]} /> : active ? (
+        <div className="site-agent-activity-fallback"><ActivityDot status="running" /><span>Working on your website.</span></div>
+      ) : null}
+      {visibleCompleted.length ? <ActivityRows groups={visibleCompleted} /> : null}
+      {!active && snapshot && !hasMappedActivity ? <p className="site-agent-activity-empty">No detailed activity was recorded.</p> : null}
+      {(run.status === "needs_input" || run.status === "failed") ? <p className="site-agent-activity-guidance">{run.progress.detail}</p> : null}
+      {detailed && snapshot?.hasEarlierActivity ? <small>Earlier activity is not shown.</small> : null}
+    </>
+  );
+}
+
+function ActivityRows({ groups }: { groups: OwnerActivityGroup[] }) {
+  return (
+    <ol className="site-agent-activity-list">
+      {groups.map((group) => (
+        <li key={group.key} className={`is-${group.status}`}>
+          <ActivityDot status={group.status} />
+          <span>{activityGroupLabel(group)}</span>
+          {group.completedAt ? <time dateTime={group.completedAt} suppressHydrationWarning>{quietTimestamp(group.completedAt)}</time> : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ActivityDot({ status }: { status: "running" | "succeeded" | "failed" }) {
+  return <span className={`site-agent-activity-dot is-${status}`} aria-hidden="true" />;
+}
+
+function RunFailureAction({
+  run,
+  busy,
+  onRetry
+}: {
+  run: OwnerSiteAgentRun;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  if (run.status !== "failed" || !run.retryableByOwner) return null;
+  return <button className="button secondary site-agent-activity-retry" type="button" disabled={busy} onClick={onRetry}>Retry {run.kind === "initial_build" ? "build" : "change"}</button>;
+}
+
+type OwnerTranscriptItem =
+  | { kind: "message"; at: number; rank: number; message: SiteAgentMessage }
+  | { kind: "run"; at: number; rank: number; run: OwnerSiteAgentRun };
+
+function ownerTranscriptItems(messages: SiteAgentMessage[], runs: OwnerSiteAgentRun[]): OwnerTranscriptItem[] {
+  const items: OwnerTranscriptItem[] = messages.map((message, index) => ({
+    kind: "message",
+    at: Date.parse(message.createdAt),
+    rank: index * 2,
+    message
+  }));
+  for (const [index, run] of runs.entries()) {
+    const firstMessageIndex = messages.findIndex((message) => message.runId === run.id);
+    const firstMessage = firstMessageIndex >= 0 ? messages[firstMessageIndex] : undefined;
+    items.push({
+      kind: "run",
+      at: Date.parse(firstMessage?.createdAt ?? run.startedAt),
+      rank: firstMessage ? firstMessageIndex * 2 + 1 : messages.length * 2 + index,
+      run
+    });
+  }
+  return items.sort((left, right) => left.at - right.at || left.rank - right.rank);
 }
 
 function selectorFor(element: Element) {
@@ -1113,6 +1449,88 @@ function editorStarterPrompts(input: SitePublicBuildInput) {
     contactPrompt,
     "Improve the mobile homepage layout"
   ];
+}
+
+function ownerTranscriptVersion(
+  messages: SiteAgentMessage[],
+  runs: OwnerSiteAgentRun[],
+  snapshots: Record<string, OwnerActivitySnapshot>,
+  suggestion?: DiscussionSuggestion
+) {
+  const activity = Object.values(snapshots).map((snapshot) => [
+    snapshot.run.id,
+    snapshot.run.status,
+    snapshot.run.stage,
+    snapshot.current?.key,
+    snapshot.current?.status,
+    ...snapshot.completed.flatMap((group) => [group.key, group.status, group.count ?? 1])
+  ].join(":")).join("|");
+  return [
+    messages.map((message) => message.id).join(":"),
+    runs.map((run) => `${run.id}:${run.status}:${run.stage}`).join(":"),
+    activity,
+    suggestion?.action ?? ""
+  ].join("::");
+}
+
+function activityGroupLabel(group: OwnerActivityGroup) {
+  if (!group.count || group.count < 2) return group.label;
+  return `${group.label.replace(/\.$/, "")} · ${group.count} steps`;
+}
+
+function quietTimestamp(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function quietDateTime(value: string) {
+  const date = new Date(value);
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return quietTimestamp(value);
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function isSettledOwnerRun(run: OwnerSiteAgentRun) {
+  return run.status === "needs_input"
+    || run.status === "succeeded"
+    || run.status === "failed"
+    || run.status === "cancelled";
+}
+
+function ownerRunAnnouncement(previous: OwnerSiteAgentRun | undefined, next: OwnerSiteAgentRun) {
+  if (!previous) return undefined;
+  if (previous.status !== "needs_input" && next.status === "needs_input") return "Lodesta needs your input.";
+  if (previous.stage !== "fast_preview" && next.stage === "fast_preview") return "Your private preview is ready.";
+  if (previous.status !== "succeeded" && next.status === "succeeded") return "Your website update is complete.";
+  if (previous.status !== "failed" && next.status === "failed") return "Your website update failed.";
+  return undefined;
+}
+
+async function requestOwnerActivity(runId: string, signal?: AbortSignal) {
+  const response = await fetch(`/api/site-agent/runs/${encodeURIComponent(runId)}/activity`, {
+    cache: "no-store",
+    signal
+  });
+  if (!response.ok) throw new Error(await responseMessage(response));
+  return await response.json() as OwnerActivitySnapshot;
+}
+
+function readOwnerActivityCache(runId: string) {
+  try {
+    const raw = window.sessionStorage.getItem(`lodesta:owner-activity:${runId}`);
+    if (!raw) return undefined;
+    const snapshot = JSON.parse(raw) as OwnerActivitySnapshot;
+    return snapshot?.run?.id === runId && Array.isArray(snapshot.completed) ? snapshot : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeOwnerActivityCache(snapshot: OwnerActivitySnapshot) {
+  try {
+    window.sessionStorage.setItem(`lodesta:owner-activity:${snapshot.run.id}`, JSON.stringify(snapshot));
+  } catch {
+    // Activity remains available in component state when session storage is unavailable.
+  }
 }
 
 function elapsedLabel(durationMs: number) {

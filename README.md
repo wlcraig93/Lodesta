@@ -83,6 +83,8 @@ Railway hosts the Next.js web service and worker. Supabase stores canonical auth
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
+Controller and site-sandbox production changes are released only through the serialized post-CI GitHub workflow documented in [docs/production-release.md](docs/production-release.md). Railway GitHub autodeploy remains disabled so Cloudflare verification always precedes deployment of the exact same commit to Railway.
+
 The application schema is created from the canonical baseline followed by the reviewed forward migrations under `supabase/migrations`. Strict immutable authorities are never rewritten in place. Regenerable operational records use canonical unversioned names; the application has no compatibility readers or dual-write paths.
 
 ## Security Boundaries

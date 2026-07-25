@@ -89,6 +89,7 @@ for (const token of ["#f7f8f6", "#fbfcfa", "#f1f3f0", "#dfe4de", "#e7efea", "#68
   assert(tokens.includes(token), `Product token palette is missing ${token}.`);
 }
 assert(tokens.includes("--product-radius-lg: 20px"), "Product tokens are missing the large command-dock radius.");
+assert(tokens.includes("--product-shadow-command-dock"), "Product tokens are missing the subtly raised command-dock shadow.");
 for (const route of ["/editor", "/leads", "/analytics", "/business-details"]) {
   assert(shell.includes(route), `Product navigation is missing ${route}.`);
 }
@@ -104,6 +105,7 @@ for (const token of [
   "--product-color-overlay",
   "--product-color-preview-stage",
   "--product-shadow-preview",
+  "--product-shadow-command-dock",
   "--product-shadow-focus"
 ]) {
   const darkTheme = tokens.slice(tokens.indexOf(':root[data-theme="dark"]'));
@@ -126,6 +128,8 @@ assert(adminSites.includes("admin-mobile-inventory") && adminSites.includes("<de
 assert(adminRuns.includes("admin-run-range-presets") && adminRuns.includes("admin-run-row") && adminRuns.includes("queryParams(filters)"), "Agent activity does not use the canonical filterable inventory.");
 assert(adminRunInspector.includes('role="tablist"') && adminRunInspector.includes("data-mobile-detail") && adminRunInspector.includes("run-event-list"), "Agent activity does not use the responsive telemetry inspector.");
 assert(css.includes(".run-inspector-workspace") && css.includes("grid-template-columns: 300px minmax(0, 1fr)"), "Telemetry inspector desktop composition is missing.");
+assert(css.includes(".site-agent-compose:focus-within:not(.is-unavailable)")
+  && css.includes("0 0 0 1px color-mix") && css.includes("var(--product-shadow-command-dock)"), "Command dock focus does not use the quiet emphasized-border treatment.");
 assert(css.includes(".workspace-now") && css.includes(".workspace-metric-strip") && css.includes(".workspace-home-section"), "Owner overview does not use the modern work-surface vocabulary.");
 assert(account.includes("aspect-ratio") === false, "Account cards contain inline visual styling instead of product CSS.");
 assert(account.includes("removalDialogOpen") && account.includes("onDialogOpenChange"), "The website card does not keep its removal trigger mounted while the portaled dialog is active.");

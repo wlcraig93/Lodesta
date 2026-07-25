@@ -1,0 +1,45 @@
+{
+  "name": "Lodesta wordmark",
+  "canonical": true,
+  "note": "This is the shipping wordmark. The sans explorations in docs/brand/ (Geist Sans, Figtree) were never adopted and are retained as history only.",
+  "typeface": {
+    "family": "Merriweather",
+    "source": "Google Fonts, SIL Open Font License 1.1",
+    "file": "Merriweather[opsz,wdth,wght].ttf (variable)",
+    "instance": { "wght": 400, "opsz": 36, "wdth": 100 },
+    "tracking": "-20 font units per gap (upem 2000, approx -10/1000 em)",
+    "warning": "The variable default is wght=300 (Light). Regular must be set explicitly.",
+    "shaping": "HarfBuzz with kern and liga enabled; glyphs converted to outlines so the SVG carries no font dependency."
+  },
+  "derivedFrom": {
+    "raster": "public/lodesta-logo.png (3136x1098, the previous shipping artwork)",
+    "verification": "Outline overlaid on the raster at 3066x692: 92.6% intersection-over-union, visually indistinguishable at 164px and 420px render sizes.",
+    "measuredFromRaster": {
+      "capHeight": "618px",
+      "xHeightOverCapHeight": 0.741,
+      "stemOverCapHeight": 0.1456,
+      "fontMetricsForComparison": "Merriweather capHeight 1486, xHeight 1110, ratio 0.747"
+    },
+    "residual": "Merriweather was redesigned in 2024; the current variable release differs subtly from the static version the original raster was set in. No axis setting closes the gap fully, and the difference is sub-pixel at every size the wordmark renders."
+  },
+  "valance": {
+    "scallops": 5,
+    "depthRatio": 0.46,
+    "rail": "y 160 to 290 font units below baseline (130 units thick)",
+    "principle": "Scallop pitch, not scallop count, is the shared constant with the compact mark. The compact mark uses 3 scallops because its field is near-square; the wordmark uses 5 because it is roughly 3.5x wider. Both hold the 0.46 depth ratio and both attach the scallops to a solid body rather than leaving them detached."
+  },
+  "exports": [
+    {
+      "file": "../../../public/brand/lodesta-wordmark.svg",
+      "format": "SVG",
+      "viewBox": "0 0 728 261.25",
+      "background": "transparent",
+      "color": "#24493A",
+      "usage": "Marketing header and footer via components/MarketingShell.tsx"
+    }
+  ],
+  "openItems": [
+    "No dark-canvas variant exists. Marketing is currently locked to light mode, so this is not yet blocking.",
+    "public/lodesta-logo.png is now unreferenced. It is retained as the original artwork of record; delete it only deliberately."
+  ]
+}

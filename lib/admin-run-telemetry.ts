@@ -35,6 +35,7 @@ export function adminFailureGuidance(code: string | undefined) {
     cost_limit_exhausted: "Review per-request costs and the saved checkpoint. Resume only after confirming the configured fuse is appropriate.",
     cost_telemetry_unavailable: "Restore provider billing telemetry or local catalog pricing before retrying this model route.",
     browser_verification_unavailable: "Inspect the retained browser diagnostic, restore the canonical accessibility verifier, then retry the owner request.",
-    deadline_exhausted: "Resume from the saved checkpoint or split the request; investigate repeated deadline exhaustion before raising the deadline."
+    deadline_exhausted: "Resume from the saved checkpoint or split the request; investigate repeated deadline exhaustion before raising the deadline.",
+    platform_version_mismatch: "Keep authoring in maintenance, complete the coordinated controller and sandbox release, verify deep health, then resolve the operator item."
   } as Record<string, string>)[code] ?? "No operator recovery guidance is recorded for this failure.";
 }

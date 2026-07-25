@@ -9,6 +9,10 @@ const watchdogSource = readFileSync("workers/recovery-watchdog/src/index.ts", "u
 const workerSource = readFileSync("workers/runner.ts", "utf8");
 const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "utf8");
 const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
+const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts", "utf8");
+const continuousIntegration = readFileSync(".github/workflows/continuous-integration.yml", "utf8");
+const productionRelease = readFileSync(".github/workflows/production-release.yml", "utf8");
+const productionRollback = readFileSync(".github/workflows/production-rollback.yml", "utf8");
 const instrumentation = readFileSync("instrumentation.ts", "utf8");
 const maintenanceRoute = readFileSync("app/api/site-agent/maintenance/route.ts", "utf8");
 const prospectRoute = readFileSync("app/api/prospect-reports/route.ts", "utf8");
@@ -23,15 +27,52 @@ const sitemap = readFileSync("app/sitemap.ts", "utf8");
 const devSupervisor = readFileSync("scripts/dev.mjs", "utf8");
 const devInspection = readFileSync("scripts/dev-inspect.mjs", "utf8");
 
-for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition"]) {
+for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition", "verify:health", "verify:release-evidence", "verify:site-sandbox-local", "verify:site-sandbox-manifest"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
 assert(packageJson.scripts["dev:web"].includes("--turbopack") && packageJson.scripts["dev:raw"].includes("--turbopack"), "Package development entrypoints must use Turbopack.");
 assert(devSupervisor.includes('"--turbopack"') && devInspection.includes('"--turbopack"'), "Supervised development entrypoints must use Turbopack.");
 assert(!existsSync("packages/site-platform/index.ts"), "The broad site-platform barrel must remain removed.");
-for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER="]) {
+for (const name of ["CLOUDFLARE_ACCOUNT_ID=", "LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_SANDBOX_IMAGE_DIGEST=", "LODESTA_RELEASE_GIT_SHA=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER="]) {
   assert(env.includes(name), `.env.example must document ${name}`);
 }
+assert(packageJson.scripts["deploy:site-sandbox"].includes("--strict") && packageJson.scripts["deploy:site-sandbox"].includes("--containers-rollout=immediate"), "Sandbox deployments must use strict mode and immediate container rollout.");
+assert(sandboxWorkerSource.includes("sandboxManifest") && sandboxWorkerSource.includes('pathname === "/health"'), "Sandbox health must expose the compatibility manifest.");
+for (const excluded of ["node_modules", "dist", "component-manifest.ts", "lodesta-manifest.json"]) {
+  assert(sandboxManifestGenerator.includes(excluded), `Sandbox manifest generator must exclude ${excluded}.`);
+}
+assert(!existsSync(".github/workflows/generation-architecture.yml"), "The stale generation architecture workflow must remain removed.");
+for (const check of ["npm run typecheck", "npm run verify:deployment-config", "npm run verify:authoring", "npm run verify:site-sandbox-local", "npm run verify:site-sandbox-manifest"]) {
+  assert(continuousIntegration.includes(check), `Continuous integration must run ${check}.`);
+  assert(productionRelease.includes(check), `Production release preflight must run ${check}.`);
+}
+assert(productionRelease.includes("environment: production")
+  && productionRelease.includes('workflows: ["Continuous integration"]')
+  && productionRelease.includes("github.event.workflow_run.conclusion == 'success'")
+  && productionRelease.includes("github.event.workflow_run.head_sha")
+  && productionRelease.includes("group: production-release")
+  && productionRelease.includes("cancel-in-progress: false")
+  && productionRelease.includes("railway up --ci")
+  && productionRelease.includes("deploy_needed")
+  && productionRelease.includes("cloudflare-reused")
+  && productionRelease.includes("npm run deploy:site-sandbox")
+  && productionRelease.includes("npm run verify:site-sandbox-deployed")
+  && productionRelease.includes("/api/health?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
+assert(
+  productionRelease.indexOf("Verify deployed sandbox compile canary") < productionRelease.indexOf("railway up --ci"),
+  "Railway must not deploy before the live sandbox compile canary passes."
+);
+assert(
+  productionRelease.includes("railway-failed-before-switch")
+    && productionRelease.includes("versions deploy")
+    && productionRelease.includes("automatic-rollback-succeeded"),
+  "A conclusively pre-switch Railway failure must restore the captured Cloudflare version."
+);
+assert(productionRollback.includes("environment: production")
+  && productionRollback.includes("group: production-release")
+  && productionRollback.includes("cloudflare_version")
+  && productionRollback.includes("sandbox_image_digest")
+  && productionRollback.includes("railway up --ci"), "Production rollback workflow is not explicitly dispatched or exact-targeted.");
 assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");
 assert(web.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"'), "Railway web service must start Next.js.");
 assert(!existsSync("deploy/railway-worker.toml"), "The obsolete production Railway polling worker config must be absent.");

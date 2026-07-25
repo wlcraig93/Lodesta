@@ -1,3 +1,3 @@
 export const sandboxSourcePolicyIdentity = "workspace-source-policy@sha256:d05531a635cec1d6a4f7f51c4d9d18e0c9992b4329747945592600c8fe4079f6";
 export const sandboxArtifactContractIdentity = "agent-authored-artifact@sha256:82761c88ba2c9b8734972bdc6bd124f373d23048df951d55b2aa0e0e5b4e4900";
-export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:1282566c7ec4001160c29797e1b0a9fb1d932ae5275556aa4e3a948c60ddb96a";
+export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:782a49df6d7d4ea714f503fad60d3dffe0905a0a71762ae8f6c5e922b7ff998c";

@@ -6,6 +6,11 @@ import {
   Sandbox as CloudflareSandbox,
   type Sandbox as SandboxDurableObject
 } from "@cloudflare/sandbox";
+import {
+  sandboxArtifactContractIdentity,
+  sandboxSourcePolicyIdentity,
+  sandboxToolchainIdentity
+} from "../scaffold/component-manifest";
 export { ContainerProxy };
 
 export class Sandbox extends CloudflareSandbox {
@@ -31,11 +36,24 @@ const previewPort = 4173;
 const maxFilesPerApply = 80;
 const maxApplyBytes = 4_000_000;
 const previewStarts = new Map<string, Promise<void>>();
+const sandboxManifest = {
+  kind: "site-sandbox-manifest",
+  artifactContractIdentity: sandboxArtifactContractIdentity,
+  toolchainIdentity: sandboxToolchainIdentity,
+  sourcePolicyIdentity: sandboxSourcePolicyIdentity
+} as const;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health") return json({ ok: true, provider: "cloudflare-sandbox", transport: env.SANDBOX_TRANSPORT });
+    if (url.pathname === "/health") {
+      return json({
+        ok: true,
+        provider: "cloudflare-sandbox",
+        transport: env.SANDBOX_TRANSPORT,
+        sandboxManifest
+      });
+    }
     if (!authorized(request, env)) return json({ error: "unauthorized" }, 401);
 
     const previewMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/preview(\/.*)?$/);

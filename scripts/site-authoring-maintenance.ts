@@ -13,7 +13,7 @@ const minutes = parseMinutes(process.argv.slice(3));
 if (command === "acquire") {
   await assertDrained();
   const now = new Date();
-  const leaseTokenHash = sha256(randomBytes(32));
+  const leaseTokenHash = configuredLeaseOwnerHash() ?? sha256(randomBytes(32));
   const leaseUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
   if (!await sitePlatformRepository.acquireMaintenanceLease(task, leaseTokenHash, now.toISOString(), leaseUntil)) {
     throw new Error("The site-authoring maintenance lease is already active.");
@@ -61,6 +61,16 @@ async function assertDrained() {
 }
 
 async function readLease() {
+  const configured = configuredLeaseOwnerHash();
+  if (configured) {
+    const retained = await readFile(leasePath, "utf8").then((source) => JSON.parse(source) as Record<string, unknown>).catch(() => undefined);
+    return {
+      schemaVersion: "site-authoring-maintenance" as const,
+      task,
+      leaseTokenHash: configured,
+      leaseUntil: typeof retained?.leaseUntil === "string" ? retained.leaseUntil : new Date(0).toISOString()
+    };
+  }
   const value = JSON.parse(await readFile(leasePath, "utf8")) as Record<string, unknown>;
   if (value.schemaVersion !== "site-authoring-maintenance" || value.task !== task
     || typeof value.leaseTokenHash !== "string" || !/^sha256:[a-f0-9]{64}$/.test(value.leaseTokenHash)
@@ -68,6 +78,11 @@ async function readLease() {
     throw new Error("Local site-authoring maintenance record is invalid.");
   }
   return value as { schemaVersion: "site-authoring-maintenance"; task: string; leaseTokenHash: string; leaseUntil: string };
+}
+
+function configuredLeaseOwnerHash() {
+  const owner = process.env.LODESTA_MAINTENANCE_LEASE_OWNER?.trim();
+  return owner ? sha256(owner) : undefined;
 }
 
 function parseMinutes(args: string[]) {

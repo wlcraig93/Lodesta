@@ -162,6 +162,7 @@ export class WebsiteManagerAgent {
 
       for (const rawCall of calls) {
         const started = new Date().toISOString();
+        const toolEventId = eventId("tool");
         let name: ReturnType<typeof managerToolNameSchema.parse> | undefined;
         let parsedArguments: Record<string, unknown> = {};
         let execution: ManagerToolExecution;
@@ -183,6 +184,17 @@ export class WebsiteManagerAgent {
             replayed = true;
           } else {
             try {
+              if (isOwnerVisibleSlowTool(name)) {
+                await recordBestEffort(input.onEvents, runEvent({
+                  id: toolEventId,
+                  kind: managerOperationKind(name),
+                  name,
+                  status: "running",
+                  turnIndex,
+                  startedAt: started,
+                  summary: {}
+                }));
+              }
               execution = await input.runtime.execute({ callId: rawCall.call_id, name, arguments: parsedArguments });
               if (execution.diagnosticOutput.ok === false) status = "failed";
               metering = execution.metering;
@@ -223,9 +235,8 @@ export class WebsiteManagerAgent {
           output: execution.diagnosticOutput
         };
         toolRecords.push(toolRecord);
-        const operationKind = toolName === "build_preview" ? "build" : toolName === "inspect_site" || toolName === "finish" ? "inspection" : "tool_call";
         await input.onEvents?.([runEvent({
-          id: eventId("tool"), kind: operationKind, name: toolName, status, turnIndex,
+          id: toolEventId, kind: managerOperationKind(toolName), name: toolName, status, turnIndex,
           startedAt: started, completedAt: toolRecord.completedAt,
           ...(metering ? toolMeteringFields(metering) : {}),
           errorCode: status === "failed" ? diagnosticErrorCode(execution.diagnosticOutput.error ?? "tool_failed") : undefined,
@@ -295,7 +306,7 @@ export class WebsiteManagerAgent {
       client: this.injectedClient ?? configuredResponsesClient(apiProvider), route, name: "manager_discussion", schema: managerDiscussionJsonSchema,
       system: websiteManagerSystemPrompt,
       content: [{ type: "input_text", text: JSON.stringify({
-        role: "Discuss the requested change without modifying source. Be concise, state what would change, and identify unsupported capability requests.",
+        role: "Discuss the requested change without modifying source. Be concise, state what would change, and identify unsupported capability requests. Speak in owner-facing page and section terms. Do not mention source paths, filenames, selectors, framework internals, internal error codes, or raw run telemetry.",
         message: input.message, selection: input.selection, publicEvidencePacket: managerEvidencePacket(input.buildInput),
         verticalContext: input.buildInput.domainContext, currentWorkspace: input.currentFiles?.length ? { files: input.currentFiles } : undefined
       }) }],
@@ -511,6 +522,30 @@ function toolNameForMetering(name: string | undefined) {
 
 function runEvent(event: ManagerRunEvent) { return event; }
 function eventId(prefix: string) { return `${prefix}_${Date.now().toString(36)}${randomUUID().replaceAll("-", "")}`; }
+
+function managerOperationKind(toolName: string): ManagerRunEvent["kind"] {
+  if (toolName === "build_preview") return "build";
+  if (toolName === "inspect_site" || toolName === "finish") return "inspection";
+  return "tool_call";
+}
+
+function isOwnerVisibleSlowTool(toolName: string) {
+  return toolName === "create_image"
+    || toolName === "build_preview"
+    || toolName === "inspect_site"
+    || toolName === "finish";
+}
+
+async function recordBestEffort(
+  onEvents: ((events: ManagerRunEvent[]) => Promise<void>) | undefined,
+  event: ManagerRunEvent
+) {
+  try {
+    await onEvents?.([event]);
+  } catch {
+    // Owner activity is telemetry only; a failed opening span must not block tool execution.
+  }
+}
 function usageFields(usage: ManagerModelUsage, route: { apiProvider: SiteAgentApiProvider; modelId: string }, response: ManagerResponse) {
   return {
     apiProvider: route.apiProvider,

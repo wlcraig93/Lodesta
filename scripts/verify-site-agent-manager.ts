@@ -119,6 +119,8 @@ let inspections = 0;
 const managerRuntime = runtime({ onInspect: () => { inspections += 1; } });
 const requests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
 const progress: number[] = [];
+const managerEvents: ManagerRunEvent[] = [];
+let rejectedOwnerActivityOpeningSpan = false;
 const manager = new WebsiteManagerAgent(queueClient([
   call("write_site", "write_file", { path: "src/site.tsx", content: siteSource }),
   call("write_styles", "write_file", { path: "src/styles.css", content: cssSource }),
@@ -135,6 +137,13 @@ const completed = await manager.run({
   instruction: "Create the initial site.",
   kind: "initial_build",
   runtime: managerRuntime,
+  onEvents: async (events) => {
+    if (!rejectedOwnerActivityOpeningSpan && events.some((event) => event.name === "build_preview" && event.status === "running")) {
+      rejectedOwnerActivityOpeningSpan = true;
+      throw new Error("synthetic owner activity persistence failure");
+    }
+    managerEvents.push(...events);
+  },
   onProgress: async ({ responseIndex }) => { progress.push(responseIndex); }
 });
 assert.equal(completed.completion.workspaceHash, workspaceHash);
@@ -142,6 +151,11 @@ assert.equal(managerRuntime.finalCheckpoint(), "checkpoint_passed");
 assert.equal(inspections, 1, "finish without inspect_site did not run final verification exactly once");
 assert.deepEqual(completed.toolRecords.map((record) => record.name), ["write_file", "write_file", "apply_patch", "build_preview", "finish"]);
 assert.deepEqual(progress, [1, 2, 3, 4, 5]);
+assert.equal(rejectedOwnerActivityOpeningSpan, true, "slow owner-visible tools did not emit a running span");
+assert(managerEvents.some((event) => event.name === "build_preview" && event.status === "succeeded"), "a failed opening-span write interrupted tool execution or its terminal event");
+const finishSpans = managerEvents.filter((event) => event.name === "finish");
+assert.equal(finishSpans.length, 2, "slow tool spans were not opened and closed exactly once");
+assert.equal(finishSpans[0]?.id, finishSpans[1]?.id, "running and terminal tool spans did not preserve event identity");
 assert(requests.every((request) => toolNames(request).join(",") === "list_files,read_file,write_file,delete_file,apply_patch,create_image,build_preview,inspect_site,request_input,finish"), "manager tool set drifted from the workspace, inspection, and media protocol");
 assert(!JSON.stringify(requests[0]?.input).includes("agentAccessPolicy"), "serving-only agent policy leaked into authoring context");
 assert(!JSON.stringify(requests[0]?.input).toLowerCase().includes("rawcrawl"), "raw crawl payload leaked into authoring context");

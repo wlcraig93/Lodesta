@@ -136,13 +136,13 @@ Use for embedded generated-site previews and review packets. The frame should st
 
 ### Agent Timeline
 
-Forward-looking pattern for run stages and model/tool activity. Show stage, state, timestamp or duration, and important output. Amber can mark intelligent suggestions or generated insights, not every step.
+Show owner activity as a bounded server-projected snapshot, not raw reasoning or client-grouped telemetry. Use a short allow-listed vocabulary, stable grouped rows, a clear current operation, quiet timestamps, and deterministic empty/error/truncation states. Amber can mark intelligent suggestions or generated insights, not every step. The mounted preview remains the evidence surface.
 
 ### Command Dock
 
-Use for owner and operator requests to an agent. The dock is a generous soft surface with one auto-growing prompt, a compact action rail, and a strong circular submit action. Its large radius and negative space distinguish it from an ordinary form field without turning it into decorative chrome. The prompt, the mode trigger, and the submit action share the dock's inner edges, and the prompt hugs its content so the dock's negative space comes from the dock itself rather than slack inside the field.
+Use for owner and operator requests to an agent. The dock is a naturally sized, subtly raised surface with one auto-growing prompt, a compact action rail, and a circular submit action. Its large radius and measured negative space distinguish it from an ordinary form field without turning it into decorative chrome. The prompt, mode trigger, and submit action share the dock's inner edges. Desktop action controls use the compact height; mobile controls use the touch height. Focus emphasizes the border with a quiet one-pixel outer ring rather than a broad glow.
 
-Mode choices use the product popover menu rather than a native `select`, so each mode can state its consequence and match product chrome in both appearance modes. The menu keeps a labelled trigger, roving arrow-key focus, Escape-to-dismiss with focus return, and a checked indicator on the active mode. Expose only controls that perform a real action, and preserve multiline writing. Voice input may use browser-managed speech recognition when the browser exposes it, but the control must explain unsupported and permission-failure states and must never imply that transcription is guaranteed to happen on-device.
+Mode choices use the product popover menu rather than a native `select`, so each mode can state its consequence and match product chrome in both appearance modes. The menu keeps a labelled trigger, roving arrow-key focus, Escape-to-dismiss with focus return, a checked indicator on the active mode, and a restrained 150ms fade/scale entrance that is removed under reduced motion. Expose only controls that perform a real action. Enter submits, Shift+Enter preserves multiline writing, Cmd/Ctrl+Enter also submits, and IME composition never submits. Voice input may use browser-managed speech recognition when the browser exposes it, but the control must explain unsupported and permission-failure states and must never imply that transcription is guaranteed to happen on-device.
 
 ## Implementation Rules
 

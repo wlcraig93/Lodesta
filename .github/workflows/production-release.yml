@@ -1,0 +1,307 @@
+name: Production release
+
+on:
+  workflow_run:
+    workflows: ["Continuous integration"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      (github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_branch == 'main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      LODESTA_SANDBOX_URL: ${{ vars.LODESTA_SANDBOX_URL }}
+      LODESTA_SANDBOX_TOKEN: ${{ secrets.LODESTA_SANDBOX_TOKEN }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      LODESTA_APP_ORIGIN: ${{ vars.LODESTA_APP_ORIGIN }}
+      LODESTA_ADMIN_TOKEN: ${{ secrets.LODESTA_ADMIN_TOKEN }}
+      LODESTA_MAINTENANCE_LEASE_OWNER: production-release-${{ github.run_id }}-${{ github.run_attempt }}
+      EVIDENCE_DIR: .data/release-evidence
+      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm install --global @railway/cli@5.28.1
+
+      - name: Record immutable release
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          mkdir -p "$EVIDENCE_DIR"
+          node --input-type=module -e '
+            const evidence = {
+              schemaVersion: "lodesta-production-release-v1",
+              releaseSha: process.env.RELEASE_SHA,
+              trigger: process.env.GITHUB_EVENT_NAME,
+              leaseOwner: process.env.LODESTA_MAINTENANCE_LEASE_OWNER,
+              startedAt: new Date().toISOString()
+            };
+            process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+          ' > "$EVIDENCE_DIR/release.json"
+
+      - name: Preflight verification
+        run: |
+          set -Eeuo pipefail
+          npm run typecheck
+          npm run verify:site-sandbox-manifest
+          npm run verify:release-evidence
+          npm run verify:deployment-config
+          npm run verify:authoring
+          npm run verify:health
+          npm run verify:site-sandbox-local
+
+      - name: Capture current production pair
+        id: capture
+        run: |
+          set -Eeuo pipefail
+          npx wrangler deployments list --config workers/site-sandbox/wrangler.jsonc --json > "$EVIDENCE_DIR/cloudflare-before.raw.json"
+          node --import tsx scripts/release-evidence.ts current-cloudflare "$EVIDENCE_DIR/cloudflare-before.raw.json" > "$EVIDENCE_DIR/cloudflare-before.json"
+          rm "$EVIDENCE_DIR/cloudflare-before.raw.json"
+          npx wrangler containers list --config workers/site-sandbox/wrangler.jsonc --json > "$EVIDENCE_DIR/cloudflare-container-before.raw.json"
+          node --import tsx scripts/release-evidence.ts current-cloudflare-container \
+            "$EVIDENCE_DIR/cloudflare-container-before.raw.json" \
+            "lodesta-site-sandbox-v1-sandbox" > "$EVIDENCE_DIR/cloudflare-container-before.json"
+          rm "$EVIDENCE_DIR/cloudflare-container-before.raw.json"
+          railway deployment list \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --limit 1 --json > "$EVIDENCE_DIR/railway-before.raw.json"
+          node --import tsx scripts/release-evidence.ts current-railway "$EVIDENCE_DIR/railway-before.raw.json" > "$EVIDENCE_DIR/railway-before.json"
+          rm "$EVIDENCE_DIR/railway-before.raw.json"
+          curl --fail --silent --show-error \
+            --header "authorization: Bearer $LODESTA_SANDBOX_TOKEN" \
+            "$LODESTA_SANDBOX_URL/health" > "$EVIDENCE_DIR/sandbox-before.raw.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const body = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            if (!body.sandboxManifest) throw new Error("Current sandbox health omitted sandboxManifest.");
+            process.stdout.write(`${JSON.stringify({ sandboxManifest: body.sandboxManifest }, null, 2)}\n`);
+          ' "$EVIDENCE_DIR/sandbox-before.raw.json" > "$EVIDENCE_DIR/sandbox-before.json"
+          rm "$EVIDENCE_DIR/sandbox-before.raw.json"
+          manifest_matches="$(node --import tsx --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { expectedSiteSandboxManifest } from "./packages/site-contracts/platform-manifest.ts";
+            const current = JSON.parse(readFileSync(process.argv[1], "utf8")).sandboxManifest;
+            const fields = Object.keys(expectedSiteSandboxManifest);
+            process.stdout.write(String(
+              current
+              && Object.keys(current).length === fields.length
+              && fields.every((field) => current[field] === expectedSiteSandboxManifest[field])
+            ));
+          ' "$EVIDENCE_DIR/sandbox-before.json")"
+          echo "cloudflare_version=$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/cloudflare-before.json')).versionId")" >> "$GITHUB_OUTPUT"
+          echo "container_digest=$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/cloudflare-container-before.json')).imageDigest")" >> "$GITHUB_OUTPUT"
+          if [ "$manifest_matches" = "true" ]; then
+            echo "deploy_needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "railway_deployment=$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-before.json')).deploymentId")" >> "$GITHUB_OUTPUT"
+
+      - name: Acquire authoring maintenance
+        id: maintenance
+        run: npm run maintenance:site-authoring -- acquire --minutes=60
+
+      - name: Deploy Cloudflare sandbox
+        id: cloudflare
+        if: steps.capture.outputs.deploy_needed == 'true'
+        run: |
+          set -Eeuo pipefail
+          touch "$EVIDENCE_DIR/cloudflare-attempted"
+          npm run deploy:site-sandbox -- \
+            --tag "$RELEASE_SHA" \
+            --message "Production release $RELEASE_SHA" 2>&1 | tee "$EVIDENCE_DIR/cloudflare-deploy.log"
+          node --import tsx scripts/release-evidence.ts deployed-cloudflare "$EVIDENCE_DIR/cloudflare-deploy.log" > "$EVIDENCE_DIR/cloudflare-deployment.json"
+          rm "$EVIDENCE_DIR/cloudflare-deploy.log"
+          echo "image_digest=$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/cloudflare-deployment.json')).imageDigest")" >> "$GITHUB_OUTPUT"
+
+      - name: Select verified sandbox image
+        id: sandbox
+        run: |
+          set -Eeuo pipefail
+          if [ "${{ steps.capture.outputs.deploy_needed }}" = "true" ]; then
+            digest="${{ steps.cloudflare.outputs.image_digest }}"
+          else
+            digest="${{ steps.capture.outputs.container_digest }}"
+            touch "$EVIDENCE_DIR/cloudflare-reused"
+          fi
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "image_digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployed sandbox compile canary
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 12); do
+            if npm run verify:site-sandbox-deployed > "$EVIDENCE_DIR/sandbox-canary.json"; then exit 0; fi
+            if [ "$attempt" -eq 12 ]; then exit 1; fi
+            sleep 10
+          done
+
+      - name: Deploy exact checkout to Railway
+        id: railway
+        run: |
+          set -Eeuo pipefail
+          touch "$EVIDENCE_DIR/railway-started"
+          railway variable set \
+            "LODESTA_SANDBOX_IMAGE_DIGEST=${{ steps.sandbox.outputs.image_digest }}" \
+            "LODESTA_RELEASE_GIT_SHA=$RELEASE_SHA" \
+            --skip-deploys \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" > /dev/null
+          set +e
+          railway up --ci \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --message "Production release $RELEASE_SHA"
+          upload_status=$?
+          set -e
+          railway deployment list \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --limit 1 --json > "$EVIDENCE_DIR/railway-current.raw.json"
+          node --import tsx scripts/release-evidence.ts current-railway "$EVIDENCE_DIR/railway-current.raw.json" > "$EVIDENCE_DIR/railway-current.json"
+          rm "$EVIDENCE_DIR/railway-current.raw.json"
+          current_id="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-current.json')).deploymentId")"
+          current_status="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-current.json')).status")"
+          if [ "$current_id" = "${{ steps.capture.outputs.railway_deployment }}" ]; then
+            if [ "$upload_status" -ne 0 ]; then touch "$EVIDENCE_DIR/railway-failed-before-switch"; fi
+            exit "$upload_status"
+          fi
+          echo "$current_id" > "$EVIDENCE_DIR/railway-deployment-id"
+          if [ "$current_status" = "FAILED" ] || [ "$current_status" = "CRASHED" ] || [ "$current_status" = "CANCELLED" ] || [ "$current_status" = "CANCELED" ]; then
+            touch "$EVIDENCE_DIR/railway-failed-before-switch"
+            exit 1
+          fi
+          exit "$upload_status"
+
+      - name: Poll Railway deployment
+        id: railway_poll
+        run: |
+          set -Eeuo pipefail
+          deployment_id="$(tr -d '\n' < "$EVIDENCE_DIR/railway-deployment-id")"
+          for attempt in $(seq 1 90); do
+            railway deployment list \
+              --environment "$RAILWAY_ENVIRONMENT_ID" \
+              --service "$RAILWAY_SERVICE_ID" \
+              --limit 20 --json > "$EVIDENCE_DIR/railway-poll.raw.json"
+            status="$(node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const deployments = JSON.parse(readFileSync(process.argv[1], "utf8"));
+              const deployment = deployments.find((item) => item.id === process.argv[2]);
+              process.stdout.write(deployment?.status ?? "UNKNOWN");
+            ' "$EVIDENCE_DIR/railway-poll.raw.json" "$deployment_id")"
+            if [ "$status" = "SUCCESS" ]; then
+              node --import tsx scripts/release-evidence.ts current-railway "$EVIDENCE_DIR/railway-poll.raw.json" > "$EVIDENCE_DIR/railway-deployment.json"
+              rm "$EVIDENCE_DIR/railway-poll.raw.json"
+              touch "$EVIDENCE_DIR/railway-succeeded"
+              exit 0
+            fi
+            if [ "$status" = "FAILED" ] || [ "$status" = "CRASHED" ] || [ "$status" = "CANCELLED" ] || [ "$status" = "CANCELED" ]; then
+              touch "$EVIDENCE_DIR/railway-failed-before-switch"
+              exit 1
+            fi
+            sleep 20
+          done
+          rm -f "$EVIDENCE_DIR/railway-poll.raw.json"
+          echo "Railway deployment did not reach a terminal state in time." >&2
+          exit 1
+
+      - name: Require authenticated deep health
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/deep-health.json"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Authenticated deep health did not pass." >&2
+          exit 1
+
+      - name: Release authoring maintenance
+        run: |
+          set -Eeuo pipefail
+          npm run maintenance:site-authoring -- release
+          touch "$EVIDENCE_DIR/release-succeeded"
+
+      - name: Automatically restore Cloudflare before Railway switches
+        if: failure() && steps.maintenance.outcome == 'success'
+        run: |
+          set -Eeuo pipefail
+          if [ -f "$EVIDENCE_DIR/railway-succeeded" ]; then
+            echo "Railway switched; maintenance remains active for the explicitly dispatched rollback workflow."
+            exit 0
+          fi
+          if [ -f "$EVIDENCE_DIR/railway-started" ] && [ ! -f "$EVIDENCE_DIR/railway-failed-before-switch" ]; then
+            echo "Railway state is not conclusively pre-switch; maintenance remains active."
+            exit 0
+          fi
+          if [ ! -f "$EVIDENCE_DIR/cloudflare-attempted" ]; then
+            curl --fail --silent --show-error \
+              --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/unchanged-pair-deep-health.json"
+            npm run maintenance:site-authoring -- release
+            touch "$EVIDENCE_DIR/unchanged-pair-released"
+            exit 0
+          fi
+          npx wrangler versions deploy "${{ steps.capture.outputs.cloudflare_version }}@100%" \
+            --config workers/site-sandbox/wrangler.jsonc \
+            --yes \
+            --message "Automatic rollback for failed release $RELEASE_SHA"
+          previous_manifest="$(node -p "JSON.stringify(JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-before.json')).sandboxManifest)")"
+          export LODESTA_EXPECTED_SANDBOX_MANIFEST_JSON="$previous_manifest"
+          for attempt in $(seq 1 12); do
+            if npm run verify:site-sandbox-deployed > "$EVIDENCE_DIR/rollback-canary.json"; then break; fi
+            if [ "$attempt" -eq 12 ]; then exit 1; fi
+            sleep 10
+          done
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/rollback-deep-health.json"; then break; fi
+            if [ "$attempt" -eq 12 ]; then exit 1; fi
+            sleep 10
+          done
+          npm run maintenance:site-authoring -- release
+          touch "$EVIDENCE_DIR/automatic-rollback-succeeded"
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-${{ env.RELEASE_SHA }}-${{ github.run_attempt }}
+          path: .data/release-evidence/
+          if-no-files-found: error
+          retention-days: 90

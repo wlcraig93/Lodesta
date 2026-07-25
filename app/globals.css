@@ -144,11 +144,6 @@ textarea {
   font-family: var(--brand-font-sans);
 }
 
-.marketing-header .app-brand img,
-.marketing-footer-brand img {
-  mix-blend-mode: multiply;
-}
-
 .marketing-header .app-brand img {
   width: 164px;
   max-width: 42vw;
@@ -3812,6 +3807,7 @@ textarea {
 }
 
 .site-agent-command-content {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -3819,8 +3815,17 @@ textarea {
   flex-direction: column;
 }
 
+.site-agent-transcript {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
 .site-agent-messages {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
   flex: 1;
   align-content: start;
@@ -3828,6 +3833,7 @@ textarea {
   padding: var(--product-space-7);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .site-agent-empty-message {
@@ -3913,7 +3919,9 @@ textarea {
 
 .site-agent-message {
   display: grid;
-  max-width: 94%;
+  width: max-content;
+  max-width: min(86%, 68ch);
+  gap: var(--product-space-2);
 }
 
 .site-agent-message.is-owner,
@@ -3925,6 +3933,12 @@ textarea {
   background: var(--product-color-primary-surface);
 }
 
+.site-agent-message.is-agent,
+.site-agent-message.is-system {
+  justify-self: start;
+  width: min(100%, 68ch);
+}
+
 .site-agent-message p {
   margin: 0;
   color: var(--product-color-text);
@@ -3932,6 +3946,18 @@ textarea {
   font-weight: var(--product-font-weight-regular);
   line-height: var(--product-line-height-ui);
   white-space: pre-wrap;
+}
+
+.site-agent-message time {
+  color: var(--product-color-text-tertiary);
+  font-size: var(--product-font-size-micro);
+  font-weight: var(--product-font-weight-regular);
+  line-height: var(--product-line-height-meta);
+}
+
+.site-agent-message.is-owner time,
+.site-agent-message.is-operator time {
+  justify-self: end;
 }
 
 .site-agent-message.is-agent p {
@@ -4007,6 +4033,193 @@ textarea {
   margin-top: var(--product-space-4);
 }
 
+.site-agent-activity-card {
+  display: grid;
+  width: 100%;
+  max-width: 68ch;
+  justify-self: start;
+  gap: var(--product-space-5);
+  padding: var(--product-space-6);
+  border: 1px solid var(--product-color-border);
+  border-radius: var(--product-radius-md);
+  background: var(--product-color-canvas-raised);
+  box-shadow: var(--product-shadow-card-soft);
+}
+
+.site-agent-activity-card.is-failed {
+  border-color: var(--product-color-error-border);
+  background: color-mix(in srgb, var(--product-color-error-surface) 45%, var(--product-color-surface));
+}
+
+.site-agent-activity-card > details {
+  min-width: 0;
+}
+
+.site-agent-activity-header,
+.site-agent-activity-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--product-space-4);
+}
+
+.site-agent-activity-header > span:not(.site-agent-activity-dot),
+.site-agent-activity-summary > span:not(.site-agent-activity-dot) {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: var(--product-space-1);
+}
+
+.site-agent-activity-header strong,
+.site-agent-activity-summary strong {
+  color: var(--product-color-text);
+  font-size: var(--product-font-size-control);
+  font-weight: var(--product-font-weight-medium);
+  line-height: var(--product-line-height-control);
+}
+
+.site-agent-activity-header small,
+.site-agent-activity-summary small {
+  color: var(--product-color-text-muted);
+  font-size: var(--product-font-size-meta);
+  line-height: var(--product-line-height-meta);
+}
+
+.site-agent-activity-summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.site-agent-activity-summary::-webkit-details-marker {
+  display: none;
+}
+
+.site-agent-activity-summary > small:last-child {
+  color: var(--product-color-primary);
+  font-weight: var(--product-font-weight-medium);
+}
+
+.site-agent-activity-summary:focus-visible,
+.site-agent-activity-details summary:focus-visible {
+  border-radius: 3px;
+  outline: none;
+  box-shadow: var(--product-shadow-focus);
+}
+
+.site-agent-activity-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border: 1px solid var(--product-color-border-strong);
+  border-radius: var(--product-radius-full);
+  background: var(--product-color-surface);
+}
+
+.site-agent-activity-dot.is-running {
+  border-color: var(--product-color-primary);
+  background: var(--product-color-primary);
+  box-shadow: 0 0 0 3px var(--product-color-primary-surface);
+  animation: site-agent-activity-pulse 1.4s ease-in-out infinite;
+}
+
+.site-agent-activity-dot.is-succeeded {
+  border-color: var(--product-color-success-border);
+  background: var(--product-color-success-text);
+}
+
+.site-agent-activity-dot.is-failed {
+  border-color: var(--product-color-error-border);
+  background: var(--product-color-error);
+}
+
+.site-agent-activity-list {
+  display: grid;
+  gap: var(--product-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-agent-activity-list li,
+.site-agent-activity-fallback,
+.site-agent-activity-loading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--product-space-4);
+  color: var(--product-color-text-subtle);
+  font-size: var(--product-font-size-meta);
+  line-height: var(--product-line-height-ui);
+}
+
+.site-agent-activity-list li > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.site-agent-activity-list time {
+  flex: 0 0 auto;
+  color: var(--product-color-text-tertiary);
+  font-size: var(--product-font-size-micro);
+}
+
+.site-agent-activity-list li.is-failed {
+  color: var(--product-color-error-text);
+}
+
+.site-agent-activity-expanded {
+  display: grid;
+  gap: var(--product-space-6);
+  padding: var(--product-space-6) 0 var(--product-space-1) var(--product-space-6);
+  border-left: 1px solid var(--product-color-border-subtle);
+}
+
+.site-agent-activity-details {
+  color: var(--product-color-text-muted);
+}
+
+.site-agent-activity-details > summary {
+  width: max-content;
+  color: var(--product-color-primary);
+  font-size: var(--product-font-size-meta);
+  font-weight: var(--product-font-weight-medium);
+  cursor: pointer;
+}
+
+.site-agent-activity-guidance,
+.site-agent-activity-empty {
+  margin: 0;
+  color: var(--product-color-text-subtle);
+  font-size: var(--product-font-size-meta);
+  line-height: var(--product-line-height-ui);
+}
+
+.site-agent-activity-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--product-space-5);
+  color: var(--product-color-text-muted);
+  font-size: var(--product-font-size-meta);
+}
+
+.site-agent-activity-unavailable button {
+  min-height: var(--product-control-height-compact);
+  border: 0;
+  border-radius: var(--product-radius-sm);
+  padding-inline: var(--product-space-5);
+  background: transparent;
+  color: var(--product-color-primary);
+  font: inherit;
+  font-weight: var(--product-font-weight-medium);
+  cursor: pointer;
+}
+
+.site-agent-activity-retry {
+  width: max-content;
+}
+
 .site-agent-run-details {
   margin-top: var(--product-space-2);
   color: var(--product-color-text-subtle);
@@ -4075,6 +4288,25 @@ textarea {
   color: var(--product-color-text-subtle);
 }
 
+.site-agent-new-activity {
+  position: absolute;
+  z-index: 4;
+  bottom: var(--product-space-5);
+  left: 50%;
+  min-height: var(--product-control-height-compact);
+  transform: translateX(-50%);
+  border: 1px solid var(--product-color-border-strong);
+  border-radius: var(--product-radius-full);
+  padding: 0 var(--product-space-6);
+  background: var(--product-color-surface);
+  box-shadow: var(--product-shadow-card-hover);
+  color: var(--product-color-primary);
+  font: inherit;
+  font-size: var(--product-font-size-meta);
+  font-weight: var(--product-font-weight-medium);
+  cursor: pointer;
+}
+
 .site-agent-inline-notice {
   padding: var(--product-space-5) var(--product-space-6);
   border: 1px solid var(--product-color-border);
@@ -4091,23 +4323,26 @@ textarea {
    one inner edge, so the dock reads as a single writing surface rather than a
    field with controls bolted underneath. */
 .site-agent-compose {
+  position: relative;
   display: grid;
   flex: 0 0 auto;
   gap: var(--product-space-6);
   margin: 0 var(--product-space-6) var(--product-space-6);
-  padding: var(--product-space-8) var(--product-space-8) var(--product-space-6);
+  padding: var(--product-space-8);
   border: 1px solid var(--product-color-border);
   border-radius: var(--product-radius-lg);
-  background: var(--product-color-surface-soft);
-  box-shadow: var(--product-shadow-card-soft);
+  background: var(--product-color-surface);
+  box-shadow: var(--product-shadow-command-dock);
   transition:
     border-color var(--product-duration-fast) var(--product-easing-standard),
     box-shadow var(--product-duration-fast) var(--product-easing-standard);
 }
 
 .site-agent-compose:focus-within:not(.is-unavailable) {
-  border-color: var(--product-color-border-emphasis);
-  box-shadow: var(--product-shadow-focus);
+  border-color: var(--product-color-primary);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--product-color-primary) 24%, transparent),
+    var(--product-shadow-command-dock);
 }
 
 .site-agent-selection-strip {
@@ -4188,7 +4423,7 @@ textarea {
 
 .site-agent-compose-footer {
   justify-content: space-between;
-  min-height: var(--product-control-height-default);
+  min-height: var(--product-control-height-compact);
   gap: var(--product-space-6);
 }
 
@@ -4203,7 +4438,7 @@ textarea {
 /* Pulled left by the trigger's own inset so the mode label starts on the same
    vertical as the prompt text, not one padding step inside it. */
 .site-agent-compose-mode {
-  position: relative;
+  position: static;
   display: inline-flex;
   min-width: 0;
   flex: 0 0 auto;
@@ -4212,7 +4447,7 @@ textarea {
 
 .site-agent-compose-mode-trigger {
   display: inline-flex;
-  min-height: var(--product-control-height-default);
+  min-height: var(--product-control-height-compact);
   align-items: center;
   gap: var(--product-space-2);
   border: 1px solid transparent;
@@ -4267,16 +4502,17 @@ textarea {
   position: absolute;
   z-index: 50;
   bottom: calc(100% + var(--product-space-4));
-  left: var(--product-space-4);
+  left: var(--product-space-8);
   display: grid;
-  width: max(264px, 100%);
-  max-width: calc(100vw - var(--product-space-12));
+  width: min(264px, calc(100% - var(--product-space-12)));
   gap: var(--product-space-2);
   border: 1px solid var(--product-color-border);
   border-radius: var(--product-radius-md);
   padding: var(--product-space-3);
   background: var(--product-color-surface);
   box-shadow: var(--product-shadow-card-hover);
+  transform-origin: bottom left;
+  animation: site-agent-mode-menu-in 150ms var(--product-easing-standard);
 }
 
 .site-agent-compose-mode-menu button {
@@ -4336,8 +4572,8 @@ textarea {
 .site-agent-voice-button,
 .site-agent-send-button {
   display: inline-flex;
-  width: 40px;
-  height: 40px;
+  width: var(--product-control-height-compact);
+  height: var(--product-control-height-compact);
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
@@ -4437,6 +4673,16 @@ textarea {
 @keyframes site-agent-listening {
   0%, 100% { opacity: .45; transform: scale(.8); }
   50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes site-agent-mode-menu-in {
+  from { opacity: 0; transform: translateY(3px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes site-agent-activity-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
 }
 
 .site-agent-panel-resizer,
@@ -4581,6 +4827,11 @@ textarea {
   .site-agent-preview-skeleton {
     animation: none;
   }
+
+  .site-agent-compose-mode-menu,
+  .site-agent-activity-dot.is-running {
+    animation: none;
+  }
 }
 
 .site-agent-setup-messages {
@@ -4692,6 +4943,13 @@ textarea {
   }
 
   .site-agent-compose-mode-menu button {
+    min-height: var(--product-control-height-touch);
+  }
+
+  .site-agent-activity-summary,
+  .site-agent-activity-details > summary,
+  .site-agent-activity-unavailable button,
+  .site-agent-new-activity {
     min-height: var(--product-control-height-touch);
   }
 
@@ -4914,12 +5172,13 @@ textarea {
     align-items: center;
   }
 
-  .site-agent-workspace[data-panel-mode="full-chat"] .site-agent-messages,
+  .site-agent-workspace[data-panel-mode="full-chat"] .site-agent-transcript,
   .site-agent-workspace[data-panel-mode="full-chat"] .site-agent-compose {
     width: min(100%, 760px);
   }
 
   .site-agent-workspace[data-panel-mode="full-chat"] .site-agent-messages {
+    width: 100%;
     padding: var(--product-space-11) 0;
   }
 
@@ -6614,7 +6873,7 @@ textarea {
 
   .site-agent-compose {
     margin: 0 10px max(10px, env(safe-area-inset-bottom));
-    padding: var(--product-space-7) var(--product-space-7) var(--product-space-5);
+    padding: var(--product-space-7);
   }
 
   .site-agent-messages {

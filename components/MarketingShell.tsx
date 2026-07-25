@@ -22,7 +22,7 @@ async function MarketingHeader() {
   return (
     <header className="app-header marketing-header">
       <Link className="app-brand" href="/" aria-label="Lodesta home">
-        <img src="/lodesta-logo.png" alt="Lodesta" />
+        <img src="/brand/lodesta-wordmark.svg" alt="Lodesta" />
       </Link>
       <nav className="app-nav" aria-label="Primary navigation">
         <Link className="app-nav-primary" href={appHref}>
@@ -37,7 +37,7 @@ function MarketingFooter() {
   return (
     <footer className="marketing-footer">
       <Link className="app-brand marketing-footer-brand" href="/" aria-label="Lodesta home">
-        <img src="/lodesta-logo.png" alt="Lodesta" />
+        <img src="/brand/lodesta-wordmark.svg" alt="Lodesta" />
       </Link>
       <p>Managed website optimization for local businesses.</p>
       <nav aria-label="Legal and support">

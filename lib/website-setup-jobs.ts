@@ -2,7 +2,7 @@ import type { PublicFetchUrlValidation } from "@/lib/url-safety";
 import { validateWebsiteSetupSource } from "@/lib/website-setups";
 import { WebsiteCrawlError } from "@/packages/business-data";
 import { platformOperationsRepository, type WebsiteSetupFailureCode } from "@/packages/platform-operations";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 
 export async function processNextWebsiteSetup(workerId = `website_setup_worker_${process.pid}`) {
   const setup = await platformOperationsRepository.claimNextWebsiteSetup(workerId);

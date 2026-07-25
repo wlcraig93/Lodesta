@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { sitePlatformRepository } from "@/packages/platform-data";
+import type { PlatformSiteRecord } from "@/packages/site-contracts";
 import { getCurrentUser } from "./supabase/server";
 import { authRequired, hasPlatformAdminRole, hasValidAdminToken } from "./auth-policy";
 
@@ -32,7 +32,7 @@ export async function requireAdminPageAccess(nextPath: string) {
   return { ...auth, canAccessAdmin: true as const, tokenAccess: false as const };
 }
 
-export async function requirePlatformSiteOwnerAccess(siteId: string, nextPath: string) {
+export async function requirePlatformSiteOwnerAccess(site: PlatformSiteRecord, nextPath: string) {
   if (hasValidAdminToken(await headers())) {
     return {
       configured: true as const,
@@ -55,8 +55,6 @@ export async function requirePlatformSiteOwnerAccess(siteId: string, nextPath: s
   const userId = auth.user?.id;
   if (!userId) redirect(`/auth/login?next=${encodeURIComponent(nextPath)}`);
 
-  const site = await sitePlatformRepository.getSite(siteId);
-  if (!site) notFound();
   const ownsSite = site.ownerUserId === userId;
   const canAccessAdmin = hasPlatformAdminRole(auth.user);
   if (ownsSite) {

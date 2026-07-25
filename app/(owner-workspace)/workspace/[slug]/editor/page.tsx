@@ -3,8 +3,6 @@ import { SiteAgentWorkspace } from "@/components/SiteAgentWorkspace";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { sitePlatformRepository } from "@/packages/platform-data";
 
-export const dynamic = "force-dynamic";
-
 export default async function WorkspaceWebsitePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const context = await requireOwnerWorkspace(slug, `/workspace/${slug}/editor`);

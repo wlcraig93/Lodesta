@@ -4,8 +4,6 @@ import { requireOwnerAccess } from "@/lib/page-access";
 import { resolveOwnerIdentity } from "@/lib/owner-identity";
 import { getOwnerSiteInventory } from "@/lib/owner-workspace";
 
-export const dynamic = "force-dynamic";
-
 export default async function AccountSettingsPage() {
   const access = await requireOwnerAccess("/account/settings");
   const inventory = await getOwnerSiteInventory();

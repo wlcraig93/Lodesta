@@ -3,7 +3,7 @@ import { z } from "zod";
 import { controlPlaneChangePayloadSchema } from "@/packages/site-contracts";
 import { controlPlaneService } from "@/packages/control-plane";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 

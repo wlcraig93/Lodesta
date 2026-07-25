@@ -71,6 +71,7 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 
 ## Git Hygiene
 
+- Work directly on `main` unless the user explicitly requests a separate branch or worktree.
 - Check `git status --short` before editing so existing user or agent changes are visible.
 - Do not commit automatically unless the user explicitly asks for a commit, PR, or publish-style handoff.
 - Stage only files changed for the current task. Do not stage unrelated dirty files.

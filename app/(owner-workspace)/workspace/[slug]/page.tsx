@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
 import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
@@ -8,8 +8,6 @@ import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { parseAnalyticsQuery } from "@/lib/analytics-query";
 import { WorkspaceMetric, WorkspacePageHeader, WorkspaceStatus } from "@/components/OwnerWorkspaceUI";
 import { formatProductDate, humanize } from "@/lib/product-format";
-
-export const dynamic = "force-dynamic";
 
 export default async function WorkspaceHomePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;

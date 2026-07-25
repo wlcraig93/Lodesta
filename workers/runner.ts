@@ -1,7 +1,7 @@
 import "../scripts/load-env";
 
 import { setTimeout as sleep } from "node:timers/promises";
-import { siteAuthoringWorkflow } from "../packages/site-platform";
+import { siteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import { sitePlatformRepository } from "../packages/platform-data";
 import { processNextWebsiteAssessmentJob } from "../packages/website-assessment/jobs";
 import { processNextWebsiteSetup } from "../lib/website-setup-jobs";

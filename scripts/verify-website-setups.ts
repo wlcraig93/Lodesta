@@ -196,7 +196,7 @@ assert(setupWorkspace.includes("The latest progress could not be loaded. Lodesta
 assert(setupWorkspace.includes("<WebsiteWorkspaceFrame") && workspaceClient.includes("<WebsiteWorkspaceFrame") && workspaceFrame.includes('type DesktopPanelMode = "split" | "collapsed" | "full-chat"'), "Setup and editor do not share the canonical responsive frame.");
 assert(productShell.includes("focusedSetup") && productShell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Setup-detail routes do not use the focused product shell.");
 assert(!workspacePage.includes("failed.failureReason") && !workspaceClient.includes("failedRun.failureReason"), "Stored authoring diagnostics leak into owner surfaces.");
-assert(accountContext.includes("getOwnerSiteInventory") && ownerWorkspace.includes("getSitesByOwnerUserId") && ownerWorkspace.includes("getBusinessStatesByIds"), "Account inventory is not owner-scoped and bulk-loaded.");
+assert(accountContext.includes("getOwnerSiteInventory") && ownerWorkspace.includes("getSitesWithBusinessStatesByOwnerUserId") && ownerWorkspace.includes("getBusinessStatesByIds"), "Account inventory is not owner-scoped and bulk-loaded.");
 assert(!workflow.includes("existingSourcePolicy") && !workflow.includes("findExistingBootstrap"), "Global source collision logic remains.");
 assert(workflow.includes("bootstrapWithUniqueSlug") && workflow.includes("duplicate key.*sites.*slug") && workflow.includes("input.site.id.replace"), "Concurrent slug creation does not use unique-insert retry with a site-ID suffix.");
 assert(!domainRoute.includes("getDomainByHostname") && domainSettings.includes("TXT ownership record") && domainSettings.includes("CNAME or ALIAS"), "Proof-first domain instructions are incomplete.");

@@ -4,7 +4,7 @@ import { sha256, stableJson } from "@/packages/business-data";
 import { managerToolArguments, type ManagerToolName } from "@/packages/site-agent/contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAgentRunSchema } from "@/packages/site-contracts";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import {
   externalAuthoringClaimSchema,

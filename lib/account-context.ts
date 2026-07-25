@@ -1,10 +1,10 @@
 import { getOwnerSiteInventory } from "@/lib/owner-workspace";
+import { getOwnerAccountOverview, type OwnerAccountSiteOverview } from "@/lib/account-overview";
 import { deriveOwnerSiteLifecycle, type OwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { getWebsiteSetupView, type WebsiteSetupView } from "@/lib/website-setups";
-import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
 
 export type AccountRelationship = {
   id: string;
@@ -25,14 +25,18 @@ export async function getAccountContext() {
   const inventory = await getOwnerSiteInventory();
   if (!inventory.auth.user) return { ...inventory, relationships: [] as AccountRelationship[] };
 
-  const setups = await platformOperationsRepository.listWebsiteSetupsForOwner(inventory.auth.user.id);
-  const queue = await sitePlatformRepository.listOperatorQueue();
+  const [setups, overview] = await Promise.all([
+    platformOperationsRepository.listWebsiteSetupsForOwner(inventory.auth.user.id),
+    getOwnerAccountOverview(inventory.auth.user.id, inventory.sites)
+  ]);
   const ownedSiteIds = new Set(inventory.sites.map((site) => site.id));
   const currentSetups = setups.filter((setup) =>
     setup.status !== "canceled"
     && (!setup.siteId || !ownedSiteIds.has(setup.siteId))
   );
   const optionsById = new Map(inventory.options.map((site) => [site.id, site]));
+  const statesByBusinessId = new Map(inventory.businessStates.map((state) => [state.businessId, state]));
+  const overviewBySiteId = new Map(overview.map((item) => [item.siteId, item]));
 
   const setupRelationships = await Promise.all(currentSetups.map(async (setup): Promise<AccountRelationship> => {
     const view = await getWebsiteSetupView(setup);
@@ -56,15 +60,18 @@ export async function getAccountContext() {
   const siteRelationships = await Promise.all(inventory.options.map(async (option): Promise<AccountRelationship> => {
     const site = sitesById.get(option.id);
     if (!site) throw new Error(`Owner inventory is missing site ${option.id}.`);
-    const [versions, runs, state, inquiries, domains] = await Promise.all([
-      sitePlatformRepository.listSiteVersions(site.id),
-      sitePlatformRepository.listRecentAgentRuns({ siteId: site.id, limit: 8 }),
-      sitePlatformRepository.getBusinessState(site.businessId),
-      siteCapabilityRepository.listInquiries(site.id),
-      platformOperationsRepository.listDomains(site.id)
-    ]);
+    const siteOverview = overviewBySiteId.get(site.id);
+    if (!siteOverview) throw new Error(`Owner account overview is missing site ${site.id}.`);
+    const { versions, runs } = siteOverview;
+    const state = statesByBusinessId.get(site.businessId);
     const candidate = versions.find((version) => version.status === "candidate");
-    const readiness = candidate
+    const attention = {
+      operatorItems: siteOverview.openQueueCount,
+      pendingProof: state?.proof.filter((item) => item.status === "observed").length,
+      replyInquiries: siteOverview.replyInquiryCount,
+      domainAttention: siteOverview.domainAttention
+    };
+    const readiness = candidate && lifecycleNeedsPublicationReadiness(siteOverview, attention)
       ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository })
       : undefined;
     const lifecycle = deriveOwnerSiteLifecycle({
@@ -73,12 +80,7 @@ export async function getAccountContext() {
       versions,
       runs,
       readiness,
-      attention: {
-        operatorItems: queue.filter((item) => item.siteId === site.id && ["open", "in_review"].includes(item.status)).length,
-        pendingProof: state?.proof.filter((item) => item.status === "observed").length,
-        replyInquiries: inquiries.filter((inquiry) => inquiry.status === "new" || inquiry.status === "needs_reply").length,
-        domainAttention: domains.some((domain) => domain.status === "attention_required")
-      }
+      attention
     });
     const published = versions.find((version) => version.status === "published");
     const recentAt = runs[0]?.completedAt ?? runs[0]?.startedAt ?? published?.publishedAt ?? site.updatedAt;
@@ -98,6 +100,23 @@ export async function getAccountContext() {
   }));
 
   return { ...inventory, setups, relationships: [...setupRelationships, ...siteRelationships] };
+}
+
+function lifecycleNeedsPublicationReadiness(
+  overview: OwnerAccountSiteOverview,
+  attention: {
+    operatorItems?: number;
+    pendingProof?: number;
+    replyInquiries?: number;
+    domainAttention?: boolean;
+  }
+) {
+  const latestRun = overview.runs[0];
+  return !["needs_input", "failed", "queued", "running"].includes(latestRun?.status ?? "")
+    && !attention.operatorItems
+    && !attention.pendingProof
+    && !attention.replyInquiries
+    && !attention.domainAttention;
 }
 
 function hostnameLabel(value: string) { try { return new URL(value).hostname.replace(/^www\./, ""); } catch { return "New website"; } }

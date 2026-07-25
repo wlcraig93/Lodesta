@@ -1,4 +1,4 @@
-import { loadPublishedSiteContext, llmsTextForSite } from "@/packages/site-platform";
+import { loadPublishedSiteContext, llmsTextForSite } from "@/packages/site-platform/public-site";
 
 export const dynamic = "force-dynamic";
 

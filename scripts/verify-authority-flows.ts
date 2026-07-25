@@ -13,7 +13,7 @@ import {
   siteVersionSchema,
   sourceSnapshotSchema
 } from "../packages/site-contracts";
-import { deriveSitePublicationReadiness } from "../packages/site-platform";
+import { deriveSitePublicationReadiness } from "../packages/site-platform/publication-readiness";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const directory = await mkdtemp(join(tmpdir(), "lodesta-authority-"));

@@ -33,7 +33,7 @@ if (process.argv.includes("--check")) {
 }
 
 const next = localBin("next");
-const child = spawn(next, ["dev", "-p", port, "-H", host], {
+const child = spawn(next, ["dev", "--turbopack", "-p", port, "-H", host], {
   stdio: "inherit",
   env: inspectionEnv
 });

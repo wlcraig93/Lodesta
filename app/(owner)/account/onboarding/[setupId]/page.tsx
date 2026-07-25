@@ -4,8 +4,6 @@ import { requireOwnerAccess } from "@/lib/page-access";
 import { getWebsiteSetupView } from "@/lib/website-setups";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 
-export const dynamic = "force-dynamic";
-
 export default async function WebsiteSetupPage({ params }: { params: Promise<{ setupId: string }> }) {
   const { setupId } = await params;
   const access = await requireOwnerAccess(`/account/onboarding/${setupId}`);

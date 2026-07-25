@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedOperator } from "../auth";
 
 const bootstrapSchema = z.object({

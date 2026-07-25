@@ -42,7 +42,7 @@ import {
   type VerticalDemandEvent
 } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
-import { siteIntentMatchesBuildContent } from "@/packages/business-data";
+import { siteIntentMatchesBuildContent } from "@/packages/business-data/public-projection";
 
 export type { SiteAgentMessage } from "@/packages/site-contracts";
 
@@ -142,6 +142,10 @@ export interface SitePlatformRepository {
   getSiteBySlug(slug: string): Promise<PlatformSiteRecord | undefined>;
   listSites(): Promise<PlatformSiteRecord[]>;
   getSitesByOwnerUserId(ownerUserId: string): Promise<PlatformSiteRecord[]>;
+  getSitesWithBusinessStatesByOwnerUserId(ownerUserId: string): Promise<{
+    sites: PlatformSiteRecord[];
+    businessStates: BusinessState[];
+  }>;
   getSitesByIds(siteIds: string[]): Promise<PlatformSiteRecord[]>;
   assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
@@ -282,6 +286,17 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return Object.values((await this.read()).sites)
       .filter((site) => site.ownerUserId === ownerUserId)
       .map((site) => clone(site) as PlatformSiteRecord);
+  }
+  async getSitesWithBusinessStatesByOwnerUserId(ownerUserId: string) {
+    const state = await this.read();
+    const sites = Object.values(state.sites)
+      .filter((site) => site.ownerUserId === ownerUserId)
+      .map((site) => clone(site) as PlatformSiteRecord);
+    const businessStates = sites.flatMap((site) => {
+      const businessState = state.businessStates[site.businessId];
+      return businessState ? [clone(businessState) as BusinessState] : [];
+    });
+    return { sites, businessStates };
   }
   async getSitesByIds(siteIds: string[]) { const state = await this.read(); return [...new Set(siteIds)].flatMap((id) => state.sites[id] ? [clone(state.sites[id]) as PlatformSiteRecord] : []); }
   async assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string) {
@@ -772,6 +787,22 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       "List sites by owner"
     );
     return rows.map(siteFromRow);
+  }
+  async getSitesWithBusinessStatesByOwnerUserId(ownerUserId: string) {
+    const rows = await requireData<Array<Record<string, unknown> & { business_states?: Array<{ state: unknown }> }>>(
+      this.client
+        .from("sites")
+        .select("*,business_states(state)")
+        .eq("owner_user_id", ownerUserId)
+        .order("created_at", { ascending: false }),
+      "List sites and business states by owner"
+    );
+    return {
+      sites: rows.map(siteFromRow),
+      businessStates: rows.flatMap((row) =>
+        (row.business_states ?? []).map((stateRow) => businessStateSchema.parse(stateRow.state))
+      )
+    };
   }
   async getSitesByIds(siteIds: string[]) {
     const ids = [...new Set(siteIds)];

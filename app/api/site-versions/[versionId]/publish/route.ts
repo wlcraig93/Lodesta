@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow, deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 
 export async function POST(request: Request, { params }: { params: Promise<{ versionId: string }> }) {

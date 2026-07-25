@@ -4,8 +4,6 @@ import { AccountWebsiteCard } from "@/components/AccountWebsiteCard";
 import { getAccountContext } from "@/lib/account-context";
 import { requireOwnerAccess } from "@/lib/page-access";
 
-export const dynamic = "force-dynamic";
-
 export default async function AccountEntryPage() {
   await requireOwnerAccess("/account");
   const context = await getAccountContext();

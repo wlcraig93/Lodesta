@@ -25,7 +25,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 function startWeb() {
-  start("web", localBin("next"), ["dev", "-p", port, "-H", host]);
+  start("web", localBin("next"), ["dev", "--turbopack", "-p", port, "-H", host]);
 }
 
 function startWorker() {

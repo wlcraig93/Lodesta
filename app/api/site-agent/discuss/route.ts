@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor, canAccessAgentSession } from "../auth";
 
 const discussionSchema = z.object({

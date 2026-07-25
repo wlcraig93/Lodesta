@@ -20,10 +20,15 @@ const marketingShell = readFileSync("components/MarketingShell.tsx", "utf8");
 const privacyPage = readFileSync("app/(marketing)/privacy/page.tsx", "utf8");
 const termsPage = readFileSync("app/(marketing)/terms/page.tsx", "utf8");
 const sitemap = readFileSync("app/sitemap.ts", "utf8");
+const devSupervisor = readFileSync("scripts/dev.mjs", "utf8");
+const devInspection = readFileSync("scripts/dev-inspect.mjs", "utf8");
 
 for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
+assert(packageJson.scripts["dev:web"].includes("--turbopack") && packageJson.scripts["dev:raw"].includes("--turbopack"), "Package development entrypoints must use Turbopack.");
+assert(devSupervisor.includes('"--turbopack"') && devInspection.includes('"--turbopack"'), "Supervised development entrypoints must use Turbopack.");
+assert(!existsSync("packages/site-platform/index.ts"), "The broad site-platform barrel must remain removed.");
 for (const name of ["LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER="]) {
   assert(env.includes(name), `.env.example must document ${name}`);
 }

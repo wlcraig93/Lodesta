@@ -27,7 +27,9 @@ const [
   siteRoute,
   platformRepository,
   dispositionMigration,
-  publicSite
+  publicSite,
+  accountOverview,
+  accountOverviewMigration
 ] = await Promise.all([
   readFile("app/(owner)/account/page.tsx", "utf8"),
   readFile("app/(auth)/auth/callback/route.ts", "utf8"),
@@ -43,7 +45,9 @@ const [
   readFile("app/api/sites/[siteId]/route.ts", "utf8"),
   readFile("packages/platform-data/repository.ts", "utf8"),
   readFile("supabase/migrations/202607230003_owner_site_disposition.sql", "utf8"),
-  readFile("packages/site-platform/public-site.ts", "utf8")
+  readFile("packages/site-platform/public-site.ts", "utf8"),
+  readFile("lib/account-overview.ts", "utf8"),
+  readFile("supabase/migrations/202607230018_owner_account_overview.sql", "utf8")
 ]);
 
 assert(!accountRoute.includes('redirect("/admin/sites")'), "Admin users are still redirected away from the owner account entry.");
@@ -72,5 +76,8 @@ assert(dispositionMigration.includes("owner_user_id = target_owner_user_id") && 
 assert(dispositionMigration.includes("delete from active_domains") && dispositionMigration.includes("update preview_grants") && dispositionMigration.includes("revoked_at"), "Site disposition leaves public routing or preview access active.");
 assert(dispositionMigration.includes("status = 'cancelled'") && dispositionMigration.includes("grant execute on function dispose_owned_site(text,uuid) to service_role"), "Site disposition does not cancel active work or enforce service-role-only execution.");
 assert(publicSite.includes('site.status !== "active"'), "Paused sites can still be served publicly.");
+assert(accountOverview.includes('rpc("owner_account_overview"') && accountOverview.includes('process.env.LODESTA_REPOSITORY !== "local"'), "The account overview does not use the canonical aggregated read.");
+assert(accountOverviewMigration.includes("where owned_site.owner_user_id = target_owner_user_id"), "The account overview RPC is not scoped to the exact owner user ID.");
+assert(accountOverviewMigration.includes("grant execute on function public.owner_account_overview(uuid) to service_role") && accountOverviewMigration.includes("revoke all on function public.owner_account_overview(uuid) from authenticated"), "The account overview RPC is not service-role-only.");
 
 console.log("Account access verification passed.");

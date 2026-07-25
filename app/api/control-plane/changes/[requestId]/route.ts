@@ -1,7 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { controlPlaneService } from "@/packages/control-plane";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedOperator } from "@/app/api/site-agent/auth";
 
 const decisionSchema = z.object({ decision: z.enum(["approve", "reject"]) }).strict();

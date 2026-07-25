@@ -1,7 +1,7 @@
 import type { SitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository, redirectsStrandedByRoutes, type PlatformOperationsRepository } from "@/packages/platform-operations";
 import { sitePublicationReadinessSchema, type SitePublicationReadiness } from "@/packages/site-contracts";
-import { siteIntentMatchesBuildContent } from "@/packages/business-data";
+import { siteIntentMatchesBuildContent } from "@/packages/business-data/public-projection";
 
 export async function deriveSitePublicationReadiness(input: {
   versionId: string;

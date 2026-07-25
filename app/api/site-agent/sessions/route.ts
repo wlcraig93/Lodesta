@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor } from "../auth";
 
 const sessionSchema = z.object({ siteId: z.string().min(1) }).strict();

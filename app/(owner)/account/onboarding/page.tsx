@@ -1,8 +1,6 @@
 import { WebsiteOnboardingForm } from "@/components/WebsiteOnboardingForm";
 import { requireOwnerAccess } from "@/lib/page-access";
 
-export const dynamic = "force-dynamic";
-
 export default async function WebsiteOnboardingPage() {
   const access = await requireOwnerAccess("/account/onboarding");
   if (!access.configured) {

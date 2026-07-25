@@ -18,10 +18,15 @@ for (const retired of [
   "app/(owner)/status/[slug]/page.tsx"
 ]) await assertMissing(retired);
 
-const [shell, css, context, home, inbox, results, business, settings, account, repository, robots, middleware, agentWorkspace, agentSessionRoute, agentRetryRoute, ownerRunView, adminRunPage, adminRunInspector, adminRunTelemetry] = await Promise.all([
+const [shell, css, context, accessPolicy, authServer, workspaceLayout, ownerLayout, workspaceLoading, home, inbox, results, business, settings, account, repository, robots, middleware, agentWorkspace, agentSessionRoute, agentRetryRoute, ownerRunView, adminRunPage, adminRunInspector, adminRunTelemetry] = await Promise.all([
   readFile("components/ProductAppShell.tsx", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("lib/owner-workspace.ts", "utf8"),
+  readFile("lib/page-access.ts", "utf8"),
+  readFile("lib/supabase/server.ts", "utf8"),
+  readFile(`${routeRoot}/layout.tsx`, "utf8"),
+  readFile("app/(owner)/layout.tsx", "utf8"),
+  readFile(`${routeRoot}/loading.tsx`, "utf8"),
   readFile(`${routeRoot}/page.tsx`, "utf8"),
   readFile("components/OwnerInbox.tsx", "utf8"),
   readFile(`${routeRoot}/analytics/page.tsx`, "utf8"),
@@ -58,6 +63,16 @@ assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] .o
 assert(css.includes(".site-agent-mobile-back") && css.includes(".site-agent-publish-mobile"), "Mobile editor topbar does not carry navigation and publishing");
 
 assert(context.includes("requirePlatformSiteOwnerAccess") && context.includes("getOwnerSiteInventory"), "Workspace access and visible-site calculation are not canonicalized");
+assert(context.includes("cache((slug: string)") && context.includes("cache((businessId: string)") && context.includes("cache(async function getOwnerSiteInventory"), "Workspace request reads are not memoized.");
+assert(authServer.includes("cache(async function getCurrentUser"), "Authenticated-user reads are not request-memoized.");
+assert(accessPolicy.includes("requirePlatformSiteOwnerAccess(site: PlatformSiteRecord") && !accessPolicy.includes("getSite(siteId)"), "Workspace authorization reloads the selected site.");
+assert(context.includes('access.mode === "platform_admin_preview" ? undefined : getOwnerSiteInventory()'), "Platform-admin previews still load account inventory.");
+assert(workspaceLayout.includes('dynamic = "force-dynamic"') && ownerLayout.includes('dynamic = "force-dynamic"'), "Authenticated layout boundaries must remain dynamic.");
+assert(workspaceLoading.includes('aria-busy="true"') && workspaceLoading.includes("Loading workspace"), "Workspace navigation has no immediate loading boundary.");
+for (const route of routes) {
+  const source = await readFile(`${routeRoot}/${route}`, "utf8");
+  assert(!source.includes('dynamic = "force-dynamic"'), `${route} redundantly declares dynamic rendering.`);
+}
 assert(home.includes("deriveOwnerSiteLifecycle") && home.indexOf("readiness") < home.indexOf("replyInquiries"), "Home does not derive the canonical owner lifecycle");
 assert(inbox.includes('type InboxFilter = "all" | "needs_reply" | "active" | "won" | "archived"'), "Inbox filters do not match the owner contract");
 assert(inbox.includes("router.replace") && inbox.includes("inquiry="), "Inbox selection is not shareable");

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizedSiteActor } from "@/app/api/site-agent/auth";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
 
 export async function GET(request: Request, { params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;

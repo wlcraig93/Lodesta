@@ -1,6 +1,6 @@
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { platformOperationsRepository } from "@/packages/platform-operations";
-import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite } from "@/packages/site-platform";
+import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite } from "@/packages/site-platform/public-site";
 import type { AgentAccessPolicy } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";

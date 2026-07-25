@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createPublicBuildInput, sha256, stableJson } from "@/packages/business-data";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import {
   operatorQueueItemSchema,
   businessStateSchema,

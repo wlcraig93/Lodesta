@@ -47,6 +47,9 @@ assert(!workflow.includes('mode?: "draft" | "experimental"'), "Experimental auth
 const accessSource = await readFile("lib/page-access.ts", "utf8");
 assert(accessSource.includes("site.ownerUserId === userId") && !accessSource.includes("ownerEmail"), "Site access is not exact user-ID ownership.");
 const publication = await readFile("packages/site-platform/publication-readiness.ts", "utf8");
+assert(publication.includes('from "@/packages/business-data/public-projection"') && !publication.includes('from "@/packages/business-data"'), "Publication readiness imports the broad business-data barrel.");
+const platformDataRepository = await readFile("packages/platform-data/repository.ts", "utf8");
+assert(platformDataRepository.includes('from "@/packages/business-data/public-projection"') && !platformDataRepository.includes('from "@/packages/business-data"'), "Platform data repository imports the broad business-data barrel.");
 assert(!publication.includes("preview_only_reference_assets") && !publication.includes("asset.reference_only"), "Retired preview-only media publication logic remains.");
 const externalAuthoringPlan = await readFile("docs/external-codex-authoring.md", "utf8");
 assert(externalAuthoringPlan.includes("typed `source_website` origin") && externalAuthoringPlan.includes("does not create a separate approval or publication gate"), "The canonical source-site media policy is not recorded.");

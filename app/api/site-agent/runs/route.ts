@@ -2,7 +2,8 @@ import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
+import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor, canAccessAgentSession } from "../auth";
 
 const runRequestSchema = z.object({

@@ -5,8 +5,6 @@ import { WorkspacePageHeader } from "@/components/OwnerWorkspaceUI";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { siteCapabilityRepository } from "@/packages/site-capabilities";
 
-export const dynamic = "force-dynamic";
-
 export default async function WorkspaceInboxPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ inquiry?: string }> }) {
   const [{ slug }, query] = await Promise.all([params, searchParams]);
   const context = await requireOwnerWorkspace(slug, `/workspace/${slug}/leads`);

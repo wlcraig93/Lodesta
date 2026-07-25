@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/security";
 import { hasBearerToken, hasValidAdminToken, hasValidRecoveryWatchdogToken } from "@/lib/auth-policy";
 import { processAutomaticRecovery } from "@/lib/recovery-watchdog";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 
 export const runtime = "nodejs";
 

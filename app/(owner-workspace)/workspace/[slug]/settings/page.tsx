@@ -9,8 +9,6 @@ import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
 
-export const dynamic = "force-dynamic";
-
 export default async function WorkspaceSettingsPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const context = await requireOwnerWorkspace(slug, `/workspace/${slug}/settings`);

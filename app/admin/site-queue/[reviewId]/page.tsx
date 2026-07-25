@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { OperatorQueueActions } from "@/components/admin/OperatorQueueActions";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform";
+import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };

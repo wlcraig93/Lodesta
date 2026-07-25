@@ -13,8 +13,6 @@ import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import type { AnalyticsReport, AnalyticsReportRow } from "@/packages/site-capabilities/contracts";
 
-export const dynamic = "force-dynamic";
-
 export default async function WorkspaceAnalyticsPage({
   params,
   searchParams

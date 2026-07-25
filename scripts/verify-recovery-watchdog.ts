@@ -10,7 +10,7 @@ import {
   websiteAssessmentRubricIdentity,
   websiteAssessmentScannerIdentity
 } from "../packages/website-assessment/rubric";
-import { siteAgentRecoveryStaleAfterMs } from "../packages/site-platform";
+import { siteAgentRecoveryStaleAfterMs } from "../packages/site-platform/workflow";
 import { triggerRecoveryWatchdog } from "../workers/recovery-watchdog/src/index";
 
 async function main() {

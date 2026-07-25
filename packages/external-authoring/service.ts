@@ -1,7 +1,7 @@
 import { sha256, stableJson, WebsiteCrawlError } from "@/packages/business-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { normalizeBootstrapSourceUrl } from "@/packages/site-platform/source-url";
 import {
   externalAuthoringBatchItemSchema,

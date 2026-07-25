@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { ownerSiteAgentRun, siteAuthoringWorkflow } from "@/packages/site-platform";
+import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
+import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor, canAccessAgentSession } from "../../../auth";
 
 export async function POST(request: Request, { params }: { params: Promise<{ runId: string }> }) {

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { cache } from "react";
 import { getSupabasePublicEnv } from "./env";
 
 export async function createSupabaseServerClient() {
@@ -26,11 +27,11 @@ export async function createSupabaseServerClient() {
   });
 }
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async function getCurrentUser() {
   const env = getSupabasePublicEnv();
   if (!env.configured) return { configured: false as const, user: null };
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
   if (error) return { configured: true as const, user: null };
   return { configured: true as const, user: data.user };
-}
+});

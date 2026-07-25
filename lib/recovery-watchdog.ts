@@ -1,5 +1,5 @@
 import { processWebsiteAssessmentJobs } from "@/packages/website-assessment/jobs";
-import { siteAuthoringWorkflow, siteAgentRecoveryStaleAfterMs } from "@/packages/site-platform";
+import { siteAuthoringWorkflow, siteAgentRecoveryStaleAfterMs } from "@/packages/site-platform/workflow";
 import { processDomainReconciliations } from "@/lib/domain-reconciliation";
 
 export const automaticRecoveryLimit = 4;

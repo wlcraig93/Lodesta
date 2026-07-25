@@ -140,9 +140,9 @@ Forward-looking pattern for run stages and model/tool activity. Show stage, stat
 
 ### Command Dock
 
-Use for owner and operator requests to an agent. The dock is a generous soft surface with one auto-growing prompt, a compact action rail, and a strong circular submit action. Its large radius and negative space distinguish it from an ordinary form field without turning it into decorative chrome.
+Use for owner and operator requests to an agent. The dock is a generous soft surface with one auto-growing prompt, a compact action rail, and a strong circular submit action. Its large radius and negative space distinguish it from an ordinary form field without turning it into decorative chrome. The prompt, the mode trigger, and the submit action share the dock's inner edges, and the prompt hugs its content so the dock's negative space comes from the dock itself rather than slack inside the field.
 
-Keep mode choices native and legible, expose only controls that perform a real action, and preserve multiline writing. Voice input may use browser-managed speech recognition when the browser exposes it, but the control must explain unsupported and permission-failure states and must never imply that transcription is guaranteed to happen on-device.
+Mode choices use the product popover menu rather than a native `select`, so each mode can state its consequence and match product chrome in both appearance modes. The menu keeps a labelled trigger, roving arrow-key focus, Escape-to-dismiss with focus return, and a checked indicator on the active mode. Expose only controls that perform a real action, and preserve multiline writing. Voice input may use browser-managed speech recognition when the browser exposes it, but the control must explain unsupported and permission-failure states and must never imply that transcription is guaranteed to happen on-device.
 
 ## Implementation Rules
 

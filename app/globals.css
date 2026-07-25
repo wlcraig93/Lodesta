@@ -4087,13 +4087,15 @@ textarea {
   line-height: var(--product-line-height-ui);
 }
 
+/* Command dock. The prompt text, the mode trigger, and the submit action share
+   one inner edge, so the dock reads as a single writing surface rather than a
+   field with controls bolted underneath. */
 .site-agent-compose {
   display: grid;
-  min-height: 136px;
   flex: 0 0 auto;
   gap: var(--product-space-6);
   margin: 0 var(--product-space-6) var(--product-space-6);
-  padding: var(--product-space-8);
+  padding: var(--product-space-8) var(--product-space-8) var(--product-space-6);
   border: 1px solid var(--product-color-border);
   border-radius: var(--product-radius-lg);
   background: var(--product-color-surface-soft);
@@ -4142,17 +4144,19 @@ textarea {
 
 .site-agent-compose textarea {
   width: 100%;
-  min-height: 56px;
+  min-height: calc(var(--product-font-size-body) * var(--product-line-height-ui));
   max-height: 160px;
   resize: none;
   border: 0;
-  padding: var(--product-space-3) var(--product-space-4);
+  padding: 0;
   overflow-y: hidden;
   background: transparent;
   color: var(--product-color-text);
+  caret-color: var(--product-color-primary);
   font-size: var(--product-font-size-body);
   font-weight: var(--product-font-weight-regular);
   line-height: var(--product-line-height-ui);
+  scrollbar-width: thin;
 }
 
 .site-agent-compose textarea::placeholder {
@@ -4196,57 +4200,137 @@ textarea {
   margin-left: auto;
 }
 
+/* Pulled left by the trigger's own inset so the mode label starts on the same
+   vertical as the prompt text, not one padding step inside it. */
 .site-agent-compose-mode {
   position: relative;
   display: inline-flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  margin-left: calc(var(--product-space-4) * -1);
+}
+
+.site-agent-compose-mode-trigger {
+  display: inline-flex;
   min-height: var(--product-control-height-default);
   align-items: center;
+  gap: var(--product-space-2);
+  border: 1px solid transparent;
   border-radius: var(--product-radius-full);
-  color: var(--product-color-text);
-  transition:
-    background-color var(--product-duration-fast) var(--product-easing-standard),
-    color var(--product-duration-fast) var(--product-easing-standard),
-    box-shadow var(--product-duration-fast) var(--product-easing-standard);
-}
-
-.site-agent-compose-mode:hover {
-  background: var(--product-color-surface-hover);
-}
-
-.site-agent-compose-mode select {
-  min-height: var(--product-control-height-default);
-  appearance: none;
-  border: 0;
-  border-radius: inherit;
-  padding: 0 32px 0 var(--product-space-6);
+  padding-block: 0;
+  padding-inline: var(--product-space-4);
   background: transparent;
-  color: inherit;
+  color: var(--product-color-text);
   font: inherit;
   font-size: var(--product-font-size-control);
   font-weight: var(--product-font-weight-medium);
   cursor: pointer;
 }
 
-.site-agent-compose-mode select:focus {
+.site-agent-compose-mode-trigger:hover:not(:disabled) {
+  border-color: var(--product-color-border);
+  background: var(--product-color-surface-hover);
+}
+
+.site-agent-compose-mode-trigger.is-open {
+  border-color: var(--product-color-border-strong);
+  background: var(--product-color-surface-selected);
+}
+
+.site-agent-compose-mode-trigger:focus-visible {
   outline: none;
+  box-shadow: var(--product-shadow-focus);
 }
 
-.site-agent-compose-mode select:disabled {
+.site-agent-compose-mode-trigger:disabled {
+  color: var(--product-color-text-muted);
   cursor: not-allowed;
-  opacity: 0.48;
 }
 
-.site-agent-compose-mode svg {
-  position: absolute;
-  right: var(--product-space-5);
+.site-agent-compose-mode-trigger svg {
   width: 16px;
   height: 16px;
-  pointer-events: none;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.7;
+  transition: transform var(--product-duration-fast) var(--product-easing-standard);
+}
+
+.site-agent-compose-mode-trigger.is-open svg {
+  transform: rotate(180deg);
+}
+
+/* Opens upward: the dock is anchored to the bottom of the chat panel. */
+.site-agent-compose-mode-menu {
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + var(--product-space-4));
+  left: var(--product-space-4);
+  display: grid;
+  width: max(264px, 100%);
+  max-width: calc(100vw - var(--product-space-12));
+  gap: var(--product-space-2);
+  border: 1px solid var(--product-color-border);
+  border-radius: var(--product-radius-md);
+  padding: var(--product-space-3);
+  background: var(--product-color-surface);
+  box-shadow: var(--product-shadow-card-hover);
+}
+
+.site-agent-compose-mode-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--product-space-5);
+  border: 0;
+  border-radius: var(--product-radius-sm);
+  padding: var(--product-space-4) var(--product-space-5);
+  background: transparent;
+  color: var(--product-color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.site-agent-compose-mode-menu button:hover,
+.site-agent-compose-mode-menu button.is-selected {
+  background: var(--product-color-surface-selected);
+}
+
+.site-agent-compose-mode-menu button:focus-visible {
+  outline: none;
+  box-shadow: var(--product-shadow-focus);
+}
+
+.site-agent-compose-mode-menu button > span {
+  display: grid;
+  min-width: 0;
+  gap: var(--product-space-1);
+}
+
+.site-agent-compose-mode-menu strong {
+  font-size: var(--product-font-size-control);
+  font-weight: var(--product-font-weight-medium);
+}
+
+.site-agent-compose-mode-menu small {
+  color: var(--product-color-text-muted);
+  font-size: var(--product-font-size-meta);
+  font-weight: var(--product-font-weight-regular);
+}
+
+.site-agent-compose-mode-menu svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--product-color-primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .site-agent-voice-button,
@@ -4601,9 +4685,13 @@ textarea {
   .site-agent-preview-controls button,
   .site-agent-tool-button,
   .site-agent-publish,
-  .site-agent-compose-mode select,
+  .site-agent-compose-mode-trigger,
   .site-agent-voice-button,
   .site-agent-send-button {
+    min-height: var(--product-control-height-touch);
+  }
+
+  .site-agent-compose-mode-menu button {
     min-height: var(--product-control-height-touch);
   }
 
@@ -4615,7 +4703,6 @@ textarea {
   }
 
   .site-agent-compose textarea {
-    min-height: 48px;
     font-size: 1rem;
   }
 
@@ -6526,9 +6613,8 @@ textarea {
   }
 
   .site-agent-compose {
-    min-height: 120px;
     margin: 0 10px max(10px, env(safe-area-inset-bottom));
-    padding: var(--product-space-6);
+    padding: var(--product-space-7) var(--product-space-7) var(--product-space-5);
   }
 
   .site-agent-messages {
@@ -8877,7 +8963,7 @@ body,
 
 .site-agent-preview-controls button,
 .site-agent-tool-button,
-.site-agent-compose-mode,
+.site-agent-compose-mode-trigger,
 .site-agent-voice-button,
 .site-agent-send-button,
 .site-agent-mobile-switch button,

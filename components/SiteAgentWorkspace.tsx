@@ -11,7 +11,7 @@ import type {
   SitePublicBuildInput,
   SiteVersion
 } from "@/packages/site-contracts";
-import type { OwnerSiteAgentRun } from "@/packages/site-platform";
+import type { OwnerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
@@ -817,20 +817,13 @@ export function SiteAgentWorkspace({
             />
             <span className="site-agent-visually-hidden" id={voiceStatusId} aria-live="polite">{voiceStatus}</span>
             <div className="site-agent-compose-footer">
+              <ComposerModeMenu
+                value={composerMode}
+                onChange={setComposerMode}
+                disabled={initialBuildActive}
+                describedBy={initialBuildActive ? composerUnavailableId : undefined}
+              />
               <div className="site-agent-compose-actions">
-                <label className="site-agent-compose-mode">
-                  <span className="site-agent-visually-hidden">Composer mode</span>
-                  <select
-                    value={composerMode}
-                    onChange={(event) => setComposerMode(event.target.value as "edit" | "ask")}
-                    aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
-                    disabled={initialBuildActive}
-                  >
-                    <option value="edit">Build</option>
-                    <option value="ask">Ask</option>
-                  </select>
-                  <ChevronDownIcon />
-                </label>
                 <button
                   className={`site-agent-voice-button ${listening ? "is-listening" : ""}`}
                   type="button"
@@ -922,8 +915,140 @@ function messageAuthorLabel(role: SiteAgentMessage["role"]) {
   return `${role} message`;
 }
 
+const COMPOSER_MODES = [
+  { value: "edit", label: "Build", detail: "Make the change and verify a draft" },
+  { value: "ask", label: "Ask", detail: "Discuss without changing the site" }
+] as const;
+
+type ComposerMode = (typeof COMPOSER_MODES)[number]["value"];
+
+/* Owner-facing mode choice. A native `select` cannot show each mode's consequence,
+   so the dock uses the same popover language as the preview menu. */
+function ComposerModeMenu({
+  value,
+  onChange,
+  disabled,
+  describedBy
+}: {
+  value: ComposerMode;
+  onChange: (mode: ComposerMode) => void;
+  disabled: boolean;
+  describedBy?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const activeIndex = Math.max(COMPOSER_MODES.findIndex((mode) => mode.value === value), 0);
+  const active = COMPOSER_MODES[activeIndex];
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  function openMenu(index: number) {
+    setOpen(true);
+    window.requestAnimationFrame(() => itemRefs.current[index]?.focus());
+  }
+
+  function select(mode: ComposerMode) {
+    onChange(mode);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  return (
+    <div className="site-agent-compose-mode">
+      <button
+        ref={triggerRef}
+        className={`site-agent-compose-mode-trigger ${open ? "is-open" : ""}`}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-label={`Composer mode: ${active.label}`}
+        aria-describedby={describedBy}
+        disabled={disabled}
+        onClick={() => (open ? setOpen(false) : setOpen(true))}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            openMenu(event.key === "ArrowDown" ? 0 : COMPOSER_MODES.length - 1);
+          }
+        }}
+      >
+        <span>{active.label}</span>
+        <ChevronDownIcon />
+      </button>
+      {open ? (
+        <div ref={menuRef} className="site-agent-compose-mode-menu" id={menuId} role="menu" aria-label="Composer mode">
+          {COMPOSER_MODES.map((mode, index) => (
+            <button
+              key={mode.value}
+              ref={(node) => {
+                itemRefs.current[index] = node;
+              }}
+              className={mode.value === value ? "is-selected" : ""}
+              type="button"
+              role="menuitemradio"
+              aria-checked={mode.value === value}
+              onClick={() => select(mode.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  const next = (index + delta + COMPOSER_MODES.length) % COMPOSER_MODES.length;
+                  itemRefs.current[next]?.focus();
+                  return;
+                }
+                if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  itemRefs.current[event.key === "Home" ? 0 : COMPOSER_MODES.length - 1]?.focus();
+                  return;
+                }
+                if (event.key === "Tab") setOpen(false);
+              }}
+            >
+              <span><strong>{mode.label}</strong><small>{mode.detail}</small></span>
+              {mode.value === value ? <CheckIcon /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ArrowUpIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4m0 0L5.5 8.5M10 4l4.5 4.5" /></svg>;
+}
+
+function CheckIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 10.5 3.5 3.5 7.5-8" /></svg>;
 }
 
 function ChevronDownIcon() {

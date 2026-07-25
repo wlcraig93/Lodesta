@@ -231,12 +231,44 @@ export function ProductAppShell({
 }
 
 function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerWorkspaceSiteOption; sites: OwnerWorkspaceSiteOption[]; compact: boolean; adminPreview: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDetailsElement>(null);
+  const triggerRef = useRef<HTMLElement>(null);
   const content = site
     ? <><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(site.name)}</span><span className="owner-workspace-site-copy"><strong>{site.name}</strong><small>{adminPreview ? "Admin preview" : site.published ? "Live website" : humanStatus(site.status)}</small></span></>
     : <><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span className="owner-workspace-site-copy"><strong>All websites</strong><small>{sites.length ? `${sites.length} connected` : "Start with your first site"}</small></span></>;
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
   return (
-    <details className="owner-workspace-site-switcher product-website-switcher" data-admin-preview={adminPreview ? "true" : undefined}>
+    <details
+      ref={rootRef}
+      className="owner-workspace-site-switcher product-website-switcher"
+      data-admin-preview={adminPreview ? "true" : undefined}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary
+        ref={triggerRef}
         aria-label={compact ? `Switch website. Current: ${site?.name ?? "All websites"}` : undefined}
         data-sidebar-tooltip={compact ? site?.name ?? "All websites" : undefined}
       >
@@ -245,9 +277,9 @@ function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerW
       </summary>
       <div>
         <span>Websites</span>
-        <Link href="/account" aria-current={!site ? "page" : undefined}><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span><strong>All websites</strong><small>Account overview</small></span></Link>
-        {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} aria-current={option.id === site?.id ? "page" : undefined}><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(option.name)}</span><span><strong>{option.name}</strong><small>{option.published ? "Live" : humanStatus(option.status)}</small></span></Link>)}
-        <Link href="/account/onboarding"><span className="owner-workspace-site-avatar" aria-hidden="true"><AddIcon /></span><span><strong>Add website</strong><small>Create a private draft</small></span></Link>
+        <Link href="/account" aria-current={!site ? "page" : undefined} onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span><strong>All websites</strong><small>Account overview</small></span></Link>
+        {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} aria-current={option.id === site?.id ? "page" : undefined} onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(option.name)}</span><span><strong>{option.name}</strong><small>{option.published ? "Live" : humanStatus(option.status)}</small></span></Link>)}
+        <Link href="/account/onboarding" onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true"><AddIcon /></span><span><strong>Add website</strong><small>Create a private draft</small></span></Link>
       </div>
     </details>
   );

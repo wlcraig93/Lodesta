@@ -52,7 +52,10 @@ export function AdminRunInventory({
   const [total, setTotal] = useState(initialTotal);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const skipInitialFetch = useRef(true);
+  const statusMenuRef = useRef<HTMLDetailsElement>(null);
+  const statusMenuTriggerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -91,6 +94,27 @@ export function AdminRunInventory({
       });
     return () => controller.abort();
   }, [filters, router]);
+
+  useEffect(() => {
+    if (!statusMenuOpen) return;
+
+    function onPointerDown(event: PointerEvent) {
+      if (!statusMenuRef.current?.contains(event.target as Node)) setStatusMenuOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setStatusMenuOpen(false);
+      statusMenuTriggerRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [statusMenuOpen]);
 
   const start = total ? filters.offset + 1 : 0;
   const end = Math.min(filters.offset + filters.limit, total);
@@ -132,8 +156,13 @@ export function AdminRunInventory({
     </header>
 
     <div className="admin-run-toolbar">
-      <details className="admin-run-filter-menu">
-        <summary>Status<span>{filters.statuses.length ? `${filters.statuses.length} selected` : "All"}</span></summary>
+      <details
+        ref={statusMenuRef}
+        className="admin-run-filter-menu"
+        open={statusMenuOpen}
+        onToggle={(event) => setStatusMenuOpen(event.currentTarget.open)}
+      >
+        <summary ref={statusMenuTriggerRef}>Status<span>{filters.statuses.length ? `${filters.statuses.length} selected` : "All"}</span></summary>
         <fieldset>
           <legend>Filter by status</legend>
           {adminRunStatuses.map((status) => <label key={status}>

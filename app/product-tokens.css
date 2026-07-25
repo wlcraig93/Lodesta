@@ -98,6 +98,7 @@
 
   --product-radius-sm: 6px;
   --product-radius-md: 8px;
+  --product-radius-lg: 20px;
   --product-radius-full: 999px;
 
   --product-shadow-card: 0 1px 2px rgba(23, 33, 27, 0.05);

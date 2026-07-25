@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/ProductDialog";
 import { AdminButton } from "@/components/admin/AdminButton";
 
 export function ExternalBatchRefreshButton() {
@@ -12,68 +13,128 @@ export function ExternalBatchRefreshButton() {
 export function ExternalBatchCancelButton({ batchId, disabled }: { batchId: string; disabled?: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [error, setError] = useState("");
+
   async function cancel() {
-    if (!window.confirm("Cancel queued work and fence active claims for this batch? Completed candidates will remain available.")) return;
     setPending(true);
-    const response = await fetch(`/api/admin/authoring-batches/${encodeURIComponent(batchId)}`, { method: "DELETE" });
-    setPending(false);
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({})) as { error?: string };
-      window.alert(payload.error ?? "Unable to cancel batch.");
-      return;
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/authoring-batches/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        setError(payload.error ?? "Unable to cancel batch.");
+        return;
+      }
+      setConfirmOpen(false);
+      router.refresh();
+    } catch {
+      setError("Unable to cancel batch. Check your connection and try again.");
+    } finally {
+      setPending(false);
     }
-    router.refresh();
   }
+
   return (
-    <AdminButton variant="ghost" disabled={disabled || pending} onClick={cancel}>
-      {pending ? "Cancelling…" : "Cancel batch"}
-    </AdminButton>
+    <>
+      <AdminButton
+        variant="ghost"
+        disabled={disabled || pending}
+        aria-haspopup="dialog"
+        onClick={() => {
+          setError("");
+          setConfirmOpen(true);
+        }}
+      >
+        Cancel batch
+      </AdminButton>
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Cancel this batch?"
+        description="Queued work will be cancelled and active claims will be fenced. Completed candidates will remain available."
+        confirmLabel="Cancel batch"
+        confirmPendingLabel="Cancelling…"
+        tone="danger"
+        pending={pending}
+        error={error}
+        onConfirm={() => void cancel()}
+        onClose={() => {
+          if (pending) return;
+          setConfirmOpen(false);
+          setError("");
+        }}
+      />
+    </>
   );
 }
 
 export function ExternalPreviewButton({ previewId }: { previewId: string }) {
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
   async function openPreview() {
     setPending(true);
-    const response = await fetch(`/api/admin/previews/${encodeURIComponent(previewId)}/link`, {
-      cache: "no-store"
-    });
-    const payload = await response.json().catch(() => ({})) as { url?: string; error?: string };
-    setPending(false);
-    if (!response.ok || !payload.url) {
-      window.alert(payload.error ?? "Unable to create preview link.");
-      return;
+    setError("");
+    try {
+      const response = await fetch(`/api/admin/previews/${encodeURIComponent(previewId)}/link`, {
+        cache: "no-store"
+      });
+      const payload = await response.json().catch(() => ({})) as { url?: string; error?: string };
+      if (!response.ok || !payload.url) {
+        setError(payload.error ?? "Unable to create preview link.");
+        return;
+      }
+      window.open(payload.url, "_blank", "noopener,noreferrer");
+    } catch {
+      setError("Unable to create preview link. Check your connection and try again.");
+    } finally {
+      setPending(false);
     }
-    window.open(payload.url, "_blank", "noopener,noreferrer");
   }
+
   return (
-    <AdminButton size="sm" variant="secondary" onClick={openPreview} disabled={pending}>
-      {pending ? "Opening…" : "Open preview"}
-    </AdminButton>
+    <span className="external-authoring-action">
+      <AdminButton size="sm" variant="secondary" onClick={() => void openPreview()} disabled={pending}>
+        {pending ? "Opening…" : "Open preview"}
+      </AdminButton>
+      {error ? <small className="form-error" role="alert">{error}</small> : null}
+    </span>
   );
 }
 
 export function ExternalRetryButton({ batchId, itemId }: { batchId: string; itemId: string }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+
   async function retry() {
     setPending(true);
-    const response = await fetch(
-      `/api/admin/authoring-batches/${encodeURIComponent(batchId)}/items/${encodeURIComponent(itemId)}/retry`,
-      { method: "POST" }
-    );
-    const payload = await response.json().catch(() => ({})) as { error?: string };
-    setPending(false);
-    if (!response.ok) {
-      window.alert(payload.error ?? "Unable to retry execution.");
-      return;
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/admin/authoring-batches/${encodeURIComponent(batchId)}/items/${encodeURIComponent(itemId)}/retry`,
+        { method: "POST" }
+      );
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to retry execution.");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Unable to retry execution. Check your connection and try again.");
+    } finally {
+      setPending(false);
     }
-    router.refresh();
   }
+
   return (
-    <AdminButton size="sm" variant="secondary" onClick={retry} disabled={pending}>
-      {pending ? "Requeueing…" : "Retry draft"}
-    </AdminButton>
+    <span className="external-authoring-action">
+      <AdminButton size="sm" variant="secondary" onClick={() => void retry()} disabled={pending}>
+        {pending ? "Requeueing…" : "Retry draft"}
+      </AdminButton>
+      {error ? <small className="form-error" role="alert">{error}</small> : null}
+    </span>
   );
 }
 

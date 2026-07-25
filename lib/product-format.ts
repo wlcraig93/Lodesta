@@ -1,5 +1,19 @@
 import type { ProductStatusTone } from "@/components/ProductUI";
 
+/**
+ * Client-side shape check used to replace the browser's native email
+ * validation bubble. Deliberately permissive — the server and the auth
+ * provider remain the authority on whether an address is real.
+ */
+export function isLikelyEmail(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  const at = trimmed.indexOf("@");
+  if (at < 1 || at !== trimmed.lastIndexOf("@")) return false;
+  const domain = trimmed.slice(at + 1);
+  return domain.includes(".") && !domain.startsWith(".") && !domain.endsWith(".");
+}
+
 export function humanize(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

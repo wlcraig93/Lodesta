@@ -31,16 +31,18 @@ export function AccountWebsiteCard({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [removalDialogOpen, setRemovalDialogOpen] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     if (!menuOpen) return;
     function onPointerDown(event: PointerEvent) {
+      if (removalDialogOpen) return;
       if (!rootRef.current?.contains(event.target as Node)) setMenuOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      if (rootRef.current?.querySelector('[role="dialog"]')) return;
+      if (removalDialogOpen) return;
       setMenuOpen(false);
       triggerRef.current?.focus();
     }
@@ -50,7 +52,7 @@ export function AccountWebsiteCard({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [menuOpen]);
+  }, [menuOpen, removalDialogOpen]);
 
   return (
     <article className="account-website-card product-card" data-state={lifecycle.state}>
@@ -78,6 +80,7 @@ export function AccountWebsiteCard({
                   targetKind={targetKind}
                   websiteName={name}
                   appearance="menu-item"
+                  onDialogOpenChange={setRemovalDialogOpen}
                 />
               </div>
             ) : null}

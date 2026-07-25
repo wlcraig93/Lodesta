@@ -1,7 +1,8 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { isLikelyEmail } from "@/lib/product-format";
 import { z } from "zod";
 import { parseJsonResponse } from "@/lib/client-json";
 
@@ -556,8 +557,24 @@ function LeadCapture({
   onCompanyWebsite: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const [emailError, setEmailError] = useState("");
+  const emailErrorId = useId();
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    const trimmed = email.trim();
+    if (!trimmed || !isLikelyEmail(trimmed)) {
+      event.preventDefault();
+      setEmailError(trimmed ? "Enter a valid email address, like owner@example.com." : "Enter your email address.");
+      emailRef.current?.focus();
+      return;
+    }
+    setEmailError("");
+    onSubmit(event);
+  }
+
   return (
-    <form className="presence-lead-form" onSubmit={onSubmit}>
+    <form className="presence-lead-form" onSubmit={handleSubmit} noValidate>
       <div>
         <span className="badge">Detailed plan</span>
         <h2>Unlock the fix plan</h2>
@@ -573,8 +590,20 @@ function LeadCapture({
       />
       <label>
         <span>Email</span>
-        <input type="email" value={email} onChange={(event) => onEmail(event.target.value)} required />
+        <input
+          ref={emailRef}
+          type="email"
+          value={email}
+          onChange={(event) => {
+            onEmail(event.target.value);
+            if (emailError) setEmailError("");
+          }}
+          required
+          aria-invalid={emailError ? true : undefined}
+          aria-describedby={emailError ? emailErrorId : undefined}
+        />
       </label>
+      {emailError ? <p className="form-error" id={emailErrorId} role="alert">{emailError}</p> : null}
       <div className="presence-lead-form-grid">
         <label>
           <span>Name</span>

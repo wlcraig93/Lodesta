@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import sharp from "sharp";
 import { resolveOwnerIdentity, sanitizeDisplayName } from "@/lib/owner-identity";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
@@ -65,7 +65,7 @@ assert(thumbnail?.key === "site-captures/site-1/artifact-1/thumbnail.webp", "Thu
 const metadata = thumbnail ? await sharp(thumbnail.bytes).metadata() : undefined;
 assert(metadata?.format === "webp" && metadata.width === 640 && metadata.height === 400, "Thumbnail output is not a 640×400 WebP.");
 
-const [tokens, layout, css, shell, accountMenu, themeControl, marketingShell, adminShell, adminSites, adminRuns, adminRunInspector, account, removeWebsite, thumbnailRoute] = await Promise.all([
+const [tokens, layout, css, shell, accountMenu, themeControl, marketingShell, adminShell, adminSites, adminRuns, adminRunInspector, account, removeWebsite, productDialog, onboarding, setupControls, externalBatchActions, thumbnailRoute] = await Promise.all([
   readFile("app/product-tokens.css", "utf8"),
   readFile("app/layout.tsx", "utf8"),
   readFile("app/globals.css", "utf8"),
@@ -79,11 +79,16 @@ const [tokens, layout, css, shell, accountMenu, themeControl, marketingShell, ad
   readFile("components/admin/RunTelemetryInspector.tsx", "utf8"),
   readFile("components/AccountWebsiteCard.tsx", "utf8"),
   readFile("components/RemoveWebsiteButton.tsx", "utf8"),
+  readFile("components/ProductDialog.tsx", "utf8"),
+  readFile("components/WebsiteOnboardingForm.tsx", "utf8"),
+  readFile("components/WebsiteSetupControls.tsx", "utf8"),
+  readFile("components/admin/ExternalAuthoringBatchActions.tsx", "utf8"),
   readFile("app/api/sites/[siteId]/thumbnail/route.ts", "utf8")
 ]);
 for (const token of ["#f7f8f6", "#fbfcfa", "#f1f3f0", "#dfe4de", "#e7efea", "#68736b"]) {
   assert(tokens.includes(token), `Product token palette is missing ${token}.`);
 }
+assert(tokens.includes("--product-radius-lg: 20px"), "Product tokens are missing the large command-dock radius.");
 for (const route of ["/editor", "/leads", "/analytics", "/business-details"]) {
   assert(shell.includes(route), `Product navigation is missing ${route}.`);
 }
@@ -123,10 +128,20 @@ assert(adminRunInspector.includes('role="tablist"') && adminRunInspector.include
 assert(css.includes(".run-inspector-workspace") && css.includes("grid-template-columns: 300px minmax(0, 1fr)"), "Telemetry inspector desktop composition is missing.");
 assert(css.includes(".workspace-now") && css.includes(".workspace-metric-strip") && css.includes(".workspace-home-section"), "Owner overview does not use the modern work-surface vocabulary.");
 assert(account.includes("aspect-ratio") === false, "Account cards contain inline visual styling instead of product CSS.");
-assert(account.includes("querySelector('[role=\"dialog\"]')"), "The website card closes its More menu while the removal dialog handles Escape.");
-assert(!account.includes("onOpen=") && removeWebsite.includes("setOpen(true)"), "Opening website removal unmounts its own confirmation dialog.");
+assert(account.includes("removalDialogOpen") && account.includes("onDialogOpenChange"), "The website card does not keep its removal trigger mounted while the portaled dialog is active.");
+assert(removeWebsite.includes("<ConfirmDialog") && !removeWebsite.includes("site-delete-dialog"), "Website removal does not use the canonical confirmation dialog.");
+assert(productDialog.includes("createPortal") && productDialog.includes("showModal()"), "The product dialog is not rendered through the native modal top layer.");
+assert(productDialog.includes("document.body.style.overflow") && productDialog.includes("requestAnimationFrame"), "The product dialog does not lock scrolling and restore focus.");
+assert(css.includes(".product-dialog::backdrop") && css.includes(".product-dialog-actions"), "Canonical product dialog styling is missing.");
+assert(onboarding.includes("<ProductDialog") && setupControls.includes("<ConfirmDialog") && externalBatchActions.includes("<ConfirmDialog"), "Existing confirmations are not consolidated on the shared dialog system.");
 assert(thumbnailRoute.includes("site.ownerUserId !== auth.user.id"), "Thumbnail endpoint does not enforce exact owner user-ID equality.");
 assert(thumbnailRoute.includes("active && published"), "Thumbnail endpoint does not prefer published imagery while a live update is running.");
+
+const nativeDialogCall = /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/;
+for (const path of [...await sourceFiles("app"), ...await sourceFiles("components")]) {
+  const source = await readFile(path, "utf8");
+  assert(!nativeDialogCall.test(source), `Native browser dialog API found in ${path}.`);
+}
 
 for (const path of [
   "app/(owner-workspace)/workspace/[slug]/editor/page.tsx",
@@ -139,4 +154,14 @@ console.log("Product UI verification passed.");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function sourceFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const path = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return sourceFiles(path);
+    return /\.(?:ts|tsx)$/.test(entry.name) ? [path] : [];
+  }));
+  return nested.flat();
 }

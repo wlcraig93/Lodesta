@@ -204,7 +204,7 @@ export function AdminRunInventory({
           </span>
           <span className="admin-run-cell admin-run-identity-cell" data-label="Run / site">
             <strong>{humanize(item.kind)}</strong>
-            <code title={item.id}>{item.id}</code>
+            <code>{item.id}</code>
             <small>{item.siteSlug ?? item.siteId}</small>
             {item.failureCode ? <small className="error-text">{humanize(item.failureCode)}</small> : null}
             {item.failurePreview ? <small className="admin-run-failure-preview" title={item.failurePreview}>{item.failurePreview}</small> : null}

@@ -118,6 +118,10 @@ Use for status, category, severity, or provenance. Badges should be semantic, no
 
 Use forest primary buttons only for decisive actions. Secondary buttons should remain neutral. Do not style Lodesta product buttons with `--site-*`.
 
+### Dialog
+
+Use the shared product dialog only when a person must make a consequential decision or complete focused input before continuing. Confirmations name the action and its consequence, focus the safe cancel action first, and keep request failures inside the open dialog. Ordinary success, status, and action errors remain inline instead of interrupting the workspace. Dialogs use the product overlay, surface, typography, semantic danger roles, and responsive action layout in every appearance mode; never use browser `alert`, `confirm`, or `prompt` APIs.
+
 ### Segmented Control
 
 Use for mode switches with mutually exclusive values, such as draft versus QA review or preview dimensions. Active states use forest, not amber.
@@ -136,7 +140,9 @@ Forward-looking pattern for run stages and model/tool activity. Show stage, stat
 
 ### Command Dock
 
-Forward-looking pattern for structured agent edits and operator commands. It should pair a concise request surface with status, guardrails, and resulting operations.
+Use for owner and operator requests to an agent. The dock is a generous soft surface with one auto-growing prompt, a compact action rail, and a strong circular submit action. Its large radius and negative space distinguish it from an ordinary form field without turning it into decorative chrome.
+
+Keep mode choices native and legible, expose only controls that perform a real action, and preserve multiline writing. Voice input may use browser-managed speech recognition when the browser exposes it, but the control must explain unsupported and permission-failure states and must never imply that transcription is guaranteed to happen on-device.
 
 ## Implementation Rules
 

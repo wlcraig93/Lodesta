@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useProductTooltip } from "@/components/ProductTooltip";
 
 type DesktopPanelMode = "split" | "collapsed" | "full-chat";
 
@@ -27,6 +28,7 @@ export function WebsiteWorkspaceFrame({
   previewToolbar,
   mobilePreviewActions,
   mobileOutcomeAction,
+  mobileNotice,
   onMobilePaneChange,
   commandLabel = "Website manager",
   previewLabel = "Website preview",
@@ -40,12 +42,17 @@ export function WebsiteWorkspaceFrame({
   previewToolbar: ReactNode;
   mobilePreviewActions?: ReactNode;
   mobileOutcomeAction?: ReactNode;
+  mobileNotice?: ReactNode;
   onMobilePaneChange?(pane: MobilePane): void;
   commandLabel?: string;
   previewLabel?: string;
   commandContent: ReactNode;
   previewContent: ReactNode;
 }) {
+  const expandTip = useProductTooltip("Expand chat panel");
+  const restoreTip = useProductTooltip("Return to split view");
+  const collapseTip = useProductTooltip("Collapse chat panel");
+  const fullChatTip = useProductTooltip("Open full chat");
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const [compactViewport, setCompactViewport] = useState(false);
   const [panelMode, setPanelMode] = useState<DesktopPanelMode>("split");
@@ -262,23 +269,29 @@ export function WebsiteWorkspaceFrame({
       <header className="site-agent-workspace-header">
         <div className="site-agent-brand-bar">
           <Link className="site-agent-mobile-back" href={backHref} aria-label={backLabel}>←</Link>
-          <button className="site-agent-collapsed-toggle" type="button" aria-label="Expand chat panel" title="Expand chat panel" onClick={restoreSplitPanel}>
+          <button className="site-agent-collapsed-toggle" type="button" aria-label="Expand chat panel" {...expandTip.triggerProps} onClick={restoreSplitPanel}>
             <ChatIcon />
           </button>
+          {expandTip.tooltip}
           {commandTitle}
           <div className="site-agent-panel-controls" aria-label="Chat panel controls">
             {panelMode === "full-chat" ? (
-              <button type="button" aria-label="Return to split view" title="Return to split view" onClick={restoreSplitPanel}>
-                <RestoreSplitIcon />
-              </button>
+              <>
+                <button type="button" aria-label="Return to split view" {...restoreTip.triggerProps} onClick={restoreSplitPanel}>
+                  <RestoreSplitIcon />
+                </button>
+                {restoreTip.tooltip}
+              </>
             ) : (
               <>
-                <button type="button" aria-label="Collapse chat panel" title="Collapse chat panel" onClick={collapsePanel}>
+                <button type="button" aria-label="Collapse chat panel" {...collapseTip.triggerProps} onClick={collapsePanel}>
                   <CollapsePanelIcon />
                 </button>
-                <button type="button" aria-label="Open full chat" title="Open full chat" onClick={openFullChat}>
+                {collapseTip.tooltip}
+                <button type="button" aria-label="Open full chat" {...fullChatTip.triggerProps} onClick={openFullChat}>
                   <FullChatIcon />
                 </button>
+                {fullChatTip.tooltip}
               </>
             )}
           </div>
@@ -289,6 +302,7 @@ export function WebsiteWorkspaceFrame({
           {mobilePane === "preview" ? mobilePreviewActions : null}
           {mobileOutcomeAction}
         </div>
+        {mobileNotice ? <div className="site-agent-mobile-notice" role="status">{mobileNotice}</div> : null}
         <div className="site-agent-preview-bar">{previewToolbar}</div>
       </header>
 

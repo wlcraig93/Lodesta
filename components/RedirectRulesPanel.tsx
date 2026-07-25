@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { z } from "zod";
 import type { SiteRedirectRule } from "@/packages/platform-operations";
 import { parseJsonResponse } from "@/lib/client-json";
@@ -18,10 +18,27 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
   const [sourcePath, setSourcePath] = useState("");
   const [destinationPath, setDestinationPath] = useState(routes[0]?.path ?? "/");
   const [status, setStatus] = useState("");
+  const [sourceError, setSourceError] = useState("");
+  const sourceErrorId = useId();
+  const sourceRef = useRef<HTMLInputElement>(null);
   const disabled = routes.length === 0;
 
   async function upsert(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmed = sourcePath.trim();
+    if (!trimmed) {
+      setSourceError("Enter the old path you want to redirect.");
+      setStatus("");
+      sourceRef.current?.focus();
+      return;
+    }
+    if (!trimmed.startsWith("/")) {
+      setSourceError("Start the old path with a slash, like /old-service.");
+      setStatus("");
+      sourceRef.current?.focus();
+      return;
+    }
+    setSourceError("");
     setStatus("Saving redirect...");
     const response = await fetch("/api/redirects", {
       method: "POST",
@@ -57,11 +74,24 @@ export function RedirectRulesPanel({ siteId, redirects, routes }: {
 
   return (
     <div className="owner-authority-stack">
-      <form className="editor-form" onSubmit={upsert}>
+      <form className="editor-form" onSubmit={upsert} noValidate>
         <label>
           <span>Old path</span>
-          <input value={sourcePath} onChange={(event) => setSourcePath(event.target.value)} placeholder="/old-service" disabled={disabled} required />
+          <input
+            ref={sourceRef}
+            value={sourcePath}
+            onChange={(event) => {
+              setSourcePath(event.target.value);
+              if (sourceError) setSourceError("");
+            }}
+            placeholder="/old-service"
+            disabled={disabled}
+            required
+            aria-invalid={sourceError ? true : undefined}
+            aria-describedby={sourceError ? sourceErrorId : undefined}
+          />
         </label>
+        {sourceError ? <p className="form-error" id={sourceErrorId} role="alert">{sourceError}</p> : null}
         <label>
           <span>Destination</span>
           <ProductSelect value={destinationPath} onChange={(event) => setDestinationPath(event.target.value)} disabled={disabled}>

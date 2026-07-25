@@ -45,7 +45,7 @@ for (const label of ["Compare with live", "Version history", "Restore selected",
   assert(component.includes(label), `Preview More menu is missing ${label}`);
 }
 assert(!component.includes("site-agent-history-menu") && !component.includes("site-agent-diagnostics-menu") && !component.includes("site-agent-tool-link"), "Retired peer-level preview actions remain in the toolbar");
-assert(component.includes('className="site-agent-compose-mode"') && component.includes(">Edit</button>") && component.includes(">Ask</button>"), "Composer does not expose the canonical Edit and Ask modes");
+assert(component.includes('className="site-agent-compose-mode"') && component.includes('<option value="edit">Build</option>') && component.includes('<option value="ask">Ask</option>'), "Composer does not expose the canonical Build and Ask modes");
 assert(component.includes("site-agent-starter-prompts") && component.includes("editorStarterPrompts"), "Empty editor does not provide contextual starter prompts");
 assert(component.includes("publishDisabledReason") && component.includes("aria-describedby"), "Disabled Publish does not explain its requirement");
 assert(frame.includes("site-agent-mobile-back") && component.includes("site-agent-mobile-more") && component.includes("site-agent-publish-mobile"), "Mobile editor topbar controls are incomplete");
@@ -75,7 +75,10 @@ assert(component.includes('aria-busy={busy && !workspace.session ? true : undefi
 assert(css.includes(".site-agent-loading-message") && css.includes("site-agent-loading-message > .site-agent-send-spinner"), "Initial workspace loading does not use the product loading treatment");
 assert(component.includes('className="site-agent-send-button"'), "Composer does not use the compact icon send control");
 assert(component.includes("<ArrowUpIcon />"), "Composer send control does not use the up-arrow icon");
-assert(component.includes("Math.min(textarea.scrollHeight, 140)"), "Composer textarea does not auto-grow to the bounded height");
+assert(component.includes("Math.min(textarea.scrollHeight, 160)") && component.includes('textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden"'), "Composer textarea does not auto-grow to the bounded height");
+assert(component.includes("SpeechRecognition") && component.includes("webkitSpeechRecognition") && component.includes('recognition.lang = "en-US"'), "Composer voice input does not use browser-managed US English speech recognition");
+assert(component.includes("site-agent-voice-button") && component.includes("aria-pressed={listening}") && component.includes("voiceRecognitionErrorMessage"), "Composer voice input does not expose accessible listening and failure states");
+assert(component.includes("if (listening) stopDictation();") && component.includes("recognition.stop()"), "Composer voice input does not stop cleanly on user input and teardown");
 assert(component.includes('activeRun?.kind === "initial_build"'), "Initial-build composer lock is not tied to the active initial build");
 assert(component.includes('placeholder={initialBuildActive ? "Available when your first draft is ready"') && component.includes("disabled={initialBuildActive}"), "Initial-build composer does not explain and enforce its unavailable state");
 assert(component.includes("activeRun.progress.label") && component.includes("activeRun.progress.detail"), "Workspace progress does not use the owner-safe run projection");
@@ -96,9 +99,9 @@ for (const label of [
 assert(css.includes("grid-template-columns: var(--site-agent-panel-width"), "Desktop workspace does not use the resizable panel width");
 assert(css.includes('.site-agent-workspace[data-panel-mode="collapsed"]') && css.includes("grid-template-columns: 52px"), "Collapsed chat rail is not implemented");
 assert(css.includes('.site-agent-workspace[data-panel-mode="full-chat"]') && css.includes("width: min(100%, 760px)"), "Full-chat composition is not implemented");
-assert(css.includes("min-height: 44px") && css.includes("max-height: 140px") && css.includes("resize: none"), "Composer is not compact and auto-sized");
+assert(css.includes("min-height: 136px") && css.includes("max-height: 160px") && css.includes("border-radius: var(--product-radius-lg)") && css.includes("resize: none"), "Composer does not use the spacious command-dock treatment");
 assert(css.includes(".site-agent-send-button") && css.includes("width: 40px"), "Desktop arrow send control is not compact");
-assert(css.includes(".site-agent-send-button {\n    width: 44px"), "Mobile arrow send control does not meet the touch target");
+assert(css.includes(".site-agent-voice-button,\n  .site-agent-send-button {\n    width: 44px") && css.includes(".site-agent-compose-mode select"), "Mobile composer controls do not meet the touch-target contract");
 assert(css.includes("background: var(--product-color-primary-surface)"), "Owner messages do not retain the green surface");
 assert(css.includes('.site-agent-workspace[data-mobile-pane="chat"] .site-agent-preview-column'), "Mobile Chat mode does not hide the mounted preview pane");
 assert(css.includes('.site-agent-workspace[data-mobile-pane="preview"] .site-agent-command'), "Mobile Preview mode does not hide the mounted chat pane");

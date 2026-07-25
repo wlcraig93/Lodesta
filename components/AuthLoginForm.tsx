@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { createSupabaseBrowserClient, type SupabaseBrowserConfig } from "@/lib/supabase/browser";
+import { isLikelyEmail } from "@/lib/product-format";
 
 const authNextCookieName = "lodesta_auth_next";
 
@@ -13,6 +14,9 @@ type AuthLoginFormProps = {
 export function AuthLoginForm({ supabase: supabaseConfig, nextPath }: AuthLoginFormProps) {
   const configured = Boolean(supabaseConfig?.url && supabaseConfig.anonKey);
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const emailErrorId = useId();
+  const emailRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState(configured ? "" : "Login is unavailable because this app runtime is missing Supabase browser auth config.");
 
   function authRedirectUrl() {
@@ -46,6 +50,22 @@ export function AuthLoginForm({ supabase: supabaseConfig, nextPath }: AuthLoginF
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setEmailError("Enter your email address.");
+      setStatus("");
+      emailRef.current?.focus();
+      return;
+    }
+    if (!isLikelyEmail(trimmed)) {
+      setEmailError("Enter a valid email address, like owner@example.com.");
+      setStatus("");
+      emailRef.current?.focus();
+      return;
+    }
+    setEmailError("");
+
     if (!supabaseConfig) {
       setStatus("Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable login.");
       return;
@@ -69,7 +89,7 @@ export function AuthLoginForm({ supabase: supabaseConfig, nextPath }: AuthLoginF
   }
 
   return (
-    <form className="editor-form auth-login-form" onSubmit={onSubmit}>
+    <form className="editor-form auth-login-form" onSubmit={onSubmit} noValidate>
       <button className="google-auth-button" type="button" onClick={onGoogleSignIn} disabled={!configured}>
         <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
           <path
@@ -99,17 +119,24 @@ export function AuthLoginForm({ supabase: supabaseConfig, nextPath }: AuthLoginF
       <label className="auth-email-field" htmlFor="auth-email">
         <span>Email address</span>
         <input
+          ref={emailRef}
           id="auth-email"
           name="email"
           type="email"
           value={email}
           placeholder="owner@example.com"
           autoComplete="username"
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (emailError) setEmailError("");
+          }}
           required
+          aria-invalid={emailError ? true : undefined}
+          aria-describedby={emailError ? emailErrorId : undefined}
           disabled={!configured}
         />
       </label>
+      {emailError ? <p className="form-error" id={emailErrorId} role="alert">{emailError}</p> : null}
       <button className="button primary auth-submit-button" type="submit" disabled={!configured}>
         Send login link
       </button>

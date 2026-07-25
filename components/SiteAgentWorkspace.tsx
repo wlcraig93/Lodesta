@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   OperatorQueueItem,
   PlatformSiteRecord,
@@ -14,7 +14,7 @@ import type {
 import type { OwnerSiteAgentRun } from "@/packages/site-platform";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
-import { ProductEmptyState, ProductSegmentedControl, ProductSelect } from "@/components/ProductUI";
+import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
 import { WebsiteWorkspaceFrame } from "@/components/WebsiteWorkspaceFrame";
 
 type WorkspacePayload = {
@@ -40,6 +40,47 @@ type DiscussionResult = {
     proposedAction?: string;
     requiresApply: boolean;
   };
+};
+
+type VoiceSupport = "checking" | "supported" | "unsupported";
+
+type SpeechRecognitionResultLike = {
+  0?: { transcript?: string };
+  isFinal: boolean;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: SpeechRecognitionResultLike;
+  };
+};
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+};
+
+type DictationContext = {
+  prefix: string;
+  suffix: string;
+  finalTranscript: string;
 };
 
 export function SiteAgentWorkspace({
@@ -76,9 +117,13 @@ export function SiteAgentWorkspace({
   const [clock, setClock] = useState(Date.now());
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
   const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
+  const [publishHintOpen, setPublishHintOpen] = useState(false);
+  const [voiceSupport, setVoiceSupport] = useState<VoiceSupport>("checking");
+  const [listening, setListening] = useState(false);
   const previewMoreId = useId();
   const publishReasonId = useId();
   const composerUnavailableId = useId();
+  const voiceStatusId = useId();
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
@@ -88,6 +133,8 @@ export function SiteAgentWorkspace({
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
+  const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
+  const dictationContextRef = useRef<DictationContext | undefined>(undefined);
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
   const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
@@ -144,6 +191,35 @@ export function SiteAgentWorkspace({
         : workspace.readiness?.status !== "ready"
           ? `${workspace.readiness?.blockers.length ?? 1} publishing requirement${(workspace.readiness?.blockers.length ?? 1) === 1 ? "" : "s"} must be resolved first.`
           : undefined;
+  const publishBlocked = Boolean(publishDisabledReason);
+  const voiceStatus = initialBuildActive
+    ? "Voice input is available when your first draft is ready."
+    : voiceSupport === "checking"
+      ? "Checking voice input availability."
+      : voiceSupport === "unsupported"
+        ? "Voice input is not supported in this browser."
+        : listening
+          ? "Listening. Speak now."
+          : "Voice input is ready.";
+  const voiceDisabled = initialBuildActive || busy || voiceSupport !== "supported";
+  const voiceDescriptionId = initialBuildActive
+    ? composerUnavailableId
+    : voiceSupport !== "supported" || listening
+      ? voiceStatusId
+      : undefined;
+
+  const stopDictation = useCallback(() => {
+    const recognition = recognitionRef.current;
+    recognitionRef.current = undefined;
+    dictationContextRef.current = undefined;
+    setListening(false);
+    if (!recognition) return;
+    try {
+      recognition.stop();
+    } catch {
+      // Recognition may already have ended between the user's action and cleanup.
+    }
+  }, []);
 
   async function refresh() {
     const response = await fetch(`/api/site-agent/sessions?siteId=${encodeURIComponent(initialSite.id)}`, { cache: "no-store" });
@@ -165,6 +241,77 @@ export function SiteAgentWorkspace({
       window.setTimeout(() => setCopiedIdentifier((current) => current === key ? undefined : current), 1600);
     } catch {
       setNotice(`Could not copy ${value}. Select the identifier and copy it manually.`);
+    }
+  }
+
+  function toggleDictation() {
+    if (listening) {
+      stopDictation();
+      return;
+    }
+    if (voiceDisabled) return;
+
+    const speechWindow = window as SpeechRecognitionWindow;
+    const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!Recognition) {
+      setVoiceSupport("unsupported");
+      return;
+    }
+
+    const textarea = composerRef.current;
+    const selectionStart = textarea?.selectionStart ?? instruction.length;
+    const selectionEnd = textarea?.selectionEnd ?? selectionStart;
+    const context: DictationContext = {
+      prefix: instruction.slice(0, selectionStart),
+      suffix: instruction.slice(selectionEnd),
+      finalTranscript: ""
+    };
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      if (recognitionRef.current !== recognition) return;
+      setNotice(undefined);
+      setListening(true);
+    };
+    recognition.onresult = (event) => {
+      if (recognitionRef.current !== recognition || dictationContextRef.current !== context) return;
+      let finalDelta = "";
+      let interimTranscript = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) finalDelta = joinTranscript(finalDelta, transcript);
+        else interimTranscript = joinTranscript(interimTranscript, transcript);
+      }
+      if (finalDelta) context.finalTranscript = joinTranscript(context.finalTranscript, finalDelta);
+      const dictated = dictationValue(context, interimTranscript);
+      if (!dictated) return;
+      setInstruction(dictated.value);
+      window.requestAnimationFrame(() => composerRef.current?.setSelectionRange(dictated.caret, dictated.caret));
+    };
+    recognition.onerror = (event) => {
+      if (event.error !== "aborted") setNotice(voiceRecognitionErrorMessage(event.error));
+      recognitionRef.current = undefined;
+      dictationContextRef.current = undefined;
+      setListening(false);
+    };
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) recognitionRef.current = undefined;
+      if (dictationContextRef.current === context) dictationContextRef.current = undefined;
+      setListening(false);
+    };
+    recognitionRef.current = recognition;
+    dictationContextRef.current = context;
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = undefined;
+      dictationContextRef.current = undefined;
+      setListening(false);
+      setNotice("Voice input could not start. Try again.");
     }
   }
 
@@ -203,6 +350,10 @@ export function SiteAgentWorkspace({
   }, [activeRun?.id]);
 
   useEffect(() => {
+    if (!publishBlocked) setPublishHintOpen(false);
+  }, [publishBlocked]);
+
+  useEffect(() => {
     if (!activeRun) return;
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -232,10 +383,35 @@ export function SiteAgentWorkspace({
   }, [previewMoreOpen]);
 
   useEffect(() => {
+    const speechWindow = window as SpeechRecognitionWindow;
+    setVoiceSupport(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition ? "supported" : "unsupported");
+    return () => {
+      const recognition = recognitionRef.current;
+      recognitionRef.current = undefined;
+      dictationContextRef.current = undefined;
+      if (!recognition) return;
+      recognition.onstart = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      try {
+        recognition.stop();
+      } catch {
+        // Recognition may already have ended during unmount.
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (initialBuildActive) stopDictation();
+  }, [initialBuildActive, stopDictation]);
+
+  useEffect(() => {
     const textarea = composerRef.current;
     if (!textarea) return;
     textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 140)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 160 ? "auto" : "hidden";
   }, [instruction]);
 
   useEffect(() => {
@@ -268,6 +444,7 @@ export function SiteAgentWorkspace({
   async function submit() {
     const message = instruction.trim();
     if (!message || !workspace.session || busy || activeRun) return;
+    stopDictation();
     setBusy(true);
     setNotice(undefined);
     setDiscussionSuggestion(undefined);
@@ -433,16 +610,22 @@ export function SiteAgentWorkspace({
             </button>
         </>
       }
+      mobileNotice={publishDisabledReason && publishHintOpen ? publishDisabledReason : undefined}
       mobileOutcomeAction={
         <>
           {publishDisabledReason ? <span className="site-agent-visually-hidden" id={`${publishReasonId}-mobile`}>{publishDisabledReason}</span> : null}
           <button
             className="button primary site-agent-publish site-agent-publish-mobile"
             type="button"
-            disabled={Boolean(publishDisabledReason)}
+            aria-disabled={publishDisabledReason ? true : undefined}
             aria-describedby={publishDisabledReason ? `${publishReasonId}-mobile` : undefined}
-            title={publishDisabledReason}
-            onClick={() => void publish()}
+            onClick={() => {
+              if (publishDisabledReason) {
+                setPublishHintOpen((current) => !current);
+                return;
+              }
+              void publish();
+            }}
           >
             Publish
           </button>
@@ -528,8 +711,8 @@ export function SiteAgentWorkspace({
                   {isAdmin ? (
                     <section className="site-agent-diagnostics" aria-labelledby="site-agent-diagnostics-title">
                       <div className="site-agent-diagnostics-heading"><span id="site-agent-diagnostics-title">Admin diagnostics</span><Link href={`/admin/sites/${workspace.site.slug}`}>Manage site</Link></div>
-                      <div className="site-agent-identifier-row"><div><span>Site ID</span><code title={workspace.site.id}>{workspace.site.id}</code></div><button type="button" onClick={() => void copyIdentifier(workspace.site.id, "site")}>{copiedIdentifier === "site" ? "Copied" : "Copy"}</button></div>
-                      <div className="site-agent-diagnostic-runs"><span className="site-agent-diagnostic-label">Recent runs</span>{diagnosticRuns.map((run) => <div className="site-agent-run-identifier" key={run.id}><div><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><code title={run.id}>{run.id}</code><small>{run.status} · {run.stage}</small></div><button type="button" onClick={() => void copyIdentifier(run.id, run.id)}>{copiedIdentifier === run.id ? "Copied" : "Copy"}</button></div>)}{!diagnosticRuns.length ? <small className="site-agent-no-runs">No runs in this workspace yet.</small> : null}</div>
+                      <div className="site-agent-identifier-row"><div><span>Site ID</span><code>{workspace.site.id}</code></div><button type="button" onClick={() => void copyIdentifier(workspace.site.id, "site")}>{copiedIdentifier === "site" ? "Copied" : "Copy"}</button></div>
+                      <div className="site-agent-diagnostic-runs"><span className="site-agent-diagnostic-label">Recent runs</span>{diagnosticRuns.map((run) => <div className="site-agent-run-identifier" key={run.id}><div><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><code>{run.id}</code><small>{run.status} · {run.stage}</small></div><button type="button" onClick={() => void copyIdentifier(run.id, run.id)}>{copiedIdentifier === run.id ? "Copied" : "Copy"}</button></div>)}{!diagnosticRuns.length ? <small className="site-agent-no-runs">No runs in this workspace yet.</small> : null}</div>
                       <Link className="site-agent-all-activity" href={`/admin/runs?siteId=${encodeURIComponent(workspace.site.id)}`}>View all activity</Link>
                     </section>
                   ) : null}
@@ -538,7 +721,7 @@ export function SiteAgentWorkspace({
             </div>
             <div className="site-agent-publish-wrap">
               {publishDisabledReason ? <span id={publishReasonId}>{publishDisabledReason}</span> : null}
-              <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} title={publishDisabledReason} onClick={() => void publish()}>Publish</button>
+              <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} onClick={() => void publish()}>Publish</button>
             </div>
           </div>
         </>
@@ -620,7 +803,10 @@ export function SiteAgentWorkspace({
             <textarea
               ref={composerRef}
               value={instruction}
-              onChange={(event) => setInstruction(event.target.value)}
+              onChange={(event) => {
+                if (listening) stopDictation();
+                setInstruction(event.target.value);
+              }}
               placeholder={initialBuildActive ? "Available when your first draft is ready" : composerMode === "ask" ? "Ask about a possible change..." : waitingRun ? "Answer the question above..." : "Describe what you want to change..."}
               disabled={initialBuildActive}
               aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
@@ -629,23 +815,47 @@ export function SiteAgentWorkspace({
               }}
               rows={1}
             />
+            <span className="site-agent-visually-hidden" id={voiceStatusId} aria-live="polite">{voiceStatus}</span>
             <div className="site-agent-compose-footer">
-              <ProductSegmentedControl className="site-agent-compose-mode" label="Composer mode">
-                <button type="button" className={composerMode === "edit" ? "is-active" : ""} aria-pressed={composerMode === "edit"} aria-describedby={initialBuildActive ? composerUnavailableId : undefined} disabled={initialBuildActive} onClick={() => setComposerMode("edit")}>Edit</button>
-                <button type="button" className={composerMode === "ask" ? "is-active" : ""} aria-pressed={composerMode === "ask"} aria-describedby={initialBuildActive ? composerUnavailableId : undefined} disabled={initialBuildActive} onClick={() => setComposerMode("ask")}>Ask</button>
-              </ProductSegmentedControl>
-              <button
-                className="site-agent-send-button"
-                type="button"
-                aria-label={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
-                aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
-                title={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
-                aria-busy={busy ? true : undefined}
-                disabled={!instruction.trim() || busy || Boolean(activeRun)}
-                onClick={() => void submit()}
-              >
-                {busy ? <span className="site-agent-send-spinner" aria-hidden="true" /> : <ArrowUpIcon />}
-              </button>
+              <div className="site-agent-compose-actions">
+                <label className="site-agent-compose-mode">
+                  <span className="site-agent-visually-hidden">Composer mode</span>
+                  <select
+                    value={composerMode}
+                    onChange={(event) => setComposerMode(event.target.value as "edit" | "ask")}
+                    aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
+                    disabled={initialBuildActive}
+                  >
+                    <option value="edit">Build</option>
+                    <option value="ask">Ask</option>
+                  </select>
+                  <ChevronDownIcon />
+                </label>
+                <button
+                  className={`site-agent-voice-button ${listening ? "is-listening" : ""}`}
+                  type="button"
+                  aria-label={listening ? "Stop voice input" : voiceSupport === "unsupported" ? "Voice input is not supported in this browser" : "Start voice input"}
+                  aria-describedby={voiceDescriptionId}
+                  aria-pressed={listening}
+                  title={listening ? "Stop voice input" : voiceSupport === "unsupported" ? "Voice input is not supported in this browser" : voiceSupport === "checking" ? "Checking voice input availability" : "Start voice input"}
+                  disabled={voiceDisabled}
+                  onClick={toggleDictation}
+                >
+                  <MicrophoneIcon />
+                </button>
+                <button
+                  className="site-agent-send-button"
+                  type="button"
+                  aria-label={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
+                  aria-describedby={initialBuildActive ? composerUnavailableId : undefined}
+                  title={initialBuildActive ? "Available when your first draft is ready" : busy ? "Working" : composerMode === "ask" ? "Send question" : "Build requested change"}
+                  aria-busy={busy ? true : undefined}
+                  disabled={!instruction.trim() || busy || Boolean(activeRun)}
+                  onClick={() => void submit()}
+                >
+                  {busy ? <span className="site-agent-send-spinner" aria-hidden="true" /> : <ArrowUpIcon />}
+                </button>
+              </div>
             </div>
           </div>
         </>
@@ -714,6 +924,45 @@ function messageAuthorLabel(role: SiteAgentMessage["role"]) {
 
 function ArrowUpIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4m0 0L5.5 8.5M10 4l4.5 4.5" /></svg>;
+}
+
+function ChevronDownIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>;
+}
+
+function MicrophoneIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <rect x="7" y="3" width="6" height="10" rx="3" />
+      <path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5M7.5 17.5h5" />
+    </svg>
+  );
+}
+
+function joinTranscript(current: string, next: string) {
+  return [current.trim(), next.trim()].filter(Boolean).join(" ");
+}
+
+function dictationValue(context: DictationContext, interimTranscript: string) {
+  const spoken = joinTranscript(context.finalTranscript, interimTranscript);
+  if (!spoken) return undefined;
+  const leadingSpace = context.prefix && !/[\s([{"'/-]$/.test(context.prefix) && !/^[,.;:!?)]/.test(spoken) ? " " : "";
+  const trailingSpace = context.suffix && !/^[\s,.;:!?)]/.test(context.suffix) ? " " : "";
+  const inserted = `${leadingSpace}${spoken}${trailingSpace}`;
+  return {
+    value: `${context.prefix}${inserted}${context.suffix}`,
+    caret: context.prefix.length + inserted.length
+  };
+}
+
+function voiceRecognitionErrorMessage(error: string) {
+  if (error === "not-allowed" || error === "service-not-allowed") {
+    return "Microphone access was denied. Enable it in your browser settings to use voice input.";
+  }
+  if (error === "audio-capture") return "No microphone is available for voice input.";
+  if (error === "no-speech") return "No speech was detected. Try voice input again.";
+  if (error === "network") return "Voice input could not reach the browser speech service. Try again.";
+  return "Voice input stopped unexpectedly. Try again.";
 }
 
 function previewRouteUrl(base: string, path: string) {

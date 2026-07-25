@@ -23,6 +23,7 @@ const [
   accountWebsiteCard,
   adminShell,
   removeWebsiteButton,
+  productDialog,
   siteRoute,
   platformRepository,
   dispositionMigration,
@@ -38,6 +39,7 @@ const [
   readFile("components/AccountWebsiteCard.tsx", "utf8"),
   readFile("components/admin/AdminShell.tsx", "utf8"),
   readFile("components/RemoveWebsiteButton.tsx", "utf8"),
+  readFile("components/ProductDialog.tsx", "utf8"),
   readFile("app/api/sites/[siteId]/route.ts", "utf8"),
   readFile("packages/platform-data/repository.ts", "utf8"),
   readFile("supabase/migrations/202607230003_owner_site_disposition.sql", "utf8"),
@@ -56,8 +58,12 @@ assert(accountRoute.includes('relationships[0].kind === "setup"'), "A single in-
 assert(accountRoute.includes("AccountWebsiteCard") && accountRoute.includes("item.siteId"), "Owned websites do not use the canonical account card.");
 assert(accountWebsiteCard.includes("RemoveWebsiteButton") && accountWebsiteCard.includes('appearance="menu-item"'), "Owned website cards do not expose removal through More.");
 assert(accountRoute.includes("item.setupId") && accountRoute.includes("item.setupView?.canCancel"), "Cancelable website setups do not expose the delete action.");
-assert(removeWebsiteButton.includes('role="dialog"') && removeWebsiteButton.includes('aria-modal="true"'), "Website deletion is missing an accessible confirmation dialog.");
-assert(removeWebsiteButton.includes('event.key === "Escape"') && removeWebsiteButton.includes('event.key !== "Tab"'), "Website deletion dialog focus handling regressed.");
+assert(removeWebsiteButton.includes("<ConfirmDialog"), "Website deletion does not use the shared confirmation dialog.");
+assert(productDialog.includes("<dialog") && productDialog.includes("dialog.showModal()"), "The shared confirmation dialog is not a native modal.");
+assert(productDialog.includes("aria-labelledby={titleId}") && productDialog.includes("aria-describedby={description ? descriptionId : undefined}"), "The shared confirmation dialog is missing accessible labeling.");
+assert(productDialog.includes("onCancel=") && productDialog.includes("event.target === event.currentTarget"), "The shared confirmation dialog dismissal behavior regressed.");
+assert(productDialog.includes("dismissibleRef.current && !busyRef.current") && productDialog.includes("previousFocusRef") && productDialog.includes("focusTarget.focus()"), "The shared confirmation dialog pending or focus behavior regressed.");
+assert(productDialog.includes("}, [mounted, open]);"), "The shared confirmation dialog can restart its modal lifecycle during a pending-state rerender.");
 assert(removeWebsiteButton.includes('method: "DELETE"') && removeWebsiteButton.includes('method: "POST"'), "Website removal does not support both sites and setups.");
 assert(removeWebsiteButton.includes("/cancel") && removeWebsiteButton.includes("router.refresh()"), "Website setup deletion does not use the owner-scoped cancel operation.");
 assert(siteRoute.includes("getCurrentUser()") && siteRoute.includes("disposeOwnedSite(siteId, auth.user.id)"), "Site deletion is not bound to the authenticated owner.");

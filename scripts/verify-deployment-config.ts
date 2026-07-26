@@ -110,6 +110,8 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("cloudflare-reused")
   && productionRelease.includes("npm run deploy:site-sandbox")
   && productionRelease.includes("npm run verify:site-sandbox-deployed")
+  && productionRelease.includes("current-sandbox-health")
+  && productionRelease.includes('previous_manifest" = "null"')
   && productionRelease.includes("/api/health?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
 assert(
   productionRelease.indexOf("Verify deployed sandbox compile canary") < productionRelease.indexOf("railway up --ci"),

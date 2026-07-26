@@ -3,6 +3,7 @@ import {
   currentCloudflareDeployment,
   currentCloudflareContainer,
   currentRailwayDeployment,
+  currentSandboxHealth,
   deployedCloudflareRelease
 } from "./release-evidence";
 
@@ -75,9 +76,39 @@ assert.deepEqual(currentRailwayDeployment([{
   message: "release abc123"
 });
 
+const currentManifest = {
+  kind: "site-sandbox-manifest",
+  artifactContractIdentity: "artifact-contract",
+  toolchainIdentity: "toolchain",
+  sourcePolicyIdentity: "source-policy"
+};
+assert.deepEqual(currentSandboxHealth({
+  ok: true,
+  provider: "cloudflare-sandbox",
+  transport: "rpc",
+  sandboxManifest: currentManifest
+}), {
+  provider: "cloudflare-sandbox",
+  sandboxManifest: currentManifest
+});
+assert.deepEqual(currentSandboxHealth({
+  ok: true,
+  provider: "cloudflare-sandbox",
+  transport: "rpc"
+}), {
+  provider: "cloudflare-sandbox",
+  sandboxManifest: null
+});
+
 assert.throws(() => currentCloudflareDeployment([]), /no deployments/i);
 assert.throws(() => currentCloudflareContainer([], "missing"), /content-addressed/i);
 assert.throws(() => deployedCloudflareRelease("Current Version ID: missing-digest"), /both/i);
 assert.throws(() => currentRailwayDeployment([{ status: "SUCCESS" }]), /malformed/i);
+assert.throws(() => currentSandboxHealth({ ok: false, provider: "cloudflare-sandbox" }), /healthy/i);
+assert.throws(() => currentSandboxHealth({
+  ok: true,
+  provider: "cloudflare-sandbox",
+  sandboxManifest: "invalid"
+}), /malformed sandbox manifest/i);
 
-process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-deploy", "railway-current"] })}\n`);
+process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-deploy", "railway-current", "sandbox-health"] })}\n`);

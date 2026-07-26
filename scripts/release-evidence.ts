@@ -27,6 +27,12 @@ type CloudflareContainerApplication = {
   updated_at?: unknown;
 };
 
+type SandboxHealth = {
+  ok?: unknown;
+  provider?: unknown;
+  sandboxManifest?: unknown;
+};
+
 export function currentCloudflareDeployment(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("Cloudflare returned no deployments.");
@@ -101,11 +107,29 @@ export function currentRailwayDeployment(value: unknown) {
   };
 }
 
+export function currentSandboxHealth(value: unknown) {
+  if (!value || typeof value !== "object") {
+    throw new Error("Sandbox health data is malformed.");
+  }
+  const health = value as SandboxHealth;
+  if (health.ok !== true || health.provider !== "cloudflare-sandbox") {
+    throw new Error("Sandbox health did not identify a healthy Cloudflare sandbox.");
+  }
+  if (health.sandboxManifest !== undefined
+    && (!health.sandboxManifest || typeof health.sandboxManifest !== "object" || Array.isArray(health.sandboxManifest))) {
+    throw new Error("Sandbox health reported a malformed sandbox manifest.");
+  }
+  return {
+    provider: health.provider,
+    sandboxManifest: health.sandboxManifest ?? null
+  };
+}
+
 if (basename(process.argv[1] ?? "") === "release-evidence.ts") {
   const command = process.argv[2];
   const file = process.argv[3];
   if (!command || !file) {
-    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|deployed-cloudflare|current-railway> <input-file> [application-name]");
+    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|deployed-cloudflare|current-railway|current-sandbox-health> <input-file> [application-name]");
   }
   const source = await readFile(file, "utf8");
   const result = command === "current-cloudflare"
@@ -116,6 +140,8 @@ if (basename(process.argv[1] ?? "") === "release-evidence.ts") {
       ? deployedCloudflareRelease(source)
       : command === "current-railway"
         ? currentRailwayDeployment(JSON.parse(source))
+        : command === "current-sandbox-health"
+          ? currentSandboxHealth(JSON.parse(source))
         : undefined;
   if (!result) throw new Error(`Unknown release evidence command: ${command}`);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

@@ -16,7 +16,7 @@ export default async function SiteWorkspaceLayout({ children, params }: { childr
   };
   return (
     <ProductAppShell
-      site={selected}
+      context={{ kind: "site", site: selected }}
       sites={context.options}
       accessMode={context.accessMode}
       canAccessAdmin={context.canAccessAdmin}

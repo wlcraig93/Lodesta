@@ -25,27 +25,80 @@ const privacyPage = readFileSync("app/(marketing)/privacy/page.tsx", "utf8");
 const termsPage = readFileSync("app/(marketing)/terms/page.tsx", "utf8");
 const sitemap = readFileSync("app/sitemap.ts", "utf8");
 const devSupervisor = readFileSync("scripts/dev.mjs", "utf8");
+const developmentSandboxPreflight = readFileSync("scripts/ensure-site-sandbox-dev.ts", "utf8");
+const devWeb = readFileSync("scripts/dev-web.mjs", "utf8");
 const devInspection = readFileSync("scripts/dev-inspect.mjs", "utf8");
+const localStart = readFileSync("scripts/start-local.mjs", "utf8");
+const sandboxRuntime = readFileSync("packages/site-sandbox/runtime-config.ts", "utf8");
+const developmentSandbox = readFileSync("workers/site-sandbox/wrangler.dev.jsonc", "utf8");
+const maintenanceFence = readFileSync("supabase/migrations/202607230019_site_authoring_maintenance_claim_fence.sql", "utf8");
 
-for (const name of ["typecheck", "smoke:dev", "verify:render-browser", "verify:architecture", "verify:database", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition", "verify:health", "verify:release-evidence", "verify:site-sandbox-local", "verify:site-sandbox-manifest"]) {
+for (const name of ["typecheck", "smoke:dev", "canary:owner-journey", "verify:owner-journey-canary", "verify:postcss-security", "verify:static", "verify:browser", "verify:sandbox", "verify:preflight", "verify:render-browser", "verify:architecture", "verify:database", "verify:database-live", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition", "verify:health", "verify:release-evidence", "verify:development-sandbox", "verify:site-sandbox-local", "verify:site-sandbox-manifest"]) {
   assert(packageJson.scripts[name], `Missing npm script ${name}.`);
 }
-assert(packageJson.scripts["dev:web"].includes("--turbopack") && packageJson.scripts["dev:raw"].includes("--turbopack"), "Package development entrypoints must use Turbopack.");
-assert(devSupervisor.includes('"--turbopack"') && devInspection.includes('"--turbopack"'), "Supervised development entrypoints must use Turbopack.");
+for (const command of ["verify:postcss-security", "typecheck", "build", "verify:architecture", "verify:database", "verify:authoring", "verify:account-setup-domain", "verify:acquisition", "verify:external-authoring", "verify:recovery-watchdog", "verify:health", "verify:deployment-config", "verify:release-evidence", "verify:site-agent-manager", "verify:site-agent-workspace", "verify:model-bakeoff", "verify:product-ui", "verify:owner-journey-canary"]) {
+  assert(packageJson.scripts["verify:static"].includes(`npm run ${command}`), `verify:static must compose ${command}.`);
+}
+assert(packageJson.scripts["verify:browser"].includes("npm run verify:generation-ingestion")
+  && packageJson.scripts["verify:browser"].includes("npm run verify:render-browser")
+  && packageJson.scripts["verify:browser"].includes("npm run verify:trusted-runtime"), "verify:browser must compose rendering and trusted-runtime coverage.");
+for (const command of ["verify:site-sandbox-manifest", "verify:development-sandbox", "verify:site-sandbox-local"]) {
+  assert(packageJson.scripts["verify:sandbox"].includes(`npm run ${command}`), `verify:sandbox must compose ${command}.`);
+}
+for (const command of ["verify:static", "verify:browser", "verify:sandbox"]) {
+  assert(packageJson.scripts["verify:preflight"].includes(`npm run ${command}`), `verify:preflight must compose ${command}.`);
+}
+assert(packageJson.scripts["dev:web"].includes("dev-web.mjs") && packageJson.scripts["dev:raw"].includes("--turbopack"), "Package development entrypoints must use guarded launchers and Turbopack.");
+assert(devSupervisor.includes('"--turbopack"') && devWeb.includes('"--turbopack"') && devInspection.includes('"--turbopack"'), "Development entrypoints must use Turbopack.");
+assert(packageJson.scripts.start.includes("start-local.mjs")
+  && packageJson.scripts["start:production"] === "next start"
+  && localStart.includes('LODESTA_RELEASE_GIT_SHA: ""')
+  && localStart.includes('LODESTA_SANDBOX_URL: ""'), "Local next start must disable production recovery and sandbox access.");
+assert(!existsSync("scripts/dev-supervisor.mjs")
+  && !devSupervisor.includes("startWorker")
+  && !devSupervisor.includes("workers/runner.ts"), "Default development must not supervise the shared polling worker.");
 assert(!existsSync("packages/site-platform/index.ts"), "The broad site-platform barrel must remain removed.");
-for (const name of ["CLOUDFLARE_ACCOUNT_ID=", "LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_SANDBOX_IMAGE_DIGEST=", "LODESTA_RELEASE_GIT_SHA=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER="]) {
+for (const name of ["CLOUDFLARE_ACCOUNT_ID=", "LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_SANDBOX_IMAGE_DIGEST=", "LODESTA_DEV_SANDBOX_TOKEN=", "LODESTA_RELEASE_GIT_SHA=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER=", "LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION=", "LODESTA_OWNER_CANARY_ORIGIN=", "LODESTA_OWNER_CANARY_SOURCE_URL=", "LODESTA_OWNER_CANARY_EMAIL=", "LODESTA_OWNER_CANARY_MODEL="]) {
   assert(env.includes(name), `.env.example must document ${name}`);
 }
 assert(packageJson.scripts["deploy:site-sandbox"].includes("--strict") && packageJson.scripts["deploy:site-sandbox"].includes("--containers-rollout=immediate"), "Sandbox deployments must use strict mode and immediate container rollout.");
+assert(packageJson.scripts["deploy:site-sandbox:dev"].includes("deploy-site-sandbox-dev.ts"), "Development sandbox must have one canonical deploy-and-canary command.");
+assert(packageJson.scripts["ensure:site-sandbox:dev"].includes("ensure-site-sandbox-dev.ts")
+  && devSupervisor.includes("ensure-site-sandbox-dev.ts")
+  && developmentSandboxPreflight.includes('new URL("/health"')
+  && developmentSandboxPreflight.includes("deploy-site-sandbox-dev.ts"),
+  "Default development must verify the live development sandbox and refresh it only when missing or stale.");
+assert(developmentSandbox.includes('"name": "lodesta-site-sandbox-v1-dev"')
+  && developmentSandbox.includes('"workers_dev": true')
+  && developmentSandbox.includes('"bucket_name": "lodesta-workspace-backups-v1"'), "Development sandbox must be isolated while sharing the pre-launch workspace bucket.");
+assert(sandboxRuntime.includes("developmentSandboxReceiptPath")
+  && sandboxRuntime.includes("developmentSandboxTokenPath")
+  && sandboxRuntime.includes("computeSiteToolchainIdentity")
+  && sandboxRuntime.includes("Development and production sandbox"), "Development sandbox runtime must validate its receipt and fail closed without production fallback.");
 assert(sandboxWorkerSource.includes("sandboxManifest") && sandboxWorkerSource.includes('pathname === "/health"'), "Sandbox health must expose the compatibility manifest.");
 for (const excluded of ["node_modules", "dist", "component-manifest.ts", "lodesta-manifest.json"]) {
   assert(sandboxManifestGenerator.includes(excluded), `Sandbox manifest generator must exclude ${excluded}.`);
 }
+for (const included of [".dockerignore", "wrangler.jsonc", "listWorkerInputs"]) {
+  assert(sandboxManifestGenerator.includes(included), `Sandbox manifest generator must fingerprint ${included}.`);
+}
 assert(!existsSync(".github/workflows/generation-architecture.yml"), "The stale generation architecture workflow must remain removed.");
-for (const check of ["npm run typecheck", "npm run verify:deployment-config", "npm run verify:authoring", "npm run verify:site-sandbox-local", "npm run verify:site-sandbox-manifest"]) {
+for (const check of ["npm run verify:static", "npm run verify:sandbox"]) {
   assert(continuousIntegration.includes(check), `Continuous integration must run ${check}.`);
   assert(productionRelease.includes(check), `Production release preflight must run ${check}.`);
 }
+assert(continuousIntegration.includes("npm run verify:browser")
+  && continuousIntegration.includes("verify-static:")
+  && continuousIntegration.includes("verify-browser:")
+  && continuousIntegration.includes("verify-sandbox:")
+  && continuousIntegration.includes("dependency-audit:")
+  && continuousIntegration.includes("continue-on-error: true")
+  && continuousIntegration.includes("actions/upload-artifact@v4"), "Continuous integration must parallelize named stages and retain non-blocking dependency audits.");
+assert(continuousIntegration.includes("sandbox-container:")
+  && continuousIntegration.includes("docker/setup-buildx-action@v3")
+  && continuousIntegration.includes("--dry-run")
+  && continuousIntegration.indexOf("sandbox-container:") > continuousIntegration.indexOf("verify-static:"),
+  "The real Wrangler/container build must remain a separate CI job from fast host verification.");
 assert(productionRelease.includes("environment: production")
   && productionRelease.includes('workflows: ["Continuous integration"]')
   && productionRelease.includes("github.event.workflow_run.conclusion == 'success'")
@@ -62,6 +115,10 @@ assert(
   productionRelease.indexOf("Verify deployed sandbox compile canary") < productionRelease.indexOf("railway up --ci"),
   "Railway must not deploy before the live sandbox compile canary passes."
 );
+assert(productionRelease.includes("timeout-minutes: 180")
+  && productionRelease.includes("deploy_needed == 'true'")
+  && productionRelease.includes("acquire --minutes=90 --draining")
+  && productionRelease.includes("wait-active --timeout-minutes=75"), "Production release must drain only sandbox-identity releases.");
 assert(
   productionRelease.includes("railway-failed-before-switch")
     && productionRelease.includes("versions deploy")
@@ -74,7 +131,7 @@ assert(productionRollback.includes("environment: production")
   && productionRollback.includes("sandbox_image_digest")
   && productionRollback.includes("railway up --ci"), "Production rollback workflow is not explicitly dispatched or exact-targeted.");
 assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");
-assert(web.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"'), "Railway web service must start Next.js.");
+assert(web.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start:production"'), "Railway web service must use the production Next.js entrypoint.");
 assert(!existsSync("deploy/railway-worker.toml"), "The obsolete production Railway polling worker config must be absent.");
 assert(workerSource.includes("localRecoveryStaleAfterMs") && workerSource.includes("processNextWebsiteAssessmentJob"), "The local-only worker must preserve fast development recovery and canonical assessment processing.");
 assert(
@@ -86,6 +143,10 @@ assert(watchdog.includes('"crons": ["*/15 * * * *"]'), "Recovery watchdog must r
 assert(!/r2_buckets|durable_objects|containers|queues/.test(watchdog), "Recovery watchdog must not bind stateful Cloudflare resources.");
 assert(watchdogSource.includes("scheduled(") && watchdogSource.includes("LODESTA_RECOVERY_WATCHDOG_TOKEN"), "Recovery watchdog scheduled handler is incomplete.");
 assert(instrumentation.includes('NEXT_PHASE !== "phase-production-build"') && instrumentation.includes('NEXT_RUNTIME === "nodejs"'), "Startup recovery must be Node-only and skip production builds.");
+assert(instrumentation.includes("LODESTA_RELEASE_GIT_SHA") && instrumentation.includes("isNonLoopbackHttpsOrigin"), "Startup recovery must require immutable deployed provenance.");
+assert(maintenanceFence.includes("task = 'site_authoring_maintenance'")
+  && !maintenanceFence.includes("workspace-cutover")
+  && maintenanceFence.includes("not maintenance_active and e.status = 'needs_input'"), "Maintenance must atomically fence ordinary and external claims while allowing active work to finish.");
 assert(maintenanceRoute.includes("hasValidRecoveryWatchdogToken") && maintenanceRoute.includes("processAutomaticRecovery"), "Maintenance route is missing machine recovery scheduling.");
 assert(prospectRoute.includes("after(async") && prospectRoute.includes("processNextWebsiteAssessmentJob"), "Prospect reports must schedule immediate canonical assessment processing.");
 assert(publicRoute.includes("readVerifiedArtifactFile"), "Public serving must verify immutable artifact bytes.");

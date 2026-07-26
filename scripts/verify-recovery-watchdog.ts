@@ -24,8 +24,23 @@ async function main() {
   assert.equal(shouldScheduleStartupRecovery({
     NEXT_RUNTIME: "nodejs",
     NODE_ENV: "production",
-    NEXT_PHASE: "phase-production-server"
+    NEXT_PHASE: "phase-production-server",
+    LODESTA_RELEASE_GIT_SHA: "a".repeat(40),
+    LODESTA_APP_ORIGIN: "https://lodesta.example"
   }), true, "production Node startup recovery is disabled");
+  assert.equal(shouldScheduleStartupRecovery({
+    NEXT_RUNTIME: "nodejs",
+    NODE_ENV: "production",
+    NEXT_PHASE: "phase-production-server",
+    LODESTA_RELEASE_GIT_SHA: "a".repeat(40),
+    LODESTA_APP_ORIGIN: "http://localhost:4330"
+  }), false, "loopback production-mode startup scheduled shared recovery");
+  assert.equal(shouldScheduleStartupRecovery({
+    NEXT_RUNTIME: "nodejs",
+    NODE_ENV: "production",
+    NEXT_PHASE: "phase-production-server",
+    LODESTA_APP_ORIGIN: "https://lodesta.example"
+  }), false, "production startup recovery ran without an immutable release SHA");
   assert.equal(shouldScheduleStartupRecovery({ NEXT_RUNTIME: "edge", NODE_ENV: "production" }), false, "Edge startup scheduled Node recovery");
   assert.equal(shouldScheduleStartupRecovery({ NEXT_RUNTIME: "nodejs", NODE_ENV: "development" }), false, "development startup duplicated the local worker");
   let startupRequest: { url: string; init?: RequestInit } | undefined;
@@ -141,13 +156,15 @@ async function main() {
   const runner = readFileSync("workers/runner.ts", "utf8");
   const workflow = readFileSync("packages/site-platform/workflow.ts", "utf8");
   const maintenance = readFileSync("app/api/site-agent/maintenance/route.ts", "utf8");
+  const recovery = readFileSync("lib/recovery-watchdog.ts", "utf8");
   assert(runner.includes("localRecoveryStaleAfterMs = 15 * 60_000"), "local worker lost its explicit fifteen-minute threshold");
   assert(workflow.includes("input.staleAfterMs ?? siteAgentRecoveryStaleAfterMs"), "workflow default does not use the conservative threshold");
   assert(maintenance.includes("body.trim() !== \"\"") && maintenance.includes("status: 202"), "machine maintenance path is not strict and asynchronous");
+  assert(recovery.includes("processNextWebsiteSetupAndRun") && recovery.includes("websiteSetup"), "automatic recovery does not recover queued website setups.");
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
-    checks: ["startup_guard", "machine_token", "scheduled_worker", "prospect_batch", "stale_thresholds"]
+    checks: ["startup_guard", "machine_token", "scheduled_worker", "website_setup_recovery", "prospect_batch", "stale_thresholds"]
   }, null, 2)}\n`);
 }
 

@@ -7,7 +7,8 @@ import { applyProviderExecutionFailure, applyProviderObservation, newDomainVerif
 import { isDomainReconciliationDue } from "@/lib/domain-reconciliation";
 import { getWebsiteSetupView, websiteSetupOwnerMessage } from "@/lib/website-setups";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
-import { websiteSetupSourceFailureCode } from "@/lib/website-setup-jobs";
+import { processWebsiteSetupAndRun, websiteSetupSourceFailureCode } from "@/lib/website-setup-jobs";
+import { isSiteCreationModelId } from "@/lib/site-creation-models";
 import type { DomainRecord, WebsiteSetupFailureCode } from "@/packages/platform-operations/contracts";
 import {
   ConcurrentProjectLimitError,
@@ -26,11 +27,18 @@ const baseInput = {
   sourceUrl: "https://example.com/",
   normalizedSource: "https://example.com/",
   reportingTimezone: "America/Chicago",
+  initialBuildApiProvider: "openrouter" as const,
+  initialBuildModelId: "anthropic/claude-sonnet-4.5",
   idempotencyKey: "request-0001",
   creationRequestHash: hashA
 };
 
 const first = await repository.createWebsiteSetup(baseInput);
+assert.equal(first.initialBuildApiProvider, "openrouter", "The selected initial-build provider was not retained with setup provenance.");
+assert.equal(first.initialBuildModelId, "anthropic/claude-sonnet-4.5", "The selected initial-build model was not retained with setup provenance.");
+assert.equal(isSiteCreationModelId("anthropic/claude-sonnet-4.5"), true, "A provider-qualified OpenRouter model ID was rejected.");
+assert.equal(isSiteCreationModelId("gpt-5.6-terra"), false, "An unqualified model ID was accepted for the OpenRouter experiment.");
+assert.equal(isSiteCreationModelId("~anthropic/claude-sonnet-latest"), false, "A mutable OpenRouter model alias was accepted for the comparison experiment.");
 assert.equal((await repository.createWebsiteSetup(baseInput)).id, first.id, "Matching idempotency replay did not return the original setup.");
 await assert.rejects(
   repository.createWebsiteSetup({ ...baseInput, sourceUrl: "https://other.example/", creationRequestHash: `sha256:${"b".repeat(64)}` }),
@@ -107,6 +115,35 @@ await assert.rejects(
 );
 for (const blocker of capacityBlockers) await repository.cancelWebsiteSetup({ setupId: blocker.id, ownerUserId: "owner-a" });
 assert.equal((await repository.retryWebsiteSetup({ setupId: first.id, ownerUserId: "owner-a" }))?.status, "queued");
+const exactClaim = await repository.claimWebsiteSetup(first.id, "request-exact-test");
+assert.equal(exactClaim?.id, first.id, "Request-owned execution did not claim its exact setup.");
+assert.equal((await repository.getWebsiteSetup(crossUser.id))?.status, "queued", "Request-owned execution claimed another environment's queued setup.");
+
+const executedRunIds: string[] = [];
+const requestOwnedResult = await processWebsiteSetupAndRun("setup-request-owned", "request-owned-test", {
+  processSetup: async (setupId, workerId) => {
+    assert.equal(setupId, "setup-request-owned");
+    assert.equal(workerId, "request-owned-test");
+    return {
+      setupId: "setup-request-owned",
+      status: "linked",
+      siteId: "site-request-owned",
+      runId: "run-request-owned"
+    };
+  },
+  executeRun: async (runId) => {
+    executedRunIds.push(runId);
+  }
+});
+assert.equal(requestOwnedResult?.setupId, "setup-request-owned");
+assert.deepEqual(executedRunIds, ["run-request-owned"], "Request-owned setup processing did not execute its initial authoring run.");
+await processWebsiteSetupAndRun("setup-empty", "request-empty-test", {
+  processSetup: async () => null,
+  executeRun: async (runId) => {
+    executedRunIds.push(runId);
+  }
+});
+assert.deepEqual(executedRunIds, ["run-request-owned"], "An empty setup queue attempted to execute an authoring run.");
 
 const artifact = { routes: [{ path: "/", htmlFile: "index.html" }, { path: "/about", htmlFile: "about/index.html" }] } as SiteBuildArtifact;
 assert.equal(resolveManifestPreviewPath({ artifact }), "index.html");
@@ -120,6 +157,7 @@ for (const value of ["http://user:pass@example.com", "http://localhost", "http:/
 }
 const ownerFailureCopy = new Map<WebsiteSetupFailureCode, string>([
   ["source_invalid", "This address is no longer a valid public website. Use a different URL."],
+  ["source_unsuitable", "This source indicates the business or website is no longer suitable for website creation. Use a different source or update the business information."],
   ["crawl_temporarily_unavailable", "We couldn’t read this website right now. Try again."],
   ["crawl_robots_disallowed", "This website doesn’t allow automated reading. Try a different website."],
   ["crawl_unsupported_content", "This address didn’t return a readable website. Try a different URL."],
@@ -147,16 +185,21 @@ assert.equal(invalid.status, "attention_required");
 assert.equal(isDomainReconciliationDue({ ...domain, status: "active", updatedAt: "2026-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), true);
 assert.equal(isDomainReconciliationDue({ ...domain, status: "expired", updatedAt: "2025-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), false);
 
-const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, setupWorkspace, workspaceFrame, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration, productShell] = await Promise.all([
+const [setupRoute, setupModelRoute, setupModelCatalog, setupUpdateRoute, setupRetryRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, setupLayout, setupWorkspace, buildCanvas, workspaceFrame, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration, initialModelMigration, productShell] = await Promise.all([
   readFile("app/api/website-setups/route.ts", "utf8"),
+  readFile("app/api/website-setups/models/route.ts", "utf8"),
+  readFile("lib/site-creation-model-catalog.ts", "utf8"),
   readFile("app/api/website-setups/[id]/route.ts", "utf8"),
+  readFile("app/api/website-setups/[id]/retry/route.ts", "utf8"),
   readFile("app/api/website-setups/auth.ts", "utf8"),
   readFile("lib/website-setup-jobs.ts", "utf8"),
   readFile("lib/website-setups.ts", "utf8"),
   readFile("app/preview/[previewId]/[[...path]]/route.ts", "utf8"),
   readFile("app/(owner)/account/onboarding/page.tsx", "utf8"),
-  readFile("app/(owner)/account/onboarding/[setupId]/page.tsx", "utf8"),
+  readFile("app/(website-setup)/account/onboarding/[setupId]/page.tsx", "utf8"),
+  readFile("app/(website-setup)/account/onboarding/[setupId]/layout.tsx", "utf8"),
   readFile("components/WebsiteSetupWorkspace.tsx", "utf8"),
+  readFile("components/WebsiteBuildCanvas.tsx", "utf8"),
   readFile("components/WebsiteWorkspaceFrame.tsx", "utf8"),
   readFile("app/(owner-workspace)/workspace/[slug]/page.tsx", "utf8"),
   readFile("components/SiteAgentWorkspace.tsx", "utf8"),
@@ -168,14 +211,35 @@ const [setupRoute, setupUpdateRoute, setupAuth, setupWorker, setupHelpers, previ
   readFile("app/admin/sites/page.tsx", "utf8"),
   readFile("supabase/migrations/202607230001_canonical_baseline.sql", "utf8"),
   readFile("supabase/migrations/202607230002_typed_website_setup_failures.sql", "utf8"),
+  readFile("supabase/migrations/202607230020_website_setup_initial_model_experiment.sql", "utf8"),
   readFile("components/ProductAppShell.tsx", "utf8")
 ]);
 assert(setupRoute.includes("duplicate_source_confirmation_required") && setupRoute.includes("confirmDuplicate"), "Private duplicate confirmation is missing.");
-assert(setupRoute.includes("idempotency_key_conflict") && !setupRoute.includes("after("), "Setup idempotency or request/worker boundary is missing.");
+assert(setupRoute.includes("idempotency_key_conflict") && setupRoute.includes("after("), "Setup idempotency or request-owned execution is missing.");
+assert(
+  setupRoute.includes("initialBuildApiProvider: SITE_CREATION_API_PROVIDER")
+    && setupRoute.includes("isSelectableSiteCreationModel")
+    && setupWorker.includes("initialBuildRoute")
+    && setupWorker.includes("setup.initialBuildApiProvider"),
+  "The exact selected OpenRouter route does not flow from setup into authoring."
+);
+assert(
+  setupModelRoute.includes("requireWebsiteSetupUser")
+    && setupModelRoute.includes("getSiteCreationModelCatalog")
+    && setupModelCatalog.includes('siteAgentAvailability === "selectable"')
+    && setupModelCatalog.includes('!model.id.startsWith("openrouter/")'),
+  "The owner setup catalog is not authenticated or capability-filtered."
+);
+assert(
+  [setupRoute, setupUpdateRoute, setupRetryRoute].every((source) => source.includes("processWebsiteSetupAndRun")),
+  "A website-setup enqueue path does not schedule request-owned execution."
+);
 assert(setupRoute.includes("validateWebsiteSetupSource") && setupUpdateRoute.includes("validateWebsiteSetupSource") && setupHelpers.includes("resolveDns: true"), "Creation and source replacement must resolve DNS before queueing.");
 assert(setupAuth.includes("setup.ownerUserId !== auth.user.id") && !setupAuth.includes("ownerEmail"), "Setup access is not exact user-ID equality.");
-assert(setupWorker.includes("bootstrapFromUrl") && !setupWorker.includes("ExistingSourceCollision"), "Setup worker retains collision reuse.");
+assert(setupWorker.includes("bootstrapFromUrl") && setupWorker.includes("executeRunAndFinalize") && !setupWorker.includes("ExistingSourceCollision"), "Setup processing does not complete the initial authoring run or retains collision reuse.");
+assert(workflow.includes("route: { apiProvider: run.apiProvider, modelId: run.modelId }"), "Website-manager execution is not pinned to its retained run model.");
 await assert.rejects(access("app/api/website-setups/[id]/preview/[[...path]]/route.ts"), "Obsolete setup-preview route remains.");
+await assert.rejects(access("app/(owner)/account/onboarding/[setupId]/page.tsx"), "Setup detail remains inside the account-level layout.");
 assert(
   previewTokenRoute.includes("readVerifiedManifestPreviewFile") &&
     previewTokenRoute.includes("hasValidPreviewSession") &&
@@ -192,9 +256,14 @@ assert(setupWorkspace.includes("activePollMs = 2_000") && setupWorkspace.include
 assert(setupWorkspace.includes("router.replace(result.view.openPath)") && setupWorkspace.includes("router.replace(next.openPath)"), "Linked setup does not replace browser history.");
 assert(setupWorkspace.includes("Available when your first draft is ready") && setupWorkspace.includes("disabled"), "Temporary setup composer is not visibly unavailable.");
 assert(setupWorkspace.includes("Waiting to begin") && setupWorkspace.includes("Learning about your business") && setupWorkspace.includes("Website setup needs attention"), "Owner-facing setup states are incomplete.");
-assert(setupWorkspace.includes("The latest progress could not be loaded. Lodesta will keep trying.") && setupWorkspace.includes("Preview paused"), "Transient polling or failure retention is incomplete.");
+assert(setupWorkspace.includes("The latest progress could not be loaded. Lodesta will keep trying.") && setupWorkspace.includes("Build paused"), "Transient polling or failure retention is incomplete.");
+assert(setupWorkspace.includes("<WebsiteBuildCanvas") && buildCanvas.includes('data-stage={stage}') && buildCanvas.includes("website-build-render-sweep"), "Initial setup does not use the shared stage-aware build canvas.");
+assert(!setupWorkspace.includes("Desktop</button>") && !setupWorkspace.includes("Mobile</button>") && !setupWorkspace.includes(">Publish</button>") && !setupWorkspace.includes(">Select</button>"), "Preview tools are visible before a setup render exists.");
 assert(setupWorkspace.includes("<WebsiteWorkspaceFrame") && workspaceClient.includes("<WebsiteWorkspaceFrame") && workspaceFrame.includes('type DesktopPanelMode = "split" | "collapsed" | "full-chat"'), "Setup and editor do not share the canonical responsive frame.");
-assert(productShell.includes("focusedSetup") && productShell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Setup-detail routes do not use the focused product shell.");
+assert(setupLayout.includes('context={{') && setupLayout.includes('kind: "setup"') && setupLayout.includes("setup.ownerUserId !== access.user.id"), "Setup detail does not use its dedicated owner-checked provisional editor layout.");
+assert(productShell.includes('context.kind === "setup"') && productShell.includes('data-shell-mode={focusedEditor ? "focused-editor"') && productShell.includes("owner-workspace-nav-current"), "Setup-detail routes do not use the focused provisional website shell.");
+assert(productShell.indexOf('"Business details"') < productShell.indexOf('"Website settings"') && productShell.includes("SlidersIcon"), "Website settings are not normalized directly after Business details.");
+assert(!productShell.includes("owner-workspace-settings-link") && productShell.includes("owner-workspace-sidebar-bottom"), "The obsolete bottom-rail website settings link remains.");
 assert(!workspacePage.includes("failed.failureReason") && !workspaceClient.includes("failedRun.failureReason"), "Stored authoring diagnostics leak into owner surfaces.");
 assert(accountContext.includes("getOwnerSiteInventory") && ownerWorkspace.includes("getSitesWithBusinessStatesByOwnerUserId") && ownerWorkspace.includes("getBusinessStatesByIds"), "Account inventory is not owner-scoped and bulk-loaded.");
 assert(!workflow.includes("existingSourcePolicy") && !workflow.includes("findExistingBootstrap"), "Global source collision logic remains.");
@@ -204,5 +273,12 @@ assert(adminSites.includes("Abandoned setup") && adminSites.includes('setup.stat
 assert(baseline.includes("pg_advisory_xact_lock") && baseline.includes("private_user_active_operation_count"), "Combined database capacity is not atomic.");
 assert(baseline.includes("active_domains") && baseline.includes("claim_domain_ownership"), "Verified hostname exclusivity is missing.");
 assert(typedFailureMigration.includes("where failure_code = 'website_crawl_failed'") && typedFailureMigration.includes("crawl_temporarily_unavailable"), "Retired crawl failures are not remapped to a retriable typed code.");
+assert(
+  initialModelMigration.includes("initial_build_api_provider")
+    && initialModelMigration.includes("invalid_initial_build_route")
+    && initialModelMigration.includes("target_initial_build_api_provider")
+    && initialModelMigration.includes("initial_build_model_id ~"),
+  "The website-setup database boundary does not retain and validate the exact OpenRouter route."
+);
 
 console.log(JSON.stringify({ ok: true, reusableSources: true, capacity: 3, directWorkspaceHandoff: true, proofFirstDomains: true }));

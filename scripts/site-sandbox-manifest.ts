@@ -38,6 +38,9 @@ export async function computeSiteToolchainIdentity(root = process.cwd()) {
   const scaffoldRoot = join(sandboxRoot, "scaffold");
   const files = [
     join(sandboxRoot, "Dockerfile"),
+    join(sandboxRoot, ".dockerignore"),
+    join(sandboxRoot, "wrangler.jsonc"),
+    ...await listWorkerInputs(join(sandboxRoot, "src")),
     ...await listScaffoldInputs(scaffoldRoot)
   ];
   const entries = await Promise.all(files.map(async (path) => ({
@@ -45,6 +48,19 @@ export async function computeSiteToolchainIdentity(root = process.cwd()) {
     bytes: await readFile(path)
   })));
   return fingerprintSiteToolchainEntries(entries);
+}
+
+async function listWorkerInputs(root: string) {
+  const files: string[] = [];
+  async function visit(directory: string) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile()) files.push(path);
+    }
+  }
+  await visit(root);
+  return files.sort();
 }
 
 export async function synchronizeSiteSandboxManifest(input: {

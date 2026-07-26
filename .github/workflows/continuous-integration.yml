@@ -9,7 +9,20 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  verify-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run verify:static
+
+  verify-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -18,13 +31,70 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run install:browsers
-      - run: npm run typecheck
-      - run: npm run verify:site-sandbox-manifest
-      - run: npm run verify:release-evidence
-      - run: npm run verify:deployment-config
-      - run: npm run verify:authoring
-      - run: npm run verify:health
-      - run: npm run verify:site-sandbox-local
-      - run: npm run verify:render-browser
+      - run: npm run verify:browser
+
+  verify-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            workers/site-sandbox/scaffold/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix workers/site-sandbox/scaffold --ignore-scripts --no-audit --no-fund
+      - run: npm run verify:sandbox
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Capture root dependency audit
+        continue-on-error: true
+        run: |
+          mkdir -p .data/dependency-audit
+          npm audit --json --package-lock-only > .data/dependency-audit/root.json
+      - name: Capture sandbox dependency audit
+        continue-on-error: true
+        run: |
+          npm audit --json --package-lock-only --prefix workers/site-sandbox/scaffold \
+            > .data/dependency-audit/site-sandbox.json
+      - name: Upload dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: .data/dependency-audit
+          if-no-files-found: error
+          retention-days: 30
+
+  sandbox-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: docker/setup-buildx-action@v3
+      - run: npm ci
+      - name: Build the real Wrangler container integration
+        run: >-
+          npx wrangler deploy
+          --config workers/site-sandbox/wrangler.jsonc
+          --dry-run
+          --strict
+          --containers-rollout=immediate

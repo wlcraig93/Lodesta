@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fingerprintSiteToolchainEntries, synchronizeSiteSandboxManifest } from "./site-sandbox-manifest";
+import {
+  computeSiteToolchainIdentity,
+  fingerprintSiteToolchainEntries,
+  synchronizeSiteSandboxManifest
+} from "./site-sandbox-manifest";
 
 const first = fingerprintSiteToolchainEntries([
   { path: "b.txt", bytes: Buffer.from("second") },
@@ -28,6 +32,40 @@ try {
     filter: (source) => !source.includes("/node_modules") && !source.includes("/dist")
   });
   await cp("packages/site-contracts", join(fixtureRoot, "packages/site-contracts"), { recursive: true });
+  const fixtureIdentity = await computeSiteToolchainIdentity(fixtureRoot);
+  for (const relativePath of [
+    "workers/site-sandbox/Dockerfile",
+    "workers/site-sandbox/.dockerignore",
+    "workers/site-sandbox/src/index.ts",
+    "workers/site-sandbox/wrangler.jsonc",
+    "workers/site-sandbox/scaffold/package-lock.json",
+    "workers/site-sandbox/scaffold/vite.config.ts"
+  ]) {
+    const target = join(fixtureRoot, relativePath);
+    const original = await readFile(target);
+    await writeFile(target, Buffer.concat([original, Buffer.from("\nproduction identity input change\n")]));
+    assert.notEqual(
+      await computeSiteToolchainIdentity(fixtureRoot),
+      fixtureIdentity,
+      `${relativePath} did not change the production identity.`
+    );
+    await writeFile(target, original);
+  }
+  const devConfig = join(fixtureRoot, "workers/site-sandbox/wrangler.dev.jsonc");
+  await writeFile(devConfig, `${await readFile(devConfig, "utf8")}\n// development-only change\n`);
+  assert.equal(
+    await computeSiteToolchainIdentity(fixtureRoot),
+    fixtureIdentity,
+    "Development Wrangler configuration changed the production identity."
+  );
+  const controllerClient = join(fixtureRoot, "packages/site-sandbox/client.ts");
+  await mkdir(join(fixtureRoot, "packages/site-sandbox"), { recursive: true });
+  await writeFile(controllerClient, "// controller-only change\n");
+  assert.equal(
+    await computeSiteToolchainIdentity(fixtureRoot),
+    fixtureIdentity,
+    "Controller client changes changed the production identity."
+  );
   const generatedTarget = join(fixtureRoot, "workers/site-sandbox/scaffold/lodesta-manifest.json");
   const generated = await readFile(generatedTarget, "utf8");
   await writeFile(generatedTarget, generated.replace("site-sandbox-manifest", "modified-site-sandbox-manifest"));
@@ -45,5 +83,7 @@ process.stdout.write(`${JSON.stringify({
   identity: result.identity,
   deterministic: true,
   changedInput: true,
+  developmentConfigIndependent: true,
+  workerBridgeCovered: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

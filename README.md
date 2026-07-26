@@ -32,9 +32,13 @@ npm install
 npm run dev
 ```
 
-The app runs at `http://localhost:4330` by default. `npm run dev` starts the Next.js app and a local-only fast recovery worker; use `npm run dev:web` when only the web process is needed. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
+The app runs at `http://localhost:4330` by default. `npm run dev` verifies the separately deployed development sandbox, refreshes and canaries it only when its runtime inputs changed, then starts Next.js. The development credential, URL, image digest, and deployment receipt are local and gitignored. The first run requires a one-time Cloudflare login; ordinary application changes skip the sandbox deployment entirely. Local authoring never falls back to production.
+
+`npm run dev:worker` is an explicit operator command that polls and mutates the shared queues and recovery state; normal development never starts it automatically. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
 
 For read-only local UI inspection without a browser sign-in, use `npm run dev:inspect`. The inspection launcher accepts only a loopback `HOST`, disables Supabase browser auth and admin-token access for that process, and does not start the background worker. Admin and owner pages remain available in the existing `local_open` mode, while mutating API requests remain unauthorized. Use the normal signed-in development flow whenever testing authentication, ownership, creation, publishing, or another write path.
+
+`npm run start` is the guarded local production-build launcher and clears production sandbox and recovery provenance. Railway alone uses `npm run start:production` with the release workflow's exact SHA and sandbox digest.
 
 Important surfaces:
 
@@ -56,18 +60,21 @@ Copy `.env.example` to local environment configuration and provide real values o
 ## Verification
 
 ```bash
-npm run typecheck
-npm run verify:architecture
-npm run verify:database
-npm run verify:authoring
-npm run verify:runtime
-npm run verify:account-setup-domain
-npm run verify:acquisition
-npm run verify:render-browser
+npm run verify:static
+npm run verify:browser
+npm run verify:sandbox
+npm run verify:preflight
 npm run smoke:dev
 ```
 
 Set `LODESTA_VERIFY_LIVE_DATABASE=true` only when the canonical baseline has been applied to the target environment and the browser-role denial checks should run against it.
+
+The model-spending owner journey is intentionally outside ordinary CI. Configure
+the dedicated non-production values documented in `.env.example`, start the
+target application, and run `npm run canary:owner-journey`. The command uses a
+real Supabase magic link, creates and edits a multi-file site, publishes it,
+then disposes it while retaining audit records. Screenshots and non-secret
+evidence are written under gitignored `.data/owner-journey/`.
 
 After the runtime release suite passes, promote the content-hashed trusted runtime through the audited series RPC:
 

@@ -75,6 +75,7 @@ export async function ingestWebsite(input: {
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
   const { ingestion: generationIngestion, crawl } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
+  assertSourceSuitableForGeneration(crawl, generationIngestion);
   const research = input.researchMode === "disabled"
     ? undefined
     : await researchBusiness({
@@ -218,7 +219,7 @@ export async function ingestWebsite(input: {
     activeForFutureBuilds: true
   }));
 
-  const links = safeSourceLinks(sourceUrl, crawl).map((link, index) => {
+  const links = selectSourceLinksForGeneration(sourceUrl, crawl).map((link, index) => {
     const factId = addFact("link", link.label, link.url, 0.75)!;
     return { id: `link_${index + 1}`, ...link, publicEligible: true, sourceFactIds: [factId] };
   });
@@ -625,13 +626,18 @@ function offeringEvidenceFor(
 }
 
 function supportsEmergencyPlumbing(crawl: CrawlAssessment, hours: ExtractedBusinessFacts["hours"]) {
-  const sourceText = crawl.pageSummaries
+  void hours;
+  return crawl.pageSummaries
     .flatMap((page) => page.sourceTextBlocks.map((block) => block.displayText))
-    .join("\n");
-  const emergency = /\bemergency (?:plumb(?:er|ing)|service)|24[ -]?hour plumber\b/i.test(sourceText);
-  const continuous = /\b24\s*\/\s*7\b|\b24[ -]?hours?(?: a day)?\b/i.test(sourceText)
-    || Boolean(hours && Object.keys(hours).length && Object.values(hours).every((value) => /\b(?:open )?24 hours?\b/i.test(value)));
-  return emergency && continuous;
+    .some(isAffirmativeEmergencyServiceStatement);
+}
+
+export function isAffirmativeEmergencyServiceStatement(value: string) {
+  const normalized = value.normalize("NFKC").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/\b(?:not|isn['’]?t|aren['’]?t|no|without|unavailable|except|excluding)\b/i.test(normalized)) return false;
+  if (/\bemergency (?:phone|line|support|dispatch|on[ -]?call)\b/i.test(normalized)) return false;
+  return /\bemergency (?:plumb(?:er|ing)|service)\b|\b24[ -]?hour plumber\b/i.test(normalized);
 }
 
 function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
@@ -647,7 +653,7 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
   for (const page of crawl.pageSummaries) {
     for (const rawLabel of page.extractedFacts.serviceAreas) {
       const label = clean(rawLabel);
-      if (!label || !plausibleServiceArea(label)) continue;
+      if (!label || !isExplicitNamedServiceArea(label)) continue;
       const identity = normalizedText(label);
       const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(identity));
       const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
@@ -672,10 +678,12 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
     .map(({ label, evidence }) => ({ label, evidence }));
 }
 
-function plausibleServiceArea(value: string) {
+export function isExplicitNamedServiceArea(value: string) {
   const normalized = normalizedText(value);
   return normalized.length >= 2
     && normalized.length <= 100
+    && !/\b(?:surrounding|greater|metro(?:politan)?|radius|miles?|nearby)\b/.test(normalized)
+    && !/[,&]|\band\b/.test(normalized)
     && !/^(?:united states|usa|nationwide|everywhere|local area|surrounding areas?)$/.test(normalized);
 }
 
@@ -725,13 +733,79 @@ function observedProof(
   });
 }
 
-function safeSourceLinks(sourceUrl: string, crawl: CrawlAssessment) {
+export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAssessment) {
+  const socialProfile = crawl.extractedFacts.socialLinks.find(isAccountLevelSocialProfile);
   const values = [
     { kind: "website" as const, label: "Source website", url: sourceUrl },
-    ...crawl.extractedFacts.socialLinks.map((url) => ({ kind: "social" as const, label: "Social profile", url })),
+    ...(socialProfile ? [{ kind: "social" as const, label: "Social profile", url: socialProfile }] : []),
     ...crawl.extractedFacts.bookingLinks.map((url) => ({ kind: "booking" as const, label: "Booking", url }))
   ];
   return uniqueBy(values.filter((item) => safeHttpUrl(item.url)), (item) => item.url).slice(0, 20);
+}
+
+export function assertSourceSuitableForGeneration(
+  crawl: CrawlAssessment,
+  ingestion: WebsiteGenerationIngestion
+) {
+  const firstPartyUrls = new Set(ingestion.pages
+    .filter((page) => page.evidenceClass === "first_party")
+    .flatMap((page) => [page.url, (page.summary as CrawlPageSummary).url]));
+  const firstPartyText = crawl.pageSummaries
+    .filter((page) => firstPartyUrls.has(page.url))
+    .flatMap((page) => [page.title ?? "", page.metaDescription ?? "", ...page.sourceTextBlocks.map((block) => block.displayText)])
+    .join("\n");
+  const closed = /\b(?:permanently closed|temporarily closed until further notice|no longer (?:open|operating|in business)|ceased operations|closed (?:our|its) doors|business has closed|location is permanently closed)\b/i.test(firstPartyText);
+  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale|website is coming soon)\b/i.test(firstPartyText);
+  const contradictory = hasContradictoryFirstPartyLocationHours(crawl, firstPartyUrls);
+  if (closed || parked || contradictory) {
+    throw new WebsiteCrawlError(
+      "source_unsuitable",
+      closed
+        ? "The first-party source indicates that the business or location is closed."
+        : parked
+          ? "The supplied address is a parked or placeholder website rather than an active first-party business source."
+          : "The first-party source gives contradictory hours for the same named street address."
+    );
+  }
+}
+
+export function hasContradictoryFirstPartyLocationHours(
+  crawl: CrawlAssessment,
+  firstPartyUrls = new Set(crawl.pageSummaries.map((page) => page.url))
+) {
+  const hoursByAddress = new Map<string, Set<string>>();
+  for (const page of crawl.pageSummaries) {
+    if (!firstPartyUrls.has(page.url)) continue;
+    const address = normalizedText(formatAddress(page.extractedFacts.address) ?? "");
+    const hours = page.extractedFacts.hours;
+    if (!address || !hours || !Object.keys(hours).length) continue;
+    const signature = stableJson(Object.fromEntries(
+      Object.entries(hours)
+        .map(([day, value]) => [normalizedText(day), normalizedText(value)] as const)
+        .sort(([left], [right]) => left.localeCompare(right))
+    ));
+    const values = hoursByAddress.get(address) ?? new Set<string>();
+    values.add(signature);
+    hoursByAddress.set(address, values);
+  }
+  return [...hoursByAddress.values()].some((values) => values.size > 1);
+}
+
+function isAccountLevelSocialProfile(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const path = url.pathname.replace(/\/+$/, "");
+    if (/\b(?:posts?|status|reels?|videos?|shorts?|watch|stories|photos?)\b/i.test(path)) return false;
+    if (host === "instagram.com") return /^\/[a-zA-Z0-9._-]+$/.test(path);
+    if (host === "facebook.com" || host === "fb.com") return /^\/[a-zA-Z0-9._-]+$/.test(path);
+    if (host === "x.com" || host === "twitter.com" || host === "tiktok.com") return /^\/@?[a-zA-Z0-9._-]+$/.test(path);
+    if (host === "linkedin.com") return /^\/(?:company|in)\/[a-zA-Z0-9._-]+$/.test(path);
+    if (host === "youtube.com") return /^\/(?:@|channel\/|c\/|user\/)[a-zA-Z0-9._-]+$/.test(path);
+    return path.length > 1;
+  } catch {
+    return false;
+  }
 }
 
 function supportingBlock(blocks: SourceTextBlock[], value: string) {

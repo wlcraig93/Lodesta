@@ -3,6 +3,10 @@ import { appOriginEnvName } from "./app-origin";
 import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { expectedSiteSandboxManifest } from "@/packages/site-contracts";
+import {
+  assertConfiguredSiteSandboxRuntimeReady,
+  configuredSiteSandboxRuntime
+} from "@/packages/site-sandbox";
 
 export type HealthState = "ok" | "warning" | "error";
 export type HealthCheck = { id: string; label: string; state: HealthState; detail: string };
@@ -39,9 +43,12 @@ function checkAdmin() {
 }
 
 function checkSandbox() {
-  return process.env.LODESTA_SANDBOX_URL && process.env.LODESTA_SANDBOX_TOKEN
-    ? ok("sandbox", "Cloudflare Sandbox", "Sandbox bridge and authentication are configured.")
-    : error("sandbox", "Cloudflare Sandbox", "LODESTA_SANDBOX_URL and LODESTA_SANDBOX_TOKEN are required.");
+  try {
+    const runtime = configuredSiteSandboxRuntime();
+    return ok("sandbox", "Cloudflare Sandbox", `${runtime.mode === "development" ? "Development" : "Production"} sandbox bridge and authentication are configured.`);
+  } catch (caught) {
+    return error("sandbox", "Cloudflare Sandbox", message(caught));
+  }
 }
 
 function checkArtifactBroker() {
@@ -69,10 +76,13 @@ export async function checkSandboxReadiness(input: {
   fetcher?: typeof fetch;
   timeoutMs?: number;
 } = {}) {
-  const url = input.url ?? process.env.LODESTA_SANDBOX_URL;
-  const token = input.token ?? process.env.LODESTA_SANDBOX_TOKEN;
-  if (!url || !token) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
   try {
+    const configured = input.url || input.token
+      ? { url: input.url, token: input.token }
+      : await assertConfiguredSiteSandboxRuntimeReady();
+    const url = configured?.url;
+    const token = configured?.token;
+    if (!url || !token) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
     const response = await (input.fetcher ?? fetch)(`${url.replace(/\/$/, "")}/health`, {
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(input.timeoutMs ?? 8_000)

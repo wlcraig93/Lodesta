@@ -90,9 +90,11 @@ for (const token of ["#f7f8f6", "#fbfcfa", "#f1f3f0", "#dfe4de", "#e7efea", "#68
 }
 assert(tokens.includes("--product-radius-lg: 20px"), "Product tokens are missing the large command-dock radius.");
 assert(tokens.includes("--product-shadow-command-dock"), "Product tokens are missing the subtly raised command-dock shadow.");
-for (const route of ["/editor", "/leads", "/analytics", "/business-details"]) {
+for (const route of ["/editor", "/leads", "/analytics", "/business-details", "/settings"]) {
   assert(shell.includes(route), `Product navigation is missing ${route}.`);
 }
+assert(shell.indexOf('"Business details"') < shell.indexOf('"Website settings"') && shell.includes("SlidersIcon"), "Website settings do not use the normalized navigation placement and icon.");
+assert(!shell.includes("owner-workspace-settings-link") && !css.includes("owner-workspace-settings-link"), "Obsolete bottom-rail settings link or CSS remains.");
 for (const token of [
   "--product-color-surface-hover",
   "--product-color-surface-disabled",
@@ -138,6 +140,15 @@ assert(productDialog.includes("createPortal") && productDialog.includes("showMod
 assert(productDialog.includes("document.body.style.overflow") && productDialog.includes("requestAnimationFrame"), "The product dialog does not lock scrolling and restore focus.");
 assert(css.includes(".product-dialog::backdrop") && css.includes(".product-dialog-actions"), "Canonical product dialog styling is missing.");
 assert(onboarding.includes("<ProductDialog") && setupControls.includes("<ConfirmDialog") && externalBatchActions.includes("<ConfirmDialog"), "Existing confirmations are not consolidated on the shared dialog system.");
+assert(
+  onboarding.includes("Initial build model")
+    && onboarding.includes('fetch("/api/website-setups/models"')
+    && onboarding.includes("Filter by model or provider")
+    && onboarding.includes("compatible models"),
+  "Website setup is missing the searchable OpenRouter initial-build model selector."
+);
+assert(css.includes(".onboarding-model-search") && css.includes(".onboarding-model-selection"), "OpenRouter model-picker states are missing product styling.");
+assert(account.includes("account-website-model-chip") && account.includes("Initial build ·"), "Website cards are missing initial-build model provenance.");
 assert(thumbnailRoute.includes("site.ownerUserId !== auth.user.id"), "Thumbnail endpoint does not enforce exact owner user-ID equality.");
 assert(thumbnailRoute.includes("active && published"), "Thumbnail endpoint does not prefer published imagery while a live update is running.");
 

@@ -15,7 +15,7 @@ import {
 import {
   classifySiteAuthoringFailure,
   createImageBytes,
-  createAuthoringContextPacket,
+  createSiteAuthoringBrief,
   isSiteAuthoringTerminalError,
   managerGuardrailsAfterPriorUsage,
   siteAgentRunGuardrailDefaults,
@@ -34,7 +34,9 @@ import {
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 import {
+  assertConfiguredSiteSandboxRuntimeReady,
   configuredSiteSandboxClient,
+  configuredSiteSandboxImageDigest,
   SiteSandboxArtifactContractError,
   SiteSandboxRequestError,
   type SiteSandboxClient
@@ -66,7 +68,6 @@ import {
 } from "@/packages/site-contracts";
 import {
   expectedSiteSandboxManifest,
-  sandboxImageDigest,
   siteToolchainIdentity,
   siteVerificationPolicyIdentity
 } from "@/packages/site-contracts/platform-manifest";
@@ -94,6 +95,7 @@ import {
 } from "./manager-runtime";
 import { deriveSitePublicationReadiness } from "./publication-readiness";
 import { SiteAgentEventRecorder } from "./run-events";
+import { verificationBlockerFeedback } from "./verification-feedback";
 import { normalizeBootstrapSourceUrl } from "./source-url";
 import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
@@ -104,6 +106,7 @@ import {
   stagedBlobReceiptSchema
 } from "@/packages/external-authoring/contracts";
 import { externalAuthoringRepository } from "@/packages/external-authoring/repository";
+import { externalAuthoringBundleMatchesRuntime } from "@/packages/external-authoring/runtime-compatibility";
 
 const runtimeSeriesId = "site-runtime-v1";
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
@@ -126,6 +129,10 @@ export class SiteAuthoringWorkflow {
     url: string;
     ownerId: string;
     reportingTimezone?: string;
+    initialBuildRoute?: {
+      apiProvider: NonNullable<SiteAgentRun["apiProvider"]>;
+      modelId: string;
+    };
     slug?: string;
     signal?: AbortSignal;
   }) {
@@ -189,11 +196,11 @@ export class SiteAuthoringWorkflow {
       kind: "initial_build",
       instruction: websiteSetupOwnerInstruction(input.url),
       requestedBy: input.ownerId,
-      workflowStartedAt
+      workflowStartedAt,
+      modelRoute: input.initialBuildRoute
     });
     if (ingested.researchUsage) {
       run = await this.updateRun(run, {
-        modelId: ingested.researchUsage.modelId,
         usage: {
           kind: "model_reported",
           inputTokens: ingested.researchUsage.inputTokens,
@@ -217,6 +224,7 @@ export class SiteAuthoringWorkflow {
     preparationKey: `sha256:${string}`;
     signal?: AbortSignal;
   }) {
+    await assertConfiguredSiteSandboxRuntimeReady();
     const now = new Date().toISOString();
     const siteId = deterministicId("site", { schemaVersion: 1, preparationKey: input.preparationKey });
     const businessId = deterministicId("business", { schemaVersion: 1, preparationKey: input.preparationKey });
@@ -471,12 +479,9 @@ export class SiteAuthoringWorkflow {
     if (!session || !buildInput) throw new Error("External authoring session or public input is unavailable.");
     if (
       buildInput.inputHash !== bundle.publicBuildInputHash
-      || bundle.sourcePolicyVersion !== workspaceSourcePolicyIdentity
-      || bundle.verificationPolicyVersion !== siteVerificationPolicyIdentity
-      || bundle.toolchainVersion !== siteToolchainIdentity
-      || bundle.sandboxImageDigest !== configuredSandboxImageDigest()
+      || !externalAuthoringBundleMatchesRuntime(bundle)
     ) {
-      throw new Error("execution_bundle_stale_restart_required");
+      throw new Error("platform_version_mismatch");
     }
 
     type RevisionDraft = Omit<SiteWorkspaceRevision, "sourceArchiveKey">;
@@ -543,6 +548,7 @@ export class SiteAuthoringWorkflow {
         });
         const errors = finalized.artifact.qa.findings.filter((finding) => finding.severity === "error");
         const warnings = finalized.artifact.qa.findings.filter((finding) => finding.severity === "warning");
+        const blockerFeedback = verificationBlockerFeedback(errors);
         const runtimePatch = await this.repository.getRuntimePatch(finalized.artifact.runtimePatchAtFinalization);
         if (!runtimePatch) throw new Error("Finalized runtime patch is unavailable.");
         const inspectionHash = sha256(stableJson({
@@ -591,9 +597,12 @@ export class SiteAuthoringWorkflow {
             inspectionHash,
             routes: finalized.artifact.routes,
             findingCount: finalized.artifact.qa.findings.length,
-            blockerCount: errors.length,
+            blockerCount: blockerFeedback.uniqueBlockerCount,
+            uniqueBlockerCount: blockerFeedback.uniqueBlockerCount,
+            returnedBlockerCount: blockerFeedback.returnedBlockerCount,
+            blockersTruncated: blockerFeedback.blockersTruncated,
             advisoryCount: warnings.length,
-            blockers: errors.slice(0, 100),
+            blockers: blockerFeedback.blockers,
             advisories: warnings.slice(0, 8)
           },
           diagnosticSummary: {
@@ -816,7 +825,9 @@ export class SiteAuthoringWorkflow {
     deferBehindActive?: boolean;
     publishAfterSuccess?: boolean;
     workflowStartedAt?: string;
+    modelRoute?: { apiProvider: NonNullable<SiteAgentRun["apiProvider"]>; modelId: string };
   }) {
+    await assertConfiguredSiteSandboxRuntimeReady();
     if (await this.repository.isMaintenanceLeaseActive("site_authoring_maintenance", new Date().toISOString())) {
       throw new Error("site_authoring_maintenance_active");
     }
@@ -843,8 +854,10 @@ export class SiteAuthoringWorkflow {
     const now = new Date().toISOString();
     const taskSkill = taskSkillFor(input.kind);
     const modelSettings = await getSiteAuthoringModelSettings();
-    const apiProvider = siteAgentApiProviderSchema.parse(process.env.LODESTA_SITE_AGENT_PROVIDER?.trim() || modelSettings.settings.siteAgentProvider);
-    const modelId = process.env.LODESTA_SITE_AGENT_MODEL?.trim() || modelSettings.settings.siteAgentModel;
+    const configuredProvider = siteAgentApiProviderSchema.parse(process.env.LODESTA_SITE_AGENT_PROVIDER?.trim() || modelSettings.settings.siteAgentProvider);
+    const apiProvider = input.modelRoute?.apiProvider ?? configuredProvider;
+    const modelId = input.modelRoute?.modelId
+      ?? (process.env.LODESTA_SITE_AGENT_MODEL?.trim() || modelSettings.settings.siteAgentModel);
     const coalesced = input.origin === "control_plane"
       ? sessionRuns.find((candidate) => candidate.status === "queued" && candidate.origin === "control_plane")
       : undefined;
@@ -930,6 +943,7 @@ export class SiteAuthoringWorkflow {
   async executeRun(runId: string, selection?: SiteElementSelection) {
     let current = await this.requireRun(runId);
     if (current.status !== "queued") return current;
+    await assertConfiguredSiteSandboxRuntimeReady();
     if (current.deferredUntilRunId) {
       const predecessor = await this.repository.getAgentRun(current.deferredUntilRunId);
       if (predecessor && (predecessor.status === "queued" || predecessor.status === "running")) return current;
@@ -965,7 +979,7 @@ export class SiteAuthoringWorkflow {
         : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId);
       const snapshots = (await Promise.all(buildInput.sourceSnapshotIds.map((id) => this.repository.getSourceSnapshot(id))))
         .filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
-      const authoringContext = createAuthoringContextPacket({ buildInput, snapshots });
+      const authoringBrief = createSiteAuthoringBrief({ buildInput, snapshots });
       const requestMessages = (await this.repository.listAgentMessages(session.id)).filter((message) => message.runId === run.id && (message.role === "owner" || message.role === "operator"));
       const ownerMessage = requestMessages.map((message) => message.content).join("\n\n")
         || "Apply the requested site change.";
@@ -973,7 +987,7 @@ export class SiteAuthoringWorkflow {
         run,
         session: sandboxState.session,
         buildInput,
-        authoringContext,
+        authoringBrief,
         sandboxRevision: sandboxState.revision,
         currentFiles,
         instruction: ownerMessage,
@@ -1103,6 +1117,7 @@ export class SiteAuthoringWorkflow {
   }
 
   async resumeNeedsInput(input: { runId: string; sessionId: string; answer: string; actorId: string }) {
+    await assertConfiguredSiteSandboxRuntimeReady();
     const waiting = await this.requireRun(input.runId);
     if (waiting.sessionId !== input.sessionId) throw new Error("run_session_mismatch");
     if (waiting.status !== "needs_input" || !waiting.inputQuestion || !waiting.inputExpiresAt) throw new Error("run_is_not_waiting_for_input");
@@ -1135,7 +1150,10 @@ export class SiteAuthoringWorkflow {
         kind: waiting.kind,
         instruction: `${original}\n\n${principalLabel(session)} clarification: ${answer}`,
         requestedBy: input.actorId,
-        origin: waiting.origin
+        origin: waiting.origin,
+        modelRoute: waiting.apiProvider && waiting.modelId
+          ? { apiProvider: waiting.apiProvider, modelId: waiting.modelId }
+          : undefined
       });
     }
     if ((await this.repository.listAgentRuns(currentSession.id)).some((run) => run.id !== waiting.id && (run.status === "queued" || run.status === "running"))) {
@@ -1261,7 +1279,10 @@ export class SiteAuthoringWorkflow {
       requestedBy: input.actorId,
       selection: request.selection,
       origin: failed.origin,
-      publishAfterSuccess: false
+      publishAfterSuccess: false,
+      modelRoute: failed.apiProvider && failed.modelId
+        ? { apiProvider: failed.apiProvider, modelId: failed.modelId }
+        : undefined
     });
     return retried;
   }
@@ -1325,7 +1346,7 @@ export class SiteAuthoringWorkflow {
     run: SiteAgentRun;
     session: SiteAgentSession;
     buildInput: SitePublicBuildInput;
-    authoringContext: ReturnType<typeof createAuthoringContextPacket>;
+    authoringBrief: ReturnType<typeof createSiteAuthoringBrief>;
     sandboxRevision: string;
     currentFiles?: WorkspaceSourceFile[];
     instruction: string;
@@ -1554,6 +1575,7 @@ export class SiteAuthoringWorkflow {
         }
         const errors = finalized.artifact.qa.findings.filter((finding) => finding.severity === "error");
         const warnings = finalized.artifact.qa.findings.filter((finding) => finding.severity === "warning");
+        const blockerFeedback = verificationBlockerFeedback(errors);
         let checkpoint: Checkpoint | undefined;
         if (finalized.artifact.qa.hardGate === "passed") {
           const revisionDraft = {
@@ -1600,11 +1622,13 @@ export class SiteAuthoringWorkflow {
             inspectionHash,
             routes: finalized.artifact.routes,
             findingCount: finalized.artifact.qa.findings.length,
-            blockerCount: errors.length,
+            blockerCount: blockerFeedback.uniqueBlockerCount,
+            uniqueBlockerCount: blockerFeedback.uniqueBlockerCount,
+            returnedBlockerCount: blockerFeedback.returnedBlockerCount,
+            blockersTruncated: blockerFeedback.blockersTruncated,
             advisoryCount: warnings.length,
-            findings: finalized.artifact.qa.findings.slice(0, 100),
-            blockers: errors.slice(0, 100),
-            advisories: warnings.slice(0, 100)
+            blockers: blockerFeedback.blockers,
+            advisories: warnings.slice(0, 8)
           },
           diagnosticSummary: {
             ok: finalized.artifact.qa.hardGate === "passed",
@@ -1624,12 +1648,14 @@ export class SiteAuthoringWorkflow {
         };
       }
     });
+    if (!run.apiProvider || !run.modelId) throw new Error("responses_run_model_route_required");
     const managerResult = await this.manager.run({
       buildInput: input.buildInput,
-      authoringContext: input.authoringContext,
+      authoringBrief: input.authoringBrief,
       runId: run.id,
       instruction: input.instruction,
       kind: input.kind,
+      route: { apiProvider: run.apiProvider, modelId: run.modelId },
       guardrails: {
         maxCostUsd: remainingGuardrails.maxCostUsd,
         maxConsecutiveIdenticalFailures: remainingGuardrails.maxConsecutiveIdenticalFailures
@@ -1725,7 +1751,13 @@ export class SiteAuthoringWorkflow {
       summary: {
         hardGate: finalized.artifact.qa.hardGate,
         workspaceRevisionId: revision.id,
-        artifactId: finalized.artifact.id
+        artifactId: finalized.artifact.id,
+        firstSuccessfulBuildMs: managerResult.telemetry.firstSuccessfulBuildMs,
+        modelRequests: managerResult.telemetry.modelRequests,
+        noToolResponses: managerResult.telemetry.noToolResponses,
+        toolCalls: managerResult.telemetry.toolCalls,
+        compactedPathRereads: managerResult.telemetry.compactedPathRereads,
+        runtimeMetrics: runtime.metrics()
       }
     });
     return {
@@ -2432,12 +2464,7 @@ function principalLabel(session: SiteAgentSession) {
 export const siteAgentRecoveryStaleAfterMs = 45 * 60_000;
 
 export function configuredSandboxImageDigest(environment: NodeJS.ProcessEnv = process.env) {
-  const configured = environment.LODESTA_SANDBOX_IMAGE_DIGEST?.trim();
-  if (!configured) return sandboxImageDigest;
-  if (!/^sha256:[a-f0-9]{64}$/.test(configured)) {
-    throw new Error("LODESTA_SANDBOX_IMAGE_DIGEST must be a SHA-256 content digest.");
-  }
-  return configured as `sha256:${string}`;
+  return configuredSiteSandboxImageDigest(environment);
 }
 
 function asContentHash(value: string) {

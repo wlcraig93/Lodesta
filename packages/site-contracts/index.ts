@@ -465,6 +465,7 @@ export type SiteVersion = z.infer<typeof siteVersionSchema>;
 export const siteElementSelectionSchema = z.object({
   route: z.string().startsWith("/"),
   selector: z.string().min(1).max(500).optional(),
+  label: z.string().min(1).max(160).optional(),
   workspaceRevisionId: identifier.optional(),
   versionId: identifier.optional()
 }).strict();

@@ -25,7 +25,12 @@ assert.deepEqual(
     "202607230014_refresh_canonical_authority_functions.sql",
     "202607230015_refresh_verified_authoring_finalizer.sql",
     "202607230016_site_agent_runaway_guardrails.sql",
-    "202607230017_site_agent_run_admin_inventory.sql"
+    "202607230017_site_agent_run_admin_inventory.sql",
+    "202607230018_owner_account_overview.sql",
+    "202607230019_site_authoring_maintenance_claim_fence.sql",
+    "202607230020_website_setup_initial_model_experiment.sql",
+    "202607250001_model_bakeoff.sql",
+    "202607260001_source_unsuitable_website_setup_failure.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -42,10 +47,14 @@ const externalCodexAuthoring = await readFile(`${migrationDirectory}/${migration
 const websiteAnalytics = await readFile(`${migrationDirectory}/${migrations[10]}`, "utf8");
 const mediaOriginCleanCut = await readFile(`${migrationDirectory}/${migrations[11]}`, "utf8");
 const canonicalMediaPublication = await readFile(`${migrationDirectory}/${migrations[12]}`, "utf8");
+const sourceUnsuitableFailure = await readFile(`${migrationDirectory}/202607260001_source_unsuitable_website_setup_failure.sql`, "utf8");
 const canonicalAuthorityRefresh = await readFile(`${migrationDirectory}/${migrations[13]}`, "utf8");
 const verifiedAuthoringFinalizerRefresh = await readFile(`${migrationDirectory}/${migrations[14]}`, "utf8");
 const siteAgentRunawayGuardrails = await readFile(`${migrationDirectory}/${migrations[15]}`, "utf8");
 const siteAgentRunAdminInventory = await readFile(`${migrationDirectory}/${migrations[16]}`, "utf8");
+const maintenanceClaimFence = await readFile(`${migrationDirectory}/${migrations[18]}`, "utf8");
+const websiteSetupInitialModelExperiment = await readFile(`${migrationDirectory}/${migrations[19]}`, "utf8");
+const modelBakeoff = await readFile(`${migrationDirectory}/${migrations[20]}`, "utf8");
 assert(
   baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
     && !baseline.includes("rights_status")
@@ -90,6 +99,32 @@ assert(
     && siteAgentRunAdminInventory.includes("revoke all on table public.site_agent_run_admin_inventory from public, anon, authenticated")
     && siteAgentRunAdminInventory.includes("grant select on table public.site_agent_run_admin_inventory to service_role"),
   "The admin run inventory must be a service-role-only security-invoker view with safe numeric projections."
+);
+assert(
+  maintenanceClaimFence.includes("site-authoring-maintenance-claim-fence")
+    && maintenanceClaimFence.includes("task = 'site_authoring_maintenance'")
+    && maintenanceClaimFence.includes("e.status in ('claimed','authoring','finalizing')")
+    && !maintenanceClaimFence.includes("workspace-cutover"),
+  "The canonical maintenance lease must atomically fence new ordinary and external claims while allowing active executions to finish."
+);
+assert(
+  websiteSetupInitialModelExperiment.includes("initial_build_api_provider")
+    && websiteSetupInitialModelExperiment.includes("target_initial_build_api_provider")
+    && websiteSetupInitialModelExperiment.includes("initial_build_model_id")
+    && websiteSetupInitialModelExperiment.includes("target_initial_build_model_id")
+    && websiteSetupInitialModelExperiment.includes("invalid_initial_build_route")
+    && websiteSetupInitialModelExperiment.includes("initial_build_api_provider = 'openrouter'")
+    && websiteSetupInitialModelExperiment.includes("initial_build_model_id ~"),
+  "The temporary initial-build model experiment must retain and validate exact OpenRouter route provenance."
+);
+assert(
+  modelBakeoff.includes("create table public.model_bakeoff_experiments")
+    && modelBakeoff.includes("create table public.model_bakeoff_runs")
+    && modelBakeoff.includes("candidate_version_id text references public.site_versions(id) on delete restrict")
+    && modelBakeoff.includes("assessment_id text references public.website_assessments(id) on delete restrict")
+    && modelBakeoff.includes("enable row level security")
+    && modelBakeoff.includes("revoke all on table public.model_bakeoff_experiments from public, anon, authenticated"),
+  "The operator-only model bake-off must retain candidate provenance and use the server-only database boundary."
 );
 assert(
   websiteAnalytics.includes("drop table public.analytics_events")
@@ -187,6 +222,10 @@ assert(
   "Retired website crawl failures must be remapped to the canonical typed failure set."
 );
 assert(
+  sourceUnsuitableFailure.includes("'source_unsuitable'"),
+  "Closed or parked first-party sources do not have a canonical setup failure."
+);
+assert(
   assetRevisionScope.includes("asset_revisions_business_content_hash_idx")
     && assetRevisionScope.includes("business_id, content_hash"),
   "Asset revision content-hash uniqueness must remain scoped to its business."
@@ -250,7 +289,9 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
     ...requiredTables.filter((table) => table !== "prospect_report_jobs"),
     "website_assessments",
     "website_assessment_jobs",
-    "analytics_collection_daily"
+    "analytics_collection_daily",
+    "model_bakeoff_experiments",
+    "model_bakeoff_runs"
   ];
   for (const table of liveTables) {
     const { error } = await admin.from(table).select("*").limit(1);

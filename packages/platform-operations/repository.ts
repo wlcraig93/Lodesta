@@ -62,6 +62,7 @@ export interface PlatformOperationsRepository {
   updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate): Promise<WebsiteSetup | null>;
   cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
   retryWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
+  claimWebsiteSetup(setupId: string, workerId: string): Promise<WebsiteSetup | null>;
   claimNextWebsiteSetup(workerId: string): Promise<WebsiteSetup | null>;
   linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }): Promise<WebsiteSetup | null>;
   failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }): Promise<WebsiteSetup | null>;
@@ -204,6 +205,8 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
         sourceUrl: input.sourceUrl,
         normalizedSource: input.normalizedSource,
         reportingTimezone: input.reportingTimezone,
+        initialBuildApiProvider: input.initialBuildApiProvider,
+        initialBuildModelId: input.initialBuildModelId,
         sourceRevision: 1,
         status: "queued",
         attempts: 0,
@@ -271,6 +274,20 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
       setup.lockedAt = undefined;
       setup.lockedBy = undefined;
       setup.updatedAt = new Date().toISOString();
+      result = structuredClone(setup);
+    });
+    return result;
+  }
+  async claimWebsiteSetup(setupId: string, workerId: string) {
+    let result: WebsiteSetup | null = null;
+    await this.write((store) => {
+      const setup = store.websiteSetups.find((item) => item.id === setupId && item.status === "queued");
+      if (!setup) return;
+      setup.status = "processing";
+      setup.attempts += 1;
+      setup.lockedBy = workerId;
+      setup.lockedAt = new Date().toISOString();
+      setup.updatedAt = setup.lockedAt;
       result = structuredClone(setup);
     });
     return result;
@@ -598,7 +615,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 }
 
 type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null };
-type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
+type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; initial_build_api_provider: "openrouter" | null; initial_build_model_id: string | null; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
 type PreviewGrantRow = {
   id: string;
   site_id: string;
@@ -676,6 +693,8 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       target_source_url: input.sourceUrl,
       target_normalized_source: input.normalizedSource,
       target_reporting_timezone: input.reportingTimezone,
+      target_initial_build_api_provider: input.initialBuildApiProvider,
+      target_initial_build_model_id: input.initialBuildModelId,
       target_idempotency_key: input.idempotencyKey,
       target_creation_request_hash: input.creationRequestHash
     }).maybeSingle();
@@ -721,6 +740,30 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       throw new Error(`Retry website setup: ${result.error.message}`);
     }
     const row = result.data as WebsiteSetupRow | null;
+    return row ? websiteSetupFromRow(row) : null;
+  }
+  async claimWebsiteSetup(setupId: string, workerId: string) {
+    const setup = await this.getWebsiteSetup(setupId);
+    if (!setup || setup.status !== "queued") return null;
+    const lockedAt = new Date().toISOString();
+    const row = await maybe<WebsiteSetupRow>(
+      this.client
+        .from("website_setups")
+        .update({
+          status: "processing",
+          attempts: setup.attempts + 1,
+          locked_by: workerId,
+          locked_at: lockedAt,
+          updated_at: lockedAt
+        })
+        .eq("id", setup.id)
+        .eq("status", "queued")
+        .eq("source_revision", setup.sourceRevision)
+        .eq("attempts", setup.attempts)
+        .select("*")
+        .maybeSingle(),
+      "Claim website setup"
+    );
     return row ? websiteSetupFromRow(row) : null;
   }
   async claimNextWebsiteSetup(workerId: string) { const row = await maybe<WebsiteSetupRow>(this.client.rpc("claim_next_website_setup", { worker_id: workerId }).maybeSingle(), "Claim website setup"); return row ? websiteSetupFromRow(row) : null; }
@@ -871,7 +914,7 @@ export const platformOperationsRepository: PlatformOperationsRepository = proces
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", initialBuildApiProvider: row.initial_build_api_provider ?? undefined, initialBuildModelId: row.initial_build_model_id ?? undefined, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined }; }
 function previewGrantFromRow(row: PreviewGrantRow): SitePreviewGrant { return { id: row.id, siteId: row.site_id, siteVersionId: row.site_version_id, secretHash: row.secret_hash, keyVersion: row.key_version, secretVersion: row.secret_version, expiresAt: row.expires_at, revokedAt: row.revoked_at ?? undefined, createdAt: row.created_at }; }
 function domainFromRow(row: DomainRow): DomainRecord {

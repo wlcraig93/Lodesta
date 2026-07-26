@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { crawlWebsiteForGeneration, fetchGenerationPageWithBrowser, generationIngestionLimits } from "../packages/business-data/generation-crawler";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "../packages/business-data/crawl-errors";
 import {
+  assertSourceSuitableForGeneration,
+  hasContradictoryFirstPartyLocationHours,
+  isAffirmativeEmergencyServiceStatement,
+  isExplicitNamedServiceArea,
+  selectSourceLinksForGeneration
+} from "../packages/business-data/website-ingestion";
+import {
   generationCrawlerProductToken,
   generationCrawlerUserAgent,
   parseRobotsPolicy,
@@ -135,6 +142,81 @@ assert.deepEqual(
   ["Austin", "Round Rock", "Cedar Park"],
   "Explicit visible service-area copy was not retained as structured first-party evidence."
 );
+assert.equal(isExplicitNamedServiceArea("Austin"), true);
+assert.equal(isExplicitNamedServiceArea("Greater Austin and surrounding areas"), false, "A broad inferred region survived the named-place service-area gate.");
+assert.equal(isExplicitNamedServiceArea("within a 50 mile radius"), false, "A radius was treated as a named service area.");
+assert.equal(isAffirmativeEmergencyServiceStatement("Emergency plumbing is available 24/7."), true);
+assert.equal(isAffirmativeEmergencyServiceStatement("Emergency plumbing is not available."), false);
+assert.equal(isAffirmativeEmergencyServiceStatement("24-hour emergency line only."), false);
+
+const socialSite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
+  ["/", {
+    type: "text/html",
+    body: `<!doctype html><html><head><title>Social Repair</title></head><body><main>
+      <h1>Social Repair</h1><p>Collision repair in Austin.</p>
+      <a href="https://instagram.com/socialrepair">Instagram</a>
+      <a href="https://instagram.com/p/post-id">Latest post</a>
+      <a href="https://facebook.com/socialrepair/posts/123">Facebook post</a>
+    </main></body></html>`
+  }]
+]);
+const socialCrawl = await crawlWebsiteForGeneration({
+  url: "https://social.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(socialSite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+});
+assert.deepEqual(
+  selectSourceLinksForGeneration("https://social.example/", socialCrawl.crawl)
+    .filter((link) => link.kind === "social")
+    .map((link) => link.url),
+  ["https://instagram.com/socialrepair"],
+  "Individual social posts or multiple account links entered generated business state."
+);
+
+const closedSite = new Map<string, { status?: number; type: string; body: string }>([
+  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
+  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
+  ["/", {
+    type: "text/html",
+    body: "<!doctype html><html><head><title>Closed Repair</title></head><body><main><h1>Closed Repair</h1><p>We have permanently closed our doors.</p></main></body></html>"
+  }]
+]);
+const closedCrawl = await crawlWebsiteForGeneration({
+  url: "https://closed.example/",
+  validateUrl: async (value) => value,
+  fetchImpl: mockFetch(closedSite),
+  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
+});
+assert.throws(
+  () => assertSourceSuitableForGeneration(closedCrawl.crawl, closedCrawl.ingestion),
+  (error) => error instanceof WebsiteCrawlError && error.code === "source_unsuitable",
+  "A closed first-party source was allowed to proceed into authoring."
+);
+const contradictoryCrawl = structuredClone(serviceAreas.crawl);
+contradictoryCrawl.pageSummaries = [
+  {
+    ...structuredClone(serviceAreas.crawl.pageSummaries[0]!),
+    url: "https://areas.example/location",
+    extractedFacts: {
+      ...structuredClone(serviceAreas.crawl.pageSummaries[0]!.extractedFacts),
+      address: { street: "100 Main Street", city: "Austin", region: "TX", postalCode: "78701", country: "US" },
+      hours: { Monday: "8:00 AM-5:00 PM" }
+    }
+  },
+  {
+    ...structuredClone(serviceAreas.crawl.pageSummaries[0]!),
+    url: "https://areas.example/contact",
+    extractedFacts: {
+      ...structuredClone(serviceAreas.crawl.pageSummaries[0]!.extractedFacts),
+      address: { street: "100 Main Street", city: "Austin", region: "TX", postalCode: "78701", country: "US" },
+      hours: { Monday: "9:00 AM-4:00 PM" }
+    }
+  }
+];
+assert.equal(hasContradictoryFirstPartyLocationHours(contradictoryCrawl), true);
 
 for (const status of [408, 429, 500, 503]) {
   await expectCrawlFailure(crawlWebsiteForGeneration({

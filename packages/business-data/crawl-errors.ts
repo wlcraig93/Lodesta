@@ -1,5 +1,6 @@
 export type WebsiteCrawlFailureCode =
   | "source_invalid"
+  | "source_unsuitable"
   | "crawl_temporarily_unavailable"
   | "crawl_robots_disallowed"
   | "crawl_unsupported_content"

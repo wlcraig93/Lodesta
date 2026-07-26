@@ -1,38 +1,46 @@
 # Design Review: Continuous Website-Creation Thread
 
 Reviewed against: `DESIGN_BRIEF.md`
-Philosophy: Calm functional AI-operations workspace
-Date: 2026-07-24
+Philosophy: Dieter Rams functionalism within Lodesta’s calm AI-operations workspace
+Date: 2026-07-25
 
-## Screenshots Captured
+## Screenshots Reviewed
 
 | Screenshot | Breakpoint | Description |
 | --- | --- | --- |
-| `screenshots/review-setup-processing-desktop-1280.jpg` | Desktop (1280×800) | Focused setup workspace with compact product rail, conversation, progress, and neutral preview |
-| `screenshots/review-setup-processing-tablet-768.jpg` | Tablet (768×1024) | Full-screen Chat pane without duplicate account chrome |
-| `screenshots/review-setup-processing-mobile-375.jpg` | Mobile (375×812) | Focused setup thread, disabled composer, and mobile pane switch |
+| `screenshots/review-unified-build-desktop-1280.png` | Desktop (1280×720) | Dark editor shell with normalized website navigation, command-dock selection, and a static attention canvas |
+| `screenshots/review-unified-build-desktop-light-1280.png` | Desktop (1280×800) | Light-theme validation of the same blank-preview state |
+| `screenshots/review-unified-build-tablet-768.png` | Tablet (768×1024) | Preview pane with the focused workspace header and shared build canvas |
+| `screenshots/review-unified-build-mobile-preview-375.png` | Mobile (375×812) | Mobile Preview pane with the attention canvas |
+| `screenshots/review-unified-build-mobile-chat-375.png` | Mobile (375×812) | Mobile Chat pane with the command dock and disabled Select-on-page action |
 
 ## Summary
 
-The setup experience now reads as the beginning of the website editor rather than a separate waiting page. The shared layout, restrained progress treatment, honest preview placeholder, and unavailable composer all match Lodesta’s product language. Responsive QA found and resolved one focused-shell route mismatch caused by trailing slashes.
+The creation experience now reads as one editor whose website is changing state. Before a render exists, the right pane is an intentional build surface rather than an empty browser frame, and the normal page, device, More, and Publish controls are absent. The compact website rail uses one navigation hierarchy, with Website settings beside the other website destinations and the account control isolated at the bottom.
+
+The shared frame holds up cleanly at desktop, tablet, and mobile sizes. The 375px layout has no horizontal overflow, and the Chat/Preview, selection, voice, and send controls retain 44px touch targets.
+
+No active provisional setup record was available in the local review data, so the responsive captures use the canonical editor’s failed-without-preview state. The provisional route and shell were verified separately through the focused route, ownership, and product-UI checks.
 
 ## Must Fix
 
-None remaining.
+None.
 
 ## Should Fix
 
-None remaining.
+None.
 
 ## Could Improve
 
-1. Capture additional release-reference screenshots for failure, fast-preview, and candidate-ready states when deterministic visual fixtures are added. The UI contracts and automated projections cover these states today, but stable fixtures would make future pixel-level regression review easier.
+1. **Exercise the first real preview crossfade in a durable visual fixture.** The current local websites all stop before producing a preview, so the canvas-to-iframe transition and enabled Select-on-page state were verified through implementation and contract checks rather than a stable design-review capture.
+
+2. **Add a non-production visual fixture for provisional setup stages.** A deterministic queued, gathering, and attention fixture would make future responsive reviews possible without creating or mutating a real setup record.
 
 ## What Works Well
 
-- The first owner instruction is visually prominent without overpowering the progress state.
-- The expandable explanation keeps the default thread calm while preserving useful reassurance and source context.
-- The preview placeholder communicates location and intent without suggesting that a real draft already exists.
-- Desktop, tablet, and mobile reorganize around the same frame instead of diverging into separate interaction models.
-- Mobile top-bar controls measure at least 44×44px, text remains readable at 375px, and the page has no horizontal overflow.
-- Disabled authoring and publishing controls include accessible explanations, and reduced-motion coverage remains in the shared workspace CSS.
+- The right pane communicates queued, gathering, composing, building, paused, and attention states without invented percentages or raw crawl telemetry.
+- Source fragments, assembling page blocks, and the render sweep form one restrained visual language; reduced motion resolves to the complete static composition.
+- “Select on page” now sits beside Build/Ask, where its resulting context chip is consumed.
+- The selection handoff is coherent: desktop full-chat restores split view, while mobile moves Chat → Preview → Chat and returns focus to the composer.
+- Website settings uses the same outline weight as the rest of the rail and no longer competes with the account control.
+- Light and dark themes both preserve hierarchy and contrast, including the attention canvas and command dock.

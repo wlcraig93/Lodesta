@@ -129,7 +129,7 @@ function ownerRunProgress(run: SiteAgentRun): OwnerRunProgress {
       cost_telemetry_unavailable: "The selected model route stopped reporting reliable cost data, so Lodesta ended the build safely. Wait for Lodesta to repair the model route before retrying.",
       browser_verification_unavailable: "Lodesta created the edit but could not complete accessibility verification. You can try this request again; the current website was not changed.",
       deadline_exhausted: "The build reached its overall time limit and Lodesta saved the work. Try a narrower request, or ask Lodesta to resume the saved work if this repeats.",
-      platform_version_mismatch: "Lodesta is completing a platform update. Your website was not changed, and retrying will not help until the update is finished."
+      platform_version_mismatch: "Lodesta’s authoring platform changed while this work was paused. Your website was not changed. Wait for the update to finish, then start a new request instead of retrying this run."
     } as const)[run.failureCode as "authoring_stalled" | "cost_limit_exhausted" | "cost_telemetry_unavailable" | "browser_verification_unavailable" | "deadline_exhausted" | "platform_version_mismatch"];
     return {
       label: "Website needs attention",

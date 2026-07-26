@@ -13,6 +13,7 @@ import {
   type ExternalAuthoringExecution
 } from "./contracts";
 import { externalAuthoringRepository, type ExternalAuthoringRepository } from "./repository";
+import { assertExternalAuthoringBundleCurrent } from "./runtime-compatibility";
 
 export type ExternalAuthoringBatchInput = {
   name: string;
@@ -247,6 +248,14 @@ export async function submitExternalAuthoringClarification(input: {
   if (!execution || execution.status !== "needs_input") {
     throw new Error("This execution is not waiting for operator input.");
   }
+  if (!execution.bundleId) throw new Error("External authoring execution is unpinned.");
+  const bundle = await repository.getBundle(execution.bundleId);
+  if (!bundle) throw new Error("External authoring bundle was not found.");
+  await assertExternalAuthoringBundleCurrent({
+    execution,
+    bundle,
+    externalRepository: repository
+  });
   const run = await siteAuthoringWorkflow.resumeNeedsInput({
     runId: item.runId,
     sessionId: item.sessionId,

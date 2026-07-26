@@ -1,5 +1,4 @@
-import React from "react";
-import { BusinessName } from "../platform/sdk";
+import { BusinessName } from "#lodesta-sdk";
 
 export const siteDefinition = {
   routes: [{

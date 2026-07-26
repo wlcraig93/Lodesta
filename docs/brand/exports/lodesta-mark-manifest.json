@@ -18,6 +18,15 @@
     "letterStrokes": "stem 34, thins 26 (contrast 1.31:1)",
     "notes": "Valance depth, corner radius, and letter contrast are tuned so the silhouette and letter both survive a 16px favicon. Letter is optically centered between the solid-body center and the full-silhouette center, not centered in the body alone."
   },
+  "keyline": {
+    "purpose": "Brand green is 1.78:1 against the dark product canvas #151814, so without a keyline only the letter reads and the awning silhouette disappears. The keyline restores the silhouette on dark and is invisible on light, because warm white on a near-white surface has no edge.",
+    "technique": "stroke on the badge path with paint-order=\"stroke\", so the fill covers the inner half and the visible keyline is entirely outward. stroke-width is twice the visible width.",
+    "rule": "Size the keyline to land just under 1px at the size that asset actually renders — target roughly 0.75px. A full pixel reads as a sticker outline. This is why the two exports differ.",
+    "lodesta-mark.svg": "12 units visible (stroke-width 24). Renders at 30/32/34px in the owner, admin, and auth shells, giving 0.70-0.80px.",
+    "lodesta-mark-favicon.svg": "24 units visible (stroke-width 48). Renders at 16px as the favicon, giving 0.75px.",
+    "letterScale": "The favicon variant also carries the letter at 1.10x, scaled about its optical centre (256, 228) and flattened into the path coordinates rather than left as a transform. Cap height 220 vs 200, width 171.6 vs 156, still centred at x=256, clearances top 52 / bottom-to-valance 34 / sides 129.2. This is the third size-specific deviation in the favicon export, alongside the lighter keyline and the low-contrast letterform — all three exist because 16px is the binding constraint and nothing else renders that small.",
+    "cutout": "lodesta-mark-cutout.* intentionally has no keyline. It is a knockout treatment for placing on brand green, where an outward warm-white edge would fight the intent."
+  },
   "exports": [
     {
       "file": "../../../public/brand/lodesta-mark.svg",
@@ -32,9 +41,16 @@
       "letter": "warm white"
     },
     {
+      "file": "../../../public/brand/lodesta-mark-favicon.svg",
+      "format": "SVG",
+      "purpose": "Source for app/icon.png. Identical geometry to lodesta-mark.svg with a heavier 32-unit keyline for 16px rendering.",
+      "background": "transparent",
+      "letter": "warm white"
+    },
+    {
       "file": "../../../app/icon.png",
       "format": "PNG",
-      "purpose": "Next.js application favicon",
+      "purpose": "Next.js application favicon, rasterized from lodesta-mark-favicon.svg (not lodesta-mark.svg)",
       "background": "transparent",
       "letter": "warm white"
     },

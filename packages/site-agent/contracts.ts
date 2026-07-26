@@ -2,7 +2,7 @@ import { z } from "zod";
 import { type SiteAgentApiProvider, type SiteElementSelection, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { validateWorkspaceSourcePolicy } from "./source-policy";
 import type { ManagerTaskKind } from "./skills";
-import type { AuthoringContextPacket } from "./authoring-context";
+import type { SiteAuthoringBrief } from "./briefs";
 import { imageCreationActions, imageCreationPurposes, imageCreationSizes } from "./image-creation";
 
 export const workspaceSourceFileSchema = z.object({
@@ -26,10 +26,11 @@ export function assertCompleteWorkspace(files: WorkspaceSourceFile[]) {
 
 export type ManagerRunRequest = {
   buildInput: SitePublicBuildInput;
-  authoringContext: AuthoringContextPacket;
+  authoringBrief: SiteAuthoringBrief;
   runId?: string;
   instruction: string;
   kind: ManagerTaskKind;
+  route?: { apiProvider: SiteAgentApiProvider; modelId: string };
   selection?: SiteElementSelection;
   guardrails?: Partial<ManagerRunGuardrails>;
   signal?: AbortSignal;

@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { RemoveWebsiteButton } from "@/components/RemoveWebsiteButton";
 import { ProductStatusBadge } from "@/components/ProductUI";
 import type { OwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
+import { siteCreationModelLabel } from "@/lib/site-creation-models";
 
 export function AccountWebsiteCard({
   name,
@@ -13,6 +14,7 @@ export function AccountWebsiteCard({
   href,
   thumbnailUrl,
   lifecycle,
+  initialBuildModelId,
   targetId,
   targetKind,
   removable
@@ -23,6 +25,7 @@ export function AccountWebsiteCard({
   href: string;
   thumbnailUrl?: string;
   lifecycle: OwnerSiteLifecycle;
+  initialBuildModelId?: string;
   targetId?: string;
   targetKind: "site" | "setup";
   removable: boolean;
@@ -93,6 +96,11 @@ export function AccountWebsiteCard({
           <div>
             {hostname ? <span className="account-website-card-domain">{hostname}</span> : null}
             <h2>{name}</h2>
+            {initialBuildModelId ? (
+              <span className="account-website-model-chip" title={`Initial build model: ${initialBuildModelId}`}>
+                Initial build · {siteCreationModelLabel(initialBuildModelId)}
+              </span>
+            ) : null}
           </div>
           <ProductStatusBadge tone={lifecycle.tone}>{lifecycle.label}</ProductStatusBadge>
         </div>

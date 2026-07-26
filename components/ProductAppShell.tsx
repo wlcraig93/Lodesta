@@ -11,7 +11,10 @@ import type { OwnerWorkspaceSiteOption } from "@/lib/owner-workspace";
 
 type ProductAppShellProps = {
   children: ReactNode;
-  site?: OwnerWorkspaceSiteOption;
+  context:
+    | { kind: "account" }
+    | { kind: "setup"; setupId: string; name: string; statusLabel: string }
+    | { kind: "site"; site: OwnerWorkspaceSiteOption };
   sites: OwnerWorkspaceSiteOption[];
   accessMode: OwnerWorkspaceAccessMode;
   canAccessAdmin: boolean;
@@ -25,14 +28,15 @@ const websiteNavigation = [
   { key: "editor", label: "Editor", suffix: "/editor", icon: WebsiteIcon },
   { key: "leads", label: "Leads", suffix: "/leads", icon: InboxIcon },
   { key: "analytics", label: "Analytics", suffix: "/analytics", icon: ResultsIcon },
-  { key: "business-details", label: "Business details", suffix: "/business-details", icon: BusinessIcon }
+  { key: "business-details", label: "Business details", suffix: "/business-details", icon: BusinessIcon },
+  { key: "settings", label: "Website settings", suffix: "/settings", icon: SlidersIcon }
 ] as const;
 
 const SHELL_STORAGE_KEY = "lodesta:product-app-shell";
 
 export function ProductAppShell({
   children,
-  site,
+  context,
   sites,
   accessMode,
   canAccessAdmin,
@@ -41,6 +45,8 @@ export function ProductAppShell({
   authConfigured
 }: ProductAppShellProps) {
   const pathname = usePathname();
+  const site = context.kind === "site" ? context.site : undefined;
+  const setup = context.kind === "setup" ? context : undefined;
   const [collapsed, setCollapsed] = useState(false);
   const [ready, setReady] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -48,8 +54,7 @@ export function ProductAppShell({
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const base = site ? `/workspace/${site.slug}` : "/account";
   const editorHref = site ? `${base}/editor` : undefined;
-  const focusedSetup = /^\/account\/onboarding\/[^/]+\/?$/.test(pathname);
-  const focusedEditor = focusedSetup || Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
+  const focusedEditor = context.kind === "setup" || Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
   const compactNavigation = focusedEditor || (ready && collapsed);
   const adminPreview = accessMode === "platform_admin_preview";
   const contextLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : undefined;
@@ -110,8 +115,9 @@ export function ProductAppShell({
       className="owner-workspace-shell product-app-shell"
       data-collapsed={compactNavigation ? "true" : undefined}
       data-shell-mode={focusedEditor ? "focused-editor" : undefined}
+      data-workspace-kind={context.kind}
       data-ready={ready ? "true" : undefined}
-      data-has-site={site ? "true" : "false"}
+      data-has-site={context.kind === "account" ? "false" : "true"}
     >
       <a className="owner-workspace-skip" href="#product-app-main">Skip to content</a>
       <aside className="owner-workspace-sidebar">
@@ -138,9 +144,9 @@ export function ProductAppShell({
           ) : null}
         </div>
 
-        {site
-          ? <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} />
-          : <AccountNavigation compact={compactNavigation} pathname={pathname} />}
+        {site ? <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} /> : null}
+        {setup ? <ProvisionalWebsiteIdentity name={setup.name} statusLabel={setup.statusLabel} compact={compactNavigation} /> : null}
+        {context.kind === "account" ? <AccountNavigation compact={compactNavigation} pathname={pathname} /> : null}
 
         {site ? (
           <nav className="owner-workspace-nav" aria-label="Website workspace">
@@ -163,28 +169,24 @@ export function ProductAppShell({
             })}
           </nav>
         ) : null}
+        {setup ? (
+          <nav className="owner-workspace-nav" aria-label="Website setup workspace">
+            <span className="owner-workspace-nav-current" aria-current="page" aria-label={compactNavigation ? "Editor" : undefined} data-sidebar-tooltip={compactNavigation ? "Editor" : undefined}>
+              <WebsiteIcon />
+              <span>Editor</span>
+            </span>
+          </nav>
+        ) : null}
 
         <div className="owner-workspace-sidebar-bottom">
-          {site ? (
-            <Link
-              className="owner-workspace-settings-link"
-              href={`${base}/settings`}
-              aria-current={pathname.startsWith(`${base}/settings`) ? "page" : undefined}
-              aria-label={compactNavigation ? "Website settings" : undefined}
-              data-sidebar-tooltip={compactNavigation ? "Website settings" : undefined}
-            >
-              <SettingsIcon />
-              <span>Website settings</span>
-            </Link>
-          ) : null}
           <AccountMenu displayName={accountIdentity.displayName} email={accountIdentity.email} contextLabel={contextLabel} actions={accountActions} compact={compactNavigation} />
         </div>
       </aside>
 
       <header className="owner-workspace-mobile-header">
         <Link className="owner-workspace-mobile-brand" href="/account" aria-label="Lodesta account"><img src="/brand/lodesta-mark.svg" alt="" /></Link>
-        <WebsiteSwitcher site={site} sites={sites} compact={false} adminPreview={adminPreview} />
-        {site ? site.published ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">Draft</span> : <span className="owner-workspace-draft-label">Account</span>}
+        {setup ? <ProvisionalWebsiteIdentity name={setup.name} statusLabel={setup.statusLabel} compact={false} /> : <WebsiteSwitcher site={site} sites={sites} compact={false} adminPreview={adminPreview} />}
+        {site ? site.published ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">Draft</span> : <span className="owner-workspace-draft-label">{setup ? "Creating" : "Account"}</span>}
       </header>
 
       <div className="owner-workspace-content" id="product-app-main">{children}</div>
@@ -199,22 +201,22 @@ export function ProductAppShell({
           })}
           <MoreButton buttonRef={moreTriggerRef} open={moreOpen} active={pathname.startsWith(`${base}/business-details`) || pathname.startsWith(`${base}/settings`)} onClick={() => setMoreOpen((value) => !value)} />
         </nav>
-      ) : (
+      ) : context.kind === "account" ? (
         <nav className="owner-workspace-mobile-nav product-account-mobile-nav" aria-label="Account">
           <Link href="/account" aria-current={pathname === "/account" ? "page" : undefined}><AllWebsitesIcon /><span>Websites</span></Link>
           <Link href="/account/onboarding" aria-current={pathname.startsWith("/account/onboarding") ? "page" : undefined}><AddIcon /><span>Add website</span></Link>
-          <Link href="/account/settings" aria-current={pathname === "/account/settings" ? "page" : undefined}><AccountIcon /><span>Account</span></Link>
+          <Link href="/account/settings" aria-current={pathname === "/account/settings" ? "page" : undefined}><SettingsIcon /><span>Settings</span></Link>
           <MoreButton buttonRef={moreTriggerRef} open={moreOpen} active={false} onClick={() => setMoreOpen((value) => !value)} />
         </nav>
-      )}
+      ) : null}
 
       {moreOpen ? (
         <div className="owner-workspace-mobile-sheet" role="dialog" aria-modal="true" aria-label="More product options">
           <button className="owner-workspace-sheet-backdrop" type="button" aria-label="Close menu" onClick={closeMore} />
           <div ref={moreSheetRef}>
-            <header><strong>{site?.name ?? "Your Lodesta account"}</strong><button type="button" onClick={closeMore} aria-label="Close menu">×</button></header>
+            <header><strong>{site?.name ?? setup?.name ?? "Your Lodesta account"}</strong><button type="button" onClick={closeMore} aria-label="Close menu">×</button></header>
             {site ? <Link href={`${base}/business-details`} onClick={() => setMoreOpen(false)}><BusinessIcon /><span>Business details</span></Link> : null}
-            {site ? <Link href={`${base}/settings`} onClick={() => setMoreOpen(false)}><SettingsIcon /><span>Website settings</span></Link> : null}
+            {site ? <Link href={`${base}/settings`} onClick={() => setMoreOpen(false)}><SlidersIcon /><span>Website settings</span></Link> : null}
             <Link href="/account" onClick={() => setMoreOpen(false)}><AllWebsitesIcon /><span>All websites</span></Link>
             <Link href="/account/onboarding" onClick={() => setMoreOpen(false)}><AddIcon /><span>Add website</span></Link>
             {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} onClick={() => setMoreOpen(false)}><WebsiteIcon /><span>{option.name}</span></Link>)}
@@ -226,6 +228,15 @@ export function ProductAppShell({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ProvisionalWebsiteIdentity({ name, statusLabel, compact }: { name: string; statusLabel: string; compact: boolean }) {
+  return (
+    <div className="owner-workspace-site-identity product-setup-identity" aria-label={compact ? `${name}. ${statusLabel}` : undefined} data-sidebar-tooltip={compact ? `${name} · ${statusLabel}` : undefined}>
+      <span className="owner-workspace-site-avatar" aria-hidden="true">{initials(name)}</span>
+      <span className="owner-workspace-site-copy"><strong>{name}</strong><small>{statusLabel}</small></span>
     </div>
   );
 }
@@ -289,7 +300,7 @@ function AccountNavigation({ compact, pathname }: { compact: boolean; pathname: 
   const items = [
     { href: "/account", label: "Websites", icon: AllWebsitesIcon, active: pathname === "/account" },
     { href: "/account/onboarding", label: "Add website", icon: AddIcon, active: pathname.startsWith("/account/onboarding") },
-    { href: "/account/settings", label: "Account settings", icon: AccountIcon, active: pathname === "/account/settings" }
+    { href: "/account/settings", label: "Settings", icon: SettingsIcon, active: pathname === "/account/settings" }
   ];
   return (
     <nav className="owner-workspace-nav product-account-navigation" aria-label="Account">
@@ -335,10 +346,10 @@ function WebsiteIcon() { return <Icon><rect x="3" y="4" width="18" height="16" r
 function InboxIcon() { return <Icon><path d="M4 5h16v14H4zM4 14h5l2 2h2l2-2h5" /></Icon>; }
 function ResultsIcon() { return <Icon><path d="M5 19V9m7 10V5m7 14v-7" /></Icon>; }
 function BusinessIcon() { return <Icon><path d="M4 20V7l8-3 8 3v13M8 10h2m4 0h2M8 14h2m4 0h2M10 20v-3h4v3" /></Icon>; }
-function SettingsIcon() { return <Icon><circle cx="12" cy="12" r="3" /><path d="M19 14.5l1.4 1.1-2 3.4-1.8-.7a7 7 0 0 1-2.1 1.2l-.3 1.9h-4l-.3-1.9a7 7 0 0 1-2.1-1.2L6 19l-2-3.4 1.4-1.1a7 7 0 0 1 0-2.5L4 10.9 6 7.5l1.8.7A7 7 0 0 1 9.9 7l.3-1.9h4l.3 1.9a7 7 0 0 1 2.1 1.2l1.8-.7 2 3.4-1.4 1.1a7 7 0 0 1 0 2.5Z" /></Icon>; }
+function SlidersIcon() { return <Icon><path d="M4 7h10m4 0h2M4 12h3m4 0h9M4 17h8m4 0h4" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="14" cy="17" r="2" /></Icon>; }
 function MoreIcon() { return <Icon><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Icon>; }
 function ChevronIcon() { return <Icon><path d="m8 10 4 4 4-4" /></Icon>; }
 function CollapseIcon({ collapsed }: IconProps) { return <Icon><path d="M4 5h16v14H4zM9 5v14" />{collapsed ? <path d="m13 9 3 3-3 3" /> : <path d="m16 9-3 3 3 3" />}</Icon>; }
 function AllWebsitesIcon() { return <Icon><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></Icon>; }
 function AddIcon() { return <Icon><path d="M12 5v14M5 12h14" /></Icon>; }
-function AccountIcon() { return <Icon><circle cx="12" cy="8" r="4" /><path d="M5 21a7 7 0 0 1 14 0" /></Icon>; }
+function SettingsIcon() { return <Icon><circle cx="12" cy="12" r="3" /><path d="M19 14.5l1.4 1.1-2 3.4-1.8-.7a7 7 0 0 1-2.1 1.2l-.3 1.9h-4l-.3-1.9a7 7 0 0 1-2.1-1.2L6 19l-2-3.4 1.4-1.1a7 7 0 0 1 0-2.5L4 10.9 6 7.5l1.8.7A7 7 0 0 1 9.9 7l.3-1.9h4l.3 1.9a7 7 0 0 1 2.1 1.2l1.8-.7 2 3.4-1.4 1.1a7 7 0 0 1 0 2.5Z" /></Icon>; }

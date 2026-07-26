@@ -544,17 +544,21 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
   async enqueueAgentRun(run: SiteAgentRun) {
     const value = siteAgentRunSchema.parse(run);
-    if (value.executionDriver === "responses_api") {
-      const state = await this.read();
+    return this.write((state) => {
+      if (state.maintenanceLeases.site_authoring_maintenance?.leaseUntil > new Date().toISOString()) {
+        throw new Error("site_authoring_maintenance_active");
+      }
+      if (value.executionDriver === "responses_api") {
       const active = Object.values(state.runs).filter((candidate) =>
         candidate.executionDriver === "responses_api"
         && candidate.requestedBy === value.requestedBy
         && ["queued", "running"].includes(candidate.status)
       ).length;
       if (active >= 3) throw new Error("concurrent_project_limit");
-    }
-    await this.saveAgentRun(value);
-    return value;
+      }
+      state.runs[value.id] = value;
+      return value;
+    });
   }
   saveAgentRun(run: SiteAgentRun) { return this.write((store) => { store.runs[run.id] = siteAgentRunSchema.parse(run); }); }
   async claimAgentRun(runId: string) {
@@ -1139,6 +1143,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const result = await this.client.rpc("enqueue_site_agent_run", { run_document: value });
     if (result.error) {
       if (/concurrent_project_limit/i.test(result.error.message)) throw new Error("concurrent_project_limit");
+      if (/site_authoring_maintenance_active/i.test(result.error.message)) throw new Error("site_authoring_maintenance_active");
       throw new Error(`Enqueue site agent run: ${result.error.message}`);
     }
     if (!result.data) throw new Error("Enqueue site agent run: no data returned");

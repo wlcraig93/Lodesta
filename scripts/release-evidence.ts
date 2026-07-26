@@ -50,12 +50,11 @@ export function currentCloudflareDeployment(value: unknown) {
 
 export function deployedCloudflareRelease(output: string) {
   const versionIds = [...output.matchAll(/Current Version ID:\s*([a-f0-9-]{36})/gi)];
-  const digests = [
-    ...output.matchAll(/\bdigest:\s*(sha256:[a-f0-9]{64})\b/gi),
-    ...output.matchAll(/@(?<digest>sha256:[a-f0-9]{64})\b/gi)
-  ];
   const versionId = versionIds.at(-1)?.[1];
-  const imageDigest = digests.at(-1)?.groups?.digest ?? digests.at(-1)?.[1];
+  const pushed = [...output.matchAll(/\bdigest:\s*(sha256:[a-f0-9]{64})\b/gi)].at(-1)?.[1];
+  const built = [...output.matchAll(/exporting manifest\s+(sha256:[a-f0-9]{64})\b/gi)].at(-1)?.[1];
+  const configured = [...output.matchAll(/registry\.cloudflare\.com\/[^\s"]+@(sha256:[a-f0-9]{64})\b/gi)].at(-1)?.[1];
+  const imageDigest = pushed ?? built ?? configured;
   if (!versionId || !imageDigest) {
     throw new Error("Wrangler output did not contain both a Worker version ID and a container image digest.");
   }

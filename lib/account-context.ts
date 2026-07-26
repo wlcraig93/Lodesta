@@ -19,6 +19,7 @@ export type AccountRelationship = {
   siteId?: string;
   setupId?: string;
   setupView?: WebsiteSetupView;
+  initialBuildModelId?: string;
 };
 
 export async function getAccountContext() {
@@ -37,6 +38,7 @@ export async function getAccountContext() {
   const optionsById = new Map(inventory.options.map((site) => [site.id, site]));
   const statesByBusinessId = new Map(inventory.businessStates.map((state) => [state.businessId, state]));
   const overviewBySiteId = new Map(overview.map((item) => [item.siteId, item]));
+  const setupBySiteId = new Map(setups.flatMap((setup) => setup.siteId ? [[setup.siteId, setup] as const] : []));
 
   const setupRelationships = await Promise.all(currentSetups.map(async (setup): Promise<AccountRelationship> => {
     const view = await getWebsiteSetupView(setup);
@@ -52,7 +54,8 @@ export async function getAccountContext() {
       recentLabel: formatRecent(setup.updatedAt, view.phase === "needs_attention" ? "Updated" : "Started"),
       lifecycle: setupLifecycle(view, `/account/onboarding/${setup.id}`),
       nextHref: `/account/onboarding/${setup.id}`,
-      setupView: view
+      setupView: view,
+      initialBuildModelId: setup.initialBuildModelId
     };
   }));
 
@@ -63,6 +66,9 @@ export async function getAccountContext() {
     const siteOverview = overviewBySiteId.get(site.id);
     if (!siteOverview) throw new Error(`Owner account overview is missing site ${site.id}.`);
     const { versions, runs } = siteOverview;
+    const originatingSetup = setupBySiteId.get(site.id);
+    const initialRun = runs.find((run) => run.kind === "initial_build")
+      ?? (originatingSetup?.runId ? await sitePlatformRepository.getAgentRun(originatingSetup.runId) : undefined);
     const state = statesByBusinessId.get(site.businessId);
     const candidate = versions.find((version) => version.status === "candidate");
     const attention = {
@@ -95,7 +101,8 @@ export async function getAccountContext() {
       recentLabel: formatRecent(recentAt, recentPrefix),
       thumbnailUrl: `/api/sites/${encodeURIComponent(site.id)}/thumbnail`,
       lifecycle,
-      nextHref: `/workspace/${site.slug}`
+      nextHref: `/workspace/${site.slug}`,
+      initialBuildModelId: initialRun?.modelId ?? originatingSetup?.initialBuildModelId
     };
   }));
 

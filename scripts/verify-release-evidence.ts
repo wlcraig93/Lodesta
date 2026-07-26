@@ -31,6 +31,16 @@ Current Version ID: 5f703837-b773-40ef-9048-872ddc517609
   imageDigest: `sha256:${"a".repeat(64)}`
 });
 
+assert.deepEqual(deployedCloudflareRelease(`
+FROM docker.io/cloudflare/sandbox:0.12.3@sha256:${"b".repeat(64)}
+exporting manifest sha256:${"c".repeat(64)} done
+Image already exists remotely, skipping push
+Current Version ID: 5f703837-b773-40ef-9048-872ddc517609
+`), {
+  versionId: "5f703837-b773-40ef-9048-872ddc517609",
+  imageDigest: `sha256:${"c".repeat(64)}`
+});
+
 assert.deepEqual(currentCloudflareContainer([{
   id: "container-app",
   name: "lodesta-site-sandbox-v1-sandbox",

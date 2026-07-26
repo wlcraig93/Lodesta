@@ -1,6 +1,10 @@
 import { sitePublicBuildInputSchema, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifact } from "@/packages/site-verification";
 import { assertWorkspaceSourcePolicy } from "@/packages/site-agent/source-policy";
+import {
+  assertConfiguredSiteSandboxRuntimeReady,
+  configuredSiteSandboxRuntime
+} from "./runtime-config";
 
 export type WorkspaceSourceFile = { path: string; content: string };
 
@@ -35,7 +39,8 @@ export function isConfirmedSandboxAbsent(error: unknown) {
 export class SiteSandboxClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly token: string
+    private readonly token: string,
+    private readonly beforeRequest?: () => Promise<unknown>
   ) {
     if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://127.0.0.1")) {
       throw new Error("Sandbox bridge must use HTTPS outside local development.");
@@ -120,6 +125,7 @@ export class SiteSandboxClient {
 
   private async call<T>(sessionId: string, action: string, method: "GET" | "POST", body?: unknown): Promise<T> {
     if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
+    await this.beforeRequest?.();
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${sessionId}/${action}`, {
       method,
       headers: {
@@ -143,8 +149,6 @@ export class SiteSandboxClient {
 }
 
 export function configuredSiteSandboxClient() {
-  const url = process.env.LODESTA_SANDBOX_URL;
-  const token = process.env.LODESTA_SANDBOX_TOKEN;
-  if (!url || !token) throw new Error("Cloudflare Sandbox requires LODESTA_SANDBOX_URL and LODESTA_SANDBOX_TOKEN.");
-  return new SiteSandboxClient(url, token);
+  const { url, token } = configuredSiteSandboxRuntime();
+  return new SiteSandboxClient(url, token, assertConfiguredSiteSandboxRuntimeReady);
 }

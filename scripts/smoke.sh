@@ -103,8 +103,16 @@ expect_status "health" "200"
 expect_json "health" 'const x=JSON.parse(process.env.BODY); if (x.status!=="ok") process.exit(1)'
 
 request GET "/api/health?deep=1"
-expect_status "deep health" "200"
-expect_json "deep health" 'const x=JSON.parse(process.env.BODY); if (!["ok","warning"].includes(x.status)||!x.checks?.some(c=>c.id==="repository_readiness")) process.exit(1)'
+if [[ "$STATUS" == "200" ]]; then
+  expect_json "deep health" 'const x=JSON.parse(process.env.BODY); if (!["ok","warning"].includes(x.status)||!x.checks?.some(c=>c.id==="repository_readiness")) process.exit(1)'
+elif [[ "$STATUS" == "503" ]]; then
+  expect_json "sandbox-disabled deep health" 'const x=JSON.parse(process.env.BODY); const errors=x.checks?.filter(c=>c.state==="error")??[]; if (x.status!=="error"||!x.checks?.some(c=>c.id==="repository_readiness")||!errors.length||errors.some(c=>!["sandbox","sandbox_readiness"].includes(c.id))) process.exit(1)'
+else
+  echo "Smoke check failed: deep health returned $STATUS, expected 200 or sandbox-only 503" >&2
+  echo "$BODY" >&2
+  exit 1
+fi
+echo "ok - deep health"
 
 request GET "/account"
 expect_status "account entry" "200"

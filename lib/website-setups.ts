@@ -1,6 +1,7 @@
+import { cache } from "react";
 import { validatePublicFetchUrl } from "@/lib/url-safety";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import type { WebsiteSetup, WebsiteSetupFailureCode } from "@/packages/platform-operations";
+import { platformOperationsRepository, type WebsiteSetup, type WebsiteSetupFailureCode } from "@/packages/platform-operations";
 import { normalizeBootstrapSourceUrl } from "@/packages/site-platform/source-url";
 
 export type WebsiteSetupView = {
@@ -13,6 +14,8 @@ export type WebsiteSetupView = {
   message?: string;
   openPath?: string;
 };
+
+export const getWebsiteSetupRecord = cache((setupId: string) => platformOperationsRepository.getWebsiteSetup(setupId));
 
 export async function validateWebsiteSetupSource(value: string) {
   const validated = await validatePublicFetchUrl(value, { resolveDns: true });
@@ -37,6 +40,7 @@ export function isRetriableWebsiteSetupFailure(setup: WebsiteSetup) {
 
 export function websiteSetupOwnerMessage(code?: WebsiteSetupFailureCode) {
   if (code === "source_invalid") return "This address is no longer a valid public website. Use a different URL.";
+  if (code === "source_unsuitable") return "This source indicates the business or website is no longer suitable for website creation. Use a different source or update the business information.";
   if (code === "crawl_temporarily_unavailable") return "We couldn’t read this website right now. Try again.";
   if (code === "crawl_robots_disallowed") return "This website doesn’t allow automated reading. Try a different website.";
   if (code === "crawl_unsupported_content" || code === "crawl_primary_unavailable") {

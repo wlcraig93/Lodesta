@@ -9,6 +9,7 @@ export default async function OwnerLayout({ children }: { children: ReactNode })
   const inventory = await getOwnerSiteInventory();
   return (
     <ProductAppShell
+      context={{ kind: "account" }}
       sites={inventory.options}
       accessMode={inventory.localOpenMode ? "local_open" : "owner"}
       canAccessAdmin={inventory.canAccessAdmin}

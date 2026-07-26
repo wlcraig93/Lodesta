@@ -19,7 +19,7 @@ export function orderedLocationHours(value: Record<string, string> | undefined) 
 export function summarizedLocationHours(value: Record<string, string> | undefined) {
   const ordered = orderedLocationHours(value);
   if (!ordered.length) return "";
-  if (ordered.every((item) => isOpen24Hours(item.value))) return "Open 24 hours daily";
+  if (ordered.every((item) => isContinuousAvailabilityValue(item.value))) return "Open 24 hours daily";
   const groups: Array<{ first: string; last: string; value: string; endOrder: number }> = [];
   for (const item of ordered) {
     const prior = groups.at(-1);
@@ -60,6 +60,12 @@ export function formatPhoneForDisplay(value: string) {
   return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
 }
 
-function isOpen24Hours(value: string) {
-  return /\b(?:open )?24 hours?\b/i.test(value);
+export function isContinuousAvailabilityValue(value: string) {
+  const normalized = value.normalize("NFKC").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  if (!normalized
+    || /\b(?:not|isn['’]?t|aren['’]?t|except|excluding|closed)\b/i.test(normalized)
+    || /\b(?:emergency|phone|line|support|service|on[ -]?call|appointment|dispatch)\b/i.test(normalized)) {
+    return false;
+  }
+  return /^(?:open\s+)?(?:24\s*hours?(?:\s+(?:a\s+day|daily))?|24\s*\/\s*7)$/i.test(normalized);
 }

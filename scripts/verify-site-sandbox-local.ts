@@ -31,16 +31,17 @@ input.assetRevisionIds.push("asset_revision_hero");
 const files = [
   {
     path: "src/site.tsx",
-    content: `import React from "react";
-import { Asset, BusinessAddress, BusinessHours, BusinessName, Fact, ManagedForm } from "../platform/sdk";
+    content: `import { Asset, BusinessAddress, BusinessHours, BusinessName, Fact, ManagedForm } from "#lodesta-sdk";
 import { LocalIntro } from "./components/LocalIntro";
+import { LegacyBadge } from "./legacy";
 export const siteDefinition = {
   routes: [{ path: "/",
-    element: <main><LocalIntro /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><Asset id="asset_hero" loading="eager" fetchPriority="high" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
+    element: <main><LocalIntro /><LegacyBadge /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><Asset id="asset_hero" loading="eager" fetchPriority="high" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
 };`
   },
   { path: "src/styles.css", content: "html{scroll-behavior:smooth}body{margin:0;font:16px Arial,sans-serif}" },
-  { path: "src/components/LocalIntro.tsx", content: `import React from "react"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered.</p>; }` },
+  { path: "src/components/LocalIntro.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered for <BusinessName />.</p>; }` },
+  { path: "src/legacy.tsx", content: `import { BusinessName } from "../platform/sdk"; export function LegacyBadge(){ return <small>Legacy boundary: <BusinessName /></small>; }` },
   { path: "src/components/local-intro.css", content: ".intro{font-weight:700;letter-spacing:.01em}" }
 ];
 
@@ -48,6 +49,7 @@ try {
   await Promise.all([
     cp(join(scaffold, "platform"), join(workspace, "platform"), { recursive: true }),
     cp(join(scaffold, "package.json"), join(workspace, "package.json")),
+    cp(join(scaffold, "tsconfig.json"), join(workspace, "tsconfig.json")),
     cp(join(scaffold, "vite.config.ts"), join(workspace, "vite.config.ts")),
     cp(join(scaffold, "component-manifest.ts"), join(workspace, "component-manifest.ts")),
     cp(join(scaffold, "lodesta-manifest.json"), join(workspace, "lodesta-manifest.json"))
@@ -83,7 +85,8 @@ try {
   assert(artifact.sharedCss?.includes(".intro{font-weight:700"), "nested CSS module was not included in the artifact");
   assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
-  assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered."), "local TSX module was not rendered");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered for"), "local TSX module was not rendered");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("Legacy boundary:"), "legacy relative SDK import was not rendered");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("(512) 555-0142"), "compiler did not render the canonical formatted phone");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday–Friday: 8:00 AM-5:30 PM"), "compiler did not render a compact source-bound hours summary");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("<dt>Monday</dt><dd>8:00 AM-5:30 PM</dd>"), "compiler did not render structured weekly hours");
@@ -101,7 +104,7 @@ try {
     "Monday: Open; Wednesday: Open",
     "Compact hours formatting combined non-contiguous days into a false range."
   );
-  process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, localImports: "pass", nestedCss: "pass" })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, sdkAlias: "pass", automaticJsx: "pass", legacySdkImport: "pass", localImports: "pass", nestedCss: "pass" })}\n`);
 } finally {
   await rm(workspace, { recursive: true, force: true });
 }

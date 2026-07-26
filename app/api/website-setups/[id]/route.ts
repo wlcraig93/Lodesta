@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
+import { processWebsiteSetupAndRun } from "@/lib/website-setup-jobs";
 import { getWebsiteSetupView, validateWebsiteSetupSource } from "@/lib/website-setups";
 import { ConcurrentProjectLimitError, platformOperationsRepository } from "@/packages/platform-operations";
 import { requireOwnedWebsiteSetup } from "../auth";
@@ -32,6 +33,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const setup = await platformOperationsRepository.updateWebsiteSetupSource({ setupId: id, ownerUserId: access.user.id, sourceUrl: source.url, normalizedSource: source.normalizedSource });
     if (!setup) return applyRateLimitHeaders(NextResponse.json({ error: "Website setup could not be changed." }, { status: 409 }), limit);
+    after(async () => { await processWebsiteSetupAndRun(setup.id, `website_setup_request_${setup.id}`); });
     return applyRateLimitHeaders(NextResponse.json({ view: await getWebsiteSetupView(setup) }, { status: 202 }), limit);
   } catch (error) {
     if (error instanceof ConcurrentProjectLimitError) {

@@ -3,9 +3,10 @@
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WebsiteSetupView } from "@/lib/website-setups";
-import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
+import { websiteSetupHostname, websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
+import { WebsiteBuildCanvas } from "@/components/WebsiteBuildCanvas";
 import { WebsiteSetupAction, WebsiteSetupSourceForm } from "@/components/WebsiteSetupControls";
-import { WebsiteWorkspaceFrame } from "@/components/WebsiteWorkspaceFrame";
+import { WebsiteWorkspaceFrame, type MobilePane } from "@/components/WebsiteWorkspaceFrame";
 
 const activePollMs = 2_000;
 const hiddenPollMs = 8_000;
@@ -14,10 +15,10 @@ export function WebsiteSetupWorkspace({ initialView }: { initialView: WebsiteSet
   const router = useRouter();
   const [view, setView] = useState(initialView);
   const [notice, setNotice] = useState<string>();
+  const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const composerUnavailableId = useId();
-  const publishUnavailableId = useId();
   const progress = setupProgress(view);
-  const sourceHost = sourceHostname(view.setup.sourceUrl);
+  const sourceHost = websiteSetupHostname(view.setup.sourceUrl);
   const active = view.phase === "queued" || view.phase === "building";
 
   useEffect(() => {
@@ -93,29 +94,18 @@ export function WebsiteSetupWorkspace({ initialView }: { initialView: WebsiteSet
       storageId={`setup:${view.setup.id}`}
       backHref="/account"
       backLabel="Back to all websites"
+      mobilePane={mobilePane}
+      onMobilePaneChange={setMobilePane}
       commandTitle={
         <div className="site-agent-command-title">
           <strong>{sourceHost}</strong>
           <small className={view.phase === "needs_attention" ? "is-attention" : "is-working"}>Creating website · {progress.shortLabel}</small>
         </div>
       }
-      mobilePreviewActions={
-        <>
-          <span className="site-agent-visually-hidden" id={`${publishUnavailableId}-mobile`}>Available when your first draft is ready.</span>
-          <button className="button primary site-agent-publish site-agent-publish-mobile" type="button" disabled aria-describedby={`${publishUnavailableId}-mobile`}>Publish</button>
-        </>
-      }
       previewToolbar={
-        <>
-          <div className="site-agent-preview-primary">
-            <span className="site-agent-preview-tab" aria-current="page">Preview</span>
-            <span className="site-agent-setup-preview-label">Private draft</span>
-          </div>
-          <div className="site-agent-preview-outcome">
-            <span className="site-agent-visually-hidden" id={publishUnavailableId}>Available when your first draft is ready.</span>
-            <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled aria-describedby={publishUnavailableId}>Publish</button>
-          </div>
-        </>
+        <div className="site-agent-preview-primary">
+          <span className="site-agent-preview-tab" aria-current="page">{view.phase === "needs_attention" ? "Build paused" : "Building private draft"}</span>
+        </div>
       }
       commandContent={
         <>
@@ -161,11 +151,12 @@ export function WebsiteSetupWorkspace({ initialView }: { initialView: WebsiteSet
       }
       previewContent={
         <div className="site-agent-preview-stage site-agent-setup-preview-stage">
-          <div className="site-agent-empty-preview site-agent-setup-preview">
-            <div className="site-agent-setup-preview-window" aria-hidden="true"><span /><i /><i /><i /></div>
-            <strong>{view.phase === "needs_attention" ? "Preview paused" : "Your private preview will appear here"}</strong>
-            <span>{view.phase === "needs_attention" ? "Resolve the setup issue in Chat to continue." : "Lodesta is preparing the first reviewable version of your website."}</span>
-          </div>
+          <WebsiteBuildCanvas
+            stage={progress.canvasStage}
+            title={progress.canvasTitle}
+            detail={progress.canvasDetail}
+            sourceLabel={sourceHost}
+          />
         </div>
       }
     />
@@ -178,7 +169,10 @@ function setupProgress(view: WebsiteSetupView) {
       shortLabel: "Needs attention",
       label: "Website setup needs attention",
       detail: view.message ?? "Lodesta could not finish preparing this website.",
-      expandedDetail: "Retry a temporary interruption, or choose a different public website if this address cannot be read."
+      expandedDetail: "Retry a temporary interruption, or choose a different public website if this address cannot be read.",
+      canvasStage: "attention" as const,
+      canvasTitle: "Build paused",
+      canvasDetail: "Resolve the setup issue in Chat to continue."
     };
   }
   if (view.setup.status === "queued") {
@@ -186,23 +180,21 @@ function setupProgress(view: WebsiteSetupView) {
       shortLabel: "Waiting",
       label: "Waiting to begin",
       detail: "Your request is queued and ready for Lodesta.",
-      expandedDetail: "Lodesta will begin by reading the public pages at the source address and collecting business information that can be verified."
+      expandedDetail: "Lodesta will begin by reading the public pages at the source address and collecting business information that can be verified.",
+      canvasStage: "queued" as const,
+      canvasTitle: "Waiting to begin",
+      canvasDetail: "Your private workspace is ready for Lodesta to start."
     };
   }
   return {
     shortLabel: "Learning",
     label: "Learning about your business",
     detail: "Lodesta is reading the public website and preparing the authoring workspace.",
-    expandedDetail: "The source is being reviewed for services, contact details, branding, and other evidence that can support the private draft."
+    expandedDetail: "The source is being reviewed for services, contact details, branding, and other evidence that can support the private draft.",
+    canvasStage: "gathering" as const,
+    canvasTitle: "Gathering the essentials",
+    canvasDetail: "Reading the public website and organizing verified business information."
   };
-}
-
-function sourceHostname(sourceUrl: string) {
-  try {
-    return new URL(sourceUrl).hostname.replace(/^www\./, "");
-  } catch {
-    return sourceUrl;
-  }
 }
 
 function ArrowUpIcon() {

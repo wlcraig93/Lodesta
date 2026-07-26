@@ -199,6 +199,7 @@ function isAllowedSourcePath(path: string) {
 
 function allowedImport(fromPath: string, moduleId: string) {
   if (moduleId === "react") return true;
+  if (moduleId === "#lodesta-sdk") return true;
   if (!moduleId.startsWith(".")) return false;
   const resolved = normalizePath(`${fromPath.slice(0, fromPath.lastIndexOf("/"))}/${moduleId}`);
   if (!resolved) return false;

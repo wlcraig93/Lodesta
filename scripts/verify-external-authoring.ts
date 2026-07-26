@@ -4,13 +4,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256 } from "@/packages/business-data";
 import {
+  authoringExecutionBundleSchema,
+  assertExternalAuthoringBundleCurrent,
+  externalAuthoringBundleMatchesRuntime,
   externalAuthoringBatchItemSchema,
   externalAuthoringBatchSchema,
   externalAuthoringCredentialSchema,
   externalAuthoringExecutionSchema,
   externalAuthoringOperationSchema,
-  LocalExternalAuthoringRepository
+  LocalExternalAuthoringRepository,
+  platformVersionMismatchOwnerReason
 } from "@/packages/external-authoring";
+import { LocalSitePlatformRepository } from "@/packages/platform-data";
+import { workspaceSourcePolicyIdentity } from "@/packages/site-agent";
+import {
+  sandboxImageDigest,
+  siteAgentRunSchema,
+  siteToolchainIdentity,
+  siteVerificationPolicyIdentity
+} from "@/packages/site-contracts";
 import { draftPreviewGrant, previewLink, validatePreviewSecret } from "@/packages/platform-operations";
 import { WorkspaceManagerRuntime } from "@/packages/site-platform/manager-runtime";
 
@@ -69,6 +81,32 @@ assert(
   "A lost finish response cannot be replayed after finalization releases the claim."
 );
 assert(workflow.includes("workspaceHash: runtimeSnapshot.workspaceHash"), "Durable execution state does not retain the canonical runtime workspace hash.");
+
+const currentBundle = authoringExecutionBundleSchema.parse({
+  schemaVersion: 1,
+  id: "bundle_runtime_verification",
+  runId: "run_runtime_verification",
+  bundleHash: `sha256:${"1".repeat(64)}`,
+  instructionVersion: "verification",
+  instructionHash: `sha256:${"2".repeat(64)}`,
+  skillContractVersion: "verification",
+  skillContractHash: `sha256:${"3".repeat(64)}`,
+  publicBuildInputId: "input_runtime_verification",
+  publicBuildInputHash: `sha256:${"4".repeat(64)}`,
+  sourcePolicyVersion: workspaceSourcePolicyIdentity,
+  sourcePolicyHash: `sha256:${"5".repeat(64)}`,
+  verificationPolicyVersion: siteVerificationPolicyIdentity,
+  verificationPolicyHash: `sha256:${"6".repeat(64)}`,
+  toolSchemaHash: `sha256:${"7".repeat(64)}`,
+  toolchainVersion: siteToolchainIdentity,
+  sandboxImageDigest,
+  createdAt: "2026-07-23T12:00:00.000Z"
+});
+assert(externalAuthoringBundleMatchesRuntime(currentBundle), "Current external bundle was rejected as stale.");
+assert(!externalAuthoringBundleMatchesRuntime({
+  ...currentBundle,
+  sandboxImageDigest: `sha256:${"0".repeat(64)}`
+}), "Pinned external bundle survived an image identity change.");
 
 const { GET: handleMcpGet } = await import("@/app/api/operator/mcp/route");
 assert.equal((await handleMcpGet(new Request("http://localhost/api/operator/mcp"))).status, 401, "Missing MCP bearer token was accepted.");
@@ -221,6 +259,78 @@ try {
     /external_idempotency_key_conflict/,
     "Reusing an idempotency key for different arguments was accepted."
   );
+
+  const platformRepository = new LocalSitePlatformRepository(join(directory, "platform-state.json"));
+  const staleBundle = authoringExecutionBundleSchema.parse({
+    ...currentBundle,
+    id: "bundle_platform_mismatch",
+    runId: claimOne.execution.runId,
+    sandboxImageDigest: `sha256:${"0".repeat(64)}`
+  });
+  const executionForMismatch = await repository.getExecution(claimOne.execution.id);
+  assert(executionForMismatch, "External execution disappeared before the stale-bundle verification.");
+  const staleExecution = externalAuthoringExecutionSchema.parse({
+    ...executionForMismatch,
+    bundleId: staleBundle.id,
+    status: "authoring"
+  });
+  await repository.saveBundle(staleBundle);
+  await repository.saveExecution(staleExecution);
+  await platformRepository.saveAgentRun(siteAgentRunSchema.parse({
+    schemaVersion: "site-agent-run",
+    id: staleExecution.runId,
+    sessionId: "session_platform_mismatch",
+    siteId: "site_platform_mismatch",
+    publicBuildInputId: staleBundle.publicBuildInputId,
+    origin: "external_batch",
+    executionDriver: "external_mcp",
+    requestedBy: "operator:verify",
+    publishAfterSuccess: false,
+    kind: "initial_build",
+    status: "running",
+    stage: "authoring",
+    authoringExecutionBundleId: staleBundle.id,
+    externalProvenance: {
+      clientAuthExpectation: "chatgpt",
+      clientAuthVerification: "operator_configured",
+      clientSkillVerification: "operator_configured",
+      clientReportedModelId: "Codex",
+      modelUsage: "unavailable"
+    },
+    executionNumber: 1,
+    skillVersions: {},
+    usage: {
+      kind: "external_unavailable",
+      modelUsage: "unavailable",
+      sandboxDurationMs: 0,
+      browserDurationMs: 0,
+      storageBytes: 0,
+      durationMs: 0
+    },
+    retryableByOwner: false,
+    startedAt: now
+  }));
+  const bundleEvidence = await repository.getBundle(staleBundle.id);
+  const operationEvidence = await repository.getOperation(operation.id);
+  await assert.rejects(
+    assertExternalAuthoringBundleCurrent({
+      execution: staleExecution,
+      bundle: staleBundle,
+      claimId: claimOne.claim.id,
+      externalRepository: repository,
+      platformRepository
+    }),
+    /platform_version_mismatch/,
+    "A stale external bundle remained executable."
+  );
+  assert.equal((await repository.getClaim(claimOne.claim.id))?.status, "fenced", "Stale bundle claim remained active.");
+  assert.equal((await repository.getExecution(staleExecution.id))?.status, "failed", "Stale external execution did not fail.");
+  const failedRun = await platformRepository.getAgentRun(staleExecution.runId);
+  assert.equal(failedRun?.failureCode, "platform_version_mismatch");
+  assert.equal(failedRun?.retryableByOwner, false);
+  assert.equal(failedRun?.failureReason, platformVersionMismatchOwnerReason);
+  assert.deepEqual(await repository.getBundle(staleBundle.id), bundleEvidence, "Stale-bundle handling rewrote immutable bundle evidence.");
+  assert.deepEqual(await repository.getOperation(operation.id), operationEvidence, "Stale-bundle handling rewrote operation evidence.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

@@ -3,7 +3,7 @@ builder = "RAILPACK"
 buildCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run install:browsers && npm run build"
 
 [deploy]
-startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start"
+startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start:production"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

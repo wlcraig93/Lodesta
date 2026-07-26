@@ -2,7 +2,6 @@ import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
-import axeCore from "axe-core";
 import { sha256 } from "@/packages/business-data";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
@@ -559,17 +558,25 @@ type AccessibilityRuntimeContext = {
   consoleErrors: string[];
 };
 
-const axeSourceHash = sha256(axeCore.source);
+type CanonicalAxeRuntime = {
+  source: string;
+  version: string;
+  sourceHash: `sha256:${string}`;
+};
+
+let canonicalAxeRuntimePromise: Promise<CanonicalAxeRuntime> | undefined;
 
 async function preloadAutomatedAccessibility(page: Page, context: AccessibilityRuntimeContext) {
+  const runtime = await canonicalAxeRuntime();
   try {
-    await page.addInitScript({ content: axeCore.source });
+    await page.addInitScript({ content: runtime.source });
   } catch (error) {
-    throw browserVerificationUnavailable("preload", context, undefined, error);
+    throw browserVerificationUnavailable("preload", context, runtime, undefined, error);
   }
 }
 
 async function inspectAutomatedAccessibility(page: Page, context: AccessibilityRuntimeContext) {
+  const canonical = await canonicalAxeRuntime();
   const readiness = await page.evaluate(() => {
     const runtime = (globalThis as typeof globalThis & {
       axe?: { version?: unknown; run?: unknown };
@@ -579,8 +586,8 @@ async function inspectAutomatedAccessibility(page: Page, context: AccessibilityR
       runnable: typeof runtime?.run === "function"
     };
   });
-  if (!readiness.runnable || readiness.detectedVersion !== axeCore.version) {
-    throw browserVerificationUnavailable("readiness", context, readiness.detectedVersion);
+  if (!readiness.runnable || readiness.detectedVersion !== canonical.version) {
+    throw browserVerificationUnavailable("readiness", context, canonical, readiness.detectedVersion);
   }
   const result = await page.evaluate(async () => {
     const runtime = (globalThis as typeof globalThis & {
@@ -614,6 +621,7 @@ async function inspectAutomatedAccessibility(page: Page, context: AccessibilityR
 function browserVerificationUnavailable(
   stage: BrowserVerificationUnavailableDetails["stage"],
   context: AccessibilityRuntimeContext,
+  runtime: CanonicalAxeRuntime,
   detectedVersion?: string,
   cause?: unknown
 ) {
@@ -624,12 +632,37 @@ function browserVerificationUnavailable(
     route: context.route,
     viewport: "mobile",
     browserVersion: context.browserVersion,
-    expectedVersion: axeCore.version,
+    expectedVersion: runtime.version,
     detectedVersion,
-    sourceHash: axeSourceHash,
+    sourceHash: runtime.sourceHash,
     consoleErrors: context.consoleErrors.slice(-5).map((message) => message.slice(0, 500)),
     cause: cause instanceof Error ? cause.message.slice(0, 500) : cause === undefined ? undefined : String(cause).slice(0, 500)
   });
+}
+
+async function canonicalAxeRuntime() {
+  canonicalAxeRuntimePromise ??= loadCanonicalAxeRuntime();
+  return canonicalAxeRuntimePromise;
+}
+
+async function loadCanonicalAxeRuntime(): Promise<CanonicalAxeRuntime> {
+  const packageRoot = resolve(process.cwd(), "node_modules", "axe-core");
+  const [source, packageSource] = await Promise.all([
+    readFile(resolve(packageRoot, "axe.min.js"), "utf8"),
+    readFile(resolve(packageRoot, "package.json"), "utf8")
+  ]);
+  const packageDocument = JSON.parse(packageSource) as { version?: unknown };
+  if (typeof packageDocument.version !== "string" || !packageDocument.version) {
+    throw new Error("browser_verification_unavailable:axe-core package version is unavailable");
+  }
+  if (!source.includes(`axe.version="${packageDocument.version}"`)) {
+    throw new Error("browser_verification_unavailable:axe-core source and package version do not match");
+  }
+  return {
+    source,
+    version: packageDocument.version,
+    sourceHash: sha256(source)
+  };
 }
 
 async function settleImages(page: Page) {

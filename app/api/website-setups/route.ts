@@ -1,7 +1,14 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
+import { isSelectableSiteCreationModel } from "@/lib/site-creation-model-catalog";
+import { ModelCatalogConfigurationError } from "@/lib/model-catalog";
+import {
+  isSiteCreationModelId,
+  SITE_CREATION_API_PROVIDER
+} from "@/lib/site-creation-models";
 import { sha256, stableJson } from "@/packages/business-data";
+import { processWebsiteSetupAndRun } from "@/lib/website-setup-jobs";
 import { getWebsiteSetupView, validateWebsiteSetupSource } from "@/lib/website-setups";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import {
@@ -17,6 +24,7 @@ function validTimezone(value: string) {
 
 const createSchema = z.object({
   sourceUrl: z.string().trim().min(1).max(2048),
+  initialBuildModelId: z.string().trim().min(3).max(120).refine(isSiteCreationModelId),
   idempotencyKey: z.string().trim().min(8).max(160),
   confirmDuplicate: z.boolean().optional(),
   reportingTimezone: z.string().min(1).max(100).refine(validTimezone, "Enter a valid IANA timezone.")
@@ -37,19 +45,24 @@ export async function POST(request: Request) {
   const auth = await requireWebsiteSetupUser();
   if (!auth.ok) return applyRateLimitHeaders(auth.response, limit);
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return applyRateLimitHeaders(NextResponse.json({ error: "Enter a valid website address.", issues: parsed.error.issues }, { status: 400 }), limit);
+  if (!parsed.success) {
+    const invalidModel = parsed.error.issues.some((issue) => issue.path[0] === "initialBuildModelId");
+    return applyRateLimitHeaders(NextResponse.json({
+      error: invalidModel ? "Choose a valid OpenRouter model." : "Enter a valid website address.",
+      issues: parsed.error.issues
+    }, { status: 400 }), limit);
+  }
 
   const source = await validateWebsiteSetupSource(parsed.data.sourceUrl);
   if (!source.ok) return applyRateLimitHeaders(NextResponse.json({ error: source.error }, { status: 400 }), limit);
 
   const creationRequestHash = sha256(stableJson({
     normalizedSource: source.normalizedSource,
-    reportingTimezone: parsed.data.reportingTimezone
+    reportingTimezone: parsed.data.reportingTimezone,
+    initialBuildApiProvider: SITE_CREATION_API_PROVIDER,
+    initialBuildModelId: parsed.data.initialBuildModelId
   }));
-  const [setups, sites] = await Promise.all([
-    platformOperationsRepository.listWebsiteSetupsForOwner(auth.user.id),
-    sitePlatformRepository.getSitesByOwnerUserId(auth.user.id)
-  ]);
+  const setups = await platformOperationsRepository.listWebsiteSetupsForOwner(auth.user.id);
   const idempotent = setups.find((setup) => setup.idempotencyKey === parsed.data.idempotencyKey);
   if (idempotent) {
     if (idempotent.creationRequestHash !== creationRequestHash) {
@@ -58,8 +71,31 @@ export async function POST(request: Request) {
         code: "idempotency_key_conflict"
       }, { status: 409 }), limit);
     }
+    if (idempotent.status === "queued") {
+      after(async () => { await processWebsiteSetupAndRun(idempotent.id, `website_setup_request_${idempotent.id}`); });
+    }
     return applyRateLimitHeaders(NextResponse.json({ view: await getWebsiteSetupView(idempotent), existing: true }), limit);
   }
+
+  try {
+    if (!await isSelectableSiteCreationModel(parsed.data.initialBuildModelId)) {
+      return applyRateLimitHeaders(NextResponse.json({
+        error: "Choose a model from the current OpenRouter catalog."
+      }, { status: 400 }), limit);
+    }
+  } catch (error) {
+    if (error instanceof ModelCatalogConfigurationError) {
+      return applyRateLimitHeaders(NextResponse.json({
+        error: "OpenRouter is not configured for website creation."
+      }, { status: 503 }), limit);
+    }
+    console.warn(`Unable to validate the website-creation model: ${error instanceof Error ? error.message : String(error)}`);
+    return applyRateLimitHeaders(NextResponse.json({
+      error: "The OpenRouter model catalog is unavailable. Try again."
+    }, { status: 502 }), limit);
+  }
+
+  const sites = await sitePlatformRepository.getSitesByOwnerUserId(auth.user.id);
 
   if (!parsed.data.confirmDuplicate) {
     const sitesById = new Map(sites.map((site) => [site.id, site]));
@@ -103,10 +139,13 @@ export async function POST(request: Request) {
       ownerUserId: auth.user.id,
       sourceUrl: source.url,
       normalizedSource: source.normalizedSource,
+      initialBuildApiProvider: SITE_CREATION_API_PROVIDER,
+      initialBuildModelId: parsed.data.initialBuildModelId,
       idempotencyKey: parsed.data.idempotencyKey,
       creationRequestHash,
       reportingTimezone: parsed.data.reportingTimezone
     });
+    after(async () => { await processWebsiteSetupAndRun(setup.id, `website_setup_request_${setup.id}`); });
     return applyRateLimitHeaders(NextResponse.json({ view: await getWebsiteSetupView(setup), existing: false }, { status: 202 }), limit);
   } catch (error) {
     if (error instanceof IdempotencyKeyConflictError) {

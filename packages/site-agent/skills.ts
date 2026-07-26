@@ -2,15 +2,15 @@ export type ManagerTaskKind = "initial_build" | "edit" | "rebase";
 
 export type ManagerTaskSkill = {
   id: "website-authoring";
-  identity: "website-authoring@sha256:2c10141a38d1fb2fd8339bdc09a463255caa472436f89be8b2dc0fac0673ba60";
+  identity: "website-authoring@sha256:12c3102273599ae4a9688cb8419c59412c7e63e6bcc6ed109194361f213fabb4";
   objective: string;
   knowledge: string[];
 };
 
 const universalKnowledge = [
   "Honor the owner's exact requested outcome before considering optional improvements.",
-  "Use only eligible facts, assets, forms, links, and capabilities from the public evidence packet.",
-  "Treat serviceBriefs as the source-backed service authority: preserve the supplied business wording, use its evidence blocks for concrete detail, and omit claims where the packet identifies an evidence gap.",
+  "Use only eligible facts, assets, forms, links, and capabilities from the site authoring brief.",
+  "Treat the brief's services as the source-backed service authority: preserve the supplied business wording, use its evidence blocks for concrete detail, and omit claims where the brief identifies an evidence gap.",
   "Give each retained dedicated service route enough distinct, useful explanation to justify the route; do not create thin keyword variants or repeat the same generic paragraph across services.",
   "Keep claims concrete and evidence-bound; ordinary tone and marketing language do not require artificial claim declarations.",
   "Local-business sites should establish the specific business quickly, make navigation usable on small screens, and give the primary customer action a clear path without repeating it everywhere.",
@@ -28,7 +28,7 @@ export function taskSkillFor(kind: ManagerTaskKind): ManagerTaskSkill {
       : "Apply the owner's requested website change precisely while preserving unrelated working behavior.";
   return {
     id: "website-authoring",
-    identity: "website-authoring@sha256:2c10141a38d1fb2fd8339bdc09a463255caa472436f89be8b2dc0fac0673ba60",
+    identity: "website-authoring@sha256:12c3102273599ae4a9688cb8419c59412c7e63e6bcc6ed109194361f213fabb4",
     objective,
     knowledge: [...universalKnowledge]
   };

@@ -1,7 +1,7 @@
-import type { SiteElementSelection, SitePublicBuildInput, VerticalContextModule } from "@/packages/site-contracts";
+import type { SiteElementSelection } from "@/packages/site-contracts";
 import { websiteManagerPromptIdentity } from "@/packages/site-contracts/platform-manifest";
 import { taskSkillFor, type ManagerTaskKind } from "./skills";
-import type { AuthoringContextPacket } from "./authoring-context";
+import type { SiteAuthoringBrief } from "./briefs";
 
 export { websiteManagerPromptIdentity };
 
@@ -20,41 +20,34 @@ Honor an explicit owner edit precisely and preserve unrelated working behavior. 
 
 Release boundaries:
 - Keep src/site.tsx and src/styles.css as entry files; safe local .ts, .tsx, and .css modules may live anywhere beneath src/. Do not import CSS from TypeScript—the compiler automatically includes every CSS file beneath src/.
-- Import only React, safe local modules, and named components from ../platform/sdk. Do not add packages, network access, scripts, embeds, secrets, backends, dependencies, or browser JavaScript.
+- Import only React, safe local modules, and named components from #lodesta-sdk. Do not add packages, network access, scripts, embeds, secrets, backends, dependencies, or browser JavaScript.
 - Keep source structure statically discoverable. Use named variables and literal property access for route content and evidence bindings; do not hide source structure behind computed property names or other runtime-computed lookups.
 - Export siteDefinition with routes. Each route may provide title and description metadata; when either is omitted, the compiler supplies a safe canonical fallback. The compiler owns the canonical site name. Every requested route should have working navigation and a React element unless the owner explicitly removes it.
 - Give every route a distinct descriptive title containing the canonical business name and a useful, non-duplicative description. Use verified locality and service intent when natural.
 - Keep every declared non-home route reachable through visible site navigation. If desktop navigation collapses on mobile, provide a visible semantic navigation control or retain an accessible mobile link set.
-- Use the platform SDK for eligible facts, assets, forms, maps, links, galleries, and disclosures. IDs must come from the public evidence packet. The trusted compiler owns canonical metadata and derives capability bindings.
+- Use the platform SDK for eligible facts, assets, forms, maps, links, galleries, and disclosures. IDs must come from the site authoring brief. The trusted compiler owns canonical metadata and derives capability bindings.
 - Use BusinessName for every visible business-name mention. Use an exact canonical Fact for contact, location, hours, offerings, or confirmed proof text, and render that Fact visibly on the route making the claim. A sensitive metadata claim requires the same visible Fact on that route.
 - Prefer BusinessHours and BusinessAddress for concise, naturally formatted operating information. Use Asset loading="eager" and fetchPriority="high" only for the primary above-fold hero image; leave other images lazy.
-- Treat serviceBriefs as the source-of-truth authoring briefs. Build dedicated pages only for distinct evidenced services, make their main content substantive, and do not turn search phrases into routes.
+- Treat the brief's services as the source-backed service authority. Build dedicated pages only for distinct evidenced services, make their main content substantive, and do not turn search phrases into routes.
 - Omit unsupported sensitive claims rather than weakening or creatively rephrasing them. Never invent ratings, reviews, credentials, awards, longevity, warranties, prices, timelines, service areas, or service details.
 - Keep the output static, semantic, responsive, accessible, and free of source/research language. CSS cannot use @import, @font-face, external URLs/fonts, or executable syntax; eligible images may use url(asset://asset-id).`;
 
 export function managerBuildContext(input: {
-  buildInput: SitePublicBuildInput;
-  authoringContext: AuthoringContextPacket;
-  verticalContext?: VerticalContextModule;
+  authoringBrief: SiteAuthoringBrief;
   instruction: string;
   kind: ManagerTaskKind;
   selection?: SiteElementSelection;
 }) {
   return {
-    schemaVersion: "authoring-context" as const,
+    schemaVersion: 1 as const,
+    kind: "website-authoring-context" as const,
     task: {
       kind: input.kind,
       instruction: input.instruction,
       selection: input.selection,
       skill: taskSkillFor(input.kind)
     },
-    evidence: managerEvidencePacket(input.buildInput),
-    authoringEvidence: input.authoringContext,
-    businessKnowledge: input.verticalContext ? {
-      source: input.verticalContext.id,
-      version: input.verticalContext.version,
-      guidance: input.verticalContext
-    } : undefined,
+    brief: input.authoringBrief,
     workspace: {
       sourceIsAvailableThroughTools: true,
       entryPath: "src/site.tsx",
@@ -62,7 +55,7 @@ export function managerBuildContext(input: {
       safeMultiFileModules: true
     },
     sdk: {
-      import: "import { BusinessName, BusinessHours, BusinessAddress, Fact, Asset, ManagedForm, ManagedField, ManagedSubmit, ManagedMap, SafeLink, Gallery, Disclosure } from '../platform/sdk';",
+      import: "import { BusinessName, BusinessHours, BusinessAddress, Fact, Asset, ManagedForm, ManagedField, ManagedSubmit, ManagedMap, SafeLink, Gallery, Disclosure } from '#lodesta-sdk';",
       components: {
         BusinessName: "<BusinessName as=\"span\" className=\"...\" />",
         BusinessHours: "<BusinessHours locationId=\"location-id\" variant=\"summary\" className=\"...\" />",
@@ -78,19 +71,5 @@ export function managerBuildContext(input: {
         Disclosure: "<Disclosure summary=\"Question\">Answer</Disclosure>"
       }
     }
-  };
-}
-
-export function managerEvidencePacket(input: SitePublicBuildInput) {
-  const { agentAccessPolicy: _servingPolicy, ...intent } = input.intent;
-  return {
-    schemaVersion: "manager-public-evidence-packet" as const,
-    publicBuildInputId: input.id,
-    siteId: input.siteId,
-    business: input.business,
-    publicFacts: input.publicFacts,
-    intent,
-    forms: input.forms,
-    capabilityConfiguration: input.capabilityConfiguration
   };
 }

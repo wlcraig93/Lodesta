@@ -5,6 +5,7 @@ import { managerToolArguments, type ManagerToolName } from "@/packages/site-agen
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAgentRunSchema } from "@/packages/site-contracts";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
+import { assertConfiguredSiteSandboxRuntimeReady } from "@/packages/site-sandbox";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import {
   externalAuthoringClaimSchema,
@@ -16,6 +17,9 @@ import {
   type ExternalAuthoringOperation
 } from "./contracts";
 import { externalAuthoringRepository } from "./repository";
+import {
+  assertExternalAuthoringBundleCurrent
+} from "./runtime-compatibility";
 
 const claimLeaseMs = 20 * 60_000;
 const executionDeadlineMs = 2 * 60 * 60_000;
@@ -84,6 +88,7 @@ export async function claimNextExternalSite(input: {
   if (!workerKey || workerKey.length > 160) throw new Error("worker_key_invalid");
   const bindingId = input.bindingId.trim();
   if (!bindingId || bindingId.length > 160) throw new Error("claim_binding_invalid");
+  await assertConfiguredSiteSandboxRuntimeReady();
   const claimId = `claim_${randomUUID().replaceAll("-", "")}`;
   const capability = deriveCapability({ claimId, bindingId, workerKey });
   const result = await externalAuthoringRepository.claimNext({
@@ -110,7 +115,13 @@ export async function claimNextExternalSite(input: {
     sitePlatformRepository.getPublicBuildInput(bundle.publicBuildInputId),
     sitePlatformRepository.listAgentMessages(run.sessionId)
   ]);
-  if (!buildInput || buildInput.inputHash !== bundle.publicBuildInputHash) throw new Error("claimed_execution_input_missing");
+  if (!buildInput) throw new Error("claimed_execution_input_missing");
+  await assertExternalAuthoringBundleCurrent({
+    execution: result.execution,
+    bundle,
+    claimId: result.claim.id,
+    publicBuildInputHash: buildInput.inputHash
+  });
   return {
     available: true as const,
     reattached: result.reattached,
@@ -355,6 +366,14 @@ async function authorizeClaim(input: { claimId: string; capability: string }) {
     await failExecutionDeadline(claim, execution);
     throw new Error("external_execution_deadline_exceeded");
   }
+  if (!execution.bundleId) throw new Error("external_execution_unpinned");
+  const bundle = await externalAuthoringRepository.getBundle(execution.bundleId);
+  if (!bundle) throw new Error("external_execution_bundle_missing");
+  await assertExternalAuthoringBundleCurrent({
+    execution,
+    bundle,
+    claimId: claim.id
+  });
   return { claim, execution };
 }
 

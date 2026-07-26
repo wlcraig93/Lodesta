@@ -19,7 +19,8 @@ import type {
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
-import { WebsiteWorkspaceFrame } from "@/components/WebsiteWorkspaceFrame";
+import { WebsiteBuildCanvas } from "@/components/WebsiteBuildCanvas";
+import { WebsiteWorkspaceFrame, type MobilePane } from "@/components/WebsiteWorkspaceFrame";
 
 type WorkspacePayload = {
   site: PlatformSiteRecord;
@@ -110,6 +111,7 @@ export function SiteAgentWorkspace({
   const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit");
   const [discussionSuggestion, setDiscussionSuggestion] = useState<DiscussionSuggestion>();
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
+  const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState<string>();
@@ -141,6 +143,7 @@ export function SiteAgentWorkspace({
   const previewMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const previewMoreMobileTriggerRef = useRef<HTMLButtonElement>(null);
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
+  const previewSelectionCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
   const recognitionRef = useRef<SpeechRecognitionLike | undefined>(undefined);
@@ -169,6 +172,7 @@ export function SiteAgentWorkspace({
     : selectedVersion
       ? `version:${selectedVersion.id}`
       : "blank";
+  const previewAvailable = previewBaseUrl !== "about:blank";
   const published = workspace.versions.find((version) => version.status === "published");
   const publishedPreviewUrl = published
     ? `/api/site-versions/${encodeURIComponent(published.id)}/artifact/`
@@ -198,6 +202,13 @@ export function SiteAgentWorkspace({
   const businessName = workspace.input?.business.name ?? initialInput.business.name;
   const compareDisabled = !publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id);
   const starterPrompts = editorStarterPrompts(workspace.input ?? initialInput);
+  const selectionAvailable = previewAvailable && !activeRun && !busy && Boolean(selectedVersion);
+  const showMore = previewAvailable && workspace.versions.length > 0;
+  const showPublish = Boolean(latestCandidate);
+  const buildCanvas = editorBuildCanvas({ activeRun, waitingRun, busy, latestCompletedRun });
+  const selectionPageLabel = selection
+    ? pages.find((page) => page.path === selection.route)?.title ?? pageLabelForRoute(selection.route)
+    : undefined;
   const publishDisabledReason = activeRun
     ? "Finish the current website update before publishing."
     : busy
@@ -555,6 +566,19 @@ export function SiteAgentWorkspace({
   }, [selectionMode]);
 
   useEffect(() => {
+    if (!selectionMode) return;
+    const document = previewRef.current?.contentDocument;
+    if (!document) return;
+    const style = document.createElement("style");
+    style.dataset.lodestaOwnerSelectionMode = "true";
+    style.textContent = "* { cursor: crosshair !important; }";
+    document.head.appendChild(style);
+    return () => {
+      style.remove();
+    };
+  }, [previewIdentity, selectionMode]);
+
+  useEffect(() => {
     selectedPagePathRef.current = selectedPagePath;
   }, [selectedPagePath]);
 
@@ -571,7 +595,41 @@ export function SiteAgentWorkspace({
     setIframeSrc(previewRouteUrl(previewBaseUrl, requestedPath));
   }, [previewIdentity, previewBaseUrl]);
 
-  useEffect(() => () => previewListenerCleanupRef.current?.(), []);
+  useEffect(() => {
+    setSelectionMode(false);
+    clearPreviewSelection();
+  }, [previewIdentity]);
+
+  useEffect(() => {
+    if (!activeRun) return;
+    setSelectionMode(false);
+    clearPreviewSelection();
+  }, [activeRun?.id]);
+
+  useEffect(() => () => {
+    previewListenerCleanupRef.current?.();
+    previewSelectionCleanupRef.current?.();
+  }, []);
+
+  function clearPreviewSelection() {
+    previewSelectionCleanupRef.current?.();
+    previewSelectionCleanupRef.current = undefined;
+    setSelection(undefined);
+  }
+
+  function toggleSelectionMode() {
+    if (selectionMode) {
+      setSelectionMode(false);
+      setLiveAnnouncement("Page selection cancelled.");
+      return;
+    }
+    if (!selectionAvailable) return;
+    clearPreviewSelection();
+    setPreviewMoreOpen(false);
+    setMobilePane("preview");
+    setSelectionMode(true);
+    setLiveAnnouncement("Select an element in the website preview.");
+  }
 
   async function submit() {
     const message = instruction.trim();
@@ -598,6 +656,8 @@ export function SiteAgentWorkspace({
         if (result.discussion.requiresApply && result.discussion.proposedAction) {
           setDiscussionSuggestion({ response: result.discussion.response, action: result.discussion.proposedAction });
         }
+      } else {
+        clearPreviewSelection();
       }
       setInstruction("");
       await refresh();
@@ -620,7 +680,8 @@ export function SiteAgentWorkspace({
     const normalized = normalizePagePath(path);
     setSelectedPagePath(normalized);
     selectedPagePathRef.current = normalized;
-    setSelection(undefined);
+    setSelectionMode(false);
+    clearPreviewSelection();
     const target = previewRouteUrl(previewBaseUrl, normalized);
     const frameWindow = previewRef.current?.contentWindow;
     if (frameWindow && previewBaseUrl !== "about:blank") frameWindow.location.assign(target);
@@ -629,6 +690,10 @@ export function SiteAgentWorkspace({
 
   function handlePreviewLoad() {
     previewListenerCleanupRef.current?.();
+    previewSelectionCleanupRef.current?.();
+    previewSelectionCleanupRef.current = undefined;
+    setSelection(undefined);
+    setSelectionMode(false);
     const frame = previewRef.current;
     const document = frame?.contentDocument;
     if (!frame || !document) return;
@@ -648,19 +713,30 @@ export function SiteAgentWorkspace({
       if (!element || element === document.documentElement || element === document.body) return;
       event.preventDefault();
       event.stopPropagation();
-      document.querySelectorAll("[data-lodesta-owner-selected]").forEach((node) => {
-        node.removeAttribute("data-lodesta-owner-selected");
-        (node as HTMLElement).style.outline = "";
-      });
+      previewSelectionCleanupRef.current?.();
+      const selectedElement = element as HTMLElement;
+      const previousOutline = selectedElement.style.outline;
+      const previousOutlineOffset = selectedElement.style.outlineOffset;
       element.setAttribute("data-lodesta-owner-selected", "true");
-      (element as HTMLElement).style.outline = "2px solid #c7861f";
+      selectedElement.style.outline = "2px solid #2f604f";
+      selectedElement.style.outlineOffset = "3px";
+      previewSelectionCleanupRef.current = () => {
+        element.removeAttribute("data-lodesta-owner-selected");
+        selectedElement.style.outline = previousOutline;
+        selectedElement.style.outlineOffset = previousOutlineOffset;
+      };
+      const route = previewRouteFromPath(new URL(frame.contentWindow!.location.href).pathname);
       setSelection({
-        route: previewRouteFromPath(new URL(frame.contentWindow!.location.href).pathname),
+        route,
         selector: selectorFor(element),
+        label: selectionLabelFor(element),
         workspaceRevisionId: selectedVersion?.workspaceRevisionId,
         versionId: selectedVersion?.id
       });
       setSelectionMode(false);
+      setMobilePane("chat");
+      setLiveAnnouncement("Page element selected. Add your instruction in Chat.");
+      window.requestAnimationFrame(() => composerRef.current?.focus());
     };
     document.addEventListener("click", click, true);
     previewListenerCleanupRef.current = () => document.removeEventListener("click", click, true);
@@ -674,7 +750,7 @@ export function SiteAgentWorkspace({
       const response = await fetch(`/api/site-versions/${encodeURIComponent(versionId)}/restore`, { method: "POST" });
       if (!response.ok) throw new Error(await responseMessage(response));
       setCompare(false);
-      setSelection(undefined);
+      clearPreviewSelection();
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -741,7 +817,12 @@ export function SiteAgentWorkspace({
       storageId={initialSite.id}
       backHref={`/workspace/${workspace.site.slug}`}
       backLabel="Back to website overview"
-      onMobilePaneChange={() => setPreviewMoreOpen(false)}
+      mobilePane={mobilePane}
+      onMobilePaneChange={(pane) => {
+        setMobilePane(pane);
+        setPreviewMoreOpen(false);
+      }}
+      previewInteractionActive={selectionMode}
       commandTitle={
           <div className="site-agent-command-title">
             <strong>{businessName}</strong>
@@ -749,7 +830,12 @@ export function SiteAgentWorkspace({
           </div>
       }
       mobilePreviewActions={
-        <>
+        previewAvailable ? <>
+          {selectionMode ? (
+            <button className="site-agent-mobile-selection-cancel" type="button" onClick={toggleSelectionMode}>
+              Cancel selection
+            </button>
+          ) : showMore ? (
             <button
               ref={previewMoreMobileTriggerRef}
               className="site-agent-mobile-more"
@@ -762,11 +848,12 @@ export function SiteAgentWorkspace({
             >
               •••
             </button>
-        </>
+          ) : null}
+        </> : undefined
       }
       mobileNotice={publishDisabledReason && publishHintOpen ? publishDisabledReason : undefined}
       mobileOutcomeAction={
-        <>
+        showPublish ? <>
           {publishDisabledReason ? <span className="site-agent-visually-hidden" id={`${publishReasonId}-mobile`}>{publishDisabledReason}</span> : null}
           <button
             className="button primary site-agent-publish site-agent-publish-mobile"
@@ -783,14 +870,14 @@ export function SiteAgentWorkspace({
           >
             Publish
           </button>
-        </>
+        </> : undefined
       }
       previewToolbar={
-        <>
+        previewAvailable ? <>
           <div className="site-agent-preview-primary">
             <label className="site-agent-page-picker">
               <span className="site-agent-visually-hidden">Website page</span>
-              <ProductSelect compact value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+              <ProductSelect compact value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length}>
                 {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
               </ProductSelect>
             </label>
@@ -798,10 +885,9 @@ export function SiteAgentWorkspace({
               <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
               <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
             </div>
-            <button className={`site-agent-tool-button ${selectionMode ? "is-active" : ""}`} type="button" aria-pressed={selectionMode} onClick={() => setSelectionMode((value) => !value)}>Select</button>
           </div>
           <div className="site-agent-preview-outcome">
-            <div className="site-agent-more-menu">
+            {showMore ? <div className="site-agent-more-menu">
               <button
                 ref={previewMoreTriggerRef}
                 className={`site-agent-tool-button site-agent-more-trigger ${previewMoreOpen || compare ? "is-active" : ""}`}
@@ -819,7 +905,7 @@ export function SiteAgentWorkspace({
                     <span className="site-agent-more-heading">Preview tools</span>
                     <label className="site-agent-page-picker">
                       <span>Page</span>
-                      <ProductSelect value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length || previewBaseUrl === "about:blank"}>
+                      <ProductSelect value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length}>
                         {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
                       </ProductSelect>
                     </label>
@@ -827,10 +913,6 @@ export function SiteAgentWorkspace({
                       <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
                       <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
                     </div>
-                    <button className={`site-agent-more-action ${selectionMode ? "is-selected" : ""}`} type="button" aria-pressed={selectionMode} onClick={() => setSelectionMode((value) => !value)}>
-                      <span><strong>Select an element</strong><small>Choose part of the preview for your next edit</small></span>
-                      <small>{selectionMode ? "On" : "Off"}</small>
-                    </button>
                   </section>
                   <section className="site-agent-more-section">
                     <span className="site-agent-more-heading">Preview</span>
@@ -853,7 +935,8 @@ export function SiteAgentWorkspace({
                         <button key={version.id} className={version.id === selectedVersion?.id ? "is-selected" : ""} type="button" aria-pressed={version.id === selectedVersion?.id} onClick={() => {
                           setSelectedVersionId(version.id);
                           setCompare(false);
-                          setSelection(undefined);
+                          setSelectionMode(false);
+                          clearPreviewSelection();
                         }}>
                           <span>Version {version.number}</span>
                           <small>{version.status}</small>
@@ -872,13 +955,17 @@ export function SiteAgentWorkspace({
                   ) : null}
                 </div>
               ) : null}
-            </div>
-            <div className="site-agent-publish-wrap">
+            </div> : null}
+            {showPublish ? <div className="site-agent-publish-wrap">
               {publishDisabledReason ? <span id={publishReasonId}>{publishDisabledReason}</span> : null}
               <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} onClick={() => void publish()}>Publish</button>
-            </div>
+            </div> : null}
           </div>
-        </>
+        </> : (
+          <div className="site-agent-preview-primary">
+            <span className="site-agent-preview-tab" aria-current="page">{buildCanvas.toolbarLabel}</span>
+          </div>
+        )
       }
       commandContent={
         <>
@@ -944,7 +1031,12 @@ export function SiteAgentWorkspace({
           <span className="site-agent-visually-hidden" aria-live="polite" aria-atomic="true">{liveAnnouncement}</span>
 
           <div className={`site-agent-compose ${initialBuildActive ? "is-unavailable" : ""}`}>
-            {selection ? <div className="site-agent-selection-strip"><span>Selected: {selection.selector}</span><button type="button" onClick={() => setSelection(undefined)}>Clear</button></div> : null}
+            {selection ? (
+              <div className="site-agent-selection-strip">
+                <span>Selected: {selection.label ?? "Page element"} · {selectionPageLabel}</span>
+                <button type="button" onClick={clearPreviewSelection}>Clear</button>
+              </div>
+            ) : null}
             {initialBuildActive ? <span className="site-agent-visually-hidden" id={composerUnavailableId}>Available when your first draft is ready.</span> : null}
             <textarea
               ref={composerRef}
@@ -966,12 +1058,25 @@ export function SiteAgentWorkspace({
             />
             <span className="site-agent-visually-hidden" id={voiceStatusId} aria-live="polite">{voiceStatus}</span>
             <div className="site-agent-compose-footer">
-              <ComposerModeMenu
-                value={composerMode}
-                onChange={setComposerMode}
-                disabled={initialBuildActive}
-                describedBy={initialBuildActive ? composerUnavailableId : undefined}
-              />
+              <div className="site-agent-compose-context">
+                <ComposerModeMenu
+                  value={composerMode}
+                  onChange={setComposerMode}
+                  disabled={initialBuildActive}
+                  describedBy={initialBuildActive ? composerUnavailableId : undefined}
+                />
+                <button
+                  className={`site-agent-select-page ${selectionMode ? "is-active" : ""}`}
+                  type="button"
+                  aria-pressed={selectionMode}
+                  aria-label={selectionMode ? "Cancel page selection" : "Select an element on the page"}
+                  disabled={!selectionMode && !selectionAvailable}
+                  onClick={toggleSelectionMode}
+                >
+                  <SelectOnPageIcon />
+                  <span>{selectionMode ? "Cancel selection" : "Select on page"}</span>
+                </button>
+              </div>
               <div className="site-agent-compose-actions">
                 <button
                   className={`site-agent-voice-button ${listening ? "is-listening" : ""}`}
@@ -1011,20 +1116,13 @@ export function SiteAgentWorkspace({
             </details>
           ) : null}
           <div className={`site-agent-preview-stage is-${viewport} ${compare ? "is-comparing" : ""}`}>
-            {previewBaseUrl === "about:blank" ? (
-              <div className="site-agent-empty-preview">
-                <div className="site-agent-preview-skeleton" aria-hidden="true">
-                  <span className="site-agent-preview-skeleton-bar" />
-                  <span className="site-agent-preview-skeleton-hero" />
-                  <span className="site-agent-preview-skeleton-line" />
-                  <span className="site-agent-preview-skeleton-line is-short" />
-                  <div className="site-agent-preview-skeleton-row">
-                    <span /><span /><span />
-                  </div>
-                </div>
-                <strong>{busy ? "Opening workspace" : "Your preview will appear here"}</strong>
-                <span>Ask for a website change, then review the verified result in this pane.</span>
-              </div>
+            {!previewAvailable ? (
+              <WebsiteBuildCanvas
+                stage={buildCanvas.stage}
+                title={buildCanvas.title}
+                detail={buildCanvas.detail}
+                sourceLabel={businessName}
+              />
             ) : (
               <iframe ref={previewRef} key={previewIdentity} name="site-agent-preview" title="Website preview" src={iframeSrc} onLoad={handlePreviewLoad} />
             )}
@@ -1239,6 +1337,53 @@ function selectorFor(element: Element) {
   return parts.join(" > ");
 }
 
+function selectionLabelFor(element: Element) {
+  const tag = element.tagName.toLowerCase();
+  const explicitLabel = cleanElementLabel(
+    element.getAttribute("aria-label")
+      ?? element.getAttribute("title")
+      ?? (tag === "img" ? element.getAttribute("alt") : null)
+      ?? element.textContent
+  );
+  if (/^h[1-6]$/.test(tag)) return explicitLabel ? `${explicitLabel} heading` : "Heading";
+  if (tag === "button") return explicitLabel ? `${explicitLabel} button` : "Button";
+  if (tag === "a") return explicitLabel ? `${explicitLabel} link` : "Link";
+  if (tag === "img") return explicitLabel ? `${explicitLabel} image` : "Image";
+  if (tag === "input" || tag === "textarea" || tag === "select") {
+    const fieldLabel = cleanElementLabel(element.getAttribute("name") ?? element.getAttribute("placeholder"));
+    return fieldLabel ? `${fieldLabel} field` : "Form field";
+  }
+  if (tag === "header") return "Header";
+  if (tag === "footer") return "Footer";
+  if (tag === "nav") return explicitLabel ? `${explicitLabel} navigation` : "Navigation";
+  if (tag === "section" || tag === "article") {
+    const heading = cleanElementLabel(element.querySelector("h1, h2, h3, h4, h5, h6")?.textContent);
+    return heading ? `${heading} section` : tag === "section" ? "Page section" : "Content section";
+  }
+  const region = element.closest("section, article");
+  const regionHeading = cleanElementLabel(region?.querySelector("h1, h2, h3, h4, h5, h6")?.textContent);
+  if (regionHeading) return `${regionHeading} content`;
+  return explicitLabel ? `${explicitLabel} content` : "Page element";
+}
+
+function cleanElementLabel(value: string | null | undefined) {
+  const cleaned = value?.replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > 72 ? `${cleaned.slice(0, 69).trimEnd()}…` : cleaned;
+}
+
+function pageLabelForRoute(route: string) {
+  if (route === "/") return "Home";
+  const segment = route.split("/").filter(Boolean).at(-1) ?? "Page";
+  try {
+    return decodeURIComponent(segment)
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+  } catch {
+    return "Page";
+  }
+}
+
 function normalizePagePath(path: string) {
   const suffix = path.trim().replace(/^\/+|\/+$/g, "");
   return suffix ? `/${suffix}` : "/";
@@ -1400,6 +1545,15 @@ function MicrophoneIcon() {
   );
 }
 
+function SelectOnPageIcon() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4 7V4h3M13 4h3v3M16 13v3h-3M7 16H4v-3" />
+      <path d="m8 8 6 2.5-2.6 1-1 2.5L8 8Z" />
+    </svg>
+  );
+}
+
 function joinTranscript(current: string, next: string) {
   return [current.trim(), next.trim()].filter(Boolean).join(" ");
 }
@@ -1449,6 +1603,68 @@ function editorStarterPrompts(input: SitePublicBuildInput) {
     contactPrompt,
     "Improve the mobile homepage layout"
   ];
+}
+
+function editorBuildCanvas({
+  activeRun,
+  waitingRun,
+  busy,
+  latestCompletedRun
+}: {
+  activeRun?: OwnerSiteAgentRun;
+  waitingRun?: OwnerSiteAgentRun;
+  busy: boolean;
+  latestCompletedRun?: OwnerSiteAgentRun;
+}) {
+  if (waitingRun) {
+    return {
+      stage: "paused" as const,
+      toolbarLabel: "Build paused",
+      title: "Your answer is needed",
+      detail: "Reply in Chat to continue building the private draft."
+    };
+  }
+  if (activeRun) {
+    const stage = activeRun.stage === "queued"
+      ? "queued" as const
+      : activeRun.stage === "authoring"
+        ? "composing" as const
+        : activeRun.stage === "needs_input"
+          ? "paused" as const
+          : activeRun.stage === "failed"
+            ? "attention" as const
+            : "building" as const;
+    return {
+      stage,
+      toolbarLabel: stage === "paused" || stage === "attention" ? "Build paused" : "Building private draft",
+      title: activeRun.progress.label,
+      detail: activeRun.progress.detail
+    };
+  }
+  if (latestCompletedRun?.status === "failed") {
+    return {
+      stage: "attention" as const,
+      toolbarLabel: "Build paused",
+      title: "Private draft needs attention",
+      detail: "Review the latest message in Chat, then retry or describe a new change."
+    };
+  }
+  if (latestCompletedRun?.status === "cancelled") {
+    return {
+      stage: "paused" as const,
+      toolbarLabel: "Build paused",
+      title: "Build cancelled",
+      detail: "Your workspace is safe. Start a new request in Chat when you are ready."
+    };
+  }
+  return {
+    stage: "queued" as const,
+    toolbarLabel: "Building private draft",
+    title: busy ? "Opening your private workspace" : "Private draft not started",
+    detail: busy
+      ? "Loading the conversation and preparing the preview canvas."
+      : "Describe the website you want in Chat to begin."
+  };
 }
 
 function ownerTranscriptVersion(
@@ -1540,5 +1756,8 @@ function elapsedLabel(durationMs: number) {
 
 async function responseMessage(response: Response) {
   const body = await response.json().catch(() => null) as { error?: string; question?: string; message?: string } | null;
+  if (body?.error === "stale_selection") {
+    return "That page selection belongs to an older preview. Clear it, select the element again, and resend your request.";
+  }
   return body?.question ?? body?.message ?? body?.error ?? `Request failed (${response.status})`;
 }

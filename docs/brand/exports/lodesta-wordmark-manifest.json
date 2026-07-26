@@ -1,7 +1,19 @@
 {
   "name": "Lodesta wordmark",
-  "canonical": true,
-  "note": "This is the shipping wordmark. The sans explorations in docs/brand/ (Geist Sans, Figtree) were never adopted and are retained as history only.",
+  "canonical": "lodesta-wordmark-boxed.svg",
+  "note": "Boxed is the primary lockup. Open is the secondary inline lockup. The sans explorations in docs/brand/ (Geist Sans, Figtree) were never adopted and are retained as history only.",
+  "lockups": {
+    "boxed": {
+      "file": "../../../public/brand/lodesta-wordmark-boxed.svg",
+      "role": "Primary. Marketing header and footer, social and OG images, avatars, app listings, merch — anywhere the background is not ours to control.",
+      "rationale": "Carries its own field, so it is portable onto colour and photography. Reads concretely as a storefront awning with the business name printed on it, which is the association the product depends on."
+    },
+    "open": {
+      "file": "../../../public/brand/lodesta-wordmark.svg",
+      "role": "Secondary inline lockup. Email signatures, dense product chrome, footers in constrained space, and any surface already filled with brand green where a green box on green would not read.",
+      "rationale": "Lower visual assertion than the badge."
+    }
+  },
   "typeface": {
     "family": "Merriweather",
     "source": "Google Fonts, SIL Open Font License 1.1",
@@ -11,35 +23,28 @@
     "warning": "The variable default is wght=300 (Light). Regular must be set explicitly.",
     "shaping": "HarfBuzz with kern and liga enabled; glyphs converted to outlines so the SVG carries no font dependency."
   },
+  "geometry": {
+    "letters": "7225 font units wide, cap height 1486, baseline at y=0",
+    "boxedPadding": "x 560, top 480, baseline-to-valance-attach 400",
+    "boxedBox": "8345 x 3158 units, aspect 2.643, corner radius 250 (9.9% of body height)",
+    "scallops": "boxed 6 at 1391 wide; open 5 at 1445 wide. Both at a 0.46 depth ratio.",
+    "pitchRule": "Scallop pitch, not scallop count, is the shared constant across lockups and the compact mark. Count follows width. Boxed pitch sits within 3.7% of open pitch.",
+    "keyline": "38 units outward, warm white, painted under the fill via paint-order. Approximately 0.73px at a 192px header render, matching the sub-pixel target used on the compact mark. Invisible on light surfaces; defines the silhouette on dark."
+  },
+  "cssSizing": {
+    "note": "Boxed letters occupy 85.8% of the full viewBox width (7225 of 8421 units, box plus keyline), so header widths were scaled by 1.166 to preserve the rendered word size when switching from the open lockup. At 192px the word renders 164.7px wide, matching the open lockup's previous 164px.",
+    "marketingHeaderDesktop": "192px (was 164px)",
+    "marketingHeaderMobile": "175px (was 150px)",
+    "appBrandBase": "154px (was 132px)",
+    "appBrandBreakpoint": "159px (was 136px)"
+  },
   "derivedFrom": {
     "raster": "public/lodesta-logo.png (3136x1098, the previous shipping artwork)",
     "verification": "Outline overlaid on the raster at 3066x692: 92.6% intersection-over-union, visually indistinguishable at 164px and 420px render sizes.",
-    "measuredFromRaster": {
-      "capHeight": "618px",
-      "xHeightOverCapHeight": 0.741,
-      "stemOverCapHeight": 0.1456,
-      "fontMetricsForComparison": "Merriweather capHeight 1486, xHeight 1110, ratio 0.747"
-    },
     "residual": "Merriweather was redesigned in 2024; the current variable release differs subtly from the static version the original raster was set in. No axis setting closes the gap fully, and the difference is sub-pixel at every size the wordmark renders."
   },
-  "valance": {
-    "scallops": 5,
-    "depthRatio": 0.46,
-    "rail": "y 160 to 290 font units below baseline (130 units thick)",
-    "principle": "Scallop pitch, not scallop count, is the shared constant with the compact mark. The compact mark uses 3 scallops because its field is near-square; the wordmark uses 5 because it is roughly 3.5x wider. Both hold the 0.46 depth ratio and both attach the scallops to a solid body rather than leaving them detached."
-  },
-  "exports": [
-    {
-      "file": "../../../public/brand/lodesta-wordmark.svg",
-      "format": "SVG",
-      "viewBox": "0 0 728 261.25",
-      "background": "transparent",
-      "color": "#24493A",
-      "usage": "Marketing header and footer via components/MarketingShell.tsx"
-    }
-  ],
   "openItems": [
-    "No dark-canvas variant exists. Marketing is currently locked to light mode, so this is not yet blocking.",
+    "Marketing is locked to light mode, so the keyline is currently inert there. It exists so a future dark marketing surface needs no new asset.",
     "public/lodesta-logo.png is now unreferenced. It is retained as the original artwork of record; delete it only deliberately."
   ]
 }

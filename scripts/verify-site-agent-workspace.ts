@@ -1,10 +1,15 @@
 import { access, readFile } from "node:fs/promises";
+import { siteAgentMessageSchema, siteElementSelectionSchema } from "@/packages/site-contracts";
 
 const component = await readFile("components/SiteAgentWorkspace.tsx", "utf8");
 const frame = await readFile("components/WebsiteWorkspaceFrame.tsx", "utf8");
 const setupWorkspace = await readFile("components/WebsiteSetupWorkspace.tsx", "utf8");
+const buildCanvas = await readFile("components/WebsiteBuildCanvas.tsx", "utf8");
 const ownerRunView = await readFile("packages/site-platform/owner-run-view.ts", "utf8");
 const sessionRoute = await readFile("app/api/site-agent/sessions/route.ts", "utf8");
+const runRoute = await readFile("app/api/site-agent/runs/route.ts", "utf8");
+const discussRoute = await readFile("app/api/site-agent/discuss/route.ts", "utf8");
+const prompts = await readFile("packages/site-agent/prompts.ts", "utf8");
 const css = await readFile("app/globals.css", "utf8");
 const editorRoute = await readFile("app/(owner-workspace)/workspace/[slug]/editor/page.tsx", "utf8");
 const adminShell = await readFile("components/admin/AdminShellClient.tsx", "utf8");
@@ -30,6 +35,13 @@ assert(component.includes("event.target instanceof document.defaultView.Element"
 assert(frame.includes('data-mobile-pane={mobilePane}'), "Mobile pane state is not exposed to the mounted workspace");
 assert(frame.includes("inert={compactViewport && mobilePane"), "The inactive mobile pane is not made inert");
 assert(component.includes("<WebsiteWorkspaceFrame") && setupWorkspace.includes("<WebsiteWorkspaceFrame"), "The editor and setup thread do not share the canonical workspace frame");
+assert(component.includes("<WebsiteBuildCanvas") && setupWorkspace.includes("<WebsiteBuildCanvas") && buildCanvas.includes('data-stage={stage}'), "Setup and blank editor states do not share the stage-aware build canvas");
+assert(component.includes("previewAvailable ? <>") && component.includes("const showMore = previewAvailable && workspace.versions.length > 0") && component.includes("const showPublish = Boolean(latestCandidate)"), "Preview controls are not progressively revealed from real preview and candidate state");
+assert(component.includes('stage: "attention" as const') && component.includes('stage: "paused" as const'), "Blank-preview failure and paused states are not represented by static build-canvas states");
+assert(component.includes('className={`site-agent-select-page') && component.includes("Select on page") && !component.includes(">Select</button>") && !component.includes("<strong>Select an element"), "Element selection is not exclusively activated from the command dock");
+assert(component.includes('setMobilePane("preview")') && component.includes('setMobilePane("chat")') && component.includes("composerRef.current?.focus()"), "Mobile selection does not complete the Chat to Preview to Chat flow");
+assert(frame.includes("previewInteractionActive") && frame.includes('panelMode === "full-chat"') && frame.includes("restoreSplitPanel()"), "Selection cannot restore the desktop split preview from full-chat mode");
+assert(component.includes("selection.label ?? \"Page element\"") && component.includes("selectionLabelFor(element)") && component.includes("stale_selection"), "Owner-facing selection labels or stale-selection guidance are incomplete");
 assert(!component.includes("site-agent-rail"), "The retired pages and capabilities rail remains in the workspace");
 assert(component.includes("{isAdmin ? ("), "Workspace diagnostics are not restricted to admins");
 assert(component.includes("Admin diagnostics") && component.includes("workspace.site.id"), "Admin site diagnostics do not expose the site ID");
@@ -77,6 +89,7 @@ assert(frame.includes("window.localStorage.setItem(panelStorageKey(storageId)"),
 assert(frame.includes("persistPanelLayout(true, persistedWidth)"), "Collapse preferences are not persisted synchronously");
 assert(frame.includes('panelMode === "full-chat"') && frame.includes("return;\n    writePanelLayout"), "Full-chat mode is incorrectly persisted");
 assert(frame.includes("desktopFullChat ? true : undefined"), "The mounted preview is not made inert in full-chat mode");
+assert(frame.includes("mobilePane: MobilePane") && frame.includes("onMobilePaneChange(pane: MobilePane): void"), "The responsive frame does not expose controlled mobile pane state");
 
 assert(!component.includes('message.role === "agent" ? "Lodesta"'), "Visible chat author labels remain");
 assert(component.includes("messageAuthorLabel(item.message.role)"), "Chat authors are not exposed accessibly");
@@ -125,9 +138,31 @@ const previewBarCss = css.match(/\.site-agent-preview-bar \{([\s\S]*?)\n\}/)?.[1
 assert(previewBarCss.includes("grid-template-columns: minmax(0, 1fr) auto") && previewBarCss.includes("overflow: visible") && !previewBarCss.includes("overflow-x"), "Preview toolbar can still scroll Publish out of view");
 assert(css.includes(".site-agent-preview-outcome") && css.includes(".site-agent-more-popover") && css.includes("right: 0"), "Preview outcome actions and More menu are not pinned to the toolbar edge");
 assert(css.includes(".site-agent-more-mobile-tools") && css.includes("position: fixed") && css.includes("top: 66px"), "Mobile Preview tools do not move into the topbar More sheet");
+assert(css.includes(".website-build-canvas") && css.includes("@keyframes website-build-gather") && css.includes("@keyframes website-build-sweep"), "The build canvas is missing aggregation, assembly, or render motion");
+assert(css.includes(".website-build-canvas *") && css.includes("animation: none"), "The build canvas does not provide a static reduced-motion composition");
 assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused mobile editor does not hide duplicate global chrome");
 const mobileTopbarControlCss = css.match(/\.site-agent-mobile-back,\n  \.site-agent-mobile-more \{([\s\S]*?)\n  \}/)?.[1] ?? "";
 assert(mobileTopbarControlCss.includes("width: 44px") && mobileTopbarControlCss.includes("height: 44px"), "Mobile workspace topbar controls do not meet the 44px touch-target contract");
+
+const selectionFixture = siteElementSelectionSchema.parse({
+  route: "/",
+  selector: "main > section > h1",
+  label: "Hero heading",
+  workspaceRevisionId: "workspace-revision",
+  versionId: "version"
+});
+const persistedSelection = siteAgentMessageSchema.parse({
+  schemaVersion: "site-agent-message",
+  id: "message",
+  sessionId: "session",
+  role: "owner",
+  content: "Make this more direct.",
+  selection: selectionFixture,
+  createdAt: "2026-07-25T00:00:00.000Z"
+});
+assert(persistedSelection.selection?.label === "Hero heading", "Owner-facing selection labels do not survive persisted agent-message validation");
+assert(runRoute.includes("siteElementSelectionSchema.optional()") && discussRoute.includes("siteElementSelectionSchema.optional()"), "Edit and Ask APIs do not share selection-label validation");
+assert(prompts.includes("selection: input.selection"), "Authoring prompts do not retain the labeled owner selection");
 
 console.log("Site agent workspace verification passed.");
 

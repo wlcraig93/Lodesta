@@ -40,6 +40,9 @@ export function classifySiteAuthoringFailure(error: unknown) {
   if (/browser_verification_unavailable/i.test(message)) {
     return failure("browser_verification_unavailable", "platform", true, message);
   }
+  if (/workspace_uninitialized|sandbox.*uninitialized|revision.*uninitialized/i.test(message)) {
+    return failure("sandbox_unavailable", "platform", false, message);
+  }
   if (/authoring_stalled/i.test(message)) {
     return failure("authoring_stalled", "authoring", false, message);
   }

@@ -1,12 +1,32 @@
 import type { PublicFetchUrlValidation } from "@/lib/url-safety";
+import {
+  isSiteCreationModelId,
+  SITE_CREATION_API_PROVIDER
+} from "@/lib/site-creation-models";
 import { validateWebsiteSetupSource } from "@/lib/website-setups";
 import { WebsiteCrawlError } from "@/packages/business-data";
-import { platformOperationsRepository, type WebsiteSetupFailureCode } from "@/packages/platform-operations";
+import {
+  platformOperationsRepository,
+  type PlatformOperationsRepository,
+  type WebsiteSetupFailureCode
+} from "@/packages/platform-operations";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 
 export async function processNextWebsiteSetup(workerId = `website_setup_worker_${process.pid}`) {
   const setup = await platformOperationsRepository.claimNextWebsiteSetup(workerId);
   if (!setup) return null;
+  return processClaimedWebsiteSetup(setup);
+}
+
+export async function processWebsiteSetup(setupId: string, workerId = `website_setup_request_${process.pid}`) {
+  const setup = await platformOperationsRepository.claimWebsiteSetup(setupId, workerId);
+  if (!setup) return null;
+  return processClaimedWebsiteSetup(setup);
+}
+
+async function processClaimedWebsiteSetup(
+  setup: NonNullable<Awaited<ReturnType<PlatformOperationsRepository["claimWebsiteSetup"]>>>
+) {
   const sourceRevision = setup.sourceRevision;
 
   try {
@@ -29,7 +49,15 @@ export async function processNextWebsiteSetup(workerId = `website_setup_worker_$
     const bootstrapped = await siteAuthoringWorkflow.bootstrapFromUrl({
       url: source.url,
       ownerId: setup.ownerUserId,
-      reportingTimezone: setup.reportingTimezone
+      reportingTimezone: setup.reportingTimezone,
+      initialBuildRoute: setup.initialBuildApiProvider === SITE_CREATION_API_PROVIDER
+        && setup.initialBuildModelId
+        && isSiteCreationModelId(setup.initialBuildModelId)
+        ? {
+            apiProvider: setup.initialBuildApiProvider,
+            modelId: setup.initialBuildModelId
+          }
+        : undefined
     });
     const linked = await platformOperationsRepository.linkWebsiteSetup({
       setupId: setup.id,
@@ -49,6 +77,35 @@ export async function processNextWebsiteSetup(workerId = `website_setup_worker_$
     });
     return failed ? { setupId: failed.id, status: failed.status, failureCode: failed.failureCode } : { setupId: setup.id, status: "stale" as const };
   }
+}
+
+export async function processNextWebsiteSetupAndRun(
+  workerId = `website_setup_request_${process.pid}`,
+  dependencies: {
+    processSetup?: typeof processNextWebsiteSetup;
+    executeRun?: (runId: string) => Promise<unknown>;
+  } = {}
+) {
+  const setup = await (dependencies.processSetup ?? processNextWebsiteSetup)(workerId);
+  if (setup && "runId" in setup && typeof setup.runId === "string") {
+    await (dependencies.executeRun ?? ((runId) => siteAuthoringWorkflow.executeRunAndFinalize(runId)))(setup.runId);
+  }
+  return setup;
+}
+
+export async function processWebsiteSetupAndRun(
+  setupId: string,
+  workerId = `website_setup_request_${process.pid}`,
+  dependencies: {
+    processSetup?: typeof processWebsiteSetup;
+    executeRun?: (runId: string) => Promise<unknown>;
+  } = {}
+) {
+  const setup = await (dependencies.processSetup ?? processWebsiteSetup)(setupId, workerId);
+  if (setup && "runId" in setup && typeof setup.runId === "string") {
+    await (dependencies.executeRun ?? ((runId) => siteAuthoringWorkflow.executeRunAndFinalize(runId)))(setup.runId);
+  }
+  return setup;
 }
 
 export function websiteSetupSourceFailureCode(

@@ -2,6 +2,7 @@ import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { gatedSensitiveClaims, scanSensitiveClaimText } from "@/lib/content-safety-scanners";
+import { isContinuousAvailabilityValue } from "@/packages/business-data/availability";
 import {
   factBindingSchema,
   type FactBinding,
@@ -312,7 +313,7 @@ function canonicalHoursSummary(value: unknown) {
     })
     .sort((left, right) => left.order - right.order || left.sourceIndex - right.sourceIndex);
   if (!ordered.length) return undefined;
-  if (ordered.every((item) => /\b(?:open )?24 hours?\b/i.test(item.value))) return "Open 24 hours daily";
+  if (ordered.every((item) => isContinuousAvailabilityValue(item.value))) return "Open 24 hours daily";
   const groups: Array<{ first: string; last: string; value: string; endOrder: number }> = [];
   for (const item of ordered) {
     const prior = groups.at(-1);

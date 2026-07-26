@@ -10,6 +10,10 @@ import {
   type ManagerToolRuntime,
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
+import {
+  deduplicateVerificationFindings,
+  verificationBlockerFeedback
+} from "./verification-feedback";
 
 export type BuildResult = {
   revision: string;
@@ -396,20 +400,24 @@ function sourceOutline(file: WorkspaceSourceFile) {
 }
 
 function summaryFindings(summary: Record<string, unknown>) {
-  return (Array.isArray(summary.blockers) ? summary.blockers : []).slice(0, 100);
+  return verificationBlockerFeedback(Array.isArray(summary.blockers) ? summary.blockers : []).blockers;
 }
 
 function compactInspectionSummary(summary: Record<string, unknown>) {
   const findings = Array.isArray(summary.findings) ? summary.findings : [];
-  const blockers = Array.isArray(summary.blockers) ? summary.blockers : [];
-  const advisories = Array.isArray(summary.advisories) ? summary.advisories : [];
+  const blockerFeedback = verificationBlockerFeedback(Array.isArray(summary.blockers) ? summary.blockers : []);
+  const blockers = blockerFeedback.blockers;
+  const advisories = deduplicateVerificationFindings(Array.isArray(summary.advisories) ? summary.advisories : []);
   const { findings: _findings, blockers: _blockers, advisories: _advisories, ...rest } = summary;
   const common = {
     ...rest,
     findingCount: numericCount(summary.findingCount, findings.length),
-    blockerCount: numericCount(summary.blockerCount, blockers.length),
+    blockerCount: blockerFeedback.uniqueBlockerCount,
+    uniqueBlockerCount: blockerFeedback.uniqueBlockerCount,
+    returnedBlockerCount: blockerFeedback.returnedBlockerCount,
+    blockersTruncated: blockerFeedback.blockersTruncated,
     advisoryCount: numericCount(summary.advisoryCount, advisories.length),
-    blockers: blockers.slice(0, 100)
+    blockers
   };
   return blockers.length
     ? { ...common, advisoriesOmitted: advisories.length > 0 }

@@ -12,7 +12,7 @@ type StoredPanelLayout = {
   collapsed: boolean;
 };
 
-type MobilePane = "chat" | "preview";
+export type MobilePane = "chat" | "preview";
 
 const DESKTOP_BREAKPOINT = 900;
 const COLLAPSED_PANEL_WIDTH = 52;
@@ -29,7 +29,9 @@ export function WebsiteWorkspaceFrame({
   mobilePreviewActions,
   mobileOutcomeAction,
   mobileNotice,
+  mobilePane,
   onMobilePaneChange,
+  previewInteractionActive = false,
   commandLabel = "Website manager",
   previewLabel = "Website preview",
   commandContent,
@@ -43,7 +45,9 @@ export function WebsiteWorkspaceFrame({
   mobilePreviewActions?: ReactNode;
   mobileOutcomeAction?: ReactNode;
   mobileNotice?: ReactNode;
-  onMobilePaneChange?(pane: MobilePane): void;
+  mobilePane: MobilePane;
+  onMobilePaneChange(pane: MobilePane): void;
+  previewInteractionActive?: boolean;
   commandLabel?: string;
   previewLabel?: string;
   commandContent: ReactNode;
@@ -53,7 +57,6 @@ export function WebsiteWorkspaceFrame({
   const restoreTip = useProductTooltip("Return to split view");
   const collapseTip = useProductTooltip("Collapse chat panel");
   const fullChatTip = useProductTooltip("Open full chat");
-  const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const [compactViewport, setCompactViewport] = useState(false);
   const [panelMode, setPanelMode] = useState<DesktopPanelMode>("split");
   const [panelWidth, setPanelWidth] = useState(400);
@@ -136,9 +139,12 @@ export function WebsiteWorkspaceFrame({
     };
   }, [isResizing, lastSplitWidth, panelWidth, workspaceWidth]);
 
+  useEffect(() => {
+    if (previewInteractionActive && panelMode === "full-chat") restoreSplitPanel();
+  }, [panelMode, previewInteractionActive]);
+
   function changeMobilePane(pane: MobilePane) {
-    setMobilePane(pane);
-    onMobilePaneChange?.(pane);
+    onMobilePaneChange(pane);
   }
 
   function persistPanelLayout(collapsed: boolean, width: number) {

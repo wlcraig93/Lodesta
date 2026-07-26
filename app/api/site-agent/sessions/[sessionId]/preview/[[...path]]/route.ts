@@ -1,5 +1,6 @@
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { authorizedSiteActor, canAccessAgentSession } from "@/app/api/site-agent/auth";
+import { assertConfiguredSiteSandboxRuntimeReady } from "@/packages/site-sandbox";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,9 @@ export async function GET(
     }
     return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
   }
-  const base = process.env.LODESTA_SANDBOX_URL;
-  const token = process.env.LODESTA_SANDBOX_TOKEN;
-  if (!base || !token) return new Response(null, { status: 503 });
+  const runtime = await assertConfiguredSiteSandboxRuntimeReady().catch(() => undefined);
+  if (!runtime) return new Response(null, { status: 503 });
+  const { url: base, token } = runtime;
   const route = path?.join("/") ?? "";
   const upstream = await fetch(`${base.replace(/\/$/, "")}/v1/sessions/${session.sandboxId}/preview/${route}`, {
     headers: { authorization: `Bearer ${token}` },

@@ -22,8 +22,7 @@ try {
   );
   const applied = await sandbox.apply(sessionId, bootstrapped.revision, [{
     path: "src/site.tsx",
-    content: `import React from "react";
-import { BusinessAddress, BusinessHours, BusinessName } from "../platform/sdk";
+    content: `import { BusinessAddress, BusinessHours, BusinessName } from "#lodesta-sdk";
 export const siteDefinition = {
   routes: [{
     path: "/",

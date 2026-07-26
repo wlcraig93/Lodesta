@@ -25,7 +25,17 @@ import {
   isSiteAuthoringTerminalError,
   SiteAuthoringTerminalError
 } from "./failures";
-import { managerBuildContext, managerEvidencePacket, websiteManagerPromptIdentity, websiteManagerSystemPrompt } from "./prompts";
+import {
+  authoringBriefAlertCharacters,
+  authoringBriefCharacters,
+  createManagerDiscussionBrief
+} from "./briefs";
+import { DeterministicManagerHistory, managerPromptTelemetry } from "./history";
+import { managerBuildContext, websiteManagerPromptIdentity, websiteManagerSystemPrompt } from "./prompts";
+import {
+  establishProviderAuthoringCapabilities
+} from "./provider-capabilities";
+import { taskSkillFor } from "./skills";
 import {
   isSupportedSiteAgentModel,
   managerGuardrailsForKind,
@@ -66,23 +76,46 @@ export class WebsiteManagerAgent {
     usage: ManagerModelUsage;
     toolRecords: ManagerToolRecord[];
     responses: number;
+    telemetry: {
+      firstSuccessfulBuildMs?: number;
+      modelRequests: number;
+      noToolResponses: number;
+      toolCalls: Record<string, number>;
+      compactedPathRereads: number;
+    };
   }> {
-    const settings = await getSiteAuthoringModelSettings();
-    const route = selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
+    const route = input.route
+      ? validatedSiteAgentRoute(input.route.apiProvider, input.route.modelId)
+      : await configuredSiteAgentRoute();
     const { apiProvider, modelId } = route;
+    const providerCapability = establishProviderAuthoringCapabilities(apiProvider, modelId);
     const client = this.injectedClient ?? configuredResponsesClient(apiProvider);
     const guardrails = guardrailsFor(input, input.guardrails);
     const startedAt = Date.now();
     const usage = emptyUsage();
     const toolRecords: ManagerToolRecord[] = [];
     const replayedCalls = new Map<string, { inputHash: `sha256:${string}`; result: ManagerToolExecution; status: "succeeded" | "failed" }>();
+    const briefCreatedAt = new Date().toISOString();
+    const briefCharacters = authoringBriefCharacters(input.authoringBrief);
+    const briefProvenance = {
+      schemaVersion: 1 as const,
+      kind: "site-authoring-brief-provenance" as const,
+      producer: websiteManagerPromptIdentity,
+      modelRoute: route,
+      skill: taskSkillFor(input.kind).identity,
+      guidance: input.authoringBrief.guidance
+        ? { id: input.authoringBrief.guidance.id, version: input.authoringBrief.guidance.version }
+        : undefined,
+      inputHash: input.buildInput.inputHash,
+      generatedAt: briefCreatedAt,
+      stale: false,
+      regeneration: "fresh" as const
+    };
     const initialContext: ResponseInputItem = {
       role: "user",
       type: "message",
       content: [{ type: "input_text", text: JSON.stringify(managerBuildContext({
-        buildInput: input.buildInput,
-        authoringContext: input.authoringContext,
-        verticalContext: input.buildInput.domainContext,
+        authoringBrief: input.authoringBrief,
         instruction: input.instruction,
         kind: input.kind,
         selection: input.selection
@@ -92,8 +125,11 @@ export class WebsiteManagerAgent {
         detail: "high" as const
       }] : [])]
     };
-    const history: ResponseInputItem[] = [initialContext];
+    const history = new DeterministicManagerHistory([initialContext]);
     let responseCount = 0;
+    let noToolResponses = 0;
+    let firstSuccessfulBuildMs: number | undefined;
+    const toolCallCounts = new Map<string, number>();
     let consecutiveFailureFingerprint: string | undefined;
     let consecutiveIdenticalFailures = 0;
 
@@ -103,10 +139,37 @@ export class WebsiteManagerAgent {
       const turnId = eventId("turn");
       const modelIdValue = eventId("model");
       const turnStartedAt = new Date().toISOString();
-      const requestHistory = [...history, runtimeStateMessage(input.runtime.stateSummary())];
+      const runtimeMessage = runtimeStateMessage(input.runtime.stateSummary());
+      const activeTail = history.activeTailItems(turnIndex);
+      const requestHistory = [...history.prefixItems(), ...activeTail, runtimeMessage];
+      const promptTelemetry = managerPromptTelemetry({
+        instructions: websiteManagerSystemPrompt,
+        tools: managerTools,
+        stablePrefix: history.prefixItems(),
+        activeTail,
+        runtimeState: runtimeMessage,
+        requestIndex: turnIndex
+      });
       await input.onEvents?.([
-        runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "running", turnIndex, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length } }),
-        runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "running", turnIndex, apiProvider, modelId, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length } })
+        runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "running", turnIndex, startedAt: turnStartedAt, summary: { historyItems: requestHistory.length, ...promptTelemetry } }),
+        runEvent({
+          id: modelIdValue,
+          kind: "model_request",
+          name: "responses.create",
+          status: "running",
+          turnIndex,
+          apiProvider,
+          modelId,
+          startedAt: turnStartedAt,
+          summary: {
+            historyItems: requestHistory.length,
+            authoringBriefCharacters: briefCharacters,
+            authoringBriefAlert: briefCharacters > authoringBriefAlertCharacters,
+            compactedHistoryRecords: history.compactedRecords().length,
+            compactedPathRereads: history.compactedPathRereads(),
+            ...promptTelemetry
+          }
+        })
       ]);
       const responseStartedAt = Date.now();
       let response: ManagerResponse;
@@ -128,7 +191,25 @@ export class WebsiteManagerAgent {
         const completedAt = new Date().toISOString();
         const errorCode = diagnosticErrorCode(error);
         await input.onEvents?.([
-          runEvent({ id: modelIdValue, kind: "model_request", name: "responses.create", status: "failed", turnIndex, apiProvider, modelId, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode }, payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptIdentity, route) }),
+          runEvent({
+            id: modelIdValue,
+            kind: "model_request",
+            name: "responses.create",
+            status: "failed",
+            turnIndex,
+            apiProvider,
+            modelId,
+            startedAt: turnStartedAt,
+            completedAt,
+            errorCode,
+            summary: { error: errorCode, ...promptTelemetry },
+            payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptIdentity, route, {
+              promptTelemetry,
+              briefProvenance,
+              providerCapabilities: providerCapability.descriptor,
+              providerCapabilityCheck: providerCapability.check
+            })
+          }),
           runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "failed", turnIndex, startedAt: turnStartedAt, completedAt, errorCode, summary: { error: errorCode } })
         ]);
         throw classifyModelProviderError(error);
@@ -137,13 +218,26 @@ export class WebsiteManagerAgent {
       const responseUsage = usageForModel(modelId, response.usage, Date.now() - responseStartedAt);
       mergeUsage(usage, response.usage, startedAt, modelId);
       const calls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
+      const parallelToolViolation = calls.length > 1;
       const modelCompletedAt = new Date().toISOString();
       await input.onEvents?.([runEvent({
         id: modelIdValue, kind: "model_request", name: "responses.create", status: "succeeded", turnIndex,
         startedAt: turnStartedAt, completedAt: modelCompletedAt, ...usageFields(responseUsage, route, response),
-        summary: { outputItems: response.output.length, functionCalls: calls.length }, payload: modelTurnPayload(requestHistory, response, websiteManagerPromptIdentity, route)
+        summary: {
+          outputItems: response.output.length,
+          functionCalls: calls.length,
+          toolNames: calls.map((call) => call.name),
+          noToolResponse: calls.length === 0,
+          parallelToolViolation,
+          ...promptTelemetry
+        },
+        payload: modelTurnPayload(requestHistory, response, websiteManagerPromptIdentity, route, {
+          promptTelemetry,
+          briefProvenance,
+          providerCapabilities: providerCapability.descriptor,
+          providerCapabilityCheck: providerCapability.check
+        })
       })]);
-      history.push(...response.output as ResponseInputItem[]);
       await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
       if (responseUsage.costSource === "unavailable") {
         throw new SiteAuthoringTerminalError(
@@ -153,9 +247,24 @@ export class WebsiteManagerAgent {
           `cost_telemetry_unavailable:${apiProvider}:${modelId}`
         );
       }
+      if (parallelToolViolation) {
+        throw new SiteAuthoringTerminalError(
+          "unknown_internal_failure",
+          "provider",
+          false,
+          `provider_parallel_tool_call_violation:${apiProvider}:${modelId}:${calls.length}`
+        );
+      }
 
       if (!calls.length) {
-        history.push({ role: "user", type: "message", content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }] });
+        noToolResponses += 1;
+        history.noteNoToolResponse({
+          responseItems: [
+            ...response.output as ResponseInputItem[],
+            { role: "user", type: "message", content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }] }
+          ],
+          responseIndex: responseCount
+        });
         await input.onEvents?.([runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "succeeded", turnIndex, startedAt: turnStartedAt, completedAt: new Date().toISOString(), summary: { functionCalls: 0 } })]);
         continue;
       }
@@ -235,12 +344,44 @@ export class WebsiteManagerAgent {
           output: execution.diagnosticOutput
         };
         toolRecords.push(toolRecord);
+        const workspaceMutated = workspaceHashBefore !== workspaceHashAfter
+          || (toolName === "create_image" && status === "succeeded" && execution.diagnosticOutput.ok !== false);
+        const compactedRereadsBefore = history.compactedPathRereads();
+        const functionOutput: ResponseInputItem = {
+          type: "function_call_output",
+          call_id: rawCall.call_id,
+          output: execution.modelOutput as never
+        };
+        history.noteTool({
+          responseItems: response.output as ResponseInputItem[],
+          functionOutput,
+          responseIndex: responseCount,
+          callId: rawCall.call_id,
+          toolName: name ?? "list_files",
+          status,
+          arguments: parsedArguments,
+          diagnostic: execution.diagnosticOutput,
+          workspaceHashBefore,
+          workspaceHashAfter,
+          workspaceMutated
+        });
+        toolCallCounts.set(toolName, (toolCallCounts.get(toolName) ?? 0) + 1);
+        if (toolName === "build_preview" && status === "succeeded" && execution.diagnosticOutput.ok !== false && firstSuccessfulBuildMs === undefined) {
+          firstSuccessfulBuildMs = Date.now() - startedAt;
+        }
         await input.onEvents?.([runEvent({
           id: toolEventId, kind: managerOperationKind(toolName), name: toolName, status, turnIndex,
           startedAt: started, completedAt: toolRecord.completedAt,
           ...(metering ? toolMeteringFields(metering) : {}),
           errorCode: status === "failed" ? diagnosticErrorCode(execution.diagnosticOutput.error ?? "tool_failed") : undefined,
-          summary: { callId: rawCall.call_id, inputHash, outputHash, ok: execution.diagnosticOutput.ok, replayed },
+          summary: {
+            callId: rawCall.call_id,
+            inputHash,
+            outputHash,
+            ok: execution.diagnosticOutput.ok,
+            replayed,
+            compactedPathReread: history.compactedPathRereads() > compactedRereadsBefore
+          },
           payload: {
             arguments: parsedArguments,
             modelResult: readableModelResult(execution.modelOutput),
@@ -248,11 +389,8 @@ export class WebsiteManagerAgent {
             metering: metering ? { apiProvider: metering.apiProvider, modelId: metering.modelId, usage: metering.usage } : undefined
           }
         })]);
-        history.push({ type: "function_call_output", call_id: rawCall.call_id, output: execution.modelOutput as never });
         await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
         if (terminalError) throw terminalError;
-        const workspaceMutated = workspaceHashBefore !== workspaceHashAfter
-          || (toolName === "create_image" && status === "succeeded" && execution.diagnosticOutput.ok !== false);
         if (workspaceMutated || (isReleaseTool(toolName) && status === "succeeded")) {
           consecutiveFailureFingerprint = undefined;
           consecutiveIdenticalFailures = 0;
@@ -284,7 +422,14 @@ export class WebsiteManagerAgent {
             promptIdentity: websiteManagerPromptIdentity,
             usage: { ...usage, durationMs: Date.now() - startedAt },
             toolRecords,
-            responses: responseCount
+            responses: responseCount,
+            telemetry: {
+              firstSuccessfulBuildMs,
+              modelRequests: responseCount,
+              noToolResponses,
+              toolCalls: Object.fromEntries([...toolCallCounts.entries()].sort(([left], [right]) => left.localeCompare(right))),
+              compactedPathRereads: history.compactedPathRereads()
+            }
           };
         }
       }
@@ -305,11 +450,7 @@ export class WebsiteManagerAgent {
     const result = await structuredResponse({
       client: this.injectedClient ?? configuredResponsesClient(apiProvider), route, name: "manager_discussion", schema: managerDiscussionJsonSchema,
       system: websiteManagerSystemPrompt,
-      content: [{ type: "input_text", text: JSON.stringify({
-        role: "Discuss the requested change without modifying source. Be concise, state what would change, and identify unsupported capability requests. Speak in owner-facing page and section terms. Do not mention source paths, filenames, selectors, framework internals, internal error codes, or raw run telemetry.",
-        message: input.message, selection: input.selection, publicEvidencePacket: managerEvidencePacket(input.buildInput),
-        verticalContext: input.buildInput.domainContext, currentWorkspace: input.currentFiles?.length ? { files: input.currentFiles } : undefined
-      }) }],
+      content: [{ type: "input_text", text: JSON.stringify(createManagerDiscussionBrief(input)) }],
       signal: input.signal, maxOutputTokens: 2500
     });
     return { discussion: managerDiscussionSchema.parse(result.value), apiProvider, modelId, usage: result.usage };
@@ -370,7 +511,16 @@ function selectedSiteAgentRoute(configuredProvider: SiteAgentApiProvider, config
     throw new SiteAuthoringTerminalError("unknown_internal_failure", "platform", false, "site_agent_api_provider_invalid");
   }
   const modelId = process.env.LODESTA_SITE_AGENT_MODEL?.trim() || configuredModelId;
-  if (apiProvider.data === "openai" && !isSupportedSiteAgentModel(modelId)) {
+  return validatedSiteAgentRoute(apiProvider.data, modelId);
+}
+
+async function configuredSiteAgentRoute() {
+  const settings = await getSiteAuthoringModelSettings();
+  return selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
+}
+
+function validatedSiteAgentRoute(apiProvider: SiteAgentApiProvider, modelId: string) {
+  if (apiProvider === "openai" && !isSupportedSiteAgentModel(modelId)) {
     throw new SiteAuthoringTerminalError(
       "unknown_internal_failure",
       "platform",
@@ -378,7 +528,7 @@ function selectedSiteAgentRoute(configuredProvider: SiteAgentApiProvider, config
       `site_agent_model_pricing_missing:${modelId}`
     );
   }
-  if (apiProvider.data === "openrouter" && !modelId.includes("/")) {
+  if (apiProvider === "openrouter" && !modelId.includes("/")) {
     throw new SiteAuthoringTerminalError(
       "unknown_internal_failure",
       "platform",
@@ -386,17 +536,21 @@ function selectedSiteAgentRoute(configuredProvider: SiteAgentApiProvider, config
       `openrouter_model_slug_invalid:${modelId}`
     );
   }
-  return { apiProvider: apiProvider.data, modelId };
+  return { apiProvider, modelId };
 }
 
 function routedResponseParams(params: ResponseCreateParamsNonStreaming, apiProvider: SiteAgentApiProvider, sessionId?: string) {
+  void establishProviderAuthoringCapabilities(apiProvider, String(params.model));
   if (apiProvider !== "openrouter") return params;
+  const {
+    include: _include,
+    ...portableParams
+  } = params;
   return {
-    ...params,
+    ...portableParams,
     provider: {
       data_collection: "deny",
-      zdr: true,
-      require_parameters: true
+      zdr: true
     },
     ...(sessionId ? { session_id: sessionId.slice(0, 256) } : {})
   } as ResponseCreateParamsNonStreaming;
@@ -572,7 +726,13 @@ function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputIte
   return { role: "user", type: "message", content: [{ type: "input_text", text: `Current deterministic workspace state:\n${JSON.stringify(summary)}` }] };
 }
 
-function modelTurnPayload(history: ResponseInputItem[], response: ManagerResponse | undefined, promptIdentity: string, route: { apiProvider: SiteAgentApiProvider; modelId: string }) {
+function modelTurnPayload(
+  history: ResponseInputItem[],
+  response: ManagerResponse | undefined,
+  promptIdentity: string,
+  route: { apiProvider: SiteAgentApiProvider; modelId: string },
+  telemetry: Record<string, unknown>
+) {
   return {
     request: {
       promptIdentity,
@@ -583,7 +743,8 @@ function modelTurnPayload(history: ResponseInputItem[], response: ManagerRespons
       parallelToolCalls: false,
       store: false,
       reasoningEffort: siteAgentReasoningEffort,
-      textVerbosity: siteAgentTextVerbosity
+      textVerbosity: siteAgentTextVerbosity,
+      ...telemetry
     },
     response: response ? { status: response.status, error: response.error, incompleteDetails: response.incomplete_details, output: response.output, outputText: response.output_text } : undefined
   };

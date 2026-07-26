@@ -22,7 +22,7 @@ jobs:
       && github.event.workflow_run.head_branch == 'main')
       || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -48,7 +48,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            workers/site-sandbox/scaffold/package-lock.json
       - run: npm ci
+      - run: npm ci --prefix workers/site-sandbox/scaffold --ignore-scripts --no-audit --no-fund
       - run: npm install --global @railway/cli@5.28.1
 
       - name: Record immutable release
@@ -70,13 +74,8 @@ jobs:
       - name: Preflight verification
         run: |
           set -Eeuo pipefail
-          npm run typecheck
-          npm run verify:site-sandbox-manifest
-          npm run verify:release-evidence
-          npm run verify:deployment-config
-          npm run verify:authoring
-          npm run verify:health
-          npm run verify:site-sandbox-local
+          npm run verify:static
+          npm run verify:sandbox
 
       - name: Capture current production pair
         id: capture
@@ -128,7 +127,16 @@ jobs:
 
       - name: Acquire authoring maintenance
         id: maintenance
-        run: npm run maintenance:site-authoring -- acquire --minutes=60
+        if: steps.capture.outputs.deploy_needed == 'true'
+        run: npm run maintenance:site-authoring -- acquire --minutes=90 --draining
+
+      - name: Drain active authoring
+        if: steps.capture.outputs.deploy_needed == 'true'
+        run: npm run maintenance:site-authoring -- wait-active --timeout-minutes=75
+
+      - name: Renew authoring maintenance after drain
+        if: steps.capture.outputs.deploy_needed == 'true'
+        run: npm run maintenance:site-authoring -- renew --minutes=60
 
       - name: Deploy Cloudflare sandbox
         id: cloudflare
@@ -253,7 +261,9 @@ jobs:
       - name: Release authoring maintenance
         run: |
           set -Eeuo pipefail
-          npm run maintenance:site-authoring -- release
+          if [ "${{ steps.capture.outputs.deploy_needed }}" = "true" ]; then
+            npm run maintenance:site-authoring -- release
+          fi
           touch "$EVIDENCE_DIR/release-succeeded"
 
       - name: Automatically restore Cloudflare before Railway switches

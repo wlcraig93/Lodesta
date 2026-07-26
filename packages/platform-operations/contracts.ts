@@ -2,6 +2,7 @@ export type WebsiteSetupStatus = "queued" | "processing" | "linked" | "failed" |
 
 export type WebsiteSetupFailureCode =
   | "source_invalid"
+  | "source_unsuitable"
   | "crawl_temporarily_unavailable"
   | "crawl_robots_disallowed"
   | "crawl_unsupported_content"
@@ -15,6 +16,8 @@ export type WebsiteSetup = {
   sourceUrl: string;
   normalizedSource: string;
   reportingTimezone: string;
+  initialBuildApiProvider?: "openrouter";
+  initialBuildModelId?: string;
   sourceRevision: number;
   status: WebsiteSetupStatus;
   siteId?: string;
@@ -37,6 +40,8 @@ export type CreateWebsiteSetupInput = {
   sourceUrl: string;
   normalizedSource: string;
   reportingTimezone: string;
+  initialBuildApiProvider: "openrouter";
+  initialBuildModelId: string;
   idempotencyKey: string;
   creationRequestHash: string;
 };

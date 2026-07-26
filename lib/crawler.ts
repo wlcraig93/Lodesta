@@ -1331,7 +1331,7 @@ function extractVisibleServiceAreas(html: string) {
       .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
       .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
     for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
-      const area = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?(?:greater\s+)?/i, "").trim();
+      const area = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?/i, "").trim();
       if (!area || !plausibleVisibleServiceArea(area)) continue;
       values.push(area);
     }

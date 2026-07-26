@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { isContinuousAvailabilityValue as controllerAvailability } from "../packages/business-data/availability";
 import { sitePublicBuildInputSchema, sourceSnapshotSchema, type SitePublicBuildInput } from "../packages/site-contracts";
+import { continuousAvailabilityConformanceVectors } from "../packages/site-contracts/availability-conformance";
 import {
   agentAuthoredArtifactSchema,
   normalizeAgentAuthoredArtifact,
@@ -10,11 +12,19 @@ import {
 import { expectedSiteSandboxManifest } from "../packages/site-contracts/platform-manifest";
 import {
   classifySiteAuthoringFailure,
-  createAuthoringContextPacket,
+  createSiteAuthoringBrief,
+  authoringBriefCharacters,
+  targetAuthoringBriefCharacters,
   SiteAuthoringTerminalError,
   validateWorkspaceSourcePolicy
 } from "../packages/site-agent";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { isContinuousAvailabilityValue as sandboxAvailability } from "../workers/site-sandbox/scaffold/platform/presentation";
+
+for (const vector of continuousAvailabilityConformanceVectors) {
+  assert.equal(controllerAvailability(vector.value), vector.continuous, `Controller availability parser drifted for ${vector.value}.`);
+  assert.equal(sandboxAvailability(vector.value), vector.continuous, `Sandbox availability parser drifted for ${vector.value}.`);
+}
 
 const input = buildSyntheticSiteInput();
 const name = input.publicFacts.find((fact) => fact.kind === "business_name")!;
@@ -308,18 +318,18 @@ const structuredContextSnapshot = sourceSnapshotSchema.parse({
     }
   }
 });
-const structuredContext = createAuthoringContextPacket({ buildInput: input, snapshots: [structuredContextSnapshot] });
-assert.equal(structuredContext.serviceBriefs[0]?.name, "Collision Repair");
-assert.deepEqual(structuredContext.serviceBriefs[0]?.sourceWording, ["Collision Repair"]);
-assert.deepEqual(structuredContext.serviceBriefs[0]?.evidence.map((block) => block.id).sort(), ["service_block_1", "service_block_2"]);
+const structuredContext = createSiteAuthoringBrief({ buildInput: input, snapshots: [structuredContextSnapshot] });
+assert.equal(structuredContext.services[0]?.name, "Collision Repair");
+assert.deepEqual(structuredContext.services[0]?.sourceWording, ["Collision Repair"]);
+assert.deepEqual(structuredContext.services[0]?.evidence.map((block) => block.id).sort(), ["service_block_1", "service_block_2"]);
 assert(!structuredContext.evidenceGaps.missing.includes("service_detail"), "Two source-backed service blocks were still reported as a service-detail evidence gap.");
-assert(structuredContext.supplementalContext.blocks.some((block) => block.id === "home_block_1"), "General first-party context disappeared when service briefs were structured.");
-const contextPacket = createAuthoringContextPacket({ buildInput: input, snapshots: [websiteSnapshot] });
-assert(contextPacket.truncated, "optional authoring blocks did not truncate at the packet boundary");
-assert.equal(contextPacket.supplementalContext.blocks.length, 1, "authoring packet truncated inside or after the wrong block");
-assert(!JSON.stringify(contextPacket).includes("canonicalTokens"), "authoring packet retained token-offset arrays");
+assert(structuredContext.evidence.supplementalBlocks.some((block) => block.id === "home_block_1"), "General first-party context disappeared when service briefs were structured.");
+const contextPacket = createSiteAuthoringBrief({ buildInput: input, snapshots: [websiteSnapshot] });
+assert(authoringBriefCharacters(contextPacket) <= targetAuthoringBriefCharacters, "authoring brief exceeded its normal prompt target");
+assert(!JSON.stringify(contextPacket).includes("A".repeat(10_000)), "authoring brief retained an unbounded source block");
+assert(!JSON.stringify(contextPacket).includes("canonicalTokens"), "authoring brief retained token-offset arrays");
 assert.throws(
-  () => createAuthoringContextPacket({
+  () => createSiteAuthoringBrief({
     buildInput: {
       ...input,
       intent: { ...input.intent, positioning: "x".repeat(170_000) }

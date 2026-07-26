@@ -17,6 +17,8 @@ The direct OpenAI website-manager picker intentionally exposes the canonical GPT
 
 The `gpt-5.6` alias is not separately listed because it routes to `gpt-5.6-sol`; Lodesta stores the canonical model ID.
 
+During the pre-launch comparison experiment, private website setup uses an authenticated, searchable OpenRouter catalog for the initial website-manager build. The catalog is scoped to text models available to Lodesta’s OpenRouter account and only exposes concrete models that advertise tool calls, tool choice, reasoning, and structured-output support. Mutable `~provider/*-latest` aliases and OpenRouter’s virtual auto/free routers are omitted because they do not identify one stable comparison model. Setup retains both `openrouter` and the exact provider-qualified model ID, pins that route on the queued run, and shows the model as initial-build provenance on the Websites page. Business ingestion remains on the operator-configured ingestion model, and later owner edits continue to use the active website-manager setting, so the control isolates the first authoring pass rather than changing the entire pipeline.
+
 Adding OpenRouter does not change an active route. An operator must configure `OPENROUTER_API_KEY` and explicitly save `openrouter` plus a provider-qualified model slug in **Operator settings → Runtime settings**. `LODESTA_SITE_AGENT_PROVIDER` and `LODESTA_SITE_AGENT_MODEL` remain operator-only environment overrides.
 
 ## Request policy

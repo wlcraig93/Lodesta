@@ -38,6 +38,7 @@ export interface ExternalAuthoringRepository {
   expireExecutionDeadlines(at: string): Promise<string[]>;
   getExecution(executionId: string): Promise<ExternalAuthoringExecution | null>;
   getExecutionForRun(runId: string): Promise<ExternalAuthoringExecution | null>;
+  listExecutionsByStatuses(statuses: ExternalAuthoringExecution["status"][], limit?: number): Promise<ExternalAuthoringExecution[]>;
   claimNext(input: {
     claimId: string;
     bindingId: string;
@@ -236,6 +237,13 @@ export class LocalExternalAuthoringRepository implements ExternalAuthoringReposi
   }
   async getExecution(executionId: string) { return clone((await this.read()).executions[executionId] ?? null); }
   async getExecutionForRun(runId: string) { return clone(Object.values((await this.read()).executions).find((item) => item.runId === runId) ?? null); }
+  async listExecutionsByStatuses(statuses: ExternalAuthoringExecution["status"][], limit = 100) {
+    return Object.values((await this.read()).executions)
+      .filter((execution) => statuses.includes(execution.status))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .slice(0, Math.max(1, Math.min(limit, 1000)))
+      .map(clone);
+  }
   async claimNext(input: {
     claimId: string;
     bindingId: string;
@@ -497,6 +505,15 @@ class SupabaseExternalAuthoringRepository implements ExternalAuthoringRepository
   }
   async getExecution(executionId: string) { const row = await maybe<Record<string, unknown>>(this.client.from("external_authoring_executions").select("*").eq("id", executionId).maybeSingle(), "Get external execution"); return row ? executionFromRow(row) : null; }
   async getExecutionForRun(runId: string) { const row = await maybe<Record<string, unknown>>(this.client.from("external_authoring_executions").select("*").eq("run_id", runId).maybeSingle(), "Get run external execution"); return row ? executionFromRow(row) : null; }
+  async listExecutionsByStatuses(statuses: ExternalAuthoringExecution["status"][], limit = 100) {
+    if (!statuses.length) return [];
+    const rows = await data<Record<string, unknown>[]>(this.client.from("external_authoring_executions")
+      .select("*")
+      .in("status", statuses)
+      .order("created_at", { ascending: true })
+      .limit(Math.max(1, Math.min(limit, 1000))), "List external authoring executions by status");
+    return rows.map(executionFromRow);
+  }
   async claimNext(input: { claimId: string; bindingId: string; workerKeyHash: string; capabilityHash: string; leaseExpiresAt: string; deadlineAt: string }) {
     const row = await maybe<{ claimId: string; executionId: string; leaseGeneration: number; reattached: boolean }>(this.client.rpc("claim_next_external_authoring", {
       target_claim_id: input.claimId,

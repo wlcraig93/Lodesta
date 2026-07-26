@@ -56,9 +56,10 @@ assert(shell.includes("data-sidebar-tooltip") && css.includes("content: attr(dat
 assert(css.includes(".owner-workspace-sidebar { position: relative; z-index: 80;") && css.includes("overflow: visible"), "Desktop sidebar overlays are still clipped by the navigation rail");
 assert(css.includes(".owner-workspace-sidebar .account-menu-popover { z-index: 100;") && css.includes("left: calc(100% + 18px)"), "Desktop account options do not overlay the page");
 assert(shell.includes('pathname.startsWith(`${editorHref}/`)') && shell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Editor routes do not opt into the focused editor shell");
-assert(shell.includes("focusedSetup") && shell.includes('^\\/account\\/onboarding\\/[^/]+\\/?$'), "Setup-detail routes do not opt into the focused workspace shell");
+assert(shell.includes('context.kind === "setup"') && shell.includes("owner-workspace-nav-current"), "Setup-detail routes do not opt into the focused provisional editor shell");
 assert(shell.includes("const compactNavigation = focusedEditor || (ready && collapsed)") && shell.includes("{!focusedEditor ? ("), "Focused editor navigation does not stay compact independently of the saved dashboard preference");
 assert(shell.includes("compact={compactNavigation}") && shell.includes('data-sidebar-tooltip={focusedEditor ? "All websites"'), "Focused editor rail does not retain compact site, account, and account-home access");
+assert(shell.indexOf('"Business details"') < shell.indexOf('"Website settings"') && shell.includes("SlidersIcon") && !shell.includes("owner-workspace-settings-link"), "Website settings are not normalized in the main website navigation.");
 assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] .owner-workspace-brand') && css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused editor shell does not expose the compact desktop rail and mobile editor takeover");
 assert(css.includes(".site-agent-mobile-back") && css.includes(".site-agent-publish-mobile"), "Mobile editor topbar does not carry navigation and publishing");
 
@@ -91,7 +92,7 @@ assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not pro
 assert(agentSessionRoute.includes("runs: runs.map(ownerSiteAgentRun)"), "Owner workspace API exposes raw agent-run telemetry.");
 assert(!agentRetryRoute.includes("failureCode"), "Owner retry API exposes internal failure diagnostics.");
 assert(!agentWorkspace.includes("failureReason") && !agentWorkspace.includes("estimatedCostUsd") && !agentWorkspace.includes("costUsd"), "Owner website workspace exposes internal failure or cost diagnostics.");
-assert(agentWorkspace.includes("failedRun.retryableByOwner") && ownerRunView.includes("You do not need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
+assert(agentWorkspace.includes('run.status !== "failed" || !run.retryableByOwner') && ownerRunView.includes("You do not need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
 for (const failureCode of ["authoring_stalled", "cost_limit_exhausted", "cost_telemetry_unavailable", "browser_verification_unavailable", "deadline_exhausted", "platform_version_mismatch"]) {
   assert(ownerRunView.includes(failureCode), `Owner failure UI does not explain ${failureCode}.`);
   assert(adminRunTelemetry.includes(failureCode), `Admin run UI does not provide recovery guidance for ${failureCode}.`);

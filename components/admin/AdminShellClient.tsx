@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AccountActionList, AccountIdentity, AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import { ThemePreferenceControl } from "@/components/ThemePreferenceControl";
 
-type AdminIconName = "sites" | "queue" | "authoring" | "outbound" | "settings" | "assessments" | "activity";
+type AdminIconName = "sites" | "queue" | "authoring" | "outbound" | "settings" | "assessments" | "activity" | "bakeoff";
 type AdminNavItem = { href: string; label: string; icon: AdminIconName };
 type AdminNavGroup = { label: string; items: AdminNavItem[] };
 
@@ -29,6 +29,7 @@ const navigation: AdminNavGroup[] = [
   {
     label: "Debug",
     items: [
+      { href: "/model-bakeoffs", label: "Model bake-offs", icon: "bakeoff" },
       { href: "/admin/assessments", label: "Assessments", icon: "assessments" },
       { href: "/admin/runs", label: "Activity", icon: "activity" }
     ]
@@ -38,7 +39,7 @@ const navigation: AdminNavGroup[] = [
 const mobilePrimary = [
   navigation[0].items[0],
   navigation[0].items[1],
-  navigation[2].items[1]
+  navigation[2].items[2]
 ];
 const ADMIN_SHELL_STORAGE_KEY = "lodesta:admin-shell";
 
@@ -215,6 +216,7 @@ function isActivePath(pathname: string, href: string) {
   if (href === "/settings") return pathname === href || pathname.startsWith("/settings/");
   if (href === "/outbound") return pathname === href || pathname.startsWith("/outbound/");
   if (href === "/authoring-batches") return pathname === href || pathname.startsWith("/authoring-batches/");
+  if (href === "/model-bakeoffs") return pathname === href || pathname.startsWith("/model-bakeoffs/");
   return pathname === href;
 }
 
@@ -225,6 +227,7 @@ function AdminIcon({ name }: { name: AdminIconName }) {
   if (name === "settings") return <Icon><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6.2L14.7 3h-5.4L9 6.2a8 8 0 0 0-1.5.9l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.5.9l.3 3.2h5.4l.3-3.2a8 8 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></Icon>;
   if (name === "assessments") return <Icon><path d="M4 19V5h16v14zM8 15l2.5-3 2 2 3.5-5" /></Icon>;
   if (name === "activity") return <Icon><path d="M3 12h4l2-6 4 12 2-6h6" /></Icon>;
+  if (name === "bakeoff") return <Icon><path d="M4 19h16M6 16V8h5v8M13 16V4h5v12M5 8h7M12 4h7" /></Icon>;
   return <Icon><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></Icon>;
 }
 

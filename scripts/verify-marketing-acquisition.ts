@@ -105,6 +105,7 @@ const publicReport = {
 try {
   server = spawn("npm", ["run", "dev:raw", "--", "-p", String(port), "-H", "127.0.0.1"], {
     cwd: process.cwd(),
+    detached: process.platform !== "win32",
     env: {
       ...process.env,
       LODESTA_REQUIRE_AUTH: "false",
@@ -350,7 +351,7 @@ try {
   }) + "\n");
 } finally {
   await browser?.close();
-  server?.kill("SIGTERM");
+  await stopServer();
 }
 
 async function waitForServer() {
@@ -371,4 +372,37 @@ async function assertEventually(check: () => Promise<boolean>, message: string) 
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(message);
+}
+
+async function stopServer() {
+  if (!server || server.exitCode !== null) return;
+  terminateServer("SIGTERM");
+  if (await waitForServerExit(5_000)) return;
+  terminateServer("SIGKILL");
+  await waitForServerExit(5_000);
+}
+
+function terminateServer(signal: NodeJS.Signals) {
+  if (!server?.pid) return;
+  try {
+    if (process.platform === "win32") server.kill(signal);
+    else process.kill(-server.pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+function waitForServerExit(timeoutMs: number) {
+  if (!server || server.exitCode !== null) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      server?.off("exit", onExit);
+      resolve(false);
+    }, timeoutMs);
+    server.once("exit", onExit);
+  });
 }

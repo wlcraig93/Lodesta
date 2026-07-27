@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import type { ArtifactBlobStore, BlobListInput, ImmutableBlob } from "../packages/site-artifacts/blob-store";
 import {
   BrowserVerificationUnavailableError,
+  createInspectionIdentity,
+  normalizeInspectionFindings,
   prepareSiteArtifact,
   runArtifactBrowserGate
 } from "../packages/site-verification";
@@ -76,6 +78,34 @@ const browser = await runArtifactBrowserGate({
   blobStore: new MemoryBlobStore(),
   capturePrefix: "verification/site-authoring-render"
 });
+const repeatedBrowser = await runArtifactBrowserGate({
+  prepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-repeat"
+});
+assert.deepEqual(
+  normalizeInspectionFindings(repeatedBrowser.findings),
+  normalizeInspectionFindings(browser.findings),
+  "Verifier findings changed for identical prepared input."
+);
+const deterministicInspectionContext = {
+  purpose: "browser-verifier-determinism",
+  publicBuildInputHash: buildInput.inputHash
+};
+assert.equal(
+  createInspectionIdentity({
+    context: deterministicInspectionContext,
+    findings: browser.findings,
+    captures: browser.captures
+  }),
+  createInspectionIdentity({
+    context: deterministicInspectionContext,
+    findings: repeatedBrowser.findings,
+    captures: repeatedBrowser.captures
+  }),
+  "Verifier inspection identity changed for identical prepared input."
+);
 const browserErrors = browser.findings.filter((finding) => finding.severity === "error");
 assert.equal(browserErrors.length, 0, browserErrors.map((finding) => `${finding.route ?? "/"} ${finding.id}: ${finding.message}`).join("\n"));
 assert(!browser.findings.some((finding) => finding.id === "render.escaped_entity"), "A normal React numeric-entity round trip became visible entity source.");

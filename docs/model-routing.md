@@ -17,7 +17,7 @@ The direct OpenAI website-manager picker intentionally exposes the canonical GPT
 
 The `gpt-5.6` alias is not separately listed because it routes to `gpt-5.6-sol`; Lodesta stores the canonical model ID.
 
-During the pre-launch comparison experiment, private website setup uses an authenticated, searchable OpenRouter catalog for the initial website-manager build. The catalog is scoped to text models available to Lodesta’s OpenRouter account and only exposes concrete models that advertise tool calls, tool choice, reasoning, and structured-output support. Mutable `~provider/*-latest` aliases and OpenRouter’s virtual auto/free routers are omitted because they do not identify one stable comparison model. Setup retains both `openrouter` and the exact provider-qualified model ID, pins that route on the queued run, and shows the model as initial-build provenance on the Websites page. Business ingestion remains on the operator-configured ingestion model, and later owner edits continue to use the active website-manager setting, so the control isolates the first authoring pass rather than changing the entire pipeline.
+Owner onboarding is model-agnostic. The website-manager workflow resolves the canonical configured creation route server-side, and the resulting run retains provider and model provenance for operators. Owners direct the website outcome; model-provider configuration remains on operator surfaces and in dedicated model bake-off tooling.
 
 Adding OpenRouter does not change an active route. An operator must configure `OPENROUTER_API_KEY` and explicitly save `openrouter` plus a provider-qualified model slug in **Operator settings → Runtime settings**. `LODESTA_SITE_AGENT_PROVIDER` and `LODESTA_SITE_AGENT_MODEL` remain operator-only environment overrides.
 
@@ -33,17 +33,25 @@ The model ID does not encode reasoning effort or output verbosity. Website-manag
 
 The authoring loop manually replays the full response history, including encrypted reasoning content, so it can preserve reasoning while using `store: false`. Programmatic Tool Calling and GPT-5.6 multi-agent mode are not enabled.
 
-OpenRouter website-manager requests use its OpenAI-compatible Responses endpoint. Each request:
+OpenRouter authoring is restricted to route/transport pairs that Lodesta has probed with the production tool schema, privacy policy, cost telemetry, and caching behavior:
 
-- sends the complete stateless manager history;
+- `anthropic/claude-opus-5` uses OpenRouter's native Anthropic Messages endpoint. Internal stable and rolling cache markers become native Anthropic `cache_control` blocks, strict tools use the Anthropic structured-output beta, and signed thinking blocks are replayed exactly.
+- `moonshotai/kimi-k3` uses OpenRouter's Responses endpoint and Moonshot's provider-managed prefix caching. Anthropic-only cache controls and headers are not sent.
+
+Both routes:
+
+- send the complete append-only, stateless manager history;
 - uses the run ID as the OpenRouter session key for upstream affinity and prompt-cache locality;
-- requires an upstream that supports the request parameters;
-- denies data-collection endpoints and requires zero-data-retention routing;
-- enables OpenRouter routing metadata for provider attribution.
+- deny data-collection endpoints and require zero-data-retention routing;
+- restrict routing to the route descriptor's established ZDR-capable upstreams;
+- require provider-reported usage and cost on every response;
+- retain OpenRouter routing metadata for provider attribution.
 
-The website manager does not configure cross-model fallbacks or pin an upstream provider. OpenRouter may choose or fail over among compatible upstream endpoints for the one requested model. Because authoring requests include tools, OpenRouter's default Auto Exacto routing favors endpoints with stronger tool-calling and throughput signals. Lodesta does not force `provider.sort: "price"`; its privacy and parameter-compatibility filters apply before OpenRouter routes the request.
+Production authoring does not pin one upstream: OpenRouter may choose or fail over only among the established upstreams for the exact requested model. An upstream change is recorded as a routing diagnostic, not treated as a model change. Transport probes pin one upstream and disable fallbacks so cache and tool behavior can be attributed to a single endpoint.
 
-OpenRouter documents its Responses API as beta. Treat switching an active model route as an operator rollout: exercise the exact model’s tool calling, structured output, encrypted reasoning, context length, output-token limits, and cost reporting before changing the setting.
+`provider.require_parameters` is deliberately omitted. OpenRouter's Responses route excluded otherwise viable tool-capable Bedrock endpoints when it was enabled, and the Anthropic Messages transport establishes strict tool behavior directly. Adding an OpenRouter model requires a route descriptor plus a retained transport and warm-cache probe; unestablished catalog models are not selectable.
+
+OpenRouter documents its Responses API as beta. Treat switching an active model route as an operator rollout: exercise the exact model and transport's tool calling, structured output, reasoning replay, context length, output-token limits, cost reporting, and warm-cache behavior before changing the setting.
 
 Authoring runs do not have cumulative input or output token budgets. Initial builds have a 60-minute absolute deadline and $15 metered-cost fuse; edits and rebases have a 25-minute deadline and $8 fuse. Research, Responses API authoring, and GPT Image asset generation count toward the same fuse. A successful final response is retained even when it crosses the fuse, but no additional model request begins afterward. Three consecutive identical deterministic release failures stop the run.
 
@@ -82,6 +90,7 @@ GPT Image 2 uses the Image API's returned token breakdown and the local standard
 - [OpenAI image-generation cost guidance](https://developers.openai.com/api/docs/guides/image-generation#cost-and-latency)
 - [OpenAI API pricing](https://openai.com/api/pricing/)
 - [OpenRouter Responses API](https://openrouter.ai/docs/api_reference/responses/overview)
+- [OpenRouter Anthropic Messages API](https://openrouter.ai/docs/api-reference/anthropic-messages/create-messages)
 - [OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting)
 - [OpenRouter provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
 - [OpenRouter Auto Exacto](https://openrouter.ai/docs/guides/routing/auto-exacto)

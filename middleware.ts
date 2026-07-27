@@ -22,6 +22,7 @@ const skippedPrefixes = [
   "/crawl-fixtures/",
   "/workspace/",
   "/outbound",
+  "/model-bakeoffs",
   "/admin/",
   "/account",
   "/favicon.ico"

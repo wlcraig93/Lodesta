@@ -25,10 +25,12 @@ const claimLeaseMs = 20 * 60_000;
 const executionDeadlineMs = 2 * 60 * 60_000;
 const workspaceToolNames = [
   "list_files",
-  "read_file",
+  "search_files",
+  "read_files",
   "write_file",
   "delete_file",
   "apply_patch",
+  "edit_file",
   "build_preview",
   "inspect_site",
   "request_input",

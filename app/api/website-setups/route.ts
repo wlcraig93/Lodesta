@@ -1,12 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import { isSelectableSiteCreationModel } from "@/lib/site-creation-model-catalog";
-import { ModelCatalogConfigurationError } from "@/lib/model-catalog";
-import {
-  isSiteCreationModelId,
-  SITE_CREATION_API_PROVIDER
-} from "@/lib/site-creation-models";
 import { sha256, stableJson } from "@/packages/business-data";
 import { processWebsiteSetupAndRun } from "@/lib/website-setup-jobs";
 import { getWebsiteSetupView, validateWebsiteSetupSource } from "@/lib/website-setups";
@@ -24,7 +18,7 @@ function validTimezone(value: string) {
 
 const createSchema = z.object({
   sourceUrl: z.string().trim().min(1).max(2048),
-  initialBuildModelId: z.string().trim().min(3).max(120).refine(isSiteCreationModelId),
+  prospectReportId: z.string().regex(/^prospect_report_[a-f0-9]{32}$/i).optional(),
   idempotencyKey: z.string().trim().min(8).max(160),
   confirmDuplicate: z.boolean().optional(),
   reportingTimezone: z.string().min(1).max(100).refine(validTimezone, "Enter a valid IANA timezone.")
@@ -46,21 +40,23 @@ export async function POST(request: Request) {
   if (!auth.ok) return applyRateLimitHeaders(auth.response, limit);
   const parsed = createSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    const invalidModel = parsed.error.issues.some((issue) => issue.path[0] === "initialBuildModelId");
     return applyRateLimitHeaders(NextResponse.json({
-      error: invalidModel ? "Choose a valid OpenRouter model." : "Enter a valid website address.",
+      error: "Enter a valid website address.",
       issues: parsed.error.issues
     }, { status: 400 }), limit);
   }
 
   const source = await validateWebsiteSetupSource(parsed.data.sourceUrl);
   if (!source.ok) return applyRateLimitHeaders(NextResponse.json({ error: source.error }, { status: 400 }), limit);
+  const prospectReportId = parsed.data.prospectReportId
+    && await platformOperationsRepository.getProspectReport(parsed.data.prospectReportId)
+    ? parsed.data.prospectReportId
+    : undefined;
 
   const creationRequestHash = sha256(stableJson({
     normalizedSource: source.normalizedSource,
     reportingTimezone: parsed.data.reportingTimezone,
-    initialBuildApiProvider: SITE_CREATION_API_PROVIDER,
-    initialBuildModelId: parsed.data.initialBuildModelId
+    prospectReportId
   }));
   const setups = await platformOperationsRepository.listWebsiteSetupsForOwner(auth.user.id);
   const idempotent = setups.find((setup) => setup.idempotencyKey === parsed.data.idempotencyKey);
@@ -75,24 +71,6 @@ export async function POST(request: Request) {
       after(async () => { await processWebsiteSetupAndRun(idempotent.id, `website_setup_request_${idempotent.id}`); });
     }
     return applyRateLimitHeaders(NextResponse.json({ view: await getWebsiteSetupView(idempotent), existing: true }), limit);
-  }
-
-  try {
-    if (!await isSelectableSiteCreationModel(parsed.data.initialBuildModelId)) {
-      return applyRateLimitHeaders(NextResponse.json({
-        error: "Choose a model from the current OpenRouter catalog."
-      }, { status: 400 }), limit);
-    }
-  } catch (error) {
-    if (error instanceof ModelCatalogConfigurationError) {
-      return applyRateLimitHeaders(NextResponse.json({
-        error: "OpenRouter is not configured for website creation."
-      }, { status: 503 }), limit);
-    }
-    console.warn(`Unable to validate the website-creation model: ${error instanceof Error ? error.message : String(error)}`);
-    return applyRateLimitHeaders(NextResponse.json({
-      error: "The OpenRouter model catalog is unavailable. Try again."
-    }, { status: 502 }), limit);
   }
 
   const sites = await sitePlatformRepository.getSitesByOwnerUserId(auth.user.id);
@@ -139,8 +117,7 @@ export async function POST(request: Request) {
       ownerUserId: auth.user.id,
       sourceUrl: source.url,
       normalizedSource: source.normalizedSource,
-      initialBuildApiProvider: SITE_CREATION_API_PROVIDER,
-      initialBuildModelId: parsed.data.initialBuildModelId,
+      prospectReportId,
       idempotencyKey: parsed.data.idempotencyKey,
       creationRequestHash,
       reportingTimezone: parsed.data.reportingTimezone

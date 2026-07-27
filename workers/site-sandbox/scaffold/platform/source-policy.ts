@@ -146,18 +146,37 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
       if (forbiddenJsxElements.has(tag)) {
         add("executable_markup", `Generated source uses forbidden <${tag}> markup; document metadata and executable resources are platform-owned.`);
       }
+      if (isIntrinsicJsxTag(node.tagName)) {
+        for (const attribute of node.attributes.properties) {
+          if (ts.isJsxSpreadAttribute(attribute)) continue;
+          const attributeName = attribute.name.getText(source).toLowerCase();
+          if (attributeName === "dangerouslysetinnerhtml") {
+            add(
+              "executable_markup",
+              `Generated source uses forbidden ${JSON.stringify(attributeName)} on intrinsic <${tag}> markup.`
+            );
+          }
+        }
+      }
     }
-    if (
-      ts.isCallExpression(node)
-      && ts.isPropertyAccessExpression(node.expression)
-      && ts.isIdentifier(node.expression.expression)
-      && node.expression.expression.text === "React"
-      && node.expression.name.text === "createElement"
-      && node.arguments[0]
-      && ts.isStringLiteralLike(node.arguments[0])
-      && forbiddenJsxElements.has(node.arguments[0].text.toLowerCase())
-    ) {
-      add("executable_markup", `Generated source uses forbidden <${node.arguments[0].text.toLowerCase()}> markup; document metadata and executable resources are platform-owned.`);
+    if (isReactCreateElement(node) && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
+      const tag = node.arguments[0].text.toLowerCase();
+      if (forbiddenJsxElements.has(tag)) {
+        add("executable_markup", `Generated source uses forbidden <${tag}> markup; document metadata and executable resources are platform-owned.`);
+      }
+      const properties = node.arguments[1];
+      if (properties && properties.kind !== ts.SyntaxKind.NullKeyword && !isUndefinedIdentifier(properties) && ts.isObjectLiteralExpression(properties)) {
+        for (const property of properties.properties) {
+          if (ts.isSpreadAssignment(property)) continue;
+          const propertyName = property.name ? staticPropertyName(property.name) : undefined;
+          if (propertyName?.toLowerCase() === "dangerouslysetinnerhtml") {
+            add(
+              "executable_markup",
+              `Generated source uses forbidden property ${JSON.stringify(propertyName)} in React.createElement(${JSON.stringify(tag)}).`
+            );
+          }
+        }
+      }
     }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       add("dynamic_import", "Generated source uses forbidden dynamic import behavior.");
@@ -190,6 +209,28 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
   };
   visit(source);
   return findings;
+}
+
+function isIntrinsicJsxTag(tag: ts.JsxTagNameExpression) {
+  return ts.isIdentifier(tag) && /^[a-z]/.test(tag.text);
+}
+
+function isReactCreateElement(node: ts.Node): node is ts.CallExpression {
+  return ts.isCallExpression(node)
+    && ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.expression)
+    && node.expression.expression.text === "React"
+    && node.expression.name.text === "createElement";
+}
+
+function isUndefinedIdentifier(node: ts.Expression) {
+  return ts.isIdentifier(node) && node.text === "undefined";
+}
+
+function staticPropertyName(node: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(node) || ts.isStringLiteralLike(node) || ts.isNumericLiteral(node)) return node.text;
+  if (ts.isComputedPropertyName(node)) return staticString(node.expression);
+  return undefined;
 }
 
 function isAllowedSourcePath(path: string) {

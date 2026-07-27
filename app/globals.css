@@ -1697,6 +1697,21 @@ textarea {
   padding: 15px;
 }
 
+.outbound-report-actions {
+  display: grid;
+  gap: var(--product-space-5);
+  margin-top: var(--product-space-10);
+  padding-top: var(--product-space-10);
+  border-top: 1px solid var(--product-color-border-subtle);
+}
+
+.admin-inline-status {
+  margin: 0;
+  color: var(--product-color-text-muted);
+  font-size: var(--product-font-size-meta);
+  line-height: var(--product-line-height-body);
+}
+
 .muted {
   color: var(--product-color-text-muted);
 }
@@ -9583,4 +9598,931 @@ input[aria-invalid="true"]:focus-visible,
 textarea[aria-invalid="true"]:focus-visible,
 .product-select[aria-invalid="true"]:focus-visible {
   box-shadow: 0 0 0 3px var(--product-color-error-surface);
+}
+/* Lodesta marketing — evidence-led editorial direction */
+.marketing-shell {
+  --marketing-ink: #153a2b;
+  --marketing-paper: #f5f4ee;
+  --marketing-raised: #fbfaf5;
+  --marketing-line: rgba(21, 58, 43, 0.2);
+  --marketing-gold: #b68a3b;
+  background: var(--marketing-paper);
+  color: var(--marketing-ink);
+}
+
+.marketing-header {
+  min-height: 76px;
+  padding-inline: clamp(20px, 4vw, 72px);
+  border-bottom: 1px solid var(--marketing-line);
+  background: color-mix(in srgb, var(--marketing-paper) 94%, transparent);
+}
+
+.marketing-header .app-nav {
+  gap: 22px;
+}
+
+.marketing-header .app-nav > a:not(.button) {
+  color: var(--marketing-ink);
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.marketing-nav-cta {
+  min-height: 44px;
+}
+
+.marketing-page {
+  overflow: clip;
+}
+
+.marketing-hero {
+  padding: clamp(48px, 8vw, 116px) clamp(20px, 5vw, 80px);
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.marketing-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  gap: clamp(38px, 7vw, 112px);
+  align-items: center;
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
+.marketing-hero-copy {
+  max-width: 760px;
+  text-align: left;
+}
+
+.marketing-hero .eyebrow {
+  margin: 0;
+}
+
+.marketing-hero-copy h1 {
+  max-width: 13ch;
+  margin: 14px 0 24px;
+  font-size: clamp(3rem, 6.2vw, 6.8rem);
+  line-height: 0.94;
+  letter-spacing: -0.065em;
+}
+
+.marketing-hero-body {
+  max-width: 660px;
+  margin: 0;
+  color: #486357;
+  font-size: clamp(1.05rem, 1.5vw, 1.3rem);
+  line-height: 1.6;
+}
+
+.marketing-hero-report {
+  position: relative;
+  padding: clamp(24px, 3.5vw, 44px);
+  border: 1px solid var(--marketing-line);
+  background: var(--marketing-raised);
+  box-shadow: 18px 18px 0 rgba(21, 58, 43, 0.08);
+}
+
+.marketing-hero-report::before {
+  position: absolute;
+  inset: 10px;
+  border: 1px solid rgba(21, 58, 43, 0.08);
+  content: "";
+  pointer-events: none;
+}
+
+.report-kicker {
+  display: block;
+  margin-bottom: 26px;
+  color: var(--marketing-gold);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.health-search-form {
+  position: relative;
+  z-index: 1;
+}
+
+.health-search-form label,
+.health-lead-capture label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.health-search-composer {
+  display: grid;
+  gap: 10px;
+}
+
+.health-search-form input,
+.health-lead-capture input {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid rgba(21, 58, 43, 0.34);
+  border-radius: 3px;
+  background: #fffef9;
+  color: var(--marketing-ink);
+  font: inherit;
+  font-size: 16px;
+  padding: 0 15px;
+}
+
+.health-search-form input:focus-visible,
+.health-lead-capture input:focus-visible {
+  outline: 3px solid rgba(182, 138, 59, 0.45);
+  outline-offset: 2px;
+}
+
+.health-search-form .button {
+  min-height: 52px;
+}
+
+.health-search-note {
+  margin: 12px 0 0;
+  color: #607369;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.marketing-section {
+  width: min(1280px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: clamp(72px, 9vw, 140px) 0;
+}
+
+.marketing-section-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
+  column-gap: clamp(40px, 8vw, 120px);
+  align-items: end;
+  margin-bottom: clamp(42px, 6vw, 82px);
+}
+
+.marketing-section-heading .eyebrow {
+  grid-column: 1 / -1;
+}
+
+.marketing-section-heading h2 {
+  max-width: 19ch;
+  margin: 10px 0 0;
+  font-size: clamp(2.25rem, 4.5vw, 5rem);
+  line-height: 1;
+  letter-spacing: -0.052em;
+}
+
+.marketing-section-heading > p:last-child {
+  margin: 0;
+  color: #526a5e;
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.health-lens-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border-top: 1px solid var(--marketing-line);
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.health-lens-grid article {
+  min-height: 260px;
+  padding: 24px 20px;
+  border-right: 1px solid var(--marketing-line);
+}
+
+.health-lens-grid article:last-child {
+  border-right: 0;
+}
+
+.health-lens-grid span,
+.product-step-list span {
+  color: var(--marketing-gold);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.health-lens-grid h3 {
+  margin: 56px 0 12px;
+  font-size: 1.4rem;
+}
+
+.health-lens-grid p {
+  margin: 0;
+  color: #526a5e;
+  line-height: 1.55;
+}
+
+.report-demo {
+  width: 100%;
+  max-width: none;
+  padding-inline: max(20px, calc((100vw - 1280px) / 2));
+  background: var(--marketing-ink);
+  color: var(--marketing-paper);
+}
+
+.report-demo .marketing-section-heading > p:last-child {
+  color: #b8c7bf;
+}
+
+.report-demo .marketing-section-heading h2 {
+  color: var(--marketing-paper);
+}
+
+.report-sheet {
+  max-width: 1060px;
+  margin: 0 auto;
+  border: 1px solid rgba(245, 244, 238, 0.28);
+  background: var(--marketing-raised);
+  color: var(--marketing-ink);
+  box-shadow: 24px 24px 0 rgba(182, 138, 59, 0.22);
+}
+
+.report-sheet > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.report-sheet h3 {
+  margin: 2px 0 0;
+  font-size: 1.35rem;
+}
+
+.report-sheet .report-kicker {
+  margin: 0;
+}
+
+.report-status-positive {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid rgba(37, 112, 75, 0.3);
+  border-radius: 999px;
+  background: rgba(37, 112, 75, 0.09);
+  color: #226344;
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.report-sheet-grid {
+  display: grid;
+  grid-template-columns: 0.72fr 1.28fr;
+}
+
+.report-sheet-grid > article {
+  padding: 28px;
+  border-right: 1px solid var(--marketing-line);
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.report-sheet-grid > article:nth-child(even) {
+  border-right: 0;
+}
+
+.report-sheet-grid > article > span:first-child {
+  color: var(--marketing-gold);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.report-sheet-grid h4 {
+  margin: 12px 0;
+  font-size: 1.2rem;
+}
+
+.report-sheet-grid p,
+.report-sheet-grid dd {
+  color: #536a5e;
+  line-height: 1.55;
+}
+
+.report-sheet-grid dl {
+  margin: 20px 0 0;
+}
+
+.report-sheet-grid dl div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--marketing-line);
+}
+
+.report-sheet-grid dt {
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.report-sheet-grid dd {
+  margin: 0;
+}
+
+.report-locked {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  background: rgba(182, 138, 59, 0.08);
+}
+
+.report-locked small {
+  display: block;
+  margin-top: 4px;
+  color: #607369;
+}
+
+.product-bridge {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.7fr) minmax(420px, 1fr);
+  gap: 0 clamp(40px, 8vw, 120px);
+  align-items: start;
+}
+
+.product-bridge .marketing-section-heading {
+  display: block;
+  margin: 0;
+}
+
+.product-bridge .button {
+  width: fit-content;
+  margin-top: 28px;
+}
+
+.product-step-list {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--marketing-line);
+}
+
+.product-step-list li {
+  display: grid;
+  grid-template-columns: 50px 1fr;
+  gap: 18px;
+  align-items: center;
+  min-height: 78px;
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.category-comparison {
+  border-top: 1px solid var(--marketing-line);
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--marketing-line);
+  border: 1px solid var(--marketing-line);
+}
+
+.comparison-grid article {
+  min-height: 270px;
+  padding: 28px;
+  background: var(--marketing-raised);
+}
+
+.comparison-grid .is-lodesta {
+  background: var(--marketing-ink);
+  color: var(--marketing-paper);
+}
+
+.comparison-grid span {
+  color: var(--marketing-gold);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.comparison-grid h3 {
+  margin: 70px 0 12px;
+  font-size: 1.5rem;
+}
+
+.comparison-grid p {
+  color: #5b7166;
+  line-height: 1.6;
+}
+
+.comparison-grid .is-lodesta p {
+  color: #c4d0ca;
+}
+
+.marketing-closing {
+  padding: clamp(70px, 9vw, 130px) max(20px, calc((100vw - 1280px) / 2));
+  background: #e7eadf;
+}
+
+.marketing-closing-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(360px, 0.65fr);
+  gap: clamp(40px, 9vw, 140px);
+  align-items: end;
+}
+
+.marketing-closing h2 {
+  max-width: 14ch;
+  margin: 10px 0 16px;
+  font-size: clamp(2.4rem, 4.8vw, 5.2rem);
+  line-height: 0.98;
+  letter-spacing: -0.055em;
+  color: var(--marketing-ink);
+}
+
+.marketing-closing .eyebrow {
+  color: var(--marketing-gold);
+}
+
+.marketing-closing p:not(.eyebrow) {
+  color: #526a5e;
+  line-height: 1.6;
+}
+
+.health-report-entry,
+.health-report-page {
+  min-height: 70vh;
+  padding: clamp(52px, 8vw, 110px) max(20px, calc((100vw - 1180px) / 2));
+}
+
+.health-report-entry > section,
+.health-report-message {
+  max-width: 780px;
+}
+
+.health-report-entry h1,
+.health-report-message h1,
+.health-report-heading h1 {
+  margin: 12px 0 20px;
+  font-size: clamp(2.7rem, 6vw, 6rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+}
+
+.health-report-entry > section > p:not(.eyebrow),
+.health-report-message > p:not(.eyebrow) {
+  max-width: 650px;
+  color: #526a5e;
+  font-size: 1.1rem;
+  line-height: 1.65;
+}
+
+.health-report-entry .health-search-form {
+  max-width: 620px;
+  margin-top: 38px;
+  padding: 26px;
+  border: 1px solid var(--marketing-line);
+  background: var(--marketing-raised);
+}
+
+.health-report-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+  align-items: start;
+  padding-bottom: 54px;
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.health-report-heading h1 {
+  max-width: 15ch;
+  font-size: clamp(2.8rem, 5vw, 5.4rem);
+}
+
+.health-report-heading p:last-child {
+  color: #526a5e;
+}
+
+.health-report-page section:not(.health-report-message, .health-implementation-cta) {
+  padding: clamp(52px, 7vw, 88px) 0;
+  border-bottom: 1px solid var(--marketing-line);
+}
+
+.health-report-page h2 {
+  max-width: 23ch;
+  margin: 8px 0 26px;
+  font-size: clamp(2rem, 3.8vw, 3.8rem);
+  line-height: 1.04;
+  letter-spacing: -0.045em;
+}
+
+.health-understanding > div,
+.health-strengths > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--marketing-line);
+  border: 1px solid var(--marketing-line);
+}
+
+.health-understanding article,
+.health-strengths article {
+  min-height: 150px;
+  padding: 24px;
+  background: var(--marketing-raised);
+}
+
+.health-understanding span,
+.health-strengths span {
+  display: block;
+  margin-bottom: 24px;
+  color: var(--marketing-gold);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.health-strengths h3 {
+  margin: 0 0 10px;
+}
+
+.health-strengths p,
+.health-understanding strong {
+  color: #526a5e;
+  line-height: 1.55;
+}
+
+.health-lens {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: clamp(30px, 7vw, 100px);
+  padding: 40px 0;
+  border-top: 1px solid var(--marketing-line);
+}
+
+.health-lens > header {
+  display: flex;
+  gap: 18px;
+}
+
+.health-lens > header > span {
+  color: var(--marketing-gold);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.health-lens h3 {
+  margin: 0 0 9px;
+  font-size: 1.55rem;
+}
+
+.health-lens header p,
+.health-lens-empty {
+  margin: 0;
+  color: #607369;
+  line-height: 1.5;
+}
+
+.health-finding {
+  grid-column: 2;
+  padding: 28px 0;
+  border-top: 1px solid var(--marketing-line);
+}
+
+.health-lens header + .health-finding {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.health-priority {
+  display: inline-block;
+  margin-bottom: 10px;
+  color: #70551f;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.health-finding h4 {
+  margin: 0 0 10px;
+  font-size: 1.25rem;
+}
+
+.health-finding > p {
+  color: #526a5e;
+  line-height: 1.6;
+}
+
+.health-finding dl {
+  margin: 22px 0 0;
+}
+
+.health-finding dl div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 20px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(21, 58, 43, 0.12);
+}
+
+.health-finding dt {
+  font-size: 0.77rem;
+  font-weight: 800;
+}
+
+.health-finding dd {
+  margin: 0;
+  color: #526a5e;
+  line-height: 1.55;
+}
+
+.health-limitations,
+.health-recommendations {
+  max-width: 900px;
+}
+
+.health-teaser-finding {
+  max-width: 960px;
+}
+
+.health-teaser-finding .health-finding {
+  max-width: 780px;
+  padding-top: 8px;
+}
+
+.health-teaser-more {
+  max-width: 720px;
+  margin: 26px 0 0;
+  padding: 18px 20px;
+  border-left: 3px solid var(--marketing-gold);
+  background: color-mix(in srgb, var(--marketing-gold) 9%, var(--marketing-raised));
+  color: #526a5e;
+  line-height: 1.55;
+}
+
+.health-limitations li {
+  margin: 8px 0;
+  color: #526a5e;
+}
+
+.health-recommendations ol,
+.health-prioritized-plan ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: recommendations;
+}
+
+.health-recommendations li,
+.health-prioritized-plan li {
+  position: relative;
+  padding: 24px 0 24px 56px;
+  border-top: 1px solid var(--marketing-line);
+  counter-increment: recommendations;
+}
+
+.health-recommendations li::before,
+.health-prioritized-plan li::before {
+  position: absolute;
+  left: 0;
+  color: var(--marketing-gold);
+  font-weight: 800;
+  content: counter(recommendations, decimal-leading-zero);
+}
+
+.health-recommendations p,
+.health-prioritized-plan p {
+  color: #526a5e;
+  line-height: 1.6;
+}
+
+.health-lead-capture {
+  display: grid;
+  grid-template-columns: 0.8fr 1fr;
+  gap: clamp(32px, 8vw, 100px);
+  padding: clamp(32px, 5vw, 58px) !important;
+  background: var(--marketing-ink);
+  color: var(--marketing-paper);
+}
+
+.health-lead-capture h2 {
+  margin-bottom: 12px;
+}
+
+.health-lead-capture p {
+  color: #bdcbc4;
+  line-height: 1.55;
+}
+
+.health-lead-composer {
+  display: grid;
+  gap: 10px;
+}
+
+.health-lead-capture .form-error {
+  color: #fff;
+}
+
+.health-implementation-cta {
+  display: flex;
+  justify-content: space-between;
+  gap: 36px;
+  align-items: center;
+  margin-top: 50px;
+  padding: clamp(30px, 5vw, 54px);
+  background: #e7eadf;
+}
+
+.health-implementation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.health-implementation-cta h2 {
+  margin-bottom: 10px;
+}
+
+.health-progress {
+  display: flex;
+  gap: 8px;
+  margin-top: 32px;
+}
+
+.health-progress span {
+  width: 68px;
+  height: 4px;
+  background: var(--marketing-gold);
+  animation: health-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.health-progress span:nth-child(2) { animation-delay: 0.2s; }
+.health-progress span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes health-pulse {
+  from { opacity: 0.25; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 900px) {
+  .marketing-header .app-nav > a:not(.app-nav-primary),
+  .marketing-nav-cta {
+    display: none;
+  }
+
+  .marketing-hero-grid,
+  .marketing-section-heading,
+  .product-bridge,
+  .marketing-closing-inner,
+  .health-lead-capture {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-hero-copy h1 {
+    font-size: clamp(3.2rem, 10vw, 5.5rem);
+  }
+
+  .health-lens-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .health-lens-grid article {
+    border-bottom: 1px solid var(--marketing-line);
+  }
+
+  .product-step-list {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: 40px;
+  }
+
+  .comparison-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .marketing-header {
+    min-height: 64px;
+  }
+
+  .marketing-hero {
+    padding: 28px 16px 40px;
+  }
+
+  .marketing-hero-grid {
+    gap: 20px;
+  }
+
+  .marketing-hero-copy h1 {
+    margin-block: 10px 14px;
+    max-width: none;
+    font-size: clamp(2.25rem, 11vw, 3rem);
+    line-height: 0.98;
+  }
+
+  .marketing-hero-body {
+    font-size: 0.94rem;
+    line-height: 1.45;
+  }
+
+  .marketing-hero-report {
+    padding: 16px;
+    box-shadow: 8px 8px 0 rgba(21, 58, 43, 0.08);
+  }
+
+  .marketing-hero-report .report-kicker {
+    margin-bottom: 10px;
+  }
+
+  .health-search-form input,
+  .health-search-form .button {
+    min-height: 48px;
+  }
+
+  .marketing-section {
+    width: min(100% - 32px, 1280px);
+    padding-block: 68px;
+  }
+
+  .marketing-section-heading {
+    display: block;
+    margin-bottom: 36px;
+  }
+
+  .marketing-section-heading h2 {
+    margin-bottom: 22px;
+  }
+
+  .health-lens-grid,
+  .report-sheet-grid,
+  .health-understanding > div,
+  .health-strengths > div {
+    grid-template-columns: 1fr;
+  }
+
+  .health-lens-grid article {
+    min-height: auto;
+    border-right: 0;
+  }
+
+  .health-lens-grid h3,
+  .comparison-grid h3 {
+    margin-top: 30px;
+  }
+
+  .report-sheet > header,
+  .health-report-heading,
+  .health-implementation-cta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-sheet-grid > article {
+    border-right: 0;
+  }
+
+  .report-sheet-grid dl div,
+  .health-finding dl div {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .health-report-page {
+    padding-top: 48px;
+  }
+
+  .health-report-heading {
+    padding-bottom: 34px;
+  }
+
+  .health-lens {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+
+  .health-finding {
+    grid-column: 1;
+  }
+
+  .health-lens header + .health-finding {
+    border-top: 1px solid var(--marketing-line);
+    padding-top: 28px;
+  }
+
+  .health-lead-capture {
+    padding: 28px 20px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-progress span {
+    animation: none;
+    opacity: 0.75;
+  }
 }

@@ -30,7 +30,10 @@ assert.deepEqual(
     "202607230019_site_authoring_maintenance_claim_fence.sql",
     "202607230020_website_setup_initial_model_experiment.sql",
     "202607250001_model_bakeoff.sql",
-    "202607260001_source_unsuitable_website_setup_failure.sql"
+    "202607260001_source_unsuitable_website_setup_failure.sql",
+    "202607260002_external_authoring_targeted_tools.sql",
+    "202607260003_website_setup_managed_model.sql",
+    "202607260004_prospect_report_access_policy.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -48,6 +51,7 @@ const websiteAnalytics = await readFile(`${migrationDirectory}/${migrations[10]}
 const mediaOriginCleanCut = await readFile(`${migrationDirectory}/${migrations[11]}`, "utf8");
 const canonicalMediaPublication = await readFile(`${migrationDirectory}/${migrations[12]}`, "utf8");
 const sourceUnsuitableFailure = await readFile(`${migrationDirectory}/202607260001_source_unsuitable_website_setup_failure.sql`, "utf8");
+const externalTargetedTools = await readFile(`${migrationDirectory}/202607260002_external_authoring_targeted_tools.sql`, "utf8");
 const canonicalAuthorityRefresh = await readFile(`${migrationDirectory}/${migrations[13]}`, "utf8");
 const verifiedAuthoringFinalizerRefresh = await readFile(`${migrationDirectory}/${migrations[14]}`, "utf8");
 const siteAgentRunawayGuardrails = await readFile(`${migrationDirectory}/${migrations[15]}`, "utf8");
@@ -55,6 +59,8 @@ const siteAgentRunAdminInventory = await readFile(`${migrationDirectory}/${migra
 const maintenanceClaimFence = await readFile(`${migrationDirectory}/${migrations[18]}`, "utf8");
 const websiteSetupInitialModelExperiment = await readFile(`${migrationDirectory}/${migrations[19]}`, "utf8");
 const modelBakeoff = await readFile(`${migrationDirectory}/${migrations[20]}`, "utf8");
+const websiteSetupManagedModel = await readFile(`${migrationDirectory}/202607260003_website_setup_managed_model.sql`, "utf8");
+const prospectReportAccessPolicy = await readFile(`${migrationDirectory}/202607260004_prospect_report_access_policy.sql`, "utf8");
 assert(
   baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
     && !baseline.includes("rights_status")
@@ -116,6 +122,44 @@ assert(
     && websiteSetupInitialModelExperiment.includes("initial_build_api_provider = 'openrouter'")
     && websiteSetupInitialModelExperiment.includes("initial_build_model_id ~"),
   "The temporary initial-build model experiment must retain and validate exact OpenRouter route provenance."
+);
+assert(
+  websiteSetupManagedModel.includes("drop column initial_build_api_provider")
+    && websiteSetupManagedModel.includes("drop column initial_build_model_id")
+    && websiteSetupManagedModel.includes("prospect_report_id text references public.prospect_reports(id) on delete restrict")
+    && websiteSetupManagedModel.includes("target_prospect_report_id"),
+  "Owner onboarding must remove customer model choice and retain report attribution."
+);
+assert(
+  prospectReportAccessPolicy.includes("access_policy text")
+    && prospectReportAccessPolicy.includes("check (access_policy in ('email_gate', 'public_link'))")
+    && prospectReportAccessPolicy.includes("create table public.prospect_report_access_grants")
+    && prospectReportAccessPolicy.includes("token_hash text not null unique")
+    && prospectReportAccessPolicy.includes("prospect_report_access_grants_report_expiry_idx")
+    && prospectReportAccessPolicy.includes("prospect_reports_active_source_policy_unique")
+    && prospectReportAccessPolicy.includes("prospect_report_leads_report_email_unique")
+    && prospectReportAccessPolicy.includes("on conflict (report_id, lower(email))")
+    && prospectReportAccessPolicy.includes("drop column unlocked_at")
+    && prospectReportAccessPolicy.includes("drop column lead_id"),
+  "Visitor-specific report access must replace report-global unlock state with indexed, expiring grants and case-insensitive lead reuse."
+);
+assert(
+  prospectReportAccessPolicy.includes("report_id text references public.prospect_reports(id) on delete restrict")
+    && prospectReportAccessPolicy.includes("first_report_viewed_at timestamptz")
+    && prospectReportAccessPolicy.includes("'report_viewed'")
+    && prospectReportAccessPolicy.includes("create or replace function public.record_outbound_report_view")
+    && prospectReportAccessPolicy.includes("and first_report_viewed_at is null")
+    && prospectReportAccessPolicy.includes("revoke all on function public.record_outbound_report_view")
+    && prospectReportAccessPolicy.includes("grant execute on function public.record_outbound_report_view"),
+  "Outbound reports must attach with delete-restrict semantics and record the first completed view atomically through a server-only function."
+);
+assert(
+  prospectReportAccessPolicy.includes("alter table public.prospect_report_access_grants enable row level security")
+    && prospectReportAccessPolicy.includes("revoke all on table public.prospect_report_access_grants from public, anon, authenticated")
+    && prospectReportAccessPolicy.includes("grant select, insert, update, delete on table public.prospect_report_access_grants to service_role")
+    && prospectReportAccessPolicy.includes("revoke all on function public.create_or_reuse_prospect_report_lead")
+    && prospectReportAccessPolicy.includes("grant execute on function public.create_or_reuse_prospect_report_lead"),
+  "Report grants and access authorities must remain service-role-only with no browser policies."
 );
 assert(
   modelBakeoff.includes("create table public.model_bakeoff_experiments")
@@ -226,6 +270,13 @@ assert(
   "Closed or parked first-party sources do not have a canonical setup failure."
 );
 assert(
+  externalTargetedTools.includes("'read_files'")
+    && externalTargetedTools.includes("'search_files'")
+    && externalTargetedTools.includes("'edit_file'")
+    && externalTargetedTools.includes("'read_file'"),
+  "The external authoring operation ledger must accept the canonical editing tools while retaining historical read operation records."
+);
+assert(
   assetRevisionScope.includes("asset_revisions_business_content_hash_idx")
     && assetRevisionScope.includes("business_id, content_hash"),
   "Asset revision content-hash uniqueness must remain scoped to its business."
@@ -291,7 +342,8 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
     "website_assessment_jobs",
     "analytics_collection_daily",
     "model_bakeoff_experiments",
-    "model_bakeoff_runs"
+    "model_bakeoff_runs",
+    "prospect_report_access_grants"
   ];
   for (const table of liveTables) {
     const { error } = await admin.from(table).select("*").limit(1);
@@ -304,6 +356,20 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
     target_owner_user_id: "00000000-0000-0000-0000-000000000000"
   }).maybeSingle();
   assert(!dispositionProbe, `dispose_owned_site: ${dispositionProbe?.message}`);
+  const { data: outboundReportViewProbe, error: outboundReportViewError } = await admin.rpc(
+    "record_outbound_report_view",
+    {
+      target_report_id: "prospect_report_live_probe_missing",
+      target_occurred_at: new Date().toISOString()
+    }
+  );
+  assert(!outboundReportViewError, `record_outbound_report_view: ${outboundReportViewError?.message}`);
+  assert.equal(outboundReportViewProbe, false, "Missing outbound reports must not record a view.");
+  const { error: reportAccessPolicyProbe } = await admin
+    .from("prospect_reports")
+    .select("id,access_policy")
+    .limit(1);
+  assert(!reportAccessPolicyProbe, `prospect_reports access_policy: ${reportAccessPolicyProbe?.message}`);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
   assert(url && anonKey, "Public Supabase Auth configuration is required for browser-role denial verification.");

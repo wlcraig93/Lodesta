@@ -24,7 +24,7 @@ assert.equal(active.current?.kind, "thinking");
 assert.equal(active.completed.length, 0);
 
 const completed = ownerActivitySnapshot(runFixture({ status: "succeeded" }), [
-  eventFixture({ id: "read-1", sequence: 1, name: "read_file", status: "succeeded" }),
+  eventFixture({ id: "read-1", sequence: 1, name: "read_files", status: "succeeded" }),
   eventFixture({ id: "read-2", sequence: 2, name: "list_files", status: "succeeded" }),
   eventFixture({ id: "write-1", sequence: 3, name: "write_file", status: "succeeded" }),
   eventFixture({ id: "finish-1", sequence: 4, kind: "inspection", name: "finish", status: "succeeded" })
@@ -62,7 +62,7 @@ for (let index = 0; index < 200; index += 1) {
   overWindowEvents.push(eventFixture({
     id: `window-${index}`,
     sequence: index,
-    name: Math.floor(index / 3) % 2 ? "read_file" : "write_file",
+    name: Math.floor(index / 3) % 2 ? "read_files" : "write_file",
     status: "succeeded"
   }));
 }
@@ -114,10 +114,11 @@ for (const forbidden of [
   assert(!redacted.includes(forbidden), `Owner activity leaked ${forbidden}`);
 }
 
-const [component, activityRoute, manager, css, tokens, documentation] = await Promise.all([
+const [component, activityRoute, manager, discussionBrief, css, tokens, documentation] = await Promise.all([
   readFile("components/SiteAgentWorkspace.tsx", "utf8"),
   readFile("app/api/site-agent/runs/[runId]/activity/route.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
+  readFile("packages/site-agent/briefs.ts", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("app/product-tokens.css", "utf8"),
   readFile("docs/owner-chat-legibility-plan.md", "utf8")
@@ -146,8 +147,8 @@ assert(component.includes("event.nativeEvent.isComposing") && component.includes
   && component.includes("event.preventDefault()"), "Enter submission, Shift+Enter, or IME behavior is incomplete.");
 assert(manager.includes("recordBestEffort") && manager.includes("isOwnerVisibleSlowTool")
   && manager.includes("id: toolEventId") && manager.includes("Owner activity is telemetry only"), "Slow opening spans are not best-effort or do not preserve terminal identity.");
-assert(manager.includes("Speak in owner-facing page and section terms.")
-  && manager.includes("raw run telemetry"), "Ordinary Ask is not guided toward owner-facing language.");
+assert(discussionBrief.includes("Speak in owner-facing page and section terms.")
+  && discussionBrief.includes("raw run telemetry"), "Ordinary Ask is not guided toward owner-facing language.");
 assert(tokens.includes("--product-shadow-command-dock") && tokens.includes("--product-radius-lg: 20px"), "Command dock tokens are incomplete.");
 assert(css.includes("width: var(--product-control-height-compact)") && css.includes("@keyframes site-agent-mode-menu-in")
   && css.includes(".site-agent-activity-dot.is-running") && css.includes("min-height: var(--product-control-height-touch)"), "Composer and activity responsive/motion styling is incomplete.");

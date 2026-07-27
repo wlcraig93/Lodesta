@@ -4,6 +4,7 @@ import { sitePublicBuildInputSchema, sourceSnapshotSchema, type SitePublicBuildI
 import { continuousAvailabilityConformanceVectors } from "../packages/site-contracts/availability-conformance";
 import {
   agentAuthoredArtifactSchema,
+  finalizePreparedArtifact,
   normalizeAgentAuthoredArtifact,
   prepareSiteArtifact,
   sanitizeAgentCss,
@@ -76,7 +77,7 @@ assert(prepared.capabilityBindings.some((binding) => binding.kind === "form"));
 assert(prepared.capabilityBindings.some((binding) => binding.kind === "map"));
 
 const compactPresentation = prepareSiteArtifact({
-  authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>Visit the Austin shop</h1><span data-lodesta-business-hours data-lodesta-hours-variant="summary" data-lodesta-fact-id="${hours.id}">Monday–Friday: 8:00 AM-5:30 PM; Saturday–Sunday: Closed</span><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
+  authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>Visit the Austin shop</h1><span data-lodesta-business-hours data-lodesta-hours-variant="summary" data-lodesta-fact-id="${hours.id}">Monday–Friday: 8:00 AM-5:30 PM; Saturday–Sunday: Closed</span><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_primary" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
   buildInput: input,
   runtimeSeriesId: "site-runtime-v1"
 });
@@ -84,6 +85,29 @@ assert(
   !errors(compactPresentation).some((finding) => finding.id === "fact.sdk_value_mismatch"),
   "Canonical compact hours or local address presentation lost its source fact binding."
 );
+
+const forgedLocalAddress = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_primary" data-lodesta-fact-id="${address.id}">999 Forged Road, Austin, TX 78701</address></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+const forgedFinding = errors(forgedLocalAddress).find((finding) => finding.id === "fact.sdk_value_mismatch");
+assert(forgedFinding, "Forged BusinessAddress binding attributes authorized incorrect rendered text.");
+assert.match(forgedFinding.message, /rendered=.*expected=.*factId=.*locationId=.*variant=.*affectedRoutes=/);
+
+const wrongLocationAddress = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_missing" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(errors(wrongLocationAddress).some((finding) => finding.id === "fact.sdk_value_mismatch"), "A BusinessAddress binding to the wrong location passed.");
+
+const genericAddressExemption = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><address data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX</address></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(errors(genericAddressExemption).some((finding) => finding.id === "fact.sdk_value_mismatch"), "Generic address Fact received the local-presentation exemption.");
 
 const serviceRouteInput = {
   ...input,
@@ -207,6 +231,24 @@ const duplicateProof = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v1"
 });
 assert(errors(duplicateProof).some((finding) => finding.id === "fact.sensitive_unsupported"), "an unbound duplicate occurrence was authorized by text search");
+const permissiveFactArtifact = finalizeForTest(duplicateProof, proofInput);
+assert.equal(permissiveFactArtifact.qa.hardGate, "passed", "factual diagnostics still blocked a technically valid site");
+assert(
+  permissiveFactArtifact.qa.findings.some((finding) => finding.id === "fact.sensitive_unsupported" && finding.severity === "warning"),
+  "factual diagnostics were not retained as advisories"
+);
+const permissiveVisualArtifact = finalizeForTest(duplicateProof, proofInput, [{
+  id: "render.contrast",
+  severity: "error",
+  area: "accessibility",
+  message: "Synthetic contrast diagnostic.",
+  route: "/"
+}]);
+assert.equal(permissiveVisualArtifact.qa.hardGate, "passed", "visual quality still blocked a technically valid site");
+assert(
+  permissiveVisualArtifact.qa.findings.some((finding) => finding.id === "render.contrast" && finding.severity === "warning"),
+  "visual quality was not retained as an advisory"
+);
 
 const metadataOnly = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><p>Quality work.</p></main>`, {
@@ -218,12 +260,36 @@ const metadataOnly = prepareSiteArtifact({
 });
 assert(errors(metadataOnly).some((finding) => finding.id === "fact.metadata_unsupported"), "metadata-only sensitive copy passed");
 
+const mismatchedContact = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><h1>${input.business.name}</h1><a href="tel:+1-555-555-5555">Call us</a></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(errors(mismatchedContact).some((finding) => finding.id === "fact.link_mismatch"));
+const permissiveContactArtifact = finalizeForTest(mismatchedContact, input);
+assert.equal(permissiveContactArtifact.qa.hardGate, "passed", "a contact-fact mismatch still blocked release");
+assert(
+  permissiveContactArtifact.qa.findings.some((finding) => finding.id === "fact.link_mismatch" && finding.severity === "warning"),
+  "the contact-fact mismatch was not retained as an advisory"
+);
+
 const malformedForm = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><form data-lodesta-form-id="form_estimate"><input data-lodesta-field-id="name"><button data-lodesta-form-submit>Send</button></form></main>`),
   buildInput: input,
   runtimeSeriesId: "site-runtime-v1"
 });
 assert(errors(malformedForm).some((finding) => finding.id.startsWith("capability.form_")));
+assert.equal(finalizeForTest(malformedForm, input).qa.hardGate, "failed", "a malformed managed capability passed the technical gate");
+
+const sanitizedUnsafeMarkup = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main style="color:red"><h1>Repair</h1><script>bad()</script><a href="javascript:bad()">Click</a></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v1"
+});
+assert(sanitizedUnsafeMarkup.findings.some((finding) => finding.id === "html.agent_executable"));
+assert(!sanitizedUnsafeMarkup.routes[0]?.html.includes("bad()"), "unsafe markup survived deterministic sanitization");
+assert(!sanitizedUnsafeMarkup.routes[0]?.html.includes("javascript:"), "unsafe link survived deterministic sanitization");
+assert.equal(finalizeForTest(sanitizedUnsafeMarkup, input).qa.hardGate, "passed", "successfully sanitized markup still forced an authoring retry");
 
 const asset = {
   assetId: "asset_background",
@@ -276,6 +342,37 @@ assert(validateWorkspaceSourcePolicy([
   { path: "src/site.tsx", content: `export const value = fetch("https://example.com");` },
   { path: "src/styles.css", content: `.x{color:red}` }
 ]).some((finding) => finding.id === "source.network"));
+for (const content of [
+  `export const view=<address data-lodesta-fact-id="fact_address">Forged</address>;`,
+  `export const view=<address {...{"data-lodesta-address-variant":"local"}}>Forged</address>;`,
+  `const props={"data-lodesta-location-id":"location_primary"}; export const view=<address {...props}>Forged</address>;`,
+  `import React from "react"; export const view=React.createElement("address", {"data-lodesta-fact-id":"fact_address"}, "Forged");`,
+  `import React from "react"; const props={"data-lodesta-fact-id":"fact_address"}; export const view=React.createElement("address", props, "Forged");`,
+  `function Wrapper(props:Record<string,string>){return <address {...props}/>}; export const view=<Wrapper data-lodesta-fact-id="fact_address"/>;`
+]) {
+  assert.deepEqual(
+    validateWorkspaceSourcePolicy([
+      { path: "src/site.tsx", content },
+      { path: "src/styles.css", content: `[data-lodesta-fact-id]{display:block}` }
+    ]),
+    [],
+    `Ordinary factual markup or prop composition was rejected: ${content}`
+  );
+}
+assert(
+  validateWorkspaceSourcePolicy([
+    {
+      path: "src/site.tsx",
+      content: `export const view=<div dangerouslySetInnerHTML={{__html:'<script>bad()</script>'}}/>;`
+    },
+    { path: "src/styles.css", content: `.safe{display:block}` }
+  ]).some((finding) => finding.id === "source.executable_markup"),
+  "Dangerous HTML injection passed source validation"
+);
+assert.deepEqual(validateWorkspaceSourcePolicy([
+  { path: "src/site.tsx", content: `import { BusinessAddress } from "#lodesta-sdk"; export const view=<BusinessAddress locationId="location_primary"/>;` },
+  { path: "src/styles.css", content: `[data-lodesta-business-address]{font-style:normal}` }
+]), []);
 
 const websiteSnapshot = sourceSnapshotSchema.parse({
   schemaVersion: 1,
@@ -376,4 +473,35 @@ function artifact(bodyHtml: string, metadata?: { title?: string; description?: s
 
 function errors(preparedArtifact: ReturnType<typeof prepareSiteArtifact>) {
   return preparedArtifact.findings.filter((finding) => finding.severity === "error");
+}
+
+function finalizeForTest(
+  preparedArtifact: ReturnType<typeof prepareSiteArtifact>,
+  buildInput: SitePublicBuildInput,
+  browserFindings: Array<{
+    id: string;
+    severity: "error" | "warning" | "info";
+    area: "html" | "css" | "route" | "link" | "asset" | "claim" | "capability" | "metadata" | "accessibility" | "render";
+    message: string;
+    route?: string;
+  }> = []
+) {
+  return finalizePreparedArtifact({
+    prepared: preparedArtifact,
+    buildInput,
+    artifactId: `artifact_test_${buildInput.id}`,
+    workspaceRevisionId: "workspace_revision_test",
+    runtimeSeriesId: "site-runtime-v1",
+    runtimePatchId: "runtime_patch_test",
+    storagePrefix: "artifacts/test",
+    toolchainVersion: "test-toolchain",
+    sandboxImageDigest: `sha256:${"b".repeat(64)}`,
+    browserGate: {
+      findings: browserFindings,
+      screenshotKeys: [],
+      routesChecked: preparedArtifact.routes.length,
+      linksChecked: 0
+    },
+    createdAt: "2026-07-27T00:00:00.000Z"
+  }).artifact;
 }

@@ -59,6 +59,7 @@ export const modelBakeoffRunSchema = z.object({
   siteId: identifier.optional(),
   sessionId: identifier.optional(),
   runId: identifier.optional(),
+  publicBuildInputHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   candidateVersionId: identifier.optional(),
   assessmentId: identifier.optional(),
   failureCode: z.string().min(1).max(160).optional(),

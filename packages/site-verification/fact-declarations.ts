@@ -11,6 +11,7 @@ import {
 } from "@/packages/site-contracts";
 import { factBindingPolicyIdentity } from "@/packages/site-contracts/platform-manifest";
 import type { ArtifactGateFinding } from "./contracts";
+import { localAddressPresentation } from "./address-presentation";
 
 export { factBindingPolicyIdentity };
 
@@ -44,7 +45,7 @@ export class FactBindingValidator {
   }): FactBindingValidationResult {
     const findings: ArtifactGateFinding[] = [];
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
-    const routes = input.routes.map((route) => visibleRoute(route, facts, findings));
+    const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings));
     const bindings = routes.flatMap((route) => route.bindings);
 
     for (const route of routes) {
@@ -84,6 +85,7 @@ export class FactBindingValidator {
 
 function visibleRoute(
   route: FactBindingValidationRoute,
+  buildInput: SitePublicBuildInput,
   facts: Map<string, PublicFact>,
   findings: ArtifactGateFinding[]
 ): VisibleRoute {
@@ -125,9 +127,39 @@ function visibleRoute(
         continue;
       }
       const rendered = state.text.slice(start, end).trim();
+      if (node.attribs["data-lodesta-business-address"] !== undefined) {
+        const variant = node.attribs["data-lodesta-address-variant"] ?? "";
+        const locationId = node.attribs["data-lodesta-location-id"] ?? "";
+        const presentation = variant === "local"
+          ? localAddressPresentation(buildInput, locationId, fact.id)
+          : undefined;
+        if (!presentation || !sameCompleteValue(presentation.value, rendered)) {
+          const expected = presentation?.value ?? "a server-derived local address for the referenced location";
+          findings.push(finding(
+            "fact.sdk_value_mismatch",
+            `BusinessAddress mismatch on ${route.path}: rendered=${JSON.stringify(rendered)} expected=${JSON.stringify(expected)} factId=${JSON.stringify(fact.id)} locationId=${JSON.stringify(locationId || null)} variant=${JSON.stringify(variant || null)} affectedRoutes=${JSON.stringify([route.path])}.`,
+            route.path
+          ));
+          continue;
+        }
+        state.bindingIndex += 1;
+        state.bindings.push({
+          id: `fact:${route.path.replace(/[^a-z0-9]+/gi, "_") || "home"}:${fact.id}:${state.bindingIndex}`.slice(0, 160),
+          route: route.path,
+          text: presentation.value,
+          origin: "sdk",
+          sourceFactIds: [fact.id],
+          span: { start, end }
+        });
+        continue;
+      }
       const displayValues = [...new Set(factDisplayValues(fact).filter((value) => factValueRendered(fact, value, rendered)))];
       if (!displayValues.length) {
-        findings.push(finding("fact.sdk_value_mismatch", `SDK binding ${fact.id} does not render a canonical display value.`, route.path));
+        findings.push(finding(
+          "fact.sdk_value_mismatch",
+          `SDK binding mismatch on ${route.path}: rendered=${JSON.stringify(rendered)} expected=${JSON.stringify(factDisplayValues(fact))} factId=${JSON.stringify(fact.id)} locationId=null variant=null affectedRoutes=${JSON.stringify([route.path])}.`,
+          route.path
+        ));
         continue;
       }
       for (const displayValue of displayValues) {
@@ -277,7 +309,8 @@ function factValueRendered(fact: PublicFact, value: string, rendered: string) {
     return components.length > 0 && components.every((component) => normalizedText(rendered).includes(normalizedText(component)));
   }
   if (fact.kind === "address") {
-    return canonicalDisplayComponents(fact.value).some((component) => normalizedText(rendered).includes(normalizedText(component)));
+    const canonical = factDisplayValues(fact).at(-1);
+    return Boolean(canonical && sameCompleteValue(canonical, rendered));
   }
   return sameCompleteValue(value, rendered);
 }

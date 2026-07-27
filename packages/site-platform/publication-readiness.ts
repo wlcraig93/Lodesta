@@ -27,11 +27,8 @@ export async function deriveSitePublicationReadiness(input: {
   if (version.status === "stale" || !buildInput || !state || !intent || buildInput.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, buildInput.intent)) {
     blockers.push(blocker("stale_input", "This candidate predates the current verified business state or site intent.", version.publicBuildInputId));
   }
-  if (buildInput?.business.identityStatus !== "verified") {
-    blockers.push(blocker("business_identity", "Confirm or correct the business name before publishing.", version.publicBuildInputId));
-  }
   if (!artifact || artifact.artifactHash !== version.artifactHash || artifact.qa.hardGate !== "passed") {
-    blockers.push(blocker("objective_qa", "The exact candidate artifact has not passed objective QA.", version.artifactId));
+    blockers.push(blocker("objective_qa", "The exact candidate artifact has not passed technical release verification.", version.artifactId));
   }
   if (forms.some((form) => !form || form.siteId !== site.id || form.status === "retired")) {
     blockers.push(blocker("unsafe_form", "The candidate references a missing, retired, or foreign form definition.", version.id));

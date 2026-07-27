@@ -16,8 +16,7 @@ export type WebsiteSetup = {
   sourceUrl: string;
   normalizedSource: string;
   reportingTimezone: string;
-  initialBuildApiProvider?: "openrouter";
-  initialBuildModelId?: string;
+  prospectReportId?: string;
   sourceRevision: number;
   status: WebsiteSetupStatus;
   siteId?: string;
@@ -40,8 +39,7 @@ export type CreateWebsiteSetupInput = {
   sourceUrl: string;
   normalizedSource: string;
   reportingTimezone: string;
-  initialBuildApiProvider: "openrouter";
-  initialBuildModelId: string;
+  prospectReportId?: string;
   idempotencyKey: string;
   creationRequestHash: string;
 };
@@ -167,6 +165,7 @@ export type OutboundProspect = {
   id: string;
   campaignId: string;
   siteId?: string;
+  reportId?: string;
   businessName: string;
   vertical?: string;
   sourceUrl?: string;
@@ -175,6 +174,7 @@ export type OutboundProspect = {
   status: "queued" | "mailed" | "preview_viewed" | "adoption_started" | "adopted" | "published" | "disqualified";
   createdAt: string;
   mailedAt?: string;
+  firstReportViewedAt?: string;
   firstPreviewViewedAt?: string;
   adoptionStartedAt?: string;
   adoptedAt?: string;
@@ -190,6 +190,7 @@ export type OutboundEvent = {
   siteId?: string;
   type:
     | "mailer_sent"
+    | "report_viewed"
     | "invitation_opened"
     | "preview_viewed"
     | "picker_interaction"
@@ -209,6 +210,7 @@ export type OutboundSummary = {
   campaigns: number;
   prospects: number;
   mailed: number;
+  reportViewed: number;
   invitationOpened: number;
   previewViewed: number;
   pickerInteractions: number;
@@ -220,6 +222,7 @@ export type OutboundSummary = {
   credibilityFeedbackCount: number;
   avgCredibilityScore?: number;
   mailerToPreviewRate: number;
+  mailerToReportRate: number;
   mailerToAdoptionRate: number;
   invitationToAdoptionRate: number;
   adoptionToPublishRate: number;
@@ -247,6 +250,7 @@ export type UpsertOutboundProspectInput = {
   id?: string;
   campaignId: string;
   siteId?: string;
+  reportId?: string;
   businessName: string;
   vertical?: string;
   sourceUrl?: string;
@@ -337,6 +341,7 @@ export type BusinessStrengthAssessment = {
 };
 export type ProspectReportStage = { id: string; label: string; status: "queued" | "running" | "completed" | "skipped" | "failed" };
 export type ProspectReportGatedPlan = { summary: string; priorities: Array<{ title: string; detail: string }> };
+export type ProspectReportAccessPolicy = "email_gate" | "public_link";
 export type ProspectPresenceReportResult = {
   schemaVersion: 1;
   kind: "prospect-presence-report";
@@ -368,6 +373,7 @@ export type ProspectWebsiteKind = "owned_website" | "no_website" | "social_or_ag
 export type ProspectReportRecord = {
   id: string;
   sourceKey: string;
+  accessPolicy: ProspectReportAccessPolicy;
   status: "queued" | "running" | "completed" | "failed";
   assessmentId?: string;
   sourceUrl?: string;
@@ -375,8 +381,6 @@ export type ProspectReportRecord = {
   websiteKind: ProspectWebsiteKind;
   result?: ProspectPresenceReportResult;
   businessStrength?: BusinessStrengthAssessment;
-  unlockedAt?: string;
-  leadId?: string;
   errorCode?: string;
   resolutionUsage?: {
     modelId: string;
@@ -391,9 +395,18 @@ export type ProspectReportRecord = {
   completedAt?: string;
 };
 export type ProspectReportLead = { id: string; reportId: string; email: string; contactName?: string; phone?: string; ipHash?: string; metadata?: Record<string, string | number | boolean>; createdAt: string };
+export type ProspectReportAccessGrant = {
+  id: string;
+  reportId: string;
+  leadId: string;
+  tokenHash: string;
+  expiresAt: string;
+  createdAt: string;
+  lastUsedAt?: string;
+};
 
-export type CreateProspectReportInput = { id?: string; sourceKey: string; sourceUrl?: string; sourceHost?: string; websiteKind: ProspectWebsiteKind; assessmentId?: string; businessStrength?: BusinessStrengthAssessment; resolutionUsage?: ProspectReportRecord["resolutionUsage"] };
-export type UpdateProspectReportInput = { reportId: string; status?: ProspectReportRecord["status"]; assessmentId?: string; sourceUrl?: string; sourceHost?: string; websiteKind?: ProspectWebsiteKind; result?: ProspectPresenceReportResult; unlockedAt?: string; leadId?: string; errorCode?: string; clearError?: boolean; completedAt?: string };
+export type CreateProspectReportInput = { id?: string; sourceKey: string; accessPolicy: ProspectReportAccessPolicy; sourceUrl?: string; sourceHost?: string; websiteKind: ProspectWebsiteKind; assessmentId?: string; businessStrength?: BusinessStrengthAssessment; resolutionUsage?: ProspectReportRecord["resolutionUsage"] };
+export type UpdateProspectReportInput = { reportId: string; status?: ProspectReportRecord["status"]; accessPolicy?: ProspectReportAccessPolicy; assessmentId?: string; sourceUrl?: string; sourceHost?: string; websiteKind?: ProspectWebsiteKind; result?: ProspectPresenceReportResult; errorCode?: string; clearError?: boolean; completedAt?: string };
 export type CreateProspectReportLeadInput = { reportId: string; email: string; contactName?: string; phone?: string; ipHash?: string; metadata?: Record<string, string | number | boolean> };
 
 export type WebsiteAssessmentRecord = {

@@ -36,6 +36,18 @@ export function isConfirmedSandboxAbsent(error: unknown) {
     && (error.providerCode === "session_not_found" || error.providerCode === "sandbox_not_found");
 }
 
+export function isUninitializedSandboxRevision(error: unknown) {
+  return error instanceof SiteSandboxRequestError
+    && error.status === 409
+    && (
+      error.providerCode === "workspace_uninitialized"
+      || (
+        error.providerCode === "revision_conflict"
+        && /currentRevision=uninitialized/i.test(error.message)
+      )
+    );
+}
+
 export class SiteSandboxClient {
   constructor(
     private readonly baseUrl: string,

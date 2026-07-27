@@ -56,10 +56,12 @@ export type ManagerCompletion = z.infer<typeof managerCompletionSchema>;
 
 export const managerToolNameSchema = z.enum([
   "list_files",
-  "read_file",
+  "search_files",
+  "read_files",
   "write_file",
   "delete_file",
   "apply_patch",
+  "edit_file",
   "create_image",
   "build_preview",
   "inspect_site",
@@ -70,16 +72,32 @@ export type ManagerToolName = z.infer<typeof managerToolNameSchema>;
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const patchFileSchema = z.object({ path: workspaceSourceFileSchema.shape.path, content: workspaceSourceFileSchema.shape.content.nullable() }).strict();
+const readFileSchema = z.object({
+  path: workspaceSourceFileSchema.shape.path,
+  startLine: z.number().int().positive().nullish().transform((value) => value ?? undefined),
+  endLine: z.number().int().positive().nullish().transform((value) => value ?? undefined)
+}).strict();
+const targetedEditSchema = z.object({
+  startLine: z.number().int().positive(),
+  endLine: z.number().int().nonnegative(),
+  content: z.string().max(250_000).nullable()
+}).strict();
 export const managerToolArguments = {
   list_files: z.object({}).strict(),
-  read_file: z.object({
-    path: workspaceSourceFileSchema.shape.path,
-    startLine: z.number().int().positive().nullish().transform((value) => value ?? undefined),
-    endLine: z.number().int().positive().nullish().transform((value) => value ?? undefined)
+  search_files: z.object({
+    query: z.string().min(1).max(500),
+    paths: z.array(workspaceSourceFileSchema.shape.path).max(20),
+    caseSensitive: z.boolean()
   }).strict(),
+  read_files: z.object({ files: z.array(readFileSchema).min(1).max(20) }).strict(),
   write_file: z.object({ path: workspaceSourceFileSchema.shape.path, content: workspaceSourceFileSchema.shape.content }).strict(),
   delete_file: z.object({ path: workspaceSourceFileSchema.shape.path }).strict(),
   apply_patch: z.object({ files: z.array(patchFileSchema).min(1).max(80) }).strict(),
+  edit_file: z.object({
+    path: workspaceSourceFileSchema.shape.path,
+    expectedContentHash: hash,
+    edits: z.array(targetedEditSchema).min(1).max(50)
+  }).strict(),
   create_image: z.object({
     action: z.enum(imageCreationActions),
     purpose: z.enum(imageCreationPurposes),
@@ -98,7 +116,9 @@ export const managerToolArguments = {
   build_preview: z.object({}).strict(),
   inspect_site: z.object({}).strict(),
   request_input: z.object({ question: z.string().min(1).max(600) }).strict(),
-  finish: managerCompletionSchema.pick({ ownerMessage: true })
+  finish: z.object({
+    ownerMessage: z.string().trim().min(1).max(8_000).transform((value) => value.slice(0, 1_200))
+  }).strict()
 } satisfies Record<ManagerToolName, z.ZodTypeAny>;
 
 export type ManagerToolCall = {
@@ -150,6 +170,7 @@ export type ManagerRunEvent = {
   providerRequestId?: string;
   inputTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   reasoningTokens?: number;
   outputTokens?: number;
   costUsd?: number;
@@ -174,6 +195,7 @@ export type ManagerDiscussion = z.infer<typeof managerDiscussionSchema>;
 export type ManagerModelUsage = {
   inputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
   reasoningTokens: number;
   outputTokens: number;
   costUsd: number;

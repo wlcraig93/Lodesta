@@ -4,6 +4,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LodestaSite } from "./sdk";
 import { platformCapabilityStyles } from "./capability-styles";
+import { removeReactImagePreloads } from "./preloads";
+import { assertValidRoutePaths } from "./route-contract";
 import { siteDefinition } from "../src/site";
 
 const root = process.cwd();
@@ -25,6 +27,7 @@ const routes = siteDefinition.routes.map((route) => {
     bodyHtml: removeReactImagePreloads(renderToStaticMarkup(<LodestaSite input={publicInput}>{route.element as ReactElement}</LodestaSite>))
   };
 });
+assertValidRoutePaths(routes);
 if ("siteName" in siteDefinition || "claims" in siteDefinition || "factDeclarations" in siteDefinition) {
   throw new Error("siteDefinition accepts routes only. The compiler owns siteName and fact bindings.");
 }
@@ -54,11 +57,6 @@ function fallbackRouteTitle(path: string, siteName: string) {
   if (path === "/") return siteName;
   const label = path.split("/").filter(Boolean).at(-1)?.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
   return label ? `${label} | ${siteName}` : siteName;
-}
-// React 19 injects image preload links into static markup. The platform owns
-// document metadata, so these toolchain-generated nodes cannot enter body HTML.
-function removeReactImagePreloads(value: string) {
-  return value.replace(/<link\s+rel="preload"\s+as="image"\s+href="asset:\/\/[^"<>]+"\s*\/?\s*>/gi, "");
 }
 function deriveCapabilityBindings(renderedRoutes: Array<{ path: string; bodyHtml: string }>) {
   const attributes = {

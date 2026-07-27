@@ -9,6 +9,8 @@ import {
   denverPlumberBakeoffSources
 } from "./catalog";
 import {
+  type ModelBakeoffCandidate,
+  type ModelBakeoffSource,
   modelBakeoffExperimentSchema,
   modelBakeoffRunSchema,
   type ModelBakeoffExperiment,
@@ -40,30 +42,34 @@ export type ModelBakeoffView = {
   };
 };
 
-export async function ensureDenverPlumberBakeoff(
-  repository: ModelBakeoffRepository = modelBakeoffRepository
-) {
-  const existing = await repository.getExperiment(denverPlumberBakeoffId);
-  if (existing) return existing;
-  const now = new Date().toISOString();
+export type ModelBakeoffDefinition = {
+  id: string;
+  name: string;
+  purpose: string;
+  requestedBy: string;
+  sources: ModelBakeoffSource[];
+  candidates: ModelBakeoffCandidate[];
+};
+
+export function createModelBakeoffRecords(definition: ModelBakeoffDefinition, now = new Date().toISOString()) {
   const experiment = modelBakeoffExperimentSchema.parse({
     schemaVersion: 1,
-    id: denverPlumberBakeoffId,
-    name: "Denver plumber authoring bake-off",
-    purpose: "Compare four authoring routes across three source-information profiles using the same Lodesta intake, tools, guardrails, verification, and private preview boundary.",
-    requestedBy: "lodesta_model_bakeoff",
+    id: definition.id,
+    name: definition.name,
+    purpose: definition.purpose,
+    requestedBy: definition.requestedBy,
     status: "queued",
-    sources: denverPlumberBakeoffSources,
-    candidates: denverPlumberBakeoffCandidates,
+    sources: definition.sources,
+    candidates: definition.candidates,
     createdAt: now,
     updatedAt: now
   });
-  const runs = denverPlumberBakeoffSources.flatMap((source, sourceIndex) =>
-    denverPlumberBakeoffCandidates.map((candidate, candidateIndex) => modelBakeoffRunSchema.parse({
+  const runs = definition.sources.flatMap((source, sourceIndex) =>
+    definition.candidates.map((candidate, candidateIndex) => modelBakeoffRunSchema.parse({
       schemaVersion: 1,
-      id: `${denverPlumberBakeoffId}:${source.key}:${candidate.key}`,
-      experimentId: denverPlumberBakeoffId,
-      ordinal: sourceIndex * denverPlumberBakeoffCandidates.length + candidateIndex,
+      id: `${definition.id}:${source.key}:${candidate.key}`,
+      experimentId: definition.id,
+      ordinal: sourceIndex * definition.candidates.length + candidateIndex,
       source,
       candidate,
       status: "queued",
@@ -71,13 +77,37 @@ export async function ensureDenverPlumberBakeoff(
       updatedAt: now
     }))
   );
+  return { experiment, runs };
+}
+
+export async function ensureModelBakeoff(
+  definition: ModelBakeoffDefinition,
+  repository: ModelBakeoffRepository = modelBakeoffRepository
+) {
+  const existing = await repository.getExperiment(definition.id);
+  if (existing) return existing;
+  const { experiment, runs } = createModelBakeoffRecords(definition);
   await repository.createExperiment(experiment, runs);
   return experiment;
 }
 
+export async function ensureDenverPlumberBakeoff(
+  repository: ModelBakeoffRepository = modelBakeoffRepository
+) {
+  return ensureModelBakeoff({
+    id: denverPlumberBakeoffId,
+    name: "Denver plumber authoring bake-off",
+    purpose: "Compare four authoring routes across three source-information profiles using the same Lodesta intake, tools, guardrails, verification, and private preview boundary.",
+    requestedBy: "lodesta_model_bakeoff",
+    sources: denverPlumberBakeoffSources,
+    candidates: denverPlumberBakeoffCandidates
+  }, repository);
+}
+
 export async function runModelBakeoffItem(
   itemId: string,
-  repository: ModelBakeoffRepository = modelBakeoffRepository
+  repository: ModelBakeoffRepository = modelBakeoffRepository,
+  options: { maxAuthoringCostUsd?: number } = {}
 ) {
   const item = await repository.getRun(itemId);
   if (!item) throw new Error(`Model bake-off run not found: ${itemId}`);
@@ -101,13 +131,15 @@ export async function runModelBakeoffItem(
       initialBuildRoute: {
         apiProvider: current.candidate.apiProvider,
         modelId: current.candidate.modelId
-      }
+      },
+      initialBuildMaxCostUsd: options.maxAuthoringCostUsd
     });
     current = modelBakeoffRunSchema.parse({
       ...current,
       siteId: bootstrapped.site.id,
       sessionId: bootstrapped.session.id,
       runId: bootstrapped.run.id,
+      publicBuildInputHash: bootstrapped.buildInput.inputHash,
       updatedAt: new Date().toISOString()
     });
     await repository.saveRun(current);

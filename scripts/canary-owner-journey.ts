@@ -25,8 +25,6 @@ const sourceUrl = requiredUrl("LODESTA_OWNER_CANARY_SOURCE_URL");
 assert.equal(sourceUrl.protocol, "https:", "The owner canary source must use HTTPS.");
 const ownerEmail = required("LODESTA_OWNER_CANARY_EMAIL");
 assert(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail), "LODESTA_OWNER_CANARY_EMAIL is invalid.");
-const modelId = required("LODESTA_OWNER_CANARY_MODEL");
-assert(/^[a-z0-9._-]+\/[a-z0-9._:/-]+$/i.test(modelId), "LODESTA_OWNER_CANARY_MODEL must be an OpenRouter model ID.");
 const supabaseUrl = required("SUPABASE_URL");
 const serviceRoleKey = required("SUPABASE_SERVICE_ROLE_KEY");
 const anonKey = publicAnonKey();
@@ -61,7 +59,6 @@ const evidence: Record<string, unknown> = {
   startedAt,
   origin: origin.origin,
   sourceOrigin: sourceUrl.origin,
-  model: { provider: "openrouter", id: modelId },
   identities: {
     artifactContract: agentAuthoredArtifactIdentity,
     toolchain: siteToolchainIdentity,
@@ -120,12 +117,7 @@ try {
   await screenshot("01-authenticated");
   step("authenticated_owner", { status: "passed" });
 
-  await page.getByLabel("Filter OpenRouter models").waitFor();
-  await page.getByLabel("Filter OpenRouter models").fill(modelId);
-  const modelSelect = page.locator("#initialBuildModelId");
-  await modelSelect.selectOption(modelId);
-  assert.equal(await modelSelect.inputValue(), modelId, `Model ${modelId} is not selectable in the current catalog.`);
-  await page.getByLabel("Website URL").fill(sourceUrl.toString());
+  await page.getByLabel("Public website or business source").fill(sourceUrl.toString());
   await page.getByRole("button", { name: "Create website" }).click();
 
   const duplicateDialog = page.getByRole("dialog", { name: "Create another website?" });
@@ -277,8 +269,7 @@ try {
     evidenceDirectory,
     setupId,
     siteId,
-    slug,
-    modelId
+    slug
   })}\n`);
 } catch (error) {
   const diagnostic = safeDiagnostic(error);

@@ -219,8 +219,25 @@ export default {
         }
         await sandbox.killAllProcesses();
         const archivePath = `/tmp/${body.backupId}.tar.gz`;
+        const restoreRoot = `/tmp/lodesta-restore-${body.backupId}`;
+        const retainedInputPath = `/tmp/lodesta-public-input-${body.backupId}.json`;
         await sandbox.writeFile(archivePath, new Response(archiveBytes).body!);
-        const restored = await sandbox.exec(`rm -rf ${workspaceRoot} && mkdir -p ${workspaceRoot} && tar -xzf ${archivePath} -C ${workspaceRoot} && rm -f ${archivePath} && rm -rf ${workspaceRoot}/node_modules && ln -s /opt/lodesta-site-scaffold/node_modules ${workspaceRoot}/node_modules`, { timeout: 30_000 });
+        const restored = await sandbox.exec([
+          `rm -rf ${restoreRoot}`,
+          `mkdir -p ${restoreRoot}`,
+          `tar -xzf ${archivePath} -C ${restoreRoot}`,
+          `cp ${publicInputPath} ${retainedInputPath}`,
+          `rm -rf ${workspaceRoot}`,
+          `mkdir -p ${workspaceRoot}`,
+          `cp -R /opt/lodesta-site-scaffold/. ${workspaceRoot}/`,
+          `rm -rf ${workspaceRoot}/node_modules ${workspaceRoot}/src`,
+          `cp -R ${restoreRoot}/src ${workspaceRoot}/src`,
+          `mkdir -p ${workspaceRoot}/.lodesta`,
+          `cp ${retainedInputPath} ${publicInputPath}`,
+          `cp ${restoreRoot}/.lodesta/revision ${revisionPath}`,
+          `ln -s /opt/lodesta-site-scaffold/node_modules ${workspaceRoot}/node_modules`,
+          `rm -rf ${restoreRoot} ${archivePath} ${retainedInputPath}`
+        ].join(" && "), { timeout: 30_000 });
         if (!restored.success) return json({ error: "restore_failed", stderr: restored.stderr.slice(-8_000) }, 422);
         return json({ ok: true, revision: await readRevision(sandbox) });
       }

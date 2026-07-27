@@ -58,7 +58,7 @@ assert(!existsSync("scripts/dev-supervisor.mjs")
   && !devSupervisor.includes("startWorker")
   && !devSupervisor.includes("workers/runner.ts"), "Default development must not supervise the shared polling worker.");
 assert(!existsSync("packages/site-platform/index.ts"), "The broad site-platform barrel must remain removed.");
-for (const name of ["CLOUDFLARE_ACCOUNT_ID=", "LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_SANDBOX_IMAGE_DIGEST=", "LODESTA_DEV_SANDBOX_TOKEN=", "LODESTA_RELEASE_GIT_SHA=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER=", "LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION=", "LODESTA_OWNER_CANARY_ORIGIN=", "LODESTA_OWNER_CANARY_SOURCE_URL=", "LODESTA_OWNER_CANARY_EMAIL=", "LODESTA_OWNER_CANARY_MODEL="]) {
+for (const name of ["CLOUDFLARE_ACCOUNT_ID=", "LODESTA_SANDBOX_URL=", "LODESTA_SANDBOX_TOKEN=", "LODESTA_SANDBOX_IMAGE_DIGEST=", "LODESTA_DEV_SANDBOX_TOKEN=", "LODESTA_RELEASE_GIT_SHA=", "LODESTA_ARTIFACT_BROKER_URL=", "LODESTA_ARTIFACT_BROKER_TOKEN=", "LODESTA_RECOVERY_WATCHDOG_URL=", "LODESTA_RECOVERY_WATCHDOG_TOKEN=", "LODESTA_R2_AUDIT_ACCESS_KEY_ID=", "LODESTA_R2_MAINTENANCE_ACCESS_KEY_ID=", "OPENAI_API_KEY=", "OPENROUTER_API_KEY=", "LODESTA_SITE_AGENT_PROVIDER=", "LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION=", "LODESTA_OWNER_CANARY_ORIGIN=", "LODESTA_OWNER_CANARY_SOURCE_URL=", "LODESTA_OWNER_CANARY_EMAIL="]) {
   assert(env.includes(name), `.env.example must document ${name}`);
 }
 assert(packageJson.scripts["deploy:site-sandbox"].includes("--strict") && packageJson.scripts["deploy:site-sandbox"].includes("--containers-rollout=immediate"), "Sandbox deployments must use strict mode and immediate container rollout.");
@@ -159,10 +159,10 @@ assert(
     && architecture.includes("canonicalMigration"),
   "Architecture ratchet must enforce canonical local contracts and the baseline."
 );
-assert(marketingHome.includes("Lodesta runs your website. You run your business."), "OAuth homepage must name Lodesta in its primary heading.");
+assert(/<h1>[^<]*Lodesta[^<]*<\/h1>/.test(marketingHome), "OAuth homepage must name Lodesta in its primary heading.");
 assert(
-  marketingHome.includes("Lodesta is an AI-powered website and local-presence platform for U.S. small businesses.")
-    && marketingHome.includes("Sign in to create, customize, publish, and manage your website"),
+  marketingHome.includes("Lodesta checks how easily customers can find, understand, trust, and contact your business.")
+    && marketingHome.includes('href="/account/onboarding"'),
   "OAuth homepage must clearly explain Lodesta's purpose and authenticated capabilities."
 );
 for (const value of ['applicationName: "Lodesta"', 'canonical: homepageUrl', 'siteName: "Lodesta"']) {

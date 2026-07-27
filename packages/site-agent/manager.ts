@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import OpenAI from "openai";
 import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCall, ResponseInputItem, Tool } from "openai/resources/responses/responses";
+import type { ModelCatalog } from "@/lib/model-catalog";
 import { configuredAppOrigin } from "@/lib/app-origin";
 import { getSiteAuthoringModelSettings } from "@/lib/operator-settings";
 import { sha256, stableJson } from "@/packages/business-data";
@@ -33,9 +34,12 @@ import {
 import { DeterministicManagerHistory, managerPromptTelemetry } from "./history";
 import { managerBuildContext, websiteManagerPromptIdentity, websiteManagerSystemPrompt } from "./prompts";
 import {
-  establishProviderAuthoringCapabilities
+  establishProviderAuthoringCapabilities,
+  type ProviderAuthoringCapabilities
 } from "./provider-capabilities";
+import { isEstablishedOpenRouterAuthoringRoute } from "./provider-routes";
 import { taskSkillFor } from "./skills";
+import { openRouterAnthropicMessagesClient } from "./openrouter-anthropic-messages";
 import {
   isSupportedSiteAgentModel,
   managerGuardrailsForKind,
@@ -51,7 +55,9 @@ type ProviderResponseUsage = NonNullable<Response["usage"]> & {
   cost?: number | null;
   cost_details?: { upstream_inference_cost?: number | null } | null;
 };
-type ManagerResponse = Pick<Response, "id" | "model" | "output" | "output_text" | "status" | "error" | "incomplete_details"> & {
+type ManagerOutputItem = Response["output"][number] | ResponseInputItem;
+type ManagerResponse = Pick<Response, "id" | "model" | "output_text" | "status" | "error" | "incomplete_details"> & {
+  output: ManagerOutputItem[];
   usage?: ProviderResponseUsage;
   openrouter_metadata?: unknown;
 };
@@ -61,7 +67,10 @@ export interface ManagerResponsesClient {
 }
 
 export class WebsiteManagerAgent {
-  constructor(private readonly injectedClient?: ManagerResponsesClient) {}
+  constructor(
+    private readonly injectedClient?: ManagerResponsesClient,
+    private readonly openRouterCatalogLoader?: () => Promise<ModelCatalog>
+  ) {}
 
   async run(input: ManagerRunRequest & {
     runtime: ManagerToolRuntime;
@@ -81,15 +90,36 @@ export class WebsiteManagerAgent {
       modelRequests: number;
       noToolResponses: number;
       toolCalls: Record<string, number>;
-      compactedPathRereads: number;
+      unchangedPathRereads: number;
+      parallelToolViolations: number;
+      upstreamChanges: number;
+      contextWindowTokens: number;
+      maxOutputTokens: number;
+      usableInputTokens: number;
+      contextUtilizationHighWater: number;
+      contextHighWaterRequest?: number;
     };
   }> {
     const route = input.route
       ? validatedSiteAgentRoute(input.route.apiProvider, input.route.modelId)
       : await configuredSiteAgentRoute();
     const { apiProvider, modelId } = route;
-    const providerCapability = establishProviderAuthoringCapabilities(apiProvider, modelId);
-    const client = this.injectedClient ?? configuredResponsesClient(apiProvider);
+    const providerCapability = await establishProviderAuthoringCapabilities(apiProvider, modelId, {
+      loadOpenRouterCatalog: this.openRouterCatalogLoader
+    });
+    const maxOutputTokens = 64_000;
+    const usableInputTokens = providerCapability.descriptor.contextWindowTokens - maxOutputTokens;
+    if (usableInputTokens <= 0) {
+      throw new SiteAuthoringTerminalError(
+        "context_capacity_exhausted",
+        "provider",
+        false,
+        `context_capacity_exhausted:${providerCapability.descriptor.contextWindowTokens}:${maxOutputTokens}`
+      );
+    }
+    const client = this.injectedClient ?? configuredResponsesClient(providerCapability.descriptor);
+    const availableTools = websiteManagerTools;
+    const providerTools = projectToolsForProvider(availableTools, providerCapability.descriptor);
     const guardrails = guardrailsFor(input, input.guardrails);
     const startedAt = Date.now();
     const usage = emptyUsage();
@@ -111,42 +141,70 @@ export class WebsiteManagerAgent {
       stale: false,
       regeneration: "fresh" as const
     };
-    const initialContext: ResponseInputItem = {
-      role: "user",
-      type: "message",
-      content: [{ type: "input_text", text: JSON.stringify(managerBuildContext({
+    const openAiCacheEnabled = providerCapability.descriptor.cacheStrategy === "openai_implicit_explicit";
+    const stableExplicitCache = openAiCacheEnabled
+      || providerCapability.descriptor.cacheStrategy === "anthropic_explicit";
+    const textBlock = {
+      type: "input_text" as const,
+      text: JSON.stringify(managerBuildContext({
         authoringBrief: input.authoringBrief,
         instruction: input.instruction,
         kind: input.kind,
         selection: input.selection
-      })) }, ...(input.mediaSheet ? [{
+      })),
+      ...(!input.mediaSheet && stableExplicitCache ? { prompt_cache_breakpoint: { mode: "explicit" as const } } : {})
+    };
+    const initialContext: ResponseInputItem[] = [{
+      role: "user",
+      type: "message",
+      content: [textBlock, ...(input.mediaSheet ? [{
         type: "input_image" as const,
         image_url: input.mediaSheet.dataUrl,
-        detail: "high" as const
+        detail: "high" as const,
+        ...(stableExplicitCache ? { prompt_cache_breakpoint: { mode: "explicit" as const } } : {})
       }] : [])]
-    };
-    const history = new DeterministicManagerHistory([initialContext]);
+    }];
+    const history = new DeterministicManagerHistory(initialContext);
     let responseCount = 0;
     let noToolResponses = 0;
     let firstSuccessfulBuildMs: number | undefined;
     const toolCallCounts = new Map<string, number>();
     let consecutiveFailureFingerprint: string | undefined;
     let consecutiveIdenticalFailures = 0;
+    let parallelToolViolations = 0;
+    let upstreamChanges = 0;
+    let lastUpstreamProvider: string | undefined;
+    let lastInputTokens = 0;
+    let contextUtilizationHighWater = 0;
+    let contextHighWaterRequest: number | undefined;
+    let contextWarningEmitted = false;
 
     while (true) {
       assertWithinCostGuardrail(usage, guardrails.maxCostUsd);
+      if (lastInputTokens >= usableInputTokens) {
+        throw new SiteAuthoringTerminalError(
+          "context_capacity_exhausted",
+          "provider",
+          false,
+          `context_capacity_exhausted:input=${lastInputTokens}:usable=${usableInputTokens}:request=${responseCount}`
+        );
+      }
       const turnIndex = responseCount + 1;
       const turnId = eventId("turn");
       const modelIdValue = eventId("model");
       const turnStartedAt = new Date().toISOString();
       const runtimeMessage = runtimeStateMessage(input.runtime.stateSummary());
+      history.appendRuntimeState(runtimeMessage);
       const activeTail = history.activeTailItems(turnIndex);
-      const requestHistory = [...history.prefixItems(), ...activeTail, runtimeMessage];
+      const projectedTail = providerCapability.descriptor.cacheStrategy === "anthropic_explicit"
+        ? withRollingPromptCacheBreakpoint(activeTail)
+        : activeTail;
+      const requestHistory = [...history.prefixItems(), ...projectedTail];
       const promptTelemetry = managerPromptTelemetry({
         instructions: websiteManagerSystemPrompt,
-        tools: managerTools,
+        tools: providerTools,
         stablePrefix: history.prefixItems(),
-        activeTail,
+        activeTail: projectedTail,
         runtimeState: runtimeMessage,
         requestIndex: turnIndex
       });
@@ -165,28 +223,40 @@ export class WebsiteManagerAgent {
             historyItems: requestHistory.length,
             authoringBriefCharacters: briefCharacters,
             authoringBriefAlert: briefCharacters > authoringBriefAlertCharacters,
-            compactedHistoryRecords: history.compactedRecords().length,
-            compactedPathRereads: history.compactedPathRereads(),
+            unchangedPathRereads: history.unchangedPathRereads(),
+            contextWindowTokens: providerCapability.descriptor.contextWindowTokens,
+            maxOutputTokens,
+            usableInputTokens,
+            contextUtilizationHighWater,
             ...promptTelemetry
           }
         })
       ]);
       const responseStartedAt = Date.now();
       let response: ManagerResponse;
+      let transportRetries = 0;
       try {
-        response = await createWithOneTransportRetry(client, routedResponseParams({
+        response = await createWithTransportRetry(client, routedResponseParams({
           model: modelId,
           instructions: websiteManagerSystemPrompt,
           input: requestHistory,
-          tools: managerTools,
+          tools: providerTools,
           tool_choice: "required",
           parallel_tool_calls: false,
           store: false,
           include: ["reasoning.encrypted_content"],
           reasoning: { effort: siteAgentReasoningEffort },
           text: { verbosity: siteAgentTextVerbosity },
-          max_output_tokens: 64_000
-        }, apiProvider, input.runId), input.signal);
+          max_output_tokens: maxOutputTokens,
+          ...(openAiCacheEnabled ? {
+            prompt_cache_key: cacheKey(input),
+            prompt_cache_options: { mode: "implicit", ttl: "30m" }
+          } : {})
+        }, providerCapability.descriptor, input.runId), {
+          signal: input.signal,
+          modelId,
+          onRetry: () => { transportRetries += 1; }
+        });
       } catch (error) {
         const completedAt = new Date().toISOString();
         const errorCode = diagnosticErrorCode(error);
@@ -202,7 +272,7 @@ export class WebsiteManagerAgent {
             startedAt: turnStartedAt,
             completedAt,
             errorCode,
-            summary: { error: errorCode, ...promptTelemetry },
+            summary: { error: errorCode, transportRetries, ...promptTelemetry },
             payload: modelTurnPayload(requestHistory, undefined, websiteManagerPromptIdentity, route, {
               promptTelemetry,
               briefProvenance,
@@ -216,6 +286,21 @@ export class WebsiteManagerAgent {
       }
       responseCount += 1;
       const responseUsage = usageForModel(modelId, response.usage, Date.now() - responseStartedAt);
+      const upstreamProvider = selectedUpstreamProvider(response, apiProvider);
+      const upstreamChanged = Boolean(
+        upstreamProvider
+        && lastUpstreamProvider
+        && upstreamProvider !== lastUpstreamProvider
+      );
+      if (upstreamChanged) upstreamChanges += 1;
+      const previousUpstreamProvider = upstreamChanged ? lastUpstreamProvider : undefined;
+      if (upstreamProvider) lastUpstreamProvider = upstreamProvider;
+      lastInputTokens = responseUsage.inputTokens;
+      const contextUtilization = usableInputTokens > 0 ? responseUsage.inputTokens / usableInputTokens : 1;
+      if (contextUtilization > contextUtilizationHighWater) {
+        contextUtilizationHighWater = contextUtilization;
+        contextHighWaterRequest = responseCount;
+      }
       mergeUsage(usage, response.usage, startedAt, modelId);
       const calls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
       const parallelToolViolation = calls.length > 1;
@@ -229,6 +314,15 @@ export class WebsiteManagerAgent {
           toolNames: calls.map((call) => call.name),
           noToolResponse: calls.length === 0,
           parallelToolViolation,
+          upstreamChanged,
+          previousUpstreamProvider,
+          upstreamProvider,
+          contextWindowTokens: providerCapability.descriptor.contextWindowTokens,
+          maxOutputTokens,
+          usableInputTokens,
+          inputCapacityUtilization: contextUtilization,
+          contextUtilizationHighWater,
+          transportRetries,
           ...promptTelemetry
         },
         payload: modelTurnPayload(requestHistory, response, websiteManagerPromptIdentity, route, {
@@ -239,6 +333,29 @@ export class WebsiteManagerAgent {
         })
       })]);
       await input.onUsage?.({ usage: { ...usage }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
+      if (contextUtilization >= 0.8 && !contextWarningEmitted) {
+        contextWarningEmitted = true;
+        const warningAt = new Date().toISOString();
+        await input.onEvents?.([runEvent({
+          id: eventId("context"),
+          kind: "model_request",
+          name: "context.capacity.warning",
+          status: "succeeded",
+          turnIndex,
+          apiProvider,
+          modelId,
+          startedAt: warningAt,
+          completedAt: warningAt,
+          summary: {
+            inputTokens: responseUsage.inputTokens,
+            contextWindowTokens: providerCapability.descriptor.contextWindowTokens,
+            maxOutputTokens,
+            usableInputTokens,
+            inputCapacityUtilization: contextUtilization,
+            requestIndex: responseCount
+          }
+        })]);
+      }
       if (responseUsage.costSource === "unavailable") {
         throw new SiteAuthoringTerminalError(
           "cost_telemetry_unavailable",
@@ -247,14 +364,7 @@ export class WebsiteManagerAgent {
           `cost_telemetry_unavailable:${apiProvider}:${modelId}`
         );
       }
-      if (parallelToolViolation) {
-        throw new SiteAuthoringTerminalError(
-          "unknown_internal_failure",
-          "provider",
-          false,
-          `provider_parallel_tool_call_violation:${apiProvider}:${modelId}:${calls.length}`
-        );
-      }
+      if (parallelToolViolation) parallelToolViolations += 1;
 
       if (!calls.length) {
         noToolResponses += 1;
@@ -269,7 +379,8 @@ export class WebsiteManagerAgent {
         continue;
       }
 
-      for (const rawCall of calls) {
+      const deferAfterFirst = calls.length > 1 && calls.some((call) => !isReadOnlyToolName(call.name));
+      for (const [callIndex, rawCall] of calls.entries()) {
         const started = new Date().toISOString();
         const toolEventId = eventId("tool");
         let name: ReturnType<typeof managerToolNameSchema.parse> | undefined;
@@ -280,6 +391,7 @@ export class WebsiteManagerAgent {
         let stalledError: SiteAuthoringTerminalError | undefined;
         let metering: ManagerToolExecution["metering"];
         let replayed = false;
+        const deferred = deferAfterFirst && callIndex > 0;
         const workspaceHashBefore = runtimeWorkspaceHash(input.runtime.stateSummary());
         try {
           name = managerToolNameSchema.parse(rawCall.name);
@@ -291,6 +403,10 @@ export class WebsiteManagerAgent {
             execution = replay.result;
             status = replay.status;
             replayed = true;
+          } else if (deferred) {
+            status = "failed";
+            execution = resultForDeferredToolCall(rawCall.call_id, name);
+            replayedCalls.set(rawCall.call_id, { inputHash, result: execution, status });
           } else {
             try {
               if (isOwnerVisibleSlowTool(name)) {
@@ -346,7 +462,7 @@ export class WebsiteManagerAgent {
         toolRecords.push(toolRecord);
         const workspaceMutated = workspaceHashBefore !== workspaceHashAfter
           || (toolName === "create_image" && status === "succeeded" && execution.diagnosticOutput.ok !== false);
-        const compactedRereadsBefore = history.compactedPathRereads();
+        const unchangedRereadsBefore = history.unchangedPathRereads();
         const functionOutput: ResponseInputItem = {
           type: "function_call_output",
           call_id: rawCall.call_id,
@@ -354,6 +470,7 @@ export class WebsiteManagerAgent {
         };
         history.noteTool({
           responseItems: response.output as ResponseInputItem[],
+          includeResponseItems: callIndex === 0,
           functionOutput,
           responseIndex: responseCount,
           callId: rawCall.call_id,
@@ -366,7 +483,14 @@ export class WebsiteManagerAgent {
           workspaceMutated
         });
         toolCallCounts.set(toolName, (toolCallCounts.get(toolName) ?? 0) + 1);
-        if (toolName === "build_preview" && status === "succeeded" && execution.diagnosticOutput.ok !== false && firstSuccessfulBuildMs === undefined) {
+        if (
+          (
+            toolName === "build_preview"
+            || (toolName === "finish" && execution.diagnosticOutput.buildPerformed === true)
+          )
+          && execution.diagnosticOutput.failureStage !== "compilation"
+          && firstSuccessfulBuildMs === undefined
+        ) {
           firstSuccessfulBuildMs = Date.now() - startedAt;
         }
         await input.onEvents?.([runEvent({
@@ -380,7 +504,9 @@ export class WebsiteManagerAgent {
             outputHash,
             ok: execution.diagnosticOutput.ok,
             replayed,
-            compactedPathReread: history.compactedPathRereads() > compactedRereadsBefore
+            unchangedPathReread: history.unchangedPathRereads() > unchangedRereadsBefore,
+            providerCapabilityViolation: parallelToolViolation,
+            deferred
           },
           payload: {
             arguments: parsedArguments,
@@ -391,10 +517,10 @@ export class WebsiteManagerAgent {
         })]);
         await input.onProgress?.({ toolRecord, usage: { ...usage, durationMs: Date.now() - startedAt }, responseUsage, responseIndex: responseCount, apiProvider, modelId });
         if (terminalError) throw terminalError;
-        if (workspaceMutated || (isReleaseTool(toolName) && status === "succeeded")) {
+        if (!deferred && (workspaceMutated || (isReleaseTool(toolName) && status === "succeeded"))) {
           consecutiveFailureFingerprint = undefined;
           consecutiveIdenticalFailures = 0;
-        } else if (isReleaseTool(toolName) && status === "failed") {
+        } else if (!deferred && isReleaseTool(toolName) && status === "failed") {
           const failureFingerprint = releaseFailureFingerprint(toolName, workspaceHashAfter, execution);
           if (failureFingerprint === consecutiveFailureFingerprint) {
             consecutiveIdenticalFailures += 1;
@@ -428,7 +554,14 @@ export class WebsiteManagerAgent {
               modelRequests: responseCount,
               noToolResponses,
               toolCalls: Object.fromEntries([...toolCallCounts.entries()].sort(([left], [right]) => left.localeCompare(right))),
-              compactedPathRereads: history.compactedPathRereads()
+              unchangedPathRereads: history.unchangedPathRereads(),
+              parallelToolViolations,
+              upstreamChanges,
+              contextWindowTokens: providerCapability.descriptor.contextWindowTokens,
+              maxOutputTokens,
+              usableInputTokens,
+              contextUtilizationHighWater,
+              contextHighWaterRequest
             }
           };
         }
@@ -447,8 +580,15 @@ export class WebsiteManagerAgent {
     const settings = await getSiteAuthoringModelSettings();
     const route = selectedSiteAgentRoute(settings.settings.siteAgentProvider, settings.settings.siteAgentModel);
     const { apiProvider, modelId } = route;
+    const providerCapability = await establishProviderAuthoringCapabilities(apiProvider, modelId, {
+      loadOpenRouterCatalog: this.openRouterCatalogLoader
+    });
     const result = await structuredResponse({
-      client: this.injectedClient ?? configuredResponsesClient(apiProvider), route, name: "manager_discussion", schema: managerDiscussionJsonSchema,
+      client: this.injectedClient ?? configuredResponsesClient(providerCapability.descriptor),
+      route,
+      providerCapabilities: providerCapability.descriptor,
+      name: "manager_discussion",
+      schema: managerDiscussionJsonSchema,
       system: websiteManagerSystemPrompt,
       content: [{ type: "input_text", text: JSON.stringify(createManagerDiscussionBrief(input)) }],
       signal: input.signal, maxOutputTokens: 2500
@@ -466,6 +606,7 @@ export class ManagerNeedsInputError extends Error {
 async function structuredResponse(input: {
   client: ManagerResponsesClient;
   route: { apiProvider: SiteAgentApiProvider; modelId: string };
+  providerCapabilities: ProviderAuthoringCapabilities;
   name: string;
   schema: Record<string, unknown>;
   system: string;
@@ -474,35 +615,119 @@ async function structuredResponse(input: {
   signal?: AbortSignal;
 }) {
   const startedAt = Date.now();
-  const response = await createWithOneTransportRetry(input.client, routedResponseParams({
+  const response = await createWithTransportRetry(input.client, routedResponseParams({
     model: input.route.modelId, instructions: input.system,
     input: [{ role: "user", type: "message", content: input.content as never }],
     store: false, parallel_tool_calls: false, reasoning: { effort: siteAgentReasoningEffort },
     text: { verbosity: siteAgentTextVerbosity, format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
     max_output_tokens: input.maxOutputTokens
-  }, input.route.apiProvider), input.signal);
+  }, input.providerCapabilities), {
+    signal: input.signal,
+    modelId: input.route.modelId
+  });
   if (!response.output_text) throw new Error("Website manager response did not contain structured output text.");
   return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.route.modelId, response.usage, Date.now() - startedAt) };
 }
 
-function configuredResponsesClient(apiProvider: SiteAgentApiProvider): ManagerResponsesClient {
+function configuredResponsesClient(capabilities: ProviderAuthoringCapabilities): ManagerResponsesClient {
+  const apiProvider = capabilities.apiProvider;
   const apiKey = apiProvider === "openrouter" ? process.env.OPENROUTER_API_KEY : process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error(`${apiProvider === "openrouter" ? "OPENROUTER_API_KEY" : "OPENAI_API_KEY"} is required for website manager runs.`);
   const origin = configuredAppOrigin();
+  if (capabilities.transport === "openrouter_anthropic_messages") {
+    return openRouterAnthropicMessagesClient({
+      apiKey,
+      headers: openRouterRequestHeaders(capabilities, origin)
+    });
+  }
   const client = new OpenAI({
     apiKey,
     baseURL: apiProvider === "openrouter" ? "https://openrouter.ai/api/v1" : undefined,
     maxRetries: 0,
     timeout: siteAgentRunGuardrailDefaults.initial_build.deadlineMs,
     defaultHeaders: apiProvider === "openrouter"
-      ? {
-          ...(origin ? { "HTTP-Referer": origin } : {}),
-          "X-OpenRouter-Title": "Lodesta",
-          "X-OpenRouter-Metadata": "enabled"
-        }
+      ? openRouterRequestHeaders(capabilities, origin)
       : undefined
   });
   return { create: (params, options) => client.responses.create(params, options) };
+}
+
+export function openRouterRequestHeaders(
+  capabilities: ProviderAuthoringCapabilities,
+  origin?: string
+): Record<string, string> {
+  if (capabilities.apiProvider !== "openrouter") return {};
+  return {
+    ...(origin ? { "HTTP-Referer": origin } : {}),
+    "X-OpenRouter-Title": "Lodesta",
+    "X-OpenRouter-Metadata": "enabled",
+    ...(capabilities.strictToolStrategy === "anthropic_beta_strict_tools"
+      ? { "x-anthropic-beta": "structured-outputs-2025-11-13" }
+      : {})
+  };
+}
+
+export function projectToolsForProvider(
+  tools: Tool[],
+  capabilities: ProviderAuthoringCapabilities
+): Tool[] {
+  if (capabilities.strictToolStrategy !== "anthropic_beta_strict_tools") return tools;
+  return tools.map((value) => {
+    if (value.type !== "function") return value;
+    return {
+      ...value,
+      parameters: anthropicStrictSchema(value.parameters)
+    };
+  }) as Tool[];
+}
+
+function anthropicStrictSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(anthropicStrictSchema);
+  if (!value || typeof value !== "object") return value;
+  const source = value as Record<string, unknown>;
+  const constraintGuidance = anthropicConstraintGuidance(source);
+  const result = Object.fromEntries(
+    Object.entries(source)
+      .filter(([key]) => !anthropicUnsupportedSchemaKeywords.has(key))
+      .map(([key, nested]) => [key, anthropicStrictSchema(nested)])
+  );
+  if (constraintGuidance.length) {
+    result.description = [
+      typeof source.description === "string" ? source.description : undefined,
+      ...constraintGuidance
+    ].filter(Boolean).join(" ");
+  }
+  return result;
+}
+
+const anthropicUnsupportedSchemaKeywords = new Set([
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties"
+]);
+
+function anthropicConstraintGuidance(value: Record<string, unknown>) {
+  const guidance: string[] = [];
+  if (typeof value.pattern === "string") guidance.push(`Must match ${value.pattern}.`);
+  if (typeof value.minimum === "number") guidance.push(`Minimum: ${value.minimum}.`);
+  if (typeof value.maximum === "number") guidance.push(`Maximum: ${value.maximum}.`);
+  if (typeof value.exclusiveMinimum === "number") guidance.push(`Must be greater than ${value.exclusiveMinimum}.`);
+  if (typeof value.exclusiveMaximum === "number") guidance.push(`Must be less than ${value.exclusiveMaximum}.`);
+  if (typeof value.minLength === "number") guidance.push(`Minimum length: ${value.minLength}.`);
+  if (typeof value.maxLength === "number") guidance.push(`Maximum length: ${value.maxLength}.`);
+  if (typeof value.minItems === "number") guidance.push(`Minimum items: ${value.minItems}.`);
+  if (typeof value.maxItems === "number") guidance.push(`Maximum items: ${value.maxItems}.`);
+  return guidance;
 }
 
 function selectedSiteAgentRoute(configuredProvider: SiteAgentApiProvider, configuredModelId: string) {
@@ -528,27 +753,34 @@ function validatedSiteAgentRoute(apiProvider: SiteAgentApiProvider, modelId: str
       `site_agent_model_pricing_missing:${modelId}`
     );
   }
-  if (apiProvider === "openrouter" && !modelId.includes("/")) {
+  if (apiProvider === "openrouter" && !isEstablishedOpenRouterAuthoringRoute(modelId)) {
     throw new SiteAuthoringTerminalError(
       "unknown_internal_failure",
       "platform",
       false,
-      `openrouter_model_slug_invalid:${modelId}`
+      `provider_authoring_capabilities_missing:${apiProvider}:${modelId}`
     );
   }
   return { apiProvider, modelId };
 }
 
-function routedResponseParams(params: ResponseCreateParamsNonStreaming, apiProvider: SiteAgentApiProvider, sessionId?: string) {
-  void establishProviderAuthoringCapabilities(apiProvider, String(params.model));
-  if (apiProvider !== "openrouter") return params;
+function routedResponseParams(
+  params: ResponseCreateParamsNonStreaming,
+  capabilities: ProviderAuthoringCapabilities,
+  sessionId?: string
+) {
+  if (capabilities.apiProvider !== "openrouter") return params;
   const {
     include: _include,
+    prompt_cache_key: _promptCacheKey,
+    prompt_cache_options: _promptCacheOptions,
     ...portableParams
   } = params;
   return {
     ...portableParams,
     provider: {
+      only: capabilities.eligibleZdrUpstreams,
+      allow_fallbacks: true,
       data_collection: "deny",
       zdr: true
     },
@@ -556,27 +788,97 @@ function routedResponseParams(params: ResponseCreateParamsNonStreaming, apiProvi
   } as ResponseCreateParamsNonStreaming;
 }
 
-async function createWithOneTransportRetry(client: ManagerResponsesClient, params: ResponseCreateParamsNonStreaming, signal?: AbortSignal) {
+async function createWithTransportRetry(
+  client: ManagerResponsesClient,
+  params: ResponseCreateParamsNonStreaming,
+  options: {
+    signal?: AbortSignal;
+    modelId: string;
+    onRetry?: (retry: { attempt: number; delayMs: number; status?: number }) => void;
+  }
+) {
+  const maximumAttempts = options.modelId === "moonshotai/kimi-k3" ? 4 : 2;
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
     try {
-      const response = await client.create(params, signal ? { signal } : undefined);
+      const response = await client.create(params, options.signal ? { signal: options.signal } : undefined);
       if (response.status === "failed") throw new Error(response.error?.message ?? "manager_model_failed");
       if (response.status === "incomplete") throw new Error(`manager_model_incomplete:${response.incomplete_details?.reason ?? "unknown"}`);
       return response;
     } catch (error) {
       lastError = error;
-      if (attempt > 0 || signal?.aborted || !transientTransportError(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (attempt + 1 >= maximumAttempts || options.signal?.aborted || !transientTransportError(error)) throw error;
+      const delayMs = transportRetryDelayMs(error, attempt, options.modelId);
+      options.onRetry?.({ attempt: attempt + 1, delayMs, status: transportStatus(error) });
+      await abortableDelay(delayMs, options.signal);
     }
   }
   throw lastError;
 }
 
+function transportRetryDelayMs(error: unknown, attempt: number, modelId: string) {
+  const status = transportStatus(error);
+  if (status === 429) {
+    const retryAfter = retryAfterMs(error);
+    if (retryAfter !== undefined) return Math.min(retryAfter, 60_000);
+    if (modelId === "moonshotai/kimi-k3") return [5_000, 15_000, 30_000][attempt] ?? 30_000;
+  }
+  if (modelId === "moonshotai/kimi-k3" && status !== undefined && status >= 500) {
+    return [2_000, 5_000, 15_000][attempt] ?? 15_000;
+  }
+  return 1_000;
+}
+
+function retryAfterMs(error: unknown) {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const response = record.response && typeof record.response === "object"
+    ? record.response as Record<string, unknown>
+    : undefined;
+  const value = headerValue(record.headers, "retry-after") ?? headerValue(response?.headers, "retry-after");
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
+}
+
+function headerValue(headers: unknown, name: string) {
+  if (headers instanceof Headers) return headers.get(name) ?? undefined;
+  if (!headers || typeof headers !== "object") return undefined;
+  const value = Object.entries(headers as Record<string, unknown>)
+    .find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+  return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
+}
+
+function transportStatus(error: unknown) {
+  if (!error || typeof error !== "object") return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function abortableDelay(delayMs: number, signal?: AbortSignal) {
+  if (delayMs <= 0) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(done, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason ?? new Error("transport_retry_aborted"));
+    };
+    function done() {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
 function transientTransportError(error: unknown) {
   const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
   if (typeof status === "number") return status === 408 || status === 409 || status === 429 || status >= 500;
-  return error instanceof TypeError || /timeout|timed out|connection|socket|network/i.test(boundedError(error));
+  return error instanceof TypeError
+    || /timeout|timed out|connection|socket|network|unexpected end of json input|unterminated json|invalid json response/i.test(boundedError(error));
 }
 
 function guardrailsFor(input: ManagerRunRequest, override?: Partial<ManagerRunGuardrails>): ManagerRunGuardrails {
@@ -601,12 +903,12 @@ function runtimeWorkspaceHash(summary: Record<string, unknown>) {
   return typeof hash === "string" ? hash : undefined;
 }
 
-function isReleaseTool(name: string): name is "build_preview" | "inspect_site" | "finish" {
-  return name === "build_preview" || name === "inspect_site" || name === "finish";
+function isReleaseTool(name: string): name is "build_preview" | "finish" {
+  return name === "build_preview" || name === "finish";
 }
 
 function releaseFailureFingerprint(
-  toolName: "build_preview" | "inspect_site" | "finish",
+  toolName: "build_preview" | "finish",
   workspaceHash: string | undefined,
   execution: ManagerToolExecution
 ) {
@@ -619,6 +921,29 @@ function releaseFailureFingerprint(
     workspaceHash,
     failure: stableFailureValue(execution.diagnosticOutput)
   }));
+}
+
+function isReadOnlyToolName(value: string) {
+  return value === "list_files" || value === "search_files" || value === "read_files";
+}
+
+function resultForDeferredToolCall(callId: string, name: string): ManagerToolExecution {
+  const value = {
+    ok: false,
+    error: "deferred_due_to_serial_tool_contract",
+    callId,
+    toolName: name,
+    guidance: "The provider returned multiple calls despite serial execution. This call was not executed; issue it again alone if it is still needed."
+  };
+  return { modelOutput: JSON.stringify(value), diagnosticOutput: value };
+}
+
+function cacheKey(input: Pick<ManagerRunRequest, "runId" | "buildInput">) {
+  return sha256(stableJson({
+    schemaVersion: 1,
+    purpose: "site-authoring",
+    run: input.runId ?? input.buildInput.id
+  })).slice("sha256:".length);
 }
 
 function stableFailureValue(value: unknown): unknown {
@@ -645,6 +970,7 @@ function mergeMeteredUsage(target: ManagerModelUsage, next: ManagerModelUsage, s
   const hadUsage = target.inputTokens > 0 || target.outputTokens > 0;
   target.inputTokens += next.inputTokens;
   target.cachedInputTokens += next.cachedInputTokens;
+  target.cacheWriteTokens = (target.cacheWriteTokens ?? 0) + (next.cacheWriteTokens ?? 0);
   target.reasoningTokens += next.reasoningTokens;
   target.outputTokens += next.outputTokens;
   target.costUsd += next.costUsd;
@@ -661,6 +987,7 @@ function toolMeteringFields(metering: NonNullable<ManagerToolExecution["metering
     providerRequestId: metering.providerRequestId,
     inputTokens: metering.usage.inputTokens,
     cachedInputTokens: metering.usage.cachedInputTokens,
+    cacheWriteTokens: metering.usage.cacheWriteTokens,
     reasoningTokens: metering.usage.reasoningTokens,
     outputTokens: metering.usage.outputTokens,
     costUsd: metering.usage.costUsd,
@@ -709,6 +1036,7 @@ function usageFields(usage: ManagerModelUsage, route: { apiProvider: SiteAgentAp
     providerRequestId: response.id,
     inputTokens: usage.inputTokens,
     cachedInputTokens: usage.cachedInputTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
     reasoningTokens: usage.reasoningTokens,
     outputTokens: usage.outputTokens,
     costUsd: usage.costUsd,
@@ -724,6 +1052,26 @@ function toolError(error: unknown): ManagerToolExecution { const message = bound
 
 function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputItem {
   return { role: "user", type: "message", content: [{ type: "input_text", text: `Current deterministic workspace state:\n${JSON.stringify(summary)}` }] };
+}
+
+function withRollingPromptCacheBreakpoint(items: ResponseInputItem[]) {
+  if (!items.length) return items;
+  const last = items.at(-1);
+  if (!last || last.type !== "message" || !Array.isArray(last.content)) return items;
+  let marked = false;
+  const content = [...last.content].reverse().map((block) => {
+    if (marked || block.type !== "input_text") return block;
+    marked = true;
+    return {
+      ...block,
+      prompt_cache_breakpoint: { mode: "explicit" as const }
+    };
+  }).reverse();
+  if (!marked) return items;
+  return [
+    ...items.slice(0, -1),
+    { ...last, content }
+  ] as ResponseInputItem[];
 }
 
 function modelTurnPayload(
@@ -772,19 +1120,29 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 const sourcePathSchema = { type: "string", pattern: "^src/[a-zA-Z0-9_./-]+\\.(?:ts|tsx|css)$" };
 
-const managerTools: Tool[] = [
+export const websiteManagerTools: Tool[] = [
   tool("list_files", "List every current source file with its hash and size.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
-  tool("read_file", "Read a source file, optionally by line window.", {
-    type: "object", additionalProperties: false, required: ["path", "startLine", "endLine"],
-    properties: { path: sourcePathSchema, startLine: { type: ["integer", "null"], minimum: 1 }, endLine: { type: ["integer", "null"], minimum: 1 } }
+  tool("search_files", "Find literal text across the workspace. Pass an empty paths array to search every source file.", {
+    type: "object", additionalProperties: false, required: ["query", "paths", "caseSensitive"],
+    properties: {
+      query: { type: "string", minLength: 1, maxLength: 500 },
+      paths: { type: "array", minItems: 0, maxItems: 20, items: sourcePathSchema },
+      caseSensitive: { type: "boolean" }
+    }
   }),
-  tool("write_file", "Create or replace one complete source file.", {
-    type: "object", additionalProperties: false, required: ["path", "content"], properties: { path: sourcePathSchema, content: { type: "string" } }
+  tool("read_files", "Read one or more source files, each optionally by line window.", {
+    type: "object", additionalProperties: false, required: ["files"],
+    properties: {
+      files: {
+        type: "array", minItems: 1, maxItems: 20,
+        items: {
+          type: "object", additionalProperties: false, required: ["path", "startLine", "endLine"],
+          properties: { path: sourcePathSchema, startLine: { type: ["integer", "null"], minimum: 1 }, endLine: { type: ["integer", "null"], minimum: 1 } }
+        }
+      }
+    }
   }),
-  tool("delete_file", "Delete one source file.", {
-    type: "object", additionalProperties: false, required: ["path"], properties: { path: sourcePathSchema }
-  }),
-  tool("apply_patch", "Atomically create, replace, or delete several complete source files. Use null content to delete a file.", {
+  tool("apply_patch", "Atomically create, replace, or delete one or more complete source files. Use null content to delete a file.", {
     type: "object", additionalProperties: false, required: ["files"], properties: {
       files: { type: "array", minItems: 1, maxItems: 80, items: { type: "object", additionalProperties: false, required: ["path", "content"], properties: { path: sourcePathSchema, content: { type: ["string", "null"] } } } }
     }
@@ -801,11 +1159,8 @@ const managerTools: Tool[] = [
     }
   }),
   tool("build_preview", "Validate and build the current workspace. Returns compiler or policy errors directly.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
-  tool("inspect_site", "Optionally inspect the current successful build in Lodesta's browser and release verifier. Returns screenshots plus actionable blockers and advisories without requiring finalization.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
-  tool("request_input", "Before the first source mutation only, pause and ask one essential owner question when proceeding would require a consequential guess.", {
-    type: "object", additionalProperties: false, required: ["question"], properties: { question: { type: "string", minLength: 1, maxLength: 600 } }
-  }),
-  tool("finish", "Finish after a current successful build. Finalization runs release verification automatically when needed.", {
+  tool("inspect_site", "Optionally inspect a current successful build visually in Lodesta's browser. Returns screenshots and visual observations only; it never runs hard release verification.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
+  tool("finish", "Finish when the workspace is ready. This automatically builds dirty or unbuilt source and checks only technical release safety and operability.", {
     type: "object", additionalProperties: false, required: ["ownerMessage"],
     properties: { ownerMessage: { type: "string", minLength: 1, maxLength: 1200 } }
   })

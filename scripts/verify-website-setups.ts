@@ -8,7 +8,6 @@ import { isDomainReconciliationDue } from "@/lib/domain-reconciliation";
 import { getWebsiteSetupView, websiteSetupOwnerMessage } from "@/lib/website-setups";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { processWebsiteSetupAndRun, websiteSetupSourceFailureCode } from "@/lib/website-setup-jobs";
-import { isSiteCreationModelId } from "@/lib/site-creation-models";
 import type { DomainRecord, WebsiteSetupFailureCode } from "@/packages/platform-operations/contracts";
 import {
   ConcurrentProjectLimitError,
@@ -27,18 +26,13 @@ const baseInput = {
   sourceUrl: "https://example.com/",
   normalizedSource: "https://example.com/",
   reportingTimezone: "America/Chicago",
-  initialBuildApiProvider: "openrouter" as const,
-  initialBuildModelId: "anthropic/claude-sonnet-4.5",
+  prospectReportId: "prospect_report_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   idempotencyKey: "request-0001",
   creationRequestHash: hashA
 };
 
 const first = await repository.createWebsiteSetup(baseInput);
-assert.equal(first.initialBuildApiProvider, "openrouter", "The selected initial-build provider was not retained with setup provenance.");
-assert.equal(first.initialBuildModelId, "anthropic/claude-sonnet-4.5", "The selected initial-build model was not retained with setup provenance.");
-assert.equal(isSiteCreationModelId("anthropic/claude-sonnet-4.5"), true, "A provider-qualified OpenRouter model ID was rejected.");
-assert.equal(isSiteCreationModelId("gpt-5.6-terra"), false, "An unqualified model ID was accepted for the OpenRouter experiment.");
-assert.equal(isSiteCreationModelId("~anthropic/claude-sonnet-latest"), false, "A mutable OpenRouter model alias was accepted for the comparison experiment.");
+assert.equal(first.prospectReportId, baseInput.prospectReportId, "Report acquisition attribution was not retained.");
 assert.equal((await repository.createWebsiteSetup(baseInput)).id, first.id, "Matching idempotency replay did not return the original setup.");
 await assert.rejects(
   repository.createWebsiteSetup({ ...baseInput, sourceUrl: "https://other.example/", creationRequestHash: `sha256:${"b".repeat(64)}` }),
@@ -185,10 +179,9 @@ assert.equal(invalid.status, "attention_required");
 assert.equal(isDomainReconciliationDue({ ...domain, status: "active", updatedAt: "2026-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), true);
 assert.equal(isDomainReconciliationDue({ ...domain, status: "expired", updatedAt: "2025-01-01T00:00:00.000Z" }, new Date("2026-01-02T12:00:00.000Z")), false);
 
-const [setupRoute, setupModelRoute, setupModelCatalog, setupUpdateRoute, setupRetryRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, setupLayout, setupWorkspace, buildCanvas, workspaceFrame, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration, initialModelMigration, productShell] = await Promise.all([
+const [setupRoute, onboardingForm, setupUpdateRoute, setupRetryRoute, setupAuth, setupWorker, setupHelpers, previewTokenRoute, onboardingPage, setupPage, setupLayout, setupWorkspace, buildCanvas, workspaceFrame, workspacePage, workspaceClient, accountContext, ownerWorkspace, workflow, domainRoute, domainSettings, adminSites, baseline, typedFailureMigration, managedModelMigration, productShell] = await Promise.all([
   readFile("app/api/website-setups/route.ts", "utf8"),
-  readFile("app/api/website-setups/models/route.ts", "utf8"),
-  readFile("lib/site-creation-model-catalog.ts", "utf8"),
+  readFile("components/WebsiteOnboardingForm.tsx", "utf8"),
   readFile("app/api/website-setups/[id]/route.ts", "utf8"),
   readFile("app/api/website-setups/[id]/retry/route.ts", "utf8"),
   readFile("app/api/website-setups/auth.ts", "utf8"),
@@ -211,24 +204,25 @@ const [setupRoute, setupModelRoute, setupModelCatalog, setupUpdateRoute, setupRe
   readFile("app/admin/sites/page.tsx", "utf8"),
   readFile("supabase/migrations/202607230001_canonical_baseline.sql", "utf8"),
   readFile("supabase/migrations/202607230002_typed_website_setup_failures.sql", "utf8"),
-  readFile("supabase/migrations/202607230020_website_setup_initial_model_experiment.sql", "utf8"),
+  readFile("supabase/migrations/202607260003_website_setup_managed_model.sql", "utf8"),
   readFile("components/ProductAppShell.tsx", "utf8")
 ]);
 assert(setupRoute.includes("duplicate_source_confirmation_required") && setupRoute.includes("confirmDuplicate"), "Private duplicate confirmation is missing.");
 assert(setupRoute.includes("idempotency_key_conflict") && setupRoute.includes("after("), "Setup idempotency or request-owned execution is missing.");
 assert(
-  setupRoute.includes("initialBuildApiProvider: SITE_CREATION_API_PROVIDER")
-    && setupRoute.includes("isSelectableSiteCreationModel")
-    && setupWorker.includes("initialBuildRoute")
-    && setupWorker.includes("setup.initialBuildApiProvider"),
-  "The exact selected OpenRouter route does not flow from setup into authoring."
+  setupRoute.includes("platformOperationsRepository.getProspectReport(parsed.data.prospectReportId)")
+    && setupRoute.includes("prospectReportId,")
+    && onboardingForm.includes("prospectReportId")
+    && !setupRoute.includes("initialBuildModelId")
+    && !setupWorker.includes("initialBuildRoute"),
+  "Owner onboarding is not model-agnostic or report attribution is missing."
 );
 assert(
-  setupModelRoute.includes("requireWebsiteSetupUser")
-    && setupModelRoute.includes("getSiteCreationModelCatalog")
-    && setupModelCatalog.includes('siteAgentAvailability === "selectable"')
-    && setupModelCatalog.includes('!model.id.startsWith("openrouter/")'),
-  "The owner setup catalog is not authenticated or capability-filtered."
+  !onboardingForm.includes("OpenRouter")
+    && !onboardingForm.includes("initialBuildModelId")
+    && managedModelMigration.includes("prospect_report_id")
+    && managedModelMigration.includes("drop column initial_build_model_id"),
+  "The customer model selector or obsolete setup model columns remain."
 );
 assert(
   [setupRoute, setupUpdateRoute, setupRetryRoute].every((source) => source.includes("processWebsiteSetupAndRun")),
@@ -249,6 +243,19 @@ assert(
   "Private preview routes lost their fragment exchange, verified reader, or response contract."
 );
 assert(onboardingPage.includes("Sign in to create a website") && onboardingPage.includes("authentication is disabled"), "Local-open setup does not fail closed with an actionable notice.");
+assert(
+  onboardingPage.includes("nextParams.set(\"source\", source)")
+    && onboardingPage.includes("nextParams.set(\"reportId\", reportId)")
+    && onboardingPage.includes("requireOwnerAccess(nextPath)")
+    && onboardingPage.includes("initialSource={source}"),
+  "Report source and attribution are not preserved through owner authentication and onboarding."
+);
+assert(
+  setupWorker.includes("reportingTimezone: setup.reportingTimezone")
+    && !setupWorker.includes("initialBuildRoute")
+    && workflow.includes("input.modelRoute?.apiProvider ?? configuredProvider"),
+  "Owner setup does not defer website creation to the canonical server-configured model."
+);
 assert(setupPage.includes('redirect(view.openPath)') && setupPage.includes("<WebsiteSetupWorkspace") && !setupPage.includes("failureReason"), "Linked setup redirect or safe progress rendering is incomplete.");
 assert(setupPage.includes('if (!setup) redirect("/account/onboarding")') && setupPage.includes("setup.ownerUserId !== access.user.id") && setupPage.includes("notFound()"), "Missing setup recovery or cross-owner fail-closed behavior is incomplete.");
 assert(setupWorkspace.includes("websiteSetupOwnerInstruction(view.setup.sourceUrl)") && workflow.includes("websiteSetupOwnerInstruction(input.url)"), "Setup and editor handoff do not share the canonical owner instruction.");
@@ -274,11 +281,11 @@ assert(baseline.includes("pg_advisory_xact_lock") && baseline.includes("private_
 assert(baseline.includes("active_domains") && baseline.includes("claim_domain_ownership"), "Verified hostname exclusivity is missing.");
 assert(typedFailureMigration.includes("where failure_code = 'website_crawl_failed'") && typedFailureMigration.includes("crawl_temporarily_unavailable"), "Retired crawl failures are not remapped to a retriable typed code.");
 assert(
-  initialModelMigration.includes("initial_build_api_provider")
-    && initialModelMigration.includes("invalid_initial_build_route")
-    && initialModelMigration.includes("target_initial_build_api_provider")
-    && initialModelMigration.includes("initial_build_model_id ~"),
-  "The website-setup database boundary does not retain and validate the exact OpenRouter route."
+  managedModelMigration.includes("drop column initial_build_api_provider")
+    && managedModelMigration.includes("drop column initial_build_model_id")
+    && managedModelMigration.includes("target_prospect_report_id")
+    && managedModelMigration.includes("on delete restrict"),
+  "The website-setup database boundary does not enforce model-agnostic onboarding and acquisition attribution."
 );
 
 console.log(JSON.stringify({ ok: true, reusableSources: true, capacity: 3, directWorkspaceHandoff: true, proofFirstDomains: true }));

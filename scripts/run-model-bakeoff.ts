@@ -2,22 +2,36 @@ import "./load-env";
 import {
   denverPlumberBakeoffId,
   ensureDenverPlumberBakeoff,
+  ensureModelBakeoff,
   getModelBakeoffView,
   modelBakeoffRepository,
   modelBakeoffRunSchema,
   refreshModelBakeoffAssessments,
+  primePlumbingRouteSmokeDefinition,
   runModelBakeoffItem,
   updateModelBakeoffStatus
 } from "@/packages/model-bakeoff";
 import { processWebsiteAssessmentJobs } from "@/packages/website-assessment/jobs";
 
 const concurrency = Math.max(1, Math.min(Number(process.env.MODEL_BAKEOFF_CONCURRENCY ?? "3"), 3));
+const maxAuthoringCostUsd = positiveNumber(process.env.MODEL_BAKEOFF_MAX_COST_USD);
 let interrupted = false;
 let creditExhausted = false;
 process.once("SIGINT", () => { interrupted = true; });
 process.once("SIGTERM", () => { interrupted = true; });
 
-const experiment = await ensureDenverPlumberBakeoff();
+const experimentId = process.env.MODEL_BAKEOFF_EXPERIMENT_ID?.trim();
+const profile = process.env.MODEL_BAKEOFF_PROFILE?.trim() || "denver";
+const candidateKeys = process.env.MODEL_BAKEOFF_CANDIDATE_KEYS
+  ?.split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const experiment = profile === "prime-route-smoke"
+  ? await ensureModelBakeoff(primePlumbingRouteSmokeDefinition(
+      experimentId || `bakeoff_prime_route_smoke_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`,
+      candidateKeys
+    ))
+  : await ensureDenverPlumberBakeoff();
 const existing = await modelBakeoffRepository.listRuns(experiment.id);
 for (const item of existing.filter((row) =>
   row.status === "building"
@@ -50,7 +64,7 @@ await Promise.all(Array.from({ length: Math.min(concurrency, queued.length) }, a
       model: item.candidate.label,
       route: `${item.candidate.apiProvider}:${item.candidate.modelId}`
     });
-    const result = await runModelBakeoffItem(item.id);
+    const result = await runModelBakeoffItem(item.id, modelBakeoffRepository, { maxAuthoringCostUsd });
     log("run_finished", {
       worker: workerIndex + 1,
       ordinal: item.ordinal + 1,
@@ -101,4 +115,11 @@ if (interrupted) process.exitCode = 130;
 
 function log(event: string, detail: Record<string, unknown>) {
   console.log(JSON.stringify({ event, at: new Date().toISOString(), ...detail }));
+}
+
+function positiveNumber(value: string | undefined) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("MODEL_BAKEOFF_MAX_COST_USD must be a positive number.");
+  return parsed;
 }

@@ -130,7 +130,7 @@ function registerWorkspaceTool(
     description: workspaceToolDescription(toolName),
     inputSchema,
     annotations: {
-      readOnlyHint: toolName === "list_files" || toolName === "read_file",
+      readOnlyHint: toolName === "list_files" || toolName === "search_files" || toolName === "read_files",
       destructiveHint: toolName === "delete_file",
       idempotentHint: true,
       openWorldHint: false
@@ -204,10 +204,12 @@ function workspaceToolTitle(toolName: string) {
 function workspaceToolDescription(toolName: Exclude<ManagerToolName, "create_image">) {
   const descriptions: Record<Exclude<ManagerToolName, "create_image">, string> = {
     list_files: "Lists the current durable authoring workspace.",
-    read_file: "Reads a bounded range from a source file.",
+    search_files: "Finds literal text across the current durable authoring workspace.",
+    read_files: "Reads bounded ranges from one or more source files.",
     write_file: "Creates or replaces one safe source file.",
     delete_file: "Deletes one safe source file; it cannot delete sites, artifacts, prospects, or ownership.",
     apply_patch: "Atomically applies a bounded multi-file content patch.",
+    edit_file: "Applies exact hash-guarded line edits to one existing source file.",
     build_preview: "Builds the current workspace in Lodesta's sandbox. This may take several minutes.",
     inspect_site: "Runs Lodesta's browser and hard-gate inspection. This may take several minutes.",
     request_input: "Pauses before mutation for one consequential operator clarification.",

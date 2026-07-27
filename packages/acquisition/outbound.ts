@@ -27,6 +27,7 @@ export type UpsertOutboundProspectInput = {
   id?: string;
   campaignId: string;
   siteId?: string;
+  reportId?: string;
   businessName: string;
   vertical?: Vertical;
   sourceUrl?: string;
@@ -57,8 +58,11 @@ export type OutboundMailerManifestRow = {
   status: OutboundProspect["status"];
   sourceUrl: string;
   previewUrl: string;
+  reportUrl: string;
+  reportStatus: string;
   mailingCode: string;
   mailedAt: string;
+  firstReportViewedAt: string;
   firstPreviewViewedAt: string;
   adoptedAt: string;
   publishedAt: string;
@@ -119,6 +123,7 @@ export function newOutboundProspect(input: UpsertOutboundProspectInput): Outboun
     id: input.id ?? crypto.randomUUID(),
     campaignId: input.campaignId,
     siteId: input.siteId,
+    reportId: input.reportId,
     businessName: input.businessName.trim(),
     vertical: input.vertical,
     sourceUrl: input.sourceUrl,
@@ -146,6 +151,9 @@ export function newOutboundEvent(input: RecordOutboundEventInput): OutboundEvent
 export function applyOutboundEventToProspect(prospect: OutboundProspect, event: OutboundEvent) {
   const occurredAt = event.occurredAt;
   if (event.siteId && !prospect.siteId) prospect.siteId = event.siteId;
+  if (event.type === "report_viewed") {
+    prospect.firstReportViewedAt ??= occurredAt;
+  }
   if (event.type === "mailer_sent") {
     prospect.status = statusAfter(prospect.status, "mailed");
     prospect.mailedAt ??= occurredAt;
@@ -185,6 +193,7 @@ export function summarizeOutbound(
   const previewViewed = scopedProspects.filter(
     (prospect) => prospect.firstPreviewViewedAt || rankStatus(prospect.status) >= rankStatus("preview_viewed")
   ).length;
+  const reportViewed = scopedProspects.filter((prospect) => prospect.firstReportViewedAt).length;
   const adoptionsStarted = scopedProspects.filter(
     (prospect) => prospect.adoptionStartedAt || rankStatus(prospect.status) >= rankStatus("adoption_started")
   ).length;
@@ -207,6 +216,7 @@ export function summarizeOutbound(
     campaigns: scopedCampaigns.length,
     prospects: scopedProspects.length,
     mailed,
+    reportViewed,
     invitationOpened,
     previewViewed,
     pickerInteractions,
@@ -220,6 +230,7 @@ export function summarizeOutbound(
       ? round(credibilityScores.reduce((total, value) => total + value, 0) / credibilityScores.length)
       : undefined,
     mailerToPreviewRate: rate(previewViewed, mailed),
+    mailerToReportRate: rate(reportViewed, mailed),
     mailerToAdoptionRate: rate(adopted, mailed),
     invitationToAdoptionRate: rate(adopted, invitationOpened),
     adoptionToPublishRate: rate(published, adopted),
@@ -232,7 +243,8 @@ export function buildOutboundMailerManifest(
   campaigns: OutboundCampaign[],
   prospects: OutboundProspect[],
   campaignId: string | undefined,
-  previewLinks: ReadonlyMap<string, string>
+  previewLinks: ReadonlyMap<string, string>,
+  reportLinks: ReadonlyMap<string, { url: string; status: string }>
 ): OutboundMailerManifestRow[] {
   const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
   const suppressedKeys = outboundSuppressionKeys(prospects);
@@ -248,6 +260,7 @@ export function buildOutboundMailerManifest(
           ? "reviewed_high_volume"
           : "ok";
       const vertical: OutboundMailerManifestRow["vertical"] = prospect.vertical ?? "unknown";
+      const report = prospect.reportId ? reportLinks.get(prospect.reportId) : undefined;
       return {
         campaignId: prospect.campaignId,
         campaignName: campaign?.name ?? "Unknown campaign",
@@ -259,8 +272,11 @@ export function buildOutboundMailerManifest(
         status: prospect.status,
         sourceUrl: prospect.sourceUrl ?? "",
         previewUrl: prospect.previewId ? previewLinks.get(prospect.previewId) ?? "" : "",
+        reportUrl: report?.url ?? "",
+        reportStatus: report?.status ?? "",
         mailingCode: prospect.mailingCode ?? "",
         mailedAt: prospect.mailedAt ?? "",
+        firstReportViewedAt: prospect.firstReportViewedAt ?? "",
         firstPreviewViewedAt: prospect.firstPreviewViewedAt ?? "",
         adoptedAt: prospect.adoptedAt ?? "",
         publishedAt: prospect.publishedAt ?? ""
@@ -281,8 +297,11 @@ export function outboundMailerManifestCsv(rows: OutboundMailerManifestRow[]) {
     "status",
     "sourceUrl",
     "previewUrl",
+    "reportUrl",
+    "reportStatus",
     "mailingCode",
     "mailedAt",
+    "firstReportViewedAt",
     "firstPreviewViewedAt",
     "adoptedAt",
     "publishedAt"

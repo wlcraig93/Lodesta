@@ -9,6 +9,8 @@ import {
   formatLocalAddress,
   summarizedLocationHours
 } from "../workers/site-sandbox/scaffold/platform/presentation";
+import { removeReactImagePreloads } from "../workers/site-sandbox/scaffold/platform/preloads";
+import { assertValidRoutePaths } from "../workers/site-sandbox/scaffold/platform/route-contract";
 
 const scaffold = resolve("workers/site-sandbox/scaffold");
 const workspace = await mkdtemp(join(tmpdir(), "lodesta-multifile-sandbox-"));
@@ -91,9 +93,50 @@ try {
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday–Friday: 8:00 AM-5:30 PM"), "compiler did not render a compact source-bound hours summary");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("<dt>Monday</dt><dd>8:00 AM-5:30 PM</dd>"), "compiler did not render structured weekly hours");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("1200 Main Street, Austin, TX 78701"), "compiler did not render the natural US address variant");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-location-id="location_primary"'), "BusinessAddress did not retain its SDK-owned location identity.");
   assert(!artifact.routes?.[0]?.bodyHtml?.includes(", US"), "compiler leaked a trailing country code into the local address variant");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('loading="eager"'), "Asset did not preserve explicit eager loading.");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('fetchPriority="high"'), "Asset did not preserve explicit fetch priority.");
+  assert(!artifact.routes?.[0]?.bodyHtml?.includes("<link"), "React image preload markup leaked into route body HTML.");
+  for (const preload of [
+    `<link rel="preload" as="image" href="asset://asset_hero"/>`,
+    `<link fetchPriority="high" href="asset://asset_hero" as="image" rel="preload">`,
+    `<link imagesrcset="asset://asset_hero 1x" as="image" rel="preload" href="asset://asset_hero"/>`
+  ]) {
+    assert.equal(removeReactImagePreloads(`before${preload}after`), "beforeafter", `Asset image preload was not removed: ${preload}`);
+  }
+  for (const unrelated of [
+    `<link rel="stylesheet" href="/site.css">`,
+    `<link rel="preload" as="font" href="asset://asset_hero">`,
+    `<link rel="preload" as="image" href="https://example.com/hero.jpg">`
+  ]) {
+    assert.equal(removeReactImagePreloads(unrelated), unrelated, `Unrelated link was removed: ${unrelated}`);
+  }
+  assert.doesNotThrow(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/services" }]),
+    "The sandbox route contract rejected a valid unique homepage and service route."
+  );
+  assert.throws(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/services" }, { path: "/services" }]),
+    /Duplicate route \/services/,
+    "The sandbox build accepted duplicate normalized route paths."
+  );
+  assert.throws(
+    () => assertValidRoutePaths([{ path: "/services" }]),
+    /homepage route at \//,
+    "The sandbox build accepted a route set without a homepage."
+  );
+  await writeFile(join(workspace, "src/site.tsx"), `export const siteDefinition = {
+    routes: [
+      { path: "/services", element: <main>One</main> },
+      { path: "/services", element: <main>Two</main> }
+    ]
+  };`);
+  await assert.rejects(
+    () => execute(join(workspace, "node_modules", ".bin", "tsx"), ["platform/build.tsx"], workspace),
+    /Duplicate route \/services/,
+    "The integrated sandbox compiler emitted an artifact with duplicate normalized routes."
+  );
   assert.throws(
     () => formatLocalAddress({ street: "1 King St", city: "Toronto", region: "ON", postalCode: "M5H 1A1", country: "CA" }),
     /supports US locations only/,

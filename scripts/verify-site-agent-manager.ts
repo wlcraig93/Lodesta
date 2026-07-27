@@ -7,16 +7,21 @@ import {
   DeterministicManagerHistory,
   createManagerDiscussionBrief,
   createSiteAuthoringBrief,
+  anthropicMessagesRequest,
+  anthropicMessagesResponse,
   establishProviderAuthoringCapabilities,
   assertCompleteWorkspace,
   classifySiteAuthoringFailure,
   classifyModelProviderError,
   managerGuardrailsForKind,
   managerGuardrailsAfterPriorUsage,
+  openRouterRequestHeaders,
+  projectToolsForProvider,
   siteAgentRunGuardrailsForKind,
   SiteAuthoringTerminalError,
   usageForModel,
   websiteManagerSystemPrompt,
+  websiteManagerTools,
   type ManagerRunEvent,
   type ManagerResponsesClient,
   type ManagerToolCall,
@@ -26,10 +31,16 @@ import {
 import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
 import { verificationBlockerFeedback } from "../packages/site-platform/verification-feedback";
 import { validateWorkspaceSourcePolicy } from "../packages/site-agent/source-policy";
+import { managerToolArguments } from "../packages/site-agent/contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const buildInput = buildSyntheticSiteInput();
 const authoringBrief = createSiteAuthoringBrief({ buildInput, snapshots: [] });
+assert.deepEqual(
+  authoringBrief.facts.map((fact) => fact.id).sort(),
+  buildInput.publicFacts.map((fact) => fact.id).sort(),
+  "the model-facing brief omitted retained public facts"
+);
 assert.equal(defaultSiteAuthoringModelSettings().siteAgentProvider, "openai", "OpenRouter changed the active site-agent provider.");
 assert(validateSiteAuthoringModelSettingsUpdate({
   siteAgentProvider: "openrouter",
@@ -70,10 +81,22 @@ assert.equal(openAiModels.find((model) => model.id === "whisper-1")?.siteAgentAv
 const openRouterModels = normalizeOpenRouterModelCatalog({
   data: [
     {
-      id: "openai/gpt-5.6-sol",
-      name: "GPT-5.6 Sol",
-      context_length: 400_000,
+      id: "anthropic/claude-opus-5",
+      name: "Claude Opus 5",
+      context_length: 1_000_000,
       pricing: { prompt: "0.000005", completion: "0.00003" },
+      supported_parameters: ["tools", "tool_choice", "reasoning", "structured_outputs"]
+    },
+    {
+      id: "moonshotai/kimi-k3",
+      name: "Kimi K3",
+      context_length: 1_048_576,
+      pricing: { prompt: "0.000001", completion: "0.000003" },
+      supported_parameters: ["tools", "tool_choice", "reasoning", "structured_outputs"]
+    },
+    {
+      id: "openai/gpt-5.6-sol",
+      name: "Unestablished OpenRouter Sol",
       supported_parameters: ["tools", "tool_choice", "reasoning", "structured_outputs"]
     },
     {
@@ -83,11 +106,13 @@ const openRouterModels = normalizeOpenRouterModelCatalog({
     }
   ]
 });
-assert.equal(openRouterModels.length, 2, "OpenRouter catalog models were discarded.");
-const openRouterSiteAgentModel = openRouterModels.find((model) => model.id === "openai/gpt-5.6-sol");
-assert.equal(openRouterSiteAgentModel?.siteAgentAvailability, "selectable", "Capable OpenRouter model was not selectable for site authoring.");
+assert.equal(openRouterModels.length, 4, "OpenRouter catalog models were discarded.");
+const openRouterSiteAgentModel = openRouterModels.find((model) => model.id === "anthropic/claude-opus-5");
+assert.equal(openRouterSiteAgentModel?.siteAgentAvailability, "selectable", "Established Opus route was not selectable for site authoring.");
+assert.equal(openRouterModels.find((model) => model.id === "moonshotai/kimi-k3")?.siteAgentAvailability, "selectable", "Established Kimi route was not selectable for site authoring.");
 assert.equal(openRouterSiteAgentModel?.inputUsdPerMillion, 5, "OpenRouter input pricing was not normalized per million tokens.");
 assert.equal(openRouterSiteAgentModel?.outputUsdPerMillion, 30, "OpenRouter output pricing was not normalized per million tokens.");
+assert.equal(openRouterModels.find((model) => model.id === "openai/gpt-5.6-sol")?.siteAgentAvailability, "capabilities_missing", "Unknown OpenRouter routes remained selectable.");
 assert.equal(openRouterModels.find((model) => model.id === "example/text-only")?.siteAgentAvailability, "capabilities_missing", "OpenRouter capability exclusions lost their explicit reason.");
 const siteSource = `import React from "react";
 import { Fact } from "../platform/sdk";
@@ -121,9 +146,11 @@ assert.deepEqual(
 assert(validateWorkspaceSourcePolicy([...files, { path: "src/unsafe.ts", content: `import fs from "node:fs";` }]).some((finding) => finding.id === "source.import_module"), "non-allowlisted package import passed source policy");
 assert(validateWorkspaceSourcePolicy([...files, { path: "src/escape.ts", content: `import { Fact } from "../../platform/sdk";` }]).some((finding) => finding.id === "source.import_module"), "source-root traversal passed source policy");
 assert(validateWorkspaceSourcePolicy([...files, { path: "src/network.ts", content: `export const value = fetch("https://example.com")` }]).some((finding) => finding.id === "source.network"), "network access passed source policy");
-assert(websiteManagerSystemPrompt.includes("statically discoverable"), "manager prompt lost the static source-structure rule");
-assert(websiteManagerSystemPrompt.includes("sensitive metadata claim requires the same visible Fact"), "manager prompt lost route-visible evidence binding for sensitive metadata");
-assert(websiteManagerSystemPrompt.includes("Omit unsupported sensitive claims"), "manager prompt lost the concise unsupported-claim rule");
+assert(websiteManagerSystemPrompt.includes("creative context rather than a markup protocol"), "manager prompt did not make facts contextual rather than procedural");
+assert(websiteManagerSystemPrompt.includes("optional convenience components, not requirements"), "manager prompt still requires factual SDK wrappers");
+assert(websiteManagerSystemPrompt.includes("checks only technical release safety and operability"), "manager prompt did not narrow the release contract");
+assert(!websiteManagerSystemPrompt.includes("same visible Fact"), "obsolete route-visible fact-binding protocol remains in the prompt");
+assert(!websiteManagerSystemPrompt.includes("Never hand-write or hand-format"), "obsolete phone-formatting protocol remains in the prompt");
 
 let inspections = 0;
 const managerRuntime = runtime({ onInspect: () => { inspections += 1; } });
@@ -132,9 +159,9 @@ const progress: number[] = [];
 const managerEvents: ManagerRunEvent[] = [];
 let rejectedOwnerActivityOpeningSpan = false;
 const manager = new WebsiteManagerAgent(queueClient([
-  call("write_site", "write_file", { path: "src/site.tsx", content: siteSource }),
-  call("write_styles", "write_file", { path: "src/styles.css", content: cssSource }),
-  call("write_hero", "apply_patch", { files: [
+  call("create_workspace", "apply_patch", { files: [
+    { path: "src/site.tsx", content: siteSource },
+    { path: "src/styles.css", content: cssSource },
     { path: "src/components/Hero.tsx", content: heroSource },
     { path: "src/components/hero.css", content: heroCss }
   ] }),
@@ -161,37 +188,52 @@ assert.equal(completed.completion.workspaceHash, workspaceHash);
 assert.equal(completed.modelId, "gpt-5.6-terra", "The manager did not retain the run-pinned initial-build model.");
 assert.equal(managerRuntime.finalCheckpoint(), "checkpoint_passed");
 assert.equal(inspections, 1, "finish without inspect_site did not run final verification exactly once");
-assert.deepEqual(completed.toolRecords.map((record) => record.name), ["write_file", "write_file", "apply_patch", "build_preview", "finish"]);
-assert.deepEqual(progress, [1, 2, 3, 4, 5]);
+assert.deepEqual(completed.toolRecords.map((record) => record.name), ["apply_patch", "build_preview", "finish"]);
+assert.deepEqual(progress, [1, 2, 3]);
 assert.equal(rejectedOwnerActivityOpeningSpan, true, "slow owner-visible tools did not emit a running span");
 assert(managerEvents.some((event) => event.name === "build_preview" && event.status === "succeeded"), "a failed opening-span write interrupted tool execution or its terminal event");
 const finishSpans = managerEvents.filter((event) => event.name === "finish");
 assert.equal(finishSpans.length, 2, "slow tool spans were not opened and closed exactly once");
 assert.equal(finishSpans[0]?.id, finishSpans[1]?.id, "running and terminal tool spans did not preserve event identity");
-assert(requests.every((request) => toolNames(request).join(",") === "list_files,read_file,write_file,delete_file,apply_patch,create_image,build_preview,inspect_site,request_input,finish"), "manager tool set drifted from the workspace, inspection, and media protocol");
+assert(requests.every((request) => toolNames(request).join(",") === "list_files,search_files,read_files,apply_patch,create_image,build_preview,inspect_site,finish"), "the model-facing authoring surface is not the intended minimal tool set");
 assert(!JSON.stringify(requests[0]?.input).includes("agentAccessPolicy"), "serving-only agent policy leaked into authoring context");
 assert(!JSON.stringify(requests[0]?.input).toLowerCase().includes("rawcrawl"), "raw crawl payload leaked into authoring context");
 const initialPrompt = JSON.stringify(requests[0]?.input);
 assert.equal(initialPrompt.match(/site-authoring-brief/g)?.length, 1, "the prompt did not contain exactly one authoring projection");
 assert(!initialPrompt.includes(buildInput.inputHash), "brief provenance leaked into the model prompt");
 assert(
-  (requests[1]?.input as unknown as Array<Record<string, unknown>>).some((item) => item.call_id === "write_site"),
-  "a successful write was not retained for the following request"
+  (requests[1]?.input as unknown as Array<Record<string, unknown>>).some((item) => item.call_id === "create_workspace"),
+  "a successful patch was not retained for the following request"
 );
 assert(
-  !(requests[2]?.input as unknown as Array<Record<string, unknown>>).some((item) => item.call_id === "write_site"),
-  "a consumed write body remained in replay history"
+  (requests[2]?.input as unknown as Array<Record<string, unknown>>).some((item) => item.call_id === "create_workspace"),
+  "append-only replay rewrote a successful prior patch"
 );
+for (let index = 1; index < requests.length; index += 1) {
+  const previous = requests[index - 1]!.input as unknown[];
+  const current = requests[index]!.input as unknown[];
+  assert.deepEqual(
+    current.slice(0, previous.length),
+    previous,
+    `request ${index + 1} did not preserve the complete prior request as an exact prefix`
+  );
+}
 assert(requests.every((request) => stableJson((request.input as unknown[])[0]) === stableJson((requests[0]?.input as unknown[])[0])), "the stable prompt prefix changed across turns");
 assert(requests.every((request) => request.reasoning?.effort === "high"), "website-manager reasoning effort drifted from high");
 assert(requests.every((request) => request.text?.verbosity === "low"), "website-manager text verbosity drifted from low");
 assert(requests.every((request) => request.model === "gpt-5.6-terra"), "A manager request drifted from the run-pinned initial-build model.");
+assert(requests.every((request) => request.prompt_cache_options?.mode === "implicit" && request.prompt_cache_options.ttl === "30m"), "GPT-5.6 cache options were not applied consistently.");
+assert(requests.every((request) => typeof request.prompt_cache_key === "string" && request.prompt_cache_key === requests[0]?.prompt_cache_key), "The non-PII prompt cache key changed within a run.");
+assert(
+  JSON.stringify(requests[0]?.input).includes('"prompt_cache_breakpoint":{"mode":"explicit"}'),
+  "The stable authoring prefix omitted its explicit GPT-5.6 cache breakpoint."
+);
 const succeededModelEvents = managerEvents.filter((event) => event.kind === "model_request" && event.status === "succeeded");
 assert.equal(new Set(succeededModelEvents.map((event) => event.summary.stablePrefixHash)).size, 1, "stable-prefix telemetry changed across requests");
 assert(succeededModelEvents.every((event) => typeof event.summary.activeTailBytes === "number"), "active-tail telemetry was not recorded");
 assert.equal(typeof succeededModelEvents[0]?.summary.initialPromptBytes, "number", "initial prompt telemetry was not recorded");
 assert.equal((succeededModelEvents[0]?.payload?.request as Record<string, unknown>)?.briefProvenance === undefined, false, "authoring brief provenance was not retained outside the prompt");
-assert.equal(completed.telemetry.modelRequests, 5);
+assert.equal(completed.telemetry.modelRequests, 3);
 assert.equal(completed.telemetry.firstSuccessfulBuildMs !== undefined, true);
 
 const discussionBrief = createManagerDiscussionBrief({
@@ -204,65 +246,252 @@ assert(!JSON.stringify(discussionBrief).includes(heroSource), "manager discussio
 assert.equal(discussionBrief.workspace?.files.find((file) => file.path === "src/components/Hero.tsx")?.bytes, Buffer.byteLength(heroSource));
 assert.deepEqual(discussionBrief.routes.current, ["/"]);
 
-const capabilityOne = establishProviderAuthoringCapabilities("openrouter", "anthropic/claude-opus-5");
-const capabilityTwo = establishProviderAuthoringCapabilities("openrouter", "anthropic/claude-opus-5");
+const testOpenRouterCatalog = async () => ({
+  provider: "openrouter" as const,
+  fetchedAt: "2026-07-26T00:00:00.000Z",
+  models: [{
+    id: "anthropic/claude-opus-5",
+    name: "Claude Opus 5",
+    contextLength: 1_000_000,
+    siteAgentAvailability: "selectable" as const
+  }, {
+    id: "moonshotai/kimi-k3",
+    name: "Kimi K3",
+    contextLength: 1_048_576,
+    siteAgentAvailability: "selectable" as const
+  }, {
+    id: "example/unpriced-authoring-model",
+    name: "Unpriced fixture",
+    contextLength: 128_000,
+    siteAgentAvailability: "selectable" as const
+  }]
+});
+const capabilityOne = await establishProviderAuthoringCapabilities("openrouter", "anthropic/claude-opus-5", { loadOpenRouterCatalog: testOpenRouterCatalog });
+const capabilityTwo = await establishProviderAuthoringCapabilities("openrouter", "anthropic/claude-opus-5", { loadOpenRouterCatalog: testOpenRouterCatalog });
 assert.equal(capabilityOne.descriptor.schemaVersion, 1);
+assert.equal(capabilityOne.descriptor.contextWindowTokens, 1_000_000);
 assert.equal(capabilityOne.check.checkedAt, capabilityTwo.check.checkedAt, "provider capability checks were not cached by route and descriptor");
-assert.equal(capabilityOne.descriptor.requestFields.parallel_tool_calls, "accepted");
+assert.equal(capabilityOne.descriptor.requestFields.parallel_tool_calls, "translated");
+assert.equal(capabilityOne.descriptor.requestFields.provider_require_parameters, "stripped");
+assert.notEqual(capabilityOne.descriptor.descriptorIdentity, capabilityOne.descriptor.probeIdentity, "declared configuration and observed probe evidence were conflated.");
+assert.equal(
+  openRouterRequestHeaders(capabilityOne.descriptor)["x-anthropic-beta"],
+  "structured-outputs-2025-11-13",
+  "Opus lost the strict-tool beta header."
+);
+const kimiCapability = await establishProviderAuthoringCapabilities("openrouter", "moonshotai/kimi-k3", { loadOpenRouterCatalog: testOpenRouterCatalog });
+assert.equal(openRouterRequestHeaders(kimiCapability.descriptor)["x-anthropic-beta"], undefined, "Kimi received an Anthropic-only header.");
+const opusToolProjection = JSON.stringify(projectToolsForProvider(websiteManagerTools, capabilityOne.descriptor));
+assert(!opusToolProjection.includes('"pattern"'), "Anthropic received a regex constraint unsupported by strict tool use.");
+assert(!opusToolProjection.includes('"minLength"') && !opusToolProjection.includes('"maxItems"'), "Anthropic received unsupported strict-schema bounds.");
+assert(opusToolProjection.includes("Must match"), "Removed Anthropic constraints were not retained as tool guidance.");
+assert(JSON.stringify(projectToolsForProvider(websiteManagerTools, kimiCapability.descriptor)).includes('"pattern"'), "Kimi's established tool schema was unnecessarily weakened.");
+
+const adapterRequest = anthropicMessagesRequest({
+  model: "anthropic/claude-opus-5",
+  instructions: "Author a verified site.",
+  input: [{
+    type: "message",
+    role: "user",
+    content: [
+      { type: "input_text", text: "Stable authoring brief." },
+      {
+        type: "input_image",
+        image_url: "data:image/png;base64,aGVsbG8=",
+        detail: "high",
+        prompt_cache_breakpoint: { mode: "explicit" }
+      }
+    ]
+  }, {
+    type: "function_call",
+    call_id: "adapter_previous_call",
+    name: "list_files",
+    arguments: "{}"
+  }, {
+    type: "function_call_output",
+    call_id: "adapter_previous_call",
+    output: JSON.stringify({ ok: true, files: [] })
+  }, {
+    type: "message",
+    role: "user",
+    content: [{
+      type: "input_text",
+      text: "Current deterministic workspace state.",
+      prompt_cache_breakpoint: { mode: "explicit" }
+    }]
+  }],
+  tools: projectToolsForProvider(websiteManagerTools, capabilityOne.descriptor),
+  tool_choice: "required",
+  parallel_tool_calls: false,
+  store: false,
+  reasoning: { effort: "high" },
+  max_output_tokens: 4096,
+  provider: {
+    only: ["amazon-bedrock"],
+    allow_fallbacks: false,
+    data_collection: "deny",
+    zdr: true
+  },
+  session_id: "adapter-session"
+} as never) as Record<string, unknown>;
+assert.equal(adapterRequest.model, "anthropic/claude-opus-5");
+assert.equal(countOccurrences(adapterRequest, "cache_control"), 2, "Anthropic Messages did not receive exactly the stable and rolling cache controls.");
+assert.equal(countOccurrences(adapterRequest, "prompt_cache_breakpoint"), 0, "An internal Responses cache marker leaked onto the Anthropic wire.");
+assert.equal(countOccurrences(adapterRequest, "strict"), websiteManagerTools.length, "Strict tool declarations were lost in Anthropic translation.");
+assert.equal((adapterRequest.tool_choice as Record<string, unknown>)?.type, "any");
+assert.equal((adapterRequest.tool_choice as Record<string, unknown>)?.disable_parallel_tool_use, true);
+assert.equal((adapterRequest.provider as Record<string, unknown>)?.zdr, true);
+assert.equal(adapterRequest.session_id, "adapter-session");
+assert.equal(adapterRequest.store, undefined, "A Responses-only store field leaked onto the Anthropic wire.");
+assert.equal(adapterRequest.parallel_tool_calls, undefined, "A Responses-only parallel_tool_calls field leaked onto the Anthropic wire.");
+
+const adapterResponse = anthropicMessagesResponse({
+  id: "msg_adapter",
+  model: "anthropic/claude-opus-5",
+  stop_reason: "tool_use",
+  content: [{
+    type: "thinking",
+    thinking: "Inspect the workspace.",
+    signature: "retained-signature"
+  }, {
+    type: "tool_use",
+    id: "adapter_call",
+    name: "list_files",
+    input: {}
+  }],
+  usage: {
+    input_tokens: 100,
+    cache_creation_input_tokens: 20,
+    cache_read_input_tokens: 80,
+    output_tokens: 12,
+    cost: 0.123,
+    cost_details: { upstream_inference_cost: 0.1 }
+  },
+  openrouter_metadata: {
+    endpoints: { available: [{ selected: true, provider: "Amazon Bedrock" }] }
+  }
+});
+assert.equal(adapterResponse.usage.input_tokens, 200, "Anthropic input accounting did not include cache reads and writes.");
+assert.equal(adapterResponse.usage.input_tokens_details.cached_tokens, 80);
+assert.equal(adapterResponse.usage.input_tokens_details.cache_write_tokens, 20);
+assert.equal(adapterResponse.usage.cost, 0.123);
+assert(adapterResponse.output.some((item) => (item as unknown as Record<string, unknown>).type === "anthropic_thinking"), "Anthropic thinking was not retained for explicit replay.");
+assert(adapterResponse.output.some((item) => item.type === "function_call"), "Anthropic tool use was not normalized for the manager.");
+const adapterReplay = anthropicMessagesRequest({
+  model: "anthropic/claude-opus-5",
+  instructions: "Author a verified site.",
+  input: [
+    { type: "message", role: "user", content: "Continue." },
+    ...adapterResponse.output,
+    {
+      type: "function_call_output",
+      call_id: "adapter_call",
+      output: JSON.stringify({ ok: true, files: [] })
+    }
+  ],
+  tools: projectToolsForProvider(websiteManagerTools, capabilityOne.descriptor),
+  tool_choice: "required",
+  parallel_tool_calls: false,
+  max_output_tokens: 4096,
+  provider: { only: ["amazon-bedrock"], allow_fallbacks: false, zdr: true }
+} as never);
+assert.equal(countOccurrences(adapterReplay, "signature"), 1, "Signed Anthropic thinking did not survive replay.");
+assert.equal(countOccurrences(adapterReplay, "tool_use_id"), 1, "Anthropic tool output did not survive replay.");
+let unknownOpenRouterRequests = 0;
+let unknownOpenRouterFailure: unknown;
+try {
+  await new WebsiteManagerAgent(queueClient([
+    call("unknown_route_must_not_run", "list_files", {})
+  ], () => { unknownOpenRouterRequests += 1; }), testOpenRouterCatalog).run({
+    buildInput,
+    authoringBrief,
+    instruction: "Reject unestablished OpenRouter authoring routes before inference.",
+    kind: "edit",
+    route: { apiProvider: "openrouter", modelId: "openai/gpt-5.6-sol" },
+    runtime: runtime({ initialFiles: files })
+  });
+} catch (error) {
+  unknownOpenRouterFailure = error;
+}
+assert(
+  unknownOpenRouterFailure instanceof SiteAuthoringTerminalError
+    && unknownOpenRouterFailure.message.startsWith("provider_authoring_capabilities_missing:"),
+  "An unestablished OpenRouter route did not fail before authoring."
+);
+assert.equal(unknownOpenRouterRequests, 0, "An unestablished OpenRouter route reached the provider.");
 
 const parallelResponse = call("parallel_one", "list_files", {});
 parallelResponse.output.push({
   type: "function_call",
   call_id: "parallel_two",
-  name: "read_file",
-  arguments: JSON.stringify({ path: "src/site.tsx", startLine: null, endLine: null }),
+  name: "read_files",
+  arguments: JSON.stringify({ files: [{ path: "src/site.tsx", startLine: null, endLine: null }] }),
   status: "completed"
 });
 let parallelToolExecutions = 0;
-let parallelToolFailure: unknown;
 const parallelBaseRuntime = runtime({ initialFiles: files });
-try {
-  await new WebsiteManagerAgent(queueClient([parallelResponse])).run({
-    buildInput,
-    authoringBrief,
-    instruction: "Reject a provider response that violates serial tool execution.",
-    kind: "edit",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-terra" },
-    runtime: {
-      stateSummary: () => parallelBaseRuntime.stateSummary(),
-      execute: async (toolCallValue) => {
-        parallelToolExecutions += 1;
-        return parallelBaseRuntime.execute(toolCallValue);
-      }
+const parallelCompleted = await new WebsiteManagerAgent(queueClient([
+  parallelResponse,
+  call("parallel_build", "build_preview", {}),
+  call("parallel_finish", "finish", finishArgs())
+])).run({
+  buildInput,
+  authoringBrief,
+  instruction: "Continue safely when a provider returns several read-only calls.",
+  kind: "edit",
+  route: { apiProvider: "openai", modelId: "gpt-5.6-terra" },
+  runtime: {
+    stateSummary: () => parallelBaseRuntime.stateSummary(),
+    execute: async (toolCallValue) => {
+      parallelToolExecutions += 1;
+      return parallelBaseRuntime.execute(toolCallValue);
     }
-  });
-} catch (error) {
-  parallelToolFailure = error;
-}
-assert(
-  parallelToolFailure instanceof SiteAuthoringTerminalError
-    && parallelToolFailure.category === "provider"
-    && parallelToolFailure.message.startsWith("provider_parallel_tool_call_violation:"),
-  "a supposedly serial provider route returned parallel tool calls without failing loudly"
-);
-assert.equal(parallelToolExecutions, 0, "parallel provider tool calls reached the workspace");
+  }
+});
+assert.equal(parallelCompleted.telemetry.parallelToolViolations, 1, "provider multi-call behavior was not recorded.");
+assert.equal(parallelToolExecutions, 4, "multiple read-only calls were not executed serially before completion.");
+
+const parallelMutation = call("parallel_mutation_one", "write_file", { path: "src/styles.css", content: `${cssSource}\n/* first mutation */` });
+parallelMutation.output.push({
+  type: "function_call",
+  call_id: "parallel_mutation_two",
+  name: "write_file",
+  arguments: JSON.stringify({ path: "src/site.tsx", content: "export const shouldNotExecute = true;" }),
+  status: "completed"
+});
+const mutationRuntime = runtime({ initialFiles: files });
+const mutationCompleted = await new WebsiteManagerAgent(queueClient([
+  parallelMutation,
+  call("parallel_mutation_build", "build_preview", {}),
+  call("parallel_mutation_finish", "finish", finishArgs())
+])).run({
+  buildInput,
+  authoringBrief,
+  instruction: "Execute only the first mutation from an unexpected multi-call response.",
+  kind: "edit",
+  route: { apiProvider: "openai", modelId: "gpt-5.6-terra" },
+  runtime: mutationRuntime
+});
+assert.equal(mutationCompleted.telemetry.parallelToolViolations, 1);
+assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content, siteSource, "a deferred parallel mutation reached the workspace.");
+assert.equal(mutationCompleted.toolRecords.find((record) => record.callId === "parallel_mutation_two")?.output.error, "deferred_due_to_serial_tool_contract");
 
 const compactHistory = new DeterministicManagerHistory([{
   role: "user",
   type: "message",
   content: [{ type: "input_text", text: "stable" }]
 }]);
-const readResponse = [{ type: "function_call", call_id: "read_history", name: "read_file", arguments: JSON.stringify({ path: "src/site.tsx", startLine: null, endLine: null }) }] as never;
-const readOutput = { type: "function_call_output", call_id: "read_history", output: JSON.stringify({ ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), content: siteSource }) } as never;
+const readResponse = [{ type: "function_call", call_id: "read_history", name: "read_files", arguments: JSON.stringify({ files: [{ path: "src/site.tsx", startLine: null, endLine: null }] }) }] as never;
+const readOutput = { type: "function_call_output", call_id: "read_history", output: JSON.stringify({ ok: true, files: [{ ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), content: siteSource }] }) } as never;
 compactHistory.noteTool({
   responseItems: readResponse,
   functionOutput: readOutput,
   responseIndex: 1,
   callId: "read_history",
-  toolName: "read_file",
+  toolName: "read_files",
   status: "succeeded",
-  arguments: { path: "src/site.tsx", startLine: null, endLine: null },
-  diagnostic: { ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), startLine: 1, endLine: 4, bytes: Buffer.byteLength(siteSource) },
+  arguments: { files: [{ path: "src/site.tsx", startLine: null, endLine: null }] },
+  diagnostic: { ok: true, files: [{ ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), startLine: 1, endLine: 4, bytes: Buffer.byteLength(siteSource) }] },
   workspaceHashBefore: workspaceHash,
   workspaceHashAfter: workspaceHash,
   workspaceMutated: false
@@ -286,24 +515,24 @@ compactHistory.noteTool({
   workspaceMutated: false
 });
 assert(
-  !compactHistory.activeTailItems(3).some((item) =>
+  compactHistory.activeTailItems(3).some((item) =>
     item.type === "function_call_output" && item.call_id === "read_history"),
-  "raw read output survived its deterministic compaction boundary"
+  "append-only history rewrote a raw read at a build boundary"
 );
 compactHistory.noteTool({
   responseItems: readResponse,
   functionOutput: readOutput,
   responseIndex: 3,
   callId: "read_history_again",
-  toolName: "read_file",
+  toolName: "read_files",
   status: "succeeded",
-  arguments: { path: "src/site.tsx", startLine: null, endLine: null },
-  diagnostic: { ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), startLine: 1, endLine: 4, bytes: Buffer.byteLength(siteSource) },
+  arguments: { files: [{ path: "src/site.tsx", startLine: null, endLine: null }] },
+  diagnostic: { ok: true, files: [{ ok: true, path: "src/site.tsx", contentHash: sha256(siteSource), startLine: 1, endLine: 4, bytes: Buffer.byteLength(siteSource) }] },
   workspaceHashBefore: workspaceHash,
   workspaceHashAfter: workspaceHash,
   workspaceMutated: false
 });
-assert.equal(compactHistory.compactedPathRereads(), 1, "an unchanged read of a compacted path was not counted");
+assert.equal(compactHistory.unchangedPathRereads(), 1, "an unchanged path reread was not counted");
 const imageHistory = new DeterministicManagerHistory([]);
 const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 imageHistory.noteTool({
@@ -332,20 +561,7 @@ imageHistory.noteTool({
   workspaceMutated: false
 });
 assert(JSON.stringify(imageHistory.activeTailItems(2)).includes(onePixelPng), "new image pixels were not retained for one following request");
-assert(!JSON.stringify(imageHistory.activeTailItems(3)).includes(onePixelPng), "consumed image pixels remained in compacted history");
-assert.deepEqual(
-  imageHistory.compactedRecords()[0]?.detail.imageMetadata,
-  [{
-    identity: sha256(Buffer.from(onePixelPng, "base64")),
-    purpose: "generated_asset",
-    bytes: Buffer.from(onePixelPng, "base64").length,
-    width: 1,
-    height: 1,
-    detail: "high",
-    index: 1
-  }],
-  "compacted image history lost its deterministic identity and dimensions"
-);
+assert(JSON.stringify(imageHistory.activeTailItems(3)).includes(onePixelPng), "append-only history discarded retained image pixels");
 assert.deepEqual(
   classifySiteAuthoringFailure(new Error("workspace_uninitialized: sandbox revision is uninitialized")),
   {
@@ -382,14 +598,61 @@ let inspectCalls = 0;
 const direct = runtime({ initialFiles: files, onBuild: () => { buildCalls += 1; }, onInspect: () => { inspectCalls += 1; } });
 const listed = output(await direct.execute(toolCall("list", "list_files", {})));
 assert.equal((listed.files as unknown[]).length, 4);
-const read = output(await direct.execute(toolCall("read", "read_file", { path: "src/components/Hero.tsx", startLine: null, endLine: null })));
-assert(String(read.content).includes("function Hero"));
+const searched = output(await direct.execute(toolCall("search", "search_files", {
+  query: "collision repair",
+  paths: [],
+  caseSensitive: false
+})));
+assert((searched.matches as unknown[]).length >= 1, "workspace search did not find literal source text");
+const read = output(await direct.execute(toolCall("read", "read_files", { files: [
+  { path: "src/components/Hero.tsx", startLine: null, endLine: null },
+  { path: "src/components/hero.css", startLine: 1, endLine: 1 }
+] })));
+assert.equal((read.files as unknown[]).length, 2, "batched source read did not return every requested file.");
+const readHero = (read.files as Array<Record<string, unknown>>)[0]!;
+assert(JSON.stringify(readHero.lines).includes("function Hero"));
+const editedHero = await direct.execute(toolCall("edit", "edit_file", {
+  path: "src/components/Hero.tsx",
+  expectedContentHash: readHero.contentHash,
+  edits: [{ startLine: 2, endLine: 2, content: "  return <header className=\"hero hero--edited\">Welcome</header>;" }]
+}));
+assert.equal(output(editedHero).unchanged, false, "targeted edit did not mutate its exact line.");
+assert(direct.currentFiles().find((file) => file.path === "src/components/Hero.tsx")?.content.includes("hero--edited"));
+const staleEdit = output(await direct.execute(toolCall("stale_edit", "edit_file", {
+  path: "src/components/Hero.tsx",
+  expectedContentHash: readHero.contentHash,
+  edits: [{ startLine: 2, endLine: 2, content: "  return <header>Stale</header>;" }]
+})));
+assert.equal(staleEdit.error, "workspace_file_changed", "stale targeted edit changed source instead of failing.");
+const overlappingEdit = output(await direct.execute(toolCall("overlap_edit", "edit_file", {
+  path: "src/components/Hero.tsx",
+  expectedContentHash: output(editedHero).contentHash,
+  edits: [
+    { startLine: 1, endLine: 2, content: "export function Hero() {" },
+    { startLine: 2, endLine: 2, content: "  return <header>Overlap</header>;" }
+  ]
+})));
+assert.equal(overlappingEdit.error, "invalid_targeted_edit", "overlapping targeted edits were accepted.");
+await direct.execute(toolCall("restore_after_edit_test", "write_file", { path: "src/components/Hero.tsx", content: heroSource }));
 await direct.execute(toolCall("build_1", "build_preview", {}));
 assert.equal(output(await direct.execute(toolCall("build_2", "build_preview", {}))).cached, true);
 assert.equal(buildCalls, 1, "unchanged build was rerun");
 assert.equal(output(await direct.execute(toolCall("inspect_1", "inspect_site", {}))).cached, false);
 assert.equal(output(await direct.execute(toolCall("inspect_2", "inspect_site", {}))).cached, true);
 assert.equal(inspectCalls, 1, "unchanged verification was rerun");
+
+const retainedBuildRuntime = runtime({ initialFiles: files });
+await retainedBuildRuntime.execute(toolCall("retained_build", "build_preview", {}));
+await retainedBuildRuntime.execute(toolCall("post_build_mutation", "apply_patch", {
+  files: [{ path: "src/styles.css", content: `${cssSource}\n.unfinished{display:none}` }]
+}));
+assert.equal(retainedBuildRuntime.hasAssessableBuild(), true, "a later mutation discarded the last successful build");
+assert.equal(retainedBuildRuntime.restoreLastSuccessfulBuild(), true, "the last successful build could not be restored for assessment");
+assert.equal(
+  retainedBuildRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content,
+  cssSource,
+  "restoring the last successful build retained unfinished source"
+);
 
 let failedInspectionCalls = 0;
 const compactRuntime = runtime({
@@ -403,21 +666,22 @@ const compactRuntime = runtime({
   }
 });
 await compactRuntime.execute(toolCall("compact_build", "build_preview", {}));
-const compactInspectionExecution = await compactRuntime.execute(toolCall("compact_inspection", "inspect_site", {}));
+const compactInspectionExecution = await compactRuntime.execute(toolCall("compact_inspection", "finish", finishArgs()));
 const compactInspection = output(compactInspectionExecution);
+assert.equal(compactInspection.buildPerformed, false, "verification failure misreported an unnecessary build.");
 assert(!("findings" in compactInspection), "inspection repeated the full finding set in model context");
 assert.equal((compactInspection.blockers as unknown[]).length, 1, "inspection omitted a hard blocker");
 assert(!("advisories" in compactInspection), "failed inspection sent subjective advisories alongside blockers");
 assert.equal(compactInspection.advisoryCount, 12, "inspection lost the full advisory count");
 assert.equal(compactInspection.advisoriesOmitted, true, "inspection did not disclose omitted advisory context");
 assert(Array.isArray(compactInspectionExecution.diagnosticOutput.findings), "operator diagnostics lost the complete finding set");
-const cachedCompactInspection = output(await compactRuntime.execute(toolCall("compact_inspection_cached", "inspect_site", {})));
+const cachedCompactInspection = output(await compactRuntime.execute(toolCall("compact_inspection_cached", "finish", finishArgs())));
 assert.equal(cachedCompactInspection.cached, true, "failed inspection was not served from the workspace-hash cache");
-assert(String(cachedCompactInspection.guidance).includes("Edit the workspace source"), "cached inspection failure omitted repair guidance");
+assert(String(cachedCompactInspection.guidance).includes("every affected occurrence"), "cached inspection failure omitted grouped cross-route repair guidance");
 assert.equal(failedInspectionCalls, 1, "unchanged failed inspection reran verification");
 await compactRuntime.execute(toolCall("compact_inspection_mutation", "write_file", { path: "src/styles.css", content: `${cssSource}\narticle{display:block}` }));
 await compactRuntime.execute(toolCall("compact_build_after_mutation", "build_preview", {}));
-await compactRuntime.execute(toolCall("compact_inspection_after_mutation", "inspect_site", {}));
+await compactRuntime.execute(toolCall("compact_inspection_after_mutation", "finish", finishArgs()));
 assert.equal(failedInspectionCalls, 2, "workspace mutation did not invalidate the failed-inspection cache");
 
 let failedBuildCalls = 0;
@@ -433,6 +697,9 @@ assert.equal(cachedBuildFailure.cached, true, "unchanged failed build was not se
 assert.equal(cachedBuildFailure.failureFingerprint, firstBuildFailure.failureFingerprint, "failed-build cache changed the deterministic fingerprint");
 assert(String(cachedBuildFailure.guidance).includes("Edit the workspace source"), "cached build failure omitted repair guidance");
 assert.equal(failedBuildCalls, 1, "unchanged failed build reran the sandbox compiler");
+const automaticBuildFailure = output(await failedBuildRuntime.execute(toolCall("failed_finish_build", "finish", finishArgs())));
+assert.equal(automaticBuildFailure.failureStage, "compilation", "finish did not identify its compilation failure stage.");
+assert.equal(automaticBuildFailure.buildPerformed, true, "finish did not report its attempted automatic build.");
 await failedBuildRuntime.execute(toolCall("repair_failed_build", "write_file", { path: "src/styles.css", content: `${cssSource}\nmain{display:block}` }));
 await failedBuildRuntime.execute(toolCall("failed_build_after_mutation", "build_preview", {}));
 assert.equal(failedBuildCalls, 2, "workspace mutation did not invalidate the failed-build cache");
@@ -447,8 +714,9 @@ const claimBlockerRuntime = runtime({
   }
 });
 await claimBlockerRuntime.execute(toolCall("claim_build", "build_preview", {}));
-const claimInspection = await claimBlockerRuntime.execute(toolCall("claim_inspect", "inspect_site", {}));
+const claimInspection = await claimBlockerRuntime.execute(toolCall("claim_inspect", "finish", finishArgs()));
 assert.equal(typeof claimInspection.modelOutput, "string", "nonvisual blocker attached a verification image");
+assert(String(output(claimInspection).guidance).includes("every affected occurrence"), "first finish failure omitted grouped cross-route repair guidance");
 
 const visualBlockerRuntime = runtime({
   initialFiles: files,
@@ -460,16 +728,15 @@ const visualBlockerRuntime = runtime({
   }
 });
 await visualBlockerRuntime.execute(toolCall("visual_build", "build_preview", {}));
-const visualInspection = await visualBlockerRuntime.execute(toolCall("visual_inspect", "inspect_site", {}));
+const visualInspection = await visualBlockerRuntime.execute(toolCall("visual_inspect", "finish", finishArgs()));
 assert(Array.isArray(visualInspection.modelOutput), "visual blocker omitted the verification image");
 
 const exactEditCss = heroCss.replace("2rem", "2.25rem");
 await direct.execute(toolCall("exact_edit", "write_file", { path: "src/components/hero.css", content: exactEditCss }));
 assert.equal(direct.currentFiles().find((file) => file.path === "src/components/Hero.tsx")?.content, heroSource, "exact style edit broadened into unrelated source");
-assert.equal(output(await direct.execute(toolCall("finish_stale", "finish", finishArgs()))).error, "finish_requires_current_successful_build");
-await direct.execute(toolCall("build_after_edit", "build_preview", {}));
-const finishedAfterEdit = await direct.execute(toolCall("finish_after_edit", "finish", finishArgs()));
-assert(finishedAfterEdit.completion, "finish did not verify and retain the edited workspace");
+const finishedAfterEdit = await direct.execute(toolCall("finish_stale", "finish", finishArgs()));
+assert(finishedAfterEdit.completion, "finish did not build, verify, and retain the edited workspace");
+assert.equal(finishedAfterEdit.diagnosticOutput.buildPerformed, true, "finish did not report its automatic build.");
 assert.equal(inspectCalls, 2, "finalization did not use the same inspection function after mutation");
 
 const atomic = runtime({ initialFiles: files });
@@ -489,12 +756,17 @@ assert(!atomic.currentFiles().some((file) => file.path.endsWith("unused.ts")));
 const clarificationRuntime = runtime();
 const clarification = await clarificationRuntime.execute(toolCall("clarify", "request_input", { question: "Which phone number should be primary?" }));
 assert.equal(clarification.needsInput?.question, "Which phone number should be primary?");
+assert.equal(
+  managerToolArguments.finish.parse({ ownerMessage: "x".repeat(1_500) }).ownerMessage.length,
+  1_200,
+  "an overlong non-factual completion note can still derail an otherwise valid candidate"
+);
 await clarificationRuntime.execute(toolCall("clarify_mutation", "write_file", { path: "src/site.tsx", content: siteSource }));
 assert.equal(output(await clarificationRuntime.execute(toolCall("clarify_late", "request_input", { question: "Which phone number should be primary?" }))).error, "input_can_only_be_requested_before_workspace_mutation");
 
 const recoveryRuntime = runtime();
 const recovery = await new WebsiteManagerAgent(queueClient([
-  call("bad_read", "read_file", { path: "src/site.tsx", startLine: "bad", endLine: null }),
+  call("bad_read", "read_files", { files: [{ path: "src/site.tsx", startLine: "bad", endLine: null }] }),
   call("recover_site", "write_file", { path: "src/site.tsx", content: siteSource }),
   call("recover_styles", "write_file", { path: "src/styles.css", content: cssSource }),
   call("recover_hero", "apply_patch", { files: [
@@ -545,12 +817,44 @@ assert.equal(usageForModel("gpt-5.6-sol", {
   input_tokens_details: { cached_tokens: 800 },
   output_tokens: 100
 }, 25).costUsd, 0.0044, "cached input was charged at the full input rate");
+assert.equal(usageForModel("gpt-5.6-sol", {
+  input_tokens: 1_000,
+  input_tokens_details: { cached_tokens: 800, cache_write_tokens: 100 },
+  output_tokens: 100
+}, 25).costUsd, 0.004525, "cache writes were not charged at 1.25× the uncached input rate");
 const quotaFailure = classifyModelProviderError({ status: 429, error: { code: "insufficient_quota" } });
 assert(quotaFailure.code === "provider_quota_exhausted" && !quotaFailure.retryableByOwner, "quota exhaustion was exposed as owner-retryable");
 const openRouterCreditsFailure = classifyModelProviderError({ status: 402, error: { code: 402, message: "Insufficient credits" } });
 assert(openRouterCreditsFailure.code === "provider_quota_exhausted" && !openRouterCreditsFailure.retryableByOwner, "OpenRouter credit exhaustion lost its provider quota classification");
 const transientProviderFailure = classifyModelProviderError({ status: 429, error: { code: "rate_limit_exceeded" } });
 assert(transientProviderFailure.code === "provider_temporarily_unavailable" && transientProviderFailure.retryableByOwner, "temporary provider rate limit was not retryable");
+const contextFailure = classifyModelProviderError({ status: 400, error: { code: "context_length_exceeded", message: "Maximum context length exceeded." } });
+assert(contextFailure.code === "context_capacity_exhausted" && !contextFailure.retryableByOwner, "context overflow remained an unknown provider failure.");
+const outputFailure = classifyModelProviderError(new Error("manager_model_incomplete:max_output_tokens"));
+assert(outputFailure.code === "output_budget_exhausted" && outputFailure.category === "budget", "maximum output exhaustion was conflated with context capacity.");
+
+const contextEvents: ManagerRunEvent[] = [];
+const contextGuardRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
+let contextGuardFailure: unknown;
+try {
+  await new WebsiteManagerAgent(queueClient([
+    meteredCall("context_guard_read", "list_files", {}, 990_000, 10, 0.01),
+    call("context_guard_must_not_run", "finish", finishArgs())
+  ], (params) => contextGuardRequests.push(params))).run({
+    buildInput,
+    authoringBrief,
+    instruction: "Stop before issuing a request known to exceed usable context capacity.",
+    kind: "edit",
+    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    runtime: runtime({ initialFiles: files }),
+    onEvents: async (events) => { contextEvents.push(...events); }
+  });
+} catch (error) {
+  contextGuardFailure = error;
+}
+assert(contextGuardFailure instanceof SiteAuthoringTerminalError && contextGuardFailure.code === "context_capacity_exhausted");
+assert.equal(contextGuardRequests.length, 1, "a known-impossible next context request reached the provider.");
+assert(contextEvents.some((event) => event.name === "context.capacity.warning"), "80% context utilization did not emit a warning event.");
 
 const previousModelOverride = process.env.LODESTA_SITE_AGENT_MODEL;
 let unpricedModelRequests = 0;
@@ -580,14 +884,14 @@ const previousOpenRouterModelOverride = process.env.LODESTA_SITE_AGENT_MODEL;
 const openRouterRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
 const openRouterEvents: ManagerRunEvent[] = [];
 process.env.LODESTA_SITE_AGENT_PROVIDER = "openrouter";
-process.env.LODESTA_SITE_AGENT_MODEL = "openai/gpt-5.6-sol";
+process.env.LODESTA_SITE_AGENT_MODEL = "moonshotai/kimi-k3";
 let openRouterResult: Awaited<ReturnType<WebsiteManagerAgent["run"]>> | undefined;
 try {
   openRouterResult = await new WebsiteManagerAgent(queueClient([
     {
       ...call("openrouter_build", "build_preview", {}),
       id: "gen_openrouter_turn_1",
-      model: "openai/gpt-5.6-sol",
+      model: "moonshotai/kimi-k3",
       usage: {
         input_tokens: 20,
         output_tokens: 8,
@@ -598,13 +902,13 @@ try {
         cost_details: { upstream_inference_cost: 0.0012 }
       },
       openrouter_metadata: {
-        endpoints: { available: [{ provider: "OpenAI", model: "openai/gpt-5.6-sol", selected: true }] }
+        endpoints: { available: [{ provider: "Moonshot AI", model: "moonshotai/kimi-k3", selected: true }] }
       }
     },
     {
       ...call("openrouter_finish", "finish", finishArgs()),
       id: "gen_openrouter_turn_2",
-      model: "openai/gpt-5.6-sol",
+      model: "moonshotai/kimi-k3",
       usage: {
         input_tokens: 30,
         output_tokens: 10,
@@ -615,10 +919,10 @@ try {
         cost_details: { upstream_inference_cost: 0.002 }
       },
       openrouter_metadata: {
-        endpoints: { available: [{ provider: "OpenAI", model: "openai/gpt-5.6-sol", selected: true }] }
+        endpoints: { available: [{ provider: "Moonshot AI", model: "moonshotai/kimi-k3", selected: true }] }
       }
     }
-  ], (params) => openRouterRequests.push(params))).run({
+  ], (params) => openRouterRequests.push(params)), testOpenRouterCatalog).run({
     buildInput,
     authoringBrief,
     runId: "run_openrouter_test",
@@ -639,10 +943,19 @@ assert.equal(openRouterResult.usage.costUsd, 0.004, "OpenRouter provider-reporte
 assert.equal(openRouterResult.usage.costSource, "provider_reported");
 assert.equal(openRouterResult.usage.reasoningTokens, 7);
 const routedRequest = openRouterRequests[0] as Parameters<ManagerResponsesClient["create"]>[0] & {
-  provider?: { data_collection?: string; zdr?: boolean; require_parameters?: boolean };
+  provider?: { only?: string[]; allow_fallbacks?: boolean; data_collection?: string; zdr?: boolean; require_parameters?: boolean };
   session_id?: string;
 };
-assert.deepEqual(routedRequest.provider, { data_collection: "deny", zdr: true });
+const routedProvider = (routedRequest as unknown as {
+  provider?: { only?: string[]; allow_fallbacks?: boolean; data_collection?: string; zdr?: boolean; require_parameters?: boolean };
+}).provider;
+assert.equal(routedProvider?.require_parameters, undefined, "The broken OpenRouter Responses parameter filter was reintroduced.");
+assert.deepEqual(routedProvider, {
+  only: ["moonshotai"],
+  allow_fallbacks: true,
+  data_collection: "deny",
+  zdr: true
+});
 assert.equal(routedRequest.session_id, "run_openrouter_test");
 assert.equal(routedRequest.include, undefined, "OpenAI encrypted-reasoning transport fields leaked into OpenRouter.");
 assert.equal(routedRequest.parallel_tool_calls, false, "OpenRouter did not receive the documented serial-tool control.");
@@ -650,14 +963,114 @@ assert.equal(routedRequest.store, false, "OpenRouter did not receive the documen
 assert.equal(routedRequest.text?.verbosity, "low", "OpenRouter did not receive the supported text verbosity control.");
 assert.equal(routedRequest.reasoning?.effort, "high", "Portable OpenRouter reasoning effort was removed.");
 assert.equal(routedRequest.tool_choice, "required", "Portable OpenRouter tool choice was removed.");
+assert(!JSON.stringify(routedRequest.input).includes("prompt_cache_breakpoint"), "Kimi received Anthropic cache breakpoints.");
 const billedTurn = openRouterEvents.find((event) => event.kind === "model_request" && event.status === "succeeded");
 assert(billedTurn, "OpenRouter model turn telemetry was not emitted.");
 assert.equal(billedTurn.apiProvider, "openrouter");
-assert.equal(billedTurn.upstreamProvider, "OpenAI");
+assert.equal(billedTurn.upstreamProvider, "Moonshot AI");
 assert.equal(billedTurn.providerRequestId, "gen_openrouter_turn_1");
 assert.equal(billedTurn.costUsd, 0.0015);
 assert.equal(billedTurn.costSource, "provider_reported");
 assert.equal(billedTurn.upstreamInferenceCostUsd, 0.0012);
+
+let kimiTransportAttempts = 0;
+const kimiRetryEvents: ManagerRunEvent[] = [];
+const kimiRetryResult = await new WebsiteManagerAgent({
+  async create() {
+    kimiTransportAttempts += 1;
+    if (kimiTransportAttempts === 1) {
+      throw Object.assign(new Error("Provider returned error"), {
+        status: 429,
+        headers: new Headers({ "Retry-After": "0" })
+      });
+    }
+    if (kimiTransportAttempts === 2) throw new SyntaxError("Unexpected end of JSON input");
+    return {
+      ...meteredCall("kimi_retry_finish", "finish", finishArgs(), 40, 10, 0.002),
+      id: "gen_kimi_retry_success",
+      model: "moonshotai/kimi-k3",
+      openrouter_metadata: {
+        endpoints: { available: [{ provider: "Moonshot AI", model: "moonshotai/kimi-k3", selected: true }] }
+      }
+    } as never;
+  }
+}, testOpenRouterCatalog).run({
+  buildInput,
+  authoringBrief,
+  runId: "run_kimi_transport_retry_test",
+  instruction: "Retain the run across temporary Moonshot rate limits.",
+  kind: "edit",
+  route: { apiProvider: "openrouter", modelId: "moonshotai/kimi-k3" },
+  runtime: runtime({ initialFiles: files }),
+  onEvents: async (events) => { kimiRetryEvents.push(...events); }
+});
+assert(kimiRetryResult.completion, "Kimi did not resume the same authoring turn after temporary 429 responses.");
+assert.equal(kimiTransportAttempts, 3, "Kimi did not use the established delayed retry allowance.");
+assert(
+  kimiRetryEvents.some((event) => event.kind === "model_request" && event.status === "succeeded" && event.summary.transportRetries === 2),
+  "Kimi transport retry count was not retained on the successful model request."
+);
+
+const opusRequests: Array<Parameters<ManagerResponsesClient["create"]>[0]> = [];
+const opusEvents: ManagerRunEvent[] = [];
+const opusResult = await new WebsiteManagerAgent(queueClient([
+  {
+    ...call("opus_build", "build_preview", {}),
+    id: "gen_opus_turn_1",
+    model: "anthropic/claude-opus-5",
+    usage: {
+      input_tokens: 20,
+      output_tokens: 8,
+      total_tokens: 28,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 16 },
+      output_tokens_details: { reasoning_tokens: 3 },
+      cost: 0.002
+    },
+    openrouter_metadata: {
+      endpoints: { available: [{ provider: "Amazon Bedrock", model: "anthropic/claude-opus-5", selected: true }] }
+    }
+  },
+  {
+    ...call("opus_finish", "finish", finishArgs()),
+    id: "gen_opus_turn_2",
+    model: "anthropic/claude-opus-5",
+    usage: {
+      input_tokens: 30,
+      output_tokens: 10,
+      total_tokens: 40,
+      input_tokens_details: { cached_tokens: 20, cache_write_tokens: 6 },
+      output_tokens_details: { reasoning_tokens: 4 },
+      cost: 0.0025
+    },
+    openrouter_metadata: {
+      endpoints: { available: [{ provider: "Google", model: "anthropic/claude-opus-5", selected: true }] }
+    }
+  }
+], (params) => opusRequests.push(params)), testOpenRouterCatalog).run({
+  buildInput,
+  authoringBrief,
+  runId: "run_opus_projection_test",
+  instruction: "Exercise the established Opus route.",
+  kind: "initial_build",
+  route: { apiProvider: "openrouter", modelId: "anthropic/claude-opus-5" },
+  runtime: runtime({ initialFiles: files }),
+  onEvents: async (events) => { opusEvents.push(...events); }
+});
+assert.equal(opusResult.telemetry.upstreamChanges, 1, "An eligible OpenRouter upstream change was not recorded.");
+assert.equal(opusRequests.length, 2);
+for (const request of opusRequests) {
+  assert(!toolNames(request).includes("request_input"), "Opus initial generation retained the unavailable request_input tool.");
+  assert.equal(countOccurrences(request.input, "prompt_cache_breakpoint"), 2, "Opus did not receive exactly one stable and one rolling breakpoint.");
+  assert.equal(request.prompt_cache_key, undefined, "OpenAI top-level cache keys leaked into Opus.");
+  assert.equal(request.prompt_cache_options, undefined, "OpenAI top-level cache options leaked into Opus.");
+  const provider = (request as typeof request & { provider?: { only?: string[]; require_parameters?: boolean } }).provider;
+  assert.deepEqual(provider?.only, ["amazon-bedrock", "google-vertex"]);
+  assert.equal(provider?.require_parameters, undefined);
+}
+assert(
+  opusEvents.some((event) => event.kind === "model_request" && event.status === "succeeded" && event.summary.upstreamChanged === true),
+  "An eligible upstream fallback was not retained as a diagnostic."
+);
 
 const unavailableCostProviderOverride = process.env.LODESTA_SITE_AGENT_PROVIDER;
 const unavailableCostModelOverride = process.env.LODESTA_SITE_AGENT_MODEL;
@@ -665,11 +1078,11 @@ const unavailableCostBaseRuntime = runtime({ initialFiles: files });
 let unavailableCostToolCalls = 0;
 let unavailableCostFailure: unknown;
 process.env.LODESTA_SITE_AGENT_PROVIDER = "openrouter";
-process.env.LODESTA_SITE_AGENT_MODEL = "example/unpriced-authoring-model";
+process.env.LODESTA_SITE_AGENT_MODEL = "moonshotai/kimi-k3";
 try {
   await new WebsiteManagerAgent(queueClient([
     call("unmetered_must_not_execute", "list_files", {})
-  ])).run({
+  ]), testOpenRouterCatalog).run({
     buildInput,
     authoringBrief,
     instruction: "Fail closed when provider and catalog cost telemetry are unavailable.",
@@ -859,9 +1272,9 @@ let finishAtBoundary: Awaited<ReturnType<WebsiteManagerAgent["run"]>>;
 Date.now = () => simulatedDateNow;
 try {
   finishAtBoundary = await new WebsiteManagerAgent(queueClient([
-    meteredCall("boundary_build", "build_preview", {}, 1_000_000, 20_000, 0.25),
-    meteredCall("boundary_inspect", "inspect_site", {}, 1_000_000, 20_000, 0.25),
-    meteredCall("boundary_finish", "finish", finishArgs(), 1_000_000, 20_000, 0.25)
+    meteredCall("boundary_build", "build_preview", {}, 700_000, 20_000, 0.25),
+    meteredCall("boundary_inspect", "inspect_site", {}, 700_000, 20_000, 0.25),
+    meteredCall("boundary_finish", "finish", finishArgs(), 700_000, 20_000, 0.25)
   ], (params) => {
     finishAtBoundaryRequests.push(params);
     simulatedDateNow += 5 * 60_000;
@@ -877,7 +1290,7 @@ try {
   Date.now = realDateNow;
 }
 assert.equal(finishAtBoundary.completion.ownerMessage, finishArgs().ownerMessage);
-assert.equal(finishAtBoundary.usage.inputTokens, 3_000_000, "productive run was still constrained by the retired cumulative input budget");
+assert.equal(finishAtBoundary.usage.inputTokens, 2_100_000, "productive run was still constrained by the retired cumulative input budget");
 assert.equal(finishAtBoundary.usage.outputTokens, 60_000, "productive run was still constrained by the retired cumulative output budget");
 assert.equal(finishAtBoundary.usage.costUsd, 0.75, "terminal cost overage was not retained");
 assert(finishAtBoundary.usage.durationMs >= 15 * 60_000, "productive run was still constrained by the retired 12-minute manager deadline");
@@ -890,7 +1303,7 @@ try {
   await new WebsiteManagerAgent(queueClient([
     call("stall_build", "build_preview", {}),
     call("stall_finish_1", "finish", finishArgs()),
-    call("stall_read", "read_file", { path: "src/site.tsx", startLine: null, endLine: null }),
+    call("stall_read", "read_files", { files: [{ path: "src/site.tsx", startLine: null, endLine: null }] }),
     call("stall_finish_2", "finish", finishArgs()),
     call("stall_finish_3", "finish", finishArgs()),
     call("stall_must_not_run", "list_files", {})
@@ -946,7 +1359,7 @@ console.log(JSON.stringify({
   sharedVerification: "pass",
   exactEditScope: "pass",
   atomicFilePatch: "pass",
-  deterministicHistoryCompaction: "pass",
+  appendOnlyHistory: "pass",
   correctableToolErrors: "pass",
   clarificationBeforeMutation: "pass",
   pricedModelEnforcement: "pass",
@@ -1005,6 +1418,18 @@ function runtime(options: {
           ? [{ type: "input_image" as const, image_url: "data:image/png;base64,AA==", detail: "high" as const }]
           : undefined,
         checkpoint: options.inspectionSummary ? undefined : "checkpoint_passed"
+      };
+    },
+    inspectVisual: async () => {
+      options.onInspect?.();
+      if (options.inspectError) throw options.inspectError;
+      return {
+        inspectionHash,
+        modelSummary: { visualOnly: true, observation: "Synthetic visual inspection." },
+        diagnosticSummary: { visualOnly: true, findings: [] },
+        images: options.inspectionImages
+          ? [{ type: "input_image" as const, image_url: "data:image/png;base64,AA==", detail: "high" as const }]
+          : undefined
       };
     }
   });
@@ -1118,4 +1543,13 @@ function output(result: Awaited<ReturnType<ManagerToolRuntime["execute"]>>) {
 
 function toolNames(request: Parameters<ManagerResponsesClient["create"]>[0]) {
   return (request.tools ?? []).map((tool) => tool.type === "function" ? tool.name : tool.type);
+}
+
+function countOccurrences(value: unknown, key: string): number {
+  if (Array.isArray(value)) return value.reduce((total, item) => total + countOccurrences(item, key), 0);
+  if (!value || typeof value !== "object") return 0;
+  return Object.entries(value as Record<string, unknown>).reduce(
+    (total, [entryKey, item]) => total + (entryKey === key ? 1 : 0) + countOccurrences(item, key),
+    0
+  );
 }

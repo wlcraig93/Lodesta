@@ -52,7 +52,6 @@ export default async function AccountEntryPage() {
               href={item.nextHref}
               thumbnailUrl={item.thumbnailUrl}
               lifecycle={item.lifecycle}
-              initialBuildModelId={item.initialBuildModelId}
               targetId={item.siteId ?? item.setupId}
               targetKind={item.kind}
               removable={item.kind === "site" || Boolean(item.setupView?.canCancel)}

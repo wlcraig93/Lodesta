@@ -131,6 +131,7 @@ function numberedInternalLabels(source: string) {
 }
 
 function allowedBoundaryLabel(path: string, label: string) {
+  if (["api.openai.com/v1", "openrouter.ai/api/v1"].includes(label)) return true;
   const boundaryFiles = [
     /^\.env\.example$/,
     /^\.github\//,
@@ -140,6 +141,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^packages\/site-artifacts\/(?:blob-store|maintenance-store)\.ts$/,
     /^packages\/platform-operations\/preview-access\.ts$/,
     /^packages\/site-sandbox\/(?:client|runtime-config)\.ts$/,
+    /^packages\/site-agent\/openrouter-anthropic-messages\.ts$/,
     /^packages\/site-verification\/browser-gate\.ts$/,
     /^packages\/business-data\/public-projection\.ts$/,
     /^packages\/website-assessment\/browser-evidence\.ts$/,
@@ -151,9 +153,6 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^scripts\/verify-site-authoring-architecture\.ts$/
   ];
   if (boundaryFiles.some((pattern) => pattern.test(path))) return true;
-  if (path === "lib/model-catalog.ts") {
-    return ["api.openai.com/v1", "openrouter.ai/api/v1"].includes(label);
-  }
   if (path === "packages/site-platform/workflow.ts") return ["node:v8", "site-runtime-v1", "V1"].includes(label);
   if (path === "packages/site-agent/manager.ts") return label.endsWith("/v1");
   return false;

@@ -42,8 +42,8 @@ const [route, migration, mediaPublicationMigration, config, skill, finalizer, re
 ]);
 
 const expectedTools = [
-  "claim_next_site", "get_execution_status", "list_files", "read_file", "write_file",
-  "delete_file", "apply_patch", "build_preview", "inspect_site", "request_input", "finish"
+  "claim_next_site", "get_execution_status", "list_files", "search_files", "read_files", "write_file",
+  "delete_file", "apply_patch", "edit_file", "build_preview", "inspect_site", "request_input", "finish"
 ];
 for (const tool of expectedTools) assert(route.includes(`"${tool}"`) || route.includes("managerToolNameSchema.options"), `${tool} is not discoverable.`);
 assert(route.includes('if (toolName === "create_image") continue'), "External MCP exposes Lodesta-side image generation.");

@@ -4,6 +4,8 @@ import { platformOperationsRepository as repository } from "@/packages/platform-
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { outboundComplianceStatus } from "@/packages/acquisition/outbound";
 import { formatProductDate } from "@/lib/product-format";
+import { OutboundReportActions } from "@/components/admin/OutboundReportActions";
+import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +16,14 @@ export default async function OutboundPage() {
     repository.listOutboundCampaigns(),
     repository.listOutboundProspects(),
     repository.listOutboundEvents(),
-    repository.listProspectReports(20)
+    repository.listProspectReports(500)
   ]);
   const assessmentIds = reports.flatMap((report) => report.assessmentId ? [report.assessmentId] : []);
   const assessments = assessmentIds.length
     ? await repository.listWebsiteAssessments({ ids: assessmentIds, limit: assessmentIds.length })
     : [];
   const assessmentsById = new Map(assessments.map((assessment) => [assessment.id, assessment]));
+  const reportsById = new Map(reports.map((report) => [report.id, report]));
 
   return (
     <main className="admin-page">
@@ -42,13 +45,14 @@ export default async function OutboundPage() {
 
       <section className="metric-row">
         <Metric label="Prospects" value={summary.prospects} />
+        <Metric label="Report views" value={summary.reportViewed} />
         <Metric label="Invitation opens" value={summary.invitationOpened} />
-        <Metric label="Adoptions started" value={summary.adoptionsStarted} />
         <Metric label="Adopted" value={summary.adopted} />
       </section>
 
       <section className="metric-row">
         <Metric label="Open to adoption" value={`${Math.round(summary.invitationToAdoptionRate * 100)}%`} />
+        <Metric label="Mailer to report" value={`${Math.round(summary.mailerToReportRate * 100)}%`} />
         <Metric label="Adoption to publish" value={`${Math.round(summary.adoptionToPublishRate * 100)}%`} />
         <Metric label="Mailer to adoption" value={`${Math.round(summary.mailerToAdoptionRate * 100)}%`} />
         <Metric label="Picker interactions" value={summary.pickerInteractions} />
@@ -66,7 +70,7 @@ export default async function OutboundPage() {
           <h2>Target fit</h2>
           <p className="muted">Business strength is separate from website quality and never appears in the public report.</p>
           <div className="finding-list">
-            {reports.map((report) => {
+            {reports.slice(0, 20).map((report) => {
               const assessment = report.assessmentId ? assessmentsById.get(report.assessmentId)?.assessment : undefined;
               return (
                 <article key={report.id} className="finding-card">
@@ -98,15 +102,32 @@ export default async function OutboundPage() {
         <section className="panel">
           <h2>Prospects</h2>
           <div className="finding-list">
-            {prospects.slice(0, 8).map((prospect) => (
-              <article key={prospect.id} className="finding-card">
-                <span className="badge">{prospect.status.replace("_", " ")}</span>
-                <h3>{prospect.businessName}</h3>
-                <p>
-                  {prospect.vertical ?? "unknown vertical"} · {prospect.previewId ? "preview linked" : "no preview"}
-                </p>
-              </article>
-            ))}
+            {prospects.slice(0, 20).map((prospect) => {
+              const report = prospect.reportId ? reportsById.get(prospect.reportId) : undefined;
+              const directAccess = report?.accessPolicy === "public_link";
+              const reportUrl = directAccess
+                ? `${configuredAppOriginOrDefault()}/website-health-report/${encodeURIComponent(report.id)}`
+                : undefined;
+              return (
+                <article key={prospect.id} className="finding-card">
+                  <span className="badge">{prospect.status.replace("_", " ")}</span>
+                  <h3>{prospect.businessName}</h3>
+                  <p>
+                    {prospect.vertical ?? "unknown vertical"} · {prospect.previewId ? "preview linked" : "no preview"}
+                  </p>
+                  <small>
+                    Report {report?.status ?? "not created"}
+                    {prospect.firstReportViewedAt ? ` · first viewed ${formatProductDate(prospect.firstReportViewedAt)}` : ""}
+                  </small>
+                  <OutboundReportActions
+                    prospectId={prospect.id}
+                    reportUrl={reportUrl}
+                    reportStatus={report?.status}
+                    directAccess={directAccess}
+                  />
+                </article>
+              );
+            })}
             {prospects.length === 0 ? <p>No outbound prospects have been added yet.</p> : null}
           </div>
         </section>

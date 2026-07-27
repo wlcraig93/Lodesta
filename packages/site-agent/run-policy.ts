@@ -94,7 +94,7 @@ export function usageForModel(
   modelId: string,
   value: {
     input_tokens?: number | null;
-    input_tokens_details?: { cached_tokens?: number | null } | null;
+    input_tokens_details?: { cached_tokens?: number | null; cache_write_tokens?: number | null } | null;
     output_tokens?: number | null;
     output_tokens_details?: { reasoning_tokens?: number | null } | null;
     cost?: number | null;
@@ -104,6 +104,10 @@ export function usageForModel(
 ): ManagerModelUsage {
   const inputTokens = value?.input_tokens ?? 0;
   const cachedInputTokens = Math.min(inputTokens, value?.input_tokens_details?.cached_tokens ?? 0);
+  const cacheWriteTokens = Math.min(
+    inputTokens - cachedInputTokens,
+    Math.max(0, value?.input_tokens_details?.cache_write_tokens ?? 0)
+  );
   const reasoningTokens = Math.min(value?.output_tokens ?? 0, value?.output_tokens_details?.reasoning_tokens ?? 0);
   const outputTokens = value?.output_tokens ?? 0;
   const pricing = modelPricing(modelId);
@@ -111,6 +115,7 @@ export function usageForModel(
   const catalogEstimateUsd = pricing
     ? (
         uncachedInputTokens * pricing.inputUsdPerMillion
+        + cacheWriteTokens * pricing.inputUsdPerMillion * 0.25
         + cachedInputTokens * pricing.cachedInputUsdPerMillion
         + outputTokens * pricing.outputUsdPerMillion
       ) / 1_000_000
@@ -119,6 +124,7 @@ export function usageForModel(
   return {
     inputTokens,
     cachedInputTokens,
+    cacheWriteTokens,
     reasoningTokens,
     outputTokens,
     costUsd: providerCostUsd ?? catalogEstimateUsd ?? 0,

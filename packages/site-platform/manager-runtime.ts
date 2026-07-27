@@ -3,6 +3,7 @@ import {
   assertCompleteWorkspace,
   isSiteAuthoringTerminalError,
   managerCompletionSchema,
+  managerToolArguments,
   workspaceSourceFileSchema,
   type ManagerRunRequest,
   type ManagerToolCall,
@@ -31,12 +32,25 @@ export type RuntimeInspection<Checkpoint> = {
   checkpoint?: Checkpoint;
 };
 
+export type RuntimeVisualInspection = {
+  inspectionHash: `sha256:${string}`;
+  modelSummary: Record<string, unknown>;
+  diagnosticSummary: Record<string, unknown>;
+  images?: Array<{ type: "input_image"; image_url: string; detail: "high" | "low" }>;
+};
+
 export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   schemaVersion: 1;
   files: WorkspaceSourceFile[];
   workspaceHash?: `sha256:${string}`;
   sandboxRevision: string;
   successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
+  lastSuccessfulBuild?: {
+    workspaceHash: `sha256:${string}`;
+    sandboxRevision: string;
+    result: BuildResult;
+    files: WorkspaceSourceFile[];
+  };
   failedBuild?: {
     workspaceHash: `sha256:${string}`;
     sandboxRevision: string;
@@ -45,6 +59,7 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
     failureFingerprint: `sha256:${string}`;
   };
   inspection?: RuntimeInspection<Checkpoint>;
+  visualInspection?: RuntimeVisualInspection;
   metrics: { builds: number; inspections: number; readCalls: number; readBytes: number; readLines: number };
   mutatedWorkspace: boolean;
 };
@@ -58,8 +73,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private workspaceHash?: `sha256:${string}`;
   private sandboxRevision: string;
   private successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
+  private lastSuccessfulBuild?: WorkspaceManagerRuntimeSnapshot<Checkpoint>["lastSuccessfulBuild"];
   private failedBuild?: WorkspaceManagerRuntimeSnapshot<Checkpoint>["failedBuild"];
   private inspection?: RuntimeInspection<Checkpoint>;
+  private visualInspection?: RuntimeVisualInspection;
   private builds = 0;
   private inspections = 0;
   private readCalls = 0;
@@ -78,6 +95,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     initialSnapshot?: WorkspaceManagerRuntimeSnapshot<Checkpoint>;
     applyBuild(files: WorkspaceSourceFile[], expectedRevision: string): Promise<BuildResult>;
     inspect(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeInspection<Checkpoint>>;
+    inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeVisualInspection>;
     createImage?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
     retainDiagnostic?(kind: string, content: string): Promise<{ key: string; contentHash: `sha256:${string}`; bytes: number }>;
   }) {
@@ -87,8 +105,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (snapshot) {
       this.workspaceHash = snapshot.workspaceHash;
       this.successfulBuild = snapshot.successfulBuild;
+      this.lastSuccessfulBuild = snapshot.lastSuccessfulBuild;
       this.failedBuild = snapshot.failedBuild;
       this.inspection = snapshot.inspection;
+      this.visualInspection = snapshot.visualInspection;
       this.builds = snapshot.metrics.builds;
       this.inspections = snapshot.metrics.inspections;
       this.readCalls = snapshot.metrics.readCalls;
@@ -103,10 +123,12 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   async execute(call: ManagerToolCall): Promise<ManagerToolExecution> {
     switch (call.name) {
       case "list_files": return this.list();
-      case "read_file": return this.read(call.arguments);
+      case "search_files": return this.search(call.arguments);
+      case "read_files": return this.read(call.arguments);
       case "write_file": return this.write(call.arguments);
       case "delete_file": return this.delete(call.arguments);
       case "apply_patch": return this.patch(call.arguments);
+      case "edit_file": return this.edit(call.arguments);
       case "create_image": {
         if (!this.options.createImage) return result({ ok: false, error: "image_generation_unavailable" });
         const created = await this.options.createImage(call.arguments);
@@ -114,6 +136,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
           this.successfulBuild = undefined;
           this.failedBuild = undefined;
           this.inspection = undefined;
+          this.visualInspection = undefined;
         }
         return created;
       }
@@ -127,6 +150,26 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   finalCheckpoint() {
     if (!this.inspection?.passed || !this.inspection.checkpoint) throw new Error("manager_finished_without_passing_checkpoint");
     return this.inspection.checkpoint;
+  }
+
+  hasAssessableBuild() {
+    return Boolean(this.successfulBuild || this.lastSuccessfulBuild);
+  }
+
+  restoreLastSuccessfulBuild() {
+    if (!this.lastSuccessfulBuild) return false;
+    this.files = new Map(this.lastSuccessfulBuild.files.map((file) => [file.path, file.content]));
+    this.workspaceHash = this.lastSuccessfulBuild.workspaceHash;
+    this.sandboxRevision = this.lastSuccessfulBuild.sandboxRevision;
+    this.successfulBuild = {
+      workspaceHash: this.lastSuccessfulBuild.workspaceHash,
+      sandboxRevision: this.lastSuccessfulBuild.sandboxRevision,
+      result: structuredClone(this.lastSuccessfulBuild.result)
+    };
+    this.failedBuild = undefined;
+    this.inspection = undefined;
+    this.visualInspection = undefined;
+    return true;
   }
 
   currentFiles(): WorkspaceSourceFile[] {
@@ -146,8 +189,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       workspaceHash: this.workspaceHash,
       sandboxRevision: this.sandboxRevision,
       successfulBuild: this.successfulBuild ? structuredClone(this.successfulBuild) : undefined,
+      lastSuccessfulBuild: this.lastSuccessfulBuild ? structuredClone(this.lastSuccessfulBuild) : undefined,
       failedBuild: this.failedBuild ? structuredClone(this.failedBuild) : undefined,
       inspection: this.inspection ? structuredClone(this.inspection) : undefined,
+      visualInspection: this.visualInspection ? structuredClone(this.visualInspection) : undefined,
       metrics: this.metrics(),
       mutatedWorkspace: this.mutatedWorkspace
     };
@@ -172,6 +217,9 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         : { status: "not_run_or_stale" },
       latestInspection: this.inspection
         ? { status: this.inspection.passed ? "passed" : "failed", inspectionHash: this.inspection.inspectionHash, findings: summaryFindings(this.inspection.modelSummary) }
+        : { status: "not_run_or_stale" },
+      latestVisualInspection: this.visualInspection
+        ? { status: "available", inspectionHash: this.visualInspection.inspectionHash }
         : { status: "not_run_or_stale" }
     };
   }
@@ -184,23 +232,76 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     });
   }
 
+  private search(args: Record<string, unknown>): ManagerToolExecution {
+    const parsed = managerToolArguments.search_files.parse(args);
+    const query = parsed.caseSensitive ? parsed.query : parsed.query.toLocaleLowerCase();
+    const selected = parsed.paths.length
+      ? parsed.paths.map((path) => [path, this.files.get(path)] as const)
+      : [...this.files.entries()];
+    const matches: Array<{ path: string; line: number; content: string }> = [];
+    const missingPaths: string[] = [];
+    let truncated = false;
+    for (const [path, content] of selected.sort(([left], [right]) => left.localeCompare(right))) {
+      if (content === undefined) {
+        missingPaths.push(path);
+        continue;
+      }
+      for (const [index, line] of content.split("\n").entries()) {
+        const candidate = parsed.caseSensitive ? line : line.toLocaleLowerCase();
+        if (!candidate.includes(query)) continue;
+        if (matches.length >= 200) {
+          truncated = true;
+          break;
+        }
+        matches.push({ path, line: index + 1, content: line.slice(0, 2_000) });
+      }
+      if (truncated) break;
+    }
+    return result({
+      ok: missingPaths.length === 0,
+      query: parsed.query,
+      matches,
+      matchCount: matches.length,
+      truncated,
+      missingPaths
+    });
+  }
+
   private read(args: Record<string, unknown>): ManagerToolExecution {
     this.readCalls += 1;
-    const path = String(args.path ?? "");
-    const content = this.files.get(path);
-    if (content === undefined) return result({ ok: false, error: "workspace_file_missing", path });
-    const lines = content.split("\n");
-    const start = Math.max(1, Number(args.startLine ?? 1));
-    const end = Math.min(lines.length, Number(args.endLine ?? Math.min(lines.length, start + 399)));
-    if (end < start) return result({ ok: false, error: "invalid_line_window", path, startLine: start, endLine: end });
-    const selected = lines.slice(start - 1, end).join("\n");
-    const bytes = Buffer.byteLength(selected);
-    const lineCount = end - start + 1;
-    this.readBytes += bytes;
-    this.readLines += lineCount;
+    const requested = managerToolArguments.read_files.parse(args).files;
+    const files = requested.map((request) => {
+      const content = this.files.get(request.path);
+      if (content === undefined) return { ok: false as const, error: "workspace_file_missing", path: request.path };
+      const lines = content.split("\n");
+      const start = request.startLine ?? 1;
+      const end = Math.min(lines.length, request.endLine ?? Math.min(lines.length, start + 399));
+      if (start > lines.length || end < start) {
+        return { ok: false as const, error: "invalid_line_window", path: request.path, startLine: start, endLine: end, totalLines: lines.length };
+      }
+      const selected = lines.slice(start - 1, end).join("\n");
+      const bytes = Buffer.byteLength(selected);
+      const lineCount = end - start + 1;
+      this.readBytes += bytes;
+      this.readLines += lineCount;
+      return {
+        ok: true as const,
+        path: request.path,
+        contentHash: sha256(content),
+        startLine: start,
+        endLine: end,
+        totalLines: lines.length,
+        bytes,
+        lines: lines.slice(start - 1, end).map((line, index) => ({
+          line: start + index,
+          content: line
+        }))
+      };
+    });
+    const diagnosticFiles = files.map(({ lines: _lines, ...file }) => file);
     return {
-      modelOutput: JSON.stringify({ ok: true, path, contentHash: sha256(content), startLine: start, endLine: end, totalLines: lines.length, content: selected }),
-      diagnosticOutput: { ok: true, path, contentHash: sha256(content), startLine: start, endLine: end, totalLines: lines.length, bytes }
+      modelOutput: JSON.stringify({ ok: files.every((file) => file.ok), files }),
+      diagnosticOutput: { ok: files.every((file) => file.ok), files: diagnosticFiles }
     };
   }
 
@@ -240,6 +341,64 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     return result({ ok: true, unchanged: changedFiles.length === 0, changedFiles, workspaceHash: this.workspaceHash });
   }
 
+  private edit(args: Record<string, unknown>): ManagerToolExecution {
+    const parsed = managerToolArguments.edit_file.parse(args);
+    const current = this.files.get(parsed.path);
+    if (current === undefined) return result({ ok: false, error: "workspace_file_missing", path: parsed.path });
+    const currentHash = sha256(current);
+    if (currentHash !== parsed.expectedContentHash) {
+      return result({
+        ok: false,
+        error: "workspace_file_changed",
+        path: parsed.path,
+        expectedContentHash: parsed.expectedContentHash,
+        actualContentHash: currentHash
+      });
+    }
+    const lines = current.split("\n");
+    const edits = [...parsed.edits].sort((left, right) => left.startLine - right.startLine || left.endLine - right.endLine);
+    let previousBoundary = 0;
+    for (const edit of edits) {
+      if (
+        edit.startLine > lines.length + 1
+        || edit.endLine > lines.length
+        || edit.endLine < edit.startLine - 1
+        || edit.startLine <= previousBoundary
+        || (edit.endLine < edit.startLine && edit.content === null)
+      ) {
+        return result({
+          ok: false,
+          error: "invalid_targeted_edit",
+          path: parsed.path,
+          startLine: edit.startLine,
+          endLine: edit.endLine,
+          totalLines: lines.length
+        });
+      }
+      previousBoundary = Math.max(edit.startLine, edit.endLine);
+    }
+    const nextLines = [...lines];
+    for (const edit of edits.reverse()) {
+      const replacement = edit.content === null ? [] : edit.content.split("\n");
+      nextLines.splice(edit.startLine - 1, edit.endLine - edit.startLine + 1, ...replacement);
+    }
+    const nextContent = workspaceSourceFileSchema.shape.content.parse(nextLines.join("\n"));
+    if (nextContent === current) {
+      return result({ ok: true, unchanged: true, path: parsed.path, contentHash: currentHash, workspaceHash: this.workspaceHash });
+    }
+    this.files.set(parsed.path, nextContent);
+    this.mutated();
+    return result({
+      ok: true,
+      unchanged: false,
+      path: parsed.path,
+      previousContentHash: currentHash,
+      contentHash: sha256(nextContent),
+      editCount: parsed.edits.length,
+      workspaceHash: this.workspaceHash
+    });
+  }
+
   private async build(): Promise<ManagerToolExecution> {
     if (!this.workspaceHash) return result({ ok: false, error: "workspace_empty" });
     if (this.successfulBuild?.workspaceHash === this.workspaceHash) {
@@ -254,8 +413,15 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       const built = await this.options.applyBuild(files, this.sandboxRevision);
       this.sandboxRevision = built.revision;
       this.successfulBuild = { workspaceHash: this.workspaceHash, sandboxRevision: built.revision, result: built };
+      this.lastSuccessfulBuild = {
+        workspaceHash: this.workspaceHash,
+        sandboxRevision: built.revision,
+        result: structuredClone(built),
+        files: this.currentFiles()
+      };
       this.failedBuild = undefined;
       this.inspection = undefined;
+      this.visualInspection = undefined;
       return result({ ok: true, cached: false, workspaceHash: this.workspaceHash, sandboxRevision: built.revision, previewPath: built.previewPath, buildDurationMs: built.buildDurationMs, placementId: built.placementId });
     } catch (error) {
       if (isSiteAuthoringTerminalError(error)) throw error;
@@ -279,25 +445,42 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       return result({ ok: false, error: "inspection_requires_current_successful_build", workspaceHash: this.workspaceHash });
     }
-    const cached = Boolean(this.inspection);
-    if (!this.inspection) {
-      this.inspections += 1;
-      this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
+    if (!this.options.inspectVisual) {
+      return result({ ok: false, error: "visual_inspection_unavailable" });
     }
-    return inspectionResult(this.inspection, cached);
+    const cached = Boolean(this.visualInspection);
+    if (!this.visualInspection) {
+      this.inspections += 1;
+      this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision);
+    }
+    return visualInspectionResult(this.visualInspection, cached);
   }
 
   private async finish(args: Record<string, unknown>): Promise<ManagerToolExecution> {
+    let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
-      return result({ ok: false, error: "finish_requires_current_successful_build" });
+      const built = await this.build();
+      if (built.diagnosticOutput.ok === false) return withFailureStage(built, "compilation", { buildPerformed: true });
+      buildPerformed = true;
     }
     const cached = Boolean(this.inspection);
     if (!this.inspection) {
       this.inspections += 1;
       this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
+      this.inspection.diagnosticSummary = {
+        ...this.inspection.diagnosticSummary,
+        verificationTimings: {
+          compilationMs: this.successfulBuild?.result.buildDurationMs ?? 0,
+          ...recordValue(this.inspection.diagnosticSummary.verificationTimings)
+        }
+      };
     }
     if (!this.inspection.passed || !this.inspection.checkpoint) {
-      return inspectionResult(this.inspection, cached, "finish_verification_failed");
+      return withFailureStage(
+        inspectionResult(this.inspection, cached, "finish_verification_failed"),
+        "verification",
+        { buildPerformed }
+      );
     }
     const completion = managerCompletionSchema.parse({
       schemaVersion: "manager-completion",
@@ -309,7 +492,11 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       sandboxImageDigest: this.options.sandboxImageDigest,
       inspectionHash: this.inspection.inspectionHash
     });
-    return { modelOutput: JSON.stringify({ ok: true, completed: true }), diagnosticOutput: { ok: true, completed: true, workspaceHash: this.workspaceHash, inspectionHash: this.inspection.inspectionHash }, completion };
+    return {
+      modelOutput: JSON.stringify({ ok: true, completed: true, buildPerformed }),
+      diagnosticOutput: { ok: true, completed: true, buildPerformed, workspaceHash: this.workspaceHash, inspectionHash: this.inspection.inspectionHash },
+      completion
+    };
   }
 
   private requestInput(args: Record<string, unknown>): ManagerToolExecution {
@@ -324,6 +511,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     this.successfulBuild = undefined;
     this.failedBuild = undefined;
     this.inspection = undefined;
+    this.visualInspection = undefined;
   }
 
   private refreshWorkspaceHash() {
@@ -331,12 +519,62 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 }
 
-function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>, cached: boolean, error?: string): ManagerToolExecution {
-  const guidance = !inspection.passed && cached
-    ? "Edit the workspace source before running the release check again."
+function visualInspectionResult(inspection: RuntimeVisualInspection, cached: boolean): ManagerToolExecution {
+  const summary = { ...inspection.modelSummary, ok: true, cached, visualOnly: true };
+  return {
+    modelOutput: inspection.images?.length
+      ? [{ type: "input_text", text: JSON.stringify(summary) }, ...inspection.images]
+      : JSON.stringify(summary),
+    diagnosticOutput: {
+      ...inspection.diagnosticSummary,
+      ok: true,
+      cached,
+      visualOnly: true
+    }
+  };
+}
+
+function withFailureStage(
+  execution: ManagerToolExecution,
+  failureStage: "compilation" | "verification",
+  details: Record<string, unknown> = {}
+): ManagerToolExecution {
+  const modelValue = typeof execution.modelOutput === "string"
+    ? parseObject(execution.modelOutput)
     : undefined;
+  return {
+    ...execution,
+    modelOutput: modelValue
+      ? JSON.stringify({ ...modelValue, failureStage, ...details })
+      : execution.modelOutput,
+    diagnosticOutput: { ...execution.diagnosticOutput, failureStage, ...details }
+  };
+}
+
+function parseObject(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>, cached: boolean, error?: string): ManagerToolExecution {
+  const guidance = !inspection.passed
+    ? "Edit every affected occurrence of each grouped root cause before running the release check again. When one cause spans routes or modules, prefer one coherent apply_patch or file rewrite."
+    : undefined;
+  const compactSummary = compactInspectionSummary(inspection.modelSummary);
   const summary = {
-    ...compactInspectionSummary(inspection.modelSummary),
+    ...compactSummary,
     ok: inspection.passed,
     cached,
     ...(error ? { error } : {}),
@@ -345,8 +583,8 @@ function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>,
   const failureFingerprint = inspection.passed
     ? undefined
     : sha256(stableJson({
-        inspectionHash: inspection.inspectionHash,
-        blockers: Array.isArray(inspection.modelSummary.blockers) ? inspection.modelSummary.blockers : []
+        error: error ?? "release_verification_failed",
+        blockers: compactSummary.blockers
       }));
   const includeImages = !inspection.passed && hasVisualBlocker(inspection.modelSummary);
   return {

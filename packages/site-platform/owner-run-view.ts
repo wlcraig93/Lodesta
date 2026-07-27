@@ -32,10 +32,12 @@ export type OwnerActivitySnapshot = {
 
 const OWNER_ACTIVITY_TOOLS: Partial<Record<string, readonly [OwnerActivityGroup["kind"], string]>> = {
   list_files: ["review", "Reviewing the current website."],
-  read_file: ["review", "Reviewing the current website."],
+  search_files: ["review", "Finding the relevant website code."],
+  read_files: ["review", "Reviewing the current website."],
   write_file: ["edit", "Updating the website."],
   delete_file: ["edit", "Updating the website."],
   apply_patch: ["edit", "Updating the website."],
+  edit_file: ["edit", "Updating the website."],
   create_image: ["image", "Creating an image."],
   build_preview: ["build", "Building the private preview."],
   inspect_site: ["review", "Checking the website."],

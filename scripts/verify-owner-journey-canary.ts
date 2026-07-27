@@ -17,8 +17,7 @@ for (const name of [
   "LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION",
   "LODESTA_OWNER_CANARY_ORIGIN",
   "LODESTA_OWNER_CANARY_SOURCE_URL",
-  "LODESTA_OWNER_CANARY_EMAIL",
-  "LODESTA_OWNER_CANARY_MODEL"
+  "LODESTA_OWNER_CANARY_EMAIL"
 ]) {
   assert(env.includes(`${name}=`), `.env.example must document ${name}.`);
   assert(source.includes(name), `The owner canary must require ${name}.`);

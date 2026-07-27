@@ -9,7 +9,7 @@ The canonical architecture and implementation sequence are documented in [docs/p
 ## Architecture
 
 - `packages/business-data`: crawl ingestion, normalized business state, and public sandbox projection.
-- `packages/acquisition`: presence reports, outbound campaigns, prospects, adoption, and their worker.
+- `packages/acquisition`: Website Health Reports, outbound campaigns, prospects, adoption, and their worker.
 - `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
 - `packages/site-agent`: the single website-authoring agent, its tools, and knowledge skills.
 - `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.

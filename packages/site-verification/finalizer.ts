@@ -15,6 +15,7 @@ import {
 } from "./contracts";
 import { sanitizeAgentCss, sanitizeAgentHtml } from "./sanitizer";
 import { platformCapabilityStyles } from "../../workers/site-sandbox/scaffold/platform/capability-styles";
+import { siteTechnicalReleasePolicy } from "@/packages/site-contracts/platform-manifest";
 
 export type PreparedArtifactFile = {
   path: string;
@@ -155,7 +156,7 @@ export function finalizePreparedArtifact(input: {
   const findings = dedupeFindings([
     ...input.prepared.findings,
     ...input.browserGate.findings
-  ]);
+  ]).map(advisoryUnlessTechnicalBlocker);
   const fileRecords = input.prepared.files.map((file) => ({
     path: file.path,
     contentType: file.contentType,
@@ -198,6 +199,24 @@ export function finalizePreparedArtifact(input: {
     }
   });
   return { artifact, files: input.prepared.files, qualityMetrics: input.prepared.qualityMetrics };
+}
+
+/**
+ * Authoring findings are retained for assessment, but only failures that make the
+ * finalized artifact unsafe or technically unusable control publication. Inputs
+ * already neutralized by the sanitizer do not force another authoring turn.
+ * Business facts, metadata, content structure, visual quality, and accessibility
+ * are intentionally advisory while the product is learning what models produce.
+ */
+export function isTechnicalReleaseBlocker(finding: ArtifactGateFinding) {
+  if (finding.severity !== "error") return false;
+  if (siteTechnicalReleasePolicy.blockingPrefixes.some((prefix) => finding.id.startsWith(prefix))) return true;
+  return (siteTechnicalReleasePolicy.blockingIds as readonly string[]).includes(finding.id);
+}
+
+function advisoryUnlessTechnicalBlocker(finding: ArtifactGateFinding): ArtifactGateFinding {
+  if (finding.severity !== "error" || isTechnicalReleaseBlocker(finding)) return finding;
+  return { ...finding, severity: "warning" };
 }
 
 function validateSiteStructure(input: {

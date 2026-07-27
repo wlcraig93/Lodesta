@@ -49,3 +49,23 @@ export const denverPlumberBakeoffCandidates: ModelBakeoffCandidate[] = [
     modelId: "moonshotai/kimi-k3"
   }
 ];
+
+export function primePlumbingRouteSmokeDefinition(
+  experimentId: string,
+  candidateKeys: string[] = denverPlumberBakeoffCandidates.map((candidate) => candidate.key)
+) {
+  const requested = new Set(candidateKeys);
+  const candidates = denverPlumberBakeoffCandidates.filter((candidate) => requested.has(candidate.key));
+  const unknown = candidateKeys.filter((key) => !candidates.some((candidate) => candidate.key === key));
+  if (unknown.length || candidates.length === 0) {
+    throw new Error(`Unknown or empty model bake-off candidate selection: ${unknown.join(",") || "none"}`);
+  }
+  return {
+    id: experimentId,
+    name: "Prime Plumbing one-source route smoke",
+    purpose: "One-source route smoke comparison of four established authoring paths. This is infrastructure and artifact evidence, not a statistically meaningful model verdict.",
+    requestedBy: "lodesta_route_smoke",
+    sources: [denverPlumberBakeoffSources[0]],
+    candidates
+  };
+}

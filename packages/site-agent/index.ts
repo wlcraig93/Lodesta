@@ -6,6 +6,8 @@ export * from "./image-creation";
 export * from "./prompts";
 export * from "./run-policy";
 export * from "./provider-capabilities";
+export * from "./provider-routes";
+export * from "./openrouter-anthropic-messages";
 export * from "./history";
 export * from "./skills";
 export * from "./source-policy";

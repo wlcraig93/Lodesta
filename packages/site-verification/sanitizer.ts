@@ -161,7 +161,13 @@ function sanitizeAttributes(element: Element, tag: string, findings: ArtifactGat
 
 function sanitizeLink(element: Element, input: SanitizeArtifactInput, findings: ArtifactGateFinding[]) {
   const href = element.attribs.href ?? "";
-  if (!safeHref(href, input)) {
+  const disposition = hrefDisposition(href, input);
+  if (disposition === "factual_mismatch") {
+    findings.push(finding("fact.link_mismatch", "claim", `Link is not present in the retained public business context: ${href || "missing href"}.`, input.route));
+    element.attribs.href = "#";
+    return;
+  }
+  if (disposition === "unsafe") {
     findings.push(finding("link.unsafe", "link", `Unsafe, unverified, or unresolved link: ${href || "missing href"}.`, input.route));
     element.attribs.href = "#";
     return;
@@ -209,24 +215,30 @@ function sanitizeForm(element: Element, allowedFormIds: Set<string>, findings: A
   }
 }
 
-function safeHref(value: string, input: SanitizeArtifactInput) {
-  if (!value || /^javascript:|^data:|^blob:/i.test(value)) return false;
-  if (value.startsWith("#")) return true;
-  if (/^tel:/i.test(value)) return input.allowedPhoneNumbers.has(comparablePhone(value.slice(4)));
-  if (/^mailto:/i.test(value)) return input.allowedEmailAddresses.has(value.slice(7).trim().toLowerCase());
+function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | "factual_mismatch" | "unsafe" {
+  if (!value || /^javascript:|^data:|^blob:/i.test(value)) return "unsafe";
+  if (value.startsWith("#")) return "safe";
+  if (/^tel:/i.test(value)) {
+    return input.allowedPhoneNumbers.has(comparablePhone(value.slice(4))) ? "safe" : "factual_mismatch";
+  }
+  if (/^mailto:/i.test(value)) {
+    return input.allowedEmailAddresses.has(value.slice(7).trim().toLowerCase()) ? "safe" : "factual_mismatch";
+  }
   if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
-      return (parsed.protocol === "https:" || parsed.protocol === "http:") && input.allowedExternalHrefs.has(parsed.toString());
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") && input.allowedExternalHrefs.has(parsed.toString())
+        ? "safe"
+        : "factual_mismatch";
     } catch {
-      return false;
+      return "unsafe";
     }
   }
   try {
     const parsed = new URL(value, "https://site.lodesta.local");
-    return input.declaredRoutes.has(normalizeRoutePath(parsed.pathname));
+    return input.declaredRoutes.has(normalizeRoutePath(parsed.pathname)) ? "safe" : "unsafe";
   } catch {
-    return false;
+    return "unsafe";
   }
 }
 

@@ -141,14 +141,12 @@ assert(productDialog.includes("document.body.style.overflow") && productDialog.i
 assert(css.includes(".product-dialog::backdrop") && css.includes(".product-dialog-actions"), "Canonical product dialog styling is missing.");
 assert(onboarding.includes("<ProductDialog") && setupControls.includes("<ConfirmDialog") && externalBatchActions.includes("<ConfirmDialog"), "Existing confirmations are not consolidated on the shared dialog system.");
 assert(
-  onboarding.includes("Initial build model")
-    && onboarding.includes('fetch("/api/website-setups/models"')
-    && onboarding.includes("Filter by model or provider")
-    && onboarding.includes("compatible models"),
-  "Website setup is missing the searchable OpenRouter initial-build model selector."
+  !onboarding.includes("Initial build model")
+    && !onboarding.includes("OpenRouter")
+    && !onboarding.includes("model provider"),
+  "Owner onboarding exposes model-provider configuration."
 );
-assert(css.includes(".onboarding-model-search") && css.includes(".onboarding-model-selection"), "OpenRouter model-picker states are missing product styling.");
-assert(account.includes("account-website-model-chip") && account.includes("Initial build ·"), "Website cards are missing initial-build model provenance.");
+assert(!account.includes("Initial build ·"), "Website cards expose internal model provenance.");
 assert(thumbnailRoute.includes("site.ownerUserId !== auth.user.id"), "Thumbnail endpoint does not enforce exact owner user-ID equality.");
 assert(thumbnailRoute.includes("active && published"), "Thumbnail endpoint does not prefer published imagery while a live update is running.");
 

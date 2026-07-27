@@ -46,6 +46,12 @@ export function classifySiteAuthoringFailure(error: unknown) {
   if (/authoring_stalled/i.test(message)) {
     return failure("authoring_stalled", "authoring", false, message);
   }
+  if (/context_capacity_exhausted|context_length_exceeded|maximum context length|max_context_length|context window.*(?:exceed|limit|maximum)/i.test(message)) {
+    return failure("context_capacity_exhausted", "provider", false, message);
+  }
+  if (/manager_model_incomplete:max_output_tokens/i.test(message)) {
+    return failure("output_budget_exhausted", "budget", false, message);
+  }
   if (/workflow_deadline_exhausted|deadline_exhausted|aborted/i.test(message)) {
     return failure("deadline_exhausted", "budget", false, message);
   }
@@ -58,6 +64,16 @@ export function classifyModelProviderError(error: unknown): SiteAuthoringTermina
   const nested = record.error && typeof record.error === "object" ? record.error as Record<string, unknown> : {};
   const providerCode = String(nested.code ?? record.code ?? "");
   const status = typeof record.status === "number" ? record.status : undefined;
+  const providerFailure = `${providerCode} ${message}`;
+  if (
+    (status === 400 || status === undefined)
+    && /context_length_exceeded|maximum context length|max_context_length|context window.*(?:exceed|limit|maximum)|too many tokens.*context/i.test(providerFailure)
+  ) {
+    return new SiteAuthoringTerminalError("context_capacity_exhausted", "provider", false, message, { cause: error });
+  }
+  if (/manager_model_incomplete:max_output_tokens/i.test(message)) {
+    return new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, message, { cause: error });
+  }
   if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits/i.test(`${providerCode} ${message}`)) {
     return new SiteAuthoringTerminalError("provider_quota_exhausted", "provider", false, message, { cause: error });
   }

@@ -40,7 +40,7 @@ export default async function ModelBakeoffsPage() {
                 </div>
               </div>
               <dl className={styles.experimentMetrics}>
-                <div><dt>Complete</dt><dd>{view.totals.completed}/12</dd></div>
+                <div><dt>Complete</dt><dd>{view.totals.completed}/{experiment.sources.length * experiment.candidates.length}</dd></div>
                 <div><dt>Build cost</dt><dd>{money(view.totals.totalCostUsd)}</dd></div>
                 <div><dt>Median score</dt><dd>{view.totals.medianQualityScore?.toFixed(0) ?? "—"}</dd></div>
               </dl>
@@ -51,7 +51,7 @@ export default async function ModelBakeoffsPage() {
         {!experiments.length ? (
           <div className={styles.empty}>
             <strong>No experiments yet</strong>
-            <p>Run <code>npm run run:model-bakeoff</code> to create and execute the first 12-site comparison.</p>
+            <p>Run <code>npm run run:model-bakeoff</code> to create and execute a private comparison.</p>
           </div>
         ) : null}
       </section>

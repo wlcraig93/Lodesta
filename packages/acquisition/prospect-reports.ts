@@ -5,6 +5,7 @@ import type {
   ProspectPresenceReportResult,
   ProspectReportFinding,
   ProspectReportGatedPlan,
+  ProspectReportAccessPolicy,
   ProspectReportRecord,
   ProspectReportStage,
   ProspectWebsiteKind
@@ -13,6 +14,7 @@ import { publicWebsiteAssessmentProjection } from "@/packages/website-assessment
 import type { WebsiteAssessment } from "@/packages/website-assessment/contracts";
 import { usageForModel } from "@/packages/site-agent/run-policy";
 import { assessBusinessStrength } from "./business-strength";
+import { publicProspectReportSchema } from "./public-report-contract";
 
 type BudgetName = "prospect_scan";
 
@@ -217,6 +219,7 @@ export function prospectReportFromAssessment(
 
 export function noOwnedWebsiteProspectReport(input: {
   websiteKind: Exclude<ProspectWebsiteKind, "owned_website">;
+  businessName?: string;
   sourceUrl?: string;
   sourceHost?: string;
 }): ProspectPresenceReportResult {
@@ -245,7 +248,7 @@ export function noOwnedWebsiteProspectReport(input: {
     websiteKind: input.websiteKind,
     sourceUrl: input.sourceUrl,
     sourceHost: input.sourceHost,
-    siteUnderstanding: { services: [], customerJourneys: [] },
+    siteUnderstanding: { businessName: input.businessName, services: [], customerJourneys: [] },
     whatsWorking: [],
     findings: [finding],
     stages: [
@@ -259,31 +262,83 @@ export function noOwnedWebsiteProspectReport(input: {
   };
 }
 
-export function publicProspectReport(report: ProspectReportRecord) {
-  const unlocked = Boolean(report.unlockedAt);
-  const result = report.result
-    ? {
-        ...report.result,
-        gatedPlan: unlocked ? report.result.gatedPlan : undefined
-      }
-    : undefined;
-  return {
+export function publicProspectReport(
+  report: ProspectReportRecord,
+  input: { accessGranted?: boolean } = {}
+) {
+  const accessGranted = report.accessPolicy === "public_link" || input.accessGranted === true;
+  const teaser = report.result ? prospectReportTeaser(report.result) : undefined;
+  const result = accessGranted ? report.result : undefined;
+  return publicProspectReportSchema.parse({
     id: report.id,
     status: report.status,
     websiteKind: report.websiteKind,
     sourceUrl: report.sourceUrl,
     sourceHost: report.sourceHost,
-    unlocked,
+    access: {
+      policy: report.accessPolicy satisfies ProspectReportAccessPolicy,
+      granted: accessGranted
+    },
+    teaser,
     result,
     error: report.status === "failed"
       ? "The scan could not finish. Try again later or contact Lodesta."
-      : report.status === "completed" && !result
+      : report.status === "completed" && !report.result
         ? "This report uses a stale schema and must be rebuilt."
         : undefined,
     createdAt: report.createdAt,
     updatedAt: report.updatedAt,
     completedAt: report.completedAt
+  });
+}
+
+export function prospectReportTeaser(result: ProspectPresenceReportResult) {
+  const strengths = [
+    ...result.whatsWorking,
+    ...(result.agentReadiness?.verified ?? []).map((item) => ({
+      id: item.id,
+      dimension: "AI-search readiness",
+      title: item.title,
+      evidence: item.evidence
+    })),
+    ...(result.visualQuality?.strengths ?? []).map((item) => ({
+      id: item.id,
+      dimension: "Visual experience",
+      title: item.title,
+      evidence: item.evidence
+    }))
+  ];
+  const findings = dedupeReportFindings([
+    ...result.findings,
+    ...(result.agentReadiness?.findings ?? []),
+    ...(result.visualQuality?.findings ?? [])
+  ]).sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const finding = findings[0];
+  const limitations = [...new Set([
+    ...(result.coverage?.limitations ?? []),
+    ...(result.agentReadiness?.coverage.limitations ?? []),
+    ...(result.visualQuality?.coverage.limitations ?? [])
+  ])];
+
+  return {
+    siteUnderstanding: result.siteUnderstanding,
+    strength: strengths[0],
+    finding,
+    limitations,
+    additionalFindingCount: Math.max(0, findings.length - (finding ? 1 : 0)),
+    planAvailable: Boolean(result.gatedPlan.priorities.length),
+    maintenanceMessage: finding
+      ? undefined
+      : "No verified problem was identified in the available evidence. The complete report focuses on coverage and practical maintenance priorities."
   };
+}
+
+function dedupeReportFindings(findings: ProspectReportFinding[]) {
+  return [...new Map(findings.map((finding) => [finding.id, finding])).values()];
+}
+
+function severityRank(severity: ProspectReportFinding["severity"]) {
+  return { critical: 0, major: 1, minor: 2, advisory: 3 }[severity];
 }
 
 function gatedPlanForFindings(findings: ProspectReportFinding[], websiteKind: ProspectWebsiteKind): ProspectReportGatedPlan {

@@ -26,6 +26,7 @@ export default async function ModelBakeoffDetailPage({
     ?? view.experiment.sources[0];
   const candidates = view.rows.filter((row) => row.item.source.key === selectedSource.key);
   const active = ["queued", "running"].includes(view.experiment.status);
+  const totalRuns = view.experiment.sources.length * view.experiment.candidates.length;
 
   return (
     <main className={`admin-page ${styles.detailPage}`}>
@@ -42,7 +43,7 @@ export default async function ModelBakeoffDetailPage({
       />
 
       <section className={styles.metricStrip} aria-label="Experiment metrics">
-        <Metric label="Complete" value={`${view.totals.completed}/12`} />
+        <Metric label="Complete" value={`${view.totals.completed}/${totalRuns}`} />
         <Metric label="Failed" value={String(view.totals.failed)} />
         <Metric label="Build cost" value={money(view.totals.totalCostUsd)} />
         <Metric label="Assessment cost" value={money(view.totals.assessmentCostUsd)} />
@@ -78,7 +79,7 @@ export default async function ModelBakeoffDetailPage({
       <section className={styles.matrixSection}>
         <div className={styles.sectionHeading}>
           <div>
-            <span>All twelve runs</span>
+            <span>All {totalRuns} runs</span>
             <h2>Experiment matrix</h2>
           </div>
           <p>Quality scores are automated decision support. Final visual and code review remains human.</p>

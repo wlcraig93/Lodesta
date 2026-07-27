@@ -114,6 +114,7 @@ export function BusinessAddress({
     data-lodesta-business-address=""
     data-lodesta-address-variant={variant}
     data-lodesta-fact-id={fact.id}
+    data-lodesta-location-id={locationId}
   >{formatLocalAddress(location)}</Tag>;
 }
 

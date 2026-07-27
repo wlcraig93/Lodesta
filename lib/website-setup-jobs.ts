@@ -1,8 +1,4 @@
 import type { PublicFetchUrlValidation } from "@/lib/url-safety";
-import {
-  isSiteCreationModelId,
-  SITE_CREATION_API_PROVIDER
-} from "@/lib/site-creation-models";
 import { validateWebsiteSetupSource } from "@/lib/website-setups";
 import { WebsiteCrawlError } from "@/packages/business-data";
 import {
@@ -49,15 +45,7 @@ async function processClaimedWebsiteSetup(
     const bootstrapped = await siteAuthoringWorkflow.bootstrapFromUrl({
       url: source.url,
       ownerId: setup.ownerUserId,
-      reportingTimezone: setup.reportingTimezone,
-      initialBuildRoute: setup.initialBuildApiProvider === SITE_CREATION_API_PROVIDER
-        && setup.initialBuildModelId
-        && isSiteCreationModelId(setup.initialBuildModelId)
-        ? {
-            apiProvider: setup.initialBuildApiProvider,
-            modelId: setup.initialBuildModelId
-          }
-        : undefined
+      reportingTimezone: setup.reportingTimezone
     });
     const linked = await platformOperationsRepository.linkWebsiteSetup({
       setupId: setup.id,

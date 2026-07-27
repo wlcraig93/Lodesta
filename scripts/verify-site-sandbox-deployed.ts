@@ -34,6 +34,23 @@ export const siteDefinition = {
     content: "body{margin:0;font:16px Arial,sans-serif}main{padding:2rem}"
   }]);
   assert(applied.revision !== bootstrapped.revision, "Deployed sandbox apply did not advance the revision.");
+  const backup = await sandbox.backup(sessionId);
+  const rebootstrapped = await sandbox.bootstrap(sessionId, buildInput);
+  const restored = await sandbox.restore(
+    sessionId,
+    backup.backup.id,
+    rebootstrapped.revision,
+    backup.backup.contentHash
+  );
+  const restoredDiagnostics = await sandbox.diagnostics(sessionId);
+  assert.deepEqual(
+    restoredDiagnostics.sandboxManifest,
+    expectedManifest,
+    "Restored workspace did not retain the current container manifest."
+  );
+  const restoredSource = await sandbox.getSource(sessionId);
+  assert(restoredSource.files.some((file) => file.path === "src/site.tsx"), "Restored workspace lost authored source.");
+  const rebuilt = await sandbox.apply(sessionId, restored.revision, restoredSource.files);
   const artifact = await sandbox.getArtifact(sessionId);
   assert.deepEqual(artifact.compilerManifest, expectedManifest, "Deployed compiler artifact reported a different manifest.");
   assert.equal(artifact.routes[0]?.path, "/", "Deployed compiler canary did not emit the homepage.");
@@ -42,7 +59,8 @@ export const siteDefinition = {
     ok: true,
     provider: "cloudflare-sandbox",
     manifest: diagnostics.sandboxManifest,
-    buildDurationMs: applied.buildDurationMs,
+    buildDurationMs: rebuilt.buildDurationMs,
+    restoreContract: "current_scaffold",
     artifactRoutes: artifact.routes.length
   })}\n`);
 } catch (error) {

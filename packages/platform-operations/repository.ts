@@ -35,6 +35,8 @@ import type {
   OutboundProspect,
   OutboundSummary,
   ProspectReportLead,
+  ProspectReportAccessGrant,
+  ProspectReportAccessPolicy,
   ProspectReportRecord,
   RecordOutboundEventInput,
   RegisterDomainInput,
@@ -91,18 +93,30 @@ export interface PlatformOperationsRepository {
   createOutboundCampaign(input: CreateOutboundCampaignInput): Promise<OutboundCampaign>;
   listOutboundCampaigns(): Promise<OutboundCampaign[]>;
   upsertOutboundProspect(input: UpsertOutboundProspectInput): Promise<OutboundProspect>;
+  getOutboundProspect(prospectId: string): Promise<OutboundProspect | null>;
   listOutboundProspects(campaignId?: string): Promise<OutboundProspect[]>;
   findOutboundProspectByPreviewId(previewId: string): Promise<OutboundProspect | null>;
+  findOutboundProspectByReportId(reportId: string): Promise<OutboundProspect | null>;
+  attachOutboundProspectReport(prospectId: string, reportId: string): Promise<OutboundProspect | null>;
+  recordOutboundReportView(reportId: string, occurredAt?: string): Promise<boolean>;
   recordOutboundEvent(input: RecordOutboundEventInput): Promise<OutboundEvent>;
   listOutboundEvents(campaignId?: string): Promise<OutboundEvent[]>;
   outboundSummary(campaignId?: string): Promise<OutboundSummary>;
   createProspectReport(input: CreateProspectReportInput): Promise<ProspectReportRecord>;
   getProspectReport(reportId: string): Promise<ProspectReportRecord | null>;
   listProspectReports(limit?: number): Promise<ProspectReportRecord[]>;
-  findActiveProspectReportBySourceKey(sourceKey: string): Promise<ProspectReportRecord | null>;
-  findReusableProspectReportBySourceKey(sourceKey: string, since: string): Promise<ProspectReportRecord | null>;
+  findActiveProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy): Promise<ProspectReportRecord | null>;
+  findReusableProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy, since: string): Promise<ProspectReportRecord | null>;
   updateProspectReport(input: UpdateProspectReportInput): Promise<ProspectReportRecord | null>;
   createProspectReportLead(input: CreateProspectReportLeadInput): Promise<ProspectReportLead | null>;
+  createProspectReportAccessGrant(input: {
+    reportId: string;
+    leadId: string;
+    tokenHash: string;
+    expiresAt: string;
+  }): Promise<ProspectReportAccessGrant>;
+  findActiveProspectReportAccessGrant(reportId: string, tokenHash: string): Promise<ProspectReportAccessGrant | null>;
+  markProspectReportAccessGrantUsed(grantId: string): Promise<void>;
   createWebsiteAssessment(input: CreateWebsiteAssessmentInput): Promise<WebsiteAssessmentRecord>;
   getWebsiteAssessment(assessmentId: string): Promise<WebsiteAssessmentRecord | null>;
   listWebsiteAssessments(input?: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number }): Promise<WebsiteAssessmentRecord[]>;
@@ -140,11 +154,12 @@ type LocalState = {
   events: OutboundEvent[];
   reports: ProspectReportRecord[];
   leads: ProspectReportLead[];
+  reportAccessGrants: ProspectReportAccessGrant[];
   websiteAssessments: WebsiteAssessmentRecord[];
   websiteAssessmentJobs: WebsiteAssessmentJob[];
 };
 
-const emptyState = (): LocalState => ({ adoptionInvitations: [], websiteSetups: [], previewGrants: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], websiteAssessments: [], websiteAssessmentJobs: [] });
+const emptyState = (): LocalState => ({ adoptionInvitations: [], websiteSetups: [], previewGrants: [], domains: [], redirects: [], campaigns: [], prospects: [], events: [], reports: [], leads: [], reportAccessGrants: [], websiteAssessments: [], websiteAssessmentJobs: [] });
 
 export class LocalPlatformOperationsRepository implements PlatformOperationsRepository {
   private queue = Promise.resolve();
@@ -205,8 +220,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
         sourceUrl: input.sourceUrl,
         normalizedSource: input.normalizedSource,
         reportingTimezone: input.reportingTimezone,
-        initialBuildApiProvider: input.initialBuildApiProvider,
-        initialBuildModelId: input.initialBuildModelId,
+        prospectReportId: input.prospectReportId,
         sourceRevision: 1,
         status: "queued",
         attempts: 0,
@@ -496,8 +510,39 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     });
     return result;
   }
+  async getOutboundProspect(prospectId: string) { return structuredClone((await this.read()).prospects.find((item) => item.id === prospectId) ?? null); }
   async listOutboundProspects(campaignId?: string) { return (await this.read()).prospects.filter((item) => !campaignId || item.campaignId === campaignId).sort(byCreatedDesc); }
   async findOutboundProspectByPreviewId(previewId: string) { return structuredClone((await this.read()).prospects.find((item) => item.previewId === previewId) ?? null); }
+  async findOutboundProspectByReportId(reportId: string) { return structuredClone((await this.read()).prospects.find((item) => item.reportId === reportId) ?? null); }
+  async attachOutboundProspectReport(prospectId: string, reportId: string) {
+    let result: OutboundProspect | null = null;
+    await this.write((store) => {
+      const prospect = store.prospects.find((item) => item.id === prospectId);
+      if (!prospect) return;
+      prospect.reportId = reportId;
+      prospect.firstReportViewedAt = undefined;
+      result = structuredClone(prospect);
+    });
+    return result;
+  }
+  async recordOutboundReportView(reportId: string, occurredAt = new Date().toISOString()) {
+    let recorded = false;
+    await this.write((store) => {
+      const prospect = store.prospects.find((item) => item.reportId === reportId);
+      if (!prospect || prospect.firstReportViewedAt) return;
+      prospect.firstReportViewedAt = occurredAt;
+      store.events.push(newOutboundEvent({
+        campaignId: prospect.campaignId,
+        prospectId: prospect.id,
+        siteId: prospect.siteId,
+        type: "report_viewed",
+        occurredAt,
+        metadata: { reportId }
+      }));
+      recorded = true;
+    });
+    return recorded;
+  }
   async recordOutboundEvent(input: RecordOutboundEventInput) {
     const event = newOutboundEvent(input);
     await this.write((store) => {
@@ -514,14 +559,14 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 
   async createProspectReport(input: CreateProspectReportInput) {
     const now = new Date().toISOString();
-    const report: ProspectReportRecord = { id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, sourceKey: input.sourceKey, status: "queued", assessmentId: input.assessmentId, sourceUrl: input.sourceUrl, sourceHost: input.sourceHost, websiteKind: input.websiteKind, businessStrength: input.businessStrength, resolutionUsage: input.resolutionUsage, createdAt: now, updatedAt: now };
+    const report: ProspectReportRecord = { id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, sourceKey: input.sourceKey, accessPolicy: input.accessPolicy, status: "queued", assessmentId: input.assessmentId, sourceUrl: input.sourceUrl, sourceHost: input.sourceHost, websiteKind: input.websiteKind, businessStrength: input.businessStrength, resolutionUsage: input.resolutionUsage, createdAt: now, updatedAt: now };
     await this.write((store) => { store.reports.push(report); });
     return report;
   }
   async getProspectReport(id: string) { return structuredClone((await this.read()).reports.find((item) => item.id === id) ?? null); }
   async listProspectReports(limit = 50) { return (await this.read()).reports.sort(byCreatedDesc).slice(0, Math.max(1, Math.min(limit, 500))); }
-  async findActiveProspectReportBySourceKey(sourceKey: string) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && ["queued", "running"].includes(item.status)).sort(byCreatedDesc)[0] ?? null); }
-  async findReusableProspectReportBySourceKey(sourceKey: string, since: string) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && item.status === "completed" && (item.completedAt ?? "") >= since).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))[0] ?? null); }
+  async findActiveProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && item.accessPolicy === accessPolicy && ["queued", "running"].includes(item.status)).sort(byCreatedDesc)[0] ?? null); }
+  async findReusableProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy, since: string) { return structuredClone((await this.read()).reports.filter((item) => item.sourceKey === sourceKey && item.accessPolicy === accessPolicy && item.status === "completed" && (item.completedAt ?? "") >= since).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""))[0] ?? null); }
   async updateProspectReport(input: UpdateProspectReportInput) {
     let result: ProspectReportRecord | null = null;
     await this.write((store) => {
@@ -535,9 +580,45 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   }
   async createProspectReportLead(input: CreateProspectReportLeadInput) {
     if (!await this.getProspectReport(input.reportId)) return null;
-    const lead: ProspectReportLead = { id: `prospect_lead_${crypto.randomUUID().replaceAll("-", "")}`, reportId: input.reportId, email: input.email.toLowerCase(), contactName: input.contactName, phone: input.phone, ipHash: input.ipHash, metadata: input.metadata, createdAt: new Date().toISOString() };
-    await this.write((store) => { store.leads.push(lead); const report = store.reports.find((item) => item.id === input.reportId); if (report) { report.unlockedAt = lead.createdAt; report.leadId = lead.id; report.updatedAt = lead.createdAt; } });
-    return lead;
+    let result!: ProspectReportLead;
+    await this.write((store) => {
+      const email = input.email.trim().toLowerCase();
+      const existing = store.leads.find((item) => item.reportId === input.reportId && item.email.toLowerCase() === email);
+      if (existing) {
+        existing.contactName = input.contactName ?? existing.contactName;
+        existing.phone = input.phone ?? existing.phone;
+        existing.ipHash = input.ipHash ?? existing.ipHash;
+        existing.metadata = { ...existing.metadata, ...input.metadata };
+        result = structuredClone(existing);
+        return;
+      }
+      const lead: ProspectReportLead = { id: `prospect_lead_${crypto.randomUUID().replaceAll("-", "")}`, reportId: input.reportId, email, contactName: input.contactName, phone: input.phone, ipHash: input.ipHash, metadata: input.metadata, createdAt: new Date().toISOString() };
+      store.leads.push(lead);
+      result = structuredClone(lead);
+    });
+    return result;
+  }
+  async createProspectReportAccessGrant(input: { reportId: string; leadId: string; tokenHash: string; expiresAt: string }) {
+    const grant: ProspectReportAccessGrant = {
+      id: `prospect_report_grant_${crypto.randomUUID().replaceAll("-", "")}`,
+      ...input,
+      createdAt: new Date().toISOString()
+    };
+    await this.write((store) => { store.reportAccessGrants.push(grant); });
+    return structuredClone(grant);
+  }
+  async findActiveProspectReportAccessGrant(reportId: string, tokenHash: string) {
+    return structuredClone((await this.read()).reportAccessGrants.find((grant) =>
+      grant.reportId === reportId
+      && grant.tokenHash === tokenHash
+      && Date.parse(grant.expiresAt) > Date.now()
+    ) ?? null);
+  }
+  async markProspectReportAccessGrantUsed(grantId: string) {
+    await this.write((store) => {
+      const grant = store.reportAccessGrants.find((item) => item.id === grantId);
+      if (grant) grant.lastUsedAt = new Date().toISOString();
+    });
   }
   async createWebsiteAssessment(input: CreateWebsiteAssessmentInput) {
     const now = new Date().toISOString();
@@ -615,7 +696,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 }
 
 type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null };
-type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; initial_build_api_provider: "openrouter" | null; initial_build_model_id: string | null; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
+type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; prospect_report_id: string | null; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
 type PreviewGrantRow = {
   id: string;
   site_id: string;
@@ -655,10 +736,11 @@ type DomainRow = {
 };
 type RedirectRow = { id: string; site_id: string; source_path: string; destination_path: string; status: SiteRedirectRule["status"]; created_at: string; updated_at: string };
 type CampaignRow = { id: string; name: string; channel: OutboundCampaign["channel"]; status: OutboundCampaign["status"]; metadata: unknown; created_at: string; started_at: string | null; ended_at: string | null };
-type ProspectRow = { id: string; campaign_id: string; site_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_id: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
+type ProspectRow = { id: string; campaign_id: string; site_id: string | null; report_id: string | null; business_name: string; vertical: OutboundProspect["vertical"] | null; source_url: string | null; preview_id: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_report_viewed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
 type EventRow = { id: string; campaign_id: string; prospect_id: string | null; site_id: string | null; type: OutboundEvent["type"]; occurred_at: string; value: number | null; metadata: unknown };
-type ReportRow = { id: string; source_key: string; status: ProspectReportRecord["status"]; assessment_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; business_strength_json: unknown; resolution_usage: unknown; unlocked_at: string | null; lead_id: string | null; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
+type ReportRow = { id: string; source_key: string; access_policy: ProspectReportRecord["accessPolicy"]; status: ProspectReportRecord["status"]; assessment_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; business_strength_json: unknown; resolution_usage: unknown; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
 type LeadRow = { id: string; report_id: string; email: string; contact_name: string | null; phone: string | null; ip_hash: string | null; metadata: unknown; created_at: string };
+type ReportAccessGrantRow = { id: string; report_id: string; lead_id: string; token_hash: string; expires_at: string; created_at: string; last_used_at: string | null };
 type WebsiteAssessmentRow = { id: string; status: WebsiteAssessmentRecord["status"]; target_kind: WebsiteAssessmentRecord["targetKind"]; source_key: string; source_url: string | null; site_id: string | null; artifact_id: string | null; version_id: string | null; rubric_identity: string; scanner_identity: string; assessment_json: unknown; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
 type WebsiteAssessmentJobRow = { id: string; assessment_id: string; prospect_report_id: string | null; status: WebsiteAssessmentJob["status"]; error: string | null; attempts: number; max_attempts: number; run_after: string; locked_by: string | null; created_at: string; updated_at: string; completed_at: string | null };
 
@@ -693,8 +775,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       target_source_url: input.sourceUrl,
       target_normalized_source: input.normalizedSource,
       target_reporting_timezone: input.reportingTimezone,
-      target_initial_build_api_provider: input.initialBuildApiProvider,
-      target_initial_build_model_id: input.initialBuildModelId,
+      target_prospect_report_id: input.prospectReportId,
       target_idempotency_key: input.idempotencyKey,
       target_creation_request_hash: input.creationRequestHash
     }).maybeSingle();
@@ -884,20 +965,27 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
 
   async createOutboundCampaign(input: CreateOutboundCampaignInput) { const value = newOutboundCampaign(input); return campaignFromRow(await data<CampaignRow>(this.client.from("outbound_campaigns").upsert({ id: value.id, name: value.name, channel: value.channel, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt, started_at: value.startedAt, ended_at: value.endedAt }, { onConflict: "id", ignoreDuplicates: false }).select("*").single(), "Create campaign")); }
   async listOutboundCampaigns() { return (await data<CampaignRow[]>(this.client.from("outbound_campaigns").select("*").order("created_at", { ascending: false }), "List campaigns")).map(campaignFromRow); }
-  async upsertOutboundProspect(input: UpsertOutboundProspectInput) { const value = newOutboundProspect(input); return prospectFromRow(await data<ProspectRow>(this.client.from("outbound_prospects").upsert({ id: value.id, campaign_id: value.campaignId, site_id: value.siteId, business_name: value.businessName, vertical: value.vertical, source_url: value.sourceUrl, preview_id: value.previewId, mailing_code: value.mailingCode, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt }).select("*").single(), "Upsert prospect")); }
+  async upsertOutboundProspect(input: UpsertOutboundProspectInput) { const value = newOutboundProspect(input); return prospectFromRow(await data<ProspectRow>(this.client.from("outbound_prospects").upsert({ id: value.id, campaign_id: value.campaignId, site_id: value.siteId, report_id: value.reportId, business_name: value.businessName, vertical: value.vertical, source_url: value.sourceUrl, preview_id: value.previewId, mailing_code: value.mailingCode, status: value.status, metadata: value.metadata ?? {}, created_at: value.createdAt }).select("*").single(), "Upsert prospect")); }
+  async getOutboundProspect(prospectId: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", prospectId).maybeSingle(), "Get outbound prospect"); return row ? prospectFromRow(row) : null; }
   async listOutboundProspects(campaignId?: string) { let query = this.client.from("outbound_prospects").select("*").order("created_at", { ascending: false }); if (campaignId) query = query.eq("campaign_id", campaignId); return (await data<ProspectRow[]>(query, "List prospects")).map(prospectFromRow); }
   async findOutboundProspectByPreviewId(previewId: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("preview_id", previewId).maybeSingle(), "Find prospect"); return row ? prospectFromRow(row) : null; }
+  async findOutboundProspectByReportId(reportId: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("report_id", reportId).maybeSingle(), "Find prospect by report"); return row ? prospectFromRow(row) : null; }
+  async attachOutboundProspectReport(prospectId: string, reportId: string) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").update({ report_id: reportId, first_report_viewed_at: null }).eq("id", prospectId).select("*").maybeSingle(), "Attach outbound prospect report"); return row ? prospectFromRow(row) : null; }
+  async recordOutboundReportView(reportId: string, occurredAt = new Date().toISOString()) { const value = await data<boolean>(this.client.rpc("record_outbound_report_view", { target_report_id: reportId, target_occurred_at: occurredAt }), "Record outbound report view"); return value; }
   async recordOutboundEvent(input: RecordOutboundEventInput) { const value = newOutboundEvent(input); const row = await data<EventRow>(this.client.from("outbound_events").insert({ id: value.id, campaign_id: value.campaignId, prospect_id: value.prospectId, site_id: value.siteId, type: value.type, occurred_at: value.occurredAt, value: value.value, metadata: value.metadata ?? {} }).select("*").single(), "Record outbound event"); const event = eventFromRow(row); const prospectId = event.prospectId ?? (event.siteId ? (await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("campaign_id", event.campaignId).eq("site_id", event.siteId).maybeSingle(), "Find prospect by site"))?.id : undefined); if (prospectId) await this.applyEvent(prospectId, event); return event; }
   async listOutboundEvents(campaignId?: string) { let query = this.client.from("outbound_events").select("*").order("occurred_at", { ascending: false }); if (campaignId) query = query.eq("campaign_id", campaignId); return (await data<EventRow[]>(query, "List outbound events")).map(eventFromRow); }
   async outboundSummary(campaignId?: string) { return summarizeOutbound(await this.listOutboundCampaigns(), await this.listOutboundProspects(campaignId), await this.listOutboundEvents(campaignId), campaignId); }
 
-  async createProspectReport(input: CreateProspectReportInput) { const now = new Date().toISOString(); return reportFromRow(await data<ReportRow>(this.client.from("prospect_reports").insert({ id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, source_key: input.sourceKey, status: "queued", assessment_id: input.assessmentId, source_url: input.sourceUrl, source_host: input.sourceHost, website_kind: input.websiteKind, business_strength_json: input.businessStrength, resolution_usage: input.resolutionUsage, created_at: now, updated_at: now }).select("*").single(), "Create report")); }
+  async createProspectReport(input: CreateProspectReportInput) { const now = new Date().toISOString(); return reportFromRow(await data<ReportRow>(this.client.from("prospect_reports").insert({ id: input.id ?? `prospect_report_${crypto.randomUUID().replaceAll("-", "")}`, source_key: input.sourceKey, access_policy: input.accessPolicy, status: "queued", assessment_id: input.assessmentId, source_url: input.sourceUrl, source_host: input.sourceHost, website_kind: input.websiteKind, business_strength_json: input.businessStrength, resolution_usage: input.resolutionUsage, created_at: now, updated_at: now }).select("*").single(), "Create report")); }
   async getProspectReport(id: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("id", id).maybeSingle(), "Get report"); return row ? reportFromRow(row) : null; }
   async listProspectReports(limit = 50) { return (await data<ReportRow[]>(this.client.from("prospect_reports").select("*").order("created_at", { ascending: false }).limit(Math.max(1, Math.min(limit, 500))), "List prospect reports")).map(reportFromRow); }
-  async findActiveProspectReportBySourceKey(sourceKey: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle(), "Find active report"); return row ? reportFromRow(row) : null; }
-  async findReusableProspectReportBySourceKey(sourceKey: string, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
-  async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", assessmentId: "assessment_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", unlockedAt: "unlocked_at", leadId: "lead_id", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
-  async createProspectReportLead(input: CreateProspectReportLeadInput) { const now = new Date().toISOString(); const row = await data<LeadRow>(this.client.from("prospect_report_leads").insert({ id: `prospect_lead_${crypto.randomUUID().replaceAll("-", "")}`, report_id: input.reportId, email: input.email.toLowerCase(), contact_name: input.contactName, phone: input.phone, ip_hash: input.ipHash, metadata: input.metadata ?? {}, created_at: now }).select("*").single(), "Create report lead"); await this.updateProspectReport({ reportId: input.reportId, unlockedAt: now, leadId: row.id }); return leadFromRow(row); }
+  async findActiveProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).eq("access_policy", accessPolicy).in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1).maybeSingle(), "Find active report"); return row ? reportFromRow(row) : null; }
+  async findReusableProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).eq("access_policy", accessPolicy).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
+  async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", accessPolicy: "access_policy", assessmentId: "assessment_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
+  async createProspectReportLead(input: CreateProspectReportLeadInput) { const row = await maybe<LeadRow>(this.client.rpc("create_or_reuse_prospect_report_lead", { target_report_id: input.reportId, target_email: input.email, target_contact_name: input.contactName ?? "", target_phone: input.phone ?? "", target_ip_hash: input.ipHash ?? null, target_metadata: input.metadata ?? {} }).maybeSingle(), "Create or reuse report lead"); return row ? leadFromRow(row) : null; }
+  async createProspectReportAccessGrant(input: { reportId: string; leadId: string; tokenHash: string; expiresAt: string }) { const row = await data<ReportAccessGrantRow>(this.client.from("prospect_report_access_grants").insert({ id: `prospect_report_grant_${crypto.randomUUID().replaceAll("-", "")}`, report_id: input.reportId, lead_id: input.leadId, token_hash: input.tokenHash, expires_at: input.expiresAt }).select("*").single(), "Create report access grant"); return reportAccessGrantFromRow(row); }
+  async findActiveProspectReportAccessGrant(reportId: string, tokenHash: string) { const row = await maybe<ReportAccessGrantRow>(this.client.from("prospect_report_access_grants").select("*").eq("report_id", reportId).eq("token_hash", tokenHash).gt("expires_at", new Date().toISOString()).maybeSingle(), "Find report access grant"); return row ? reportAccessGrantFromRow(row) : null; }
+  async markProspectReportAccessGrantUsed(grantId: string) { await data(this.client.from("prospect_report_access_grants").update({ last_used_at: new Date().toISOString() }).eq("id", grantId).select("id").single(), "Mark report access grant used"); }
   async createWebsiteAssessment(input: CreateWebsiteAssessmentInput) { const now = new Date().toISOString(); const row = await data<WebsiteAssessmentRow>(this.client.from("website_assessments").insert({ id: input.id ?? `website_assessment_${crypto.randomUUID().replaceAll("-", "")}`, status: "queued", target_kind: input.targetKind, source_key: input.sourceKey, source_url: input.sourceUrl, site_id: input.siteId, artifact_id: input.artifactId, version_id: input.versionId, rubric_identity: input.rubricIdentity, scanner_identity: input.scannerIdentity, created_at: now, updated_at: now }).select("*").single(), "Create website assessment"); return websiteAssessmentFromRow(row); }
   async getWebsiteAssessment(assessmentId: string) { const row = await maybe<WebsiteAssessmentRow>(this.client.from("website_assessments").select("*").eq("id", assessmentId).maybeSingle(), "Get website assessment"); return row ? websiteAssessmentFromRow(row) : null; }
   async listWebsiteAssessments(input: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number } = {}) { if (input.ids && !input.ids.length) return []; let query = this.client.from("website_assessments").select("*").order("created_at", { ascending: false }).limit(Math.max(1, Math.min(input.limit ?? 100, 500))); if (input.siteId) query = query.eq("site_id", input.siteId); if (input.sourceKey) query = query.eq("source_key", input.sourceKey); if (input.ids?.length) query = query.in("id", input.ids.slice(0, 500)); return (await data<WebsiteAssessmentRow[]>(query, "List website assessments")).map(websiteAssessmentFromRow); }
@@ -907,14 +995,14 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async completeWebsiteAssessmentJob(jobId: string) { const now = new Date().toISOString(); await data(this.client.from("website_assessment_jobs").update({ status: "completed", completed_at: now, updated_at: now }).eq("id", jobId).select("id").single(), "Complete website assessment job"); }
   async failWebsiteAssessmentJob(jobId: string, error: string) { const row = await data<WebsiteAssessmentJobRow>(this.client.from("website_assessment_jobs").select("*").eq("id", jobId).single(), "Read failed website assessment job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("website_assessment_jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail website assessment job"); }
 
-  private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = prospectFromRow(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
+  private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = prospectFromRow(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_report_viewed_at: value.firstReportViewedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
 }
 
 export const platformOperationsRepository: PlatformOperationsRepository = process.env.LODESTA_REPOSITORY === "local"
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", initialBuildApiProvider: row.initial_build_api_provider ?? undefined, initialBuildModelId: row.initial_build_model_id ?? undefined, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
+function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", prospectReportId: row.prospect_report_id ?? undefined, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined }; }
 function previewGrantFromRow(row: PreviewGrantRow): SitePreviewGrant { return { id: row.id, siteId: row.site_id, siteVersionId: row.site_version_id, secretHash: row.secret_hash, keyVersion: row.key_version, secretVersion: row.secret_version, expiresAt: row.expires_at, revokedAt: row.revoked_at ?? undefined, createdAt: row.created_at }; }
 function domainFromRow(row: DomainRow): DomainRecord {
@@ -975,7 +1063,7 @@ function domainToRow(value: DomainRecord) {
 }
 function redirectFromRow(row: RedirectRow): SiteRedirectRule { return { id: row.id, siteId: row.site_id, sourcePath: row.source_path, destinationPath: row.destination_path, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function campaignFromRow(row: CampaignRow): OutboundCampaign { return { id: row.id, name: row.name, channel: row.channel, status: row.status, metadata: row.metadata as OutboundCampaign["metadata"], createdAt: row.created_at, startedAt: row.started_at ?? undefined, endedAt: row.ended_at ?? undefined }; }
-function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewId: row.preview_id ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
+function prospectFromRow(row: ProspectRow): OutboundProspect { return { id: row.id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, reportId: row.report_id ?? undefined, businessName: row.business_name, vertical: row.vertical ?? undefined, sourceUrl: row.source_url ?? undefined, previewId: row.preview_id ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstReportViewedAt: row.first_report_viewed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
 function eventFromRow(row: EventRow): OutboundEvent { return { id: row.id, campaignId: row.campaign_id, prospectId: row.prospect_id ?? undefined, siteId: row.site_id ?? undefined, type: row.type, occurredAt: row.occurred_at, value: row.value ?? undefined, metadata: row.metadata as OutboundEvent["metadata"] }; }
 function reportFromRow(row: ReportRow): ProspectReportRecord {
   const report = row.report_json === null ? undefined : prospectPresenceReportResultSchema.safeParse(row.report_json);
@@ -983,6 +1071,7 @@ function reportFromRow(row: ReportRow): ProspectReportRecord {
   return {
     id: row.id,
     sourceKey: row.source_key,
+    accessPolicy: row.access_policy,
     status: row.status,
     assessmentId: row.assessment_id ?? undefined,
     sourceUrl: row.source_url ?? undefined,
@@ -991,8 +1080,6 @@ function reportFromRow(row: ReportRow): ProspectReportRecord {
     result: report?.success ? report.data : undefined,
     businessStrength: businessStrength?.success ? businessStrength.data : undefined,
     resolutionUsage: row.resolution_usage as ProspectReportRecord["resolutionUsage"] | undefined,
-    unlockedAt: row.unlocked_at ?? undefined,
-    leadId: row.lead_id ?? undefined,
     errorCode: row.error_code ?? (report && !report.success ? "stale_schema_rebuild_required" : undefined),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1000,6 +1087,7 @@ function reportFromRow(row: ReportRow): ProspectReportRecord {
   };
 }
 function leadFromRow(row: LeadRow): ProspectReportLead { return { id: row.id, reportId: row.report_id, email: row.email, contactName: row.contact_name ?? undefined, phone: row.phone ?? undefined, ipHash: row.ip_hash ?? undefined, metadata: row.metadata as ProspectReportLead["metadata"], createdAt: row.created_at }; }
+function reportAccessGrantFromRow(row: ReportAccessGrantRow): ProspectReportAccessGrant { return { id: row.id, reportId: row.report_id, leadId: row.lead_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, lastUsedAt: row.last_used_at ?? undefined }; }
 function websiteAssessmentFromRow(row: WebsiteAssessmentRow): WebsiteAssessmentRecord { const parsed = row.assessment_json === null ? undefined : websiteAssessmentSchema.safeParse(row.assessment_json); return { id: row.id, status: row.status, targetKind: row.target_kind, sourceKey: row.source_key, sourceUrl: row.source_url ?? undefined, siteId: row.site_id ?? undefined, artifactId: row.artifact_id ?? undefined, versionId: row.version_id ?? undefined, rubricIdentity: row.rubric_identity, scannerIdentity: row.scanner_identity, assessment: parsed && parsed.success ? parsed.data : undefined, errorCode: row.error_code ?? (parsed && !parsed.success ? "stale_schema_rebuild_required" : undefined), createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function websiteAssessmentJobFromRow(row: WebsiteAssessmentJobRow): WebsiteAssessmentJob { return { id: row.id, assessmentId: row.assessment_id, prospectReportId: row.prospect_report_id ?? undefined, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function byCreatedDesc<T extends { createdAt: string }>(a: T, b: T) { return b.createdAt.localeCompare(a.createdAt); }

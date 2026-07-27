@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { configuredAppOrigin } from "./app-origin";
 import { isSupportedSiteAgentModel, siteAgentModelPricing } from "@/packages/site-agent/run-policy";
+import { isEstablishedOpenRouterAuthoringRoute } from "@/packages/site-agent/provider-routes";
 
 export type ModelCatalogProvider = "openai" | "openrouter";
 export type SiteAgentModelAvailability = "selectable" | "pricing_unconfigured" | "capabilities_missing";
@@ -112,8 +113,9 @@ export function normalizeOpenRouterModelCatalog(payload: unknown): ModelCatalogO
     const id = modelIdSchema.safeParse(model.id);
     if (!id.success) return [];
     const supportedParameters = new Set(model.supported_parameters ?? []);
-    const siteAgentAvailability: SiteAgentModelAvailability = ["tools", "tool_choice", "reasoning", "structured_outputs"]
-      .every((parameter) => supportedParameters.has(parameter))
+    const siteAgentAvailability: SiteAgentModelAvailability = isEstablishedOpenRouterAuthoringRoute(id.data)
+      && ["tools", "tool_choice", "reasoning", "structured_outputs"]
+        .every((parameter) => supportedParameters.has(parameter))
       ? "selectable"
       : "capabilities_missing";
     return [{

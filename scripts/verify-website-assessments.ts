@@ -1102,6 +1102,7 @@ async function main() {
   let retryReport: ProspectReportRecord = {
     id: "prospect_report_retry_fixture",
     sourceKey: strong.target.sourceKey,
+    accessPolicy: "email_gate",
     status: "running",
     assessmentId: strong.id,
     sourceUrl: strong.target.sourceUrl,

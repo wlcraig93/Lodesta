@@ -10,7 +10,9 @@ import {
   developmentSandboxReceiptPath,
   developmentSandboxTokenPath,
   developmentSandboxWorkerName,
+  isUninitializedSandboxRevision,
   readDevelopmentSandboxToken,
+  SiteSandboxRequestError,
   type DevelopmentSandboxReceipt
 } from "../packages/site-sandbox";
 import { ensureDevelopmentSandboxToken } from "./development-sandbox-token";
@@ -20,6 +22,34 @@ const deploymentSource = await readFile("scripts/deploy-site-sandbox-dev.ts", "u
 assert(deploymentSource.includes("const attempts = 12")
   && deploymentSource.includes("manifest does not match")
   && deploymentSource.includes("controller contract"), "Development deployment must retry the exact canary while a new container revision propagates.");
+const liveWorkerSource = await readFile("workers/site-sandbox/src/index.ts", "utf8");
+assert(
+  liveWorkerSource.includes("lodesta-restore-")
+    && liveWorkerSource.includes("cp -R /opt/lodesta-site-scaffold/.")
+    && liveWorkerSource.includes(`cp -R \${restoreRoot}/src \${workspaceRoot}/src`)
+    && liveWorkerSource.includes(`cp \${retainedInputPath} \${publicInputPath}`),
+  "Workspace restore must retain authored source while reinstalling the current compiler scaffold and public input."
+);
+assert(
+  isUninitializedSandboxRevision(new SiteSandboxRequestError(
+    "apply",
+    "sandbox_test",
+    409,
+    "revision_conflict",
+    "currentRevision=uninitialized"
+  )),
+  "An evicted sandbox revision was not recognized as deterministically reinitializable."
+);
+assert(
+  !isUninitializedSandboxRevision(new SiteSandboxRequestError(
+    "apply",
+    "sandbox_test",
+    409,
+    "revision_conflict",
+    "currentRevision=sha256:retained"
+  )),
+  "An ordinary revision conflict was incorrectly made retryable."
+);
 
 const fixture = await mkdtemp(join(tmpdir(), "lodesta-development-sandbox-"));
 try {

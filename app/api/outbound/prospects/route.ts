@@ -7,27 +7,11 @@ export const runtime = "nodejs";
 
 const prospectSchema = z.object({
   id: z.string().min(1).optional(),
+  prospectId: z.string().min(1),
+  selectionObservationId: z.string().min(1),
   campaignId: z.string().min(1),
   siteId: z.string().min(1).optional(),
-  businessName: z.string().min(1),
-  vertical: z
-    .enum([
-      "restaurant",
-      "auto_body",
-      "beauty_salon",
-      "med_spa",
-      "law_firm",
-      "dental",
-      "home_services",
-      "fitness",
-      "real_estate",
-      "landscaping",
-      "veterinary",
-      "creative_studio",
-      "general_local"
-    ])
-    .optional(),
-  sourceUrl: z.string().url().optional(),
+  reportId: z.string().min(1).optional(),
   previewId: z.string().min(1).optional(),
   mailingCode: z.string().min(1).optional(),
   status: z.enum(["queued", "mailed", "preview_viewed", "adoption_started", "adopted", "published", "disqualified"]).optional(),

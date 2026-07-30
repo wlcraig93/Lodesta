@@ -3,6 +3,7 @@ import { platformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { normalizeBootstrapSourceUrl } from "@/packages/site-platform/source-url";
+import { canonicalProspectKey } from "@/packages/prospect-research";
 import {
   externalAuthoringBatchItemSchema,
   externalAuthoringBatchSchema,
@@ -132,13 +133,45 @@ export async function processNextExternalPreparation(input: {
       preparationKey: item.preparationKey as `sha256:${string}`,
       signal: AbortSignal.timeout(30 * 60_000)
     });
-    const prospectId = deterministicId("prospect", { schemaVersion: 1, batchItemId: item.id });
+    const canonicalProspect = await platformOperationsRepository.upsertProspect({
+      canonicalKey: canonicalProspectKey({
+        websiteUrl: item.sourceUrl,
+        businessName: prepared.state.identity.name
+      }),
+      businessName: prepared.state.identity.name,
+      status: "active",
+      websiteKind: "owned_website",
+      websiteUrl: item.sourceUrl,
+      countryCode: "US",
+      doNotContact: false,
+      metadata: {
+        externalAuthoringBatchItemId: item.id
+      }
+    });
+    const selectionObservation = await platformOperationsRepository.createProspectObservation({
+      prospectId: canonicalProspect.id,
+      sourceType: "business_website",
+      sourceUrl: item.sourceUrl,
+      observedAt: new Date().toISOString(),
+      websiteKind: "owned_website",
+      websiteUrl: item.sourceUrl,
+      agencyStatus: "unknown",
+      evidenceCoverage: 0.2,
+      producer: "external-authoring-preparation",
+      methodologyIdentity: "external-authoring-preparation",
+      inputHash: item.preparationKey,
+      evidence: {
+        externalAuthoringBatchItemId: item.id,
+        siteId: prepared.site.id
+      }
+    });
+    const prospectId = deterministicId("campaign_prospect", { schemaVersion: 1, batchItemId: item.id });
     await platformOperationsRepository.upsertOutboundProspect({
       id: prospectId,
+      prospectId: canonicalProspect.id,
+      selectionObservationId: selectionObservation.id,
       campaignId: batch.campaignId,
       siteId: prepared.site.id,
-      businessName: prepared.state.identity.name,
-      sourceUrl: item.sourceUrl,
       status: "queued",
       metadata: {
         externalAuthoringBatchItemId: item.id,

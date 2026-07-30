@@ -163,6 +163,8 @@ export type OutboundCampaign = {
 
 export type OutboundProspect = {
   id: string;
+  prospectId: string;
+  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
@@ -248,12 +250,11 @@ export type CreateOutboundCampaignInput = {
 
 export type UpsertOutboundProspectInput = {
   id?: string;
+  prospectId: string;
+  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
-  businessName: string;
-  vertical?: string;
-  sourceUrl?: string;
   previewId?: string;
   mailingCode?: string;
   status?: OutboundProspect["status"];

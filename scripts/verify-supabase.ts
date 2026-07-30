@@ -33,7 +33,8 @@ assert.deepEqual(
     "202607260001_source_unsuitable_website_setup_failure.sql",
     "202607260002_external_authoring_targeted_tools.sql",
     "202607260003_website_setup_managed_model.sql",
-    "202607260004_prospect_report_access_policy.sql"
+    "202607260004_prospect_report_access_policy.sql",
+    "202607290001_normalized_prospect_research.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -61,6 +62,7 @@ const websiteSetupInitialModelExperiment = await readFile(`${migrationDirectory}
 const modelBakeoff = await readFile(`${migrationDirectory}/${migrations[20]}`, "utf8");
 const websiteSetupManagedModel = await readFile(`${migrationDirectory}/202607260003_website_setup_managed_model.sql`, "utf8");
 const prospectReportAccessPolicy = await readFile(`${migrationDirectory}/202607260004_prospect_report_access_policy.sql`, "utf8");
+const normalizedProspectResearch = await readFile(`${migrationDirectory}/202607290001_normalized_prospect_research.sql`, "utf8");
 assert(
   baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
     && !baseline.includes("rights_status")
@@ -169,6 +171,52 @@ assert(
     && modelBakeoff.includes("enable row level security")
     && modelBakeoff.includes("revoke all on table public.model_bakeoff_experiments from public, anon, authenticated"),
   "The operator-only model bake-off must retain candidate provenance and use the server-only database boundary."
+);
+assert(
+  normalizedProspectResearch.includes("create table public.prospects")
+    && normalizedProspectResearch.includes("create table public.prospect_observations")
+    && normalizedProspectResearch.includes("create table public.prospect_contacts")
+    && normalizedProspectResearch.includes("unique (prospect_id, input_hash)")
+    && normalizedProspectResearch.includes("verification_status text not null default 'unverified'")
+    && normalizedProspectResearch.includes("operating_status text not null default 'unknown'")
+    && normalizedProspectResearch.includes("target_fit_status text not null default 'unknown'")
+    && normalizedProspectResearch.includes("prospect_observations_verification_filters_idx")
+    && normalizedProspectResearch.includes("'public_listing'")
+    && normalizedProspectResearch.includes("with (security_invoker = true)")
+    && normalizedProspectResearch.includes("add column prospect_id text")
+    && normalizedProspectResearch.includes("add column selection_observation_id text")
+    && normalizedProspectResearch.includes("drop column business_name")
+    && normalizedProspectResearch.includes("drop column vertical")
+    && normalizedProspectResearch.includes("drop column source_url"),
+  "Prospect research must separate canonical business identity, immutable observations, sourced contacts, verification/fit status, and campaign membership."
+);
+assert(
+  normalizedProspectResearch.includes("where do_not_contact")
+    && normalizedProspectResearch.includes("where outreach_eligible and suppressed_at is null")
+    && normalizedProspectResearch.includes("check (not outreach_eligible or verification_status in ('public_source', 'owner_verified'))")
+    && normalizedProspectResearch.includes("revoke all on table public.prospects from public, anon, authenticated")
+    && normalizedProspectResearch.includes("grant select, insert on table public.prospect_observations to service_role")
+    && !normalizedProspectResearch.includes("grant select, insert, update, delete on table public.prospect_observations"),
+  "Prospect contacts and observations must preserve suppression, verification, and append-only server boundaries."
+);
+const prospectSnapshotPruneFunction = normalizedProspectResearch.match(
+  /create or replace function public\.prune_prospect_source_snapshot[\s\S]*?\n\$\$;/i
+)?.[0];
+assert(
+  prospectSnapshotPruneFunction
+    && prospectSnapshotPruneFunction.includes("security definer")
+    && prospectSnapshotPruneFunction.includes("set search_path = ''")
+    && prospectSnapshotPruneFunction.includes("metadata ->> 'acquisitionSource'")
+    && prospectSnapshotPruneFunction.includes("from public.outbound_prospects")
+    && prospectSnapshotPruneFunction.includes("website_assessment_id is not null")
+    && prospectSnapshotPruneFunction.includes("prospect_report_id is not null"),
+  "Source-snapshot pruning must be scoped by acquisition source and fail closed for selected, assessed, or reported prospects."
+);
+assert(
+  !/\bdelete\s+from\s+public\.(prospects|prospect_observations|prospect_contacts|outbound_prospects)\b/i.test(
+    normalizedProspectResearch.replace(prospectSnapshotPruneFunction, "")
+  ),
+  "The prospect normalization cutover must backfill retained records without deleting them."
 );
 assert(
   websiteAnalytics.includes("drop table public.analytics_events")
@@ -343,7 +391,10 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
     "analytics_collection_daily",
     "model_bakeoff_experiments",
     "model_bakeoff_runs",
-    "prospect_report_access_grants"
+    "prospect_report_access_grants",
+    "prospects",
+    "prospect_observations",
+    "prospect_contacts"
   ];
   for (const table of liveTables) {
     const { error } = await admin.from(table).select("*").limit(1);
@@ -351,6 +402,8 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
   }
   const { error: adminRunInventoryProbe } = await admin.from("site_agent_run_admin_inventory").select("id").limit(1);
   assert(!adminRunInventoryProbe, `site_agent_run_admin_inventory: ${adminRunInventoryProbe?.message}`);
+  const { error: prospectCurrentProbe } = await admin.from("prospect_current").select("id").limit(1);
+  assert(!prospectCurrentProbe, `prospect_current: ${prospectCurrentProbe?.message}`);
   const { error: dispositionProbe } = await admin.rpc("dispose_owned_site", {
     target_site_id: "site_disposition_probe_missing",
     target_owner_user_id: "00000000-0000-0000-0000-000000000000"

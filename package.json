@@ -49,7 +49,7 @@
     "verify:external-authoring-connectivity": "node --env-file=.env.local --import tsx scripts/spike-external-authoring-connectivity.ts",
     "verify:runtime": "node --import tsx scripts/verify-trusted-runtime.ts && node --import tsx scripts/verify-artifact-storage-boundaries.ts",
     "verify:account-setup-domain": "node --import tsx scripts/verify-account-access.ts && node --import tsx scripts/verify-owner-workspace.ts && node --import tsx scripts/verify-website-setups.ts && node --import tsx scripts/verify-site-disposition.ts",
-    "verify:acquisition": "node --import tsx scripts/verify-prospect-reports.ts",
+    "verify:acquisition": "node --import tsx scripts/verify-prospect-reports.ts && node --import tsx scripts/verify-prospect-research.ts",
     "verify:marketing-acquisition": "node --import tsx scripts/verify-marketing-acquisition.ts",
     "verify:website-assessments": "node --import tsx scripts/verify-website-assessments.ts",
     "verify:visual-quality": "node --import tsx scripts/verify-visual-quality.ts",

@@ -23,8 +23,10 @@ export type OutboundComplianceStatus = {
   reason?: string;
 };
 
-export type UpsertOutboundProspectInput = {
+export type NewOutboundProspectInput = {
   id?: string;
+  prospectId: string;
+  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
@@ -117,10 +119,12 @@ export function assertOutboundCompliance(input: CreateOutboundCampaignInput) {
   return { ok: true as const, status };
 }
 
-export function newOutboundProspect(input: UpsertOutboundProspectInput): OutboundProspect {
+export function newOutboundProspect(input: NewOutboundProspectInput): OutboundProspect {
   const now = new Date().toISOString();
   return {
     id: input.id ?? crypto.randomUUID(),
+    prospectId: input.prospectId,
+    selectionObservationId: input.selectionObservationId,
     campaignId: input.campaignId,
     siteId: input.siteId,
     reportId: input.reportId,

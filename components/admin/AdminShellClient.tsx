@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AccountActionList, AccountIdentity, AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import { ThemePreferenceControl } from "@/components/ThemePreferenceControl";
 
-type AdminIconName = "sites" | "queue" | "authoring" | "outbound" | "settings" | "assessments" | "activity" | "bakeoff";
+type AdminIconName = "sites" | "queue" | "authoring" | "prospects" | "outbound" | "settings" | "assessments" | "activity" | "bakeoff";
 type AdminNavItem = { href: string; label: string; icon: AdminIconName };
 type AdminNavGroup = { label: string; items: AdminNavItem[] };
 
@@ -22,6 +22,7 @@ const navigation: AdminNavGroup[] = [
     label: "Operate",
     items: [
       { href: "/authoring-batches", label: "Authoring batches", icon: "authoring" },
+      { href: "/prospects", label: "Prospects", icon: "prospects" },
       { href: "/outbound", label: "Outbound", icon: "outbound" },
       { href: "/settings", label: "Settings", icon: "settings" }
     ]
@@ -214,6 +215,7 @@ function isActivePath(pathname: string, href: string) {
   if (href === "/admin/runs") return pathname === href || pathname.startsWith("/admin/runs/");
   if (href === "/admin/assessments") return pathname === href || pathname.startsWith("/admin/assessments/");
   if (href === "/settings") return pathname === href || pathname.startsWith("/settings/");
+  if (href === "/prospects") return pathname === href || pathname.startsWith("/prospects/");
   if (href === "/outbound") return pathname === href || pathname.startsWith("/outbound/");
   if (href === "/authoring-batches") return pathname === href || pathname.startsWith("/authoring-batches/");
   if (href === "/model-bakeoffs") return pathname === href || pathname.startsWith("/model-bakeoffs/");
@@ -223,6 +225,7 @@ function isActivePath(pathname: string, href: string) {
 function AdminIcon({ name }: { name: AdminIconName }) {
   if (name === "queue") return <Icon><path d="M5 4h14v16H5zM8 9l2 2 5-5M8 16h8" /></Icon>;
   if (name === "authoring") return <Icon><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10zM13.5 7 17 10.5M5 5h5M7.5 2.5v5" /></Icon>;
+  if (name === "prospects") return <Icon><circle cx="9" cy="8" r="3" /><path d="M3.5 19c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M16 7h5M18.5 4.5v5M16 14h5M16 18h5" /></Icon>;
   if (name === "outbound") return <Icon><path d="m3 11 18-8-7 18-3-7zM11 14l4-4" /></Icon>;
   if (name === "settings") return <Icon><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6.2L14.7 3h-5.4L9 6.2a8 8 0 0 0-1.5.9l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.5.9l.3 3.2h5.4l.3-3.2a8 8 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></Icon>;
   if (name === "assessments") return <Icon><path d="M4 19V5h16v14zM8 15l2.5-3 2 2 3.5-5" /></Icon>;

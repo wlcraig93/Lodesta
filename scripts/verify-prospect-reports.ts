@@ -280,10 +280,32 @@ async function main() {
       assert.match(stored, /sha256:/);
 
       const campaign = await local.createOutboundCampaign({ name: "Report mail test" });
-      const prospect = await local.upsertOutboundProspect({
-        campaignId: campaign.id,
+      const canonicalProspect = await local.upsertProspect({
+        canonicalKey: "website:example.com",
         businessName: "Example Plumbing",
-        sourceUrl: "https://example.com/"
+        status: "active",
+        websiteKind: "owned_website",
+        websiteUrl: "https://example.com/",
+        countryCode: "US",
+        doNotContact: false
+      });
+      const observation = await local.createProspectObservation({
+        prospectId: canonicalProspect.id,
+        sourceType: "business_website",
+        sourceUrl: "https://example.com/",
+        observedAt: new Date().toISOString(),
+        websiteKind: "owned_website",
+        websiteUrl: "https://example.com/",
+        agencyStatus: "unknown",
+        evidenceCoverage: 0.25,
+        producer: "verify-prospect-reports",
+        methodologyIdentity: "verify-prospect-reports-v1",
+        inputHash: "verify:example-plumbing"
+      });
+      const prospect = await local.upsertOutboundProspect({
+        prospectId: canonicalProspect.id,
+        selectionObservationId: observation.id,
+        campaignId: campaign.id,
       });
       await local.attachOutboundProspectReport(prospect.id, publicReport.id);
       assert.equal(await local.recordOutboundReportView(publicReport.id), true);

@@ -299,7 +299,7 @@ async function main() {
         agencyStatus: "unknown",
         evidenceCoverage: 0.25,
         producer: "verify-prospect-reports",
-        methodologyIdentity: "verify-prospect-reports-v1",
+        methodologyIdentity: "verify-prospect-reports",
         inputHash: "verify:example-plumbing"
       });
       const prospect = await local.upsertOutboundProspect({

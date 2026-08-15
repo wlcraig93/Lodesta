@@ -18,13 +18,12 @@ try {
   await Promise.all([
     repository.saveAgentRun(runFixture({ id: "run-alpha", siteId: "site-one", status: "succeeded", startedAt: "2026-07-01T10:00:00.000Z", modelId: "gpt-alpha", costUsd: 1.25, durationMs: 30_000 })),
     repository.saveAgentRun(runFixture({ id: "run-beta", siteId: "site-one", status: "failed", startedAt: "2026-07-02T10:00:00.000Z", modelId: "gpt-beta", costUsd: 8.5, durationMs: 90_000, failureCode: "authoring_stalled" })),
-    repository.saveAgentRun(runFixture({ id: "run-gamma", siteId: "site-two", status: "cancelled", startedAt: "2026-07-03T10:00:00.000Z", modelId: "gpt-gamma", costUsd: 3.75, durationMs: 45_000 })),
-    repository.saveAgentRun(externalRunFixture())
+    repository.saveAgentRun(runFixture({ id: "run-gamma", siteId: "site-two", status: "cancelled", startedAt: "2026-07-03T10:00:00.000Z", modelId: "gpt-gamma", costUsd: 3.75, durationMs: 45_000 }))
   ]);
 
   const newest = await repository.listAgentRunAdminPage({ limit: 25 });
-  assert.equal(newest.total, 4);
-  assert.deepEqual(newest.items.map((item) => item.id), ["run-external", "run-gamma", "run-beta", "run-alpha"]);
+  assert.equal(newest.total, 3);
+  assert.deepEqual(newest.items.map((item) => item.id), ["run-gamma", "run-beta", "run-alpha"]);
 
   const filtered = await repository.listAgentRunAdminPage({
     statuses: ["failed", "cancelled"],
@@ -36,7 +35,7 @@ try {
 
   const searched = await repository.listAgentRunAdminPage({ search: "gpt-beta", limit: 25 });
   assert.deepEqual(searched.items.map((item) => item.id), ["run-beta"]);
-  assert.deepEqual((await repository.listAgentRunAdminPage({ search: "site-two", limit: 25 })).items.map((item) => item.id), ["run-external", "run-gamma"]);
+  assert.deepEqual((await repository.listAgentRunAdminPage({ search: "site-two", limit: 25 })).items.map((item) => item.id), ["run-gamma"]);
   assert.deepEqual((await repository.listAgentRunAdminPage({ search: "openai", limit: 25 })).items.map((item) => item.id), ["run-gamma", "run-beta", "run-alpha"]);
   assert.deepEqual((await repository.listAgentRunAdminPage({ search: "edit", limit: 25 })).items.map((item) => item.id), ["run-gamma", "run-beta", "run-alpha"]);
   assert.deepEqual((await repository.listAgentRunAdminPage({ search: "authoring_stalled", limit: 25 })).items.map((item) => item.id), ["run-beta"]);
@@ -45,18 +44,17 @@ try {
   assert.deepEqual(site.items.map((item) => item.id), ["run-alpha", "run-beta"]);
 
   const highestCost = await repository.listAgentRunAdminPage({ sort: "highest_cost", limit: 25 });
-  assert.deepEqual(highestCost.items.map((item) => item.id), ["run-beta", "run-gamma", "run-alpha", "run-external"]);
+  assert.deepEqual(highestCost.items.map((item) => item.id), ["run-beta", "run-gamma", "run-alpha"]);
 
   const lowestCost = await repository.listAgentRunAdminPage({ sort: "lowest_cost", limit: 25 });
-  assert.deepEqual(lowestCost.items.map((item) => item.id), ["run-alpha", "run-gamma", "run-beta", "run-external"]);
-  assert.equal(lowestCost.items.at(-1)?.costUsd, undefined);
+  assert.deepEqual(lowestCost.items.map((item) => item.id), ["run-alpha", "run-gamma", "run-beta"]);
 
   const longest = await repository.listAgentRunAdminPage({ sort: "longest_duration", offset: 1, limit: 25 });
-  assert.deepEqual(longest.items.map((item) => item.id), ["run-gamma", "run-alpha", "run-external"]);
+  assert.deepEqual(longest.items.map((item) => item.id), ["run-gamma", "run-alpha"]);
 
   const paged = await repository.listAgentRunAdminPage({ limit: 1, offset: 1 });
-  assert.equal(paged.total, 4);
-  assert.deepEqual(paged.items.map((item) => item.id), ["run-gamma"]);
+  assert.equal(paged.total, 3);
+  assert.deepEqual(paged.items.map((item) => item.id), ["run-beta"]);
 
   assert.equal(parseAdminRunQuery(new URLSearchParams("status=failed,cancelled&sort=highest_cost&limit=25&offset=25")).success, true);
   assert.equal(parseAdminRunQuery(new URLSearchParams("range=7d")).success, true);
@@ -95,8 +93,10 @@ try {
     readFile("app/api/admin/runs/[runId]/route.ts", "utf8")
   ]);
   assert(inventory.includes("item.issue") && inventory.includes("No runs found"), "Run inventory does not degrade stale or empty records legibly.");
-  const rowMarkup = inventory.match(/items\.map\(\(item\) => (<Link[\s\S]*?<\/Link>)\)}/)?.[1] ?? "";
-  assert(rowMarkup && !rowMarkup.includes("<button") && !rowMarkup.includes("<input"), "Inventory rows must remain one semantic link target without nested controls.");
+  const rowLinkMarkup = inventory.match(/<Link\s+className="admin-run-row-link"[\s\S]*?<\/Link>/)?.[0] ?? "";
+  assert(rowLinkMarkup && !rowLinkMarkup.includes("<button") && !rowLinkMarkup.includes("<input"), "Inventory row links must not contain nested controls.");
+  assert(inventory.includes("<RunIdCopyButton") && inventory.includes("navigator.clipboard.writeText(runId)")
+    && inventory.includes('aria-live="polite"'), "Run IDs do not expose an accessible clipboard action.");
   assert(inspector.includes('role="tablist"') && inspector.includes('role="tabpanel"') && inspector.includes('aria-current=')
     && inspector.includes('"ArrowLeft"') && inspector.includes('"ArrowDown"'), "Run inspector selection and tabs are not keyboard-readable.");
   assert(inspector.includes("visibilitychange") && inspector.includes("document.hidden") && inspector.includes("window.setInterval")
@@ -107,7 +107,8 @@ try {
   assert(inspector.includes("Copied to clipboard") && inspector.includes("Copy all"), "Accessible copy feedback is incomplete.");
   assert(css.includes("@media (min-width: 700px)") && css.includes("data-mobile-detail")
     && css.includes("grid-template-columns: 240px") && css.includes("grid-template-columns: 300px"), "Run inspector responsive drill-in widths are missing.");
-  assert(css.includes(".run-inspector-tabs button:focus-visible") && css.includes(".admin-run-row:focus-visible"), "Required focus indicators are missing.");
+  assert(css.includes(".run-inspector-tabs button:focus-visible") && css.includes(".admin-run-row-link:focus-visible")
+    && css.includes(".admin-run-id-copy:focus-visible"), "Required focus indicators are missing.");
   assert(migration.includes("security_invoker = true") && migration.includes("revoke all") && migration.includes("grant select")
     && !migration.includes("  runs.run,\n"), "Admin inventory view is not lightweight and service-role scoped.");
   assert(payloadRoute.includes("blob.contentHash !== event.payloadHash") && payloadRoute.includes('state: "expired"')
@@ -135,10 +136,9 @@ function runFixture(input: {
     sessionId: `session-${input.id}`,
     siteId: input.siteId,
     publicBuildInputId: `input-${input.id}`,
+    request: { kind: "owner_instruction", messageIds: [`message-${input.id}`] },
     origin: "owner_request",
-    executionDriver: "responses_api",
     requestedBy: "operator-test",
-    publishAfterSuccess: false,
     kind: "edit",
     status: input.status,
     stage: input.status === "succeeded" ? "candidate_ready" : "failed",
@@ -152,7 +152,6 @@ function runFixture(input: {
       maxConsecutiveIdenticalFailures: 3
     },
     usage: {
-      kind: "model_reported",
       inputTokens: 1000,
       cachedInputTokens: 100,
       reasoningTokens: 200,
@@ -168,43 +167,6 @@ function runFixture(input: {
     failureReason: input.failureCode ? "The same release failure repeated." : undefined,
     startedAt: input.startedAt,
     completedAt: new Date(Date.parse(input.startedAt) + input.durationMs).toISOString()
-  });
-}
-
-function externalRunFixture() {
-  return siteAgentRunSchema.parse({
-    schemaVersion: "site-agent-run",
-    id: "run-external",
-    sessionId: "session-external",
-    siteId: "site-two",
-    publicBuildInputId: "input-external",
-    origin: "external_batch",
-    executionDriver: "external_mcp",
-    requestedBy: "operator-test",
-    publishAfterSuccess: false,
-    kind: "initial_build",
-    status: "succeeded",
-    stage: "candidate_ready",
-    externalProvenance: {
-      clientAuthExpectation: "chatgpt",
-      clientAuthVerification: "operator_configured",
-      clientSkillVerification: "operator_configured",
-      clientReportedModelId: "Codex",
-      modelUsage: "unavailable"
-    },
-    executionNumber: 1,
-    skillVersions: {},
-    usage: {
-      kind: "external_unavailable",
-      modelUsage: "unavailable",
-      sandboxDurationMs: 0,
-      browserDurationMs: 0,
-      storageBytes: 0,
-      durationMs: 10_000
-    },
-    retryableByOwner: false,
-    startedAt: "2026-07-04T10:00:00.000Z",
-    completedAt: "2026-07-04T10:00:10.000Z"
   });
 }
 

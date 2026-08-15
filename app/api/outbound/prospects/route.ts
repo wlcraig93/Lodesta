@@ -8,7 +8,6 @@ export const runtime = "nodejs";
 const prospectSchema = z.object({
   id: z.string().min(1).optional(),
   prospectId: z.string().min(1),
-  selectionObservationId: z.string().min(1),
   campaignId: z.string().min(1),
   siteId: z.string().min(1).optional(),
   reportId: z.string().min(1).optional(),

@@ -77,10 +77,10 @@ export default async function OutboundPage() {
                   <span className="badge">{report.businessStrength?.tier ?? "business signal incomplete"}</span>
                   <h3>{report.sourceHost ?? report.sourceKey}</h3>
                   <p>
-                    Business strength {report.businessStrength?.score ?? "—"} · Website quality {assessment?.score?.value ?? "—"}
+                    Business strength {report.businessStrength?.score ?? "—"} · Website grade {assessment?.grade?.value ?? "provisional"} · Author {assessment?.score.scopes.siteAuthor.value ?? "—"}
                   </p>
                   <small>
-                    Business coverage {Math.round((report.businessStrength?.coverage ?? 0) * 100)}% · Website coverage {Math.round((assessment?.coverage.value ?? 0) * 100)}%
+                    Business coverage {Math.round((report.businessStrength?.coverage ?? 0) * 100)}% · Site evidence {Math.round((assessment?.coverage.siteEvidence ?? 0) * 100)}% · Pipeline {Math.round((assessment?.coverage.pipelineCompleteness ?? 0) * 100)}%
                   </small>
                 </article>
               );

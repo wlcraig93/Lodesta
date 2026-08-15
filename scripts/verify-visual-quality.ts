@@ -17,16 +17,122 @@ assert([...publiclyEligibleVisualQualityCheckIds].every((id) => ids.includes(id)
 
 const live = process.env.VISUAL_QUALITY_LIVE_CONFORMANCE === "true";
 const reports = [];
+const deterministicConflict = await evaluateVisualQuality({
+  contactSheets: [
+    { viewport: "desktop", bytes: Buffer.from("desktop-fixture"), mimeType: "image/png" },
+    { viewport: "mobile", bytes: Buffer.from("mobile-fixture"), mimeType: "image/png" }
+  ],
+  screenshots: [
+    { route: "/", viewport: "desktop", frame: "top", artifactKey: "fixture/desktop.png" },
+    { route: "/", viewport: "mobile", frame: "top", artifactKey: "fixture/mobile.png" }
+  ],
+  vertical: "plumber",
+  verticalConfidence: 1,
+  businessName: "Example Local Business",
+  primaryLocation: "Austin, TX",
+  services: ["Primary service"],
+  customerJourneys: ["Call for service"],
+  deterministicContext: {
+    minimumFontSize: 16,
+    horizontalOverflow: false,
+    clippingCount: 0
+  },
+  hasMeaningfulImagery: true,
+  client: {
+    create: async () => ({
+      status: "completed",
+      output_text: JSON.stringify({
+        checks: visualQualityCheckDefinitions.map((check, index) => ({
+          id: check.id,
+          status: "warning",
+          confidence: 1,
+          explanation: index === 0
+            ? "The font-size is visibly too small."
+            : "The composition could establish a clearer visual relationship.",
+          evidence: [{
+            route: "/",
+            viewport: "desktop",
+            frame: "top",
+            observation: "The cited frame supports this composition judgment."
+          }]
+        }))
+      })
+    })
+  }
+});
+assert.equal(
+  deterministicConflict.evaluator.status,
+  "unavailable",
+  "A screenshot model was allowed to override deterministic measurement evidence."
+);
+assert(
+  deterministicConflict.coverage.limitations.some((limitation) =>
+    limitation.includes("visual_evaluator_prohibited_assertion")
+  ),
+  "A measurable screenshot assertion was not rejected with retained provenance."
+);
+const homepageOnlySiteReview = await evaluateVisualQuality({
+  contactSheets: [
+    { viewport: "desktop", bytes: Buffer.from("desktop-fixture"), mimeType: "image/png" },
+    { viewport: "mobile", bytes: Buffer.from("mobile-fixture"), mimeType: "image/png" }
+  ],
+  screenshots: [
+    { route: "/", viewport: "desktop", frame: "top", artifactKey: "fixture/home-desktop.png" },
+    { route: "/", viewport: "mobile", frame: "top", artifactKey: "fixture/home-mobile.png" },
+    { route: "/service", viewport: "desktop", frame: "top", artifactKey: "fixture/service-desktop.png" },
+    { route: "/service", viewport: "mobile", frame: "top", artifactKey: "fixture/service-mobile.png" }
+  ],
+  vertical: "plumber",
+  verticalConfidence: 1,
+  businessName: "Example Local Business",
+  primaryLocation: "Austin, TX",
+  services: ["Primary service"],
+  customerJourneys: ["Call for service"],
+  deterministicContext: {},
+  hasMeaningfulImagery: true,
+  client: {
+    create: async () => ({
+      status: "completed",
+      output_text: JSON.stringify({
+        checks: visualQualityCheckDefinitions.map((check, index) => ({
+          id: check.id,
+          status: "pass",
+          confidence: 1,
+          explanation: "The supplied composition supports this visual judgment.",
+          evidence: [{
+            route: "/",
+            viewport: index % 2 === 0 ? "desktop" : "mobile",
+            frame: "top",
+            observation: "The homepage frame supports this visual judgment."
+          }]
+        }))
+      })
+    })
+  }
+});
+assert.equal(
+  homepageOnlySiteReview.evaluator.status,
+  "unavailable",
+  "A multi-route visual review was accepted without citing every labeled route."
+);
+assert(
+  homepageOnlySiteReview.coverage.limitations.some((limitation) =>
+    limitation.includes("visual_evaluator_incomplete_evidence_coverage")
+  ),
+  "Incomplete route evidence was not retained as the visual-review failure reason."
+);
 if (live) {
   assert(process.env.OPENAI_API_KEY, "OPENAI_API_KEY is required for live Visual Quality conformance.");
   for (const fixture of ["strong", "mixed", "defective"] as const) {
     const contactSheet = await fixtureContactSheet(fixture);
     const assessment = await evaluateVisualQuality({
-      contactSheet,
-      contactSheetMimeType: "image/png",
+      contactSheets: [
+        { viewport: "desktop", bytes: contactSheet, mimeType: "image/png" },
+        { viewport: "mobile", bytes: contactSheet, mimeType: "image/png" }
+      ],
       screenshots: [
-        { route: "/", viewport: "desktop", artifactKey: `fixture/${fixture}-desktop.png` },
-        { route: "/", viewport: "mobile", artifactKey: `fixture/${fixture}-mobile.png` }
+        { route: "/", viewport: "desktop", frame: "top", artifactKey: `fixture/${fixture}-desktop.png` },
+        { route: "/", viewport: "mobile", frame: "top", artifactKey: `fixture/${fixture}-mobile.png` }
       ],
       vertical: "general_local",
       verticalConfidence: 0.9,
@@ -54,6 +160,7 @@ console.log(JSON.stringify({
   methodologyIdentity: visualQualityMethodologyIdentity,
   checks: ids.length,
   publicEligibleChecks: publiclyEligibleVisualQualityCheckIds.size,
+  deterministicPrecedence: "pass",
   liveConformance: live ? reports : "not_configured"
 }, null, 2));
 

@@ -12,4 +12,11 @@ tsconfig.tsbuildinfo
 .data
 supabase/.temp/
 .gstack/
-.design/**/screenshots/
+.claude/
+.design/
+outputs/
+screenshots/
+tmp/
+workers/**/.wrangler/
+allruns.json
+packages/site-agent/reference-boards/

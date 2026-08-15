@@ -1,12 +1,47 @@
 import { sitePublicBuildInputSchema, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifact } from "@/packages/site-verification";
 import { assertWorkspaceSourcePolicy } from "@/packages/site-agent/source-policy";
-import {
-  assertConfiguredSiteSandboxRuntimeReady,
-  configuredSiteSandboxRuntime
-} from "./runtime-config";
+import { configuredSiteSandboxRuntimeForDeployment } from "./runtime-config";
+import type { SiteSandboxDeployment } from "@/packages/site-contracts";
 
 export type WorkspaceSourceFile = { path: string; content: string };
+
+const sandboxRequestTimeoutMs = 150_000;
+const sandboxBuildRequestTimeoutMs = 210_000;
+const sandboxOperationSubmitTimeoutMs = 15_000;
+const sandboxOperationStatusTimeoutMs = 10_000;
+const sandboxOperationPollIntervalMs = 500;
+
+type SandboxBuildSuccess = {
+  ok: true;
+  revision: string;
+  previewUrl: string;
+  buildDurationMs: number;
+  placementId: string;
+  operationId: string;
+  activeGenerationRevision: string;
+  replayed?: boolean;
+  phaseTimings: Record<string, number>;
+  warnings?: string[];
+};
+
+type SandboxOperationStatus = {
+  ok: boolean;
+  operationId: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  phase: "queued" | "preparing" | "validating" | "compiling" | "promoting" | "complete";
+  createdAt: string;
+  updatedAt: string;
+  phaseStartedAt: string;
+  timestamps: Record<string, string>;
+  phaseTimings: Record<string, number>;
+  result?: SandboxBuildSuccess;
+  failure?: {
+    status: number;
+    payload: { error?: string; detail?: string; stdout?: string; stderr?: string; currentRevision?: string };
+  };
+  submissionReplayed?: boolean;
+};
 
 export class SiteSandboxRequestError extends Error {
   readonly name = "SiteSandboxRequestError";
@@ -67,24 +102,12 @@ export class SiteSandboxClient {
 
   async apply(sessionId: string, expectedRevision: string, files: WorkspaceSourceFile[]) {
     assertWorkspaceSourcePolicy(files);
-    return this.call<{
-      ok: true;
-      revision: string;
-      previewUrl: string;
-      buildDurationMs: number;
-      placementId: string;
-    }>(sessionId, "apply", "POST", { expectedRevision, files });
+    return this.submitAndPoll(sessionId, "apply", { expectedRevision, files });
   }
 
   async rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInput) {
     const value = sitePublicBuildInputSchema.parse(buildInput);
-    return this.call<{
-      ok: true;
-      revision: string;
-      previewUrl: string;
-      buildDurationMs: number;
-      placementId: string;
-    }>(sessionId, "rebase", "POST", { expectedRevision, publicBuildInput: value });
+    return this.submitAndPoll(sessionId, "rebase", { expectedRevision, publicBuildInput: value });
   }
 
   async getArtifact(sessionId: string): Promise<AgentAuthoredArtifact> {
@@ -108,7 +131,7 @@ export class SiteSandboxClient {
   }
 
   async restore(sessionId: string, backupId: string, expectedRevision: string, expectedArchiveHash: `sha256:${string}`) {
-    return this.call<{ ok: true; revision: string }>(sessionId, "restore", "POST", { backupId, expectedRevision, expectedArchiveHash });
+    return this.submitAndPoll(sessionId, "restore", { backupId, expectedRevision, expectedArchiveHash });
   }
 
   async diagnostics(sessionId: string) {
@@ -118,11 +141,26 @@ export class SiteSandboxClient {
       versions: string[];
       sandboxManifest: {
         kind: "site-sandbox-manifest";
+        apiIdentity: string;
+        storageIdentity: string;
+        durableObjectIdentity: string;
         artifactContractIdentity: string;
         toolchainIdentity: string;
         sourcePolicyIdentity: string;
       };
       placementId: string;
+      activeGeneration?: {
+        schemaVersion: 1;
+        revision: string;
+        sourceHash: string;
+        publicInputHash: string;
+        operationId: string;
+        status: "initialized" | "built";
+        createdAt: string;
+      };
+      activeGenerationTarget?: string;
+      mutationLock?: { operationId?: string; startedAt?: string };
+      activeOperation?: SandboxOperationStatus;
       processes: Array<{ id: string; command: string; status: string }>;
     }>(sessionId, "diagnostics", "GET");
   }
@@ -135,17 +173,73 @@ export class SiteSandboxClient {
     return `${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${encodeURIComponent(sessionId)}/preview${route.startsWith("/") ? route : `/${route}`}`;
   }
 
-  private async call<T>(sessionId: string, action: string, method: "GET" | "POST", body?: unknown): Promise<T> {
+  async fetchPreview(sessionId: string, route = "/") {
+    if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
+    await this.beforeRequest?.();
+    return fetch(this.previewUrl(sessionId, route), {
+      headers: { authorization: `Bearer ${this.token}` },
+      signal: AbortSignal.timeout(sandboxRequestTimeoutMs)
+    });
+  }
+
+  private async submitAndPoll(
+    sessionId: string,
+    action: "apply" | "rebase" | "restore",
+    body: unknown
+  ): Promise<SandboxBuildSuccess> {
+    const submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+      sessionId,
+      action,
+      "POST",
+      body,
+      sandboxOperationSubmitTimeoutMs
+    );
+    if ("revision" in submitted) return submitted;
+    const submissionReplayed = Boolean(submitted.submissionReplayed);
+    const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
+    let lastStatus = submitted;
+    while (Date.now() < deadline) {
+      if (lastStatus.status === "succeeded" && lastStatus.result) {
+        return submissionReplayed
+          ? { ...lastStatus.result, replayed: true }
+          : lastStatus.result;
+      }
+      if (lastStatus.status === "failed") throw operationFailure(action, sessionId, lastStatus);
+      await wait(Math.min(sandboxOperationPollIntervalMs, Math.max(0, deadline - Date.now())));
+      try {
+        lastStatus = await this.call<SandboxOperationStatus>(
+          sessionId,
+          `operations/${submitted.operationId}`,
+          "GET",
+          undefined,
+          sandboxOperationStatusTimeoutMs
+        );
+      } catch (error) {
+        if (error instanceof SiteSandboxRequestError && error.status < 500 && error.status !== 404) throw error;
+        if (Date.now() >= deadline) break;
+      }
+    }
+    throw new SiteSandboxRequestError(
+      action,
+      sessionId,
+      504,
+      "operation_status_timeout",
+      `operationId=${submitted.operationId}\nlastPhase=${lastStatus.phase}\nlastUpdatedAt=${lastStatus.updatedAt}`
+    );
+  }
+
+  private async call<T>(sessionId: string, action: string, method: "GET" | "POST", body?: unknown, timeoutMs = sandboxRequestTimeoutMs): Promise<T> {
     if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
     await this.beforeRequest?.();
     const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${sessionId}/${action}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        ...(body === undefined ? {} : { "content-type": "application/json" })
-      },
-      body: body === undefined ? undefined : JSON.stringify(body)
-    });
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" })
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
     const payload = await response.json().catch(() => undefined) as (T & { error?: string; detail?: string; stdout?: string; stderr?: string; currentRevision?: string }) | undefined;
     if (!response.ok) {
       const diagnostics = [
@@ -160,7 +254,38 @@ export class SiteSandboxClient {
   }
 }
 
-export function configuredSiteSandboxClient() {
-  const { url, token } = configuredSiteSandboxRuntime();
-  return new SiteSandboxClient(url, token, assertConfiguredSiteSandboxRuntimeReady);
+function operationFailure(action: string, sessionId: string, status: SandboxOperationStatus) {
+  const failure = status.failure;
+  const payload = failure?.payload;
+  return new SiteSandboxRequestError(
+    action,
+    sessionId,
+    failure?.status ?? 500,
+    payload?.error ?? "sandbox_operation_failed",
+    [
+      `operationId=${status.operationId}`,
+      `phase=${status.phase}`,
+      payload?.currentRevision ? `currentRevision=${payload.currentRevision}` : undefined,
+      payload?.detail,
+      payload?.stderr,
+      payload?.stdout
+    ].filter(Boolean).join("\n").slice(-12_000)
+  );
+}
+
+function wait(durationMs: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, durationMs));
+}
+
+export function configuredSiteSandboxClient(): SiteSandboxClient {
+  throw new Error("Sandbox access requires an immutable pinned deployment.");
+}
+
+export function configuredSiteSandboxClientForDeployment(deployment: SiteSandboxDeployment) {
+  const runtime = configuredSiteSandboxRuntimeForDeployment(deployment);
+  return new SiteSandboxClient(
+    runtime.url,
+    runtime.token,
+    async () => configuredSiteSandboxRuntimeForDeployment(deployment)
+  );
 }

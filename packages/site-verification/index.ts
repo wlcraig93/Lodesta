@@ -8,3 +8,4 @@ export * from "./thumbnail";
 export * from "./media-contact-sheet";
 export * from "./address-presentation";
 export * from "./inspection-identity";
+export * from "./ia-advisory";

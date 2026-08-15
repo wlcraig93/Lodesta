@@ -75,6 +75,8 @@ export type CrawlPagePurposeTag =
   | "contact"
   | "gallery"
   | "reviews"
+  | "case_study"
+  | "comparison"
   | "offers"
   | "faq"
   | "blog"
@@ -193,6 +195,7 @@ export async function crawlUrl(url: string, options: CrawlUrlOptions = {}): Prom
     const html = await response.text();
     const finalUrl = response.url || safeUrl;
     const primarySummary = summarizeCrawlPage(html, finalUrl, "primary");
+    primarySummary.canonical ??= canonicalFromLinkHeader(response.headers.get("link"), finalUrl);
 
     assessment.fetched = true;
     assessment.status = response.status;
@@ -255,6 +258,25 @@ export function extractCrawlPageSignals(html: string, sourceUrl: string) {
 
 export function summarizeCrawlHtml(html: string, sourceUrl: string): CrawlPageSummary {
   return summarizeCrawlPage(html, sourceUrl, "primary");
+}
+
+export function canonicalFromLinkHeader(linkHeader: string | null | undefined, sourceUrl: string) {
+  if (!linkHeader) return undefined;
+  const linkPattern = /<([^>]+)>\s*((?:;\s*[^,]+)*)/g;
+  let match: RegExpExecArray | null;
+  while ((match = linkPattern.exec(linkHeader)) !== null) {
+    const parameters = match[2] ?? "";
+    const rel = parameters.match(/;\s*rel\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;\s,]+))/i);
+    const relations = (rel?.[1] ?? rel?.[2] ?? rel?.[3] ?? "").toLowerCase().split(/\s+/);
+    if (!relations.includes("canonical")) continue;
+    try {
+      const resolved = new URL(match[1], sourceUrl);
+      return ["http:", "https:"].includes(resolved.protocol) ? resolved.href : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSummary["source"]): CrawlPageSummary {
@@ -338,6 +360,8 @@ function classifyCrawlPagePurpose(sourcePage: URL, title: string | undefined, ht
   if (/\bcontact|get-in-touch|quote|estimate|appointment|booking\b/.test(text)) tags.push("contact");
   if (/\bgallery|photos?|portfolio|work\b/.test(text)) tags.push("gallery");
   if (/\breviews?|testimonials?\b/.test(text)) tags.push("reviews");
+  if (/\bcase[- ]stud(?:y|ies)|success stor(?:y|ies)|customer stor(?:y|ies)\b/.test(text)) tags.push("case_study");
+  if (/\bcompare|comparison|versus|\bvs\.?\b|alternatives?|why[- ]choose\b/.test(text)) tags.push("comparison");
   if (/\boffers?|specials?|coupons?|financ/i.test(text)) tags.push("offers");
   if (/\bfaq|questions?\b/.test(text)) tags.push("faq");
   if (/\bblog|news|articles?\b/.test(text)) tags.push("blog");
@@ -352,7 +376,10 @@ async function fetchInternalPageSummary(url: string) {
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) return null;
     const html = await response.text();
-    return summarizeCrawlPage(html, response.url || url, "sampled_internal");
+    const finalUrl = response.url || url;
+    const summary = summarizeCrawlPage(html, finalUrl, "sampled_internal");
+    summary.canonical ??= canonicalFromLinkHeader(response.headers.get("link"), finalUrl);
+    return summary;
   } catch {
     return null;
   }
@@ -521,7 +548,7 @@ function extractSitemapLocs(xml: string, baseUrl: string) {
 
 function isBusinessFactSitemapPath(pathname: string) {
   if (normalizePath(pathname) === "/") return true;
-  return /contact|location|hours|about|service|menu|order|book|appointment|schedule|reserve|faq|review|testimonial|gallery|portfolio|work/i.test(pathname);
+  return /contact|location|hours|about|service|menu|order|book|appointment|schedule|reserve|faq|review|testimonial|gallery|portfolio|work|case-study|success-story|compare|comparison|alternative|why-choose/i.test(pathname);
 }
 
 type RobotsRule = {
@@ -784,7 +811,7 @@ function extractBusinessFacts(
   if (localNode) {
     facts.name = normalizeFact(localNode.name);
     facts.description = normalizeFact(localNode.description);
-    facts.phone = normalizePhone(normalizeFact(localNode.telephone));
+    facts.phone = normalizePhone(normalizeFact(caseInsensitiveProperty(localNode, "telephone")));
     facts.email = normalizeEmail(normalizeFact(localNode.email));
     facts.address = extractAddress(localNode.address);
     facts.geo = extractGeo(localNode.geo);
@@ -1506,6 +1533,12 @@ function toArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value;
   if (value === undefined || value === null) return [];
   return [value];
+}
+
+function caseInsensitiveProperty(record: Record<string, unknown>, name: string) {
+  return Object.entries(record)
+    .find(([key]) => key.toLocaleLowerCase() === name.toLocaleLowerCase())
+    ?.[1];
 }
 
 function toNumber(value: unknown) {

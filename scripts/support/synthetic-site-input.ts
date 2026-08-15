@@ -1,6 +1,5 @@
 import { sha256, stableJson } from "../../packages/business-data";
 import { siteIntentSchema, sitePublicBuildInputSchema } from "../../packages/site-contracts";
-import { autoBodyContextModule } from "../../packages/vertical-context";
 
 const createdAt = "2026-07-20T00:00:00.000Z";
 
@@ -10,6 +9,7 @@ export function buildSyntheticSiteInput() {
     id: "intent_synthetic_verification",
     siteId: "site_synthetic_verification",
     revision: 1,
+    ownerIntentRevision: 1,
     updatedAt: createdAt,
     audience: "Austin drivers seeking collision repair.",
     positioning: "Clear, local, repair-focused service.",
@@ -43,9 +43,8 @@ export function buildSyntheticSiteInput() {
     siteId: "site_synthetic_verification",
     businessId: "business_synthetic_verification",
     createdAt,
-    businessStateRevision: 1,
-    siteIntentRevision: 1,
-    domainContext: autoBodyContextModule,
+    ownerOperationalRevision: 1,
+    ownerIntentRevision: 1,
     business: {
       name: "Northstar Collision Repair",
       identityStatus: "verified" as const,
@@ -53,7 +52,7 @@ export function buildSyntheticSiteInput() {
       contacts: { phone: "+15125550142" },
       locations: [{
         id: "location_primary",
-        label: "Main shop",
+        label: "Business location",
         street: "1200 Main Street",
         city: "Austin",
         region: "TX",
@@ -65,12 +64,9 @@ export function buildSyntheticSiteInput() {
       serviceAreas: [],
       offerings: [{
         id: "offering_collision",
-        catalogId: "collision_repair",
         name: "Collision Repair",
         status: "confirmed" as const,
         visibility: "public" as const,
-        pageMode: "dedicated" as const,
-        featured: true,
         sourceFactIds: ["fact_service_collision"],
         confirmedAt: createdAt
       }],
@@ -84,13 +80,15 @@ export function buildSyntheticSiteInput() {
       schemaVersion: 1 as const,
       id: "form_estimate",
       siteId: "site_synthetic_verification",
+      key: "estimate_request",
       revision: 1,
       name: "Estimate request",
       status: "candidate_only" as const,
+      destination: "lead_inbox" as const,
       fields: [
-        { id: "name", label: "Name", type: "text" as const, required: true },
-        { id: "phone", label: "Phone", type: "phone" as const, required: true },
-        { id: "message", label: "What happened?", type: "textarea" as const, required: false }
+        { id: "name", label: "Name", role: "contact_name" as const, type: "text" as const, required: true },
+        { id: "phone", label: "Phone", role: "contact_phone" as const, type: "phone" as const, required: true },
+        { id: "message", label: "What happened?", role: "message" as const, type: "textarea" as const, required: false }
       ],
       submitLabel: "Request an estimate",
       successMessage: "Thanks. The shop will follow up.",

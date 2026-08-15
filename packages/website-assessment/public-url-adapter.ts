@@ -28,6 +28,9 @@ import {
   type PublicVisualQualityCapture
 } from "./visual-quality-capture";
 import { unavailableVisualQuality } from "./visual-quality";
+import type { SitePublicBuildInput } from "@/packages/site-contracts";
+import { selectVisualQualityPages } from "./visual-quality-capture";
+import { siteInventoryForPublicUrl } from "./site-inventory";
 
 export type PublicUrlAssessmentRun = {
   assessment: WebsiteAssessment;
@@ -51,6 +54,7 @@ export async function assessPublicUrl(input: {
   targetKind?: "public_url" | "published_site";
   siteId?: string;
   versionId?: string;
+  canonicalBuildInput?: SitePublicBuildInput;
 }): Promise<PublicUrlAssessmentRun> {
   const sourceUrl = normalizePublicFetchUrlInput(input.url);
   if (!sourceUrl) throw new Error("A public website URL is required.");
@@ -58,8 +62,6 @@ export async function assessPublicUrl(input: {
     url: sourceUrl,
     signal: input.signal,
     limits: {
-      selectedPages: 20,
-      browserFallbackPages: 5,
       concurrentPerOrigin: 2,
       minimumStartSpacingMs: 500
     }
@@ -116,8 +118,7 @@ export async function assessPublicUrl(input: {
             signal: input.signal
           });
           return evaluateVisualQuality({
-            contactSheet: visualQualityCapture.contactSheet,
-            contactSheetMimeType: visualQualityCapture.contactSheetMimeType,
+            contactSheets: visualQualityCapture.contactSheets,
             screenshots: visualQualityCapture.screenshots,
             vertical: vertical.vertical,
             verticalConfidence: vertical.confidence,
@@ -141,13 +142,16 @@ export async function assessPublicUrl(input: {
     accessibility: browserEvidence.accessibility,
     generatedAt,
     vertical: vertical.vertical,
-    verticalConfidence: vertical.confidence
+    verticalConfidence: vertical.confidence,
+    canonicalBuildInput: input.canonicalBuildInput
   });
+  const routeSelection = visualQualityCapture?.routeSelection
+    ?? selectVisualQualityPages(crawl).selection;
   const limitations = [
     ...destinationProbes.limitations,
     ingestion.coverage === "complete"
       ? undefined
-      : `The crawl reported ${ingestion.coverage} coverage (${ingestion.counts.fetched} of ${ingestion.counts.selected} selected pages fetched).`,
+      : `The crawl reported ${ingestion.coverage} coverage (${ingestion.counts.fetched} of ${ingestion.counts.eligible} eligible pages fetched; ${ingestion.counts.unfinished} unfinished).`,
     render.unavailableReason ? `Browser render inspection was unavailable: ${render.unavailableReason}` : undefined,
     browserEvidence.performance.limitation,
     browserEvidence.accessibility.limitation,
@@ -172,6 +176,12 @@ export async function assessPublicUrl(input: {
       verticalEvidence: vertical.evidence,
       customerJourneys
     },
+    canonicalFactAvailability: canonicalFactAvailabilityFor({
+      crawl,
+      buildInput: input.canonicalBuildInput
+    }),
+    routeSelection,
+    siteInventory: siteInventoryForPublicUrl({ crawl, ingestion }),
     criteria,
     agentReadinessChecks: agentReadiness.checks,
     agentReadinessLimitations: agentReadiness.limitations,
@@ -217,6 +227,7 @@ function criteriaForPublicUrl(input: {
   generatedAt: string;
   vertical: string;
   verticalConfidence: number;
+  canonicalBuildInput?: SitePublicBuildInput;
 }): AssessmentCriterionInput[] {
   const { crawl, render, ingestion, probes, performance, accessibility, generatedAt } = input;
   const sourceUrl = crawl.finalUrl ?? crawl.url;
@@ -253,11 +264,61 @@ function criteriaForPublicUrl(input: {
     && crawl.extractedFacts.serviceAreas.length === 0;
   const crawlInferenceConfidence = ingestion.coverage === "complete"
     ? 0.9
-    : ingestion.coverage === "bounded"
-      ? 0.85
+    : ingestion.coverage === "restricted"
+      ? 0.8
       : 0.7;
+  const canonicalPhone = input.canonicalBuildInput?.business.contacts.phone
+    ?? crawl.extractedFacts.phone;
+  const telephoneLinks = links.filter((link) => link.kind === "tel");
+  const matchingTelephoneLinks = canonicalPhone
+    ? telephoneLinks.filter((link) => phoneMatches(link.href, canonicalPhone))
+    : [];
+  const canonicalHours = input.canonicalBuildInput?.business.locations.find((location) => location.hours)?.hours
+    ?? crawl.extractedFacts.hours;
+  const hoursAgree = !input.canonicalBuildInput
+    || !canonicalHours
+    || !crawl.extractedFacts.hours
+    || stableRecord(canonicalHours) === stableRecord(crawl.extractedFacts.hours);
 
   return [
+    result(
+      "trust.business_identity",
+      crawl.extractedFacts.name && (crawl.extractedFacts.phone || crawl.extractedFacts.email || formattedLocation(crawl)) ? "pass" : crawl.extractedFacts.name ? "warning" : "fail",
+      crawl.extractedFacts.name
+        ? `Business identity detected as ${crawl.extractedFacts.name}${crawl.extractedFacts.phone || crawl.extractedFacts.email || formattedLocation(crawl) ? " with contact facts" : " without complete contact facts"}.`
+        : "A clear business identity was not extracted.",
+      evidence("trust.business_identity.content", "content", `Name: ${crawl.extractedFacts.name ?? "not detected"}; phone: ${crawl.extractedFacts.phone ? "detected" : "not detected"}; email: ${crawl.extractedFacts.email ? "detected" : "not detected"}; location: ${formattedLocation(crawl) ?? "not detected"}.`, generatedAt, { sourceUrl }),
+      "inferred",
+      crawl.extractedFacts.name ? 0.9 : crawlInferenceConfidence
+    ),
+    result(
+      "truth.phone_consistency",
+      !canonicalPhone ? "not_applicable" : telephoneLinks.length === 0 ? "warning" : matchingTelephoneLinks.length === telephoneLinks.length ? "pass" : "fail",
+      !canonicalPhone
+        ? "No canonical phone fact was available."
+        : telephoneLinks.length === 0
+          ? "A canonical phone fact was available, but no tap-to-call destination was detected."
+          : `${matchingTelephoneLinks.length} of ${telephoneLinks.length} telephone links matched the canonical number.`,
+      evidence("truth.phone_consistency.links", "crawl", `Canonical phone available: ${Boolean(canonicalPhone)}; tel links: ${telephoneLinks.length}; canonical matches: ${matchingTelephoneLinks.length}.`, generatedAt, { sourceUrl })
+    ),
+    result(
+      "truth.hours_consistency",
+      !canonicalHours ? "not_applicable" : hoursAgree ? "pass" : "fail",
+      !canonicalHours
+        ? "No publish-eligible canonical hours fact was available."
+        : hoursAgree
+          ? "Rendered source hours did not contradict the canonical hours fact."
+          : "Rendered source hours contradicted the canonical hours fact.",
+      evidence("truth.hours_consistency.content", "content", `Canonical hours available: ${Boolean(canonicalHours)}; rendered hours available: ${Boolean(crawl.extractedFacts.hours)}; agree: ${hoursAgree}.`, generatedAt, { sourceUrl })
+    ),
+    result(
+      "truth.structured_data_consistency",
+      crawl.hasLocalBusinessSchema ? "unknown" : "not_applicable",
+      crawl.hasLocalBusinessSchema
+        ? "Local-business structured data was present, but the retained crawl evidence did not preserve a complete visible-to-machine fact comparison."
+        : "No LocalBusiness-compatible structured data was detected.",
+      evidence("truth.structured_data_consistency.crawl", "crawl", `Detected JSON-LD types: ${crawl.jsonLdTypes.join(", ") || "none"}.`, generatedAt, { sourceUrl })
+    ),
     result("functional.home_reachable", crawl.fetched && (crawl.status ?? 500) < 400 ? "pass" : "fail",
       crawl.fetched ? `Homepage returned HTTP ${crawl.status ?? "unknown"}.` : `Homepage could not be fetched: ${crawl.error ?? "unknown error"}.`,
       evidence("functional.home_reachable.http", "http", crawl.fetched ? `Final homepage response was HTTP ${crawl.status ?? "unknown"}.` : `Homepage fetch failed: ${crawl.error ?? "unknown error"}.`, generatedAt, { sourceUrl })),
@@ -274,6 +335,26 @@ function criteriaForPublicUrl(input: {
           ? `${internalFailures.length} of ${probes.probedInternal} probed internal destinations failed.`
           : `All ${probes.probedInternal} probed internal destinations returned usable responses.`,
       probeEvidence("functional.internal_destinations.probes", probes, "internal", generatedAt, sourceUrl)),
+    result(
+      "functional.navigation_reachability",
+      render.adapter === "fetch_fallback"
+        ? "unknown"
+        : (mobile?.navigationUnreachableCount ?? 0) > 0
+          ? "fail"
+          : (mobile?.navigationDestinationCount ?? 0) > 0 || pages.length <= 1
+            ? "pass"
+            : "unknown",
+      render.adapter === "fetch_fallback"
+        ? "Browser interaction evidence was unavailable for primary navigation."
+        : (mobile?.navigationUnreachableCount ?? 0) > 0
+          ? `${mobile?.navigationUnreachableCount} of ${mobile?.navigationDestinationCount ?? 0} primary mobile destination(s) were not hit-testable after disclosure activation.`
+          : (mobile?.navigationDestinationCount ?? 0) > 0
+            ? `All ${mobile?.navigationDestinationCount} discovered primary mobile destination(s) were hit-testable.`
+            : pages.length <= 1
+              ? "No separate primary destination was required for this one-page site."
+              : "No primary navigation destinations were discoverable in the measured mobile header.",
+      evidence("functional.navigation_reachability.render", "render", `Mobile destinations: ${mobile?.navigationDestinationCount ?? "unknown"}; unreachable: ${mobile?.navigationUnreachableCount ?? "unknown"}; samples: ${mobile?.navigationUnreachableSamples?.join(", ") || "none"}.`, generatedAt, { sourceUrl, viewport: "mobile" })
+    ),
     result("functional.primary_external_destinations",
       probes.probedPrimaryExternal === 0 ? "not_applicable" : externalFailures.length === 0 ? "pass" : "fail",
       probes.probedPrimaryExternal === 0
@@ -328,6 +409,32 @@ function criteriaForPublicUrl(input: {
         ? "Mobile text sizing could not be measured."
         : `Smallest measured readable mobile text was ${mobile?.minReadableTextFontSizePx ?? "unknown"}px.`,
       evidence("performance.readable_text.render", "render", `Minimum readable mobile text: ${mobile?.minReadableTextFontSizePx ?? "unknown"}px.`, generatedAt, { sourceUrl, viewport: "mobile" })),
+    result(
+      "responsive.target_size",
+      render.adapter === "fetch_fallback"
+        ? "unknown"
+        : (mobile?.smallTargetCount ?? 0) === 0
+          ? "pass"
+          : (mobile?.smallTargetCount ?? 0) <= 2
+            ? "warning"
+            : "fail",
+      render.adapter === "fetch_fallback"
+        ? "Mobile target geometry was unavailable."
+        : `${mobile?.smallTargetCount ?? 0} essential mobile control(s) measured below 44×44px.`,
+      evidence("responsive.target_size.render", "render", `Small essential mobile targets: ${mobile?.smallTargetCount ?? "unknown"}; samples: ${mobile?.smallTargetSamples?.join(", ") || "none"}.`, generatedAt, { sourceUrl, viewport: "mobile" })
+    ),
+    result(
+      "responsive.no_clipping_overlap",
+      render.adapter === "fetch_fallback"
+        ? "unknown"
+        : (mobile?.clippedElementCount ?? 0) > 0 || (mobile?.hitTestFailureCount ?? 0) > 0
+          ? "fail"
+          : "pass",
+      render.adapter === "fetch_fallback"
+        ? "Mobile clipping, overlap, and hit-testing geometry was unavailable."
+        : `${mobile?.clippedElementCount ?? 0} clipped element(s) and ${mobile?.hitTestFailureCount ?? 0} obscured essential control(s) were measured.`,
+      evidence("responsive.no_clipping_overlap.render", "render", `Clipped: ${mobile?.clippedElementCount ?? "unknown"}; obscured controls: ${mobile?.hitTestFailureCount ?? "unknown"}; samples: ${[...(mobile?.clippedElementSamples ?? []), ...(mobile?.hitTestFailureSamples ?? [])].slice(0, 6).join(", ") || "none"}.`, generatedAt, { sourceUrl, viewport: "mobile" })
+    ),
     performanceResult("performance.lcp", performance.lcp, performance, generatedAt, sourceUrl),
     performanceResult("performance.inp", performance.inp, performance, generatedAt, sourceUrl),
     performanceResult("performance.cls", performance.cls, performance, generatedAt, sourceUrl),
@@ -360,11 +467,14 @@ function criteriaForPublicUrl(input: {
           ? "A lead form was detected, but its submission was intentionally not attempted, so the contact path is only partially verified."
           : "No direct contact, booking, ordering, or inquiry path was detected.",
       evidence("conversion.contact_path.crawl", "crawl", `Phone links: ${crawl.hasTelLink ? "yes" : "no"}; forms: ${crawl.formCount}; booking/order/email links: ${links.filter((link) => ["booking", "ordering", "mailto"].includes(link.kind)).length}.`, generatedAt, { sourceUrl })),
-    result("conversion.click_to_call", crawl.hasTelLink ? "pass" : "warning",
-      crawl.hasTelLink
-        ? "A tap-to-call telephone link was detected."
-        : "No tap-to-call telephone link was detected in the bounded crawl.",
-      evidence("conversion.click_to_call.crawl", "crawl", `Telephone link detected: ${crawl.hasTelLink}.`, generatedAt, { sourceUrl })),
+    result("conversion.click_to_call",
+      !canonicalPhone ? "not_applicable" : matchingTelephoneLinks.length ? "pass" : "warning",
+      !canonicalPhone
+        ? "No canonical phone fact was available for tap-to-call verification."
+        : matchingTelephoneLinks.length
+          ? `${matchingTelephoneLinks.length} tap-to-call link${matchingTelephoneLinks.length === 1 ? "" : "s"} matched the canonical phone number.`
+          : "No tap-to-call link matched the canonical phone number.",
+      evidence("conversion.click_to_call.crawl", "crawl", `Telephone links: ${telephoneLinks.length}; canonical matches: ${matchingTelephoneLinks.length}.`, generatedAt, { sourceUrl })),
     result("conversion.primary_action_above_fold",
       render.adapter === "fetch_fallback" ? "unknown" : mobile?.aboveFoldCtaDetected ? "pass" : "fail",
       render.adapter === "fetch_fallback"
@@ -373,8 +483,7 @@ function criteriaForPublicUrl(input: {
           ? "An actionable control was visible in the first mobile viewport."
           : "No actionable control was visible in the first mobile viewport.",
       evidence("conversion.primary_action_above_fold.render", "render", `Above-fold mobile action detected: ${Boolean(mobile?.aboveFoldCtaDetected)}.`, generatedAt, { sourceUrl, ...screenshotEvidence }),
-      "inferred",
-      mobile?.aboveFoldCtaDetected ? 0.9 : 0.85),
+      "deterministic"),
     result("conversion.service_navigation",
       servicePages.length >= 2 ? "pass" : servicePages.length === 1 ? "warning" : "fail",
       servicePages.length >= 2
@@ -447,15 +556,28 @@ function criteriaForPublicUrl(input: {
       evidence("local_content.vertical_requirements.content", "content", `Vertical: ${input.vertical}; confidence: ${Math.round(input.verticalConfidence * 100)}%.`, generatedAt, { sourceUrl }),
       "inferred",
       input.verticalConfidence),
+    result(
+      "content.priority_intent_coverage",
+      detailedServicePages.length ? "pass" : servicePages.length ? "warning" : "fail",
+      detailedServicePages.length
+        ? "The highest-ranked service-intent route contained substantive content."
+        : servicePages.length
+          ? "A service-intent route existed but did not meet the substantive-content threshold."
+          : "No service-intent route was available for the requested semantic slot.",
+      pageEvidence("content.priority_intent_coverage.pages", detailedServicePages.length ? detailedServicePages : servicePages, generatedAt, sourceUrl),
+      "deterministic"
+    ),
+    result(
+      "content.hours_presence",
+      !canonicalHours ? "not_applicable" : crawl.extractedFacts.hours ? "pass" : "warning",
+      !canonicalHours
+        ? "No publish-eligible canonical hours fact was available."
+        : crawl.extractedFacts.hours
+          ? "Canonical business hours were present in the rendered source evidence."
+          : "Canonical business hours were available but not detected in rendered source evidence.",
+      evidence("content.hours_presence.content", "content", `Canonical hours available: ${Boolean(canonicalHours)}; rendered hours detected: ${Boolean(crawl.extractedFacts.hours)}.`, generatedAt, { sourceUrl })
+    ),
 
-    result("trust.business_identity",
-      crawl.extractedFacts.name && (crawl.extractedFacts.phone || crawl.extractedFacts.email || formattedLocation(crawl)) ? "pass" : crawl.extractedFacts.name ? "warning" : "fail",
-      crawl.extractedFacts.name
-        ? `Business identity detected as ${crawl.extractedFacts.name}${crawl.extractedFacts.phone || crawl.extractedFacts.email || formattedLocation(crawl) ? " with contact facts" : " without complete contact facts"}.`
-        : "A clear business identity was not extracted.",
-      evidence("trust.business_identity.content", "content", `Name: ${crawl.extractedFacts.name ?? "not detected"}; phone: ${crawl.extractedFacts.phone ? "detected" : "not detected"}; email: ${crawl.extractedFacts.email ? "detected" : "not detected"}; location: ${formattedLocation(crawl) ?? "not detected"}.`, generatedAt, { sourceUrl }),
-      "inferred",
-      crawl.extractedFacts.name ? 0.9 : crawlInferenceConfidence),
     result("trust.about", aboutPages.length ? "pass" : "warning",
       aboutPages.length ? "An about-oriented page was detected." : "No about-oriented page was detected.",
       pageEvidence("trust.about.pages", aboutPages, generatedAt, sourceUrl),
@@ -466,6 +588,11 @@ function criteriaForPublicUrl(input: {
       evidence("trust.proof.content", "content", proofPattern.test(visibleText) ? "First-party proof language matched the deterministic credibility pattern." : "No deterministic credibility pattern matched.", generatedAt, { sourceUrl }),
       "inferred",
       proofPattern.test(visibleText) ? 0.9 : 0.7),
+    result("research.proof_availability", proofPattern.test(visibleText) ? "pass" : "warning",
+      proofPattern.test(visibleText)
+        ? "The first-party crawl supplied usable proof language."
+        : "The first-party crawl supplied no usable verified proof; rendered proof quality was assessed separately.",
+      evidence("research.proof_availability.content", "content", `First-party proof evidence detected: ${proofPattern.test(visibleText)}.`, generatedAt, { sourceUrl })),
     result("trust.privacy",
       forms.length === 0 ? "not_applicable" : privacyLinked ? "pass" : "fail",
       forms.length === 0
@@ -604,7 +731,7 @@ function probeEvidence(
 }
 
 function pageEvidence(id: string, pages: CrawlPageSummary[], generatedAt: string, sourceUrl: string) {
-  return evidence(id, "crawl", pages.length ? pages.slice(0, 12).map((page) => `${page.url} (${page.purposeTags.join(", ")})`).join("; ") : "No matching pages were found in the bounded crawl.", generatedAt, { sourceUrl });
+  return evidence(id, "crawl", pages.length ? pages.slice(0, 12).map((page) => `${page.url} (${page.purposeTags.join(", ")})`).join("; ") : "No matching pages were found in the crawl.", generatedAt, { sourceUrl });
 }
 
 function axeEvidence(
@@ -684,6 +811,42 @@ function canonicalSourceKey(value: string) {
   url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
   url.pathname = url.pathname.replace(/\/+$/, "") || "/";
   return `url:${url.href}`;
+}
+
+function canonicalFactAvailabilityFor(input: {
+  crawl: CrawlAssessment;
+  buildInput?: SitePublicBuildInput;
+}): WebsiteAssessment["canonicalFactAvailability"] {
+  const facts = input.crawl.extractedFacts;
+  const build = input.buildInput?.business;
+  const locations = build?.locations ?? [];
+  return {
+    businessName: Boolean(build?.name ?? facts.name),
+    phone: Boolean(build?.contacts.phone ?? facts.phone),
+    email: Boolean(build?.contacts.email ?? facts.email),
+    address: Boolean(locations.length || facts.address),
+    hours: Boolean(locations.some((location) => location.hours) || facts.hours),
+    coordinates: Boolean(
+      locations.some((location) => location.latitude !== undefined && location.longitude !== undefined)
+      || facts.geo
+    ),
+    serviceAreas: Boolean(build?.serviceAreas.length || facts.serviceAreas.length),
+    proof: Boolean(build?.proof.length || facts.reviewsSummary)
+  };
+}
+
+function phoneMatches(href: string, canonicalPhone: string) {
+  const candidate = href.replace(/^tel:/i, "").replace(/\?.*$/, "");
+  const left = candidate.replace(/\D/g, "");
+  const right = canonicalPhone.replace(/\D/g, "");
+  if (!left || !right) return false;
+  return left === right || left.slice(-10) === right.slice(-10);
+}
+
+function stableRecord(value: Record<string, string>) {
+  return JSON.stringify(Object.entries(value)
+    .map(([key, entry]) => [normalized(key), normalized(entry)] as const)
+    .sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function unique<T>(values: T[]) {

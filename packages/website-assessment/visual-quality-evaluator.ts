@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import { z } from "zod";
 import { usageForModel } from "@/packages/site-agent/run-policy";
+import { assertOpenAiStrictJsonSchema } from "@/packages/site-agent/strict-tool-schema";
 import type { VisualQuality, VisualQualityCheckInput } from "./contracts";
 import {
   buildVisualQuality,
@@ -20,6 +21,7 @@ import {
 export type VisualQualityScreenshot = {
   route: string;
   viewport: "desktop" | "mobile";
+  frame: "top" | "middle" | "bottom";
   artifactKey: string;
   sourceUrl?: string;
 };
@@ -45,6 +47,7 @@ const responseCheckSchema = z.object({
   evidence: z.array(z.object({
     route: z.string().startsWith("/"),
     viewport: z.enum(["desktop", "mobile"]),
+    frame: z.enum(["top", "middle", "bottom"]),
     observation: z.string().min(1).max(1_000)
   }).strict()).max(3)
 }).strict();
@@ -63,8 +66,11 @@ export function visualQualityModelIsConfigured() {
 }
 
 export async function evaluateVisualQuality(input: {
-  contactSheet?: Buffer;
-  contactSheetMimeType?: "image/png" | "image/jpeg" | "image/webp";
+  contactSheets: Array<{
+    viewport: "desktop" | "mobile";
+    bytes: Buffer;
+    mimeType: "image/png" | "image/jpeg" | "image/webp";
+  }>;
   screenshots: VisualQualityScreenshot[];
   vertical: string;
   verticalConfidence: number;
@@ -81,8 +87,16 @@ export async function evaluateVisualQuality(input: {
   modelId?: string;
 }): Promise<VisualQuality> {
   const observedAt = input.observedAt ?? new Date().toISOString();
-  const screenshotSetHash = sha256(input.contactSheet ?? Buffer.alloc(0));
-  if (!input.contactSheet?.length || !input.screenshots.length) {
+  const screenshotSetHash = sha256(Buffer.concat([...input.contactSheets]
+    .sort((left, right) => left.viewport.localeCompare(right.viewport))
+    .flatMap((sheet) => [Buffer.from(sheet.viewport), sheet.bytes])));
+  if (
+    !input.contactSheets.length
+    || !input.screenshots.length
+    || !["desktop", "mobile"].every((viewport) =>
+      input.contactSheets.some((sheet) => sheet.viewport === viewport && sheet.bytes.length)
+    )
+  ) {
     return unavailableVisualQuality({
       observedAt,
       screenshotSetHash,
@@ -100,13 +114,15 @@ export async function evaluateVisualQuality(input: {
   }
   const client = input.client ?? configuredClient(apiKey!);
   const available = new Map(input.screenshots.map((screenshot) => [
-    screenshotKey(screenshot.route, screenshot.viewport),
+    screenshotKey(screenshot.route, screenshot.viewport, screenshot.frame),
     screenshot
   ]));
   const availableRoutes = [...new Set(input.screenshots.map((screenshot) => screenshot.route))].sort();
   const availableViewports = [...new Set(input.screenshots.map((screenshot) => screenshot.viewport))].sort();
   const startedAt = Date.now();
   try {
+    const responseJsonSchema = outputJsonSchema(availableRoutes, availableViewports);
+    assertOpenAiStrictJsonSchema(responseJsonSchema, "visual_quality_review");
     const response = await client.create({
       model: modelId,
       store: false,
@@ -124,7 +140,7 @@ export async function evaluateVisualQuality(input: {
                 title: check.title,
                 applicability: check.applicability
               })),
-              screenshotLabels: input.screenshots.map(({ route, viewport }) => ({ route, viewport })),
+              screenshotLabels: input.screenshots.map(({ route, viewport, frame }) => ({ route, viewport, frame })),
               businessContext: {
                 businessName: input.businessName,
                 primaryLocation: input.primaryLocation,
@@ -137,11 +153,11 @@ export async function evaluateVisualQuality(input: {
               deterministicContext: input.deterministicContext
             })
           },
-          {
+          ...input.contactSheets.map((sheet) => ({
             type: "input_image",
-            image_url: `data:${input.contactSheetMimeType ?? "image/png"};base64,${input.contactSheet.toString("base64")}`,
+            image_url: `data:${sheet.mimeType};base64,${sheet.bytes.toString("base64")}`,
             detail: "high"
-          }
+          }))
         ]
       }],
       reasoning: { effort: "medium" },
@@ -151,7 +167,7 @@ export async function evaluateVisualQuality(input: {
           type: "json_schema",
           name: "visual_quality_review",
           strict: true,
-          schema: outputJsonSchema(availableRoutes, availableViewports)
+          schema: responseJsonSchema
         }
       },
       max_output_tokens: maximumOutputTokens
@@ -184,14 +200,15 @@ export async function evaluateVisualQuality(input: {
       const assessed = check.status === "pass" || check.status === "warning" || check.status === "fail";
       if (assessed && !check.evidence.length) throw new Error(`visual_evaluator_missing_citation:${check.id}`);
       const evidence = check.evidence.map((item, index) => {
-        const screenshot = available.get(screenshotKey(item.route, item.viewport));
+        const screenshot = available.get(screenshotKey(item.route, item.viewport, item.frame));
         if (!screenshot) throw new Error(`visual_evaluator_invalid_citation:${check.id}`);
         return visualEvidence({
           id: `${check.id}.screenshot.${index + 1}`,
-          summary: `${item.route} · ${item.viewport}: ${item.observation}`,
+          summary: `${item.route} · ${item.viewport} · ${item.frame}: ${item.observation}`,
           observedAt,
           route: item.route,
           viewport: item.viewport,
+          frame: item.frame,
           artifactKey: screenshot.artifactKey,
           sourceUrl: screenshot.sourceUrl
         });
@@ -211,6 +228,7 @@ export async function evaluateVisualQuality(input: {
             })]
       };
     });
+    assertCompleteEvidenceCoverage(parsed.checks, availableRoutes, availableViewports);
     const modelUsage = usageForModel(modelId, response.usage, Date.now() - startedAt);
     return buildVisualQuality({
       checks,
@@ -274,9 +292,10 @@ function outputJsonSchema(routes: string[], viewports: string[]) {
                 properties: {
                   route: { type: "string", enum: routes },
                   viewport: { type: "string", enum: viewports },
+                  frame: { type: "string", enum: ["top", "middle", "bottom"] },
                   observation: { type: "string" }
                 },
-                required: ["route", "viewport", "observation"]
+                required: ["route", "viewport", "frame", "observation"]
               }
             }
           },
@@ -293,6 +312,21 @@ function assertCompleteCheckSet(ids: string[]) {
   const actual = [...new Set(ids)].sort();
   if (actual.length !== ids.length || actual.join("\n") !== expected.join("\n")) {
     throw new Error("visual_evaluator_incomplete_check_set");
+  }
+}
+
+function assertCompleteEvidenceCoverage(
+  checks: Array<{ evidence: Array<{ route: string; viewport: string }> }>,
+  routes: string[],
+  viewports: string[]
+) {
+  const citedRoutes = new Set(checks.flatMap((check) => check.evidence.map((item) => item.route)));
+  const citedViewports = new Set(checks.flatMap((check) => check.evidence.map((item) => item.viewport)));
+  if (
+    routes.some((route) => !citedRoutes.has(route))
+    || viewports.some((viewport) => !citedViewports.has(viewport))
+  ) {
+    throw new Error("visual_evaluator_incomplete_evidence_coverage");
   }
 }
 
@@ -324,8 +358,8 @@ function hasBothViewports(screenshots: VisualQualityScreenshot[]) {
   return viewports.has("desktop") && viewports.has("mobile");
 }
 
-function screenshotKey(route: string, viewport: string) {
-  return `${route}:${viewport}`;
+function screenshotKey(route: string, viewport: string, frame: string) {
+  return `${route}:${viewport}:${frame}`;
 }
 
 function sha256(value: Buffer) {

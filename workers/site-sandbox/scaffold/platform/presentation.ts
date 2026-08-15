@@ -8,12 +8,19 @@ export function orderedLocationHours(value: Record<string, string> | undefined) 
     return {
       key: `${rawLabel}:${sourceIndex}`,
       label: rawLabel,
-      value: itemValue,
+      value: formatLocalHoursValue(itemValue),
       order,
       endOrder: endOrder >= order ? endOrder : order,
       sourceIndex
     };
   }).sort((left, right) => left.order - right.order || left.sourceIndex - right.sourceIndex);
+}
+
+export function formatLocalHoursValue(value: string) {
+  const normalized = value.normalize("NFKC").replace(/[–—]/g, "-").trim();
+  const match = normalized.match(/^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return value;
+  return `${formatClockTime(match[1]!, match[2]!)}–${formatClockTime(match[3]!, match[4]!)}`;
 }
 
 export function summarizedLocationHours(value: Record<string, string> | undefined) {
@@ -48,6 +55,18 @@ export function formatLocalAddress(location: {
   return [location.street, localityAndPostal].filter(Boolean).join(", ");
 }
 
+export function directionsHrefForLocation(location: {
+  label: string;
+  street?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  country?: string;
+}) {
+  const address = [location.street, location.city, location.region, location.postalCode, location.country].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address || location.label)}`;
+}
+
 export function assertUsCountry(value: string | undefined) {
   if (!value || value.toUpperCase() === "US") return;
   throw new Error(`BusinessAddress.local supports US locations only; received ${value}.`);
@@ -68,4 +87,10 @@ export function isContinuousAvailabilityValue(value: string) {
     return false;
   }
   return /^(?:open\s+)?(?:24\s*hours?(?:\s+(?:a\s+day|daily))?|24\s*\/\s*7)$/i.test(normalized);
+}
+
+function formatClockTime(rawHour: string, minute: string) {
+  const hour = Number(rawHour);
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}${minute === "00" ? "" : `:${minute}`} ${hour < 12 ? "AM" : "PM"}`;
 }

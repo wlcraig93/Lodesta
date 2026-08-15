@@ -12,34 +12,42 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function AdminSitesPage() {
   await requireAdminPageAccess("/admin/sites");
-  const [sites, setups, domains] = await Promise.all([
+  const [sites, domains] = await Promise.all([
     sitePlatformRepository.listSites(),
-    platformOperationsRepository.listWebsiteSetups(),
     platformOperationsRepository.listDomains()
   ]);
-  const rows = await Promise.all(sites.map(async (site) => {
-    const [state, versions, runs] = await Promise.all([
-      sitePlatformRepository.getBusinessState(site.businessId),
-      sitePlatformRepository.listSiteVersions(site.id),
-      sitePlatformRepository.listRecentAgentRuns({ siteId: site.id, limit: 1 })
-    ]);
+  const [states, versions, recentRuns] = await Promise.all([
+    sitePlatformRepository.getBusinessStatesByIds(sites.map((site) => site.businessId)),
+    sitePlatformRepository.listSiteVersionsBySiteIds(sites.map((site) => site.id)),
+    sitePlatformRepository.listRecentAgentRuns({ limit: 500 })
+  ]);
+  const statesByBusinessId = new Map(states.map((state) => [state.businessId, state]));
+  const versionsBySiteId = new Map<string, typeof versions>();
+  for (const version of versions) {
+    const siteVersions = versionsBySiteId.get(version.siteId) ?? [];
+    siteVersions.push(version);
+    versionsBySiteId.set(version.siteId, siteVersions);
+  }
+  const latestRunBySiteId = new Map<string, (typeof recentRuns)[number]>();
+  for (const run of recentRuns) {
+    if (!latestRunBySiteId.has(run.siteId)) latestRunBySiteId.set(run.siteId, run);
+  }
+  const rows = sites.map((site) => {
     return {
       site,
-      state,
-      versions,
-      latestRun: runs[0],
-      abandonedSetup: setups.some((setup) => setup.siteId === site.id && setup.status === "canceled"),
+      state: statesByBusinessId.get(site.businessId),
+      versions: versionsBySiteId.get(site.id) ?? [],
+      latestRun: latestRunBySiteId.get(site.id),
       domainAlert: domains.find((domain) => domain.siteId === site.id && (domain.status === "attention_required" || domain.executionFailureCount >= 3))
     };
-  }));
-  const inventory = rows.map(({ site, state, versions, latestRun, abandonedSetup, domainAlert }) => {
+  });
+  const inventory = rows.map(({ site, state, versions, latestRun, domainAlert }) => {
     const candidateCount = versions.filter((version) => version.status === "candidate").length;
     return {
       site,
       state,
       versions,
       latestRun,
-      abandonedSetup,
       domainAlert,
       candidateCount,
       lifecycle: deriveSiteLifecycle(site, versions, latestRun),
@@ -58,11 +66,11 @@ export default async function AdminSitesPage() {
       <div className="admin-table-scroll">
         <table className="data-table admin-sites-table">
           <thead><tr><th>Business</th><th>Site status</th><th>Ownership</th><th>Latest generation</th><th>Updated</th><th>Actions</th></tr></thead>
-          <tbody>{inventory.map(({ site, state, versions, latestRun, abandonedSetup, domainAlert, candidateCount, lifecycle, ownership, updatedLabel }) => (
+          <tbody>{inventory.map(({ site, state, versions, latestRun, domainAlert, candidateCount, lifecycle, ownership, updatedLabel }) => (
             <tr key={site.id}>
               <td><strong>{state?.identity.name ?? site.slug}</strong><small>{site.slug} · {state?.identity.categories[0] ?? "local business"}</small></td>
               <td><span className={`badge is-${statusTone(lifecycle)}`}>{siteLifecycleLabels[lifecycle]}</span>{domainAlert ? <span className="badge is-attention">Domain alert</span> : null}<small>{site.publishedVersionId ? `Published version ${versions.find((version) => version.id === site.publishedVersionId)?.number ?? "?"}` : "Not published"} · {candidateCount} candidate{candidateCount === 1 ? "" : "s"}</small></td>
-              <td><span className={`badge is-${statusTone(ownership)}`}>{siteOwnershipLabels[ownership]}</span>{abandonedSetup ? <span className="badge is-danger">Abandoned setup</span> : null}<small>{site.ownerUserId ?? "No owner account"}</small></td>
+              <td><span className={`badge is-${statusTone(ownership)}`}>{siteOwnershipLabels[ownership]}</span><small>{site.ownerUserId ?? "No owner account"}</small></td>
               <td>{latestRun ? <><span className={`badge is-${statusTone(latestRun.status)}`}>{latestRun.status}</span><small>{latestRun.kind} · {latestRun.stage}</small></> : <span className="muted">No runs</span>}</td>
               <td>{updatedLabel}</td>
               <td>
@@ -77,7 +85,7 @@ export default async function AdminSitesPage() {
         </table>
       </div>
       <div className="admin-mobile-inventory">
-        {inventory.map(({ site, state, versions, latestRun, abandonedSetup, domainAlert, candidateCount, lifecycle, ownership, updatedLabel }) => (
+        {inventory.map(({ site, state, versions, latestRun, domainAlert, candidateCount, lifecycle, ownership, updatedLabel }) => (
           <article key={site.id}>
             <div className="admin-mobile-inventory-heading">
               <div><strong>{state?.identity.name ?? site.slug}</strong><span>{site.slug} · {state?.identity.categories[0] ?? "local business"}</span></div>
@@ -91,7 +99,7 @@ export default async function AdminSitesPage() {
               <summary>Details and actions</summary>
               <dl>
                 <div><dt>Publication</dt><dd>{site.publishedVersionId ? `Version ${versions.find((version) => version.id === site.publishedVersionId)?.number ?? "?"} live` : "Not published"} · {candidateCount} candidate{candidateCount === 1 ? "" : "s"}{domainAlert ? " · Domain alert" : ""}</dd></div>
-                <div><dt>Ownership</dt><dd>{siteOwnershipLabels[ownership]}{abandonedSetup ? " · Abandoned setup" : ""}</dd></div>
+                <div><dt>Ownership</dt><dd>{siteOwnershipLabels[ownership]}</dd></div>
                 <div><dt>Generation</dt><dd>{latestRun ? `${latestRun.status} · ${latestRun.kind} · ${latestRun.stage}` : "No runs"}</dd></div>
               </dl>
               <div className="button-row"><Link className="button secondary" href={`/workspace/${site.slug}`}>Workspace</Link>{site.publishedVersionId ? <Link className="button secondary" href={`/sites/${site.slug}`}>Live site</Link> : null}</div>

@@ -15,7 +15,7 @@ import { triggerRecoveryWatchdog } from "../workers/recovery-watchdog/src/index"
 
 async function main() {
   assert.equal(automaticRecoveryLimit, 4, "automatic recovery batch limit drifted");
-  assert.equal(siteAgentRecoveryStaleAfterMs, 45 * 60_000, "production stale threshold drifted");
+  assert.equal(siteAgentRecoveryStaleAfterMs, 5 * 60_000, "production stale threshold drifted");
   assert.equal(shouldScheduleStartupRecovery({
     NEXT_RUNTIME: "nodejs",
     NODE_ENV: "production",
@@ -144,6 +144,28 @@ async function main() {
       id: record.id,
       target: { kind: "public_url", sourceKey: record.sourceKey, sourceUrl: record.sourceUrl },
       siteUnderstanding: { services: [], vertical: "general_local", verticalConfidence: 0.35, verticalEvidence: [], customerJourneys: [] },
+      siteInventory: {
+        source: "complete_crawl",
+        coverage: "complete",
+        discoveredUrls: 1,
+        eligiblePages: 1,
+        assessedPages: 1,
+        failedPages: 0,
+        contentDepth: { substantivePages: 1, thinPages: 0, unclassifiedPages: 0 },
+        pageTypes: [
+          { id: "home", label: "Homepage", count: 1 },
+          { id: "service", label: "Service pages", count: 0 },
+          { id: "location", label: "Location pages", count: 0 },
+          { id: "about", label: "About pages", count: 0 },
+          { id: "contact", label: "Contact pages", count: 0 },
+          { id: "faq", label: "FAQ pages", count: 0 },
+          { id: "proof", label: "Proof and case studies", count: 0 },
+          { id: "comparison", label: "Comparison pages", count: 0 },
+          { id: "editorial", label: "Articles and resources", count: 0 },
+          { id: "legal", label: "Legal pages", count: 0 },
+          { id: "other", label: "Other pages", count: 0 }
+        ]
+      },
       criteria: [],
       agentReadinessChecks: [],
       inputHashSource: { fixture: record.id }
@@ -157,14 +179,15 @@ async function main() {
   const workflow = readFileSync("packages/site-platform/workflow.ts", "utf8");
   const maintenance = readFileSync("app/api/site-agent/maintenance/route.ts", "utf8");
   const recovery = readFileSync("lib/recovery-watchdog.ts", "utf8");
-  assert(runner.includes("localRecoveryStaleAfterMs = 15 * 60_000"), "local worker lost its explicit fifteen-minute threshold");
+  assert(runner.includes("localRecoveryStaleAfterMs = 5 * 60_000"), "local worker lost its explicit five-minute threshold");
   assert(workflow.includes("input.staleAfterMs ?? siteAgentRecoveryStaleAfterMs"), "workflow default does not use the conservative threshold");
   assert(maintenance.includes("body.trim() !== \"\"") && maintenance.includes("status: 202"), "machine maintenance path is not strict and asynchronous");
-  assert(recovery.includes("processNextWebsiteSetupAndRun") && recovery.includes("websiteSetup"), "automatic recovery does not recover queued website setups.");
+  assert(!recovery.includes("WebsiteSetup") && recovery.includes("processRecoverableRuns"), "automatic recovery retains the setup queue or omits authoring recovery.");
+  assert(workflow.includes("touchAgentRunHeartbeat") && workflow.includes("60_000"), "Long-running authoring work does not maintain a durable heartbeat.");
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
-    checks: ["startup_guard", "machine_token", "scheduled_worker", "website_setup_recovery", "prospect_batch", "stale_thresholds"]
+    checks: ["startup_guard", "machine_token", "scheduled_worker", "authoring_recovery", "prospect_batch", "stale_thresholds"]
   }, null, 2)}\n`);
 }
 

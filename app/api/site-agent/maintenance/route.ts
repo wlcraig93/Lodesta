@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/security";
 import { hasBearerToken, hasValidAdminToken, hasValidRecoveryWatchdogToken } from "@/lib/auth-policy";
 import { processAutomaticRecovery } from "@/lib/recovery-watchdog";
-import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
+import { siteAgentRecoveryStaleAfterMs, siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 
 export const runtime = "nodejs";
 
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       }
     });
     return NextResponse.json(
-      { ok: true, scheduled: true, profile: { limit: 4, staleAfterMs: 45 * 60_000 } },
+      { ok: true, scheduled: true, profile: { limit: 4, staleAfterMs: siteAgentRecoveryStaleAfterMs } },
       { status: 202, headers: { "cache-control": "private, no-store" } }
     );
   }

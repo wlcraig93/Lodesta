@@ -5,6 +5,7 @@ const severitySchema = z.enum(["critical", "major", "minor", "advisory"]);
 const findingSchema = z.object({
   id: z.string(),
   dimension: z.string(),
+  controlOwner: z.enum(["site_author", "lodesta_platform", "source_research", "shared"]),
   severity: severitySchema,
   status: z.enum(["fail", "warning"]),
   title: z.string(),
@@ -16,8 +17,33 @@ const findingSchema = z.object({
 const strengthSchema = z.object({
   id: z.string(),
   dimension: z.string(),
+  controlOwner: z.enum(["site_author", "lodesta_platform", "source_research", "shared"]),
   title: z.string(),
   evidence: z.array(z.string())
+}).strict();
+const advisoryCoverageSchema = z.object({
+  value: z.number(),
+  assessedChecks: z.number().int().nonnegative(),
+  applicableChecks: z.number().int().nonnegative(),
+  limitations: z.array(z.string())
+}).strict();
+const siteInventorySchema = z.object({
+  source: z.enum(["complete_crawl", "retained_artifact"]),
+  coverage: z.enum(["complete", "restricted", "incomplete", "retained_artifact"]),
+  discoveredUrls: z.number().int().nonnegative(),
+  eligiblePages: z.number().int().nonnegative(),
+  assessedPages: z.number().int().nonnegative(),
+  failedPages: z.number().int().nonnegative(),
+  contentDepth: z.object({
+    substantivePages: z.number().int().nonnegative(),
+    thinPages: z.number().int().nonnegative(),
+    unclassifiedPages: z.number().int().nonnegative()
+  }).strict(),
+  pageTypes: z.array(z.object({
+    id: z.enum(["home", "service", "location", "about", "contact", "faq", "proof", "comparison", "editorial", "legal", "other"]),
+    label: z.string(),
+    count: z.number().int().nonnegative()
+  }).strict()).length(11)
 }).strict();
 const evidenceCoverageSchema = z.object({
   value: z.number(),
@@ -33,25 +59,57 @@ const siteUnderstandingSchema = z.object({
 }).strict();
 
 export const publicProspectReportResultSchema = z.object({
-  schemaVersion: z.literal(1),
-  kind: z.literal("prospect-presence-report"),
+  schemaVersion: z.literal(2),
+  kind: z.literal("prospect-website-health-report"),
   generatedAt: z.string(),
   websiteKind: websiteKindSchema,
   sourceUrl: z.string().optional(),
   sourceHost: z.string().optional(),
   assessmentId: z.string().optional(),
   coverage: z.object({
-    value: z.number(),
+    siteEvidence: z.number(),
+    pipelineCompleteness: z.number(),
     assessedCriteria: z.number(),
     applicableCriteria: z.number(),
+    provisional: z.boolean(),
     limitations: z.array(z.string())
   }).strict().optional(),
+  snapshot: z.object({
+    verifiedChecks: z.number().int().nonnegative(),
+    opportunityChecks: z.number().int().nonnegative(),
+    unverifiedChecks: z.number().int().nonnegative(),
+    assessedChecks: z.number().int().nonnegative(),
+    applicableChecks: z.number().int().nonnegative()
+  }).strict().optional(),
+  methodology: z.object({
+    producerIdentity: z.string(),
+    registryIdentity: z.string(),
+    scannerIdentity: z.string(),
+    routeSelectionIdentity: z.string()
+  }).strict().optional(),
+  grade: z.object({
+    withheld: z.literal(true),
+    note: z.string()
+  }).strict().optional(),
+  dimensions: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    state: z.enum(["scored", "not_yet_scored", "insufficient_evidence", "not_applicable"]),
+    reviewMode: z.enum(["measured", "advisory"]),
+    siteEvidence: z.number(),
+    pipelineCompleteness: z.number(),
+    verifiedChecks: z.number().int().nonnegative(),
+    opportunityChecks: z.number().int().nonnegative(),
+    unverifiedChecks: z.number().int().nonnegative(),
+    notApplicableChecks: z.number().int().nonnegative()
+  }).strict()).optional(),
+  siteInventory: siteInventorySchema.optional(),
   siteUnderstanding: siteUnderstandingSchema,
   whatsWorking: z.array(strengthSchema),
   findings: z.array(findingSchema),
   agentReadiness: z.object({
     methodologyIdentity: z.string(),
-    coverage: evidenceCoverageSchema,
+    coverage: advisoryCoverageSchema,
     verified: z.array(z.object({
       id: z.string(),
       group: z.string(),
@@ -66,7 +124,7 @@ export const publicProspectReportResultSchema = z.object({
   }).strict().optional(),
   visualQuality: z.object({
     methodologyIdentity: z.string(),
-    coverage: evidenceCoverageSchema,
+    coverage: advisoryCoverageSchema,
     strengths: z.array(z.object({
       id: z.string(),
       group: z.string(),

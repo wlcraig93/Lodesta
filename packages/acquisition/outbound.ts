@@ -26,7 +26,6 @@ export type OutboundComplianceStatus = {
 export type NewOutboundProspectInput = {
   id?: string;
   prospectId: string;
-  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
@@ -124,7 +123,6 @@ export function newOutboundProspect(input: NewOutboundProspectInput): OutboundPr
   return {
     id: input.id ?? crypto.randomUUID(),
     prospectId: input.prospectId,
-    selectionObservationId: input.selectionObservationId,
     campaignId: input.campaignId,
     siteId: input.siteId,
     reportId: input.reportId,

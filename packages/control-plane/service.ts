@@ -3,7 +3,6 @@ import { createPublicBuildInput, sha256, stableJson } from "@/packages/business-
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import {
-  operatorQueueItemSchema,
   businessStateSchema,
   controlPlaneChangeRequestSchema,
   siteAgentSessionSchema,
@@ -37,8 +36,10 @@ export class ControlPlaneService {
       expectedBusinessRevision: existingState.revision, expectedIntentRevision: existingIntent.revision,
       requestedBy: input.requestedBy, requestedAt: now
     });
-    await this.repository.saveControlPlaneChangeRequest(request);
-    if (policy.reviewRequired) return { request, applied: false as const };
+    if (policy.reviewRequired) {
+      await this.repository.saveControlPlaneChangeRequest(request);
+      return { request, applied: false as const };
+    }
     return this.applyRequest(request, input.requestedBy);
   }
 
@@ -53,7 +54,6 @@ export class ControlPlaneService {
       return { request: rejected, applied: false as const };
     }
     const approved = controlPlaneChangeRequestSchema.parse({ ...current, status: "approved", decidedBy: input.decidedBy, decidedAt });
-    await this.repository.saveControlPlaneChangeRequest(approved);
     return this.applyRequest(approved, input.decidedBy);
   }
 
@@ -68,20 +68,46 @@ export class ControlPlaneService {
       throw new Error("stale_control_plane_change");
     }
 
-    let authorityApplied = false;
     try {
+      const applied = controlPlaneChangeRequestSchema.parse({
+        ...request,
+        status: "applied",
+        decidedBy: request.decidedBy ?? actorId,
+        decidedAt: request.decidedAt ?? new Date().toISOString()
+      });
       if (request.payload.kind === "request_site_edit") {
-        const session = await this.workflow.getOrCreateSession({ siteId: site.id, principal: { kind: "owner", id: actorId } });
-        const { run } = await this.workflow.enqueueEdit({
-          session, instruction: request.payload.instruction,
-          selection: request.payload.selection, requestedBy: actorId
+        const currentInput = site.currentPublicBuildInputId
+          ? await this.repository.getPublicBuildInput(site.currentPublicBuildInputId)
+          : undefined;
+        if (!currentInput) throw new Error("Current public build input was not found.");
+        const session = await this.workflow.prepareSession({
+          siteId: site.id,
+          principal: { kind: "owner", id: request.requestedBy },
+          buildInput: currentInput
         });
-        const applied = controlPlaneChangeRequestSchema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
-        await this.repository.saveControlPlaneChangeRequest(applied);
-        return { request: applied, applied: true as const, run };
+        const prepared = await this.workflow.prepareRunDocuments({
+          session,
+          buildInput: currentInput,
+          kind: site.currentWorkspaceRevisionId ? "edit" : "initial_build",
+          instruction: request.payload.instruction,
+          selection: request.payload.selection,
+          requestedBy: request.requestedBy,
+          request: { kind: "owner_instruction" },
+          origin: "owner_request"
+        });
+        const committed = await this.repository.applyPreparedAuthorityChange({
+          actorId,
+          request: applied,
+          session,
+          run: prepared.run,
+          message: prepared.message
+        });
+        return { request: committed.request, applied: true as const, run: committed.run! };
       }
 
-      let ownerSnapshot = await this.ownerInputSnapshot(request);
+      const ownerSnapshot = request.targetAuthority === "business_state"
+        ? await this.ownerInputSnapshot(request)
+        : undefined;
       let nextState = state;
       let nextIntent = intent;
       if (request.targetAuthority === "business_state") {
@@ -89,81 +115,72 @@ export class ControlPlaneService {
           if (request.payload.revision.businessId !== state.businessId || request.payload.asset.assetId !== request.payload.revision.assetId || request.payload.asset.revisionId !== request.payload.revision.id) {
             throw new Error("Registered asset does not belong to this business or revision.");
           }
-          await this.repository.saveAssetRevision(request.payload.revision);
         }
+        if (!ownerSnapshot) throw new Error("Owner source snapshot was not prepared.");
         nextState = mutateBusinessState(state, request.payload, ownerSnapshot);
-        await this.repository.saveSourceSnapshot(ownerSnapshot);
-        await this.repository.saveBusinessState(nextState);
-        await this.repository.markUnpublishedVersionsStale(site.id);
-        authorityApplied = true;
       } else if (request.targetAuthority === "site_intent" && request.payload.kind === "update_site_intent") {
-        nextIntent = mutateSiteIntent(intent, request.payload.patch);
-        await this.repository.saveSiteIntent(nextIntent);
-        await this.repository.markUnpublishedVersionsStale(site.id);
-        authorityApplied = true;
+        nextIntent = mutateSiteIntent(intent, request.payload.patch, true);
       } else if (request.targetAuthority === "site_intent" && request.payload.kind === "update_agent_access_policy") {
-        nextIntent = mutateSiteIntent(intent, { agentAccessPolicy: request.payload.policy });
-        await this.repository.saveSiteIntent(nextIntent);
-        authorityApplied = true;
-        const applied = controlPlaneChangeRequestSchema.parse({
-          ...request,
-          status: "applied",
-          decidedBy: request.decidedBy ?? actorId,
-          decidedAt: request.decidedAt ?? new Date().toISOString()
+        nextIntent = mutateSiteIntent(intent, { agentAccessPolicy: request.payload.policy }, false);
+        const committed = await this.repository.applyPreparedAuthorityChange({
+          actorId,
+          request: applied,
+          siteIntent: nextIntent
         });
-        await this.repository.saveControlPlaneChangeRequest(applied);
-        return { request: applied, applied: true as const, policyOnly: true as const };
+        return { request: committed.request, applied: true as const, policyOnly: true as const };
       }
 
       const currentInput = site.currentPublicBuildInputId ? await this.repository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
       if (!currentInput) throw new Error("Current public build input was not found.");
       const buildInput = createPublicBuildInput({
         id: id("input"), state: nextState, intent: nextIntent, forms: currentInput.forms,
-        domainContext: currentInput.domainContext,
-        sourceSnapshotIds: [...currentInput.sourceSnapshotIds, ...(request.targetAuthority === "business_state" ? [ownerSnapshot.id] : [])],
+        sourceSnapshotIds: [
+          ...currentInput.sourceSnapshotIds,
+          ...(ownerSnapshot ? [ownerSnapshot.id] : [])
+        ],
         runtimeSeriesId: currentInput.capabilityConfiguration.trustedRuntimeSeries
       });
-      await this.repository.savePublicBuildInput(buildInput);
-      await this.repository.setCurrentPublicBuildInput(site.id, buildInput.id);
-      let session = await this.workflow.getOrCreateSession({ siteId: site.id, principal: { kind: "owner", id: actorId }, buildInput });
+      let session = await this.workflow.prepareSession({
+        siteId: site.id,
+        principal: { kind: "owner", id: request.requestedBy },
+        buildInput
+      });
       session = siteAgentSessionSchema.parse({ ...session, publicBuildInputId: buildInput.id, updatedAt: new Date().toISOString() });
-      await this.repository.saveAgentSession(session);
       const identityCorrected = request.payload.kind === "confirm_identity"
         && normalizedText(request.payload.name) !== normalizedText(state.identity.name);
       const kind = request.impact === "deterministic" && !identityCorrected ? "rebase" as const : "edit" as const;
-      const run = await this.workflow.enqueueRun({
-        session, kind, instruction: instructionFor(request.payload), requestedBy: actorId,
-        origin: "control_plane", deferBehindActive: true,
-        publishAfterSuccess: false
+      const prepared = await this.workflow.prepareRunDocuments({
+        session,
+        buildInput,
+        kind,
+        instruction: instructionFor(request.payload),
+        requestedBy: request.requestedBy,
+        request: { kind: "authority_refresh", changeRequestIds: [request.id] },
+        origin: "control_plane", deferBehindActive: true
       });
-      const applied = controlPlaneChangeRequestSchema.parse({ ...request, status: "applied", decidedBy: request.decidedBy ?? actorId, decidedAt: request.decidedAt ?? new Date().toISOString() });
-      await this.repository.saveControlPlaneChangeRequest(applied);
-      return {
+      const committed = await this.repository.applyPreparedAuthorityChange({
+        actorId,
         request: applied,
+        sourceSnapshot: ownerSnapshot,
+        assetRevision: request.payload.kind === "register_asset" ? request.payload.revision : undefined,
+        businessState: nextState !== state ? nextState : undefined,
+        siteIntent: nextIntent !== intent ? nextIntent : undefined,
+        publicBuildInput: buildInput,
+        session,
+        run: prepared.run,
+        message: prepared.message
+      });
+      return {
+        request: committed.request,
         applied: true as const,
-        run,
+        run: committed.run!,
         autoPublish: false,
-        deferred: Boolean(run.deferredUntilRunId)
+        deferred: Boolean(committed.run?.deferredUntilRunId)
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const failed = controlPlaneChangeRequestSchema.parse({ ...request, status: "failed", failureReason: message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]` });
       await this.repository.saveControlPlaneChangeRequest(failed);
-      if (authorityApplied && request.payload.kind !== "update_agent_access_policy") {
-        const now = new Date().toISOString();
-        await this.repository.saveOperatorQueueItem(operatorQueueItemSchema.parse({
-          schemaVersion: "operator-queue-item",
-          id: id("operator"), siteId: request.siteId, reason: "authority_publish_failure", severity: "urgent", status: "open",
-          findings: [{
-            requestId: request.id,
-            targetAuthority: request.targetAuthority,
-            message: "Confirmed canonical state was retained, but its replacement site version was not queued. Reconcile before publishing another candidate.",
-            failure: error instanceof Error ? error.message : String(error)
-          }],
-          createdAt: now,
-          updatedAt: now
-        }));
-      }
       throw error;
     }
   }
@@ -246,12 +263,10 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
     });
     next.offerings.push({
       id: id("offering"),
-      customName: name,
       name,
+      description: payload.description,
       status: "confirmed",
       visibility: "public",
-      pageMode: payload.pageMode,
-      featured: false,
       sourceFactIds: [factId],
       confirmedAt: now
     });
@@ -260,7 +275,6 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
     if (!offering) throw new Error("Offering was not found.");
     offering.status = payload.enabled ? "confirmed" : "inactive";
     offering.visibility = payload.enabled ? "public" : "hidden";
-    offering.pageMode = payload.enabled ? payload.pageMode : "none";
     offering.confirmedAt = payload.enabled ? now : undefined;
   } else if (payload.kind === "set_proof") {
     const proof = next.proof.find((item) => item.id === payload.proofId);
@@ -293,6 +307,7 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
     throw new Error("Change payload does not target business state.");
   }
   next.revision = state.revision + 1;
+  next.ownerOperationalRevision = state.ownerOperationalRevision + 1;
   next.updatedAt = now;
   const { stateHash: _oldHash, ...withoutHash } = next;
   next.stateHash = sha256(stableJson(withoutHash));
@@ -316,8 +331,14 @@ function upsertFact(
   }
 }
 
-function mutateSiteIntent(intent: SiteIntent, patch: Partial<SiteIntent>) {
-  const next = { ...intent, ...patch, revision: intent.revision + 1, updatedAt: new Date().toISOString() };
+function mutateSiteIntent(intent: SiteIntent, patch: Partial<SiteIntent>, advanceOwnerAuthority: boolean) {
+  const next = {
+    ...intent,
+    ...patch,
+    revision: intent.revision + 1,
+    ownerIntentRevision: intent.ownerIntentRevision + (advanceOwnerAuthority ? 1 : 0),
+    updatedAt: new Date().toISOString()
+  };
   const { intentHash: _oldHash, ...withoutHash } = next;
   next.intentHash = sha256(stableJson(withoutHash));
   return siteIntentSchema.parse(next);
@@ -329,8 +350,8 @@ function instructionFor(payload: ControlPlaneChangePayload) {
     case "confirm_identity": return "Use BusinessName for every visible identity mention and update the website to the owner-confirmed business name.";
     case "update_contact": return "Recompile the existing design against the confirmed contact update.";
     case "update_hours": return "Recompile the existing design against the confirmed hours update.";
-    case "add_offering": return `Add the owner-confirmed ${payload.name} service throughout the site and create the requested page architecture.`;
-    case "set_offering": return `${payload.enabled ? "Add or update" : "Remove"} the selected service throughout the site and page architecture.`;
+    case "add_offering": return `Reflect the owner-confirmed ${payload.name} service wherever it is useful. Decide whether any route change improves the site; service confirmation alone does not require a page.`;
+    case "set_offering": return `${payload.enabled ? "Reflect" : "Remove"} the selected service wherever relevant. Preserve or change routes based on the site's information architecture, not the offering record alone.`;
     case "set_proof": return `${payload.enabled ? "Add" : "Remove"} the selected verified proof item without inventing claims.`;
     case "set_asset_active": return `${payload.active ? "Incorporate" : "Remove"} the selected asset while preserving the site's visual quality.`;
     case "register_asset": return "Incorporate the newly uploaded owner asset while preserving the site's visual quality.";

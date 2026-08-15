@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { DomUtils, parseDocument } from "htmlparser2";
-import { agentAuthoredArtifactIdentity } from "@/packages/site-contracts/platform-manifest";
+import {
+  agentAuthoredArtifactIdentity,
+  siteSandboxApiIdentity,
+  siteSandboxDurableObjectIdentity,
+  siteSandboxStorageIdentity
+} from "@/packages/site-contracts/platform-manifest";
 
 export const agentAuthoredRouteSchema = z.object({
   path: z.string().startsWith("/").max(180),
@@ -13,19 +18,22 @@ export const agentAuthoredArtifactSchema = z.object({
   kind: z.literal("agent-authored-artifact"),
   compilerManifest: z.object({
     kind: z.literal("site-sandbox-manifest"),
+    apiIdentity: z.literal(siteSandboxApiIdentity),
+    storageIdentity: z.literal(siteSandboxStorageIdentity),
+    durableObjectIdentity: z.literal(siteSandboxDurableObjectIdentity),
     artifactContractIdentity: z.literal(agentAuthoredArtifactIdentity),
     toolchainIdentity: z.string().min(1).max(180),
     sourcePolicyIdentity: z.string().min(1).max(180)
   }).strict(),
   siteName: z.string().min(1).max(200),
   sharedCss: z.string().min(1).max(200_000),
-  routes: z.array(agentAuthoredRouteSchema).min(1).max(40),
+  routes: z.array(agentAuthoredRouteSchema).min(1),
   capabilityBindings: z.array(z.object({
     id: z.string().min(1).max(160),
     kind: z.enum(["form", "analytics", "map", "gallery", "disclosure"]),
     route: z.string().startsWith("/"),
     config: z.record(z.string(), z.unknown())
-  }).strict()).max(200)
+  }).strict())
 }).strict().superRefine((artifact, context) => {
   const paths = new Set<string>();
   for (const route of artifact.routes) {

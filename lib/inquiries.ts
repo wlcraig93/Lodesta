@@ -42,12 +42,10 @@ export type PublicInquiry = Omit<Inquiry, "aiEnrichment"> & {
   aiEnrichment?: Inquiry["aiEnrichment"];
 };
 
-const nameFieldPattern = /\b(name|full_name|fullname|first_name|firstname|last_name|lastname|your_name|contact_name)\b/i;
-
 export function extractInquiryContact(form: InquiryFormDefinition, payload: Record<string, string>): ExtractedInquiryContact {
-  const emailFields = form.fields.filter((field) => field.type === "email" && payload[field.id]);
-  const phoneFields = form.fields.filter((field) => field.type === "phone" && payload[field.id]);
-  const nameFields = form.fields.filter((field) => nameFieldPattern.test(`${field.id} ${field.label}`) && payload[field.id]);
+  const emailFields = form.fields.filter((field) => field.role === "contact_email" && payload[field.id]);
+  const phoneFields = form.fields.filter((field) => field.role === "contact_phone" && payload[field.id]);
+  const nameFields = form.fields.filter((field) => field.role === "contact_name" && payload[field.id]);
   const notes: string[] = [];
 
   if (emailFields.length > 1) notes.push("Multiple email fields were present.");
@@ -77,9 +75,7 @@ export function extractInquiryContact(form: InquiryFormDefinition, payload: Reco
 }
 
 export function inquiryMessageText(form: InquiryFormDefinition, payload: Record<string, string>) {
-  const messageField =
-    form.fields.find((field) => field.type === "textarea" && payload[field.id]) ??
-    form.fields.find((field) => /message|comment|question|details|description|request/i.test(`${field.id} ${field.label}`) && payload[field.id]);
+  const messageField = form.fields.find((field) => field.role === "message" && payload[field.id]);
   return messageField ? payload[messageField.id] : undefined;
 }
 

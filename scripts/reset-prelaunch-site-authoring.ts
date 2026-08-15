@@ -5,9 +5,28 @@ import { dirname, resolve } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { sha256, stableJson } from "../packages/business-data";
-import { configuredSiteSandboxClient, isConfirmedSandboxAbsent } from "../packages/site-sandbox";
+import { siteSandboxDeploymentSchema } from "../packages/site-contracts";
+import { configuredSiteSandboxClientForDeployment, isConfirmedSandboxAbsent } from "../packages/site-sandbox";
 
 const reportPath = resolve(process.cwd(), ".data/maintenance/site-authoring-reset.json");
+const removedPrelaunchTables = [
+  "source_snapshot_chunks",
+  "source_snapshot_objects",
+  "source_snapshot_pages",
+  "source_snapshot_resources",
+  "site_version_source_coverage",
+  "site_version_redirects",
+  "vertical_demand_events"
+] as const;
+const removedPrelaunchTableKeys: Record<(typeof removedPrelaunchTables)[number], string> = {
+  source_snapshot_objects: "id",
+  source_snapshot_chunks: "id",
+  source_snapshot_resources: "id",
+  source_snapshot_pages: "id",
+  site_version_source_coverage: "version_id",
+  site_version_redirects: "id",
+  vertical_demand_events: "id"
+};
 const options = parseArgs(process.argv.slice(2));
 const client = getSupabaseAdminClient();
 
@@ -36,10 +55,10 @@ if (!options.apply) {
   if (fresh.activeRuns.length) {
     throw new Error(`Generated-site reset requires a drained platform; ${fresh.activeRuns.length} run(s) remain queued or running.`);
   }
-  await destroySandboxes(fresh.sessions);
+  await destroySandboxes(client, fresh.sessions);
   await resetGeneratedSiteRows(client);
   const post = await createReport(client);
-  if (post.counts.sites || post.counts.versions || post.counts.sessions || post.counts.runs || post.counts.setups) {
+  if (Object.values(post.counts).some((count) => count !== 0)) {
     throw new Error(`Generated-site reset was incomplete: ${JSON.stringify(post.counts)}.`);
   }
   process.stdout.write(`${JSON.stringify({
@@ -67,12 +86,32 @@ type ResetReport = {
   sessions: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
   activeRuns: Array<Record<string, unknown>>;
-  setups: Array<Record<string, unknown>>;
+  continuationHeads: Array<Record<string, unknown>>;
+  continuationSegments: Array<Record<string, unknown>>;
+  bootstrapRequests: Array<Record<string, unknown>>;
+  siteAssessments: Array<Record<string, unknown>>;
+  siteAssessmentJobs: Array<Record<string, unknown>>;
+  extendedTables: Record<(typeof removedPrelaunchTables)[number], Array<Record<string, unknown>>>;
 };
 
 async function createReport(database: SupabaseClient): Promise<ResetReport> {
-  const [sites, versions, artifacts, workspaces, assets, snapshots, sessions, runs, setups] = await Promise.all([
-    selectAll(database, "sites", "id,slug,business_id,owner_user_id,status,published_version_id,current_workspace_revision_id,current_public_build_input_id"),
+  const [
+    sites,
+    versions,
+    artifacts,
+    workspaces,
+    assets,
+    snapshots,
+    sessions,
+    runs,
+    continuationHeads,
+    continuationSegments,
+    bootstrapRequests,
+    assessments,
+    assessmentJobs,
+    ...extendedTableRows
+  ] = await Promise.all([
+    selectAll(database, "sites", "id,slug,business_id,owner_user_id,source_url,status,published_version_id,current_workspace_revision_id,current_public_build_input_id"),
     selectAll(database, "site_versions", "id,site_id,status,schema_version,artifact_id,workspace_revision_id,public_build_input_id"),
     selectAll(database, "site_build_artifacts", "id,site_id,toolchain_version,sandbox_image_digest,storage_prefix"),
     selectAll(database, "site_workspace_revisions", "id,site_id,source_archive_key,source_hash"),
@@ -81,10 +120,22 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
       "id,asset_id,business_id,storage_path,rights_status"
     ]),
     selectAll(database, "source_snapshots", "id,business_id,source_type,content_hash"),
-    selectAll(database, "site_agent_sessions", "id,site_id,status,sandbox_id"),
+    selectAll(database, "site_agent_sessions", "id,site_id,status,sandbox_id,sandbox_deployment_id"),
     selectAll(database, "site_agent_runs", "id,site_id,session_id,status,kind"),
-    selectAll(database, "website_setups", "id,owner_user_id,status,site_id,session_id,run_id")
+    selectAll(database, "site_agent_continuation_heads", "run_id,status,latest_sequence,purge_after"),
+    selectAll(database, "site_agent_continuation_segments", "id,run_id,generation,sequence,blob_ref"),
+    selectAll(database, "site_authoring_bootstrap_requests", "owner_user_id,site_id,run_id,created_at"),
+    selectAll(database, "website_assessments", "id,target_kind,source_key,site_id,artifact_id,version_id"),
+    selectAll(database, "website_assessment_jobs", "id,assessment_id,status"),
+    ...removedPrelaunchTables.map((table) => selectOptionalTable(database, table))
   ]);
+  const extendedTables = Object.fromEntries(removedPrelaunchTables.map((table, index) => [
+    table,
+    sortRows(extendedTableRows[index] ?? [])
+  ])) as ResetReport["extendedTables"];
+  const siteAssessments = assessments.filter((row) => typeof row.site_id === "string");
+  const siteAssessmentIds = new Set(siteAssessments.map((row) => row.id));
+  const siteAssessmentJobs = assessmentJobs.filter((row) => siteAssessmentIds.has(row.assessment_id));
   const canonical = {
     schemaVersion: 1 as const,
     kind: "prelaunch-site-authoring-reset" as const,
@@ -97,7 +148,12 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
       snapshots: snapshots.length,
       sessions: sessions.length,
       runs: runs.length,
-      setups: setups.length
+      continuationHeads: continuationHeads.length,
+      continuationSegments: continuationSegments.length,
+      bootstrapRequests: bootstrapRequests.length,
+      siteAssessments: siteAssessments.length,
+      siteAssessmentJobs: siteAssessmentJobs.length,
+      ...Object.fromEntries(removedPrelaunchTables.map((table) => [table, extendedTables[table].length]))
     },
     sites: sortRows(sites),
     versions: sortRows(versions),
@@ -108,7 +164,12 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     sessions: sortRows(sessions),
     runs: sortRows(runs),
     activeRuns: sortRows(runs.filter((row) => row.status === "queued" || row.status === "running")),
-    setups: sortRows(setups)
+    continuationHeads: sortRows(continuationHeads),
+    continuationSegments: sortRows(continuationSegments),
+    bootstrapRequests: sortRows(bootstrapRequests),
+    siteAssessments: sortRows(siteAssessments),
+    siteAssessmentJobs: sortRows(siteAssessmentJobs),
+    extendedTables
   };
   return {
     ...canonical,
@@ -149,14 +210,26 @@ async function assertMaintenanceLease(database: SupabaseClient) {
   }
 }
 
-async function destroySandboxes(sessions: Array<Record<string, unknown>>) {
+async function destroySandboxes(database: SupabaseClient, sessions: Array<Record<string, unknown>>) {
   const retained = sessions.filter((session) => typeof session.sandbox_id === "string" && session.sandbox_id.length > 0);
   if (!retained.length) return;
-  const sandbox = configuredSiteSandboxClient();
+  const clients = new Map<string, ReturnType<typeof configuredSiteSandboxClientForDeployment>>();
   for (const session of retained) {
-    if (typeof session.id !== "string") throw new Error("Cutover report contains an invalid sandbox session ID.");
+    const sandboxId = typeof session.sandbox_id === "string" ? session.sandbox_id : undefined;
+    const deploymentId = typeof session.sandbox_deployment_id === "string" ? session.sandbox_deployment_id : undefined;
+    if (!sandboxId || !deploymentId) throw new Error("Cutover report contains a live sandbox without immutable deployment provenance.");
+    let sandbox = clients.get(deploymentId);
+    if (!sandbox) {
+      const { data, error } = await database.from("site_sandbox_deployments")
+        .select("deployment")
+        .eq("id", deploymentId)
+        .single();
+      if (error) throw new Error(`Load sandbox deployment ${deploymentId}: ${error.message}`);
+      sandbox = configuredSiteSandboxClientForDeployment(siteSandboxDeploymentSchema.parse(data?.deployment));
+      clients.set(deploymentId, sandbox);
+    }
     try {
-      await sandbox.destroy(session.id);
+      await sandbox.destroy(sandboxId);
     } catch (error) {
       if (!isConfirmedSandboxAbsent(error)) throw error;
     }
@@ -173,17 +246,10 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
   }, "id");
   await updateAll(database, "site_versions", { replaced_version_id: null }, "id");
   await updateAll(database, "site_workspace_revisions", { parent_revision_id: null }, "id");
+  await deleteSiteAssessments(database);
+  for (const table of removedPrelaunchTables) await deleteOptionalTable(database, table);
 
   for (const [table, filterColumn] of [
-    ["website_setups", "id"],
-    ["external_authoring_operations", "id"],
-    ["external_authoring_claims", "id"],
-    ["external_authoring_executions", "id"],
-    ["authoring_execution_bundles", "id"],
-    ["external_authoring_batch_items", "id"],
-    ["external_authoring_batches", "id"],
-    ["authoring_outbox", "id"],
-    ["staged_blob_receipts", "id"],
     ["preview_grants", "id"],
     ["active_domains", "hostname"],
     ["domains", "id"],
@@ -196,6 +262,9 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
     ["site_operator_queue", "id"],
     ["site_agent_run_events", "id"],
     ["site_agent_messages", "id"],
+    ["site_agent_continuation_segments", "id"],
+    ["site_agent_continuation_heads", "run_id"],
+    ["site_authoring_bootstrap_requests", "owner_user_id"],
     ["site_agent_runs", "id"],
     ["site_agent_sessions", "id"],
     ["site_version_sources", "version_id"],
@@ -218,6 +287,36 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
   ] as const) {
     await deleteAll(database, table, filterColumn);
   }
+}
+
+async function deleteSiteAssessments(database: SupabaseClient) {
+  const assessments = (await selectAll(
+    database,
+    "website_assessments",
+    "id,site_id"
+  )).filter((row): row is Record<string, unknown> & { id: string } =>
+    typeof row.id === "string" && typeof row.site_id === "string");
+  const assessmentIds = assessments.map((assessment) => assessment.id);
+  if (!assessmentIds.length) return;
+
+  const [reports, observations] = await Promise.all([
+    selectAll(database, "prospect_reports", "id,assessment_id"),
+    selectAll(database, "prospect_observations", "id,website_assessment_id")
+  ]);
+  const assessmentIdSet = new Set(assessmentIds);
+  const prospectReferences = [
+    ...reports.filter((row) =>
+      typeof row.assessment_id === "string" && assessmentIdSet.has(row.assessment_id)),
+    ...observations.filter((row) =>
+      typeof row.website_assessment_id === "string" && assessmentIdSet.has(row.website_assessment_id))
+  ];
+  if (prospectReferences.length) {
+    throw new Error(
+      `${prospectReferences.length} prospect record(s) reference generated-site assessments; explicit prospect disposition is required.`
+    );
+  }
+  await deleteByValues(database, "website_assessment_jobs", "assessment_id", assessmentIds);
+  await deleteByValues(database, "website_assessments", "id", assessmentIds);
 }
 
 async function selectAll(database: SupabaseClient, table: string, columns: string) {
@@ -245,6 +344,20 @@ async function selectFirstAvailable(database: SupabaseClient, table: string, col
   throw lastError instanceof Error ? lastError : new Error(`No supported ${table} inventory shape is available.`);
 }
 
+async function selectOptionalTable(database: SupabaseClient, table: string) {
+  try {
+    return await selectAll(database, table, "*");
+  } catch (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+}
+
+function isMissingTableError(error: unknown) {
+  return error instanceof Error
+    && /relation .* does not exist|could not find the table|schema cache/i.test(error.message);
+}
+
 function isMissingColumnError(error: unknown) {
   return error instanceof Error
     && /column .* does not exist|could not find the .* column|schema cache/i.test(error.message);
@@ -258,6 +371,21 @@ async function updateAll(database: SupabaseClient, table: string, values: Record
 async function deleteAll(database: SupabaseClient, table: string, filterColumn: string) {
   const { error } = await database.from(table).delete().not(filterColumn, "is", null);
   if (error) throw new Error(`Reset ${table}: ${error.message}`);
+}
+
+async function deleteOptionalTable(database: SupabaseClient, table: string) {
+  const key = removedPrelaunchTableKeys[table as keyof typeof removedPrelaunchTableKeys];
+  if (!key) throw new Error(`No reset key is declared for ${table}.`);
+  const { error } = await database.from(table).delete().not(key, "is", null);
+  if (error && !isMissingTableError(new Error(error.message))) throw new Error(`Reset ${table}: ${error.message}`);
+}
+
+async function deleteByValues(database: SupabaseClient, table: string, column: string, values: string[]) {
+  const chunkSize = 100;
+  for (let index = 0; index < values.length; index += chunkSize) {
+    const { error } = await database.from(table).delete().in(column, values.slice(index, index + chunkSize));
+    if (error) throw new Error(`Reset ${table}: ${error.message}`);
+  }
 }
 
 function sortRows(rows: Array<Record<string, unknown>>) {

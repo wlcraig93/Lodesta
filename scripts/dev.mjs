@@ -9,36 +9,68 @@ const repositoryMode = process.env.LODESTA_REPOSITORY === "local" ? "local" : "s
 await ensureDevelopmentSandbox();
 
 console.log(`[dev] starting Next.js at http://${host}:${port}`);
-console.log(`[dev] repository=${repositoryMode} sandbox=development worker=disabled`);
-console.log("[dev] run npm run dev:worker separately only when you intend to mutate shared queues and recovery state");
+console.log(`[dev] repository=${repositoryMode} sandbox=development worker=enabled`);
 
-const child = spawn(localBin("next"), ["dev", "--turbopack", "-p", port, "-H", host], {
+const sharedEnv = {
+  ...process.env,
+  FORCE_COLOR: process.env.FORCE_COLOR ?? "1",
+  LODESTA_DEV_SANDBOX: "1",
+  LODESTA_SANDBOX_BLUE_URL: "",
+  LODESTA_SANDBOX_BLUE_TOKEN: "",
+  LODESTA_SANDBOX_GREEN_URL: "",
+  LODESTA_SANDBOX_GREEN_TOKEN: "",
+  LODESTA_RELEASE_GIT_SHA: ""
+};
+const web = spawn(localBin("next"), ["dev", "--turbopack", "-p", port, "-H", host], {
   stdio: "inherit",
-  env: {
-    ...process.env,
-    FORCE_COLOR: process.env.FORCE_COLOR ?? "1",
-    LODESTA_DEV_SANDBOX: "1",
-    LODESTA_SANDBOX_URL: "",
-    LODESTA_SANDBOX_TOKEN: "",
-    LODESTA_SANDBOX_IMAGE_DIGEST: "",
-    LODESTA_RELEASE_GIT_SHA: ""
-  }
+  env: sharedEnv
 });
+const worker = spawn(process.execPath, ["--import", "tsx", "workers/runner.ts", "work", "250", "4"], {
+  stdio: "inherit",
+  env: sharedEnv
+});
+const children = [web, worker];
+let stopping = false;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.once(signal, () => child.kill(signal));
+  process.once(signal, () => stop(signal));
 }
 
-child.once("error", (error) => {
-  console.error(`[dev] failed to start Next.js: ${error.message}`);
-  process.exit(1);
-});
+watch(web, "web");
+watch(worker, "worker");
 
-child.once("exit", (code, signal) => {
-  if (typeof code === "number") process.exit(code);
-  console.error(`[dev] Next.js exited from ${signal ?? "an unknown signal"}`);
-  process.exit(1);
-});
+function watch(child, label) {
+  child.once("error", (error) => {
+    console.error(`[dev] failed to start ${label}: ${error.message}`);
+    stop("SIGTERM", 1);
+  });
+  child.once("exit", (code, signal) => {
+    if (stopping) return;
+    console.error(`[dev] ${label} exited with ${typeof code === "number" ? `code ${code}` : signal ?? "an unknown signal"}`);
+    stop("SIGTERM", typeof code === "number" && code !== 0 ? code : 1);
+  });
+}
+
+function stop(signal, exitCode = 0) {
+  if (stopping) return;
+  stopping = true;
+  for (const child of children) {
+    if (!child.killed) child.kill(signal);
+  }
+  const force = setTimeout(() => {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }
+    process.exit(exitCode);
+  }, 5_000);
+  const finish = () => {
+    if (children.some((child) => child.exitCode === null && child.signalCode === null)) return;
+    clearTimeout(force);
+    process.exit(exitCode);
+  };
+  for (const child of children) child.once("exit", finish);
+  finish();
+}
 
 async function ensureDevelopmentSandbox() {
   await new Promise((resolveEnsure, reject) => {

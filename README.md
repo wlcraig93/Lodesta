@@ -8,7 +8,7 @@ The canonical architecture and implementation sequence are documented in [docs/p
 
 ## Architecture
 
-- `packages/business-data`: crawl ingestion, normalized business state, and public sandbox projection.
+- `packages/business-data`: complete website mirroring, regenerable page indexing, normalized business state, and public sandbox projection.
 - `packages/acquisition`: Website Health Reports, outbound campaigns, prospects, adoption, and their worker.
 - `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
 - `packages/site-agent`: the single website-authoring agent, its tools, and knowledge skills.
@@ -19,7 +19,7 @@ The canonical architecture and implementation sequence are documented in [docs/p
 - `packages/site-artifacts`: content-addressed local or R2 artifact storage.
 - `packages/platform-data`: canonical repository contracts and Supabase implementation.
 - `packages/site-platform`: sessions, runs, clarifications, immutable candidates, publishing, restore, and rollback.
-- `packages/site-capabilities`: managed forms, analytics, maps, safe links, and capability policy.
+- `packages/site-capabilities`: lead-inbox forms, analytics, maps, safe links, and capability policy.
 - `packages/control-plane`: typed business-state and site-intent mutations.
 - `packages/trusted-runtime`: audited runtime-series patching and rollback.
 
@@ -32,7 +32,7 @@ npm install
 npm run dev
 ```
 
-The app runs at `http://localhost:4330` by default. `npm run dev` verifies the separately deployed development sandbox, refreshes and canaries it only when its runtime inputs changed, then starts Next.js. The development credential, URL, image digest, and deployment receipt are local and gitignored. The first run requires a one-time Cloudflare login; ordinary application changes skip the sandbox deployment entirely. Local authoring never falls back to production.
+The app runs at `http://localhost:4330` by default. Development and production use the same immutable blue-green sandbox lifecycle with separate physical workers and credentials. `npm run dev` verifies the active nonproduction deployment; when sandbox inputs change, it deploys and canaries the drained inactive development slot, registers its exact Worker version, image, and manifest, atomically promotes it, and only then starts Next.js and the authoring worker. Slot credentials and deployment receipts are local and gitignored. The first run requires a one-time Cloudflare login; ordinary application changes skip sandbox deployment entirely. Local authoring never falls back to production workers.
 
 `npm run dev:worker` is an explicit operator command that polls and mutates the shared queues and recovery state; normal development never starts it automatically. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
 
@@ -49,7 +49,7 @@ Important surfaces:
 - `/settings`: site-authoring and ingestion model settings.
 - `/workspace/:slug`: owner home, site status, and next action.
 - `/workspace/:slug/website`: site-authoring manager, preview, history, and publishing.
-- `/workspace/:slug/inbox`: managed form inbox.
+- `/workspace/:slug/inbox`: website lead inbox.
 - `/workspace/:slug/results`: owner-readable first-party analytics.
 - `/workspace/:slug/business`: canonical business data and site intent.
 - `/workspace/:slug/settings`: proof-first custom domains, redirects, and access.
@@ -86,7 +86,7 @@ Product refinement uses the same signed-in `/account/onboarding` flow as custome
 
 ## Deployment
 
-Railway hosts the Next.js web service and worker. Supabase stores canonical authorities and operational records. R2 stores immutable source archives, assets, screenshots, runtime patches, and finalized site bytes. Cloudflare Sandbox runs untrusted website builds; Cloudflare for SaaS remains the custom-domain integration.
+Railway hosts the Next.js web service and worker. Supabase stores canonical authorities, the compact source manifest, the page-level text index, and operational records. R2 stores content-addressed website response bodies, assets, workspace archives, runtime patches, and finalized site bytes. Cloudflare Sandbox runs untrusted website builds; Cloudflare for SaaS remains the custom-domain integration.
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 

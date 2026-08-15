@@ -6,13 +6,11 @@ import { ConfirmDialog } from "@/components/ProductDialog";
 
 export function RemoveWebsiteButton({
   targetId,
-  targetKind,
   websiteName,
   appearance = "button",
   onDialogOpenChange
 }: {
   targetId: string;
-  targetKind: "site" | "setup";
   websiteName: string;
   appearance?: "button" | "menu-item";
   onDialogOpenChange?(open: boolean): void;
@@ -40,9 +38,7 @@ export function RemoveWebsiteButton({
     setDeleting(true);
     setError("");
     try {
-      const response = targetKind === "site"
-        ? await fetch(`/api/sites/${encodeURIComponent(targetId)}`, { method: "DELETE" })
-        : await fetch(`/api/website-setups/${encodeURIComponent(targetId)}/cancel`, { method: "POST" });
+      const response = await fetch(`/api/sites/${encodeURIComponent(targetId)}`, { method: "DELETE" });
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
         setError(result.error ?? "This website could not be deleted. Try again.");
@@ -74,9 +70,7 @@ export function RemoveWebsiteButton({
       <ConfirmDialog
         open={open}
         title={`Delete ${websiteName}?`}
-        description={targetKind === "site"
-          ? "This removes the website from your account and takes any published pages offline. Past versions and audit records are retained, and you won’t be able to undo this from your account."
-          : "This removes the unfinished website setup from your account. It won’t be published, and you won’t be able to resume this setup."}
+        description="This removes the website from your account and takes any published pages offline. Past versions and audit records are retained, and you won’t be able to undo this from your account."
         confirmLabel="Delete website"
         confirmPendingLabel="Deleting…"
         tone="danger"

@@ -12,6 +12,7 @@ import type {
 } from "@/packages/platform-data";
 import type { SiteAgentRun } from "@/packages/site-contracts";
 import { humanize, statusTone } from "@/lib/product-format";
+import { useProductTooltip } from "@/components/ProductTooltip";
 import { ProductSelect } from "@/components/ProductUI";
 
 type InventoryFilters = {
@@ -226,28 +227,38 @@ export function AdminRunInventory({
         <span>Status</span><span>Run / site</span><span>Model</span><span>Tokens</span><span>Cost</span><span>Duration</span><span>Started</span>
       </div>
       <div className="admin-run-list-body">
-        {items.map((item) => <Link className="admin-run-row" href={`/admin/runs/${item.id}`} key={item.id}>
+        {items.map((item) => <div className="admin-run-row" key={item.id}>
+          <Link
+            className="admin-run-row-link"
+            href={`/admin/runs/${item.id}`}
+            aria-label={`View ${humanize(item.kind)} run ${item.id}`}
+          >
+            <span className="sr-only">View run details</span>
+          </Link>
           <span className="admin-run-cell admin-run-status-cell" data-label="Status">
             <span className={`badge is-${statusTone(item.status)}`}>{humanize(item.status)}</span>
             <small>{humanize(item.stage)}</small>
           </span>
           <span className="admin-run-cell admin-run-identity-cell" data-label="Run / site">
             <strong>{humanize(item.kind)}</strong>
-            <code>{item.id}</code>
+            <span className="admin-run-id-line">
+              <code>{item.id}</code>
+              <RunIdCopyButton runId={item.id} />
+            </span>
             <small>{item.siteSlug ?? item.siteId}</small>
             {item.failureCode ? <small className="error-text">{humanize(item.failureCode)}</small> : null}
             {item.failurePreview ? <small className="admin-run-failure-preview" title={item.failurePreview}>{item.failurePreview}</small> : null}
             {item.issue ? <small className="error-text">{item.issue}</small> : null}
           </span>
-          <span className="admin-run-cell" data-label="Model">
+          <span className="admin-run-cell admin-run-model-cell" data-label="Model">
             <strong>{item.modelId ?? "Unverified"}</strong>
-            <small>{item.apiProvider ?? humanize(item.executionDriver)}</small>
+            <small>{item.apiProvider ?? "Unknown"}</small>
           </span>
-          <span className="admin-run-cell admin-run-numeric" data-label="Tokens">{item.tokenCount?.toLocaleString() ?? "—"}</span>
-          <span className="admin-run-cell admin-run-numeric" data-label="Cost">{formatCost(item.costUsd, item.costSource)}</span>
-          <span className="admin-run-cell admin-run-numeric" data-label="Duration">{formatDuration(item.durationMs)}</span>
-          <span className="admin-run-cell" data-label="Started"><time dateTime={item.startedAt}>{formatDate(item.startedAt)}</time></span>
-        </Link>)}
+          <span className="admin-run-cell admin-run-token-cell admin-run-numeric" data-label="Tokens">{item.tokenCount?.toLocaleString() ?? "—"}</span>
+          <span className="admin-run-cell admin-run-cost-cell admin-run-numeric" data-label="Cost">{formatCost(item.costUsd, item.costSource)}</span>
+          <span className="admin-run-cell admin-run-duration-cell admin-run-numeric" data-label="Duration">{formatDuration(item.durationMs)}</span>
+          <span className="admin-run-cell admin-run-started-cell" data-label="Started"><time dateTime={item.startedAt}>{formatDate(item.startedAt)}</time></span>
+        </div>)}
         {!items.length ? <div className="admin-run-empty"><strong>{activeFilterCount || filters.search ? "No runs found" : "No runs captured yet"}</strong><p>{activeFilterCount || filters.search ? "Clear a filter or broaden the search." : "Runs will appear here when site authoring begins."}</p></div> : null}
       </div>
     </div>
@@ -265,6 +276,39 @@ export function AdminRunInventory({
       </div>
     </footer>
   </section>;
+}
+
+function RunIdCopyButton({ runId }: { runId: string }) {
+  const [copied, setCopied] = useState(false);
+  const label = copied ? "Copied run ID" : "Copy run ID";
+  const { triggerProps, tooltip } = useProductTooltip(label);
+
+  async function copyRunId() {
+    try {
+      await navigator.clipboard.writeText(runId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return <>
+    <button
+      {...triggerProps}
+      className="admin-run-id-copy"
+      type="button"
+      aria-label={label}
+      onClick={() => void copyRunId()}
+      data-copied={copied ? "true" : undefined}
+    >
+      {copied
+        ? <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.2 3 3L13 4.5" /></svg>
+        : <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.25" y="2.25" width="8.5" height="8.5" rx="1.5" /><path d="M10.75 11.25v1.5a1 1 0 0 1-1 1h-6.5a1 1 0 0 1-1-1v-6.5a1 1 0 0 1 1-1h1.5" /></svg>}
+    </button>
+    {tooltip}
+    <span className="sr-only" aria-live="polite">{copied ? `Copied ${runId} to clipboard.` : ""}</span>
+  </>;
 }
 
 function filtersFromQuery(query: SiteAgentRunAdminQuery): InventoryFilters {

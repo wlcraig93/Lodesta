@@ -33,8 +33,11 @@ export type RenderScreenshotArtifact = {
   viewport: RenderViewportName;
   width: number;
   height: number;
+  frame?: "top" | "middle" | "bottom" | "overview";
+  stage?: "natural" | "settled" | "derived";
   path?: string;
   bytes?: number;
+  contentHash?: `sha256:${string}`;
   capturedAt: string;
 };
 
@@ -106,6 +109,9 @@ export type RenderViewportMetrics = {
   horizontalOverflowPx?: number;
   bodyFontSizePx?: number;
   minReadableTextFontSizePx?: number;
+  maxReadableLineLengthChars?: number;
+  longReadableLineCount?: number;
+  longReadableLineSamples?: string[];
   minTextContrastRatio?: number;
   minTextContrastSample?: string;
   headerContrastRatio?: number;
@@ -115,6 +121,21 @@ export type RenderViewportMetrics = {
   heroH1MaxLineWidthPx?: number;
   visualOverlapCount?: number;
   visualOverlapSamples?: string[];
+  clippedElementCount?: number;
+  clippedElementSamples?: string[];
+  smallTargetCount?: number;
+  smallTargetSamples?: string[];
+  hitTestFailureCount?: number;
+  hitTestFailureSamples?: string[];
+  navigationDestinationCount?: number;
+  navigationUnreachableCount?: number;
+  navigationUnreachableSamples?: string[];
+  primaryHeadingText?: string;
+  primaryActionLabel?: string;
+  primaryHeadingBeforeAction?: boolean;
+  crossViewportPrimaryHeadingPresent?: boolean;
+  crossViewportPrimaryActionPresent?: boolean;
+  crossViewportHierarchyOrderConsistent?: boolean;
   headingOverflowCount?: number;
   headingOverflowSamples?: string[];
   blockOverlapCount?: number;

@@ -182,18 +182,24 @@ export function RunTelemetryInspector({
   }
 
   const contactSheets = (run.screenshotKeys ?? []).filter((key) => key.endsWith("/contact-sheet.png"));
-  const modelUsage = run.usage.kind === "model_reported" ? run.usage : undefined;
+  const modelUsage = run.usage;
+  const sourceRetrievals = events.filter((event) => ["search_sources", "read_source_page", "list_source_pages"].includes(event.name)).length;
+  const webResearches = events.filter((event) => event.name === "search_public_web").length;
 
   return <section className="run-inspector" data-mobile-detail={mobileDetailOpen ? "true" : undefined}>
     <div className="run-inspector-summary" aria-label="Run summary">
       <SummaryFact label="Status"><span className={`badge is-${statusTone(run.status)}`}>{humanize(run.status)}</span></SummaryFact>
       <SummaryFact label="Stage" value={humanize(run.stage)} />
       <SummaryFact label="Execution" value={String(run.executionNumber)} />
-      <SummaryFact label="Model" value={run.modelId ?? run.externalProvenance?.clientReportedModelId ?? "Unverified"} />
-      <SummaryFact label="Route" value={run.apiProvider ?? humanize(run.executionDriver)} />
-      <SummaryFact label="Tokens" value={modelUsage ? (modelUsage.inputTokens + modelUsage.outputTokens).toLocaleString() : "Unavailable"} />
-      <SummaryFact label={`Cost · ${modelUsage ? humanize(modelUsage.costSource) : "external"}`} value={modelUsage && modelUsage.costSource !== "unavailable" ? `$${modelUsage.costUsd.toFixed(4)}` : "Unavailable"} />
+      <SummaryFact label="Sandbox deployment" value={run.sandboxDeploymentId ?? "Not pinned"} />
+      <SummaryFact label="Resume checkpoint" value={run.resumeCheckpointId ?? "None"} />
+      <SummaryFact label="Model" value={run.modelId} />
+      <SummaryFact label="Route" value={run.apiProvider} />
+      <SummaryFact label="Tokens" value={(modelUsage.inputTokens + modelUsage.outputTokens).toLocaleString()} />
+      <SummaryFact label={`Cost · ${humanize(modelUsage.costSource)}`} value={modelUsage.costSource !== "unavailable" ? `$${modelUsage.costUsd.toFixed(4)}` : "Unavailable"} />
       <SummaryFact label="Duration" value={formatDuration(run.usage.durationMs)} />
+      <SummaryFact label="Source retrievals" value={sourceRetrievals.toLocaleString()} />
+      <SummaryFact label="Web research" value={webResearches.toLocaleString()} />
       {["queued", "running"].includes(run.status) ? <span className="run-inspector-live"><span />{refreshing ? "Updating" : "Live"}</span> : null}
     </div>
 
@@ -382,9 +388,8 @@ function RunView({
         <CopyFact label="Session ID" value={run.sessionId} copyValue={copyValue} copied={copied} />
         <FactRow label="Site" value={siteSlug ?? run.siteId} />
         <CopyFact label="Site ID" value={run.siteId} copyValue={copyValue} copied={copied} />
-        <FactRow label="Execution driver" value={humanize(run.executionDriver)} />
-        <FactRow label="API provider" value={run.apiProvider ?? "External"} />
-        <FactRow label="Requested model" value={run.modelId ?? run.externalProvenance?.clientReportedModelId ?? "Unverified"} />
+        <FactRow label="API provider" value={run.apiProvider} />
+        <FactRow label="Requested model" value={run.modelId} />
         <CopyFact label="Parent revision" value={run.exactParentRevisionId ?? "Initial"} copyValue={copyValue} copied={copied} />
         <CopyFact label="Output revision" value={run.outputRevisionId ?? "None"} copyValue={copyValue} copied={copied} />
         <CopyFact label="Artifact" value={run.outputArtifactId ?? "None"} copyValue={copyValue} copied={copied} />

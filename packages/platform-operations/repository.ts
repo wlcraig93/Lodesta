@@ -19,31 +19,25 @@ import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { websiteAssessmentSchema } from "@/packages/website-assessment/contracts";
 import {
-  prospectAffiliationId,
   prospectContactId,
   prospectIdForCanonicalKey,
-  prospectLicenseId,
   prospectLocationId,
-  prospectObservationId,
-  type CreateProspectObservationInput,
+  prospectImportSchema,
+  prospectExplorerFields,
+  prospectExplorerValue,
+  normalizeProspectPhone,
   type Prospect,
-  type ProspectAffiliation,
   type ProspectCandidate,
+  type ProspectCandidateContact,
+  type ProspectCandidateFilter,
   type ProspectCandidateQuery,
   type ProspectContact,
+  type ProspectExplorerFieldKey,
   type ProspectImportRecord,
-  type ProspectLicense,
   type ProspectLocation,
-  type ProspectObservation,
-  type ProspectSource,
-  type ProspectSourceRun,
-  type UpsertProspectAffiliationInput,
   type UpsertProspectContactInput,
   type UpsertProspectInput,
-  type UpsertProspectLicenseInput,
-  type UpsertProspectLocationInput,
-  type UpsertProspectSourceInput,
-  type UpsertProspectSourceRunInput
+  type UpsertProspectLocationInput
 } from "@/packages/prospect-research";
 import {
   businessStrengthAssessmentSchema,
@@ -51,7 +45,6 @@ import {
 } from "./assessment-schemas";
 import type {
   AdoptionInvitation,
-  CreateWebsiteSetupInput,
   CreateOutboundCampaignInput,
   CreateProspectReportInput,
   CreateProspectReportLeadInput,
@@ -74,9 +67,6 @@ import type {
   UpdateWebsiteAssessmentInput,
   WebsiteAssessmentJob,
   WebsiteAssessmentRecord,
-  WebsiteSetupFailureCode,
-  WebsiteSetupSourceUpdate,
-  WebsiteSetup,
   UpsertOutboundProspectInput
 } from "./contracts";
 
@@ -84,17 +74,6 @@ export interface PlatformOperationsRepository {
   createAdoptionInvitation(input: { siteId: string; tokenHash: string; expiresAt: string }): Promise<AdoptionInvitation>;
   findAdoptionInvitation(tokenHash: string): Promise<AdoptionInvitation | null>;
   consumeAdoptionInvitation(input: { tokenHash: string; ownerUserId: string }): Promise<AdoptionInvitation | null>;
-  createWebsiteSetup(input: CreateWebsiteSetupInput): Promise<WebsiteSetup>;
-  getWebsiteSetup(setupId: string): Promise<WebsiteSetup | null>;
-  listWebsiteSetupsForOwner(ownerUserId: string): Promise<WebsiteSetup[]>;
-  listWebsiteSetups(siteId?: string): Promise<WebsiteSetup[]>;
-  updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate): Promise<WebsiteSetup | null>;
-  cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
-  retryWebsiteSetup(input: { setupId: string; ownerUserId: string }): Promise<WebsiteSetup | null>;
-  claimWebsiteSetup(setupId: string, workerId: string): Promise<WebsiteSetup | null>;
-  claimNextWebsiteSetup(workerId: string): Promise<WebsiteSetup | null>;
-  linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }): Promise<WebsiteSetup | null>;
-  failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }): Promise<WebsiteSetup | null>;
   createPreviewGrant(input: {
     id?: string;
     siteId: string;
@@ -123,34 +102,11 @@ export interface PlatformOperationsRepository {
   countProspectCandidates(input?: ProspectCandidateQuery): Promise<number>;
   upsertProspectLocation(input: UpsertProspectLocationInput): Promise<ProspectLocation>;
   listProspectLocations(prospectId: string): Promise<ProspectLocation[]>;
-  upsertProspectLicense(input: UpsertProspectLicenseInput): Promise<ProspectLicense>;
-  listProspectLicenses(prospectId: string): Promise<ProspectLicense[]>;
-  upsertProspectAffiliation(input: UpsertProspectAffiliationInput): Promise<ProspectAffiliation>;
-  listProspectAffiliations(prospectId: string): Promise<ProspectAffiliation[]>;
-  upsertProspectSource(input: UpsertProspectSourceInput): Promise<ProspectSource>;
-  listProspectSources(vertical?: string): Promise<ProspectSource[]>;
-  upsertProspectSourceRun(input: UpsertProspectSourceRunInput): Promise<ProspectSourceRun>;
-  listProspectSourceRuns(sourceId?: string): Promise<ProspectSourceRun[]>;
-  pruneProspectSourceSnapshots(input: Array<{
-    sourceId: string;
-    retainedCanonicalKeys: string[];
-  }>): Promise<{
-    prospects: number;
-    locations: number;
-    licenses: number;
-    affiliations: number;
-    observations: number;
-    contacts: number;
-  }>;
-  createProspectObservation(input: CreateProspectObservationInput): Promise<ProspectObservation>;
   upsertProspectContact(input: UpsertProspectContactInput): Promise<ProspectContact>;
   listProspectContacts(prospectId: string): Promise<ProspectContact[]>;
   importProspectResearch(records: ProspectImportRecord[]): Promise<{
     prospects: number;
     locations: number;
-    licenses: number;
-    affiliations: number;
-    observations: number;
     contacts: number;
   }>;
   createOutboundCampaign(input: CreateOutboundCampaignInput): Promise<OutboundCampaign>;
@@ -190,35 +146,13 @@ export interface PlatformOperationsRepository {
   failWebsiteAssessmentJob(jobId: string, error: string): Promise<void>;
 }
 
-export class IdempotencyKeyConflictError extends Error {
-  readonly code = "idempotency_key_conflict";
-  constructor() {
-    super("This idempotency key was already used for a different website source.");
-    this.name = "IdempotencyKeyConflictError";
-  }
-}
-
-export class ConcurrentProjectLimitError extends Error {
-  readonly code = "concurrent_project_limit";
-  constructor() {
-    super("Finish or cancel an active build before starting another.");
-    this.name = "ConcurrentProjectLimitError";
-  }
-}
-
 type LocalState = {
   adoptionInvitations: AdoptionInvitation[];
-  websiteSetups: WebsiteSetup[];
   previewGrants: SitePreviewGrant[];
   domains: DomainRecord[];
   redirects: SiteRedirectRule[];
   researchProspects: Prospect[];
   prospectLocations: ProspectLocation[];
-  prospectLicenses: ProspectLicense[];
-  prospectAffiliations: ProspectAffiliation[];
-  prospectSources: ProspectSource[];
-  prospectSourceRuns: ProspectSourceRun[];
-  prospectObservations: ProspectObservation[];
   prospectContacts: ProspectContact[];
   campaigns: OutboundCampaign[];
   prospects: OutboundProspect[];
@@ -232,17 +166,11 @@ type LocalState = {
 
 const emptyState = (): LocalState => ({
   adoptionInvitations: [],
-  websiteSetups: [],
   previewGrants: [],
   domains: [],
   redirects: [],
   researchProspects: [],
   prospectLocations: [],
-  prospectLicenses: [],
-  prospectAffiliations: [],
-  prospectSources: [],
-  prospectSourceRuns: [],
-  prospectObservations: [],
   prospectContacts: [],
   campaigns: [],
   prospects: [],
@@ -256,7 +184,8 @@ const emptyState = (): LocalState => ({
 
 export class LocalPlatformOperationsRepository implements PlatformOperationsRepository {
   private queue = Promise.resolve();
-  constructor(private readonly path = resolve(process.cwd(), ".data", "site-platform", "operations.json")) {}
+  constructor(private readonly path = process.env.LODESTA_PLATFORM_OPERATIONS_LOCAL_PATH?.trim()
+    || resolve(process.cwd(), ".data", "site-platform", "operations.json")) {}
 
   async createAdoptionInvitation(input: { siteId: string; tokenHash: string; expiresAt: string }) {
     const invitation: AdoptionInvitation = {
@@ -287,154 +216,6 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
       invitation.consumedAt = new Date().toISOString();
       invitation.consumedByUserId = input.ownerUserId;
       result = structuredClone(invitation);
-    });
-    return result;
-  }
-
-  async createWebsiteSetup(input: CreateWebsiteSetupInput) {
-    const now = new Date().toISOString();
-    let result!: WebsiteSetup;
-    await this.write((store) => {
-      const existing = store.websiteSetups.find((item) =>
-        item.ownerUserId === input.ownerUserId && item.idempotencyKey === input.idempotencyKey
-      );
-      if (existing) {
-        if (existing.creationRequestHash !== input.creationRequestHash) throw new IdempotencyKeyConflictError();
-        result = structuredClone(existing);
-        return;
-      }
-      const active = store.websiteSetups.filter((item) =>
-        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
-      ).length;
-      if (active >= 3) throw new ConcurrentProjectLimitError();
-      result = {
-        id: `setup_${crypto.randomUUID().replaceAll("-", "")}`,
-        ownerUserId: input.ownerUserId,
-        sourceUrl: input.sourceUrl,
-        normalizedSource: input.normalizedSource,
-        reportingTimezone: input.reportingTimezone,
-        prospectReportId: input.prospectReportId,
-        sourceRevision: 1,
-        status: "queued",
-        attempts: 0,
-        maxAttempts: 3,
-        idempotencyKey: input.idempotencyKey,
-        creationRequestHash: input.creationRequestHash,
-        createdAt: now,
-        updatedAt: now
-      };
-      store.websiteSetups.push(result);
-    });
-    return result;
-  }
-  async getWebsiteSetup(setupId: string) { return structuredClone((await this.read()).websiteSetups.find((item) => item.id === setupId) ?? null); }
-  async listWebsiteSetupsForOwner(ownerUserId: string) { return (await this.read()).websiteSetups.filter((item) => item.ownerUserId === ownerUserId).sort(byCreatedDesc); }
-  async listWebsiteSetups(siteId?: string) { return (await this.read()).websiteSetups.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
-  async updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
-      if (!setup || !["queued", "processing", "failed"].includes(setup.status)) return;
-      if (setup.status === "failed" && store.websiteSetups.filter((item) =>
-        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
-      ).length >= 3) throw new ConcurrentProjectLimitError();
-      setup.sourceUrl = input.sourceUrl;
-      setup.normalizedSource = input.normalizedSource;
-      setup.sourceRevision += 1;
-      setup.status = "queued";
-      setup.failureCode = undefined;
-      setup.failureReason = undefined;
-      setup.siteId = undefined;
-      setup.sessionId = undefined;
-      setup.runId = undefined;
-      setup.lockedAt = undefined;
-      setup.lockedBy = undefined;
-      setup.updatedAt = new Date().toISOString();
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
-      if (!setup || setup.status === "canceled") return;
-      setup.status = "canceled";
-      setup.lockedAt = undefined;
-      setup.lockedBy = undefined;
-      setup.updatedAt = new Date().toISOString();
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async retryWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.ownerUserId === input.ownerUserId);
-      if (!setup || setup.status !== "failed" || !isRetriableSetupFailure(setup.failureCode)) return;
-      if (store.websiteSetups.filter((item) =>
-        item.ownerUserId === input.ownerUserId && ["queued", "processing"].includes(item.status)
-      ).length >= 3) throw new ConcurrentProjectLimitError();
-      setup.status = "queued";
-      setup.failureCode = undefined;
-      setup.failureReason = undefined;
-      setup.lockedAt = undefined;
-      setup.lockedBy = undefined;
-      setup.updatedAt = new Date().toISOString();
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async claimWebsiteSetup(setupId: string, workerId: string) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const setup = store.websiteSetups.find((item) => item.id === setupId && item.status === "queued");
-      if (!setup) return;
-      setup.status = "processing";
-      setup.attempts += 1;
-      setup.lockedBy = workerId;
-      setup.lockedAt = new Date().toISOString();
-      setup.updatedAt = setup.lockedAt;
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async claimNextWebsiteSetup(workerId: string) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const staleBefore = Date.now() - 75 * 60_000;
-      const setup = store.websiteSetups
-        .filter((item) => item.status === "queued" || (item.status === "processing" && item.lockedAt && Date.parse(item.lockedAt) < staleBefore))
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-      if (!setup) return;
-      setup.status = "processing";
-      setup.attempts += 1;
-      setup.lockedBy = workerId;
-      setup.lockedAt = new Date().toISOString();
-      setup.updatedAt = setup.lockedAt;
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }) {
-    let result: WebsiteSetup | null = null;
-    await this.write(async (store) => {
-      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.status === "processing" && item.sourceRevision === input.sourceRevision);
-      if (!setup) return;
-      const site = await sitePlatformRepository.assignSiteOwnerIfUnowned(input.siteId, setup.ownerUserId);
-      if (!site || site.ownerUserId !== setup.ownerUserId) return;
-      Object.assign(setup, { status: "linked", siteId: input.siteId, sessionId: input.sessionId, runId: input.runId, lockedBy: undefined, lockedAt: undefined, updatedAt: new Date().toISOString() } satisfies Partial<WebsiteSetup>);
-      result = structuredClone(setup);
-    });
-    return result;
-  }
-  async failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }) {
-    let result: WebsiteSetup | null = null;
-    await this.write((store) => {
-      const setup = store.websiteSetups.find((item) => item.id === input.setupId && item.status === "processing" && item.sourceRevision === input.sourceRevision);
-      if (!setup) return;
-      Object.assign(setup, { status: "failed", failureCode: input.failureCode, failureReason: input.failureReason, siteId: input.siteId, lockedBy: undefined, lockedAt: undefined, updatedAt: new Date().toISOString() } satisfies Partial<WebsiteSetup>);
-      result = structuredClone(setup);
     });
     return result;
   }
@@ -612,10 +393,8 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return store.researchProspects
       .map((prospect) => prospectCandidateValue(
         prospect,
-        store.prospectObservations,
         store.prospectContacts,
-        store.prospectLocations,
-        store.prospectLicenses
+        store.prospectLocations
       ))
       .filter((candidate) => matchesProspectQuery(candidate, input))
       .sort((left, right) => compareProspectCandidates(left, right, input))
@@ -627,10 +406,8 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return store.researchProspects
       .map((prospect) => prospectCandidateValue(
         prospect,
-        store.prospectObservations,
         store.prospectContacts,
-        store.prospectLocations,
-        store.prospectLicenses
+        store.prospectLocations
       ))
       .filter((candidate) => matchesProspectQuery(candidate, input))
       .length;
@@ -660,169 +437,18 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
       .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary) || left.id.localeCompare(right.id))
       .map((item) => structuredClone(item));
   }
-  async upsertProspectLicense(input: UpsertProspectLicenseInput) {
-    let result!: ProspectLicense;
-    await this.write((store) => {
-      if (!store.researchProspects.some((item) => item.id === input.prospectId)) throw new Error("Unknown prospect.");
-      if (input.locationId && !store.prospectLocations.some((item) =>
-        item.id === input.locationId && item.prospectId === input.prospectId
-      )) throw new Error("License location does not belong to the prospect.");
-      if (!store.prospectSources.some((item) => item.id === input.sourceId)) throw new Error("Unknown prospect source.");
-      const id = input.id ?? prospectLicenseId(input);
-      const existing = store.prospectLicenses.find((item) => item.id === id);
-      result = prospectLicenseValue({ ...input, id }, existing);
-      if (existing) Object.assign(existing, result);
-      else store.prospectLicenses.push(result);
-    });
-    return structuredClone(result);
-  }
-  async listProspectLicenses(prospectId: string) {
-    return (await this.read()).prospectLicenses
-      .filter((item) => item.prospectId === prospectId)
-      .sort((left, right) => right.observedAt.localeCompare(left.observedAt) || left.id.localeCompare(right.id))
-      .map((item) => structuredClone(item));
-  }
-  async upsertProspectAffiliation(input: UpsertProspectAffiliationInput) {
-    let result!: ProspectAffiliation;
-    await this.write((store) => {
-      if (!store.researchProspects.some((item) => item.id === input.prospectId)) throw new Error("Unknown prospect.");
-      if (input.relatedProspectId && !store.researchProspects.some((item) => item.id === input.relatedProspectId)) {
-        throw new Error("Unknown related prospect.");
-      }
-      const id = input.id ?? prospectAffiliationId(input);
-      const existing = store.prospectAffiliations.find((item) => item.id === id);
-      result = prospectAffiliationValue({ ...input, id }, existing);
-      if (existing) Object.assign(existing, result);
-      else store.prospectAffiliations.push(result);
-    });
-    return structuredClone(result);
-  }
-  async listProspectAffiliations(prospectId: string) {
-    return (await this.read()).prospectAffiliations
-      .filter((item) => item.prospectId === prospectId)
-      .sort((left, right) => right.observedAt.localeCompare(left.observedAt) || left.id.localeCompare(right.id))
-      .map((item) => structuredClone(item));
-  }
-  async upsertProspectSource(input: UpsertProspectSourceInput) {
-    let result!: ProspectSource;
-    await this.write((store) => {
-      const existing = store.prospectSources.find((item) => item.id === input.id);
-      result = prospectSourceValue(input, existing);
-      if (existing) Object.assign(existing, result);
-      else store.prospectSources.push(result);
-    });
-    return structuredClone(result);
-  }
-  async listProspectSources(vertical?: string) {
-    return (await this.read()).prospectSources
-      .filter((item) => !vertical || item.vertical === vertical)
-      .sort((left, right) => left.jurisdiction.localeCompare(right.jurisdiction) || left.id.localeCompare(right.id))
-      .map((item) => structuredClone(item));
-  }
-  async upsertProspectSourceRun(input: UpsertProspectSourceRunInput) {
-    let result!: ProspectSourceRun;
-    await this.write((store) => {
-      if (!store.prospectSources.some((item) => item.id === input.sourceId)) throw new Error("Unknown prospect source.");
-      const existing = store.prospectSourceRuns.find((item) => item.id === input.id);
-      result = prospectSourceRunValue(input, existing);
-      if (existing) Object.assign(existing, result);
-      else store.prospectSourceRuns.push(result);
-    });
-    return structuredClone(result);
-  }
-  async listProspectSourceRuns(sourceId?: string) {
-    return (await this.read()).prospectSourceRuns
-      .filter((item) => !sourceId || item.sourceId === sourceId)
-      .sort((left, right) => right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id))
-      .map((item) => structuredClone(item));
-  }
-  async pruneProspectSourceSnapshots(input: Array<{ sourceId: string; retainedCanonicalKeys: string[] }>) {
-    const counts = {
-      prospects: 0,
-      locations: 0,
-      licenses: 0,
-      affiliations: 0,
-      observations: 0,
-      contacts: 0
-    };
-    const retainedBySource = new Map(input.map((snapshot) => [
-      snapshot.sourceId,
-      new Set(snapshot.retainedCanonicalKeys.map(normalizedCanonicalKey))
-    ]));
-    await this.write((store) => {
-      const removableProspectIds = new Set(store.researchProspects
-        .filter((prospect) => {
-          const sourceId = typeof prospect.metadata?.acquisitionSource === "string"
-            ? prospect.metadata.acquisitionSource
-            : undefined;
-          if (!sourceId) return false;
-          const retained = retainedBySource.get(sourceId);
-          return retained ? !retained.has(normalizedCanonicalKey(prospect.canonicalKey)) : false;
-        })
-        .map((prospect) => prospect.id));
-      if (!removableProspectIds.size) return;
-
-      const selectedProspect = store.prospects.find((prospect) => removableProspectIds.has(prospect.prospectId));
-      if (selectedProspect) {
-        throw new Error(`Cannot prune prospect ${selectedProspect.prospectId}; it is selected into outbound work.`);
-      }
-      const linkedObservation = store.prospectObservations.find((observation) =>
-        removableProspectIds.has(observation.prospectId)
-        && Boolean(observation.websiteAssessmentId || observation.prospectReportId)
-      );
-      if (linkedObservation) {
-        throw new Error(`Cannot prune prospect ${linkedObservation.prospectId}; its observation is linked to a report or assessment.`);
-      }
-
-      const before = {
-        prospects: store.researchProspects.length,
-        locations: store.prospectLocations.length,
-        licenses: store.prospectLicenses.length,
-        affiliations: store.prospectAffiliations.length,
-        observations: store.prospectObservations.length,
-        contacts: store.prospectContacts.length
-      };
-      store.prospectAffiliations = store.prospectAffiliations.filter((affiliation) =>
-        !removableProspectIds.has(affiliation.prospectId)
-        && (!affiliation.relatedProspectId || !removableProspectIds.has(affiliation.relatedProspectId))
-      );
-      store.prospectContacts = store.prospectContacts.filter((contact) => !removableProspectIds.has(contact.prospectId));
-      store.prospectObservations = store.prospectObservations.filter((observation) =>
-        !removableProspectIds.has(observation.prospectId)
-      );
-      store.prospectLicenses = store.prospectLicenses.filter((license) => !removableProspectIds.has(license.prospectId));
-      store.prospectLocations = store.prospectLocations.filter((location) => !removableProspectIds.has(location.prospectId));
-      store.researchProspects = store.researchProspects.filter((prospect) => !removableProspectIds.has(prospect.id));
-      counts.prospects = before.prospects - store.researchProspects.length;
-      counts.locations = before.locations - store.prospectLocations.length;
-      counts.licenses = before.licenses - store.prospectLicenses.length;
-      counts.affiliations = before.affiliations - store.prospectAffiliations.length;
-      counts.observations = before.observations - store.prospectObservations.length;
-      counts.contacts = before.contacts - store.prospectContacts.length;
-    });
-    return counts;
-  }
-  async createProspectObservation(input: CreateProspectObservationInput) {
-    let result!: ProspectObservation;
-    await this.write((store) => {
-      if (!store.researchProspects.some((item) => item.id === input.prospectId)) throw new Error("Unknown prospect.");
-      const existing = store.prospectObservations.find((item) => item.prospectId === input.prospectId && item.inputHash === input.inputHash);
-      if (existing) {
-        result = structuredClone(existing);
-        return;
-      }
-      result = prospectObservationValue(input);
-      store.prospectObservations.push(result);
-    });
-    return structuredClone(result);
-  }
   async upsertProspectContact(input: UpsertProspectContactInput) {
     let result!: ProspectContact;
     await this.write((store) => {
       if (!store.researchProspects.some((item) => item.id === input.prospectId)) throw new Error("Unknown prospect.");
-      const id = input.id ?? prospectContactId(input);
+      const id = input.id ?? prospectContactProjectionId(input);
       const existing = findExistingProspectContact(store.prospectContacts, input, id);
       result = prospectContactValue({ ...input, id }, existing);
+      if (result.isPrimary) {
+        for (const contact of store.prospectContacts) {
+          if (contact.prospectId === input.prospectId && contact.id !== result.id) contact.isPrimary = false;
+        }
+      }
       if (existing) Object.assign(existing, result);
       else store.prospectContacts.push(result);
     });
@@ -831,17 +457,15 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   async listProspectContacts(prospectId: string) {
     return (await this.read()).prospectContacts
       .filter((item) => item.prospectId === prospectId)
-      .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .map((item) => structuredClone(item));
   }
   async importProspectResearch(records: ProspectImportRecord[]) {
+    records = records.length ? prospectImportSchema.parse({ records }).records : [];
     assertUniqueProspectImportRecords(records);
     const counts = {
       prospects: 0,
       locations: 0,
-      licenses: 0,
-      affiliations: 0,
-      observations: 0,
       contacts: 0
     };
     await this.write((store) => {
@@ -849,6 +473,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
         const existingProspect = store.researchProspects.find((item) =>
           item.canonicalKey === normalizedCanonicalKey(record.prospect.canonicalKey) || item.id === record.prospect.id
         );
+        assertCanonicalProspectResearchUpdate(existingProspect, record);
         const prospect = prospectValue(record.prospect, existingProspect);
         if (existingProspect) Object.assign(existingProspect, prospect);
         else store.researchProspects.push(prospect);
@@ -871,39 +496,16 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
           else store.prospectLocations.push(location);
           counts.locations += 1;
         }
-        for (const licenseInput of record.licenses ?? []) {
-          const normalizedLicense = { ...licenseInput, prospectId: prospect.id };
-          const id = normalizedLicense.id ?? prospectLicenseId(normalizedLicense);
-          const existingLicense = store.prospectLicenses.find((item) => item.id === id);
-          const license = prospectLicenseValue({ ...normalizedLicense, id }, existingLicense);
-          if (existingLicense) Object.assign(existingLicense, license);
-          else store.prospectLicenses.push(license);
-          counts.licenses += 1;
-        }
-        for (const affiliationInput of record.affiliations ?? []) {
-          const normalizedAffiliation = { ...affiliationInput, prospectId: prospect.id };
-          const id = normalizedAffiliation.id ?? prospectAffiliationId(normalizedAffiliation);
-          const existingAffiliation = store.prospectAffiliations.find((item) => item.id === id);
-          const affiliation = prospectAffiliationValue({ ...normalizedAffiliation, id }, existingAffiliation);
-          if (existingAffiliation) Object.assign(existingAffiliation, affiliation);
-          else store.prospectAffiliations.push(affiliation);
-          counts.affiliations += 1;
-        }
-        if (record.observation) {
-          const observationInput = { ...record.observation, prospectId: prospect.id };
-          const existingObservation = store.prospectObservations.find((item) =>
-            item.prospectId === prospect.id && item.inputHash === observationInput.inputHash
-          );
-          if (!existingObservation) {
-            store.prospectObservations.push(prospectObservationValue(observationInput));
-            counts.observations += 1;
-          }
-        }
         for (const contactInput of record.contacts ?? []) {
           const normalizedContact = { ...contactInput, prospectId: prospect.id };
-          const id = normalizedContact.id ?? prospectContactId(normalizedContact);
+          const id = normalizedContact.id ?? prospectContactProjectionId(normalizedContact);
           const existingContact = findExistingProspectContact(store.prospectContacts, normalizedContact, id);
           const contact = prospectContactValue({ ...normalizedContact, id }, existingContact);
+          if (contact.isPrimary) {
+            for (const candidate of store.prospectContacts) {
+              if (candidate.prospectId === prospect.id && candidate.id !== contact.id) candidate.isPrimary = false;
+            }
+          }
           if (existingContact) Object.assign(existingContact, contact);
           else store.prospectContacts.push(contact);
           counts.contacts += 1;
@@ -920,9 +522,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     await this.write((store) => {
       const prospect = store.researchProspects.find((item) => item.id === input.prospectId);
       if (!prospect) throw new Error("Unknown canonical prospect.");
-      if (prospect.doNotContact || prospect.status !== "active") throw new Error("Suppressed, converted, or archived prospects cannot be added to a campaign.");
-      const observation = store.prospectObservations.find((item) => item.id === input.selectionObservationId && item.prospectId === prospect.id);
-      if (!observation) throw new Error("Campaign selection must reference an observation for the canonical prospect.");
+      if (!store.campaigns.some((item) => item.id === input.campaignId)) throw new Error("Unknown campaign.");
       const existing = input.id ? store.prospects.find((item) => item.id === input.id) : undefined;
       const value = newOutboundProspect({
         ...input,
@@ -1113,12 +713,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   private async read() {
     const raw = await readFile(this.path, "utf8").catch(() => undefined);
     if (!raw) return emptyState();
-    const state = { ...emptyState(), ...JSON.parse(raw) as Partial<LocalState> };
-    state.researchProspects = state.researchProspects.map((prospect) => ({
-      ...prospect,
-      ownershipScope: prospect.ownershipScope ?? "unknown"
-    }));
-    return state;
+    return { ...emptyState(), ...JSON.parse(raw) as Partial<LocalState> };
   }
   private write(operation: (state: LocalState) => void | Promise<void>) {
     const next = this.queue.then(async () => { const state = await this.read(); await operation(state); await mkdir(dirname(this.path), { recursive: true }); const temp = `${this.path}.${process.pid}.tmp`; await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`); await rename(temp, this.path); });
@@ -1127,7 +722,6 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
 }
 
 type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null };
-type WebsiteSetupRow = { id: string; owner_user_id: string; source_url: string; normalized_source: string; reporting_timezone: string; prospect_report_id: string | null; source_revision: number; status: WebsiteSetup["status"]; site_id: string | null; session_id: string | null; run_id: string | null; attempts: number; max_attempts: number; idempotency_key: string; creation_request_hash: string; locked_by: string | null; locked_at: string | null; failure_code: WebsiteSetupFailureCode | null; failure_reason: string | null; created_at: string; updated_at: string };
 type PreviewGrantRow = {
   id: string;
   site_id: string;
@@ -1171,25 +765,12 @@ type ProspectResearchRow = {
   id: string;
   canonical_key: string;
   business_name: string;
-  legal_business_name: string | null;
-  dba_name: string | null;
   vertical: string | null;
-  industry_code: string | null;
-  ownership_scope: Prospect["ownershipScope"];
-  status: Prospect["status"];
-  website_kind: Prospect["websiteKind"];
+  research_state: Prospect["researchState"];
   website_url: string | null;
-  website_host: string | null;
-  address_line_1: string | null;
-  address_line_2: string | null;
-  locality: string | null;
-  region: string | null;
-  postal_code: string | null;
-  country_code: string;
-  phone: string | null;
-  do_not_contact: boolean;
-  suppression_reason: string | null;
-  metadata: unknown;
+  website_platform: string | null;
+  website_agency_provider: string | null;
+  business_email: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1198,7 +779,6 @@ type ProspectLocationRow = {
   prospect_id: string;
   canonical_key: string;
   kind: ProspectLocation["kind"];
-  status: ProspectLocation["status"];
   location_name: string | null;
   address_line_1: string | null;
   address_line_2: string | null;
@@ -1208,175 +788,59 @@ type ProspectLocationRow = {
   country_code: string;
   county: string | null;
   phone: string | null;
+  google_place_id: string | null;
+  google_business_name: string | null;
+  google_category: string | null;
+  google_address: string | null;
+  google_phone: string | null;
+  google_website_url: string | null;
+  google_maps_url: string | null;
+  google_rating: number | null;
+  google_review_count: number | null;
   latitude: number | null;
   longitude: number | null;
   is_primary: boolean;
-  source_id: string | null;
-  source_run_id: string | null;
-  source_record_key: string | null;
-  observed_at: string;
   created_at: string;
   updated_at: string;
-};
-type ProspectLicenseRow = {
-  id: string;
-  prospect_id: string;
-  location_id: string | null;
-  jurisdiction: string;
-  regulator: string;
-  license_type: string;
-  license_number: string;
-  status: ProspectLicense["status"];
-  classifications: string[];
-  issued_at: string | null;
-  renewed_at: string | null;
-  expires_at: string | null;
-  responsible_person_name: string | null;
-  responsible_person_title: string | null;
-  source_id: string;
-  source_run_id: string | null;
-  source_url: string;
-  source_record_key: string | null;
-  observed_at: string;
-  evidence: unknown;
-  created_at: string;
-  updated_at: string;
-};
-type ProspectAffiliationRow = {
-  id: string;
-  prospect_id: string;
-  related_prospect_id: string | null;
-  related_organization_name: string;
-  affiliation_type: ProspectAffiliation["affiliationType"];
-  confidence: ProspectAffiliation["confidence"];
-  source_url: string | null;
-  observed_at: string;
-  evidence: unknown;
-  created_at: string;
-  updated_at: string;
-};
-type ProspectSourceRow = {
-  id: string;
-  vertical: string;
-  jurisdiction: string;
-  authority_name: string;
-  source_name: string;
-  source_url: string;
-  access_method: ProspectSource["accessMethod"];
-  coverage_status: ProspectSource["coverageStatus"];
-  record_scope: ProspectSource["recordScope"];
-  refresh_cadence: string | null;
-  expected_record_count: number | null;
-  access_notes: string | null;
-  last_checked_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-type ProspectSourceRunRow = {
-  id: string;
-  source_id: string;
-  status: ProspectSourceRun["status"];
-  started_at: string;
-  finished_at: string | null;
-  snapshot_at: string | null;
-  source_hash: string | null;
-  records_seen: number;
-  organizations_upserted: number;
-  locations_upserted: number;
-  licenses_upserted: number;
-  contacts_upserted: number;
-  rejected_records: number;
-  error: string | null;
-  metadata: unknown;
-  created_at: string;
-  updated_at: string;
-};
-type ProspectObservationRow = {
-  id: string;
-  schema_version: 1;
-  prospect_id: string;
-  source_type: ProspectObservation["sourceType"];
-  source_url: string | null;
-  observed_at: string;
-  website_kind: ProspectObservation["websiteKind"];
-  website_url: string | null;
-  review_rating: number | null;
-  review_count: number | null;
-  years_in_business: number | null;
-  cms: string | null;
-  site_builder: string | null;
-  managed_provider: string | null;
-  agency_status: ProspectObservation["agencyStatus"];
-  agency_name: string | null;
-  website_assessment_id: string | null;
-  prospect_report_id: string | null;
-  business_strength_score: number | null;
-  website_opportunity_score: number | null;
-  reachability_score: number | null;
-  priority_score: number | null;
-  scoring_model: string | null;
-  verification_status: ProspectObservation["verificationStatus"];
-  verification_score: number | null;
-  operating_status: ProspectObservation["operatingStatus"];
-  target_fit_status: ProspectObservation["targetFitStatus"];
-  target_fit_reason: string | null;
-  evidence_coverage: number;
-  producer: string;
-  methodology_identity: string;
-  input_hash: string;
-  notes: string | null;
-  evidence: unknown;
-  created_at: string;
 };
 type ProspectContactRow = {
   id: string;
   prospect_id: string;
-  contact_type: ProspectContact["contactType"];
-  full_name: string | null;
+  full_name: string;
   role_title: string | null;
   email: string | null;
   phone: string | null;
-  source_type: ProspectContact["sourceType"];
-  source_url: string | null;
-  verification_status: ProspectContact["verificationStatus"];
-  outreach_eligible: boolean;
-  observed_at: string;
-  suppressed_at: string | null;
-  suppression_reason: string | null;
+  is_primary: boolean;
   created_at: string;
   updated_at: string;
 };
 type ProspectCurrentRow = ProspectResearchRow & {
-  latest_observation_id: string | null;
-  latest_observed_at: string | null;
-  review_rating: number | null;
-  review_count: number | null;
-  years_in_business: number | null;
-  cms: string | null;
-  site_builder: string | null;
-  managed_provider: string | null;
-  agency_status: ProspectObservation["agencyStatus"] | null;
-  agency_name: string | null;
-  website_assessment_id: string | null;
-  prospect_report_id: string | null;
-  business_strength_score: number | null;
-  website_opportunity_score: number | null;
-  reachability_score: number | null;
-  priority_score: number | null;
-  scoring_model: string | null;
-  verification_status: ProspectObservation["verificationStatus"] | null;
-  verification_score: number | null;
-  operating_status: ProspectObservation["operatingStatus"] | null;
-  target_fit_status: ProspectObservation["targetFitStatus"] | null;
-  target_fit_reason: string | null;
-  evidence_coverage: number | null;
-  owner_name: string | null;
-  public_email: string | null;
-  contact_count: number;
-  location_count: number;
-  active_license_count: number;
+  address_line_1: string | null;
+  address_line_2: string | null;
+  locality: string | null;
+  region: string | null;
+  postal_code: string | null;
+  country_code: string | null;
+  county: string | null;
+  location_phone: string | null;
+  google_business_name: string | null;
+  google_category: string | null;
+  google_address: string | null;
+  google_phone: string | null;
+  google_website_url: string | null;
+  google_maps_url: string | null;
+  google_rating: number | null;
+  google_review_count: number | null;
+  google_place_id: string | null;
+  primary_contact_name: string | null;
+  primary_contact_role: string | null;
+  primary_contact_email: string | null;
+  primary_contact_phone: string | null;
+  outreach_email: string | null;
+  outreach_phone: string | null;
+  contact_details: unknown;
 };
-type ProspectRow = { id: string; prospect_id: string; selection_observation_id: string; campaign_id: string; site_id: string | null; report_id: string | null; preview_id: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_report_viewed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
+type ProspectRow = { id: string; prospect_id: string; campaign_id: string; site_id: string | null; report_id: string | null; preview_id: string | null; mailing_code: string | null; status: OutboundProspect["status"]; metadata: unknown; created_at: string; mailed_at: string | null; first_report_viewed_at: string | null; first_preview_viewed_at: string | null; adoption_started_at: string | null; adopted_at: string | null; published_at: string | null; disqualified_at: string | null };
 type EventRow = { id: string; campaign_id: string; prospect_id: string | null; site_id: string | null; type: OutboundEvent["type"]; occurred_at: string; value: number | null; metadata: unknown };
 type ReportRow = { id: string; source_key: string; access_policy: ProspectReportRecord["accessPolicy"]; status: ProspectReportRecord["status"]; assessment_id: string | null; source_url: string | null; source_host: string | null; website_kind: ProspectReportRecord["websiteKind"]; report_json: unknown; business_strength_json: unknown; resolution_usage: unknown; error_code: string | null; created_at: string; updated_at: string; completed_at: string | null };
 type LeadRow = { id: string; report_id: string; email: string; contact_name: string | null; phone: string | null; ip_hash: string | null; metadata: unknown; created_at: string };
@@ -1407,100 +871,6 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       target_owner_user_id: input.ownerUserId
     }).maybeSingle(), "Consume adoption invitation");
     return row ? adoptionInvitationFromRow(row) : null;
-  }
-
-  async createWebsiteSetup(input: CreateWebsiteSetupInput) {
-    const result = await this.client.rpc("create_website_setup", {
-      target_owner_user_id: input.ownerUserId,
-      target_source_url: input.sourceUrl,
-      target_normalized_source: input.normalizedSource,
-      target_reporting_timezone: input.reportingTimezone,
-      target_prospect_report_id: input.prospectReportId,
-      target_idempotency_key: input.idempotencyKey,
-      target_creation_request_hash: input.creationRequestHash
-    }).maybeSingle();
-    if (result.error) {
-      if (/idempotency_key_conflict/i.test(result.error.message)) throw new IdempotencyKeyConflictError();
-      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
-      throw new Error(`Create website setup: ${result.error.message}`);
-    }
-    if (!result.data) throw new Error("Create website setup: no data returned");
-    return websiteSetupFromRow(result.data as WebsiteSetupRow);
-  }
-  async getWebsiteSetup(setupId: string) { const row = await maybe<WebsiteSetupRow>(this.client.from("website_setups").select("*").eq("id", setupId).maybeSingle(), "Get website setup"); return row ? websiteSetupFromRow(row) : null; }
-  async listWebsiteSetupsForOwner(ownerUserId: string) { return (await data<WebsiteSetupRow[]>(this.client.from("website_setups").select("*").eq("owner_user_id", ownerUserId).order("created_at", { ascending: false }), "List owner website setups")).map(websiteSetupFromRow); }
-  async listWebsiteSetups(siteId?: string) { let query = this.client.from("website_setups").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<WebsiteSetupRow[]>(query, "List website setups")).map(websiteSetupFromRow); }
-  async updateWebsiteSetupSource(input: WebsiteSetupSourceUpdate) {
-    const result = await this.client.rpc("update_website_setup_source", {
-      target_setup_id: input.setupId,
-      target_owner_user_id: input.ownerUserId,
-      target_source_url: input.sourceUrl,
-      target_normalized_source: input.normalizedSource
-    }).maybeSingle();
-    if (result.error) {
-      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
-      throw new Error(`Update website setup source: ${result.error.message}`);
-    }
-    const row = result.data as WebsiteSetupRow | null;
-    return row ? websiteSetupFromRow(row) : null;
-  }
-  async cancelWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
-    const row = await maybe<WebsiteSetupRow>(this.client.rpc("cancel_website_setup", {
-      target_setup_id: input.setupId,
-      target_owner_user_id: input.ownerUserId
-    }).maybeSingle(), "Cancel website setup");
-    return row ? websiteSetupFromRow(row) : null;
-  }
-  async retryWebsiteSetup(input: { setupId: string; ownerUserId: string }) {
-    const result = await this.client.rpc("retry_website_setup", {
-      target_setup_id: input.setupId,
-      target_owner_user_id: input.ownerUserId
-    }).maybeSingle();
-    if (result.error) {
-      if (/concurrent_project_limit/i.test(result.error.message)) throw new ConcurrentProjectLimitError();
-      throw new Error(`Retry website setup: ${result.error.message}`);
-    }
-    const row = result.data as WebsiteSetupRow | null;
-    return row ? websiteSetupFromRow(row) : null;
-  }
-  async claimWebsiteSetup(setupId: string, workerId: string) {
-    const setup = await this.getWebsiteSetup(setupId);
-    if (!setup || setup.status !== "queued") return null;
-    const lockedAt = new Date().toISOString();
-    const row = await maybe<WebsiteSetupRow>(
-      this.client
-        .from("website_setups")
-        .update({
-          status: "processing",
-          attempts: setup.attempts + 1,
-          locked_by: workerId,
-          locked_at: lockedAt,
-          updated_at: lockedAt
-        })
-        .eq("id", setup.id)
-        .eq("status", "queued")
-        .eq("source_revision", setup.sourceRevision)
-        .eq("attempts", setup.attempts)
-        .select("*")
-        .maybeSingle(),
-      "Claim website setup"
-    );
-    return row ? websiteSetupFromRow(row) : null;
-  }
-  async claimNextWebsiteSetup(workerId: string) { const row = await maybe<WebsiteSetupRow>(this.client.rpc("claim_next_website_setup", { worker_id: workerId }).maybeSingle(), "Claim website setup"); return row ? websiteSetupFromRow(row) : null; }
-  async linkWebsiteSetup(input: { setupId: string; sourceRevision: number; siteId: string; sessionId: string; runId: string }) {
-    const row = await maybe<WebsiteSetupRow>(this.client.rpc("link_website_setup", {
-      target_setup_id: input.setupId,
-      target_source_revision: input.sourceRevision,
-      target_site_id: input.siteId,
-      target_session_id: input.sessionId,
-      target_run_id: input.runId
-    }).maybeSingle(), "Link website setup");
-    return row ? websiteSetupFromRow(row) : null;
-  }
-  async failWebsiteSetup(input: { setupId: string; sourceRevision: number; failureCode: WebsiteSetupFailureCode; failureReason: string; siteId?: string }) {
-    const row = await maybe<WebsiteSetupRow>(this.client.from("website_setups").update({ status: "failed", site_id: input.siteId ?? null, failure_code: input.failureCode, failure_reason: input.failureReason, locked_by: null, locked_at: null, updated_at: new Date().toISOString() }).eq("id", input.setupId).eq("status", "processing").eq("source_revision", input.sourceRevision).select("*").maybeSingle(), "Fail website setup");
-    return row ? websiteSetupFromRow(row) : null;
   }
 
   async createPreviewGrant(input: {
@@ -1623,22 +993,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async listProspectCandidates(input: ProspectCandidateQuery = {}) {
     let query = this.client.from("prospect_current").select("*");
     if (input.search) query = query.ilike("business_name", `%${input.search.trim()}%`);
-    if (input.vertical) query = query.eq("vertical", input.vertical);
-    if (input.industryCode) query = query.eq("industry_code", input.industryCode);
-    if (input.region) query = query.eq("region", input.region.toUpperCase());
-    if (input.websiteKind) query = query.eq("website_kind", input.websiteKind);
-    if (input.cms) query = query.eq("cms", input.cms);
-    if (input.managedProvider) query = query.eq("managed_provider", input.managedProvider);
-    if (input.agencyStatus) query = query.eq("agency_status", input.agencyStatus);
-    if (input.verificationStatus) query = query.eq("verification_status", input.verificationStatus);
-    if (input.operatingStatus) query = query.eq("operating_status", input.operatingStatus);
-    if (input.targetFitStatus) query = query.eq("target_fit_status", input.targetFitStatus);
-    if (input.ownershipScope) query = query.eq("ownership_scope", input.ownershipScope);
-    if (input.minimumLocationCount !== undefined) query = query.gte("location_count", input.minimumLocationCount);
-    if (input.minimumActiveLicenseCount !== undefined) query = query.gte("active_license_count", input.minimumActiveLicenseCount);
-    if (input.minimumReviewCount !== undefined) query = query.gte("review_count", input.minimumReviewCount);
-    if (input.minimumPriorityScore !== undefined) query = query.gte("priority_score", input.minimumPriorityScore);
-    if (input.minimumVerificationScore !== undefined) query = query.gte("verification_score", input.minimumVerificationScore);
+    for (const filter of input.filters ?? []) query = applySupabaseProspectFilter(query, filter);
     const sortColumn = prospectSortColumn(input.sortBy);
     const ascending = (input.sortDirection ?? defaultProspectSortDirection(input.sortBy)) === "asc";
     const offset = prospectQueryOffset(input.offset);
@@ -1653,22 +1008,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async countProspectCandidates(input: ProspectCandidateQuery = {}) {
     let query = this.client.from("prospect_current").select("id", { count: "exact", head: true });
     if (input.search) query = query.ilike("business_name", `%${input.search.trim()}%`);
-    if (input.vertical) query = query.eq("vertical", input.vertical);
-    if (input.industryCode) query = query.eq("industry_code", input.industryCode);
-    if (input.region) query = query.eq("region", input.region.toUpperCase());
-    if (input.websiteKind) query = query.eq("website_kind", input.websiteKind);
-    if (input.cms) query = query.eq("cms", input.cms);
-    if (input.managedProvider) query = query.eq("managed_provider", input.managedProvider);
-    if (input.agencyStatus) query = query.eq("agency_status", input.agencyStatus);
-    if (input.verificationStatus) query = query.eq("verification_status", input.verificationStatus);
-    if (input.operatingStatus) query = query.eq("operating_status", input.operatingStatus);
-    if (input.targetFitStatus) query = query.eq("target_fit_status", input.targetFitStatus);
-    if (input.ownershipScope) query = query.eq("ownership_scope", input.ownershipScope);
-    if (input.minimumLocationCount !== undefined) query = query.gte("location_count", input.minimumLocationCount);
-    if (input.minimumActiveLicenseCount !== undefined) query = query.gte("active_license_count", input.minimumActiveLicenseCount);
-    if (input.minimumReviewCount !== undefined) query = query.gte("review_count", input.minimumReviewCount);
-    if (input.minimumPriorityScore !== undefined) query = query.gte("priority_score", input.minimumPriorityScore);
-    if (input.minimumVerificationScore !== undefined) query = query.gte("verification_score", input.minimumVerificationScore);
+    for (const filter of input.filters ?? []) query = applySupabaseProspectFilter(query, filter);
     const result = await query;
     if (result.error) throw new Error(`Count prospect candidates: ${result.error.message}`);
     return result.count ?? 0;
@@ -1688,123 +1028,22 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       .order("is_primary", { ascending: false })
       .order("id", { ascending: true }), "List prospect locations")).map(prospectLocationFromRow);
   }
-  async upsertProspectLicense(input: UpsertProspectLicenseInput) {
-    const value = prospectLicenseValue(input);
-    const row = await data<ProspectLicenseRow>(this.client.from("prospect_licenses")
-      .upsert(prospectLicenseToRow(value), {
-        onConflict: "prospect_id,jurisdiction,regulator,license_type,license_number",
-        ignoreDuplicates: false
-      })
-      .select("*")
-      .single(), "Upsert prospect license");
-    return prospectLicenseFromRow(row);
-  }
-  async listProspectLicenses(prospectId: string) {
-    return (await data<ProspectLicenseRow[]>(this.client.from("prospect_licenses")
-      .select("*")
-      .eq("prospect_id", prospectId)
-      .order("observed_at", { ascending: false }), "List prospect licenses")).map(prospectLicenseFromRow);
-  }
-  async upsertProspectAffiliation(input: UpsertProspectAffiliationInput) {
-    const value = prospectAffiliationValue(input);
-    const row = await data<ProspectAffiliationRow>(this.client.from("prospect_affiliations")
-      .upsert(prospectAffiliationToRow(value), { onConflict: "id", ignoreDuplicates: false })
-      .select("*")
-      .single(), "Upsert prospect affiliation");
-    return prospectAffiliationFromRow(row);
-  }
-  async listProspectAffiliations(prospectId: string) {
-    return (await data<ProspectAffiliationRow[]>(this.client.from("prospect_affiliations")
-      .select("*")
-      .eq("prospect_id", prospectId)
-      .order("observed_at", { ascending: false }), "List prospect affiliations")).map(prospectAffiliationFromRow);
-  }
-  async upsertProspectSource(input: UpsertProspectSourceInput) {
-    const value = prospectSourceValue(input);
-    const row = await data<ProspectSourceRow>(this.client.from("prospect_sources")
-      .upsert(prospectSourceToRow(value), { onConflict: "id", ignoreDuplicates: false })
-      .select("*")
-      .single(), "Upsert prospect source");
-    return prospectSourceFromRow(row);
-  }
-  async listProspectSources(vertical?: string) {
-    let query = this.client.from("prospect_sources").select("*").order("jurisdiction", { ascending: true });
-    if (vertical) query = query.eq("vertical", vertical);
-    return (await data<ProspectSourceRow[]>(query, "List prospect sources")).map(prospectSourceFromRow);
-  }
-  async upsertProspectSourceRun(input: UpsertProspectSourceRunInput) {
-    const value = prospectSourceRunValue(input);
-    const row = await data<ProspectSourceRunRow>(this.client.from("prospect_source_runs")
-      .upsert(prospectSourceRunToRow(value), { onConflict: "id", ignoreDuplicates: false })
-      .select("*")
-      .single(), "Upsert prospect source run");
-    return prospectSourceRunFromRow(row);
-  }
-  async listProspectSourceRuns(sourceId?: string) {
-    let query = this.client.from("prospect_source_runs").select("*").order("started_at", { ascending: false });
-    if (sourceId) query = query.eq("source_id", sourceId);
-    return (await data<ProspectSourceRunRow[]>(query, "List prospect source runs")).map(prospectSourceRunFromRow);
-  }
-  async pruneProspectSourceSnapshots(input: Array<{ sourceId: string; retainedCanonicalKeys: string[] }>) {
-    const counts = {
-      prospects: 0,
-      locations: 0,
-      licenses: 0,
-      affiliations: 0,
-      observations: 0,
-      contacts: 0
-    };
-    for (const snapshot of input) {
-      const result = await data<Record<keyof typeof counts, number>>(this.client.rpc(
-        "prune_prospect_source_snapshot",
-        {
-          p_source_id: snapshot.sourceId,
-          p_retained_canonical_keys: snapshot.retainedCanonicalKeys.map(normalizedCanonicalKey)
-        }
-      ), `Prune prospect source snapshot ${snapshot.sourceId}`);
-      for (const key of Object.keys(counts) as Array<keyof typeof counts>) {
-        counts[key] += Number(result[key] ?? 0);
-      }
-    }
-    return counts;
-  }
-  async createProspectObservation(input: CreateProspectObservationInput) {
-    const existing = await maybe<ProspectObservationRow>(this.client.from("prospect_observations")
-      .select("*")
-      .eq("prospect_id", input.prospectId)
-      .eq("input_hash", input.inputHash)
-      .maybeSingle(), "Find prospect observation");
-    if (existing) return prospectObservationFromRow(existing);
-    const value = prospectObservationValue(input);
-    const row = await data<ProspectObservationRow>(this.client.from("prospect_observations")
-      .insert(prospectObservationToRow(value))
-      .select("*")
-      .single(), "Create prospect observation");
-    return prospectObservationFromRow(row);
-  }
   async upsertProspectContact(input: UpsertProspectContactInput) {
-    const existing = await this.findExistingProspectContact(input);
-    const value = prospectContactValue(input, existing);
-    const row = await data<ProspectContactRow>(this.client.from("prospect_contacts")
-      .upsert(prospectContactToRow(value), { onConflict: "id", ignoreDuplicates: false })
-      .select("*")
-      .single(), "Upsert prospect contact");
-    return prospectContactFromRow(row);
+    const existing = findExistingProspectContact(await this.listProspectContacts(input.prospectId), input);
+    return this.persistProspectContact(prospectContactValue(input, existing));
   }
   async listProspectContacts(prospectId: string) {
     return (await data<ProspectContactRow[]>(this.client.from("prospect_contacts")
       .select("*")
       .eq("prospect_id", prospectId)
-      .order("observed_at", { ascending: false }), "List prospect contacts")).map(prospectContactFromRow);
+      .order("updated_at", { ascending: false }), "List prospect contacts")).map(prospectContactFromRow);
   }
   async importProspectResearch(records: ProspectImportRecord[]) {
+    records = records.length ? prospectImportSchema.parse({ records }).records : [];
     assertUniqueProspectImportRecords(records);
     if (!records.length) return {
       prospects: 0,
       locations: 0,
-      licenses: 0,
-      affiliations: 0,
-      observations: 0,
       contacts: 0
     };
     const canonicalKeys = [...new Set(records.map((record) => normalizedCanonicalKey(record.prospect.canonicalKey)))];
@@ -1815,10 +1054,11 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
         .in("canonical_key", canonicalKeyBatch), "Find imported prospects"));
     }
     const existingByCanonicalKey = new Map(existingRows.map((row) => [row.canonical_key, prospectResearchFromRow(row)]));
-    const prospects = records.map((record) => prospectValue(
-      record.prospect,
-      existingByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey))
-    ));
+    const prospects = records.map((record) => {
+      const existing = existingByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey));
+      assertCanonicalProspectResearchUpdate(existing, record);
+      return prospectValue(record.prospect, existing);
+    });
     const prospectRows: ProspectResearchRow[] = [];
     for (const batch of batches(prospects.map(prospectToRow), 250)) {
       prospectRows.push(...await data<ProspectResearchRow[]>(this.client.from("prospects")
@@ -1831,40 +1071,21 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
       if (!prospect) throw new Error(`Imported prospect was not returned for ${record.prospect.canonicalKey}.`);
       return (record.locations ?? []).map((location) => prospectLocationValue({ ...location, prospectId: prospect.id }));
     });
-    const licenses = deduplicateProspectLicenses(records.flatMap((record) => {
+    const incomingContactInputs = records.flatMap((record) => {
       const prospect = prospectByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey));
       if (!prospect) throw new Error(`Imported prospect was not returned for ${record.prospect.canonicalKey}.`);
-      return (record.licenses ?? []).map((license) => prospectLicenseValue({ ...license, prospectId: prospect.id }));
-    }));
-    const affiliations = records.flatMap((record) => {
-      const prospect = prospectByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey));
-      if (!prospect) throw new Error(`Imported prospect was not returned for ${record.prospect.canonicalKey}.`);
-      return (record.affiliations ?? []).map((affiliation) =>
-        prospectAffiliationValue({ ...affiliation, prospectId: prospect.id })
-      );
+      return (record.contacts ?? []).map((contact) => ({ ...contact, prospectId: prospect.id }));
     });
-    const observations = records.flatMap((record) => {
-      if (!record.observation) return [];
-      const prospect = prospectByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey));
-      if (!prospect) throw new Error(`Imported prospect was not returned for ${record.prospect.canonicalKey}.`);
-      return [prospectObservationValue({ ...record.observation, prospectId: prospect.id })];
-    });
-    const importedProspectIds = [...prospectByCanonicalKey.values()].map((prospect) => prospect.id);
-    const existingContactRows: ProspectContactRow[] = [];
-    for (const prospectIdBatch of batches(importedProspectIds, 250)) {
-      existingContactRows.push(...await data<ProspectContactRow[]>(this.client.from("prospect_contacts")
+    const existingContacts: ProspectContact[] = [];
+    for (const prospectIdBatch of batches([...new Set(incomingContactInputs.map((contact) => contact.prospectId))], 250)) {
+      if (!prospectIdBatch.length) continue;
+      existingContacts.push(...(await data<ProspectContactRow[]>(this.client.from("prospect_contacts")
         .select("*")
-        .in("prospect_id", prospectIdBatch), "Find imported prospect contacts"));
+        .in("prospect_id", prospectIdBatch), "Find imported contacts")).map(prospectContactFromRow));
     }
-    const existingContacts = existingContactRows.map(prospectContactFromRow);
-    const contacts = deduplicateProspectContacts(records.flatMap((record) => {
-      const prospect = prospectByCanonicalKey.get(normalizedCanonicalKey(record.prospect.canonicalKey));
-      if (!prospect) throw new Error(`Imported prospect was not returned for ${record.prospect.canonicalKey}.`);
-      return (record.contacts ?? []).map((contact) => {
-        const input = { ...contact, prospectId: prospect.id };
-        return prospectContactValue(input, findExistingProspectContact(existingContacts, input));
-      });
-    }));
+    const contacts = deduplicateProspectContacts(incomingContactInputs.map((contact) =>
+      prospectContactValue(contact, findExistingProspectContact(existingContacts, contact))
+    ));
     if (locations.length) {
       for (const batch of batches(locations.map(prospectLocationToRow), 250)) {
         await data(this.client.from("prospect_locations")
@@ -1872,46 +1093,12 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
           .select("id"), "Import prospect locations");
       }
     }
-    if (licenses.length) {
-      for (const batch of batches(licenses.map(prospectLicenseToRow), 250)) {
-        await data(this.client.from("prospect_licenses")
-          .upsert(batch, {
-            onConflict: "prospect_id,jurisdiction,regulator,license_type,license_number",
-            ignoreDuplicates: false
-          })
-          .select("id"), "Import prospect licenses");
-      }
-    }
-    if (affiliations.length) {
-      for (const batch of batches(affiliations.map(prospectAffiliationToRow), 250)) {
-        await data(this.client.from("prospect_affiliations")
-          .upsert(batch, { onConflict: "id", ignoreDuplicates: false })
-          .select("id"), "Import prospect affiliations");
-      }
-    }
-    if (observations.length) {
-      for (const batch of batches(observations.map(prospectObservationToRow), 250)) {
-        await data(this.client.from("prospect_observations")
-          .upsert(batch, {
-            onConflict: "prospect_id,input_hash",
-            ignoreDuplicates: true
-          })
-          .select("id"), "Import prospect observations");
-      }
-    }
     if (contacts.length) {
-      for (const batch of batches(contacts.map(prospectContactToRow), 250)) {
-        await data(this.client.from("prospect_contacts")
-          .upsert(batch, { onConflict: "id", ignoreDuplicates: false })
-          .select("id"), "Import prospect contacts");
-      }
+      for (const contact of contacts) await this.persistProspectContact(contact);
     }
     return {
       prospects: prospects.length,
       locations: locations.length,
-      licenses: licenses.length,
-      affiliations: affiliations.length,
-      observations: observations.length,
       contacts: contacts.length
     };
   }
@@ -1921,13 +1108,6 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async upsertOutboundProspect(input: UpsertOutboundProspectInput) {
     const prospect = await this.getProspect(input.prospectId);
     if (!prospect) throw new Error("Unknown canonical prospect.");
-    if (prospect.doNotContact || prospect.status !== "active") throw new Error("Suppressed, converted, or archived prospects cannot be added to a campaign.");
-    const observation = await maybe<ProspectObservationRow>(this.client.from("prospect_observations")
-      .select("*")
-      .eq("id", input.selectionObservationId)
-      .eq("prospect_id", input.prospectId)
-      .maybeSingle(), "Validate campaign selection observation");
-    if (!observation) throw new Error("Campaign selection must reference an observation for the canonical prospect.");
     const value = newOutboundProspect({
       ...input,
       businessName: prospect.businessName,
@@ -1937,7 +1117,6 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     const row = await data<ProspectRow>(this.client.from("outbound_prospects").upsert({
       id: value.id,
       prospect_id: value.prospectId,
-      selection_observation_id: value.selectionObservationId,
       campaign_id: value.campaignId,
       site_id: value.siteId,
       report_id: value.reportId,
@@ -1999,31 +1178,20 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     return outboundProspectFromRows(row, prospect);
   }
 
-  private async findExistingProspectContact(input: UpsertProspectContactInput) {
-    if (input.id) {
-      const byId = await maybe<ProspectContactRow>(this.client.from("prospect_contacts")
-        .select("*")
-        .eq("id", input.id)
-        .maybeSingle(), "Find prospect contact by ID");
-      if (byId) return prospectContactFromRow(byId);
+  private async persistProspectContact(value: ProspectContact) {
+    if (value.isPrimary) {
+      const demotion = await this.client.from("prospect_contacts")
+        .update({ is_primary: false, updated_at: new Date().toISOString() })
+        .eq("prospect_id", value.prospectId)
+        .neq("id", value.id)
+        .eq("is_primary", true);
+      if (demotion.error) throw new Error(`Demote existing primary prospect contact: ${demotion.error.message}`);
     }
-    if (input.email) {
-      const byEmail = await maybe<ProspectContactRow>(this.client.from("prospect_contacts")
-        .select("*")
-        .eq("prospect_id", input.prospectId)
-        .eq("email", input.email.trim().toLowerCase())
-        .maybeSingle(), "Find prospect contact by email");
-      if (byEmail) return prospectContactFromRow(byEmail);
-    }
-    if (input.phone) {
-      const byPhone = await maybe<ProspectContactRow>(this.client.from("prospect_contacts")
-        .select("*")
-        .eq("prospect_id", input.prospectId)
-        .eq("phone", input.phone.trim())
-        .maybeSingle(), "Find prospect contact by phone");
-      if (byPhone) return prospectContactFromRow(byPhone);
-    }
-    return undefined;
+    const row = await data<ProspectContactRow>(this.client.from("prospect_contacts")
+      .upsert(prospectContactToRow(value), { onConflict: "id", ignoreDuplicates: false })
+      .select("*")
+      .single(), "Upsert prospect contact");
+    return prospectContactFromRow(row);
   }
 
   private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = await this.outboundProspectFromMembership(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_report_viewed_at: value.firstReportViewedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
@@ -2033,7 +1201,6 @@ export const platformOperationsRepository: PlatformOperationsRepository = proces
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function websiteSetupFromRow(row: WebsiteSetupRow): WebsiteSetup { return { id: row.id, ownerUserId: row.owner_user_id, sourceUrl: row.source_url, normalizedSource: row.normalized_source, reportingTimezone: row.reporting_timezone ?? "UTC", prospectReportId: row.prospect_report_id ?? undefined, sourceRevision: row.source_revision, status: row.status, siteId: row.site_id ?? undefined, sessionId: row.session_id ?? undefined, runId: row.run_id ?? undefined, attempts: row.attempts, maxAttempts: row.max_attempts, idempotencyKey: row.idempotency_key, creationRequestHash: row.creation_request_hash, lockedBy: row.locked_by ?? undefined, lockedAt: row.locked_at ?? undefined, failureCode: row.failure_code ?? undefined, failureReason: row.failure_reason ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined }; }
 function previewGrantFromRow(row: PreviewGrantRow): SitePreviewGrant { return { id: row.id, siteId: row.site_id, siteVersionId: row.site_version_id, secretHash: row.secret_hash, keyVersion: row.key_version, secretVersion: row.secret_version, expiresAt: row.expires_at, revokedAt: row.revoked_at ?? undefined, createdAt: row.created_at }; }
 function domainFromRow(row: DomainRow): DomainRecord {
@@ -2094,40 +1261,19 @@ function domainToRow(value: DomainRecord) {
 }
 function redirectFromRow(row: RedirectRow): SiteRedirectRule { return { id: row.id, siteId: row.site_id, sourcePath: row.source_path, destinationPath: row.destination_path, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }; }
 function campaignFromRow(row: CampaignRow): OutboundCampaign { return { id: row.id, name: row.name, channel: row.channel, status: row.status, metadata: row.metadata as OutboundCampaign["metadata"], createdAt: row.created_at, startedAt: row.started_at ?? undefined, endedAt: row.ended_at ?? undefined }; }
-function outboundProspectFromRows(row: ProspectRow, prospect: Prospect): OutboundProspect { return { id: row.id, prospectId: row.prospect_id, selectionObservationId: row.selection_observation_id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, reportId: row.report_id ?? undefined, businessName: prospect.businessName, vertical: prospect.vertical, sourceUrl: prospect.websiteUrl, previewId: row.preview_id ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstReportViewedAt: row.first_report_viewed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
+function outboundProspectFromRows(row: ProspectRow, prospect: Prospect): OutboundProspect { return { id: row.id, prospectId: row.prospect_id, campaignId: row.campaign_id, siteId: row.site_id ?? undefined, reportId: row.report_id ?? undefined, businessName: prospect.businessName, vertical: prospect.vertical, sourceUrl: prospect.websiteUrl, previewId: row.preview_id ?? undefined, mailingCode: row.mailing_code ?? undefined, status: row.status, metadata: row.metadata as OutboundProspect["metadata"], createdAt: row.created_at, mailedAt: row.mailed_at ?? undefined, firstReportViewedAt: row.first_report_viewed_at ?? undefined, firstPreviewViewedAt: row.first_preview_viewed_at ?? undefined, adoptionStartedAt: row.adoption_started_at ?? undefined, adoptedAt: row.adopted_at ?? undefined, publishedAt: row.published_at ?? undefined, disqualifiedAt: row.disqualified_at ?? undefined }; }
 function prospectValue(input: UpsertProspectInput, existing?: Prospect): Prospect {
   const now = new Date().toISOString();
-  const websiteUrl = input.websiteKind === "owned_website"
-    ? optionalText(input.websiteUrl) ?? existing?.websiteUrl
-    : undefined;
-  const websiteHost = websiteUrl
-    ? normalizedWebsiteHost(websiteUrl)
-    : input.websiteKind === "owned_website"
-      ? optionalText(input.websiteHost) ?? existing?.websiteHost
-      : undefined;
   return {
     id: existing?.id ?? input.id ?? prospectIdForCanonicalKey(input.canonicalKey),
     canonicalKey: normalizedCanonicalKey(input.canonicalKey),
     businessName: input.businessName.trim(),
-    legalBusinessName: optionalText(input.legalBusinessName) ?? existing?.legalBusinessName,
-    dbaName: optionalText(input.dbaName) ?? existing?.dbaName,
     vertical: optionalText(input.vertical) ?? existing?.vertical,
-    industryCode: optionalText(input.industryCode) ?? existing?.industryCode,
-    ownershipScope: input.ownershipScope ?? existing?.ownershipScope ?? "unknown",
-    status: input.status,
-    websiteKind: input.websiteKind,
-    websiteUrl,
-    websiteHost,
-    addressLine1: optionalText(input.addressLine1) ?? existing?.addressLine1,
-    addressLine2: optionalText(input.addressLine2) ?? existing?.addressLine2,
-    locality: optionalText(input.locality) ?? existing?.locality,
-    region: optionalText(input.region)?.toUpperCase() ?? existing?.region,
-    postalCode: optionalText(input.postalCode) ?? existing?.postalCode,
-    countryCode: input.countryCode.trim().toUpperCase(),
-    phone: optionalText(input.phone) ?? existing?.phone,
-    doNotContact: input.doNotContact,
-    suppressionReason: input.doNotContact ? optionalText(input.suppressionReason) ?? existing?.suppressionReason : undefined,
-    metadata: { ...existing?.metadata, ...input.metadata },
+    researchState: input.researchState ?? existing?.researchState ?? "pending",
+    websiteUrl: optionalText(input.websiteUrl) ?? existing?.websiteUrl,
+    websitePlatform: optionalText(input.websitePlatform) ?? existing?.websitePlatform,
+    websiteAgencyProvider: optionalText(input.websiteAgencyProvider) ?? existing?.websiteAgencyProvider,
+    businessEmail: optionalText(input.businessEmail)?.toLowerCase() ?? existing?.businessEmail,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
@@ -2139,7 +1285,6 @@ function prospectLocationValue(input: UpsertProspectLocationInput, existing?: Pr
     prospectId: input.prospectId,
     canonicalKey: normalizedCanonicalKey(input.canonicalKey),
     kind: input.kind,
-    status: input.status,
     locationName: optionalText(input.locationName),
     addressLine1: optionalText(input.addressLine1),
     addressLine2: optionalText(input.addressLine2),
@@ -2148,149 +1293,63 @@ function prospectLocationValue(input: UpsertProspectLocationInput, existing?: Pr
     postalCode: optionalText(input.postalCode),
     countryCode: input.countryCode.trim().toUpperCase(),
     county: optionalText(input.county),
-    phone: optionalText(input.phone),
+    phone: normalizeProspectPhone(input.phone),
+    googlePlaceId: optionalText(input.googlePlaceId),
+    googleBusinessName: optionalText(input.googleBusinessName),
+    googleCategory: optionalText(input.googleCategory),
+    googleAddress: optionalText(input.googleAddress),
+    googlePhone: normalizeProspectPhone(input.googlePhone),
+    googleWebsiteUrl: optionalText(input.googleWebsiteUrl),
+    googleMapsUrl: optionalText(input.googleMapsUrl),
+    googleRating: input.googleRating,
+    googleReviewCount: input.googleReviewCount,
     latitude: input.latitude,
     longitude: input.longitude,
-    isPrimary: input.isPrimary,
-    sourceId: optionalText(input.sourceId),
-    sourceRunId: optionalText(input.sourceRunId),
-    sourceRecordKey: optionalText(input.sourceRecordKey),
-    observedAt: input.observedAt,
+    isPrimary: input.isPrimary || existing?.isPrimary || false,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
 }
-function prospectLicenseValue(input: UpsertProspectLicenseInput, existing?: ProspectLicense): ProspectLicense {
-  const now = new Date().toISOString();
-  return {
-    id: existing?.id ?? input.id ?? prospectLicenseId(input),
-    prospectId: input.prospectId,
-    locationId: optionalText(input.locationId),
-    jurisdiction: input.jurisdiction.trim().toUpperCase(),
-    regulator: input.regulator.trim(),
-    licenseType: input.licenseType.trim(),
-    licenseNumber: input.licenseNumber.trim(),
-    status: input.status,
-    classifications: [...new Set(input.classifications.map((value) => value.trim()).filter(Boolean))],
-    issuedAt: optionalText(input.issuedAt),
-    renewedAt: optionalText(input.renewedAt),
-    expiresAt: optionalText(input.expiresAt),
-    responsiblePersonName: optionalText(input.responsiblePersonName),
-    responsiblePersonTitle: optionalText(input.responsiblePersonTitle),
-    sourceId: input.sourceId,
-    sourceRunId: optionalText(input.sourceRunId),
-    sourceUrl: input.sourceUrl,
-    sourceRecordKey: optionalText(input.sourceRecordKey),
-    observedAt: input.observedAt,
-    evidence: input.evidence,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now
-  };
+function assertCanonicalProspectResearchUpdate(existing: Prospect | undefined, record: ProspectImportRecord) {
+  if (existing && normalizeIdentityName(existing.businessName) !== normalizeIdentityName(record.prospect.businessName)) {
+    throw new Error("A source import cannot silently change the canonical business name.");
+  }
 }
-function prospectAffiliationValue(
-  input: UpsertProspectAffiliationInput,
-  existing?: ProspectAffiliation
-): ProspectAffiliation {
-  const now = new Date().toISOString();
-  return {
-    id: existing?.id ?? input.id ?? prospectAffiliationId(input),
-    prospectId: input.prospectId,
-    relatedProspectId: optionalText(input.relatedProspectId),
-    relatedOrganizationName: input.relatedOrganizationName.trim(),
-    affiliationType: input.affiliationType,
-    confidence: input.confidence,
-    sourceUrl: optionalText(input.sourceUrl),
-    observedAt: input.observedAt,
-    evidence: input.evidence,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now
-  };
+
+function normalizeIdentityName(value: string) {
+  return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
-function prospectSourceValue(input: UpsertProspectSourceInput, existing?: ProspectSource): ProspectSource {
-  const now = new Date().toISOString();
-  return {
-    ...input,
-    jurisdiction: input.jurisdiction.trim().toUpperCase(),
-    lastCheckedAt: optionalText(input.lastCheckedAt),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now
-  };
-}
-function prospectSourceRunValue(input: UpsertProspectSourceRunInput, existing?: ProspectSourceRun): ProspectSourceRun {
-  const now = new Date().toISOString();
-  return {
-    ...input,
-    finishedAt: optionalText(input.finishedAt),
-    snapshotAt: optionalText(input.snapshotAt),
-    sourceHash: optionalText(input.sourceHash),
-    error: optionalText(input.error),
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now
-  };
-}
-function prospectObservationValue(input: CreateProspectObservationInput): ProspectObservation {
-  return {
-    ...input,
-    id: input.id ?? prospectObservationId(input.prospectId, input.inputHash),
-    schemaVersion: 1,
-    sourceUrl: optionalText(input.sourceUrl),
-    websiteUrl: optionalText(input.websiteUrl),
-    cms: optionalText(input.cms),
-    siteBuilder: optionalText(input.siteBuilder),
-    managedProvider: optionalText(input.managedProvider),
-    agencyName: optionalText(input.agencyName),
-    websiteAssessmentId: optionalText(input.websiteAssessmentId),
-    prospectReportId: optionalText(input.prospectReportId),
-    scoringModel: optionalText(input.scoringModel),
-    verificationStatus: input.verificationStatus ?? "unverified",
-    operatingStatus: input.operatingStatus ?? "unknown",
-    targetFitStatus: input.targetFitStatus ?? "unknown",
-    targetFitReason: optionalText(input.targetFitReason),
-    notes: optionalText(input.notes),
-    createdAt: new Date().toISOString()
-  };
+function prospectContactProjectionId(input: UpsertProspectContactInput) {
+  return prospectContactId(input);
 }
 function prospectContactValue(input: UpsertProspectContactInput, existing?: ProspectContact): ProspectContact {
   const now = new Date().toISOString();
   const email = optionalText(input.email)?.toLowerCase();
-  const phone = optionalText(input.phone);
+  const phone = normalizeProspectPhone(input.phone);
   const fullName = optionalText(input.fullName);
-  if (!email && !phone && !fullName) throw new Error("A prospect contact requires a name, email, or phone.");
-  if (input.verificationStatus === "public_source" && !input.sourceUrl) throw new Error("A public-source contact requires a source URL.");
-  if (input.outreachEligible && !["public_source", "owner_verified"].includes(input.verificationStatus)) {
-    throw new Error("Unverified contact data cannot be marked outreach eligible.");
-  }
+  if (!fullName) throw new Error("A prospect contact requires a name.");
   return {
-    id: existing?.id ?? input.id ?? prospectContactId({ ...input, email, phone, fullName }),
+    id: existing?.id ?? input.id ?? prospectContactProjectionId(input),
     prospectId: input.prospectId,
-    contactType: input.contactType,
     fullName,
     roleTitle: optionalText(input.roleTitle),
     email,
     phone,
-    sourceType: input.sourceType,
-    sourceUrl: optionalText(input.sourceUrl),
-    verificationStatus: input.verificationStatus,
-    outreachEligible: input.outreachEligible,
-    observedAt: input.observedAt,
-    suppressedAt: optionalText(input.suppressedAt),
-    suppressionReason: optionalText(input.suppressionReason),
+    isPrimary: input.isPrimary,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now
   };
 }
 function findExistingProspectContact(
   contacts: ProspectContact[],
-  input: { prospectId: string; id?: string; email?: string; phone?: string },
+  input: { prospectId: string; id?: string; fullName: string; email?: string; phone?: string },
   deterministicId?: string
 ) {
-  const email = optionalText(input.email)?.toLowerCase();
-  const phone = optionalText(input.phone);
+  const fullName = normalizeIdentityName(input.fullName);
   return contacts.find((contact) => contact.prospectId === input.prospectId && (
     contact.id === input.id
     || contact.id === deterministicId
-    || Boolean(email && contact.email?.toLowerCase() === email)
-    || Boolean(phone && contact.phone === phone)
+    || normalizeIdentityName(contact.fullName) === fullName
   ));
 }
 function deduplicateProspectContacts(contacts: ProspectContact[]) {
@@ -2305,112 +1364,151 @@ function deduplicateProspectContacts(contacts: ProspectContact[]) {
       continue;
     }
     const preferred = preferredProspectContact(existing, contact);
-    if (preferred !== existing) {
-      Object.assign(existing, preferred, {
-        id: existing.id,
-        createdAt: existing.createdAt < preferred.createdAt ? existing.createdAt : preferred.createdAt
-      });
-    }
+    Object.assign(existing, {
+      fullName: preferred.fullName,
+      roleTitle: preferred.roleTitle ?? existing.roleTitle ?? contact.roleTitle,
+      email: existing.email ?? contact.email,
+      phone: existing.phone ?? contact.phone,
+      isPrimary: existing.isPrimary || contact.isPrimary,
+      createdAt: existing.createdAt < contact.createdAt ? existing.createdAt : contact.createdAt,
+      updatedAt: existing.updatedAt > contact.updatedAt ? existing.updatedAt : contact.updatedAt
+    });
     for (const key of new Set([...keys, ...prospectContactIdentityKeys(existing)])) {
       byIdentity.set(key, existing);
     }
   }
-  return result;
-}
-function deduplicateProspectLicenses(licenses: ProspectLicense[]) {
-  const byId = new Map<string, ProspectLicense>();
-  for (const license of licenses) {
-    const existing = byId.get(license.id);
-    if (!existing || license.observedAt > existing.observedAt) byId.set(license.id, license);
+  for (const prospectId of new Set(result.map((contact) => contact.prospectId))) {
+    const primaries = result
+      .filter((contact) => contact.prospectId === prospectId && contact.isPrimary)
+      .sort((left, right) => prospectContactPriority({ ...right, isPrimary: false }) - prospectContactPriority({ ...left, isPrimary: false })
+        || Number(Boolean(right.email)) - Number(Boolean(left.email))
+        || Number(Boolean(right.phone)) - Number(Boolean(left.phone))
+        || right.updatedAt.localeCompare(left.updatedAt));
+    for (const contact of primaries.slice(1)) contact.isPrimary = false;
   }
-  return [...byId.values()];
+  return result;
 }
 function prospectContactIdentityKeys(contact: ProspectContact) {
   return [
     `id:${contact.id}`,
-    contact.email ? `email:${contact.prospectId}:${contact.email.toLowerCase()}` : undefined,
-    contact.phone ? `phone:${contact.prospectId}:${contact.phone}` : undefined
+    `name:${contact.prospectId}:${normalizeIdentityName(contact.fullName)}`
   ].filter((value): value is string => Boolean(value));
 }
+
 function preferredProspectContact(left: ProspectContact, right: ProspectContact) {
-  const leftScore = Number(left.contactType === "owner") * 10
-    + Number(Boolean(left.fullName))
-    + Number(Boolean(left.email))
-    + Number(Boolean(left.phone));
-  const rightScore = Number(right.contactType === "owner") * 10
-    + Number(Boolean(right.fullName))
-    + Number(Boolean(right.email))
-    + Number(Boolean(right.phone));
+  const leftScore = prospectContactPriority(left) + Number(Boolean(left.email)) + Number(Boolean(left.phone));
+  const rightScore = prospectContactPriority(right) + Number(Boolean(right.email)) + Number(Boolean(right.phone));
   if (rightScore !== leftScore) return rightScore > leftScore ? right : left;
-  return right.observedAt > left.observedAt ? right : left;
+  return right.updatedAt > left.updatedAt ? right : left;
 }
 function prospectCandidateValue(
   prospect: Prospect,
-  observations: ProspectObservation[],
   contacts: ProspectContact[],
-  locations: ProspectLocation[],
-  licenses: ProspectLicense[]
+  locations: ProspectLocation[]
 ): ProspectCandidate {
-  const latest = observations
-    .filter((observation) => observation.prospectId === prospect.id)
-    .sort((left, right) => right.observedAt.localeCompare(left.observedAt) || right.id.localeCompare(left.id))[0];
-  const activeContacts = contacts.filter((contact) => contact.prospectId === prospect.id && !contact.suppressedAt);
-  const sourcedContacts = activeContacts.filter((contact) => ["public_source", "owner_verified"].includes(contact.verificationStatus));
-  const ownerName = sourcedContacts.find((contact) => contact.contactType === "owner" && contact.fullName)?.fullName;
-  const publicEmail = prospect.doNotContact
-    ? undefined
-    : sourcedContacts.find((contact) => contact.outreachEligible && contact.email)?.email;
+  const primaryLocation = locations
+    .filter((location) => location.prospectId === prospect.id)
+    .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary)
+      || Number(Boolean(right.googlePlaceId)) - Number(Boolean(left.googlePlaceId))
+      || right.updatedAt.localeCompare(left.updatedAt))[0];
+  const activeContacts = contacts
+    .filter((contact) => contact.prospectId === prospect.id)
+    .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary)
+      || prospectContactPriority(right) - prospectContactPriority(left)
+      || right.updatedAt.localeCompare(left.updatedAt)
+      || right.id.localeCompare(left.id));
+  const primaryContact = activeContacts[0];
   return {
     ...prospect,
-    latestObservationId: latest?.id,
-    latestObservedAt: latest?.observedAt,
-    reviewRating: latest?.reviewRating,
-    reviewCount: latest?.reviewCount,
-    yearsInBusiness: latest?.yearsInBusiness,
-    cms: latest?.cms,
-    siteBuilder: latest?.siteBuilder,
-    managedProvider: latest?.managedProvider,
-    agencyStatus: latest?.agencyStatus,
-    agencyName: latest?.agencyName,
-    websiteAssessmentId: latest?.websiteAssessmentId,
-    prospectReportId: latest?.prospectReportId,
-    businessStrengthScore: latest?.businessStrengthScore,
-    websiteOpportunityScore: latest?.websiteOpportunityScore,
-    reachabilityScore: latest?.reachabilityScore,
-    priorityScore: latest?.priorityScore,
-    scoringModel: latest?.scoringModel,
-    verificationStatus: latest?.verificationStatus,
-    verificationScore: latest?.verificationScore,
-    operatingStatus: latest?.operatingStatus,
-    targetFitStatus: latest?.targetFitStatus,
-    targetFitReason: latest?.targetFitReason,
-    evidenceCoverage: latest?.evidenceCoverage,
-    ownerName,
-    publicEmail,
-    contactCount: activeContacts.length,
-    locationCount: locations.filter((location) => location.prospectId === prospect.id && location.status !== "inactive").length,
-    activeLicenseCount: licenses.filter((license) => license.prospectId === prospect.id && license.status === "active").length
+    primaryAddressLine1: primaryLocation?.addressLine1,
+    primaryAddressLine2: primaryLocation?.addressLine2,
+    primaryLocality: primaryLocation?.locality,
+    primaryRegion: primaryLocation?.region,
+    primaryPostalCode: primaryLocation?.postalCode,
+    primaryCountryCode: primaryLocation?.countryCode,
+    county: primaryLocation?.county,
+    locationPhone: primaryLocation?.phone,
+    googleBusinessName: primaryLocation?.googleBusinessName,
+    googleCategory: primaryLocation?.googleCategory,
+    googleAddress: primaryLocation?.googleAddress,
+    googlePhone: primaryLocation?.googlePhone,
+    googleWebsiteUrl: primaryLocation?.googleWebsiteUrl,
+    googleMapsUrl: primaryLocation?.googleMapsUrl,
+    googleRating: primaryLocation?.googleRating,
+    googleReviewCount: primaryLocation?.googleReviewCount,
+    googlePlaceId: primaryLocation?.googlePlaceId,
+    primaryContactName: primaryContact?.fullName,
+    primaryContactRole: primaryContact?.roleTitle,
+    primaryContactEmail: primaryContact?.email,
+    primaryContactPhone: primaryContact?.phone,
+    outreachEmail: primaryContact?.email ?? prospect.businessEmail,
+    outreachPhone: primaryContact?.phone ?? primaryLocation?.phone ?? primaryLocation?.googlePhone,
+    contacts: activeContacts.map(prospectCandidateContactValue)
   };
+}
+function prospectContactPriority(contact: Pick<ProspectContact, "roleTitle" | "isPrimary">) {
+  if (contact.isPrimary) return 1_000;
+  const role = contact.roleTitle?.toLowerCase() ?? "";
+  if (/owner|founder|principal/.test(role)) return 100;
+  if (/president|chief executive|ceo|managing member|partner/.test(role)) return 90;
+  if (/manager/.test(role)) return 70;
+  if (/operator/.test(role)) return 50;
+  if (/applicator/.test(role)) return 40;
+  return 10;
 }
 function matchesProspectQuery(candidate: ProspectCandidate, input: ProspectCandidateQuery) {
   const search = input.search?.trim().toLowerCase();
-  return (!search || [candidate.businessName, candidate.websiteHost, candidate.locality].some((value) => value?.toLowerCase().includes(search)))
-    && (!input.vertical || candidate.vertical === input.vertical)
-    && (!input.industryCode || candidate.industryCode === input.industryCode)
-    && (!input.region || candidate.region === input.region.toUpperCase())
-    && (!input.websiteKind || candidate.websiteKind === input.websiteKind)
-    && (!input.cms || candidate.cms === input.cms)
-    && (!input.managedProvider || candidate.managedProvider === input.managedProvider)
-    && (!input.agencyStatus || candidate.agencyStatus === input.agencyStatus)
-    && (!input.verificationStatus || candidate.verificationStatus === input.verificationStatus)
-    && (!input.operatingStatus || candidate.operatingStatus === input.operatingStatus)
-    && (!input.targetFitStatus || candidate.targetFitStatus === input.targetFitStatus)
-    && (!input.ownershipScope || candidate.ownershipScope === input.ownershipScope)
-    && (input.minimumLocationCount === undefined || candidate.locationCount >= input.minimumLocationCount)
-    && (input.minimumActiveLicenseCount === undefined || candidate.activeLicenseCount >= input.minimumActiveLicenseCount)
-    && (input.minimumReviewCount === undefined || (candidate.reviewCount ?? -1) >= input.minimumReviewCount)
-    && (input.minimumPriorityScore === undefined || (candidate.priorityScore ?? -1) >= input.minimumPriorityScore)
-    && (input.minimumVerificationScore === undefined || (candidate.verificationScore ?? -1) >= input.minimumVerificationScore);
+  return (!search || candidate.businessName.toLowerCase().includes(search))
+    && (input.filters ?? []).every((filter) => matchesProspectFilter(candidate, filter));
+}
+function matchesProspectFilter(candidate: ProspectCandidate, filter: ProspectCandidateFilter) {
+  const field = prospectExplorerFields[filter.field];
+  const candidateValue = prospectExplorerValue(candidate, filter.field);
+  if (filter.operator === "is_empty") return candidateValue === undefined || candidateValue === "";
+  if (filter.operator === "is_not_empty") return candidateValue !== undefined && candidateValue !== "";
+  if (candidateValue === undefined || !filter.value) return false;
+  const filterValue = prospectFilterValue(filter);
+  if (filter.operator === "contains") {
+    return String(candidateValue).toLocaleLowerCase().includes(String(filterValue).toLocaleLowerCase());
+  }
+  if (filter.operator === "equals") return candidateValue === filterValue;
+  if (filter.operator === "not_equals") return candidateValue !== filterValue;
+  const comparison = field.kind === "date"
+    ? Date.parse(String(candidateValue)) - Date.parse(String(filterValue))
+    : Number(candidateValue) - Number(filterValue);
+  if (filter.operator === "greater_than") return comparison > 0;
+  if (filter.operator === "greater_than_or_equal") return comparison >= 0;
+  if (filter.operator === "less_than") return comparison < 0;
+  return comparison <= 0;
+}
+type ProspectSupabaseFilterQuery<T> = {
+  eq(column: string, value: unknown): T;
+  neq(column: string, value: unknown): T;
+  gt(column: string, value: unknown): T;
+  gte(column: string, value: unknown): T;
+  lt(column: string, value: unknown): T;
+  lte(column: string, value: unknown): T;
+  ilike(column: string, pattern: string): T;
+  is(column: string, value: null): T;
+  not(column: string, operator: string, value: unknown): T;
+};
+function applySupabaseProspectFilter<T extends ProspectSupabaseFilterQuery<T>>(query: T, filter: ProspectCandidateFilter): T {
+  const value = prospectFilterValue(filter);
+  if (filter.operator === "contains") return query.ilike(filter.field, `%${String(value)}%`);
+  if (filter.operator === "equals") return query.eq(filter.field, value);
+  if (filter.operator === "not_equals") return query.neq(filter.field, value);
+  if (filter.operator === "greater_than") return query.gt(filter.field, value);
+  if (filter.operator === "greater_than_or_equal") return query.gte(filter.field, value);
+  if (filter.operator === "less_than") return query.lt(filter.field, value);
+  if (filter.operator === "less_than_or_equal") return query.lte(filter.field, value);
+  if (filter.operator === "is_empty") return query.is(filter.field, null);
+  return query.not(filter.field, "is", null);
+}
+function prospectFilterValue(filter: ProspectCandidateFilter): string | number {
+  const value = filter.value ?? "";
+  const kind = prospectExplorerFields[filter.field].kind;
+  if (kind === "number") return Number(value);
+  return value;
 }
 function compareProspectCandidates(
   left: ProspectCandidate,
@@ -2418,37 +1516,24 @@ function compareProspectCandidates(
   input: ProspectCandidateQuery
 ) {
   const direction = input.sortDirection ?? defaultProspectSortDirection(input.sortBy);
-  let result = 0;
-  if (input.sortBy === "business_name") result = compareProspectText(left.businessName, right.businessName, direction);
-  else if (input.sortBy === "state") result = compareProspectText(left.region, right.region, direction);
-  else if (input.sortBy === "reviews") result = compareProspectNumber(left.reviewCount, right.reviewCount, direction);
-  else if (input.sortBy === "verification") result = compareProspectNumber(left.verificationScore, right.verificationScore, direction);
-  else if (input.sortBy === "observed_at") result = compareProspectText(left.latestObservedAt, right.latestObservedAt, direction);
-  else result = compareProspectNumber(left.priorityScore, right.priorityScore, direction);
+  const field = input.sortBy ?? "business_name";
+  const result = compareProspectValues(prospectExplorerValue(left, field), prospectExplorerValue(right, field), direction);
   return result
     || left.businessName.localeCompare(right.businessName)
     || left.id.localeCompare(right.id);
 }
-function compareProspectNumber(left: number | undefined, right: number | undefined, direction: "asc" | "desc") {
+function compareProspectValues(left: string | number | boolean | undefined, right: string | number | boolean | undefined, direction: "asc" | "desc") {
   if (left === undefined) return right === undefined ? 0 : 1;
   if (right === undefined) return -1;
-  return direction === "asc" ? left - right : right - left;
+  const result = typeof left === "number" && typeof right === "number"
+    ? left - right
+    : String(left).localeCompare(String(right), "en", { numeric: true, sensitivity: "base" });
+  return direction === "asc" ? result : -result;
 }
-function compareProspectText(left: string | undefined, right: string | undefined, direction: "asc" | "desc") {
-  if (!left) return right ? 1 : 0;
-  if (!right) return -1;
-  return direction === "asc" ? left.localeCompare(right) : right.localeCompare(left);
-}
-function prospectSortColumn(sortBy?: ProspectCandidateQuery["sortBy"]) {
-  if (sortBy === "business_name") return "business_name";
-  if (sortBy === "state") return "region";
-  if (sortBy === "reviews") return "review_count";
-  if (sortBy === "verification") return "verification_score";
-  if (sortBy === "observed_at") return "latest_observed_at";
-  return "priority_score";
-}
+function prospectSortColumn(sortBy?: ProspectCandidateQuery["sortBy"]) { return sortBy ?? "business_name"; }
 function defaultProspectSortDirection(sortBy?: ProspectCandidateQuery["sortBy"]): "asc" | "desc" {
-  return ["business_name", "state"].includes(sortBy ?? "") ? "asc" : "desc";
+  if (!sortBy) return "asc";
+  return ["number", "date"].includes(prospectExplorerFields[sortBy].kind) ? "desc" : "asc";
 }
 function prospectQueryLimit(limit?: number) { return Math.max(1, Math.min(limit ?? 100, 1_000)); }
 function prospectQueryOffset(offset?: number) { return Math.max(0, Math.floor(offset ?? 0)); }
@@ -2466,25 +1551,12 @@ function prospectResearchFromRow(row: ProspectResearchRow): Prospect {
     id: row.id,
     canonicalKey: row.canonical_key,
     businessName: row.business_name,
-    legalBusinessName: row.legal_business_name ?? undefined,
-    dbaName: row.dba_name ?? undefined,
     vertical: row.vertical ?? undefined,
-    industryCode: row.industry_code ?? undefined,
-    ownershipScope: row.ownership_scope,
-    status: row.status,
-    websiteKind: row.website_kind,
+    researchState: row.research_state,
     websiteUrl: row.website_url ?? undefined,
-    websiteHost: row.website_host ?? undefined,
-    addressLine1: row.address_line_1 ?? undefined,
-    addressLine2: row.address_line_2 ?? undefined,
-    locality: row.locality ?? undefined,
-    region: row.region ?? undefined,
-    postalCode: row.postal_code ?? undefined,
-    countryCode: row.country_code,
-    phone: row.phone ?? undefined,
-    doNotContact: row.do_not_contact,
-    suppressionReason: row.suppression_reason ?? undefined,
-    metadata: row.metadata as Prospect["metadata"],
+    websitePlatform: row.website_platform ?? undefined,
+    websiteAgencyProvider: row.website_agency_provider ?? undefined,
+    businessEmail: row.business_email ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -2492,34 +1564,30 @@ function prospectResearchFromRow(row: ProspectResearchRow): Prospect {
 function prospectCandidateFromRow(row: ProspectCurrentRow): ProspectCandidate {
   return {
     ...prospectResearchFromRow(row),
-    latestObservationId: row.latest_observation_id ?? undefined,
-    latestObservedAt: row.latest_observed_at ?? undefined,
-    reviewRating: row.review_rating ?? undefined,
-    reviewCount: row.review_count ?? undefined,
-    yearsInBusiness: row.years_in_business ?? undefined,
-    cms: row.cms ?? undefined,
-    siteBuilder: row.site_builder ?? undefined,
-    managedProvider: row.managed_provider ?? undefined,
-    agencyStatus: row.agency_status ?? undefined,
-    agencyName: row.agency_name ?? undefined,
-    websiteAssessmentId: row.website_assessment_id ?? undefined,
-    prospectReportId: row.prospect_report_id ?? undefined,
-    businessStrengthScore: row.business_strength_score ?? undefined,
-    websiteOpportunityScore: row.website_opportunity_score ?? undefined,
-    reachabilityScore: row.reachability_score ?? undefined,
-    priorityScore: row.priority_score ?? undefined,
-    scoringModel: row.scoring_model ?? undefined,
-    verificationStatus: row.verification_status ?? undefined,
-    verificationScore: row.verification_score ?? undefined,
-    operatingStatus: row.operating_status ?? undefined,
-    targetFitStatus: row.target_fit_status ?? undefined,
-    targetFitReason: row.target_fit_reason ?? undefined,
-    evidenceCoverage: row.evidence_coverage ?? undefined,
-    ownerName: row.owner_name ?? undefined,
-    publicEmail: row.public_email ?? undefined,
-    contactCount: row.contact_count,
-    locationCount: row.location_count,
-    activeLicenseCount: row.active_license_count
+    primaryAddressLine1: row.address_line_1 ?? undefined,
+    primaryAddressLine2: row.address_line_2 ?? undefined,
+    primaryLocality: row.locality ?? undefined,
+    primaryRegion: row.region ?? undefined,
+    primaryPostalCode: row.postal_code ?? undefined,
+    primaryCountryCode: row.country_code ?? undefined,
+    county: row.county ?? undefined,
+    locationPhone: row.location_phone ?? undefined,
+    googleBusinessName: row.google_business_name ?? undefined,
+    googleCategory: row.google_category ?? undefined,
+    googleAddress: row.google_address ?? undefined,
+    googlePhone: row.google_phone ?? undefined,
+    googleWebsiteUrl: row.google_website_url ?? undefined,
+    googleMapsUrl: row.google_maps_url ?? undefined,
+    googleRating: row.google_rating ?? undefined,
+    googleReviewCount: row.google_review_count ?? undefined,
+    googlePlaceId: row.google_place_id ?? undefined,
+    primaryContactName: row.primary_contact_name ?? undefined,
+    primaryContactRole: row.primary_contact_role ?? undefined,
+    primaryContactEmail: row.primary_contact_email ?? undefined,
+    primaryContactPhone: row.primary_contact_phone ?? undefined,
+    outreachEmail: row.outreach_email ?? undefined,
+    outreachPhone: row.outreach_phone ?? undefined,
+    contacts: prospectCandidateContactsFromUnknown(row.contact_details)
   };
 }
 function prospectLocationFromRow(row: ProspectLocationRow): ProspectLocation {
@@ -2528,7 +1596,6 @@ function prospectLocationFromRow(row: ProspectLocationRow): ProspectLocation {
     prospectId: row.prospect_id,
     canonicalKey: row.canonical_key,
     kind: row.kind,
-    status: row.status,
     locationName: row.location_name ?? undefined,
     addressLine1: row.address_line_1 ?? undefined,
     addressLine2: row.address_line_2 ?? undefined,
@@ -2538,181 +1605,72 @@ function prospectLocationFromRow(row: ProspectLocationRow): ProspectLocation {
     countryCode: row.country_code,
     county: row.county ?? undefined,
     phone: row.phone ?? undefined,
+    googlePlaceId: row.google_place_id ?? undefined,
+    googleBusinessName: row.google_business_name ?? undefined,
+    googleCategory: row.google_category ?? undefined,
+    googleAddress: row.google_address ?? undefined,
+    googlePhone: row.google_phone ?? undefined,
+    googleWebsiteUrl: row.google_website_url ?? undefined,
+    googleMapsUrl: row.google_maps_url ?? undefined,
+    googleRating: row.google_rating ?? undefined,
+    googleReviewCount: row.google_review_count ?? undefined,
     latitude: row.latitude ?? undefined,
     longitude: row.longitude ?? undefined,
     isPrimary: row.is_primary,
-    sourceId: row.source_id ?? undefined,
-    sourceRunId: row.source_run_id ?? undefined,
-    sourceRecordKey: row.source_record_key ?? undefined,
-    observedAt: row.observed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
-  };
-}
-function prospectLicenseFromRow(row: ProspectLicenseRow): ProspectLicense {
-  return {
-    id: row.id,
-    prospectId: row.prospect_id,
-    locationId: row.location_id ?? undefined,
-    jurisdiction: row.jurisdiction,
-    regulator: row.regulator,
-    licenseType: row.license_type,
-    licenseNumber: row.license_number,
-    status: row.status,
-    classifications: row.classifications,
-    issuedAt: row.issued_at ?? undefined,
-    renewedAt: row.renewed_at ?? undefined,
-    expiresAt: row.expires_at ?? undefined,
-    responsiblePersonName: row.responsible_person_name ?? undefined,
-    responsiblePersonTitle: row.responsible_person_title ?? undefined,
-    sourceId: row.source_id,
-    sourceRunId: row.source_run_id ?? undefined,
-    sourceUrl: row.source_url,
-    sourceRecordKey: row.source_record_key ?? undefined,
-    observedAt: row.observed_at,
-    evidence: row.evidence as ProspectLicense["evidence"],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-function prospectAffiliationFromRow(row: ProspectAffiliationRow): ProspectAffiliation {
-  return {
-    id: row.id,
-    prospectId: row.prospect_id,
-    relatedProspectId: row.related_prospect_id ?? undefined,
-    relatedOrganizationName: row.related_organization_name,
-    affiliationType: row.affiliation_type,
-    confidence: row.confidence,
-    sourceUrl: row.source_url ?? undefined,
-    observedAt: row.observed_at,
-    evidence: row.evidence as ProspectAffiliation["evidence"],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-function prospectSourceFromRow(row: ProspectSourceRow): ProspectSource {
-  return {
-    id: row.id,
-    vertical: row.vertical,
-    jurisdiction: row.jurisdiction,
-    authorityName: row.authority_name,
-    sourceName: row.source_name,
-    sourceUrl: row.source_url,
-    accessMethod: row.access_method,
-    coverageStatus: row.coverage_status,
-    recordScope: row.record_scope,
-    refreshCadence: row.refresh_cadence ?? undefined,
-    expectedRecordCount: row.expected_record_count ?? undefined,
-    accessNotes: row.access_notes ?? undefined,
-    lastCheckedAt: row.last_checked_at ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-function prospectSourceRunFromRow(row: ProspectSourceRunRow): ProspectSourceRun {
-  return {
-    id: row.id,
-    sourceId: row.source_id,
-    status: row.status,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at ?? undefined,
-    snapshotAt: row.snapshot_at ?? undefined,
-    sourceHash: row.source_hash ?? undefined,
-    recordsSeen: row.records_seen,
-    organizationsUpserted: row.organizations_upserted,
-    locationsUpserted: row.locations_upserted,
-    licensesUpserted: row.licenses_upserted,
-    contactsUpserted: row.contacts_upserted,
-    rejectedRecords: row.rejected_records,
-    error: row.error ?? undefined,
-    metadata: row.metadata as ProspectSourceRun["metadata"],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  };
-}
-function prospectObservationFromRow(row: ProspectObservationRow): ProspectObservation {
-  return {
-    schemaVersion: 1,
-    id: row.id,
-    prospectId: row.prospect_id,
-    sourceType: row.source_type,
-    sourceUrl: row.source_url ?? undefined,
-    observedAt: row.observed_at,
-    websiteKind: row.website_kind,
-    websiteUrl: row.website_url ?? undefined,
-    reviewRating: row.review_rating ?? undefined,
-    reviewCount: row.review_count ?? undefined,
-    yearsInBusiness: row.years_in_business ?? undefined,
-    cms: row.cms ?? undefined,
-    siteBuilder: row.site_builder ?? undefined,
-    managedProvider: row.managed_provider ?? undefined,
-    agencyStatus: row.agency_status,
-    agencyName: row.agency_name ?? undefined,
-    websiteAssessmentId: row.website_assessment_id ?? undefined,
-    prospectReportId: row.prospect_report_id ?? undefined,
-    businessStrengthScore: row.business_strength_score ?? undefined,
-    websiteOpportunityScore: row.website_opportunity_score ?? undefined,
-    reachabilityScore: row.reachability_score ?? undefined,
-    priorityScore: row.priority_score ?? undefined,
-    scoringModel: row.scoring_model ?? undefined,
-    verificationStatus: row.verification_status,
-    verificationScore: row.verification_score ?? undefined,
-    operatingStatus: row.operating_status,
-    targetFitStatus: row.target_fit_status,
-    targetFitReason: row.target_fit_reason ?? undefined,
-    evidenceCoverage: row.evidence_coverage,
-    producer: row.producer,
-    methodologyIdentity: row.methodology_identity,
-    inputHash: row.input_hash,
-    notes: row.notes ?? undefined,
-    evidence: row.evidence as ProspectObservation["evidence"],
-    createdAt: row.created_at
   };
 }
 function prospectContactFromRow(row: ProspectContactRow): ProspectContact {
   return {
     id: row.id,
     prospectId: row.prospect_id,
-    contactType: row.contact_type,
-    fullName: row.full_name ?? undefined,
+    fullName: row.full_name,
     roleTitle: row.role_title ?? undefined,
     email: row.email ?? undefined,
     phone: row.phone ?? undefined,
-    sourceType: row.source_type,
-    sourceUrl: row.source_url ?? undefined,
-    verificationStatus: row.verification_status,
-    outreachEligible: row.outreach_eligible,
-    observedAt: row.observed_at,
-    suppressedAt: row.suppressed_at ?? undefined,
-    suppressionReason: row.suppression_reason ?? undefined,
+    isPrimary: row.is_primary,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+function prospectCandidateContactValue(contact: ProspectContact): ProspectCandidateContact {
+  return {
+    id: contact.id,
+    fullName: contact.fullName,
+    roleTitle: contact.roleTitle,
+    email: contact.email,
+    phone: contact.phone,
+    isPrimary: contact.isPrimary
+  };
+}
+function prospectCandidateContactsFromUnknown(value: unknown): ProspectCandidateContact[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const contact = item as Record<string, unknown>;
+    if (typeof contact.id !== "string" || typeof contact.fullName !== "string") return [];
+    return [{
+      id: contact.id,
+      fullName: contact.fullName,
+      roleTitle: typeof contact.roleTitle === "string" ? contact.roleTitle : undefined,
+      email: typeof contact.email === "string" ? contact.email : undefined,
+      phone: typeof contact.phone === "string" ? contact.phone : undefined,
+      isPrimary: contact.isPrimary === true
+    }];
+  });
 }
 function prospectToRow(value: Prospect) {
   return {
     id: value.id,
     canonical_key: value.canonicalKey,
     business_name: value.businessName,
-    legal_business_name: value.legalBusinessName ?? null,
-    dba_name: value.dbaName ?? null,
     vertical: value.vertical ?? null,
-    industry_code: value.industryCode ?? null,
-    ownership_scope: value.ownershipScope,
-    status: value.status,
-    website_kind: value.websiteKind,
+    research_state: value.researchState,
     website_url: value.websiteUrl ?? null,
-    website_host: value.websiteHost ?? null,
-    address_line_1: value.addressLine1 ?? null,
-    address_line_2: value.addressLine2 ?? null,
-    locality: value.locality ?? null,
-    region: value.region ?? null,
-    postal_code: value.postalCode ?? null,
-    country_code: value.countryCode,
-    phone: value.phone ?? null,
-    do_not_contact: value.doNotContact,
-    suppression_reason: value.suppressionReason ?? null,
-    metadata: value.metadata ?? {},
+    website_platform: value.websitePlatform ?? null,
+    website_agency_provider: value.websiteAgencyProvider ?? null,
+    business_email: value.businessEmail ?? null,
     created_at: value.createdAt,
     updated_at: value.updatedAt
   };
@@ -2723,7 +1681,6 @@ function prospectLocationToRow(value: ProspectLocation) {
     prospect_id: value.prospectId,
     canonical_key: value.canonicalKey,
     kind: value.kind,
-    status: value.status,
     location_name: value.locationName ?? null,
     address_line_1: value.addressLine1 ?? null,
     address_line_2: value.addressLine2 ?? null,
@@ -2733,163 +1690,34 @@ function prospectLocationToRow(value: ProspectLocation) {
     country_code: value.countryCode,
     county: value.county ?? null,
     phone: value.phone ?? null,
+    google_place_id: value.googlePlaceId ?? null,
+    google_business_name: value.googleBusinessName ?? null,
+    google_category: value.googleCategory ?? null,
+    google_address: value.googleAddress ?? null,
+    google_phone: value.googlePhone ?? null,
+    google_website_url: value.googleWebsiteUrl ?? null,
+    google_maps_url: value.googleMapsUrl ?? null,
+    google_rating: value.googleRating ?? null,
+    google_review_count: value.googleReviewCount ?? null,
     latitude: value.latitude ?? null,
     longitude: value.longitude ?? null,
     is_primary: value.isPrimary,
-    source_id: value.sourceId ?? null,
-    source_run_id: value.sourceRunId ?? null,
-    source_record_key: value.sourceRecordKey ?? null,
-    observed_at: value.observedAt,
     created_at: value.createdAt,
     updated_at: value.updatedAt
-  };
-}
-function prospectLicenseToRow(value: ProspectLicense) {
-  return {
-    id: value.id,
-    prospect_id: value.prospectId,
-    location_id: value.locationId ?? null,
-    jurisdiction: value.jurisdiction,
-    regulator: value.regulator,
-    license_type: value.licenseType,
-    license_number: value.licenseNumber,
-    status: value.status,
-    classifications: value.classifications,
-    issued_at: value.issuedAt ?? null,
-    renewed_at: value.renewedAt ?? null,
-    expires_at: value.expiresAt ?? null,
-    responsible_person_name: value.responsiblePersonName ?? null,
-    responsible_person_title: value.responsiblePersonTitle ?? null,
-    source_id: value.sourceId,
-    source_run_id: value.sourceRunId ?? null,
-    source_url: value.sourceUrl,
-    source_record_key: value.sourceRecordKey ?? null,
-    observed_at: value.observedAt,
-    evidence: value.evidence ?? {},
-    created_at: value.createdAt,
-    updated_at: value.updatedAt
-  };
-}
-function prospectAffiliationToRow(value: ProspectAffiliation) {
-  return {
-    id: value.id,
-    prospect_id: value.prospectId,
-    related_prospect_id: value.relatedProspectId ?? null,
-    related_organization_name: value.relatedOrganizationName,
-    affiliation_type: value.affiliationType,
-    confidence: value.confidence,
-    source_url: value.sourceUrl ?? null,
-    observed_at: value.observedAt,
-    evidence: value.evidence ?? {},
-    created_at: value.createdAt,
-    updated_at: value.updatedAt
-  };
-}
-function prospectSourceToRow(value: ProspectSource) {
-  return {
-    id: value.id,
-    vertical: value.vertical,
-    jurisdiction: value.jurisdiction,
-    authority_name: value.authorityName,
-    source_name: value.sourceName,
-    source_url: value.sourceUrl,
-    access_method: value.accessMethod,
-    coverage_status: value.coverageStatus,
-    record_scope: value.recordScope,
-    refresh_cadence: value.refreshCadence ?? null,
-    expected_record_count: value.expectedRecordCount ?? null,
-    access_notes: value.accessNotes ?? null,
-    last_checked_at: value.lastCheckedAt ?? null,
-    created_at: value.createdAt,
-    updated_at: value.updatedAt
-  };
-}
-function prospectSourceRunToRow(value: ProspectSourceRun) {
-  return {
-    id: value.id,
-    source_id: value.sourceId,
-    status: value.status,
-    started_at: value.startedAt,
-    finished_at: value.finishedAt ?? null,
-    snapshot_at: value.snapshotAt ?? null,
-    source_hash: value.sourceHash ?? null,
-    records_seen: value.recordsSeen,
-    organizations_upserted: value.organizationsUpserted,
-    locations_upserted: value.locationsUpserted,
-    licenses_upserted: value.licensesUpserted,
-    contacts_upserted: value.contactsUpserted,
-    rejected_records: value.rejectedRecords,
-    error: value.error ?? null,
-    metadata: value.metadata ?? {},
-    created_at: value.createdAt,
-    updated_at: value.updatedAt
-  };
-}
-function prospectObservationToRow(value: ProspectObservation) {
-  return {
-    id: value.id,
-    schema_version: 1,
-    prospect_id: value.prospectId,
-    source_type: value.sourceType,
-    source_url: value.sourceUrl ?? null,
-    observed_at: value.observedAt,
-    website_kind: value.websiteKind,
-    website_url: value.websiteUrl ?? null,
-    review_rating: value.reviewRating ?? null,
-    review_count: value.reviewCount ?? null,
-    years_in_business: value.yearsInBusiness ?? null,
-    cms: value.cms ?? null,
-    site_builder: value.siteBuilder ?? null,
-    managed_provider: value.managedProvider ?? null,
-    agency_status: value.agencyStatus,
-    agency_name: value.agencyName ?? null,
-    website_assessment_id: value.websiteAssessmentId ?? null,
-    prospect_report_id: value.prospectReportId ?? null,
-    business_strength_score: value.businessStrengthScore ?? null,
-    website_opportunity_score: value.websiteOpportunityScore ?? null,
-    reachability_score: value.reachabilityScore ?? null,
-    priority_score: value.priorityScore ?? null,
-    scoring_model: value.scoringModel ?? null,
-    verification_status: value.verificationStatus,
-    verification_score: value.verificationScore ?? null,
-    operating_status: value.operatingStatus,
-    target_fit_status: value.targetFitStatus,
-    target_fit_reason: value.targetFitReason ?? null,
-    evidence_coverage: value.evidenceCoverage,
-    producer: value.producer,
-    methodology_identity: value.methodologyIdentity,
-    input_hash: value.inputHash,
-    notes: value.notes ?? null,
-    evidence: value.evidence ?? {},
-    created_at: value.createdAt
   };
 }
 function prospectContactToRow(value: ProspectContact) {
   return {
     id: value.id,
     prospect_id: value.prospectId,
-    contact_type: value.contactType,
-    full_name: value.fullName ?? null,
+    full_name: value.fullName,
     role_title: value.roleTitle ?? null,
     email: value.email ?? null,
     phone: value.phone ?? null,
-    source_type: value.sourceType,
-    source_url: value.sourceUrl ?? null,
-    verification_status: value.verificationStatus,
-    outreach_eligible: value.outreachEligible,
-    observed_at: value.observedAt,
-    suppressed_at: value.suppressedAt ?? null,
-    suppression_reason: value.suppressionReason ?? null,
+    is_primary: value.isPrimary,
     created_at: value.createdAt,
     updated_at: value.updatedAt
   };
-}
-function normalizedWebsiteHost(value: string) {
-  try {
-    return new URL(value).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    throw new Error(`Invalid prospect website URL: ${value}`);
-  }
 }
 function optionalText(value?: string) {
   const normalized = value?.trim();
@@ -2927,6 +1755,5 @@ function reportAccessGrantFromRow(row: ReportAccessGrantRow): ProspectReportAcce
 function websiteAssessmentFromRow(row: WebsiteAssessmentRow): WebsiteAssessmentRecord { const parsed = row.assessment_json === null ? undefined : websiteAssessmentSchema.safeParse(row.assessment_json); return { id: row.id, status: row.status, targetKind: row.target_kind, sourceKey: row.source_key, sourceUrl: row.source_url ?? undefined, siteId: row.site_id ?? undefined, artifactId: row.artifact_id ?? undefined, versionId: row.version_id ?? undefined, rubricIdentity: row.rubric_identity, scannerIdentity: row.scanner_identity, assessment: parsed && parsed.success ? parsed.data : undefined, errorCode: row.error_code ?? (parsed && !parsed.success ? "stale_schema_rebuild_required" : undefined), createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function websiteAssessmentJobFromRow(row: WebsiteAssessmentJobRow): WebsiteAssessmentJob { return { id: row.id, assessmentId: row.assessment_id, prospectReportId: row.prospect_report_id ?? undefined, status: row.status, attempts: row.attempts, maxAttempts: row.max_attempts, runAfter: row.run_after, lockedBy: row.locked_by ?? undefined, error: row.error ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at ?? undefined }; }
 function byCreatedDesc<T extends { createdAt: string }>(a: T, b: T) { return b.createdAt.localeCompare(a.createdAt); }
-function isRetriableSetupFailure(code?: WebsiteSetupFailureCode) { return code === "crawl_temporarily_unavailable" || code === "bootstrap_failed" || code === "worker_interrupted"; }
 async function data<T = unknown>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, operation: string) { const result = await query; if (result.error) throw new Error(`${operation}: ${result.error.message}`); if (result.data === null) throw new Error(`${operation}: no data returned`); return result.data; }
 async function maybe<T>(query: PromiseLike<{ data: T | null; error: { message: string } | null }>, operation: string) { const result = await query; if (result.error) throw new Error(`${operation}: ${result.error.message}`); return result.data; }

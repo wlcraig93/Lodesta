@@ -25,7 +25,17 @@ const forbiddenCalls = new Map<string, string>([
   ["setTimeout", "timers"], ["setInterval", "timers"], ["queueMicrotask", "timers"]
 ]);
 const forbiddenJsxElements = new Set(["link", "script", "style"]);
-export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) {
+const lodestaSdkJsxNames = new Set([
+  "BusinessName", "BusinessHours", "BusinessAddress", "Fact", "Asset",
+  "LeadForm", "LeadField", "LeadLabel", "LeadControl", "LeadSubmit", "LeadFormStatus",
+  "DirectionsLink", "SafeLink", "NavigationDisclosure"
+]);
+const nativeSdkJsxNames = new Set([...lodestaSdkJsxNames].filter((name) => name !== "NavigationDisclosure"));
+const allowedAuthoredLodestaAttributes = new Set(["data-lodesta-conversion", "data-lodesta-role"]);
+export function validateWorkspaceSourcePolicy(
+  files: WorkspaceSourcePolicyFile[],
+  options?: { runtimeSeriesId?: string }
+) {
   const findings: WorkspaceSourcePolicyFinding[] = [];
   const paths = new Set(files.map((file) => file.path));
   for (const path of requiredPaths) {
@@ -41,7 +51,7 @@ export function validateWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]
       continue;
     }
 
-    findings.push(...validateTypeScript(file));
+    findings.push(...validateTypeScript(file, options?.runtimeSeriesId === "site-runtime-v3" ? nativeSdkJsxNames : lodestaSdkJsxNames));
   }
   if (files.length > 80) findings.push({ id: "source.file_limit", path: "src", message: "A workspace may contain at most 80 source files." });
   if (files.reduce((total, file) => total + new TextEncoder().encode(file.content).byteLength, 0) > 4_000_000) {
@@ -116,10 +126,22 @@ export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) 
   throw error;
 }
 
-function validateTypeScript(file: WorkspaceSourcePolicyFile) {
+function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxNames: ReadonlySet<string>) {
   const findings: WorkspaceSourcePolicyFinding[] = [];
   const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, file.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const add = (id: string, message: string) => findings.push({ id: `source.${id}`, path: file.path, message });
+  const parseDiagnostics = (source as ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+  for (const diagnostic of parseDiagnostics) {
+    const location = diagnostic.start === undefined
+      ? ""
+      : (() => {
+          const { line, character } = source.getLineAndCharacterOfPosition(diagnostic.start);
+          return ` at ${line + 1}:${character + 1}`;
+        })();
+    add("syntax", `TypeScript syntax error${location}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`);
+  }
+  const declaredIdentifiers = declaredValueIdentifiers(source);
+  const usedSdkJsxNames = new Set<string>();
 
   for (const statement of source.statements) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
@@ -133,6 +155,14 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
         );
       }
       if (!allowedImport(file.path, moduleId)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
+      if (moduleId === "#lodesta-sdk" && statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
+        for (const specifier of statement.importClause.namedBindings.elements) {
+          const importedName = specifier.propertyName?.text ?? specifier.name.text;
+          if (!permittedSdkJsxNames.has(importedName)) {
+            add("sdk_export", `${importedName} is not available in this authoring runtime.`);
+          }
+        }
+      }
     } else if (ts.isImportEqualsDeclaration(statement) || (ts.isExportDeclaration(statement) && statement.moduleSpecifier)) {
       if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
         && allowedImport(file.path, statement.moduleSpecifier.text)) continue;
@@ -142,8 +172,28 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
 
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      for (const attribute of node.attributes.properties) {
+        if (ts.isJsxSpreadAttribute(attribute)) continue;
+        const attributeName = attribute.name.getText(source).toLowerCase();
+        if (attributeName.startsWith("data-lodesta-") && !allowedAuthoredLodestaAttributes.has(attributeName)) {
+          add("reserved_kernel_attribute", `Generated source uses reserved kernel binding ${JSON.stringify(attributeName)} in JSX.`);
+        }
+      }
+      if (ts.isIdentifier(node.tagName) && permittedSdkJsxNames.has(node.tagName.text)) {
+        usedSdkJsxNames.add(node.tagName.text);
+      }
+      if (
+        ts.isIdentifier(node.tagName)
+        && node.tagName.text === "SafeLink"
+        && hasIntrinsicJsxAncestor(node, "a", source)
+      ) {
+        add(
+          "safelink_anchor_nesting",
+          "SafeLink already renders an anchor; use SafeLink directly and pass className to it instead of wrapping it in <a>."
+        );
+      }
       const tag = node.tagName.getText(source).toLowerCase();
-      if (forbiddenJsxElements.has(tag)) {
+      if (isIntrinsicJsxTag(node.tagName) && forbiddenJsxElements.has(tag)) {
         add("executable_markup", `Generated source uses forbidden <${tag}> markup; document metadata and executable resources are platform-owned.`);
       }
       if (isIntrinsicJsxTag(node.tagName)) {
@@ -159,6 +209,12 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
         }
       }
     }
+    if (ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node) || ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node)) {
+      const propertyName = staticPropertyName(node.name);
+      if (propertyName?.toLowerCase().startsWith("data-lodesta-") && !allowedAuthoredLodestaAttributes.has(propertyName.toLowerCase())) {
+        add("reserved_kernel_attribute", `Generated source uses reserved kernel binding ${JSON.stringify(propertyName)} in an object literal.`);
+      }
+    }
     if (isReactCreateElement(node) && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
       const tag = node.arguments[0].text.toLowerCase();
       if (forbiddenJsxElements.has(tag)) {
@@ -169,6 +225,9 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
         for (const property of properties.properties) {
           if (ts.isSpreadAssignment(property)) continue;
           const propertyName = property.name ? staticPropertyName(property.name) : undefined;
+          if (propertyName?.toLowerCase().startsWith("data-lodesta-") && !allowedAuthoredLodestaAttributes.has(propertyName.toLowerCase())) {
+            add("reserved_kernel_attribute", `Generated source uses reserved kernel binding ${JSON.stringify(propertyName)} in React.createElement(${JSON.stringify(tag)}).`);
+          }
           if (propertyName?.toLowerCase() === "dangerouslysetinnerhtml") {
             add(
               "executable_markup",
@@ -195,7 +254,7 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
         const expression = node.getText(source).replace(/\s+/g, " ").slice(0, 240);
         add(
           "computed_property",
-          `Generated source uses dynamic computed property access at ${line + 1}:${character + 1} (${expression}). Replace it with a statically named property, a switch, or an explicit conditional.`
+          `Unsafe dynamic computed property access at ${line + 1}:${character + 1} (${expression}).`
         );
       } else if (property === "constructor" || forbiddenReferences.has(property ?? "") || forbiddenCalls.has(property ?? "")) {
         add("code_generation", `Generated source uses forbidden computed property ${JSON.stringify(property)}.`);
@@ -208,7 +267,182 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile) {
     ts.forEachChild(node, visit);
   };
   visit(source);
+  const missingSdkImports = [...usedSdkJsxNames]
+    .filter((name) => !declaredIdentifiers.has(name))
+    .sort();
+  if (missingSdkImports.length) {
+    add(
+      "sdk_import_missing",
+      `Missing #lodesta-sdk JSX import(s): ${missingSdkImports.join(", ")}. Import every named SDK component used in this file before building.`
+    );
+  }
+  if (file.path === "src/site.tsx") findings.push(...validateStaticSiteDefinition(source, file.path));
   return findings;
+}
+
+function hasIntrinsicJsxAncestor(node: ts.Node, tagName: string, source: ts.SourceFile) {
+  let ancestor = node.parent;
+  while (ancestor) {
+    if (
+      ts.isJsxElement(ancestor)
+      && isIntrinsicJsxTag(ancestor.openingElement.tagName)
+      && ancestor.openingElement.tagName.getText(source).toLowerCase() === tagName
+    ) return true;
+    ancestor = ancestor.parent;
+  }
+  return false;
+}
+
+function declaredValueIdentifiers(source: ts.SourceFile) {
+  const names = new Set<string>();
+  const addBinding = (name: ts.BindingName) => {
+    if (ts.isIdentifier(name)) {
+      names.add(name.text);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) addBinding(element.name);
+    }
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isImportClause(node) && node.name) names.add(node.name.text);
+    if (ts.isImportSpecifier(node)) names.add(node.name.text);
+    if (ts.isNamespaceImport(node)) names.add(node.name.text);
+    if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node)) && node.name) {
+      names.add(node.name.text);
+    }
+    if (ts.isVariableDeclaration(node)) addBinding(node.name);
+    if (ts.isParameter(node)) addBinding(node.name);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return names;
+}
+
+function validateStaticSiteDefinition(source: ts.SourceFile, path: string): WorkspaceSourcePolicyFinding[] {
+  const findings: WorkspaceSourcePolicyFinding[] = [];
+  const constInitializers = topLevelConstInitializers(source);
+  const declaration = source.statements
+    .filter(ts.isVariableStatement)
+    .flatMap((statement) => [...statement.declarationList.declarations])
+    .find((candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === "siteDefinition");
+  if (!declaration?.initializer) return findings;
+  const definition = resolveStaticExpression(declaration.initializer, constInitializers);
+  if (!ts.isObjectLiteralExpression(definition)) return findings;
+  const routesProperty = objectProperty(definition, "routes");
+  const routesInitializer = routesProperty && ts.isPropertyAssignment(routesProperty)
+    ? routesProperty.initializer
+    : routesProperty && ts.isShorthandPropertyAssignment(routesProperty)
+      ? routesProperty.name
+      : undefined;
+  if (!routesInitializer) {
+    findings.push({
+      id: "source.site_routes_missing",
+      path,
+      message: "siteDefinition must define a routes array containing the homepage route at /."
+    });
+    return findings;
+  }
+  const routesValue = resolveStaticExpression(routesInitializer, constInitializers);
+  if (!ts.isArrayLiteralExpression(routesValue)) return findings;
+  const literalRoutes = routesValue.elements.flatMap((element) => {
+    const route = resolveStaticExpression(element, constInitializers);
+    return ts.isObjectLiteralExpression(route) ? [route] : [];
+  });
+  // This preflight is intentionally conservative: helper calls, spreads, and
+  // mapped route families are valid authoring patterns whose final paths are
+  // enforced by the compiler and artifact route contract. Do not reject a
+  // dynamically composed route array merely because this shallow static pass
+  // cannot prove that it contains the homepage.
+  const routeArrayIsFullyStatic = literalRoutes.length === routesValue.elements.length;
+  const routePaths = literalRoutes.flatMap((route) => {
+    const property = objectProperty(route, "path");
+    if (!property || !ts.isPropertyAssignment(property)) return [];
+    const value = staticString(unwrapStaticExpression(property.initializer));
+    return value === undefined ? [] : [value];
+  });
+  if (routeArrayIsFullyStatic && !routePaths.some((value) => value === "/" || value === "")) {
+    findings.push({
+      id: "source.homepage_route_missing",
+      path,
+      message: "siteDefinition.routes requires a homepage route with path '/'."
+    });
+  }
+  const duplicatePaths = [...new Set(routePaths.filter((value, index) => routePaths.indexOf(value) !== index))];
+  if (duplicatePaths.length) {
+    findings.push({
+      id: "source.route_duplicate",
+      path,
+      message: `siteDefinition.routes contains duplicate literal path(s): ${duplicatePaths.map((value) => JSON.stringify(value)).join(", ")}.`
+    });
+  }
+  for (const route of literalRoutes) {
+    const routePath = (() => {
+      const property = objectProperty(route, "path");
+      return property && ts.isPropertyAssignment(property)
+        ? staticString(unwrapStaticExpression(property.initializer))
+        : undefined;
+    })();
+    const element = objectProperty(route, "element");
+    const component = objectProperty(route, "component");
+    if (component && !element) {
+      findings.push({
+        id: "source.route_element",
+        path,
+        message: `Route ${JSON.stringify(routePath ?? "unknown")} uses component instead of element. Render JSX with element: <PageComponent />.`
+      });
+      continue;
+    }
+    if (!element || !ts.isPropertyAssignment(element)) continue;
+    const value = unwrapStaticExpression(element.initializer);
+    if (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value)) {
+      findings.push({
+        id: "source.route_element",
+        path,
+        message: `Route ${JSON.stringify(routePath ?? "unknown")} passes a component reference instead of rendered JSX. Use element: <${value.getText(source)} />.`
+      });
+    }
+  }
+  return findings;
+}
+
+function topLevelConstInitializers(source: ts.SourceFile) {
+  const initializers = new Map<string, ts.Expression>();
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+        initializers.set(declaration.name.text, declaration.initializer);
+      }
+    }
+  }
+  return initializers;
+}
+
+function resolveStaticExpression(
+  expression: ts.Expression,
+  constInitializers: ReadonlyMap<string, ts.Expression>,
+  resolving = new Set<string>()
+): ts.Expression {
+  const unwrapped = unwrapStaticExpression(expression);
+  if (!ts.isIdentifier(unwrapped) || resolving.has(unwrapped.text)) return unwrapped;
+  const initializer = constInitializers.get(unwrapped.text);
+  if (!initializer) return unwrapped;
+  const nextResolving = new Set(resolving);
+  nextResolving.add(unwrapped.text);
+  return resolveStaticExpression(initializer, constInitializers, nextResolving);
+}
+
+function objectProperty(object: ts.ObjectLiteralExpression, name: string) {
+  return object.properties.find((property) => property.name && staticPropertyName(property.name) === name);
+}
+
+function unwrapStaticExpression<T extends ts.Expression>(expression: T): ts.Expression {
+  let current: ts.Expression = expression;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isSatisfiesExpression(current)) {
+    current = current.expression;
+  }
+  return current;
 }
 
 function isIntrinsicJsxTag(tag: ts.JsxTagNameExpression) {

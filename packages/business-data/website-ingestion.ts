@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import sharp from "sharp";
 import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
@@ -11,32 +10,20 @@ import {
   platformSiteRecordSchema,
   siteIntentSchema,
   sourceSnapshotSchema,
-  type AssetRevisionRef,
-  type AssetRevision,
   type BusinessOffering,
   type BusinessState,
   type FormDefinition,
   type PlatformSiteRecord,
   type BusinessFact,
   type SiteIntent,
-  type SourceSnapshot,
-  type VerticalContextModule
+  type SourceSnapshot
 } from "@/packages/site-contracts";
-import { matchVerticalContext } from "@/packages/vertical-context";
 import { WebsiteCrawlError } from "./crawl-errors";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
-import {
-  canonicalOfferingCandidates,
-  type CanonicalOfferingCandidate,
-  type OfferingEvidence
-} from "./offering-normalization";
-import { researchBusiness, type WebResearchUsage } from "./web-research";
-
-export type RetainedAssetBinary = {
-  revision: AssetRevision;
-  bytes: Buffer;
-};
+import { buildWebsiteSourceMirror, websiteMirrorManifestHash, type RetainedSourceResource } from "./source-mirror";
+import type { SourceSnapshotPage } from "@/packages/site-contracts";
+import { classifySourcePagePath } from "./source-page-classification";
 
 export type WebsiteIngestionResult = {
   site: PlatformSiteRecord;
@@ -44,14 +31,152 @@ export type WebsiteIngestionResult = {
   intent: SiteIntent;
   forms: FormDefinition[];
   sourceSnapshots: SourceSnapshot[];
-  retainedAssets: RetainedAssetBinary[];
+  retainedSourceResources: RetainedSourceResource[];
+  sourceSnapshotPages: SourceSnapshotPage[];
   sourceUrl: string;
   crawl: CrawlAssessment;
   generationIngestion: WebsiteGenerationIngestion;
-  researchUsage?: WebResearchUsage;
   validationEligibility: "frozen_validation" | "private_review_only";
-  domainContext?: VerticalContextModule;
 };
+
+export type SourcePreparationFactDiagnostic = {
+  kind: "hours" | "service_area";
+  value: unknown;
+  disposition:
+    | "accepted"
+    | "deduplication"
+    | "invalid_value_filtering"
+    | "conflict_suppression"
+    | "changed_public_eligibility"
+    | "unexplained_loss";
+  reason: string;
+  sourceUrls: string[];
+  evidenceClasses: EvidenceClass[];
+};
+
+export type SourcePreparationDiagnostics = {
+  schemaVersion: 1;
+  facts: SourcePreparationFactDiagnostic[];
+};
+
+/**
+ * Creates the durable private project authority before crawling. The submitted
+ * URL is retained on the site record until the first exact website mirror is
+ * finalized. A submitted URL alone is not a source snapshot or owner fact.
+ */
+export async function createLooseWebsiteBootstrap(input: {
+  url: string;
+  slug?: string;
+  siteId?: string;
+  businessId?: string;
+  now?: string;
+}) {
+  let sourceUrl: string;
+  try {
+    sourceUrl = await assertPublicFetchUrl(input.url, { resolveDns: false });
+  } catch (error) {
+    throw new WebsiteCrawlError(
+      "source_invalid",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+  const now = input.now ?? new Date().toISOString();
+  const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
+  const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
+  const hostname = new URL(sourceUrl).hostname;
+  const name = hostnameBusinessName(sourceUrl);
+  const stateWithoutHash = {
+    schemaVersion: 1 as const,
+    businessId,
+    siteId,
+    revision: 1,
+    ownerOperationalRevision: 1,
+    updatedAt: now,
+    identity: {
+      name,
+      status: "provisional" as const,
+      categories: [] as string[]
+    },
+    contacts: {},
+    locations: [],
+    serviceAreas: [],
+    offerings: [],
+    proof: [],
+    assets: [],
+    links: [],
+    facts: []
+  };
+  const state = businessStateSchema.parse({
+    ...stateWithoutHash,
+    stateHash: sha256(stableJson(stateWithoutHash))
+  });
+  const intentWithoutHash = {
+    schemaVersion: 1 as const,
+    id: `intent_${idPart(randomUUID())}`,
+    siteId,
+    revision: 1,
+    ownerIntentRevision: 1,
+    updatedAt: now,
+    voice: ["clear", "capable"],
+    primaryConversion: "auto" as const,
+    pageRequirements: [],
+    brandConstraints: {
+      preferredColors: [],
+      prohibitedColors: [],
+      preserveLogo: true,
+      notes: []
+    },
+    enabledCapabilities: ["forms", "analytics", "maps"] as const,
+    agentAccessPolicy: {
+      search: "allow" as const,
+      aiInput: "allow" as const,
+      aiTrain: "disallow" as const,
+      trainingPermission: { status: "not_granted" as const }
+    },
+    notes: []
+  };
+  const intent = siteIntentSchema.parse({
+    ...intentWithoutHash,
+    intentHash: sha256(stableJson(intentWithoutHash))
+  });
+  const form = formDefinitionSchema.parse({
+    schemaVersion: 1,
+    id: `form_contact_${idPart(randomUUID())}`,
+    siteId,
+    key: "primary_lead",
+    revision: 1,
+    name: "Contact request",
+    status: "candidate_only",
+    destination: "lead_inbox",
+    fields: [
+      { id: "name", label: "Name", role: "contact_name", type: "text", required: true },
+      { id: "phone", label: "Phone", role: "contact_phone", type: "phone", required: false },
+      { id: "email", label: "Email", role: "contact_email", type: "email", required: true },
+      { id: "message", label: "How can we help?", role: "message", type: "textarea", required: false }
+    ],
+    submitLabel: "Send request",
+    successMessage: "Thanks. The business will follow up soon.",
+    createdAt: now
+  });
+  const site = platformSiteRecordSchema.parse({
+    id: siteId,
+    businessId,
+    slug: input.slug ?? safeSlug(name || hostname),
+    sourceUrl,
+    normalizedSource: sourceUrl,
+    status: "draft",
+    createdAt: now,
+    updatedAt: now
+  });
+  return {
+    site,
+    state,
+    intent,
+    forms: [form],
+    sourceSnapshots: [] as SourceSnapshot[],
+    sourceUrl
+  };
+}
 
 export async function ingestWebsite(input: {
   url: string;
@@ -60,7 +185,6 @@ export async function ingestWebsite(input: {
   businessId?: string;
   now?: string;
   signal?: AbortSignal;
-  researchMode?: "auto" | "disabled";
 }): Promise<WebsiteIngestionResult> {
   let sourceUrl: string;
   try {
@@ -74,29 +198,31 @@ export async function ingestWebsite(input: {
   const now = input.now ?? new Date().toISOString();
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
-  const { ingestion: generationIngestion, crawl } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
+  const { ingestion: generationIngestion, crawl, captures, documents, timings } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
   assertSourceSuitableForGeneration(crawl, generationIngestion);
-  const research = input.researchMode === "disabled"
-    ? undefined
-    : await researchBusiness({
-      businessId,
-      sourceUrl,
-      businessName: clean(crawl.extractedFacts.name) ?? clean(crawl.title),
-      locality: crawl.extractedFacts.address
-        ? [crawl.extractedFacts.address.city, crawl.extractedFacts.address.region].filter(Boolean).join(", ")
-        : undefined,
-      capturedAt: now,
-      signal: input.signal
-    });
 
-  const facts = crawl.extractedFacts;
-  const domainContext = resolveDomainContext(crawl.extractedFacts);
+  const retainedContacts = retainedContactConsensus(documents);
+  const facts = {
+    ...crawl.extractedFacts,
+    phone: crawl.extractedFacts.phone ?? retainedContacts.phone,
+    email: crawl.extractedFacts.email ?? retainedContacts.email
+  };
   const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
   const sourceBackedName = preferBusinessNameCandidate(crawlName, undefined, new URL(sourceUrl).hostname);
   const identityStatus = clean(sourceBackedName) ? "verified" as const : "provisional" as const;
   const name = clean(sourceBackedName) ?? hostnameBusinessName(sourceUrl);
-  const sourceContentHash = sha256(stableJson({ generationIngestion, crawl }));
+  const sourceContentHash = websiteMirrorManifestHash({ ingestion: generationIngestion, captures });
   const sourceSnapshotId = sourceSnapshotIdForBusiness(businessId, sourceContentHash);
+  const mirror = buildWebsiteSourceMirror({
+    sourceSnapshotId,
+    sourceUrl,
+    ingestion: generationIngestion,
+    captures,
+    documents,
+    capturedAt: now,
+    timings
+  });
+  const factExtractionStarted = Date.now();
   const sourceSnapshot = sourceSnapshotSchema.parse({
     schemaVersion: 1,
     id: sourceSnapshotId,
@@ -105,9 +231,7 @@ export async function ingestWebsite(input: {
     sourceUrl,
     contentHash: sourceContentHash,
     capturedAt: now,
-    payload: {
-      ingestion: generationIngestion
-    }
+    payload: mirror.payload
   });
 
   const blockIndex = crawl.pageSummaries.flatMap((page) => page.sourceTextBlocks);
@@ -129,7 +253,9 @@ export async function ingestWebsite(input: {
     const id = `fact_${kind}_${sha256(text).slice(7, 19)}`;
     const block = evidence?.sourceBlockId
       ? blockIndex.find((candidate) => candidate.id === evidence.sourceBlockId && candidate.sourceUrl === evidence.sourceUrl)
-      : supportingBlock(blockIndex, text);
+      : evidence
+        ? undefined
+        : selectSupportingSourceBlock(blockIndex, text, evidenceClassByUrl);
     const evidenceClass: EvidenceClass = evidence?.evidenceClass ?? (block ? evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" : "first_party");
     const automaticallyEligible = publicEligible && evidenceClass === "first_party";
     publicFacts.push({
@@ -160,10 +286,25 @@ export async function ingestWebsite(input: {
   const nameFactId = identityStatus === "verified"
     ? addFact("business_name", "Business name", name, 0.9, sameValue(name, crawlName))
     : undefined;
-  const sourceWebsiteFactId = addFact("link", "Source website", sourceUrl, 1)!;
+  const sourceWebsiteFactId = addFact("link", "Source website", sourceUrl, 1, true, {
+    sourceUrl,
+    evidenceClass: "first_party"
+  })!;
   addFact("description", "Business description", clean(facts.description), 0.7, sameValue(facts.description, crawl.extractedFacts.description));
-  const phoneFactId = addFact("phone", "Phone", clean(facts.phone), 0.82, sameValue(facts.phone, crawl.extractedFacts.phone));
-  addFact("email", "Email", clean(facts.email), 0.78, sameValue(facts.email, crawl.extractedFacts.email));
+  const phoneFactId = addFact(
+    "phone",
+    "Phone",
+    clean(facts.phone),
+    0.82,
+    sameValue(facts.phone, crawl.extractedFacts.phone) || sameValue(facts.phone, retainedContacts.phone)
+  );
+  addFact(
+    "email",
+    "Email",
+    clean(facts.email),
+    0.78,
+    sameValue(facts.email, crawl.extractedFacts.email) || sameValue(facts.email, retainedContacts.email)
+  );
   const addressText = formatAddress(facts.address);
   const addressFactId = addFact("address", "Address", addressText, 0.8, sameValue(addressText, formatAddress(crawl.extractedFacts.address)));
   const hoursFactId = addFact(
@@ -174,59 +315,33 @@ export async function ingestWebsite(input: {
     sameValue(facts.hours, crawl.extractedFacts.hours)
   );
 
-  const emergencyService = domainContext?.id === "plumbing" && supportsEmergencyPlumbing(crawl, facts.hours)
-    ? "Emergency Plumbing"
-    : undefined;
-  const serviceNames = unique([
-    ...facts.services,
-    ...(emergencyService ? [emergencyService] : [])
-  ]).filter((service) => service === emergencyService || serviceIsSourceBacked(service, crawl)).slice(0, 48);
-  const offerings = canonicalOfferingCandidates(serviceNames, domainContext, {
-    evidenceFor: (service) => offeringEvidenceFor(service, crawl, generationIngestion),
-    scoreBoostFor: (service) => service.catalogId === "emergency_plumbing" && emergencyService ? 40 : 0
-  })
-    .slice(0, 24)
-    .map((service, index) => offeringFromService(service, index, addFact));
-  const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
   const crawlServiceAreas = verifiedServiceAreas(crawl, generationIngestion);
+  for (const service of selectSourceOfferingFacts(crawl, generationIngestion, crawlServiceAreas.map((area) => area.label))) {
+    addFact("offering", "Observed source service language", service.name, service.confidence, true, service.evidence);
+  }
+  const offerings: BusinessOffering[] = [];
+  const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
   const serviceAreas = crawlServiceAreas.slice(0, 50).map(({ label, evidence }, index) => {
     const factId = addFact("service_area", "Service area", label, 0.78, true, evidence)!;
     return { id: `service_area_${index + 1}`, label, sourceFactIds: [factId] };
   });
   void eligibleAddress;
 
-  const retainedAssets = await retainReferenceAssets({
-    businessId,
-    crawl,
-    sourceSnapshotId,
-    now,
-    signal: input.signal
-  });
-  const assets: AssetRevisionRef[] = retainedAssets.map(({ revision }) => ({
-    assetId: revision.assetId,
-    revisionId: revision.id,
-    kind: retainedAssetKind(revision, crawl),
-    contentHash: revision.contentHash,
-    storageKey: revision.storageKey,
-    mimeType: revision.mimeType,
-    alt: revision.provenance.origin === "source_website"
-      ? revision.provenance.alt ?? ""
-      : "",
-    width: revision.width,
-    height: revision.height,
-    origin: "source_website",
-    sourceFactIds: [nameFactId ?? sourceWebsiteFactId],
-    activeForFutureBuilds: true
-  }));
+  const assets: [] = [];
 
   const links = selectSourceLinksForGeneration(sourceUrl, crawl).map((link, index) => {
-    const factId = addFact("link", link.label, link.url, 0.75)!;
+    const factId = link.kind === "website" && link.url === sourceUrl
+      ? sourceWebsiteFactId
+      : addFact("link", link.label, link.url, 0.75, true, {
+          sourceUrl: sourcePageForFunctionalLink(crawl, link.url) ?? sourceUrl,
+          evidenceClass: "first_party"
+        })!;
     return { id: `link_${index + 1}`, ...link, publicEligible: true, sourceFactIds: [factId] };
   });
   const locationSourceIds = [addressFactId, hoursFactId].filter((value): value is string => Boolean(value));
   const locations = facts.address || facts.hours || facts.geo ? [{
     id: "location_primary",
-    label: "Main shop",
+    label: "Business location",
     street: clean(facts.address?.street),
     city: clean(facts.address?.city),
     region: clean(facts.address?.region),
@@ -238,23 +353,26 @@ export async function ingestWebsite(input: {
     sourceFactIds: locationSourceIds
   }] : [];
 
+  const proof = observedProof(crawl, sourceSnapshotId, publicFacts, now);
+  const factExtractionCompleted = Date.now();
   const stateWithoutHash = {
     schemaVersion: 1 as const,
     businessId,
     siteId,
     revision: 1,
+    ownerOperationalRevision: 1,
     updatedAt: now,
     identity: {
       name,
       status: identityStatus,
       description: clean(facts.description),
-      categories: unique([preferredBusinessTerm(domainContext), ...facts.categories]).slice(0, 20)
+      categories: selectBusinessCategories(facts.categories, [name, ...facts.services])
     },
     contacts: { phone: clean(facts.phone), email: clean(facts.email) },
     locations,
     serviceAreas,
     offerings,
-    proof: observedProof(crawl, sourceSnapshotId, publicFacts, now),
+    proof,
     assets,
     links,
     facts: publicFacts
@@ -265,49 +383,39 @@ export async function ingestWebsite(input: {
     schemaVersion: 1,
     id: `form_estimate_${idPart(randomUUID())}`,
     siteId,
+    key: "primary_lead",
     revision: 1,
     name: "Estimate request",
     status: "candidate_only",
+    destination: "lead_inbox",
     fields: [
-      { id: "name", label: "Name", type: "text", required: true },
-      { id: "phone", label: "Phone", type: "phone", required: true },
-      { id: "email", label: "Email", type: "email", required: false },
-      { id: "message", label: `How can this ${preferredBusinessTerm(domainContext)} help?`, type: "textarea", required: false }
+      { id: "name", label: "Name", role: "contact_name", type: "text", required: true },
+      { id: "phone", label: "Phone", role: "contact_phone", type: "phone", required: true },
+      { id: "email", label: "Email", role: "contact_email", type: "email", required: false },
+      { id: "message", label: "How can we help?", role: "message", type: "textarea", required: false }
     ],
     submitLabel: "Request an estimate",
     successMessage: "Thanks. The business will follow up soon.",
     createdAt: now
   });
-  const pageRequirements = [
-    { id: "page_home", purpose: "home" as const, slug: "", title: "Home", required: true },
-    ...offerings.filter((offering) => offering.pageMode === "dedicated").slice(0, 6).map((offering) => ({
-      id: `page_${offering.id}`,
-      purpose: "service" as const,
-      slug: `services/${safeSlug(offering.name)}`,
-      title: offering.name,
-      required: false,
-      offeringId: offering.id
-    })),
-    { id: "page_contact", purpose: "contact" as const, slug: "contact", title: "Contact", required: true }
-  ];
   const intentWithoutHash = {
     schemaVersion: 1 as const,
     id: `intent_${idPart(randomUUID())}`,
     siteId,
     revision: 1,
+    ownerIntentRevision: 1,
     updatedAt: now,
-    audience: domainContext?.customerJourneys[0],
     positioning: clean(facts.description),
     voice: ["clear", "capable"],
     primaryConversion: "auto" as const,
-    pageRequirements,
+    pageRequirements: [],
     brandConstraints: {
       preferredColors: [],
       prohibitedColors: [],
       preserveLogo: true,
       notes: []
     },
-    enabledCapabilities: ["forms", "analytics", "maps", "gallery", "disclosure"] as const,
+    enabledCapabilities: ["forms", "analytics", "maps"] as const,
     agentAccessPolicy: {
       search: "allow" as const,
       aiInput: "allow" as const,
@@ -325,319 +433,266 @@ export async function ingestWebsite(input: {
     createdAt: now,
     updatedAt: now
   });
+  const finalizationCompleted = Date.now();
+  const timedSourceSnapshot = sourceSnapshotSchema.parse({
+    ...sourceSnapshot,
+    payload: {
+      ...mirror.payload,
+      stages: {
+        ...mirror.payload.stages,
+        factExtractionMs: Math.max(0, factExtractionCompleted - factExtractionStarted),
+        finalizationMs: Math.max(0, finalizationCompleted - factExtractionCompleted)
+      },
+      completedAt: new Date(finalizationCompleted).toISOString(),
+      elapsedMs: Math.max(mirror.payload.elapsedMs, finalizationCompleted - Date.parse(mirror.payload.startedAt))
+    }
+  });
   void phoneFactId;
   return {
     site,
     state,
     intent,
     forms: [form],
-    sourceSnapshots: [sourceSnapshot, ...(research ? [research.snapshot] : [])],
-    retainedAssets,
+    sourceSnapshots: [timedSourceSnapshot],
+    retainedSourceResources: mirror.resources,
+    sourceSnapshotPages: mirror.pages,
     sourceUrl,
     crawl,
     generationIngestion,
-    researchUsage: research?.usage,
-    validationEligibility: generationIngestion.coverage === "incomplete" ? "private_review_only" : "frozen_validation",
-    domainContext
+    validationEligibility: generationIngestion.coverage === "incomplete" ? "private_review_only" : "frozen_validation"
   };
-}
-
-async function retainReferenceAssets(input: {
-  businessId: string;
-  crawl: CrawlAssessment;
-  sourceSnapshotId: string;
-  now: string;
-  signal?: AbortSignal;
-}) {
-  const candidates = uniqueBy(rankSourceAssetCandidates(input.crawl.assetReferences), (asset) => asset.url);
-  const results: Array<RetainedAssetBinary & {
-    perceptualHash: string;
-    sourceKind: "photo" | "logo" | "icon";
-    rank: number;
-  }> = [];
-  for (const [index, candidate] of candidates.entries()) {
-    try {
-      const url = await assertPublicFetchUrl(candidate.url);
-      const response = await fetch(url, { signal: combinedSignal(input.signal, 10_000) });
-      if (!response.ok) continue;
-      const declaredBytes = Number(response.headers.get("content-length"));
-      if (Number.isFinite(declaredBytes) && declaredBytes > 8_000_000) continue;
-      const bytes = await readBodyWithLimit(response, 8_000_000);
-      if (!bytes?.length) continue;
-      const metadata = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false }).metadata();
-      const mimeType = decodedImageMime(metadata.format);
-      if (!mimeType || !metadata.width || !metadata.height) continue;
-      const perceptualHash = await imageDifferenceHash(bytes);
-      const contentHash = sha256(bytes);
-      const scopedAssetHash = sha256(stableJson({ businessId: input.businessId, contentHash }));
-      const assetId = `asset_source_${index + 1}_${scopedAssetHash.slice(7, 17)}`;
-      const revision = assetRevisionSchema.parse({
-        schemaVersion: 1,
-        id: assetRevisionIdForBusiness(input.businessId, contentHash),
-        assetId,
-        businessId: input.businessId,
-        contentHash,
-        storageKey: `site-assets/${input.businessId}/${contentHash.slice(7)}`,
-        mimeType,
-        bytes: bytes.length,
-        width: metadata.width,
-        height: metadata.height,
-        origin: "source_website",
-        provenance: {
-          origin: "source_website",
-          sourceUrl: url,
-          sourcePageUrl: candidate.sourcePageUrl,
-          sourceSnapshotId: input.sourceSnapshotId,
-          ...(candidate.alt ? { alt: candidate.alt } : {})
-        },
-        createdAt: input.now
-      });
-      results.push({
-        revision,
-        bytes,
-        perceptualHash,
-        sourceKind: candidate.kind === "image" ? "photo" : candidate.kind,
-        rank: sourceAssetRank(candidate, metadata.width, metadata.height)
-      });
-    } catch {
-      // Individual media failures do not invalidate otherwise usable business evidence.
-    }
-  }
-  return selectPerceptuallyDistinctRetainedAssets(results);
-}
-
-export function selectPerceptuallyDistinctRetainedAssets(candidates: Array<RetainedAssetBinary & {
-  perceptualHash: string;
-  sourceKind: "photo" | "logo" | "icon";
-  rank: number;
-}>) {
-  const ranked = [...candidates].sort((left, right) => right.rank - left.rank || left.revision.id.localeCompare(right.revision.id));
-  const selected: RetainedAssetBinary[] = [];
-  const retainedHashes: Array<{ kind: string; hash: string }> = [];
-  for (const candidate of ranked) {
-    if (selected.some((asset) => asset.revision.contentHash === candidate.revision.contentHash)) continue;
-    if (retainedHashes.some((retained) => retained.kind === candidate.sourceKind && hammingDistance(retained.hash, candidate.perceptualHash) <= 6)) continue;
-    selected.push({ revision: candidate.revision, bytes: candidate.bytes });
-    retainedHashes.push({ kind: candidate.sourceKind, hash: candidate.perceptualHash });
-    if (selected.length >= 24) break;
-  }
-  return deduplicateRetainedAssets(selected);
-}
-
-export function deduplicateRetainedAssets(assets: RetainedAssetBinary[]) {
-  const retained = new Map<string, RetainedAssetBinary>();
-  for (const asset of assets) {
-    const existing = retained.get(asset.revision.id);
-    if (!existing) {
-      retained.set(asset.revision.id, asset);
-      continue;
-    }
-    if (
-      existing.revision.businessId !== asset.revision.businessId ||
-      existing.revision.contentHash !== asset.revision.contentHash
-    ) {
-      throw new Error(`Immutable asset revision collision for ${asset.revision.id}.`);
-    }
-  }
-  return [...retained.values()];
-}
-
-function rankSourceAssetCandidates<T extends {
-  url: string;
-  alt?: string;
-  kind: "photo" | "image" | "logo" | "icon";
-  sourcePageUrl: string;
-}>(candidates: T[]) {
-  return [...candidates].sort((left, right) =>
-    sourceAssetCandidateRank(right) - sourceAssetCandidateRank(left)
-    || left.url.localeCompare(right.url));
-}
-
-function sourceAssetCandidateRank(candidate: {
-  alt?: string;
-  kind: "photo" | "image" | "logo" | "icon";
-  sourcePageUrl: string;
-}) {
-  return (candidate.kind === "logo" ? 500 : candidate.kind === "photo" || candidate.kind === "image" ? 350 : 100)
-    + (usefulSourceAlt(candidate.alt) ? 60 : 0)
-    + (new URL(candidate.sourcePageUrl).pathname === "/" ? 30 : 0);
-}
-
-function sourceAssetRank(
-  candidate: { alt?: string; kind: "photo" | "image" | "logo" | "icon"; sourcePageUrl: string },
-  width: number,
-  height: number
-) {
-  const areaScore = Math.min(300, Math.round((width * height) / 10_000));
-  const tooSmall = width < 240 || height < 160 ? -250 : 0;
-  return sourceAssetCandidateRank(candidate) + areaScore + tooSmall;
-}
-
-function usefulSourceAlt(value: string | undefined) {
-  const alt = value?.replace(/\s+/g, " ").trim() ?? "";
-  return alt.length >= 8
-    && alt.length <= 180
-    && !/\.(?:jpe?g|png|webp|gif|svg)\b|https?:\/\/|(?:^|[\s_-])(?:img|image|photo|dsc|screenshot)[\s_-]*\d*/i.test(alt);
-}
-
-async function imageDifferenceHash(bytes: Buffer) {
-  const { data } = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false })
-    .resize(9, 8, { fit: "fill" })
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  let bits = "";
-  for (let row = 0; row < 8; row += 1) {
-    for (let column = 0; column < 8; column += 1) {
-      bits += data[row * 9 + column] > data[row * 9 + column + 1] ? "1" : "0";
-    }
-  }
-  return bits;
-}
-
-function hammingDistance(left: string, right: string) {
-  if (left.length !== right.length) return Number.POSITIVE_INFINITY;
-  let distance = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) distance += 1;
-  }
-  return distance;
 }
 
 export function sourceSnapshotIdForBusiness(businessId: string, contentHash: string) {
   return `source_${sha256(stableJson({ businessId, contentHash })).slice(7, 31)}`;
 }
 
-export function assetRevisionIdForBusiness(businessId: string, contentHash: string) {
-  return `asset_revision_${sha256(stableJson({ businessId, contentHash })).slice(7, 31)}`;
+
+export function selectBusinessCategories(values: string[], sourceHints: string[] = []) {
+  const specific = unique(values.map((value) => clean(value)).filter((value): value is string => Boolean(value)))
+    .filter((value) => !/^(?:web ?page|profile ?page|collection ?page|item ?page|web ?site|breadcrumb ?list|thing|creative ?work|professional service|organization|local business)$/i.test(value));
+  const hintText = normalizedText(sourceHints.join(" "));
+  return unique([
+    ...specific,
+    ...(specific.some((value) => /pest|exterminat/i.test(value)) || /\b(?:pest control|exterminat(?:or|ion))\b/.test(hintText)
+      ? ["Pest Control Service"]
+      : [])
+  ]).slice(0, 20);
 }
 
-async function readBodyWithLimit(response: Response, maximumBytes: number) {
-  if (!response.body) return undefined;
-  const reader = response.body.getReader();
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) return Buffer.concat(chunks, bytes);
-      bytes += value.byteLength;
-      if (bytes > maximumBytes) {
-        await reader.cancel("asset_size_limit");
-        return undefined;
-      }
-      chunks.push(Buffer.from(value));
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-function serviceIsSourceBacked(service: string, crawl: CrawlAssessment) {
-  const normalized = normalizedText(service);
-  const extracted = crawl.extractedFacts.services.some((value) => {
-    const candidate = normalizedText(value);
-    return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-  });
-  return extracted || crawl.pageSummaries.some((page) => page.sourceTextBlocks.some((block) => normalizedText(block.displayText).includes(normalized)));
-}
-
-function offeringFromService(
-  service: CanonicalOfferingCandidate,
-  index: number,
-  addFact: (
-    kind: BusinessFact["kind"],
-    label: string,
-    value: unknown,
-    confidence?: number,
-    publicEligible?: boolean,
-    evidence?: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass }
-  ) => string | undefined
-): BusinessOffering {
-  const primaryEvidence = service.evidence?.blocks.find((block) => block.evidenceClass === "first_party")
-    ?? service.evidence?.blocks[0];
-  const directPageUrl = service.evidence?.directPageUrls[0];
-  const factId = addFact(
-    "offering",
-    "Service",
-    service.sourceName,
-    0.82,
-    true,
-    primaryEvidence ?? (directPageUrl ? { sourceUrl: directPageUrl, evidenceClass: "first_party" } : undefined)
-  )!;
-  return {
-    id: `offering_${index + 1}_${safeSlug(service.name).slice(0, 60)}`,
-    ...(service.catalogId ? { catalogId: service.catalogId } : { customName: service.name }),
-    name: service.name,
-    status: "observed",
-    visibility: "preview",
-    pageMode: index < 6 ? "dedicated" : "shared",
-    featured: index < 3,
-    sourceFactIds: [factId]
-  };
-}
-
-function offeringEvidenceFor(
-  service: string,
+export function selectSourceOfferingFacts(
   crawl: CrawlAssessment,
-  ingestion: WebsiteGenerationIngestion
-): OfferingEvidence {
-  const normalized = normalizedText(service);
-  const meaningfulTokens = normalized.split(" ").filter((token) => token.length >= 3 && !offeringStopWords.has(token));
+  ingestion: WebsiteGenerationIngestion,
+  serviceAreaLabels: string[] = verifiedServiceAreas(crawl, ingestion).map((area) => area.label)
+) {
+  const serviceAreaIdentities = unique(serviceAreaLabels.flatMap((label) => [
+    normalizedText(label),
+    serviceAreaIdentity(label)
+  ]).filter(Boolean));
   const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
     [page.url, page.evidenceClass] as const,
     [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
   ]));
-  const blocks = crawl.pageSummaries.flatMap((page) => page.sourceTextBlocks.flatMap((block) => {
-    const text = normalizedText(block.displayText);
-    const exactPhrase = normalized.length >= 3 && text.includes(normalized);
-    const emergencyAlias = normalized === "emergency plumbing"
-      && /\bemergency (?:plumb(?:er|ing)|service)|24[ -]?hour plumber\b/i.test(block.displayText);
-    const tokenCoverage = meaningfulTokens.length
-      ? meaningfulTokens.filter((token) => text.includes(token)).length / meaningfulTokens.length
-      : 0;
-    if (!exactPhrase && !emergencyAlias && tokenCoverage < 0.8) return [];
-    return [{
-      id: block.id,
-      sourceUrl: block.sourceUrl,
-      evidenceClass: evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" as EvidenceClass
-    }];
-  }));
-  const directPageUrls = crawl.pageSummaries.flatMap((page) => {
-    const pageSignal = normalizedText(`${page.title ?? ""} ${new URL(page.url).pathname}`);
-    const exactPhrase = pageSignal.includes(normalized);
-    const tokenCoverage = meaningfulTokens.length
-      ? meaningfulTokens.filter((token) => pageSignal.includes(token)).length / meaningfulTokens.length
-      : 0;
-    return (exactPhrase || tokenCoverage >= 0.8) && page.purposeTags.some((tag) => tag === "services" || tag === "service_detail")
-      ? [page.url]
-      : [];
-  });
-  const uniqueBlocks = uniqueBy(blocks, (block) => block.id);
-  const uniquePages = unique(directPageUrls);
-  const firstPartyBlocks = uniqueBlocks.filter((block) => block.evidenceClass === "first_party");
-  return {
-    blocks: uniqueBlocks,
-    directPageUrls: uniquePages,
-    score: uniquePages.length * 24
-      + new Set(firstPartyBlocks.map((block) => block.sourceUrl)).size * 12
-      + Math.min(firstPartyBlocks.length, 6) * 6
-  };
+  const candidates = new Map<string, {
+    name: string;
+    score: number;
+    pageUrls: Set<string>;
+    evidence: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass };
+  }>();
+  for (const page of crawl.pageSummaries) {
+    const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
+    if (evidenceClass !== "first_party") continue;
+    if (classifySourcePagePath(new URL(page.url).pathname) !== "customer_content") continue;
+    for (const rawName of page.extractedFacts.services) {
+      const name = canonicalOfferingName(clean(rawName), serviceAreaIdentities);
+      if (!name || !isPlausibleOfferingName(name)) continue;
+      const identity = offeringIdentity(name);
+      const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(normalizedText(name)));
+      const purposeScore = page.purposeTags.includes("service_detail")
+        ? 5
+        : page.purposeTags.includes("services")
+          ? 4
+          : page.purposeTags.includes("home")
+            ? 2
+            : page.purposeTags.includes("location")
+              ? -4
+              : 0;
+      const existing = candidates.get(identity);
+      if (existing) {
+        if (!existing.pageUrls.has(page.url)) existing.score += 1;
+        existing.pageUrls.add(page.url);
+        if (purposeScore > existing.score) {
+          existing.name = name;
+          existing.evidence = {
+            ...(supporting ? { sourceBlockId: supporting.id } : {}),
+            sourceUrl: page.url,
+            evidenceClass
+          };
+        }
+        existing.score += purposeScore;
+        continue;
+      }
+      candidates.set(identity, {
+        name,
+        score: purposeScore + 1,
+        pageUrls: new Set([page.url]),
+        evidence: {
+          ...(supporting ? { sourceBlockId: supporting.id } : {}),
+          sourceUrl: page.url,
+          evidenceClass
+        }
+      });
+    }
+  }
+  return [...candidates.values()]
+    .filter((candidate) => candidate.score >= 2)
+    .sort((left, right) => right.score - left.score || right.pageUrls.size - left.pageUrls.size || left.name.localeCompare(right.name))
+    .slice(0, 24)
+    .map((candidate) => ({
+      name: candidate.name,
+      confidence: Math.min(0.9, 0.68 + Math.min(candidate.score, 11) * 0.02),
+      evidence: candidate.evidence
+    }));
 }
 
-function supportsEmergencyPlumbing(crawl: CrawlAssessment, hours: ExtractedBusinessFacts["hours"]) {
-  void hours;
-  return crawl.pageSummaries
-    .flatMap((page) => page.sourceTextBlocks.map((block) => block.displayText))
-    .some(isAffirmativeEmergencyServiceStatement);
+function isPlausibleOfferingName(value: string) {
+  const normalized = normalizedText(value);
+  const words = normalized.split(" ").filter(Boolean);
+  if (words.length < 1 || words.length > 8 || value.length > 100) return false;
+  if (/\b(?:header|footer|slider?|slide|megamenu|option panel|tab content|portfolio|archive|category|infosurgepest|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
+  if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial)$/i.test(value)) return false;
+  if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
+  return !/\b(?:artificial grass|gardening|hardscaping|landscaping|lawn care|lawn fertilization|tree surgery|waste removal|softscaping|mulching|lawn maintenance|plant health|gardens? and ponds|pruning|lawn aeration|hvac)\b/.test(normalized);
 }
 
-export function isAffirmativeEmergencyServiceStatement(value: string) {
-  const normalized = value.normalize("NFKC").replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
-  if (!normalized) return false;
-  if (/\b(?:not|isn['’]?t|aren['’]?t|no|without|unavailable|except|excluding)\b/i.test(normalized)) return false;
-  if (/\bemergency (?:phone|line|support|dispatch|on[ -]?call)\b/i.test(normalized)) return false;
-  return /\bemergency (?:plumb(?:er|ing)|service)\b|\b24[ -]?hour plumber\b/i.test(normalized);
+function canonicalOfferingName(value: string | undefined, serviceAreaIdentities: string[]) {
+  if (!value) return undefined;
+  let normalized = normalizedText(value).replace(/^(?:your|our)\s+/, "").trim();
+  if (/\b(?:cost|price|pricing|online|20\d{2})\b/.test(normalized)) return undefined;
+  const sortedAreas = [...serviceAreaIdentities].sort((left, right) => right.length - left.length);
+  for (const area of sortedAreas) {
+    const escaped = escapeRegExp(area);
+    normalized = normalized
+      .replace(new RegExp(`^(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?\\s+`, "i"), "")
+      .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?$`, "i"), "")
+      .trim();
+  }
+  normalized = normalized.replace(/\s+(?:nc|tx|fl|ga|va)$/i, "").trim();
+  if (!normalized) return undefined;
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function offeringIdentity(value: string) {
+  return normalizedText(value)
+    .replace(/\b(?:services?|exterminator|extermination|treatment)\b/g, "control")
+    .replace(/\b(?:pests?|bugs?)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function sourcePreparationDiagnosticsFor(
+  crawl: CrawlAssessment,
+  ingestion: WebsiteGenerationIngestion
+): SourcePreparationDiagnostics {
+  const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
+    [page.url, page.evidenceClass] as const,
+    [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
+  ]));
+  const facts: SourcePreparationFactDiagnostic[] = [];
+  const acceptedServiceAreas = new Map(
+    verifiedServiceAreas(crawl, ingestion).map((item) => [serviceAreaIdentity(item.label), item.label])
+  );
+  const serviceAreaOccurrences = new Map<string, number>();
+  for (const page of crawl.pageSummaries) {
+    for (const rawValue of page.extractedFacts.serviceAreas) {
+      const value = clean(rawValue) ?? rawValue;
+      const identity = serviceAreaIdentity(value);
+      const occurrence = (serviceAreaOccurrences.get(identity) ?? 0) + 1;
+      serviceAreaOccurrences.set(identity, occurrence);
+      const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
+      const supporting = page.sourceTextBlocks.find((block) =>
+        normalizedText(block.displayText).includes(identity)
+      );
+      const accepted = acceptedServiceAreas.has(identity);
+      const disposition = accepted && occurrence === 1
+        ? "accepted" as const
+        : accepted
+          ? "deduplication" as const
+          : evidenceClass !== "first_party"
+            ? "changed_public_eligibility" as const
+            : !isExplicitNamedServiceArea(value)
+              || !serviceAreaHasGeographicEvidence(value, page, supporting?.displayText)
+              ? "invalid_value_filtering" as const
+              : "unexplained_loss" as const;
+      facts.push({
+        kind: "service_area",
+        value,
+        disposition,
+        reason: disposition === "accepted"
+          ? "A unique, named market had first-party geographic evidence."
+          : disposition === "deduplication"
+            ? "The same normalized market was already retained."
+            : disposition === "changed_public_eligibility"
+              ? "The candidate lacked first-party publication eligibility."
+              : disposition === "invalid_value_filtering"
+                ? "The candidate was generic, audience-like, composite, or lacked geographic service-area evidence."
+                : "The candidate was not retained and no deterministic exclusion rule explained the loss.",
+        sourceUrls: [page.url],
+        evidenceClasses: [evidenceClass]
+      });
+    }
+  }
+
+  const hoursByValue = new Map<string, { value: Record<string, string>; urls: Set<string>; classes: Set<EvidenceClass> }>();
+  for (const page of crawl.pageSummaries) {
+    const hours = page.extractedFacts.hours;
+    if (!hours || !Object.keys(hours).length) continue;
+    const identity = stableJson(hours);
+    const candidate = hoursByValue.get(identity) ?? {
+      value: hours,
+      urls: new Set<string>(),
+      classes: new Set<EvidenceClass>()
+    };
+    candidate.urls.add(page.url);
+    candidate.classes.add(evidenceClassByUrl.get(page.url) ?? "unknown");
+    hoursByValue.set(identity, candidate);
+  }
+  const acceptedHoursIdentity = crawl.extractedFacts.hours
+    ? stableJson(crawl.extractedFacts.hours)
+    : undefined;
+  const visibleHourSignals = new Set(crawl.pageSummaries.flatMap((page) =>
+    page.sourceTextBlocks.flatMap((block) => {
+      const matches = block.displayText.match(/\b(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\b[^\n]{0,80}\b\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–—]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?/gi);
+      return (matches ?? []).map(normalizedText);
+    })
+  ));
+  for (const [identity, candidate] of hoursByValue) {
+    const accepted = identity === acceptedHoursIdentity;
+    const conflicting = hoursByValue.size > 1 || visibleHourSignals.size > 1;
+    const eligible = candidate.classes.has("first_party");
+    const disposition = accepted
+      ? "accepted" as const
+      : !eligible
+        ? "changed_public_eligibility" as const
+        : conflicting
+          ? "conflict_suppression" as const
+          : "unexplained_loss" as const;
+    facts.push({
+      kind: "hours",
+      value: candidate.value,
+      disposition,
+      reason: disposition === "accepted"
+        ? "One publish-eligible hours value survived consensus."
+        : disposition === "changed_public_eligibility"
+          ? "The candidate lacked first-party publication eligibility."
+          : disposition === "conflict_suppression"
+            ? "Distinct extracted or visible hours signals prevented a single reliable value."
+            : "The candidate was not retained and no conflict or eligibility rule explained the loss.",
+      sourceUrls: [...candidate.urls].sort(),
+      evidenceClasses: [...candidate.classes].sort()
+    });
+  }
+  return { schemaVersion: 1, facts };
 }
 
 function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
@@ -652,15 +707,23 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
   }>();
   for (const page of crawl.pageSummaries) {
     for (const rawLabel of page.extractedFacts.serviceAreas) {
-      const label = clean(rawLabel);
+      const label = normalizeServiceAreaCandidate(clean(rawLabel));
       if (!label || !isExplicitNamedServiceArea(label)) continue;
-      const identity = normalizedText(label);
+      const identity = serviceAreaIdentity(label);
       const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(identity));
+      if (!serviceAreaHasGeographicEvidence(label, page, supporting?.displayText)) continue;
       const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
       if (evidenceClass !== "first_party") continue;
       const existing = candidates.get(identity);
       if (existing) {
         existing.pageUrls.add(page.url);
+        if (serviceAreaSpecificity(label) > serviceAreaSpecificity(existing.label)) {
+          existing.label = label;
+          existing.evidence = {
+            ...(supporting ? { sourceBlockId: supporting.id, sourceUrl: supporting.sourceUrl } : { sourceUrl: page.url }),
+            evidenceClass
+          };
+        }
         continue;
       }
       candidates.set(identity, {
@@ -680,16 +743,56 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
 
 export function isExplicitNamedServiceArea(value: string) {
   const normalized = normalizedText(value);
+  const words = normalized.split(" ").filter(Boolean);
   return normalized.length >= 2
     && normalized.length <= 100
+    && words.length <= 5
+    && !/\d|[:;!?]/.test(value)
+    && /(?:^|[\s-])[A-Z][A-Za-z'-]*/.test(value)
     && !/\b(?:surrounding|greater|metro(?:politan)?|radius|miles?|nearby)\b/.test(normalized)
-    && !/[,&]|\band\b/.test(normalized)
+    && !/\b(?:homeowners?|customers?|clients?|residents?|restaurants?|businesses?|properties|communities|families|people|you|your|our|we|team|technicians?|including|anthem|climate|challenges?|solutions?|response|times?|insight|concerns?|activity|provides?|bring|understand|common|unique|housing|precise|fast|local|reviews?|reviewers?|apartments?|offices?|pets?|environment|more|include|microhab|corridors?|every|days?|across|not|bugs?|ants?|termites?|mosquitoes?|rodents?|cockroaches?)\b/.test(normalized)
+    && !/&|\band\b/.test(normalized)
+    && (!value.includes(",") || /,\s*[A-Z]{2}\s*$/i.test(value))
     && !/^(?:united states|usa|nationwide|everywhere|local area|surrounding areas?)$/.test(normalized);
 }
 
-const offeringStopWords = new Set([
-  "and", "the", "for", "with", "near", "company", "services", "service", "austin", "texas"
-]);
+export function normalizeServiceAreaCandidate(value: string | undefined) {
+  if (!value) return undefined;
+  const stripped = value
+    .replace(/^\s*(?:(?:serving|throughout|across|near|in)\s+(?:the\s+)?|(?:all|rest)\s+of\s+(?:the\s+)?|(?:entire|wider)\s+)/i, "")
+    .trim();
+  return isExplicitNamedServiceArea(stripped) ? stripped : undefined;
+}
+
+function serviceAreaIdentity(value: string) {
+  return normalizedText(value)
+    .replace(/\s+(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)$/, "")
+    .trim();
+}
+
+function serviceAreaSpecificity(value: string) {
+  return /(?:,\s*|\s)[A-Z]{2}\s*$/i.test(value) ? 2 : 1;
+}
+
+function serviceAreaHasGeographicEvidence(
+  label: string,
+  page: CrawlPageSummary,
+  supportingText?: string
+) {
+  if (/(?:,\s*|\s)[A-Z]{2}\s*$/i.test(label)) return true;
+  const identity = serviceAreaIdentity(label);
+  const path = new URL(page.url).pathname.toLocaleLowerCase();
+  const slug = identity.replace(/[^a-z0-9]+/g, "-");
+  if (new RegExp(`/(?:locations?|service-areas?)/${escapeRegExp(slug)}(?:-|/|$)`).test(path)) return true;
+  const context = normalizedText(supportingText ?? "");
+  return Boolean(context)
+    && context.includes(identity)
+    && /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving)\b/.test(context);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function observedProof(
   crawl: CrawlAssessment,
@@ -697,13 +800,13 @@ function observedProof(
   facts: BusinessFact[],
   now: string
 ): BusinessState["proof"] {
-  const candidates = crawl.pageSummaries
+  const testimonialCandidates = crawl.pageSummaries
     .filter((page) => page.purposeTags.includes("reviews"))
     .flatMap((page) => page.sourceTextBlocks)
     .filter((block) => /^(?:blockquote|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
     .filter((block) => canonicalWordCount(block.displayText) >= 6 && block.displayText.length >= 30 && block.displayText.length <= 240)
     .slice(0, 8);
-  return candidates.map((block, index) => {
+  const testimonials = testimonialCandidates.map((block, index) => {
     const factId = `fact_proof_${index + 1}_${sha256(block.displayText).slice(7, 17)}`;
     facts.push({
       id: factId,
@@ -731,16 +834,104 @@ function observedProof(
       sourceFactIds: [factId]
     };
   });
+
+  const warranties = selectObservedFirstPartyWarrantyBlocks(crawl.pageSummaries, crawl.url).map((block) => {
+    const suffix = sha256(`${block.sourceUrl}\n${block.displayText}`).slice(7, 19);
+    const factId = `fact_proof_warranty_${suffix}`;
+    facts.push({
+      id: factId,
+      kind: "proof",
+      label: "Observed service guarantee",
+      value: block.displayText,
+      source: {
+        factId,
+        sourceSnapshotId,
+        sourceBlockId: block.id,
+        sourceUrl: block.sourceUrl,
+        evidenceClass: "first_party",
+        observedAt: now,
+        confidence: 0.88,
+        ownerConfirmed: false
+      },
+      publicEligible: false
+    });
+    return {
+      id: `proof_warranty_${suffix}`,
+      kind: "warranty" as const,
+      status: "observed" as const,
+      publicText: block.displayText,
+      verbatim: true,
+      sourceFactIds: [factId]
+    };
+  });
+
+  return [...testimonials, ...warranties];
+}
+
+const freeReturnServicePattern = /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,180}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i;
+const guaranteedReturnServicePattern = /\bguarantee\b.{0,220}\b(?:re[-\s]?(?:treat|service)|come back|return)\b/i;
+
+export function selectObservedFirstPartyWarrantyBlocks(
+  pages: Array<Pick<CrawlPageSummary, "url" | "sourceTextBlocks">>,
+  sourceUrl: string
+): SourceTextBlock[] {
+  const sourceOrigin = new URL(sourceUrl).origin;
+  const seen = new Set<string>();
+  return pages
+    .filter((page) => {
+      try {
+        return new URL(page.url).origin === sourceOrigin;
+      } catch {
+        return false;
+      }
+    })
+    .flatMap((page) => page.sourceTextBlocks)
+    .filter((block) => /^(?:blockquote|dd|div|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
+    .filter((block) => canonicalWordCount(block.displayText) >= 8 && block.displayText.length >= 40 && block.displayText.length <= 600)
+    .filter((block) => freeReturnServicePattern.test(block.displayText) || guaranteedReturnServicePattern.test(block.displayText))
+    .filter((block) => {
+      const identity = block.displayText.normalize("NFKC").toLocaleLowerCase("en-US").replace(/\s+/g, " ").trim();
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    })
+    .slice(0, 4);
 }
 
 export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAssessment) {
   const socialProfile = crawl.extractedFacts.socialLinks.find(isAccountLevelSocialProfile);
+  const customerPortalLinks = uniqueBy(crawl.pageSummaries
+    .flatMap((page) => page.linkReferences)
+    .filter((link) => isCustomerPortalLink(link.href, link.text))
+    .map((link) => ({ kind: "other" as const, label: "Customer Login", url: link.href })), (item) => item.url);
   const values = [
     { kind: "website" as const, label: "Source website", url: sourceUrl },
     ...(socialProfile ? [{ kind: "social" as const, label: "Social profile", url: socialProfile }] : []),
-    ...crawl.extractedFacts.bookingLinks.map((url) => ({ kind: "booking" as const, label: "Booking", url }))
+    ...crawl.extractedFacts.bookingLinks.map((url) => ({ kind: "booking" as const, label: "Booking", url })),
+    ...customerPortalLinks
   ];
   return uniqueBy(values.filter((item) => safeHttpUrl(item.url)), (item) => item.url).slice(0, 20);
+}
+
+export function sourcePageForFunctionalLink(crawl: CrawlAssessment, destinationUrl: string) {
+  return crawl.pageSummaries.find((page) => page.linkReferences.some((link) => link.href === destinationUrl))?.url;
+}
+
+export function isCustomerPortalLink(href: string, text?: string) {
+  try {
+    const url = new URL(href);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (/\b(?:wp-(?:admin|login)|administrator)\b/i.test(url.pathname)) return false;
+    if (/^(?:facebook|instagram|linkedin|x|twitter|tiktok|youtube)\.com$/.test(host)) return false;
+    if (/(?:^|\.)(?:pestportals|fieldportals)\.com$/.test(host)) return true;
+    const label = normalizedText(text ?? "");
+    const destination = normalizedText(`${url.pathname} ${url.search}`);
+    return /\b(?:customer|client|member|resident|owner)\b/.test(`${label} ${destination}`)
+      && /\b(?:portal|login|log in|sign in|account)\b/.test(`${label} ${destination}`)
+      || /^(?:customer |client )?(?:portal|login|log in|sign in|my account)$/.test(label);
+  } catch {
+    return false;
+  }
 }
 
 export function assertSourceSuitableForGeneration(
@@ -808,21 +999,62 @@ function isAccountLevelSocialProfile(value: string) {
   }
 }
 
-function supportingBlock(blocks: SourceTextBlock[], value: string) {
+export function selectSupportingSourceBlock(
+  blocks: SourceTextBlock[],
+  value: string,
+  evidenceClassByUrl: ReadonlyMap<string, EvidenceClass> = new Map()
+) {
   const target = normalizedText(value);
   if (target.length < 3) return undefined;
-  return blocks.find((block) => {
+  const matches = blocks.filter((block) => {
     const text = normalizedText(block.displayText);
     return text.includes(target) || target.includes(text);
   });
+  const rank = (block: SourceTextBlock) => {
+    const evidenceClass = evidenceClassByUrl.get(block.sourceUrl) ?? "unknown";
+    return evidenceClass === "first_party" ? 0 : evidenceClass === "unknown" ? 1 : 2;
+  };
+  return matches.sort((left, right) => rank(left) - rank(right))[0];
 }
 
-function resolveDomainContext(facts: ExtractedBusinessFacts) {
-  return matchVerticalContext([...facts.categories, ...facts.services, facts.description ?? ""].join(" "));
+export function retainedContactConsensus(
+  documents: Array<{ url: string; extractedText: string }>
+) {
+  const phone = rankedDocumentConsensus(documents, (text) =>
+    [...text.matchAll(/(?:\+?1[\s.(\-]*)?(?:\d{3}|\(\d{3}\))[\s.)\-]*\d{3}[\s.\-]*\d{4}\b/g)]
+      .map((match) => normalizedUsPhone(match[0]))
+      .filter((value): value is string => Boolean(value)));
+  const email = rankedDocumentConsensus(documents, (text) =>
+    [...text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)]
+      .map((match) => match[0].toLowerCase())
+      .filter((value) => !/^(?:no-?reply|donotreply)@/i.test(value))
+      .filter((value) => !/@(?:example\.(?:com|org|net)|localhost)$/i.test(value)));
+  return { phone, email };
 }
 
-function preferredBusinessTerm(domainContext?: VerticalContextModule) {
-  return domainContext?.terminology.business?.[0] ?? "business";
+function rankedDocumentConsensus(
+  documents: Array<{ url: string; extractedText: string }>,
+  candidatesFor: (text: string) => string[]
+) {
+  const support = new Map<string, Set<string>>();
+  for (const document of documents) {
+    for (const candidate of new Set(candidatesFor(document.extractedText))) {
+      support.set(candidate, new Set([...(support.get(candidate) ?? []), document.url]));
+    }
+  }
+  const ranked = [...support.entries()].sort(([leftValue, leftUrls], [rightValue, rightUrls]) =>
+    rightUrls.size - leftUrls.size || leftValue.localeCompare(rightValue));
+  const winner = ranked[0];
+  if (!winner || winner[1].size < 2) return undefined;
+  if (ranked[1] && winner[1].size <= ranked[1][1].size) return undefined;
+  return winner[0];
+}
+
+function normalizedUsPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return undefined;
 }
 
 function formatAddress(address: ExtractedBusinessFacts["address"]) {
@@ -839,24 +1071,6 @@ function displayValue(value: unknown) {
 function sameValue(left: unknown, right: unknown) {
   if (left === undefined || left === null || left === "" || right === undefined || right === null || right === "") return false;
   return normalizedText(displayValue(left)) === normalizedText(displayValue(right));
-}
-
-function decodedImageMime(format: string | undefined): AssetRevision["mimeType"] | undefined {
-  if (format === "png") return "image/png";
-  if (format === "jpeg") return "image/jpeg";
-  if (format === "webp") return "image/webp";
-  return undefined;
-}
-
-function retainedAssetKind(revision: AssetRevision, crawl: CrawlAssessment): AssetRevisionRef["kind"] {
-  if (revision.provenance.origin !== "source_website") return "other";
-  const sourceUrl = revision.provenance.sourceUrl;
-  const source = crawl.assetReferences.find((candidate) => candidate.url === sourceUrl);
-  return source?.kind === "logo" ? "logo" : source?.kind === "icon" ? "icon" : "photo";
-}
-
-function combinedSignal(signal: AbortSignal | undefined, timeoutMs: number) {
-  return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
 
 function clean(value: unknown) {

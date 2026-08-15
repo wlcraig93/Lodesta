@@ -8,7 +8,10 @@ import {
   type VisualQualityScreenshot
 } from "./visual-quality-evaluator";
 import { unavailableVisualQuality } from "./visual-quality";
-import { assessmentVerticalForDomainContext } from "./vertical";
+import { inferAssessmentVertical } from "./vertical";
+import {
+  selectArtifactVisualRoutes
+} from "./route-selection";
 
 export async function evaluateArtifactVisualQuality(input: {
   artifact: SiteBuildArtifact;
@@ -24,42 +27,59 @@ export async function evaluateArtifactVisualQuality(input: {
       limitation: "Visual Quality was unavailable because the multimodal evaluator is not configured."
     });
   }
-  const contactSheetKey = input.artifact.qa.screenshotKeys.find((key) => key.endsWith("/contact-sheet.png"));
-  if (!contactSheetKey) {
+  const contactSheetKeys = (["desktop", "mobile"] as const).map((viewport) => ({
+    viewport,
+    key: input.artifact.qa.screenshotKeys.find((key) =>
+      key.endsWith(`/contact-sheet-${viewport}.png`)
+    )
+  }));
+  if (contactSheetKeys.some((sheet) => !sheet.key)) {
     return unavailableVisualQuality({
       observedAt: input.observedAt,
-      limitation: "The retained artifact did not contain a visual-review contact sheet."
+      limitation: "The retained artifact did not contain separate native-frame desktop and mobile visual-review sheets."
     });
   }
   const store = input.store ?? configuredArtifactBlobStore();
-  const contactSheet = await store.get(contactSheetKey).catch(() => undefined);
-  if (!contactSheet) {
+  const retainedSheets = await Promise.all(contactSheetKeys.map(async (sheet) => ({
+    viewport: sheet.viewport,
+    blob: await store.get(sheet.key!).catch(() => undefined)
+  })));
+  if (retainedSheets.some((sheet) => !sheet.blob)) {
     return unavailableVisualQuality({
       observedAt: input.observedAt,
-      limitation: "The retained artifact contact sheet could not be read."
+      limitation: "One or more retained artifact visual-review sheets could not be read."
     });
   }
-  const screenshots = artifactScreenshots(input.artifact);
+  const routeSelection = artifactRouteSelection(input.artifact, input.buildInput);
+  const vertical = artifactVertical(input.artifact, input.buildInput);
+  const screenshots = artifactScreenshots(
+    input.artifact,
+    routeSelection.selected.flatMap((selection) => selection.route ? [selection.route] : [])
+  );
   return evaluateVisualQuality({
-    contactSheet: contactSheet.bytes,
-    contactSheetMimeType: contactSheet.contentType === "image/jpeg"
-      ? "image/jpeg"
-      : contactSheet.contentType === "image/webp"
-        ? "image/webp"
-        : "image/png",
+    contactSheets: retainedSheets.map((sheet) => ({
+      viewport: sheet.viewport,
+      bytes: sheet.blob!.bytes,
+      mimeType: sheet.blob!.contentType === "image/jpeg"
+        ? "image/jpeg" as const
+        : sheet.blob!.contentType === "image/webp"
+          ? "image/webp" as const
+          : "image/png" as const
+    })),
     screenshots,
-    vertical: assessmentVerticalForDomainContext(input.buildInput.domainContext?.id),
-    verticalConfidence: input.buildInput.domainContext ? 1 : 0.35,
+    vertical: vertical.vertical,
+    verticalConfidence: vertical.confidence,
     businessName: input.buildInput.business.name,
     primaryLocation: formattedArtifactLocation(input.buildInput),
     services: input.buildInput.business.offerings
       .filter((offering) => offering.status === "confirmed" && offering.visibility === "public")
       .map((offering) => offering.name),
-    customerJourneys: input.buildInput.domainContext?.customerJourneys ?? [],
+    customerJourneys: inferredArtifactJourneys(input.buildInput),
     hasMeaningfulImagery: input.buildInput.business.assets.length > 0
       || input.artifact.capabilityBindings.some((binding) => binding.kind === "gallery"),
     deterministicContext: {
       target: "site_artifact",
+      routeSelection,
       routes: input.artifact.routes.map((route) => ({
         path: route.path,
         title: route.title,
@@ -79,16 +99,43 @@ export async function evaluateArtifactVisualQuality(input: {
   });
 }
 
-export function artifactScreenshots(artifact: SiteBuildArtifact): VisualQualityScreenshot[] {
+export function artifactVertical(
+  artifact: SiteBuildArtifact,
+  buildInput: SitePublicBuildInput
+) {
+  return inferAssessmentVertical({
+    textEvidence: [
+      buildInput.business.name,
+      ...buildInput.business.offerings
+        .filter((offering) => offering.status === "confirmed" && offering.visibility === "public")
+        .map((offering) => offering.name),
+      ...artifact.routes.flatMap((route) => [route.title, route.description])
+    ]
+  });
+}
+
+export function artifactScreenshots(
+  artifact: SiteBuildArtifact,
+  selectedRoutes: string[] = artifact.routes.map((route) => route.path)
+): VisualQualityScreenshot[] {
   const screenshots: VisualQualityScreenshot[] = [];
-  for (const route of artifact.routes) {
+  for (const route of artifact.routes.filter((item) => selectedRoutes.includes(item.path))) {
     for (const viewport of ["desktop", "mobile"] as const) {
-      const suffix = `/${routeKey(route.path)}-${viewport}.png`;
-      const artifactKey = artifact.qa.screenshotKeys.find((key) => key.endsWith(suffix));
-      if (artifactKey) screenshots.push({ route: route.path, viewport, artifactKey });
+      for (const frame of ["top", "middle", "bottom"] as const) {
+        const suffix = `/${routeKey(route.path)}-${viewport}-${frame}.png`;
+        const artifactKey = artifact.qa.screenshotKeys.find((key) => key.endsWith(suffix));
+        if (artifactKey) screenshots.push({ route: route.path, viewport, frame, artifactKey });
+      }
     }
   }
   return screenshots;
+}
+
+function artifactRouteSelection(
+  artifact: SiteBuildArtifact,
+  buildInput: SitePublicBuildInput
+) {
+  return selectArtifactVisualRoutes(artifact.routes, buildInput.intent.pageRequirements);
 }
 
 function routeKey(route: string) {
@@ -100,4 +147,15 @@ function formattedArtifactLocation(buildInput: SitePublicBuildInput) {
   return location
     ? [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ")
     : buildInput.business.serviceAreas[0]?.label;
+}
+
+function inferredArtifactJourneys(buildInput: SitePublicBuildInput) {
+  return [
+    buildInput.business.contacts.phone ? "Call the business" : undefined,
+    buildInput.forms.length ? "Submit an inquiry" : undefined,
+    buildInput.business.offerings.some((offering) => offering.status === "confirmed" && offering.visibility === "public")
+      ? "Evaluate a specific service"
+      : undefined,
+    buildInput.business.locations.length ? "Confirm location and hours" : undefined
+  ].filter((value): value is string => Boolean(value));
 }

@@ -10,7 +10,7 @@ import {
 import { parseAnalyticsQuery } from "../lib/analytics-query";
 import type { AnalyticsEvent, AnalyticsReportQuery } from "../packages/site-capabilities/contracts";
 
-assert.equal(classifyAnalyticsTraffic("LodestaGenerationCrawler/2.0"), "lodesta_internal");
+assert.equal(classifyAnalyticsTraffic("LodestaWebsiteCrawler/1.0"), "lodesta_internal");
 assert.equal(classifyAnalyticsTraffic("Googlebot/2.1"), "known_bot");
 assert.equal(classifyAnalyticsTraffic("Mozilla/5.0 Safari/605.1.15"), "human");
 assert.equal(classifyAnalyticsChannel({ referrerHost: "google.com" }), "organic_search");

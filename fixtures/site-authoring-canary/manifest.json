@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "kind": "site-authoring-visual-canary",
+  "viewports": [
+    { "name": "mobile", "width": 390, "height": 844 },
+    { "name": "desktop", "width": 1440, "height": 1000 }
+  ],
+  "cases": [
+    {
+      "id": "sparse-roofing",
+      "businessName": "Cedar Ridge Roofing",
+      "sourceUrl": "https://cedar-ridge-roofing.example/",
+      "coverage": ["incomplete_sources", "mobile_layout"],
+      "ownerAuthority": {
+        "ownerOperationalRevision": 2,
+        "ownerIntentRevision": 1,
+        "phone": "+15125550111",
+        "services": ["Roof repair", "Roof replacement"],
+        "direction": "Calm, practical, residential; ask before asserting service area or availability."
+      },
+      "provisionalSources": [
+        {
+          "kind": "crawl_failure",
+          "payload": { "status": "partial", "title": "Cedar Ridge Roofing", "body": "" }
+        }
+      ],
+      "assetCondition": "none",
+      "reviewPrompts": [
+        "Does the site feel complete without inventing facts?",
+        "Is the missing information handled gracefully instead of exposed as an error?"
+      ]
+    },
+    {
+      "id": "two-location-dental",
+      "businessName": "Harborline Family Dental",
+      "sourceUrl": "https://harborline-family-dental.example/",
+      "coverage": ["multi_location", "mobile_layout"],
+      "ownerAuthority": {
+        "ownerOperationalRevision": 4,
+        "ownerIntentRevision": 2,
+        "phone": "+13125550122",
+        "locations": ["North Loop", "Lakeside"],
+        "services": ["Preventive care", "Restorative care", "Emergency appointments"],
+        "direction": "Welcoming and composed; make both locations easy to understand and contact."
+      },
+      "provisionalSources": [
+        {
+          "kind": "structured_data",
+          "payload": { "locations": 2, "hoursCompleteness": "mixed" }
+        }
+      ],
+      "assetCondition": "strong",
+      "reviewPrompts": [
+        "Can a visitor distinguish both locations and their actions?",
+        "Does mobile navigation remain clear with location choices?"
+      ]
+    },
+    {
+      "id": "weak-imagery-landscaping",
+      "businessName": "Prairie & Stone Landscapes",
+      "sourceUrl": "https://prairie-stone-landscapes.example/",
+      "coverage": ["weak_imagery", "mobile_layout"],
+      "ownerAuthority": {
+        "ownerOperationalRevision": 3,
+        "ownerIntentRevision": 3,
+        "phone": "+14025550133",
+        "services": ["Landscape design", "Patios and walkways", "Seasonal maintenance"],
+        "direction": "Craft-led and natural; do not fabricate completed projects, staff, or awards."
+      },
+      "provisionalSources": [
+        {
+          "kind": "asset_inventory",
+          "payload": { "images": 3, "quality": "small_and_compressed", "logoAvailable": true }
+        }
+      ],
+      "assetCondition": "weak",
+      "reviewPrompts": [
+        "Does the composition remain distinctive with weak source photography?",
+        "If a managed image is created, is it non-factual and clearly appropriate?"
+      ]
+    },
+    {
+      "id": "conflicting-auto-repair",
+      "businessName": "Northstar Collision Repair",
+      "sourceUrl": "https://northstar-collision.example/",
+      "coverage": ["conflicting_provisional", "mobile_layout"],
+      "ownerAuthority": {
+        "ownerOperationalRevision": 7,
+        "ownerIntentRevision": 2,
+        "phone": "+15125550144",
+        "hours": "Monday-Friday 8:00 AM-5:30 PM; Saturday-Sunday closed",
+        "services": ["Collision repair", "Paint repair"],
+        "direction": "Direct and reassuring; owner values always override crawl values."
+      },
+      "provisionalSources": [
+        {
+          "kind": "crawl",
+          "payload": {
+            "phone": "+15125550999",
+            "hours": "Open daily 24 hours",
+            "conflictsWithOwnerAuthority": true
+          }
+        }
+      ],
+      "assetCondition": "mixed",
+      "reviewPrompts": [
+        "Does every operational value use the current owner authority?",
+        "Is conflicting provisional material omitted without stalling authoring?"
+      ]
+    },
+    {
+      "id": "dense-physical-therapy",
+      "businessName": "Riverbend Physical Therapy & Performance",
+      "sourceUrl": "https://riverbend-physical-therapy.example/",
+      "coverage": ["mobile_layout"],
+      "ownerAuthority": {
+        "ownerOperationalRevision": 5,
+        "ownerIntentRevision": 4,
+        "phone": "+14145550155",
+        "services": [
+          "Orthopedic physical therapy",
+          "Sports rehabilitation",
+          "Post-surgical rehabilitation",
+          "Balance and mobility"
+        ],
+        "direction": "Professional and human; organize dense service information without thin routes."
+      },
+      "provisionalSources": [
+        {
+          "kind": "crawl",
+          "payload": { "pages": 18, "copyDensity": "high", "navigationItems": 11 }
+        }
+      ],
+      "assetCondition": "strong",
+      "reviewPrompts": [
+        "Does the agent choose an appropriate information architecture instead of mirroring source clutter?",
+        "Are key actions and navigation usable at 390px?"
+      ]
+    }
+  ]
+}

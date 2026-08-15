@@ -37,7 +37,8 @@ try {
     "workers/site-sandbox/Dockerfile",
     "workers/site-sandbox/.dockerignore",
     "workers/site-sandbox/src/index.ts",
-    "workers/site-sandbox/wrangler.jsonc",
+    "workers/site-sandbox/wrangler.blue.jsonc",
+    "workers/site-sandbox/wrangler.green.jsonc",
     "workers/site-sandbox/scaffold/package-lock.json",
     "workers/site-sandbox/scaffold/vite.config.ts"
   ]) {
@@ -51,13 +52,17 @@ try {
     );
     await writeFile(target, original);
   }
-  const devConfig = join(fixtureRoot, "workers/site-sandbox/wrangler.dev.jsonc");
-  await writeFile(devConfig, `${await readFile(devConfig, "utf8")}\n// development-only change\n`);
-  assert.equal(
-    await computeSiteToolchainIdentity(fixtureRoot),
-    fixtureIdentity,
-    "Development Wrangler configuration changed the production identity."
-  );
+  for (const slot of ["blue", "green"]) {
+    const devConfig = join(fixtureRoot, `workers/site-sandbox/wrangler.dev.${slot}.jsonc`);
+    const original = await readFile(devConfig, "utf8");
+    await writeFile(devConfig, `${original}\n// development-only change\n`);
+    assert.equal(
+      await computeSiteToolchainIdentity(fixtureRoot),
+      fixtureIdentity,
+      `Development ${slot} Wrangler configuration changed the production identity.`
+    );
+    await writeFile(devConfig, original);
+  }
   const controllerClient = join(fixtureRoot, "packages/site-sandbox/client.ts");
   await mkdir(join(fixtureRoot, "packages/site-sandbox"), { recursive: true });
   await writeFile(controllerClient, "// controller-only change\n");

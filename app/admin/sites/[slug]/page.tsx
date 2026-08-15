@@ -6,6 +6,8 @@ import { requireAdminPageAccess } from "@/lib/page-access";
 import { deriveSiteLifecycle, deriveSiteOwnership, siteLifecycleLabels, siteOwnershipLabels } from "@/lib/site-admin-status";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { formatProductDate, statusTone } from "@/lib/product-format";
+import { websiteSourceSnapshotPayloadSchema } from "@/packages/site-contracts";
+import { SourceRecaptureButton } from "@/components/admin/SourceRecaptureButton";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
@@ -28,10 +30,28 @@ export default async function AdminSitePage({ params }: { params: Promise<{ slug
   const candidates = versions.filter((version) => version.status === "candidate");
   const lifecycle = deriveSiteLifecycle(site, versions, runs[0]);
   const ownership = deriveSiteOwnership(site);
+  const publicBuildInput = site.currentPublicBuildInputId
+    ? await sitePlatformRepository.getPublicBuildInput(site.currentPublicBuildInputId)
+    : undefined;
+  const sourceSnapshots = await Promise.all((publicBuildInput?.sourceSnapshotIds ?? []).map((id) => sitePlatformRepository.getSourceSnapshot(id)));
+  const crawl = sourceSnapshots
+    .flatMap((snapshot) => {
+      if (!snapshot) return [];
+      const parsed = websiteSourceSnapshotPayloadSchema.safeParse(snapshot.payload);
+      return parsed.success ? [{ snapshot, payload: parsed.data }] : [];
+    })
+    .sort((left, right) => right.snapshot.capturedAt.localeCompare(left.snapshot.capturedAt))[0];
+  const [crawlResources, crawlPages] = crawl ? await Promise.all([
+    sitePlatformRepository.listSourceSnapshotResources(crawl.snapshot.id),
+    sitePlatformRepository.listSourceSnapshotPages(crawl.snapshot.id)
+  ]) : [[], []];
+  const rawBytes = crawlResources.reduce((total, resource) => total + resource.rawBytes, 0);
+  const storedBytes = crawlResources.reduce((total, resource) => total + resource.storedBytes, 0);
   return <main className="admin-page">
     <AdminPageHeader eyebrow="Manage site" title={state?.identity.name ?? slug} description={`${site.id} · ${state?.identity.categories[0] ?? "local business"}`} actions={<div className="button-row"><Link className="button secondary" href="/admin/sites">Manage sites</Link><Link className="button primary" href={`/workspace/${slug}`}>Workspace</Link>{published ? <Link className="button secondary" href={`/sites/${slug}`}>Live site</Link> : null}</div>} />
     <section className="metric-row"><Metric label="Site status" value={siteLifecycleLabels[lifecycle]} /><Metric label="Ownership" value={siteOwnershipLabels[ownership]} /><Metric label="Latest generation" value={runs[0]?.status ?? "Not started"} /><Metric label="Open review" value={openQueue.length} /></section>
     <section className="panel"><div className="section-heading-row"><div><h2>Site tools</h2><p className="muted">Open the canonical owner surface for this site.</p></div></div><div className="button-row"><Link className="button secondary" href={`/workspace/${slug}`}>Overview</Link><Link className="button secondary" href={`/workspace/${slug}/editor`}>Editor</Link><Link className="button secondary" href={`/workspace/${slug}/leads`}>Leads</Link><Link className="button secondary" href={`/workspace/${slug}/analytics`}>Analytics</Link><Link className="button secondary" href={`/workspace/${slug}/business-details`}>Business details</Link><Link className="button secondary" href={`/workspace/${slug}/settings`}>Settings</Link></div></section>
+    <section className="panel"><div className="section-heading-row"><div><h2>Source mirror</h2><p className="muted">Replayable response capture and page-level search telemetry for the current authoring input.</p></div><div className="button-row">{crawl ? <><span className={`badge is-${crawl.payload.coverage === "complete" ? "success" : "warning"}`}>{crawl.payload.coverage}</span><Link className="button secondary" href={`/admin/source-snapshots/${crawl.snapshot.id}`}>Inspect mirror</Link></> : null}{site.sourceUrl ? <SourceRecaptureButton siteId={site.id} /> : null}</div></div>{crawl ? <dl className="detail-list"><dt>Captured</dt><dd>{formatProductDate(crawl.snapshot.capturedAt)}</dd><dt>Documents discovered</dt><dd>{crawl.payload.counts.documentsDiscovered}</dd><dt>Documents eligible</dt><dd>{crawl.payload.counts.documentsEligible}</dd><dt>Documents fetched</dt><dd>{crawl.payload.counts.documentsFetched}</dd><dt>Documents excluded</dt><dd>{crawl.payload.counts.documentsExcluded}</dd><dt>Documents failed</dt><dd>{crawl.payload.counts.documentsFailed}</dd><dt>Documents unfinished</dt><dd>{crawl.payload.counts.documentsUnfinished}</dd><dt>Retained resources</dt><dd>{crawlResources.length}</dd><dt>Indexed pages</dt><dd>{crawlPages.length}</dd><dt>Raw / stored bytes</dt><dd>{rawBytes.toLocaleString()} / {storedBytes.toLocaleString()}</dd></dl> : <p className="muted">No website mirror is attached to the current authoring input.</p>}</section>
     <div className="admin-grid">
       <section className="panel"><h2>Versions</h2><div className="finding-list">{versions.map((version) => <article className="finding-card" key={version.id}><div className="button-row"><span className={`badge is-${statusTone(version.status)}`}>{version.status}</span><span>Version {version.number}</span></div><p>{version.artifactHash.slice(0, 28)}</p><Link className="button secondary" href={`/api/site-versions/${version.id}/artifact/`}>Open artifact</Link></article>)}{!versions.length ? <p className="muted">No versions yet.</p> : null}</div></section>
       <aside className="panel"><h2>Business authority</h2><dl className="detail-list"><dt>Owner user ID</dt><dd>{site.ownerUserId ?? "Unowned"}</dd><dt>Phone</dt><dd>{state?.contacts.phone ?? "Not recorded"}</dd><dt>Email</dt><dd>{state?.contacts.email ?? "Not recorded"}</dd><dt>Offerings</dt><dd>{state?.offerings.length ?? 0}</dd><dt>State revision</dt><dd>{state?.revision ?? "-"}</dd><dt>Intent revision</dt><dd>{intent?.revision ?? "-"}</dd><dt>Candidate versions</dt><dd>{candidates.length}</dd></dl></aside>

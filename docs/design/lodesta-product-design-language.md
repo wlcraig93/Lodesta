@@ -34,7 +34,7 @@ Design around the actual operating objects in the product:
 - Forest (`--product-color-primary`) is the primary product action color. Use it for decisive actions, active states, progress fills, and focused product intent.
 - Amber (`--product-color-intelligence`) is reserved for agent/intelligence signals: automation highlights, recommendations, suggested next steps, pending attention, and generated insight. Owner-facing `needs_attention` states use the amber surface, border, and text roles. Do not use amber for ordinary primary buttons or generic in-progress activity.
 - Status colors are semantic only: success, warning, error, and info states should use the matching status tokens.
-- Passive product structure is intentionally warm-neutral rather than green-tinted. Canvas `#f7f8f6`, raised canvas `#fbfcfa`, soft surface `#f1f3f0`, default border `#dfe4de`, and selected surface `#e7efea` keep forest reserved for active product meaning.
+- Passive product structure must remain neutral rather than green-tinted. Light mode uses warm-neutral structure; dark mode uses graphite and true gray structure. Forest stays reserved for actions, focus, progress, and semantic active states instead of tinting the app canvas.
 - Customer-site color is separate. Do not use `--site-*` to style Lodesta-owned UI, and do not change generated customer-site styling to satisfy product UI needs.
 
 ## Tokens
@@ -53,7 +53,7 @@ Lodesta-owned UI uses `--product-*` CSS custom properties from `app/product-toke
 - Product, owner, authentication, editor, and admin surfaces support System, Light, and Dark preferences.
 - System is the default. The device-local preference lives in the lower-left account menu and is resolved before hydration.
 - Marketing remains explicitly light and brand-led.
-- Dark mode uses warm charcoal surfaces, off-white text, restrained green actions, and mode-specific borders and shadows.
+- Dark mode uses neutral graphite surfaces, clean gray and off-white text, restrained green actions, and mode-specific borders and shadows. Structural canvas, panel, hover, border, muted-text, overlay, and preview-stage roles must not create a green cast.
 - Native controls, focus treatment, overlays, status roles, and preview staging must remain legible in both modes.
 - Public and generated customer-site presentation is outside this appearance contract.
 

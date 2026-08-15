@@ -22,15 +22,19 @@ export async function researchBusiness(input: {
   sourceUrl?: string;
   businessName?: string;
   locality?: string;
+  query?: string;
+  domains?: string[];
   capturedAt?: string;
   signal?: AbortSignal;
 }): Promise<{ snapshot: SourceSnapshot; usage: WebResearchUsage } | undefined> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
   const queryIdentity = [
+    input.query ? `Research question: ${input.query}` : undefined,
     input.businessName ? `Business: ${input.businessName}` : undefined,
     input.locality ? `Locality: ${input.locality}` : undefined,
-    input.sourceUrl ? `First-party website: ${input.sourceUrl}` : undefined
+    input.sourceUrl ? `First-party website: ${input.sourceUrl}` : undefined,
+    input.domains?.length ? `Prefer these domains: ${input.domains.join(", ")}` : undefined
   ].filter(Boolean).join("\n");
   if (!queryIdentity) return undefined;
 

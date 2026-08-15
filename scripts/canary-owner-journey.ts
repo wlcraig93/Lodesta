@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { chromium, type Page } from "playwright";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
-import { developmentSandboxWorkerName } from "../packages/site-sandbox/runtime-config";
+import { readDevelopmentSandboxReceipt } from "../packages/site-sandbox/runtime-config";
 import {
   agentAuthoredArtifactIdentity,
+  expectedSiteSandboxManifest,
   siteToolchainIdentity,
   websiteManagerPromptIdentity,
   workspaceSourcePolicyIdentity
@@ -34,10 +35,10 @@ const canaryId = `${timestampId()}-${crypto.randomUUID().slice(0, 8)}`;
 const evidenceDirectory = join(".data", "owner-journey", canaryId);
 const startedAt = new Date().toISOString();
 const exactEditText = `Lodesta canary verification ${canaryId}`;
-const sandboxProvenance = await canarySandboxProvenance(origin);
 const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
+const sandboxProvenance = await canarySandboxProvenance(origin, admin);
 
 await mkdir(evidenceDirectory, { recursive: true });
 
@@ -73,7 +74,6 @@ const steps = evidence.steps as Array<Record<string, unknown>>;
 let page: Page | undefined;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 let ownerUserId: string | undefined;
-let setupId: string | undefined;
 let siteId: string | undefined;
 let slug: string | undefined;
 let disposed = false;
@@ -119,37 +119,17 @@ try {
 
   await page.getByLabel("Public website or business source").fill(sourceUrl.toString());
   await page.getByRole("button", { name: "Create website" }).click();
-
-  const duplicateDialog = page.getByRole("dialog", { name: "Create another website?" });
-  await Promise.race([
-    page.waitForURL((url) =>
-      url.origin === origin.origin && /^\/account\/onboarding\/[^/]+\/?$/.test(url.pathname)
-    ),
-    duplicateDialog.waitFor()
-  ]);
-  if (await duplicateDialog.isVisible().catch(() => false)) {
-    await duplicateDialog.getByRole("button", { name: "Create another" }).click();
-    await page.waitForURL((url) =>
-      url.origin === origin.origin && /^\/account\/onboarding\/[^/]+\/?$/.test(url.pathname)
-    );
-    step("duplicate_source_confirmation", { status: "passed", encountered: true });
-  } else {
-    step("duplicate_source_confirmation", { status: "passed", encountered: false });
-  }
-
-  setupId = page.url().split("/").filter(Boolean).at(-1);
-  assert(setupId, "The setup route omitted its setup identifier.");
-  evidence.setupId = setupId;
-  await page.locator(".site-agent-setup-progress").waitFor();
-  await screenshot("02-setup-progress");
-  step("setup_progress", { status: "passed" });
-
   await page.waitForURL((url) =>
     url.origin === origin.origin && /^\/workspace\/[^/]+\/editor\/?$/.test(url.pathname),
-  { timeout: buildTimeoutMs });
+  { timeout: 60_000 }
+  );
+  step("reusable_source_creation", { status: "passed" });
+
   slug = page.url().split("/").filter(Boolean).at(-2);
   assert(slug, "The editor route omitted its site slug.");
   evidence.slug = slug;
+  await screenshot("02-authoring-started");
+  step("atomic_project_handoff", { status: "passed" });
 
   const initialWorkspace = await waitForWorkspace(page, undefined, (snapshot) =>
     Boolean(snapshot.site?.id && snapshot.site.currentWorkspaceRevisionId && snapshot.versions?.some((version) => version.status === "candidate")),
@@ -161,7 +141,7 @@ try {
     }
   });
   siteId = initialWorkspace.site?.id;
-  assert(siteId, "The completed setup did not expose its site identifier.");
+  assert(siteId, "The authoring workspace did not expose its site identifier.");
   evidence.siteId = siteId;
   const initialRevision = await workspaceRevision(admin, initialWorkspace.site?.currentWorkspaceRevisionId);
   assert(initialRevision.files.length >= 2, "The initial authoring workspace is not multi-file.");
@@ -249,15 +229,7 @@ try {
   );
   const publicResponse = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
   assert.equal(publicResponse.status(), 404, "The disposed public route remains available.");
-  const { data: retainedSetup, error: retainedSetupError } = await admin
-    .from("website_setups")
-    .select("id,status,site_id")
-    .eq("id", setupId)
-    .maybeSingle();
-  if (retainedSetupError) throw retainedSetupError;
-  assert.equal(retainedSetup?.status, "canceled", "The retained setup was not marked canceled after disposal.");
-  assert.equal(retainedSetup?.site_id, siteId, "The retained setup lost its site audit reference.");
-  step("disposal", { status: "passed", retainedSetup: true, publicStatus: publicResponse.status() });
+  step("disposal", { status: "passed", publicStatus: publicResponse.status() });
 
   evidence.status = "passed";
   evidence.completedAt = new Date().toISOString();
@@ -267,7 +239,6 @@ try {
     ok: true,
     canaryId,
     evidenceDirectory,
-    setupId,
     siteId,
     slug
   })}\n`);
@@ -282,13 +253,12 @@ try {
   }
   throw new Error(diagnostic);
 } finally {
-  if (!disposed && page && setupId && ownerUserId) {
+  if (!disposed && page && ownerUserId && siteId) {
     const cleanup = await cleanupCanaryState({
       admin,
       page,
-      setupId,
       ownerUserId,
-      knownSiteId: siteId
+      siteId
     }).catch((error) => ({
       disposed: false,
       method: "failed",
@@ -394,39 +364,37 @@ function safeDiagnostic(error: unknown) {
     .slice(0, 4_000);
 }
 
-async function canarySandboxProvenance(targetOrigin: URL) {
+async function canarySandboxProvenance(targetOrigin: URL, repository: SupabaseClient) {
+  const { data: control, error: controlError } = await repository
+    .from("site_sandbox_control")
+    .select("active_deployment_id")
+    .eq("id", "production")
+    .single();
+  if (controlError) throw controlError;
+  const activeDeploymentId = control?.active_deployment_id as string | undefined;
+  assert(activeDeploymentId, "The production sandbox control pointer is missing.");
+  const { data: deployment, error: deploymentError } = await repository
+    .from("site_sandbox_deployments")
+    .select("id, slot, worker_version_id, release_sha, image_digest, manifest")
+    .eq("id", activeDeploymentId)
+    .single();
+  if (deploymentError) throw deploymentError;
+  assert(/^sha256:[a-f0-9]{64}$/.test(deployment?.image_digest ?? ""), "The active sandbox deployment has a malformed image digest.");
+  assert.deepEqual(deployment?.manifest, expectedSiteSandboxManifest, "The active sandbox manifest does not match the canary checkout.");
   if (["localhost", "127.0.0.1"].includes(targetOrigin.hostname)) {
-    const receipt = JSON.parse(await readFile(".data/site-sandbox-dev.json", "utf8")) as {
-      workerName?: string;
-      imageDigest?: string;
-      sandboxManifest?: Record<string, unknown>;
-    };
-    assert.equal(receipt.workerName, developmentSandboxWorkerName, "The local owner canary requires the dedicated development sandbox receipt.");
-    assert(/^sha256:[a-f0-9]{64}$/.test(receipt.imageDigest ?? ""), "The development sandbox receipt omits its exact image digest.");
-    assert.deepEqual(receipt.sandboxManifest, {
-      kind: "site-sandbox-manifest",
-      artifactContractIdentity: agentAuthoredArtifactIdentity,
-      toolchainIdentity: siteToolchainIdentity,
-      sourcePolicyIdentity: workspaceSourcePolicyIdentity
-    }, "The development sandbox receipt does not match the canary checkout.");
-    return {
-      mode: "development",
-      workerName: receipt.workerName,
-      imageDigest: receipt.imageDigest,
-      manifest: receipt.sandboxManifest
-    };
+    const receipt = readDevelopmentSandboxReceipt(deployment.slot);
+    assert.equal(receipt.workerVersionId, deployment.worker_version_id, "The local sandbox receipt does not match the active deployment version.");
+    assert.equal(receipt.releaseSha, deployment.release_sha, "The local sandbox receipt does not match the active deployment release.");
+    assert.equal(receipt.imageDigest, deployment.image_digest, "The local sandbox receipt does not match the active deployment image.");
   }
-  const imageDigest = required("LODESTA_SANDBOX_IMAGE_DIGEST");
-  assert(/^sha256:[a-f0-9]{64}$/.test(imageDigest), "LODESTA_SANDBOX_IMAGE_DIGEST is malformed.");
   return {
-    mode: "configured",
-    imageDigest,
-    manifest: {
-      kind: "site-sandbox-manifest",
-      artifactContractIdentity: agentAuthoredArtifactIdentity,
-      toolchainIdentity: siteToolchainIdentity,
-      sourcePolicyIdentity: workspaceSourcePolicyIdentity
-    }
+    mode: ["localhost", "127.0.0.1"].includes(targetOrigin.hostname) ? "development" : "production",
+    deploymentId: deployment.id,
+    slot: deployment.slot,
+    workerVersionId: deployment.worker_version_id,
+    releaseSha: deployment.release_sha,
+    imageDigest: deployment.image_digest,
+    manifest: deployment.manifest
   };
 }
 
@@ -489,55 +457,24 @@ async function waitForWorkspace(
 async function cleanupCanaryState(input: {
   admin: SupabaseClient;
   page: Page;
-  setupId: string;
   ownerUserId: string;
-  knownSiteId?: string;
+  siteId: string;
 }) {
-  const { data: setup, error: setupError } = await input.admin
-    .from("website_setups")
-    .select("status,site_id")
-    .eq("id", input.setupId)
-    .eq("owner_user_id", input.ownerUserId)
-    .maybeSingle();
-  if (setupError) throw setupError;
-  assert(setup, "The canary setup disappeared before cleanup.");
+  const status = await input.page.evaluate(async (id) => {
+    const response = await fetch(`/api/sites/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return response.status;
+  }, input.siteId).catch(() => 0);
+  if (status === 200) return { disposed: true, method: "owner_site_api", status };
 
-  const targetSiteId = input.knownSiteId ?? setup.site_id ?? undefined;
-  if (targetSiteId) {
-    const status = await input.page.evaluate(async (id) => {
-      const response = await fetch(`/api/sites/${encodeURIComponent(id)}`, { method: "DELETE" });
-      return response.status;
-    }, targetSiteId).catch(() => 0);
-    if (status === 200) return { disposed: true, method: "owner_site_api", status };
-
-    const { data, error } = await input.admin.rpc("dispose_owned_site", {
-      target_site_id: targetSiteId,
-      target_owner_user_id: input.ownerUserId
-    }).maybeSingle();
-    if (error) throw error;
-    return {
-      disposed: Boolean(data),
-      method: "service_role_fallback",
-      status
-    };
-  }
-
-  if (["queued", "processing", "failed"].includes(setup.status)) {
-    const status = await input.page.evaluate(async (id) => {
-      const response = await fetch(`/api/website-setups/${encodeURIComponent(id)}/cancel`, { method: "POST" });
-      return response.status;
-    }, input.setupId).catch(() => 0);
-    return {
-      disposed: status === 200,
-      method: "owner_setup_api",
-      status
-    };
-  }
-
+  const { data, error } = await input.admin.rpc("dispose_owned_site", {
+    target_site_id: input.siteId,
+    target_owner_user_id: input.ownerUserId
+  }).maybeSingle();
+  if (error) throw error;
   return {
-    disposed: setup.status === "canceled",
-    method: "already_terminal",
-    status: 0
+    disposed: Boolean(data),
+    method: "service_role_fallback",
+    status
   };
 }
 

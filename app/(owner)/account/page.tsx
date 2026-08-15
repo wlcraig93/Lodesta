@@ -8,9 +8,6 @@ export default async function AccountEntryPage() {
   await requireOwnerAccess("/account");
   const context = await getAccountContext();
   if (context.auth.user && context.relationships.length === 0) redirect("/account/onboarding");
-  if (context.auth.user && context.relationships.length === 1 && context.relationships[0].kind === "setup") {
-    redirect(context.relationships[0].nextHref);
-  }
 
   return (
     <main className="account-entry-page product-page">
@@ -35,7 +32,6 @@ export default async function AccountEntryPage() {
                 detail: "Local development website",
                 nextAction: { href: `/workspace/${site.slug}`, label: "Open website" }
               }}
-              targetKind="site"
               removable={false}
             />
           ))}
@@ -52,9 +48,8 @@ export default async function AccountEntryPage() {
               href={item.nextHref}
               thumbnailUrl={item.thumbnailUrl}
               lifecycle={item.lifecycle}
-              targetId={item.siteId ?? item.setupId}
-              targetKind={item.kind}
-              removable={item.kind === "site" || Boolean(item.setupView?.canCancel)}
+              targetId={item.siteId}
+              removable
             />
           ))}
           <Link className="account-add-website-card" href="/account/onboarding">

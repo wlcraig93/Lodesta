@@ -24,13 +24,16 @@ export type GenerationQualityBenchmarkInput = {
 };
 
 const gatedDimensions = new Set<AssessmentDimensionId>([
+  "business_truth",
   "functional_integrity",
-  "automated_accessibility"
+  "accessibility"
 ]);
 const phase2ValueDimensions = new Set<AssessmentDimensionId>([
-  "discoverability",
-  "conversion",
-  "local_content"
+  "search_answer_discoverability",
+  "content_intent_coverage",
+  "trust_proof",
+  "conversion_usability",
+  "visual_editorial_craft"
 ]);
 const dimensionWeights = new Map(assessmentDimensions.map((dimension) => [dimension.id, dimension.weight]));
 

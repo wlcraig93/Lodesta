@@ -6,3 +6,5 @@ export * from "./web-research";
 export * from "./generation-crawler";
 export * from "./crawl-errors";
 export * from "./robots-policy";
+export * from "./source-preparation-diff";
+export * from "./source-mirror";

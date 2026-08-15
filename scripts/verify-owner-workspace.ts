@@ -56,7 +56,7 @@ assert(shell.includes("data-sidebar-tooltip") && css.includes("content: attr(dat
 assert(css.includes(".owner-workspace-sidebar { position: relative; z-index: 80;") && css.includes("overflow: visible"), "Desktop sidebar overlays are still clipped by the navigation rail");
 assert(css.includes(".owner-workspace-sidebar .account-menu-popover { z-index: 100;") && css.includes("left: calc(100% + 18px)"), "Desktop account options do not overlay the page");
 assert(shell.includes('pathname.startsWith(`${editorHref}/`)') && shell.includes('data-shell-mode={focusedEditor ? "focused-editor"'), "Editor routes do not opt into the focused editor shell");
-assert(shell.includes('context.kind === "setup"') && shell.includes("owner-workspace-nav-current"), "Setup-detail routes do not opt into the focused provisional editor shell");
+assert(!shell.includes('context.kind === "setup"') && !shell.includes("Website setup workspace"), "The retired setup shell remains.");
 assert(shell.includes("const compactNavigation = focusedEditor || (ready && collapsed)") && shell.includes("{!focusedEditor ? ("), "Focused editor navigation does not stay compact independently of the saved dashboard preference");
 assert(shell.includes("compact={compactNavigation}") && shell.includes('data-sidebar-tooltip={focusedEditor ? "All websites"'), "Focused editor rail does not retain compact site, account, and account-home access");
 assert(shell.indexOf('"Business details"') < shell.indexOf('"Website settings"') && shell.includes("SlidersIcon") && !shell.includes("owner-workspace-settings-link"), "Website settings are not normalized in the main website navigation.");
@@ -74,7 +74,7 @@ for (const route of routes) {
   const source = await readFile(`${routeRoot}/${route}`, "utf8");
   assert(!source.includes('dynamic = "force-dynamic"'), `${route} redundantly declares dynamic rendering.`);
 }
-assert(home.includes("deriveOwnerSiteLifecycle") && home.indexOf("readiness") < home.indexOf("replyInquiries"), "Home does not derive the canonical owner lifecycle");
+assert(home.includes("deriveOwnerSiteLifecycle") && home.indexOf("candidateIntegrity") < home.indexOf("replyInquiries"), "Home does not derive the canonical owner lifecycle");
 assert(inbox.includes('type InboxFilter = "all" | "needs_reply" | "active" | "won" | "archived"'), "Inbox filters do not match the owner contract");
 assert(inbox.includes("router.replace") && inbox.includes("inquiry="), "Inbox selection is not shareable");
 assert(
@@ -85,7 +85,7 @@ assert(
 );
 assert(business.includes("owner-business-section-nav") && business.includes("proof-media") && business.includes("site-preferences"), "Business information is not sectioned");
 assert(settings.includes("DomainConnectForm") && settings.includes("DomainRefreshButton") && settings.includes("RedirectRulesPanel"), "Settings does not expose proof-first domains and redirects");
-assert(account.includes("AccountWebsiteCard") && account.includes('relationships[0].kind === "setup"'), "The account overview does not use the canonical website cards while preserving setup handoff");
+assert(account.includes("AccountWebsiteCard") && account.includes("item.siteId"), "The account overview does not use canonical site cards.");
 assert(repository.includes("getInquiry(siteId: string, inquiryId: string)") && repository.includes('.eq("site_id", siteId).eq("id", inquiryId)'), "Inquiry detail lookup is not site-scoped");
 assert(robots.includes('"/workspace/"'), "Workspace routes are not excluded from indexing");
 assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not protect workspace routes");
@@ -93,7 +93,7 @@ assert(agentSessionRoute.includes("runs: runs.map(ownerSiteAgentRun)"), "Owner w
 assert(!agentRetryRoute.includes("failureCode"), "Owner retry API exposes internal failure diagnostics.");
 assert(!agentWorkspace.includes("failureReason") && !agentWorkspace.includes("estimatedCostUsd") && !agentWorkspace.includes("costUsd"), "Owner website workspace exposes internal failure or cost diagnostics.");
 assert(agentWorkspace.includes('run.status !== "failed" || !run.retryableByOwner') && ownerRunView.includes("You do not need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
-for (const failureCode of ["authoring_stalled", "cost_limit_exhausted", "cost_telemetry_unavailable", "browser_verification_unavailable", "deadline_exhausted", "platform_version_mismatch"]) {
+for (const failureCode of ["authoring_stalled", "cost_limit_exhausted", "cost_telemetry_unavailable", "browser_verification_unavailable", "source_preparation_failed", "deadline_exhausted", "platform_version_mismatch"]) {
   assert(ownerRunView.includes(failureCode), `Owner failure UI does not explain ${failureCode}.`);
   assert(adminRunTelemetry.includes(failureCode), `Admin run UI does not provide recovery guidance for ${failureCode}.`);
 }

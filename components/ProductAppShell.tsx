@@ -13,7 +13,6 @@ type ProductAppShellProps = {
   children: ReactNode;
   context:
     | { kind: "account" }
-    | { kind: "setup"; setupId: string; name: string; statusLabel: string }
     | { kind: "site"; site: OwnerWorkspaceSiteOption };
   sites: OwnerWorkspaceSiteOption[];
   accessMode: OwnerWorkspaceAccessMode;
@@ -46,7 +45,6 @@ export function ProductAppShell({
 }: ProductAppShellProps) {
   const pathname = usePathname();
   const site = context.kind === "site" ? context.site : undefined;
-  const setup = context.kind === "setup" ? context : undefined;
   const [collapsed, setCollapsed] = useState(false);
   const [ready, setReady] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -54,7 +52,7 @@ export function ProductAppShell({
   const moreSheetRef = useRef<HTMLDivElement>(null);
   const base = site ? `/workspace/${site.slug}` : "/account";
   const editorHref = site ? `${base}/editor` : undefined;
-  const focusedEditor = context.kind === "setup" || Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
+  const focusedEditor = Boolean(editorHref && (pathname === editorHref || pathname.startsWith(`${editorHref}/`)));
   const compactNavigation = focusedEditor || (ready && collapsed);
   const adminPreview = accessMode === "platform_admin_preview";
   const contextLabel = tokenAccess ? "Token session" : adminPreview ? "Admin preview" : accessMode === "local_open" ? "Local development" : undefined;
@@ -145,7 +143,6 @@ export function ProductAppShell({
         </div>
 
         {site ? <WebsiteSwitcher site={site} sites={sites} compact={compactNavigation} adminPreview={adminPreview} /> : null}
-        {setup ? <ProvisionalWebsiteIdentity name={setup.name} statusLabel={setup.statusLabel} compact={compactNavigation} /> : null}
         {context.kind === "account" ? <AccountNavigation compact={compactNavigation} pathname={pathname} /> : null}
 
         {site ? (
@@ -169,15 +166,6 @@ export function ProductAppShell({
             })}
           </nav>
         ) : null}
-        {setup ? (
-          <nav className="owner-workspace-nav" aria-label="Website setup workspace">
-            <span className="owner-workspace-nav-current" aria-current="page" aria-label={compactNavigation ? "Editor" : undefined} data-sidebar-tooltip={compactNavigation ? "Editor" : undefined}>
-              <WebsiteIcon />
-              <span>Editor</span>
-            </span>
-          </nav>
-        ) : null}
-
         <div className="owner-workspace-sidebar-bottom">
           <AccountMenu displayName={accountIdentity.displayName} email={accountIdentity.email} contextLabel={contextLabel} actions={accountActions} compact={compactNavigation} />
         </div>
@@ -185,8 +173,8 @@ export function ProductAppShell({
 
       <header className="owner-workspace-mobile-header">
         <Link className="owner-workspace-mobile-brand" href="/account" aria-label="Lodesta account"><img src="/brand/lodesta-mark.svg" alt="" /></Link>
-        {setup ? <ProvisionalWebsiteIdentity name={setup.name} statusLabel={setup.statusLabel} compact={false} /> : <WebsiteSwitcher site={site} sites={sites} compact={false} adminPreview={adminPreview} />}
-        {site ? site.published ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">Draft</span> : <span className="owner-workspace-draft-label">{setup ? "Creating" : "Account"}</span>}
+        <WebsiteSwitcher site={site} sites={sites} compact={false} adminPreview={adminPreview} />
+        {site ? site.published ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">Draft</span> : <span className="owner-workspace-draft-label">Account</span>}
       </header>
 
       <div className="owner-workspace-content" id="product-app-main">{children}</div>
@@ -214,7 +202,7 @@ export function ProductAppShell({
         <div className="owner-workspace-mobile-sheet" role="dialog" aria-modal="true" aria-label="More product options">
           <button className="owner-workspace-sheet-backdrop" type="button" aria-label="Close menu" onClick={closeMore} />
           <div ref={moreSheetRef}>
-            <header><strong>{site?.name ?? setup?.name ?? "Your Lodesta account"}</strong><button type="button" onClick={closeMore} aria-label="Close menu">×</button></header>
+            <header><strong>{site?.name ?? "Your Lodesta account"}</strong><button type="button" onClick={closeMore} aria-label="Close menu">×</button></header>
             {site ? <Link href={`${base}/business-details`} onClick={() => setMoreOpen(false)}><BusinessIcon /><span>Business details</span></Link> : null}
             {site ? <Link href={`${base}/settings`} onClick={() => setMoreOpen(false)}><SlidersIcon /><span>Website settings</span></Link> : null}
             <Link href="/account" onClick={() => setMoreOpen(false)}><AllWebsitesIcon /><span>All websites</span></Link>
@@ -228,15 +216,6 @@ export function ProductAppShell({
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function ProvisionalWebsiteIdentity({ name, statusLabel, compact }: { name: string; statusLabel: string; compact: boolean }) {
-  return (
-    <div className="owner-workspace-site-identity product-setup-identity" aria-label={compact ? `${name}. ${statusLabel}` : undefined} data-sidebar-tooltip={compact ? `${name} · ${statusLabel}` : undefined}>
-      <span className="owner-workspace-site-avatar" aria-hidden="true">{initials(name)}</span>
-      <span className="owner-workspace-site-copy"><strong>{name}</strong><small>{statusLabel}</small></span>
     </div>
   );
 }

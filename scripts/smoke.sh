@@ -2,25 +2,38 @@
 set -euo pipefail
 
 START_SERVER=0
+PORT_EXPLICIT=0
+if [[ -n "${PORT+x}" ]]; then
+  PORT_EXPLICIT=1
+fi
 PORT="${PORT:-4330}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --start-server) START_SERVER=1; shift ;;
-    --port) PORT="$2"; shift 2 ;;
+    --port) PORT="$2"; PORT_EXPLICIT=1; shift 2 ;;
     *) echo "Unknown smoke option: $1" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$START_SERVER" -eq 1 && "$PORT_EXPLICIT" -eq 0 && -z "${LODESTA_SMOKE_BASE_URL:-}" ]]; then
+  PORT="$(node -e 'const server=require("node:net").createServer(); server.listen(0,"127.0.0.1",()=>{const address=server.address(); if (!address || typeof address==="string") process.exit(1); process.stdout.write(String(address.port)); server.close();});')"
+fi
 
 BASE_URL="${LODESTA_SMOKE_BASE_URL:-http://127.0.0.1:${PORT}}"
 BASE_URL="${BASE_URL%/}"
 export LODESTA_APP_ORIGIN="${LODESTA_SMOKE_APP_ORIGIN:-$BASE_URL}"
 export LODESTA_REPOSITORY="${LODESTA_REPOSITORY:-local}"
 export LODESTA_ASSET_STORAGE="${LODESTA_ASSET_STORAGE:-local}"
+if [[ -z "${LODESTA_ADMIN_TOKEN:-}" && -f ".env.local" ]]; then
+  LODESTA_ADMIN_TOKEN="$(node --env-file=.env.local -e 'process.stdout.write(process.env.LODESTA_ADMIN_TOKEN ?? "")')"
+fi
 export LODESTA_ADMIN_TOKEN="${LODESTA_ADMIN_TOKEN:-smoke_admin_token}"
 export LODESTA_HASH_SECRET="${LODESTA_HASH_SECRET:-smoke_hash_secret}"
 
 SERVER_PID=""
 SERVER_LOG=""
+ADMIN_HEADER_FILE=""
+SMOKE_DATA_DIR=""
 STATUS=""
 BODY=""
 
@@ -32,10 +45,25 @@ cleanup() {
   if [[ -n "$SERVER_LOG" && -f "$SERVER_LOG" ]]; then
     rm -f "$SERVER_LOG"
   fi
+  if [[ -n "$ADMIN_HEADER_FILE" && -f "$ADMIN_HEADER_FILE" ]]; then
+    rm -f "$ADMIN_HEADER_FILE"
+  fi
+  if [[ -n "$SMOKE_DATA_DIR" && -d "$SMOKE_DATA_DIR" ]]; then
+    rm -f "$SMOKE_DATA_DIR/operations.json"
+    rmdir "$SMOKE_DATA_DIR" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
+ADMIN_HEADER_FILE="$(mktemp)"
+chmod 600 "$ADMIN_HEADER_FILE"
+printf 'x-lodesta-admin-token: %s\n' "$LODESTA_ADMIN_TOKEN" >"$ADMIN_HEADER_FILE"
+
 if [[ "$START_SERVER" -eq 1 ]]; then
+  if [[ -z "${LODESTA_PLATFORM_OPERATIONS_LOCAL_PATH:-}" ]]; then
+    SMOKE_DATA_DIR="$(mktemp -d)"
+    export LODESTA_PLATFORM_OPERATIONS_LOCAL_PATH="$SMOKE_DATA_DIR/operations.json"
+  fi
   SERVER_LOG="$(mktemp)"
   npm run dev:raw -- -p "$PORT" -H 127.0.0.1 >"$SERVER_LOG" 2>&1 &
   SERVER_PID="$!"
@@ -47,7 +75,7 @@ for _ in $(seq 1 90); do
     cat "$SERVER_LOG" >&2 || true
     exit 1
   fi
-  STATUS="$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL/api/health" 2>/dev/null || true)"
+  STATUS="$(curl -sS --connect-timeout 2 --max-time 5 -o /dev/null -w "%{http_code}" "$BASE_URL/api/health" 2>/dev/null || true)"
   [[ "$STATUS" =~ ^[234][0-9][0-9]$ ]] && break
   sleep 0.5
 done
@@ -55,7 +83,7 @@ done
 
 request() {
   local method="$1" path="$2" payload="${3:-}"
-  local args=(-sS -L -w $'\n%{http_code}' -H "x-forwarded-for: 203.0.113.10" -H "x-lodesta-admin-token: ${LODESTA_ADMIN_TOKEN}")
+  local args=(-sS --connect-timeout 5 --max-time 60 -L -w $'\n%{http_code}' -H "x-forwarded-for: 203.0.113.10" -H "@${ADMIN_HEADER_FILE}")
   [[ "$method" == "POST" ]] && args+=(-X POST -H "content-type: application/json" -d "$payload")
   local response
   response="$(curl "${args[@]}" "${BASE_URL}${path}")"
@@ -82,7 +110,7 @@ expect_json() {
 expect_empty_route_404() {
   local name="$1" path="$2" body_file result status content_type
   body_file="$(mktemp)"
-  result="$(curl -sS -L -o "$body_file" -w "%{http_code}|%{content_type}" -H "x-forwarded-for: 203.0.113.10" -H "x-lodesta-admin-token: ${LODESTA_ADMIN_TOKEN}" "${BASE_URL}${path}")"
+  result="$(curl -sS --connect-timeout 5 --max-time 60 -L -o "$body_file" -w "%{http_code}|%{content_type}" -H "x-forwarded-for: 203.0.113.10" -H "@${ADMIN_HEADER_FILE}" "${BASE_URL}${path}")"
   status="${result%%|*}"
   content_type="${result#*|}"
   if [[ "$status" != "404" || -s "$body_file" || "$content_type" == text/html* ]]; then
@@ -118,19 +146,33 @@ request GET "/account"
 expect_status "account entry" "200"
 request GET "/account/onboarding"
 expect_status "account onboarding" "200"
-request GET "/api/website-setups"
-if [[ "$STATUS" != "401" && "$STATUS" != "503" ]]; then
-  echo "Smoke check failed: unauthenticated website setups returned $STATUS, expected 401 or local-open 503" >&2
+request POST "/api/site-agent/sites" '{}'
+if [[ "$STATUS" != "400" && "$STATUS" != "401" && "$STATUS" != "503" ]]; then
+  echo "Smoke check failed: site bootstrap returned $STATUS, expected validation, authentication, or local-open refusal" >&2
   echo "$BODY" >&2
   exit 1
 fi
-echo "ok - website setup authentication boundary"
+echo "ok - site bootstrap authentication boundary"
 
-for path in "/admin/sites" "/admin/sites/new" "/admin/site-queue" "/admin/runs" "/settings"; do
+for path in \
+  "/admin/sites" \
+  "/admin/sites/new" \
+  "/admin/site-queue" \
+  "/admin/runs" \
+  "/prospects" \
+  "/outbound" \
+  "/settings"; do
   request GET "$path"
   [[ "$STATUS" =~ ^(200|307)$ ]] || { echo "Smoke check failed: operator surface $path returned $STATUS" >&2; exit 1; }
 done
 echo "ok - operator surfaces"
+
+request GET "/api/admin/source-snapshots/source_missing/replay"
+expect_status "unknown source replay fails closed" "404"
+expect_json "unknown source replay fails closed" 'const x=JSON.parse(process.env.BODY); if (x.error!=="Source replay page not found") process.exit(1)'
+request GET "/api/admin/source-snapshots/source_missing/resources/resource_missing"
+expect_status "unknown source replay resource fails closed" "404"
+expect_json "unknown source replay resource fails closed" 'const x=JSON.parse(process.env.BODY); if (x.error!=="Source replay resource not found") process.exit(1)'
 
 request GET "/sites/smoke-missing"
 expect_status "unknown public site fails closed" "404"

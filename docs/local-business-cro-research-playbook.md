@@ -625,6 +625,8 @@ Experiment candidates:
 
 ## Location And Service Landing Pages
 
+For the full architecture, route-quantity, migration, and editorial position, see the [Local-Service Site Architecture and Editorial Playbook](local-service-site-architecture-and-editorial-playbook.md).
+
 ### The Risk: Doorway And Scaled Content Abuse
 
 Google defines doorway abuse as pages created to rank for similar queries that lead users to intermediate or less useful pages. It gives examples including multiple region/city pages that funnel users to one destination and substantially similar pages closer to search results than a browsable hierarchy. Google also flags keyword stuffing, including blocks of city/region names, and scaled content abuse where many pages are generated primarily to manipulate rankings.

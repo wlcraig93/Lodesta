@@ -1,6 +1,9 @@
 {
   "kind": "site-sandbox-manifest",
-  "artifactContractIdentity": "agent-authored-artifact@sha256:82761c88ba2c9b8734972bdc6bd124f373d23048df951d55b2aa0e0e5b4e4900",
-  "toolchainIdentity": "lodesta-static-site-workspace@sha256:22633a9bb1eca2e077ef2e7108727a6af7041e1df730e3256994ad8e4c4c9b86",
-  "sourcePolicyIdentity": "workspace-source-policy@sha256:3ed4f0b9404865b36734dbc56edd7c697a0ffb919a79c086aaef1a2848acaa79"
+  "apiIdentity": "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d",
+  "storageIdentity": "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6",
+  "durableObjectIdentity": "site-sandbox-durable-object@sha256:f60c304d730f280207606d2decd14312c95b211f355dbf1ca2f829cbe2166784",
+  "artifactContractIdentity": "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37",
+  "toolchainIdentity": "lodesta-static-site-workspace@sha256:829881bb9135398a846c0c24bf419aafc6fce0458a57f17b77ee499919960b32",
+  "sourcePolicyIdentity": "workspace-source-policy@sha256:2f90904d1ada3eddf23e2c821b7c0841ee327d6b404de909e83f0ecfe9c79cab"
 }

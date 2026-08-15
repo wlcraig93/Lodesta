@@ -73,10 +73,81 @@ export async function validatePublicFetchUrl(
   return { ok: true, url: parsed.href, hostname };
 }
 
-export async function assertPublicFetchUrl(value: string) {
-  const validation = await validatePublicFetchUrl(value);
+export async function assertPublicFetchUrl(value: string, options: { resolveDns?: boolean } = {}) {
+  const validation = await validatePublicFetchUrl(value, options);
   if (!validation.ok) throw new PublicFetchUrlError(validation.code, validation.error);
   return validation.url;
+}
+
+export async function fetchPublicText(
+  value: string,
+  options: {
+    signal?: AbortSignal;
+    maxBytes?: number;
+    maxRedirects?: number;
+  } = {}
+) {
+  const maxBytes = Math.max(1, Math.min(options.maxBytes ?? 1_000_000, 2_000_000));
+  const maxRedirects = Math.max(0, Math.min(options.maxRedirects ?? 5, 8));
+  let current = await assertPublicFetchUrl(value);
+  for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
+    const response = await fetch(current, {
+      method: "GET",
+      redirect: "manual",
+      signal: options.signal,
+      headers: {
+        accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.1",
+        "user-agent": "LodestaSourceRetrieval/1.0"
+      }
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirects === maxRedirects) {
+        throw new Error(location ? "public_source_redirect_limit" : "public_source_redirect_missing");
+      }
+      current = await assertPublicFetchUrl(new URL(location, current).href);
+      continue;
+    }
+    if (!response.ok) throw new Error(`public_source_http_${response.status}`);
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (
+      contentType
+      && !contentType.includes("text/")
+      && !contentType.includes("application/json")
+      && !contentType.includes("application/xhtml+xml")
+    ) {
+      throw new Error("public_source_unsupported_content");
+    }
+    const declaredBytes = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+      throw new Error("public_source_too_large");
+    }
+    if (!response.body) {
+      return { url: current, status: response.status, contentType, text: "", bytes: 0 };
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel("public_source_too_large").catch(() => undefined);
+        throw new Error("public_source_too_large");
+      }
+      chunks.push(chunk.value);
+    }
+    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    return {
+      url: current,
+      status: response.status,
+      contentType,
+      text: buffer.toString("utf8"),
+      bytes
+    };
+  }
+  throw new Error("public_source_redirect_limit");
 }
 
 export function validatePublicHostname(hostname: string): PublicFetchUrlValidation {

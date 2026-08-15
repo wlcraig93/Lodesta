@@ -3,21 +3,30 @@
 Lodesta can run the website manager either directly through OpenAI or through OpenRouter. The canonical default remains:
 
 - API provider: `openai`
-- website manager model: `gpt-5.6-sol`
+- website manager model: `gpt-5.6-luna`
 - business-ingestion provider: direct OpenAI
+
+Initial builds use `gpt-5.6-luna` at high reasoning for both the exhaustive
+architecture request and the workspace author. Architecture and authoring usage
+share the same run deadline and cost fuse. Edits and rebases go directly to the
+configured website manager without another architecture request. The approved
+decision and canary evidence are recorded in
+`docs/decisions/2026-08-03-luna-architecture-authoring-workflow.md`.
 
 The direct OpenAI website-manager picker intentionally exposes the canonical GPT-5.6 family plus GPT-5.5 as a prior-generation baseline, all with locally verified pricing:
 
 | Model | Intended use | Input / cached input / output per 1M tokens |
 | --- | --- | --- |
-| `gpt-5.6-sol` | Highest capability | $5.00 / $0.50 / $30.00 |
-| `gpt-5.6-terra` | Balance of intelligence and cost | $2.50 / $0.25 / $15.00 |
-| `gpt-5.6-luna` | Cost-sensitive, high-volume work | $1.00 / $0.10 / $6.00 |
+| `gpt-5.6-sol` | Operator comparison or focused high-capability work | $5.00 / $0.50 / $30.00 |
+| `gpt-5.6-terra` | Balance of intelligence and cost | $2.00 / $0.20 / $12.00 |
+| `gpt-5.6-luna` | Canonical architecture and website authoring | $0.20 / $0.02 / $1.20 |
 | `gpt-5.5` | Prior-generation comparison or fallback | $5.00 / $0.50 / $30.00 |
 
 The `gpt-5.6` alias is not separately listed because it routes to `gpt-5.6-sol`; Lodesta stores the canonical model ID.
 
-Owner onboarding is model-agnostic. The website-manager workflow resolves the canonical configured creation route server-side, and the resulting run retains provider and model provenance for operators. Owners direct the website outcome; model-provider configuration remains on operator surfaces and in dedicated model bake-off tooling.
+Owner onboarding is model-agnostic. The website-manager workflow resolves the canonical configured creation route server-side, and the resulting run retains provider and model provenance for operators. Owners direct the website outcome; model-provider configuration remains an operator concern.
+
+The admin **New site** form is model-agnostic, just like owner onboarding. Model experiments are selected through the backend operator setting or environment override, so a new site, a retry, and later edits all begin from one canonical route instead of carrying a hidden per-site exception.
 
 Adding OpenRouter does not change an active route. An operator must configure `OPENROUTER_API_KEY` and explicitly save `openrouter` plus a provider-qualified model slug in **Operator settings → Runtime settings**. `LODESTA_SITE_AGENT_PROVIDER` and `LODESTA_SITE_AGENT_MODEL` remain operator-only environment overrides.
 
@@ -26,12 +35,19 @@ Adding OpenRouter does not change an active route. An operator must configure `O
 The model ID does not encode reasoning effort or output verbosity. Website-manager and discussion requests currently use one quality-first runtime profile for every approved model:
 
 - reasoning effort: `high`;
+- retained reasoning context: `all_turns` on direct OpenAI;
 - text verbosity: `low`;
 - standard reasoning mode (not Pro mode);
 - required, sequential workspace tool calls for authoring;
 - API storage disabled.
 
-The authoring loop manually replays the full response history, including encrypted reasoning content, so it can preserve reasoning while using `store: false`. Programmatic Tool Calling and GPT-5.6 multi-agent mode are not enabled.
+The direct OpenAI authoring loop manually replays every response output, including encrypted reasoning content, so it preserves reasoning while using `store: false`. Server-side Responses compaction is enabled at 200,000 rendered tokens. When OpenAI emits an opaque compaction item, Lodesta retains it unchanged and drops older input items before that boundary. Prompt caching and compaction remain separate: caching lowers repeated-prefix cost and latency, while compaction keeps long-running context focused and below capacity.
+
+OpenRouter routes do not receive the OpenAI-only `context_management` field. They continue to use their established provider-specific reasoning replay and caching behavior. Programmatic Tool Calling and GPT-5.6 multi-agent mode are not enabled.
+
+Business imagery is not attached to the manager's initial context. The context carries an asset index, and the manager opens only the specific asset previews it is considering through `inspect_assets`.
+
+For a targeted edit, the manager proceeds directly to `finish` after the source change unless concrete visual uncertainty warrants `inspect_site`. `inspect_site` builds dirty source itself and automatically focuses the supplied owner selection when inspecting that route; `finish` independently builds and performs hard release verification. Neither `build_preview` nor visual inspection is a routine pre-finish ceremony.
 
 OpenRouter authoring is restricted to route/transport pairs that Lodesta has probed with the production tool schema, privacy policy, cost telemetry, and caching behavior:
 
@@ -53,7 +69,7 @@ Production authoring does not pin one upstream: OpenRouter may choose or fail ov
 
 OpenRouter documents its Responses API as beta. Treat switching an active model route as an operator rollout: exercise the exact model and transport's tool calling, structured output, reasoning replay, context length, output-token limits, cost reporting, and warm-cache behavior before changing the setting.
 
-Authoring runs do not have cumulative input or output token budgets. Initial builds have a 60-minute absolute deadline and $15 metered-cost fuse; edits and rebases have a 25-minute deadline and $8 fuse. Research, Responses API authoring, and GPT Image asset generation count toward the same fuse. A successful final response is retained even when it crosses the fuse, but no additional model request begins afterward. Three consecutive identical deterministic release failures stop the run.
+Authoring runs do not have cumulative input or output token budgets. Initial builds have a 60-minute absolute deadline and $15 metered-cost fuse; edits and rebases have a 25-minute deadline and $8 fuse. Architecture, research, Responses API authoring, and GPT Image asset generation count toward the same fuse. A successful final response is retained even when it crosses the fuse, but no additional model request begins afterward. Three consecutive identical deterministic release failures stop the run.
 
 ## Usage and cost telemetry
 
@@ -82,6 +98,7 @@ GPT Image 2 uses the Image API's returned token breakdown and the local standard
 ## References
 
 - [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/model-guidance?model=gpt-5.6-sol)
+- [OpenAI Responses compaction](https://developers.openai.com/api/docs/guides/compaction)
 - [OpenAI GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol)
 - [OpenAI GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
 - [OpenAI GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna)

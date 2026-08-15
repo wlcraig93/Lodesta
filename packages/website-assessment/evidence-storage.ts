@@ -10,16 +10,15 @@ export async function persistWebsiteAssessmentEvidence(input: {
 }) {
   const assessment = structuredClone(input.assessment);
   const store = input.store ?? configuredArtifactBlobStore();
-  const stored = new Map<string, string>();
+  const stored = new Map<string, { key: string; contentHash: `sha256:${string}` }>();
   let unavailable = 0;
-  const evidenceGroups = [
-    ...assessment.dimensions
-      .flatMap((dimension) => dimension.criteria)
-      .map((evidenceGroup) => ({ evidenceGroup, visual: false })),
-    ...assessment.visualQuality.groups
-      .flatMap((group) => group.checks)
-      .map((evidenceGroup) => ({ evidenceGroup, visual: true }))
-  ];
+  const evidenceGroups = assessment.dimensions
+    .flatMap((dimension) => dimension.criteria)
+    .map((evidenceGroup) => ({
+      evidenceGroup,
+      visual: evidenceGroup.evaluatorType === "model"
+        && evidenceGroup.topics.includes("visual_quality")
+    }));
   let unavailableVisual = 0;
   for (const { evidenceGroup, visual } of evidenceGroups) {
     for (const item of evidenceGroup.evidence) {
@@ -27,7 +26,8 @@ export async function persistWebsiteAssessmentEvidence(input: {
       if (!localPath || !isLocalRenderPath(localPath)) continue;
       const existing = stored.get(localPath);
       if (existing) {
-        item.artifactKey = existing;
+        item.artifactKey = existing.key;
+        item.contentHash = existing.contentHash;
         continue;
       }
       try {
@@ -40,8 +40,9 @@ export async function persistWebsiteAssessmentEvidence(input: {
           contentType: "image/png",
           contentHash
         });
-        stored.set(localPath, key);
+        stored.set(localPath, { key, contentHash });
         item.artifactKey = key;
+        item.contentHash = contentHash;
       } catch {
         unavailable += 1;
         if (visual) unavailableVisual += 1;
@@ -52,12 +53,17 @@ export async function persistWebsiteAssessmentEvidence(input: {
   if (unavailable) {
     assessment.coverage.limitations.push(`${unavailable} local screenshot reference${unavailable === 1 ? " was" : "s were"} unavailable for immutable delivery.`);
     assessment.coverage.limitations = [...new Set(assessment.coverage.limitations)];
+    assessment.coverage.pipelineCompleteness = Math.min(
+      assessment.coverage.pipelineCompleteness,
+      0.9999
+    );
+    assessment.coverage.comparisonEligible = false;
   }
   if (unavailableVisual) {
-    assessment.visualQuality.coverage.limitations.push(
+    assessment.coverage.limitations.push(
       `${unavailableVisual} cited Visual Quality screenshot${unavailableVisual === 1 ? " was" : "s were"} unavailable for immutable delivery.`
     );
-    assessment.visualQuality.coverage.limitations = [...new Set(assessment.visualQuality.coverage.limitations)];
+    assessment.coverage.limitations = [...new Set(assessment.coverage.limitations)];
   }
   return websiteAssessmentSchema.parse(assessment);
 }

@@ -1,6 +1,8 @@
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
+import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
+import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
-import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite } from "@/packages/site-platform/public-site";
+import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite, sitemapXmlForSite } from "@/packages/site-platform/public-site";
 import type { AgentAccessPolicy } from "@/packages/site-contracts";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +33,9 @@ export async function GET(
     ? "site.css"
     : artifact.routes.find((route) => requestedRoute === route.path)?.htmlFile;
   if (!artifactPath) {
-    const redirect = await platformOperationsRepository.resolveRedirect(site.id, requestedRoute);
+    const versionRedirect = await sitePlatformRepository.resolveSiteVersionRedirect(version.id, requestedRoute);
+    const ownerRedirect = versionRedirect ? undefined : await platformOperationsRepository.resolveRedirect(site.id, requestedRoute);
+    const redirect = versionRedirect ?? ownerRedirect;
     if (!redirect || !artifact.routes.some((route) => route.path === redirect.destinationPath)) return new Response(null, { status: 404 });
     return new Response(null, {
       status: 308,
@@ -39,19 +43,26 @@ export async function GET(
         location: `${siteBasePath(request, slug)}${redirect.destinationPath === "/" ? "" : redirect.destinationPath}` || "/",
         "cache-control": "public, max-age=60, s-maxage=300",
         "x-lodesta-site-version": version.id,
-        "x-lodesta-redirect-id": redirect.id
+        "x-lodesta-redirect-id": redirect.id,
+        "x-lodesta-redirect-owner": versionRedirect ? "site-version" : "owner"
       }
     });
   }
   const blob = await readVerifiedArtifactFile({ artifact, path: artifactPath, store: configuredArtifactBlobStore() });
   if (!blob) return new Response(null, { status: 404 });
+  const htmlLinks = blob.contentType.startsWith("text/html")
+    ? [
+        `<${publicRouteUrl(request, slug, requestedRoute)}>; rel="canonical"`,
+        `<${markdownRouteUrl(request, slug, requestedRoute)}>; rel="alternate"; type="text/markdown"`
+      ].join(", ")
+    : undefined;
   return new Response(new Uint8Array(blob.bytes), {
     headers: siteHeaders(
       blob.contentType,
       artifact.artifactHash,
       version.id,
       policy,
-      blob.contentType.startsWith("text/html") ? `<${markdownRouteUrl(request, slug, requestedRoute)}>; rel="alternate"; type="text/markdown"` : undefined
+      htmlLinks
     )
   });
 }
@@ -67,13 +78,10 @@ function siteRobots(request: Request, slug: string, artifactHash: string, versio
 function siteSitemap(request: Request, slug: string, routes: string[], lastModified: string, artifactHash: string, versionId: string, policy: AgentAccessPolicy) {
   const origin = new URL(request.url).origin;
   const basePath = siteBasePath(request, slug);
-  const urls = routes.map((route) => `<url><loc>${escapeXml(`${origin}${basePath}${route === "/" ? "" : route}`)}</loc><lastmod>${escapeXml(lastModified)}</lastmod></url>`).join("");
-  return new Response(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`, {
+  return new Response(sitemapXmlForSite({ origin, basePath, routes, lastModified }), {
     headers: siteHeaders("application/xml; charset=utf-8", artifactHash, versionId, policy)
   });
 }
-
-function escapeXml(value: string) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
 
 function siteBasePath(request: Request, slug: string) {
   return request.headers.get("x-lodesta-custom-domain-routed") === "1" ? "" : `/sites/${encodeURIComponent(slug)}`;
@@ -112,7 +120,7 @@ function siteHeaders(contentType: string, artifactHash: string, versionId: strin
   });
   if (link) headers.set("link", link);
   if (contentType.startsWith("text/html")) {
-    headers.set("content-security-policy", "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'");
+    headers.set("content-security-policy", generatedSiteContentSecurityPolicy("self"));
   }
   return headers;
 }

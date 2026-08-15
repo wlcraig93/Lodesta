@@ -2,7 +2,7 @@ export type ValidatableFormDefinition = {
   fields: Array<{
     id: string;
     label: string;
-    type: "text" | "email" | "phone" | "textarea" | "select";
+    type: "text" | "email" | "phone" | "textarea" | "select" | "radio" | "checkbox";
     required: boolean;
     options?: string[];
   }>;
@@ -86,7 +86,7 @@ export function validateFormSubmission(
 }
 
 function validateFieldValue(field: ValidatableFormDefinition["fields"][number], value: string): FormSubmissionValidationIssue | null {
-  if ((field.type === "text" || field.type === "email" || field.type === "phone" || field.type === "select") && value.length > maxTextLength) {
+  if (field.type !== "textarea" && value.length > maxTextLength) {
     return issue(field, "Value is too long.");
   }
 
@@ -102,7 +102,7 @@ function validateFieldValue(field: ValidatableFormDefinition["fields"][number], 
     return issue(field, "Enter a valid phone number.");
   }
 
-  if (field.type === "select" && field.options?.length && !field.options.includes(value)) {
+  if ((field.type === "select" || field.type === "radio") && field.options?.length && !field.options.includes(value)) {
     return issue(field, "Choose one of the configured options.");
   }
 

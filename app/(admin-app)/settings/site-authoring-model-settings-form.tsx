@@ -27,7 +27,7 @@ type CatalogState =
   | { status: "ready"; catalog: ModelCatalog; error?: undefined }
   | { status: "error"; catalog?: ModelCatalog; error: string };
 type SettingsSnapshot = {
-  settings: { siteAgentProvider: ModelProvider; siteAgentModel: string; ingestionModel: string };
+  settings: { siteAgentProvider: ModelProvider; siteAgentModel: string };
   version: number;
   source: string;
   updatedBy?: string;
@@ -105,15 +105,6 @@ export function SiteAuthoringModelSettingsForm({ initialSnapshot }: { initialSna
           ? " OpenRouter automatically routes each tool-calling request among compatible zero-data-retention endpoints; Lodesta does not pin one upstream provider or force cheapest-only routing."
           : ""}
       </p>
-
-      <ModelCatalogSelect
-        id="ingestion-model"
-        label="Business ingestion"
-        value={form.ingestionModel}
-        onChange={(ingestionModel) => setForm((current) => ({ ...current, ingestionModel }))}
-        catalogState={openAiCatalog.state}
-        retry={openAiCatalog.retry}
-      />
 
       <AdminButtonRow>
         <AdminButton variant="primary" disabled={saving} type="submit">

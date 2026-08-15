@@ -44,7 +44,7 @@ export function agentReadinessForPublicUrl(input: {
     }))
     .filter((entry) => entry.answerCount > 0);
   const directAnswerCount = directAnswerPages.reduce((total, entry) => total + entry.answerCount, 0);
-  const confidence = ingestion.coverage === "complete" ? 0.9 : ingestion.coverage === "bounded" ? 0.85 : 0.7;
+  const confidence = ingestion.coverage === "complete" ? 0.9 : ingestion.coverage === "restricted" ? 0.8 : 0.7;
   const html = findProbe(probes, "html_home");
   const markdown = findProbe(probes, "markdown_home");
   const llms = findProbe(probes, "llms_txt");
@@ -230,7 +230,7 @@ export function agentReadinessForArtifact(input: {
   const overrides = new Map<string, AgentReadinessCheckInput>([
     ["agent.answer.entity_consistency", artifactCheck("agent.answer.entity_consistency", structuredIdentity ? "pass" : "warning", structuredIdentity ? "present_valid" : "not_detected", structuredIdentity ? "The retained artifact binds the verified business name into structured data." : "The retained artifact does not prove that a matching machine-readable business identity rendered.", artifact, generatedAt)],
     ["agent.answer.service_location_coverage", artifactCheck("agent.answer.service_location_coverage", offerings.length && hasLocation ? "pass" : offerings.length || hasLocation ? "warning" : "fail", offerings.length && hasLocation ? "present_valid" : "present_invalid", `${offerings.length} verified public offering(s) and ${hasLocation ? "verified location or service-area facts" : "no verified location or service-area facts"} were available.`, artifact, generatedAt, "inferred", 0.95)],
-    ["agent.answer.direct_answers", artifactCheck("agent.answer.direct_answers", buildInput.domainContext ? "unknown" : "not_applicable", "not_tested", buildInput.domainContext ? "The artifact retained vertical guidance, but not enough rendered prose to prove direct answer coverage." : "No verified vertical module was available, so category-specific answer coverage was not applied.", artifact, generatedAt)],
+    ["agent.answer.direct_answers", artifactCheck("agent.answer.direct_answers", "unknown", "not_tested", "Direct-answer coverage depends on rendered page content and is not inferred from a vertical catalog or module.", artifact, generatedAt)],
     ["agent.answer.extractable_content", artifactCheck("agent.answer.extractable_content", artifact.factBindings.length ? "warning" : "unknown", artifact.factBindings.length ? "present_invalid" : "not_tested", artifact.factBindings.length ? "Source-bound facts were retained, but the artifact assessment does not preserve a complete semantic-text extraction." : "Semantic answer content requires a rendered or published assessment.", artifact, generatedAt)],
     ["agent.answer.citation_targets", artifactCheck("agent.answer.citation_targets", serviceOrLocationRoutes.length >= 2 ? "pass" : serviceOrLocationRoutes.length ? "warning" : "fail", serviceOrLocationRoutes.length >= 2 ? "present_valid" : serviceOrLocationRoutes.length ? "present_invalid" : "not_detected", `${serviceOrLocationRoutes.length} descriptive service or location route(s) were retained as potential citation targets.`, artifact, generatedAt, "inferred", 0.9)]
   ]);
@@ -326,7 +326,7 @@ function probeEvidence(id: string, observation: AgentReadinessProbeObservation |
     kind: "http",
     summary: (summary ?? (observation
       ? `URL: ${observation.url}; final URL: ${observation.finalUrl ?? "unavailable"}; status: ${observation.status ?? "unavailable"}; content type: ${observation.contentType ?? "unavailable"}${observation.linkHeader ? `; Link: ${observation.linkHeader.slice(0, 500)}` : ""}${observation.error ? `; error: ${observation.error}` : ""}${bodyExcerpt}.`
-      : "The bounded HTTP probe did not produce an observation.")).slice(0, 2_000),
+      : "The HTTP probe did not produce an observation.")).slice(0, 2_000),
     sourceUrl: observation?.url,
     observedAt
   };

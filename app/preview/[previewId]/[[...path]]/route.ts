@@ -1,11 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { readStoredAsset } from "@/lib/asset-storage";
+import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
+import { resolveManagedPreviewAsset, rewritePreviewAssetUrls } from "@/lib/private-preview-assets";
 import {
   hasValidPreviewSession,
   platformOperationsRepository
 } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { readVerifiedManifestPreviewFile } from "@/packages/site-artifacts";
+import {
+  configuredArtifactBlobStore,
+  readVerifiedManifestPreviewFile,
+  resolveSafeManifestPreviewRoute
+} from "@/packages/site-artifacts";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +31,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ prev
     const assetSiteId = path[1];
     const file = path.slice(2).join("/");
     if (assetSiteId !== site.id || !file) return notFound();
+    const managed = await resolveManagedPreviewAsset({
+      revisionId: file,
+      businessId: site.businessId,
+      allowedRevisionIds: version.assetRevisionIds,
+      repository: sitePlatformRepository,
+      blobStore: configuredArtifactBlobStore()
+    });
+    if (managed) {
+      return new Response(new Uint8Array(managed.bytes), {
+        headers: previewHeaders({
+          contentType: managed.mimeType,
+          artifactHash: artifact.artifactHash,
+          versionId: version.id
+        })
+      });
+    }
     const revision = await sitePlatformRepository.getAssetRevisionByStorageKey(`${site.id}/${file}`);
     if (!revision || !version.assetRevisionIds.includes(revision.id)) return notFound();
     const asset = await readStoredAsset(`${site.id}/${file}`);
@@ -39,7 +61,26 @@ export async function GET(request: Request, { params }: { params: Promise<{ prev
   }
 
   const blob = await readVerifiedManifestPreviewFile({ artifact, path, requestUrl: request.url });
-  if (!blob) return notFound();
+  if (!blob) {
+    const requestedRoute = resolveSafeManifestPreviewRoute({ path, requestUrl: request.url });
+    if (!requestedRoute) return notFound();
+    const versionRedirect = await sitePlatformRepository.resolveSiteVersionRedirect(version.id, requestedRoute);
+    const ownerRedirect = versionRedirect ? undefined : await platformOperationsRepository.resolveRedirect(site.id, requestedRoute);
+    const redirect = versionRedirect ?? ownerRedirect;
+    if (!redirect || !artifact.routes.some((route) => route.path === redirect.destinationPath)) return notFound();
+    return new Response(null, {
+      status: 308,
+      headers: {
+        location: previewRoutePath(preview.id, redirect.destinationPath),
+        "cache-control": "private, no-store",
+        "x-robots-tag": "noindex, nofollow",
+        "x-lodesta-site-version": version.id,
+        "x-lodesta-preview": "1",
+        "x-lodesta-redirect-id": redirect.id,
+        "x-lodesta-redirect-owner": versionRedirect ? "site-version" : "owner"
+      }
+    });
+  }
   const bytes = rewritePreviewAssetUrls(blob.bytes, blob.contentType, preview.id, site.id);
   return new Response(new Uint8Array(bytes), {
     headers: previewHeaders({
@@ -48,6 +89,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ prev
       versionId: version.id
     })
   });
+}
+
+function previewRoutePath(previewId: string, route: string) {
+  const base = `/preview/${encodeURIComponent(previewId)}`;
+  return route === "/" ? `${base}/` : `${base}${route}`;
 }
 
 function exchangeShell(previewId: string) {
@@ -78,19 +124,11 @@ function exchangeShell(previewId: string) {
   });
 }
 
-function rewritePreviewAssetUrls(bytes: Uint8Array, contentType: string, previewId: string, siteId: string) {
-  if (!contentType.includes("text/html") && !contentType.includes("text/css")) return bytes;
-  const value = Buffer.from(bytes).toString("utf8");
-  const current = `/api/assets/${encodeURIComponent(siteId)}/`;
-  const replacement = `/preview/${encodeURIComponent(previewId)}/__asset/${encodeURIComponent(siteId)}/`;
-  return Buffer.from(value.replaceAll(current, replacement), "utf8");
-}
-
 function previewHeaders(input: { contentType: string; artifactHash: string; versionId: string }) {
   return {
     "content-type": input.contentType,
     "cache-control": "private, no-store",
-    "content-security-policy": "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'self'; base-uri 'none'",
+    "content-security-policy": generatedSiteContentSecurityPolicy("self"),
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-robots-tag": "noindex, nofollow",

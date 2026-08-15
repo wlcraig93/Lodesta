@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AccountActionList, AccountIdentity, AccountMenu, type AccountAction } from "@/components/AccountMenu";
 import { ThemePreferenceControl } from "@/components/ThemePreferenceControl";
 
-type AdminIconName = "sites" | "queue" | "authoring" | "prospects" | "outbound" | "settings" | "assessments" | "activity" | "bakeoff";
+type AdminIconName = "sites" | "queue" | "prospects" | "outbound" | "settings" | "assessments" | "activity";
 type AdminNavItem = { href: string; label: string; icon: AdminIconName };
 type AdminNavGroup = { label: string; items: AdminNavItem[] };
 
@@ -21,7 +21,6 @@ const navigation: AdminNavGroup[] = [
   {
     label: "Operate",
     items: [
-      { href: "/authoring-batches", label: "Authoring batches", icon: "authoring" },
       { href: "/prospects", label: "Prospects", icon: "prospects" },
       { href: "/outbound", label: "Outbound", icon: "outbound" },
       { href: "/settings", label: "Settings", icon: "settings" }
@@ -30,7 +29,6 @@ const navigation: AdminNavGroup[] = [
   {
     label: "Debug",
     items: [
-      { href: "/model-bakeoffs", label: "Model bake-offs", icon: "bakeoff" },
       { href: "/admin/assessments", label: "Assessments", icon: "assessments" },
       { href: "/admin/runs", label: "Activity", icon: "activity" }
     ]
@@ -40,7 +38,7 @@ const navigation: AdminNavGroup[] = [
 const mobilePrimary = [
   navigation[0].items[0],
   navigation[0].items[1],
-  navigation[2].items[2]
+  navigation[2].items[1]
 ];
 const ADMIN_SHELL_STORAGE_KEY = "lodesta:admin-shell";
 
@@ -217,20 +215,16 @@ function isActivePath(pathname: string, href: string) {
   if (href === "/settings") return pathname === href || pathname.startsWith("/settings/");
   if (href === "/prospects") return pathname === href || pathname.startsWith("/prospects/");
   if (href === "/outbound") return pathname === href || pathname.startsWith("/outbound/");
-  if (href === "/authoring-batches") return pathname === href || pathname.startsWith("/authoring-batches/");
-  if (href === "/model-bakeoffs") return pathname === href || pathname.startsWith("/model-bakeoffs/");
   return pathname === href;
 }
 
 function AdminIcon({ name }: { name: AdminIconName }) {
   if (name === "queue") return <Icon><path d="M5 4h14v16H5zM8 9l2 2 5-5M8 16h8" /></Icon>;
-  if (name === "authoring") return <Icon><path d="m4 20 4.5-1 10-10-3.5-3.5-10 10zM13.5 7 17 10.5M5 5h5M7.5 2.5v5" /></Icon>;
   if (name === "prospects") return <Icon><circle cx="9" cy="8" r="3" /><path d="M3.5 19c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M16 7h5M18.5 4.5v5M16 14h5M16 18h5" /></Icon>;
   if (name === "outbound") return <Icon><path d="m3 11 18-8-7 18-3-7zM11 14l4-4" /></Icon>;
   if (name === "settings") return <Icon><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6.2L14.7 3h-5.4L9 6.2a8 8 0 0 0-1.5.9l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.5.9l.3 3.2h5.4l.3-3.2a8 8 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></Icon>;
   if (name === "assessments") return <Icon><path d="M4 19V5h16v14zM8 15l2.5-3 2 2 3.5-5" /></Icon>;
   if (name === "activity") return <Icon><path d="M3 12h4l2-6 4 12 2-6h6" /></Icon>;
-  if (name === "bakeoff") return <Icon><path d="M4 19h16M6 16V8h5v8M13 16V4h5v12M5 8h7M12 4h7" /></Icon>;
   return <Icon><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></Icon>;
 }
 

@@ -1,212 +1,164 @@
-# Product-Path Simplification
+# Simplified Site Authoring and Owner Authority
 
-Status: implementation complete; deployment pending
-Date: 2026-07-22
+Status: implemented in code; pre-launch data cutover and deployment pending
+Date: 2026-07-30
 
 ## Decision
 
-Lodesta has one website-authoring architecture: a strong model working directly in a
-safe multi-file workspace, supplied with verified business evidence, ordinary file
-tools, a build command, and one release-boundary verifier.
+Lodesta has one model-led authoring system:
 
-The product is intentionally narrower than a general application builder. It builds and
-edits local-business websites. It does not generate authentication systems, application
-databases, arbitrary backends, package graphs, or user-defined runtime code.
+**URL → private project → one capable agent builds → best complete candidate preview →
+owner edits and reviews → owner publishes**
 
-Complexity belongs at two places:
+The in-app model runner and persistent worker use the same `SiteAuthoringKernel`,
+instructions, skill, context, workspace semantics, domain tools, and
+candidate-finalization contract. There is no alternate authoring transport or execution
+engine in the product.
 
-1. before authoring, where ingestion assembles evidence-backed business context; and
-2. after authoring, where deterministic verification, immutable artifacts, publishing,
-   and the trusted runtime protect public output.
+There are no mandatory briefs, plan boards, critic agents, automatic repair agents,
+variant orchestrators, readiness scores, or subjective publishability gates. The one
+approved exception is the model-authored, mechanically exhaustive initial-build route
+and source-disposition ledger recorded in
+`docs/decisions/2026-08-03-luna-architecture-authoring-workflow.md`.
 
-There is no orchestration framework between the model and its workspace.
+## Creation and source material
 
-## Authority boundary
+A valid public URL from an authenticated user creates a private project and queues
+authoring immediately. The same URL may be used by multiple projects and never confers
+ownership or reveals another account.
 
-The strict authorities remain versioned and fail loud: `BusinessState`,
-`SiteIntent`, `SourceSnapshot`, `AssetRevision`, `FormDefinition`,
-`SitePublicBuildInput`, `SiteWorkspaceRevision`, `SiteBuildArtifact`,
-`SiteVersion`, `TrustedRuntimeSeries`, and `TrustedRuntimePatch`.
+Crawl pages, metadata, structured data, screenshots, research, and retained assets are
+provisional source artifacts with provenance. Initial website capture completes as a
+separate, model-free preparation step before authoring starts. Its immutable snapshot is
+reusable across retries and different authoring prompts, so those runs do not recrawl the
+site. It does not have to be transformed into a brief, evidence ledger, or canonical fact
+package. If preparation cannot retain a complete snapshot, the run fails clearly and
+retryably instead of starting the author with empty or partially attached source data.
 
-They have one unsuffixed TypeScript name each and carry numeric `schemaVersion: 1` inside
-their retained payloads. Mutable owner truth advances monotonically; retained inputs,
-workspaces, artifacts, versions, and runtime patches remain immutable.
+A missing or disputed business name does not block project creation. The initial identity
+may remain provisional until source research or the owner resolves it.
 
-Regenerable operational records use canonical unversioned names: `SiteAgentSession`,
-`SiteAgentRun`, and `SiteAgentRunEvent`. Because Lodesta has no production sites, the
-canonical baseline is a rehearsed pre-launch hard cut. It does not translate historical
-attempts, retain archive tables, or create compatibility paths.
+## One authoring kernel
 
-## Canonical flow
+The shared kernel provides:
 
-1. Ingestion creates canonical business state, site intent, public facts, source
-   snapshots, asset revisions, forms, and one immutable public build input.
-2. An owner instruction creates one run against the current workspace head.
-3. The manager receives a compact evidence packet, one universal authoring skill, the
-   owner instruction, and ordinary workspace tools.
-4. The model freely creates or edits safe `.ts`, `.tsx`, and `.css` modules beneath
-   `src/`, while retaining `src/site.tsx` and `src/styles.css` as required entry files.
-5. The model may build and optionally inspect. `finish` automatically performs the same
-   verification when no current inspection exists.
-6. A passing workspace becomes an immutable workspace revision, build artifact, and
-   private candidate. Publishing remains a separate explicit boundary.
+- private project and run lifecycle;
+- current owner-authoritative business state and site intent;
+- raw provisional sources and retained assets;
+- persistent safe workspace file operations;
+- managed images, forms, actions, maps, and links;
+- sandbox build and browser inspection;
+- confirmed typed owner-authority changes;
+- owner input requests; and
+- exact candidate finalization.
 
-There is no planner phase, frozen plan, edit-objective fixture, anchor protocol,
-replacement counter, per-tool budget, convergence detector, automatic critic, or
-automatic repair continuation. Correctable tool and compiler errors go back to the
-model in the same conversation. The sole approved convergence exception is the exact
-deterministic release-failure guard recorded in
-`docs/site-authoring-runaway-guardrails-plan.md`.
+For an initial build with a retained website, a Luna High architecture request owns
+information architecture and page count; the Luna High workspace author owns layout,
+design, copy, responsive behavior, and implementation of that complete ledger. For
+edits, rebases, and source-free builds, the workspace author retains ordinary
+architectural discretion. Product quality otherwise improves through instructions,
+skills, source retrieval, visual references, asset handling, browser inspection, and
+managed capabilities.
 
-## Tools and limits
+Standing limits are the overall deadline, metered model-cost fuse, workspace size,
+platform concurrency, and the exact deterministic repeated-release-failure guard in
+`docs/site-authoring-runaway-guardrails-plan.md`. Token totals are telemetry.
 
-The manager has ten tools:
+## Authority precedence
 
-- `list_files`
-- `read_file`
-- `write_file`
-- `delete_file`
-- `apply_patch`
-- `create_image`
-- `build_preview`
-- `inspect_site`
-- `request_input`
-- `finish`
+The canonical rule is:
 
-Standing limits are the overall deadline, metered model-cost fuse, exact deterministic
-release-failure guard, workspace size, and platform concurrency. Input and output token
-totals remain telemetry and do not terminate a productive run. The workspace boundary
-currently permits at most 80 files and 4 MB of authored source.
+> Provisional discoveries may inform a candidate but do not override it. Newer
+> owner-authoritative operational or intent changes supersede older candidates.
 
-## Evidence and skills
+`ownerOperationalRevision` advances only for authenticated, explicitly confirmed owner
+changes to identity, contact details, location, hours, services, external actions,
+active assets, managed forms, or enabled capabilities. `ownerIntentRevision` advances
+only for explicit owner direction, brand constraints, goals, or site preferences.
+Serving-time agent access policy has its own general `SiteIntent.revision` change and
+does not advance owner intent or stale site presentation.
 
-The authoring context contains public business evidence, owner-confirmed intent,
-eligible assets/forms/capabilities, the exact task, current workspace access, and SDK
-usage. Serving-only agent policy and raw crawl payloads are excluded.
+Crawl refreshes, search results, inferred facts, and model suggestions never advance
+either owner revision and never stale a reviewed candidate.
 
-There is one universal `website-authoring` skill. It contains concrete knowledge about
-evidence use, responsive local-business presentation, conversion paths, exact edits,
-and the release boundary. Skills may become more knowledgeable, but they must not become
-fixed layouts, section recipes, templates, or vertical generator branches.
+Settings and chat use the same typed control-plane command. A freeform code edit cannot
+change canonical operational state. Applying an owner change records actor and timestamp,
+stales older unpublished candidates as `stale_owner_authority`, and queues one coalesced
+follow-up authoring update. An active run may finish for history, but its result is stale
+and cannot become current.
 
-## Exact edits and clarification
+Restoring an older design restores its presentation and rebases current owner authority
+before creating a new candidate. The already-live site is unchanged until the owner
+publishes a replacement.
 
-For an explicit owner edit, the requested outcome wins. Unrelated advisory findings do
-not broaden or block the edit. The model preserves unrelated routes and behavior, but
-the release boundary does not prohibit an intentional owner-requested removal; it only
-blocks resulting broken navigation or links.
+## Candidate integrity
 
-Capability meaning is handled by the model, not an instruction-keyword classifier. The
-model explains requests outside static-site scope; source policy and release verification
-still make custom backends, authentication, databases, networking, and executable browser
-code impossible to ship.
+Finalization retains an immutable workspace revision, build artifact, candidate manifest,
+and exact private preview. It checks only:
 
-`request_input` is available only before the first source mutation:
+- coherent workspace, input, artifact, and hash references;
+- permitted dependencies and retained assets;
+- successful compilation and trusted-runtime rendering;
+- working internal navigation;
+- valid managed forms/actions and runtime patch; and
+- complete retained-artifact references.
 
-- the run enters `needs_input` for seven days;
-- its sandbox is checkpointed/destroyed and queue capacity is released;
-- the question is visible in the workspace and an operational owner notification is
-  attempted;
-- a timely answer resumes the same run;
-- if the workspace head advanced, the run restarts against the current head with the
-  conversation retained;
-- an answer after expiry cancels the waiting run and creates a new run against the
-  current head.
+Technical failures return clear diagnostics to the same run. They do not launch a critic
+or open-ended repair workflow. Design taste, SEO/CRO advice, clipping heuristics, model
+opinions, crawl freshness, and evidence-completeness scores are advisory.
 
-After mutation, the manager proceeds conservatively: it prefers verified evidence,
-omits an ambiguous claim, and reports the open question in its owner message. The
-owner-facing UI presents this as an answer-needed condition rather than a mysterious
-generation failure.
+Candidate integrity states are `current`, `stale_owner_authority`, and
+`failed_integrity`; version history additionally retains superseded and published
+versions. There is no generic `publishable` state.
 
-## Verification
+## Owner-controlled publication
 
-`inspect_site` and finalization call the same verification function and configuration.
-The inspection identity includes the workspace hash, public-input hash, verification
-policy, source policy, toolchain, sandbox image digest, runtime patch, artifact hash,
-findings, and captures. A source mutation invalidates the prior build and inspection.
+Finalization never publishes. The owner-only, bodyless publish endpoint selects the exact
+candidate already associated with the requested version. It verifies:
 
-Finalization runs verification itself when the model never inspected. Browser checks
-retry once only for transient infrastructure/timing failures; deterministic content or
-policy failures do not retry.
+- exact authenticated equality with `sites.owner_user_id`;
+- retained workspace, artifact, assets, sources, managed forms, and trusted runtime;
+- artifact hashes and hard-gate status; and
+- both candidate owner revisions equal current owner authority.
 
-Hard blockers are limited to build/render failure, unsafe output, broken routes/assets/
-links, invalid capabilities, and unsupported concrete factual assertions such as hours,
-prices, credentials, awards, longevity, service areas, warranties, or other verifiable
-claims. Puffery, tone, layout preferences, and marketing advice are warnings.
+Publication does not compare newer crawls or rerun subjective validators. Authority
+mismatch is a typed conflict directing the owner to the refreshed candidate or active
+update.
 
-## Policy-only changes and outcome reporting
+## Quality evaluation
 
-Agent-access policy is resolved from current `SiteIntent` at request/serving time. A
-policy-only update changes the authority without creating a build input, agent run,
-workspace revision, artifact, or candidate. It does not stale an otherwise current
-candidate.
+Use a small offline canary set covering incomplete sources, multi-location businesses,
+weak imagery, conflicting provisional discoveries, and mobile layouts. Judge output by
+owner-review usefulness and obvious visual/functional quality. Feed lessons into the
+shared skill, tools, and context rather than adding blocking heuristics.
 
-Walking-skeleton reporting treats generation and policy as separate phases. A later
-policy failure can never relabel a successfully retained generation candidate as a
-generation failure.
+The product promises a strong private first result that the owner reviews and publishes;
+it does not promise deterministic factual perfection.
 
-## Operational records
+## Clean cut
 
-Each run has one result, one execution number for bounded crash recovery, and one flat ordered
-event stream. Events may describe the run, model requests, tool calls, builds, and
-inspections. There are no parent spans or attempt trees. Large payloads are stored by
-immutable reference and expire through object-storage lifecycle policy.
+The live generation-experiment subsystem, variant orchestration, synthetic scorecards,
+experiment dashboards, batch preparation UI, evaluator schemas, mandatory brief/plan/
+critic artifacts, and business-name bootstrap gate are retired. Historical migrations
+remain immutable migration history; the forward clean-cut migration drops their live
+tables after an explicit reviewed pre-launch reset.
 
-## Acceptance suite
+Strict retained artifact schemas use the new owner-revision fields with no aliases or
+dual readers. Migration `202607300001_simplified_site_authoring.sql` intentionally fails
+while pre-launch retained site data exists. Run the reset in report mode, review the exact
+inventory and confirmation hash, drain authoring, then apply it explicitly before the
+migration.
 
-The standing implementation checks are:
+## Acceptance
 
-- `npm run typecheck`
-- `npm run verify:site-intent-persistence`
-- `npm run verify:site-agent-manager`
-- `npm run verify:authoring`
-- `npm run verify:site-agent-workspace`
-- `npm run verify:site-sandbox-local`
-- `npm run verify:render-browser`
-- `npm run verify:architecture`
-- `npm run verify:artifact-storage-boundaries`
-- `npm run verify:trusted-runtime`
-- `npm run smoke:dev`
-
-The signed-in onboarding and workspace flow is the final environment-backed acceptance:
-ingest one public source, generate and inspect a multi-file candidate, perform an exact
-edit, prove policy-only isolation, and publish to the unique Lodesta URL.
-
-## Product refinement
-
-Private product projects are deliberately rerunnable and unscored. Each confirmed creation
-may create a distinct site from the same source and hand the candidate to the real workspace
-UI for continued editing.
-Subjective observations remain freeform notes. There are no frozen samples, fixed quality
-rubrics, mandatory edit batteries, or global admission verdicts. Those process structures
-may be designed later only from observed product behavior.
-
-This freedom ends at publication. Every candidate requires current canonical inputs,
-passing objective QA, publishable assets, and valid forms and redirects. Subjective
-quality, source ownership, business identity, billing, and operator approval do
-not block publication.
-
-## Coordinated rollout
-
-Implementation and local verification do not mutate shared infrastructure. Roll out the
-clean break as one coordinated release:
-
-1. rehearse the snapshot restore and prove the canonical baseline on a separate empty database;
-2. require the manifest-bound `reset-prelaunch:<manifest-hash>` confirmation;
-3. apply the sole canonical baseline while preserving Supabase Auth;
-4. build and deploy the Cloudflare sandbox Worker and its updated container, then record
-   the deployed image digest in the code-owned platform manifest;
-5. deploy the web application and run worker against that exact manifest;
-6. install the one-day `agent-run-events/` object lifecycle rule; and
-7. run database, deployed-sandbox, smoke, release-boundary, and signed-in onboarding
-   verification before allowing new website runs.
-
-The application and deployed-sandbox verifiers intentionally fail closed while either
-side still exposes the prior schema or version manifest.
-
-## Change-control rule
-
-Failures are fixed by improving evidence, skills, prompts, tools, or the hard boundary.
-Reintroducing planners, critics, anchor protocols, budgets/counters, mandatory tool
-sequences, automatic repair continuations, or convergence gates requires an explicit
-product-owner decision recorded in a new plan.
+- URL creation starts authoring without a source-backed business-name gate.
+- Partial or contradictory sources still reach a run or clear owner question.
+- Provisional refresh does not stale or block a candidate.
+- Confirmed owner operational or intent changes stale older candidates and coalesce one
+  follow-up update.
+- Restored presentation rebases current owner values.
+- Broken builds, navigation, assets, forms, runtime, and hashes fail candidate integrity.
+- Subjective advice never independently blocks candidate creation or publication.
+- All in-app authoring runs use the same worker, run contract, and retained artifact shape.
+- Typecheck, smoke, browser rendering, stored-artifact reporting, and the representative
+  visual canary pass before deployment.

@@ -1,41 +1,46 @@
 import { readFile } from "node:fs/promises";
-import sharp from "sharp";
-import type { CrawlAssessment, CrawlPageSummary } from "@/lib/crawler";
+import type { CrawlAssessment } from "@/lib/crawler";
 import { inspectUrlRender } from "@/lib/render-inspection";
 import type { RenderInspectionResult } from "@/packages/acquisition/presence-contracts";
-import { createArtifactContactSheet, type BrowserGateCapture } from "@/packages/site-verification";
+import { createArtifactContactSheets, type BrowserGateCapture } from "@/packages/site-verification";
 import type { VisualQualityScreenshot } from "./visual-quality-evaluator";
+import {
+  selectWebsiteHealthRoutes,
+  type WebsiteHealthRouteSelection
+} from "./route-selection";
 
 export type PublicVisualQualityCapture = {
-  contactSheet?: Buffer;
-  contactSheetMimeType: "image/png";
+  contactSheets: Array<{
+    viewport: "desktop" | "mobile";
+    bytes: Buffer;
+    mimeType: "image/png";
+  }>;
   screenshots: VisualQualityScreenshot[];
   selectedRoutes: Array<{ route: string; url: string; purposeTags: string[] }>;
+  routeSelection: WebsiteHealthRouteSelection;
   deterministicContext: Record<string, unknown>;
   hasMeaningfulImagery: boolean;
   limitations: string[];
 };
 
 export function selectVisualQualityPages(crawl: CrawlAssessment) {
-  const pages = crawl.pageSummaries;
-  const home = pages.find((page) => page.source === "primary") ?? pages[0];
-  const serviceCandidates = pages
-    .filter((page) => page.purposeTags.includes("service_detail") || page.purposeTags.includes("services"))
-    .sort((left, right) => pageRank(right) - pageRank(left));
-  const contact = pages.find((page) => page.purposeTags.includes("contact") || page.purposeTags.includes("location"));
-  const about = pages.find((page) => page.purposeTags.includes("about"));
-  const selected = [
-    home,
-    serviceCandidates[0],
-    contact ?? about ?? serviceCandidates[1]
-  ].filter((page): page is CrawlPageSummary => Boolean(page));
-  const seen = new Set<string>();
-  return selected.filter((page) => {
-    const identity = canonicalRoute(page.url);
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  }).slice(0, 3);
+  const selection = selectWebsiteHealthRoutes(crawl.pageSummaries.map((page) => ({
+    route: routeFor(page.url),
+    sourceUrl: page.url,
+    purposeTags: page.source === "primary"
+      ? [...page.purposeTags, "home"]
+      : page.purposeTags,
+    contentLength: page.mainText?.length ?? 0
+  })));
+  const byRoute = new Map(crawl.pageSummaries.map((page) => [routeFor(page.url), page]));
+  return {
+    selection,
+    pages: selection.selected.flatMap((selected) => {
+      if (!selected.route) return [];
+      const page = byRoute.get(selected.route);
+      return page ? [page] : [];
+    })
+  };
 }
 
 export async function capturePublicVisualQuality(input: {
@@ -44,7 +49,7 @@ export async function capturePublicVisualQuality(input: {
   assessmentId?: string;
   signal?: AbortSignal;
 }): Promise<PublicVisualQualityCapture> {
-  const pages = selectVisualQualityPages(input.crawl);
+  const { pages, selection } = selectVisualQualityPages(input.crawl);
   const home = pages[0];
   const limitations: string[] = [];
   const renderByUrl = new Map<string, RenderInspectionResult>();
@@ -71,7 +76,12 @@ export async function capturePublicVisualQuality(input: {
     const rendered = renderByUrl.get(page.url);
     if (!rendered) continue;
     for (const screenshot of rendered.screenshots) {
-      if (screenshot.viewport === "tablet" || !screenshot.path) continue;
+      if (
+        screenshot.viewport === "tablet"
+        || !screenshot.path
+        || !screenshot.frame
+        || screenshot.frame === "overview"
+      ) continue;
       try {
         const bytes = await readFile(screenshot.path);
         const route = routeFor(page.url);
@@ -79,11 +89,14 @@ export async function capturePublicVisualQuality(input: {
           key: screenshot.path,
           route,
           viewport: screenshot.viewport,
+          stage: "settled",
+          frame: screenshot.frame,
           bytes
         });
         screenshots.push({
           route,
           viewport: screenshot.viewport,
+          frame: screenshot.frame,
           artifactKey: screenshot.path,
           sourceUrl: page.url
         });
@@ -92,20 +105,26 @@ export async function capturePublicVisualQuality(input: {
       }
     }
   }
-  let contactSheet: Buffer | undefined;
+  const contactSheets: PublicVisualQualityCapture["contactSheets"] = [];
   if (captures.length) {
     try {
-      const raw = await createArtifactContactSheet(captures);
-      contactSheet = await sharp(raw)
-        .resize({ width: 1_600, height: 4_096, fit: "inside", withoutEnlargement: true })
-        .png({ compressionLevel: 9 })
-        .toBuffer();
-      if (contactSheet.length > 20_000_000) {
-        contactSheet = undefined;
-        limitations.push("The labeled screenshot set exceeded the bounded multimodal payload size.");
+      const sheets = await createArtifactContactSheets(
+        captures,
+        selection.selected.flatMap((item) => item.route ? [item.route] : [])
+      );
+      for (const sheet of sheets) {
+        if (sheet.bytes.length > 20_000_000) {
+          limitations.push(`The labeled ${sheet.viewport} screenshot sheet exceeded the bounded multimodal payload size.`);
+          continue;
+        }
+        contactSheets.push({
+          viewport: sheet.viewport,
+          bytes: sheet.bytes,
+          mimeType: "image/png"
+        });
       }
     } catch (error) {
-      limitations.push(`The labeled screenshot set could not be assembled: ${error instanceof Error ? error.message : String(error)}`);
+      limitations.push(`The labeled screenshot sheets could not be assembled: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const selectedRoutes = pages.map((page) => ({
@@ -115,10 +134,10 @@ export async function capturePublicVisualQuality(input: {
   }));
   const hasMeaningfulImagery = pages.some((page) => page.imageCount > 0);
   return {
-    contactSheet,
-    contactSheetMimeType: "image/png",
+    contactSheets,
     screenshots,
     selectedRoutes,
+    routeSelection: selection,
     hasMeaningfulImagery,
     limitations: unique(limitations),
     deterministicContext: {
@@ -137,16 +156,6 @@ export async function capturePublicVisualQuality(input: {
       })
     }
   };
-}
-
-function pageRank(page: CrawlPageSummary) {
-  return (page.purposeTags.includes("service_detail") ? 1_000 : 0)
-    + Math.min(page.mainText?.length ?? 0, 5_000);
-}
-
-function canonicalRoute(value: string) {
-  const url = new URL(value);
-  return `${url.hostname.toLowerCase().replace(/^www\./, "")}${routeFor(value)}`;
 }
 
 function routeFor(value: string) {

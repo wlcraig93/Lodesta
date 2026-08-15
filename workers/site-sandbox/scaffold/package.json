@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsx platform/build.tsx",
     "validate-source": "tsx platform/validate-source.ts",
-    "preview": "vite preview"
+    "preview": "node platform/preview-server.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.3",

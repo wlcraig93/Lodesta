@@ -9,10 +9,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ asse
   const record = await platformOperationsRepository.getWebsiteAssessment((await params).assessmentId);
   if (!record?.assessment) return NextResponse.json({ error: "Assessment not found" }, { status: 404 });
   const key = new URL(request.url).searchParams.get("key") ?? "";
-  const eligible = new Set([
-    ...record.assessment.dimensions.flatMap((dimension) => dimension.criteria),
-    ...record.assessment.visualQuality.groups.flatMap((group) => group.checks)
-  ].flatMap((evidenceGroup) => evidenceGroup.evidence
+  const eligible = new Set(record.assessment.dimensions
+    .flatMap((dimension) => dimension.criteria)
+    .flatMap((evidenceGroup) => evidenceGroup.evidence
     .map((item) => item.artifactKey)
     .filter((value): value is string => Boolean(value))));
   if (!eligible.has(key)) return NextResponse.json({ error: "Evidence not found" }, { status: 404 });

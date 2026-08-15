@@ -8,8 +8,7 @@ import { getSupabaseAdminClient } from "./supabase/client";
 export const SITE_AUTHORING_MODEL_SETTING_KEY = "site_authoring_models";
 export const SITE_AUTHORING_MODEL_DEFAULTS = {
   siteAgentProvider: "openai",
-  siteAgentModel: "gpt-5.6-sol",
-  ingestionModel: "gpt-5.6-sol"
+  siteAgentModel: "gpt-5.6-luna"
 } as const;
 
 const cacheTtlMs = 60_000;
@@ -18,8 +17,7 @@ const localSettingsFile = join(process.cwd(), ".data", "operator-settings.json")
 const modelSlugSchema = z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9._~:/-]+$/, "Model must be a valid model slug.");
 const settingsObjectSchema = z.object({
   siteAgentProvider: siteAgentApiProviderSchema,
-  siteAgentModel: modelSlugSchema,
-  ingestionModel: modelSlugSchema
+  siteAgentModel: modelSlugSchema
 }).strict();
 function refineSettings(
   value: z.infer<typeof settingsObjectSchema>,

@@ -40,6 +40,18 @@ export function classifySiteAuthoringFailure(error: unknown) {
   if (/browser_verification_unavailable/i.test(message)) {
     return failure("browser_verification_unavailable", "platform", true, message);
   }
+  if (/source_preparation_failed|source_preparation_deadline_exhausted/i.test(message)) {
+    return failure("source_preparation_failed", "platform", true, message);
+  }
+  if (/sandbox_destroy_retry_required/i.test(message)) {
+    return failure("sandbox_unavailable", "platform", true, message);
+  }
+  if (/Development sandbox (?:configuration|source) changed|Development sandbox receipt (?:has a stale manifest|is malformed)|Site sandbox manifest is stale|sandbox manifest does not match/i.test(message)) {
+    return failure("platform_version_mismatch", "platform", false, message);
+  }
+  if (/Development sandbox (?:is not deployed|credentials are (?:missing|malformed)|URL must)|Cloudflare Sandbox requires/i.test(message)) {
+    return failure("sandbox_unavailable", "platform", false, message);
+  }
   if (/workspace_uninitialized|sandbox.*uninitialized|revision.*uninitialized/i.test(message)) {
     return failure("sandbox_unavailable", "platform", false, message);
   }
@@ -52,8 +64,14 @@ export function classifySiteAuthoringFailure(error: unknown) {
   if (/manager_model_incomplete:max_output_tokens/i.test(message)) {
     return failure("output_budget_exhausted", "budget", false, message);
   }
-  if (/workflow_deadline_exhausted|deadline_exhausted|aborted/i.test(message)) {
+  if (/workflow_deadline_exhausted|deadline_exhausted/i.test(message)) {
     return failure("deadline_exhausted", "budget", false, message);
+  }
+  if (/fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable/i.test(message)) {
+    return failure("unknown_internal_failure", "platform", true, message);
+  }
+  if (/duplicate key value violates unique constraint|foreign key constraint|serialization failure|deadlock detected/i.test(message)) {
+    return failure("unknown_internal_failure", "platform", true, message);
   }
   return failure("unknown_internal_failure", "platform", false, message);
 }
@@ -73,6 +91,12 @@ export function classifyModelProviderError(error: unknown): SiteAuthoringTermina
   }
   if (/manager_model_incomplete:max_output_tokens/i.test(message)) {
     return new SiteAuthoringTerminalError("output_budget_exhausted", "budget", false, message, { cause: error });
+  }
+  if (
+    (status === 400 || status === undefined)
+    && /Invalid schema for function|invalid (?:strict )?(?:function|tool) schema|schema for function.+(?:not a valid format|unsupported)/i.test(providerFailure)
+  ) {
+    return new SiteAuthoringTerminalError("model_tool_schema_invalid", "platform", false, message, { cause: error });
   }
   if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits/i.test(`${providerCode} ${message}`)) {
     return new SiteAuthoringTerminalError("provider_quota_exhausted", "provider", false, message, { cause: error });

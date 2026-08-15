@@ -52,6 +52,16 @@ export function robotsTextForSite(policy: AgentAccessPolicy, sitemapUrl: string)
   ].join("\n\n") + "\n";
 }
 
+export function sitemapXmlForSite(input: {
+  origin: string;
+  basePath: string;
+  routes: string[];
+  lastModified: string;
+}) {
+  const urls = input.routes.map((route) => `<url><loc>${escapeXml(`${input.origin}${input.basePath}${route === "/" ? "" : route}`)}</loc><lastmod>${escapeXml(input.lastModified)}</lastmod></url>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;
+}
+
 export function requestAcceptsMarkdown(request: Request) {
   return (request.headers.get("accept") ?? "").split(",").some((entry) => {
     const [mediaType, ...parameters] = entry.trim().toLowerCase().split(";");
@@ -114,4 +124,8 @@ function normalizeRoute(value: string) {
 
 function markdownUrl(base: string, routePath: string) {
   return routePath === "/" ? `${base}/index.md` : `${base}${routePath}/index.md`;
+}
+
+function escapeXml(value: string) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

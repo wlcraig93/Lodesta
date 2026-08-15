@@ -211,8 +211,8 @@ Before first publish:
 > Lodesta will measure real visits and customer actions. Drafts, previews, Lodesta
 > agents, and known bots will not count.
 
-The primary action links to the editor or publication readiness, depending on the
-canonical candidate state.
+The primary action links to the editor or the current candidate preview, depending on
+the canonical candidate state.
 
 For an active site with no activity in the selected window:
 
@@ -309,7 +309,7 @@ Lodesta internal exclusion uses defense in depth:
 
 1. every Lodesta crawler, website assessment, render inspection, retained-site
    verification, and other public-site browser context uses the canonical
-   `LodestaGenerationCrawler` user agent or a successor documented product token;
+   `LodestaWebsiteCrawler` user agent or a successor documented product token;
 2. internal browser contexts attach a signed Lodesta internal-traffic header to
    same-origin requests;
 3. internal Playwright request guards abort the analytics endpoint where analytics is

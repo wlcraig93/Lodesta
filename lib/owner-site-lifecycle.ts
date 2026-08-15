@@ -1,7 +1,7 @@
 import type {
   PlatformSiteRecord,
   SiteAgentRun,
-  SitePublicationReadiness,
+  SiteCandidateIntegrity,
   SiteVersion
 } from "@/packages/site-contracts";
 
@@ -38,7 +38,7 @@ export function deriveOwnerSiteLifecycle(input: {
   site: Pick<PlatformSiteRecord, "publishedVersionId">;
   versions: Array<Pick<SiteVersion, "id" | "number" | "status">>;
   runs: Array<Pick<SiteAgentRun, "kind" | "status" | "stage" | "inputQuestion" | "retryableByOwner">>;
-  readiness?: Pick<SitePublicationReadiness, "status" | "blockers">;
+  candidateIntegrity?: Pick<SiteCandidateIntegrity, "status" | "issues">;
   attention?: OwnerSiteAttention;
 }): OwnerSiteLifecycle {
   const base = `/workspace/${input.slug}`;
@@ -82,18 +82,23 @@ export function deriveOwnerSiteLifecycle(input: {
         `${base}/editor`, "View progress");
     }
     return lifecycle("building", "info", "Building",
-      "Lodesta is preparing the first verified version.",
+      "Lodesta is preparing a high-quality private first result for your review.",
       `${base}/editor`, "View progress");
   }
-  if (candidate && input.readiness?.status === "ready") {
+  if (candidate && input.candidateIntegrity?.status === "current") {
     return lifecycle("ready_to_publish", "success", "Ready to publish",
-      `Version ${candidate.number} passed its publication checks.`,
+      `Version ${candidate.number} is ready for your review and publish decision.`,
       `${base}/editor`, "Review and publish");
   }
-  if (candidate && input.readiness?.status === "blocked") {
+  if (candidate && input.candidateIntegrity?.status === "stale_owner_authority") {
     return lifecycle("needs_attention", "attention", "Needs attention",
-      `${input.readiness.blockers.length} publishing requirement${input.readiness.blockers.length === 1 ? "" : "s"} need review.`,
-      `${base}/editor`, "Review requirements");
+      "Business details or site preferences changed after this version. Review the refreshed candidate.",
+      `${base}/editor`, "Review refreshed site");
+  }
+  if (candidate && input.candidateIntegrity?.status === "failed_integrity") {
+    return lifecycle("needs_attention", "attention", "Needs attention",
+      "The current preview has a technical issue that Lodesta needs to rebuild.",
+      `${base}/editor`, "Review website");
   }
   if (input.site.publishedVersionId || published) {
     return lifecycle("live", "success", "Live",
@@ -120,7 +125,7 @@ function lifecycle(
     title: {
       building: "Your website is being prepared",
       needs_attention: "Your website needs attention",
-      ready_to_publish: "Your verified update is ready",
+      ready_to_publish: "Your website update is ready",
       live: "Your website is live and current",
       update_in_progress: "Your website update is in progress"
     }[state],

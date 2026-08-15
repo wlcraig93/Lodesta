@@ -6,6 +6,14 @@ const nextConfig = {
   outputFileTracingExcludes: {
     "*": [".data/**", ".design/**"]
   },
+  outputFileTracingIncludes: {
+    "*": ["./packages/site-agent/reference-boards/**"]
+  },
+  serverExternalPackages: [
+    "postcss",
+    "postcss-value-parser",
+    "typescript"
+  ],
   images: {
     remotePatterns: [
       {

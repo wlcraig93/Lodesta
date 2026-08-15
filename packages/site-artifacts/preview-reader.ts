@@ -24,6 +24,16 @@ export function resolveManifestPreviewPath(input: {
   return input.artifact.routes.find((candidate) => candidate.path === route)?.htmlFile;
 }
 
+export function resolveSafeManifestPreviewRoute(input: {
+  path?: string[];
+  requestUrl?: string;
+}) {
+  if (!isSafePreviewPath(input.path, input.requestUrl)) return undefined;
+  const requested = input.path?.join("/") ?? "";
+  if (requested === "site.css") return undefined;
+  return normalizePreviewRoute(requested);
+}
+
 function isSafePreviewPath(path: string[] | undefined, requestUrl: string | undefined) {
   if (requestUrl) {
     if (/%(?:2f|5c|00|2e)/i.test(requestUrl)) return false;

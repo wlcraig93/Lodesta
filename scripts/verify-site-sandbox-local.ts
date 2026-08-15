@@ -6,11 +6,15 @@ import { spawn } from "node:child_process";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import {
+  formatLocalHoursValue,
   formatLocalAddress,
   summarizedLocationHours
 } from "../workers/site-sandbox/scaffold/platform/presentation";
 import { removeReactImagePreloads } from "../workers/site-sandbox/scaffold/platform/preloads";
-import { assertValidRoutePaths } from "../workers/site-sandbox/scaffold/platform/route-contract";
+import {
+  assertRenderedRouteBodies,
+  assertValidRoutePaths
+} from "../workers/site-sandbox/scaffold/platform/route-contract";
 
 const scaffold = resolve("workers/site-sandbox/scaffold");
 const workspace = await mkdtemp(join(tmpdir(), "lodesta-multifile-sandbox-"));
@@ -33,18 +37,28 @@ input.assetRevisionIds.push("asset_revision_hero");
 const files = [
   {
     path: "src/site.tsx",
-    content: `import { Asset, BusinessAddress, BusinessHours, BusinessName, Fact, ManagedForm } from "#lodesta-sdk";
+    content: `import { Asset, BusinessAddress, BusinessHours, BusinessName, DirectionsLink, Fact, LeadForm } from "#lodesta-sdk";
 import { LocalIntro } from "./components/LocalIntro";
+import { NavigationFixtures } from "./components/NavigationFixtures";
+import { PageShell } from "./components/PageShell";
 import { LegacyBadge } from "./legacy";
+function HomePage(){ return <PageShell><main><LocalIntro /><LegacyBadge /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><DirectionsLink locationId="location_primary">Get directions</DirectionsLink><div className="gallery"><figure><Asset id="asset_hero" loading="eager" fetchPriority="high" /></figure></div><details><summary>Service details</summary><p>Native disclosure content.</p></details><LeadForm id="${input.forms[0]?.id}" /><NavigationFixtures /></main></PageShell>; }
+function AboutPage(){ return <PageShell><main><h1>About <BusinessName /></h1></main></PageShell>; }
 export const siteDefinition = {
-  routes: [{ path: "/",
-    element: <main><LocalIntro /><LegacyBadge /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><Asset id="asset_hero" loading="eager" fetchPriority="high" /><ManagedForm id="${input.forms[0]?.id}" /></main> }]
+  routes: [
+    { path: "/", element: <HomePage /> },
+    { path: "/about", title: "About", element: <AboutPage /> }
+  ]
 };`
   },
-  { path: "src/styles.css", content: "html{scroll-behavior:smooth}body{margin:0;font:16px Arial,sans-serif}" },
+  { path: "src/styles.css", content: ":root{--site-color-background:#fff;--site-color-text:#111;--site-color-accent:#176b5b;--site-space-4:1rem;--site-content-width:72rem;--site-radius-md:.5rem;--site-shadow-md:0 1rem 2rem #0002;--site-motion-standard:180ms}html{scroll-behavior:smooth}body{margin:0;color:var(--site-color-text);background:var(--site-color-background);font:16px Arial,sans-serif}" },
   { path: "src/components/LocalIntro.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered for <BusinessName />.</p>; }` },
+  { path: "src/components/PageShell.tsx", content: `import type { ReactNode } from "react"; import { SiteFooter } from "./SiteFooter"; import { SiteHeader } from "./SiteHeader"; export function PageShell({children}:{children:ReactNode}){ return <><SiteHeader />{children}<SiteFooter /></>; }` },
+  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName, NavigationDisclosure } from "#lodesta-sdk"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><NavigationDisclosure id="primary-navigation" behavior="modal" label="Primary"><a href="/">Home</a><a href="/about">About</a></NavigationDisclosure></header>; }` },
+  { path: "src/components/SiteFooter.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function SiteFooter(){ return <footer>Visit <BusinessName /></footer>; }` },
+  { path: "src/components/NavigationFixtures.tsx", content: `import { NavigationDisclosure } from "#lodesta-sdk"; export function NavigationFixtures(){ return <NavigationDisclosure id="inline-navigation" label="Secondary" behavior="inline" trigger={<span>Menu choices</span>}><a href="/about">About</a></NavigationDisclosure>; }` },
   { path: "src/legacy.tsx", content: `import { BusinessName } from "../platform/sdk"; export function LegacyBadge(){ return <small>Legacy boundary: <BusinessName /></small>; }` },
-  { path: "src/components/local-intro.css", content: ".intro{font-weight:700;letter-spacing:.01em}" }
+  { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" }
 ];
 
 try {
@@ -84,16 +98,31 @@ try {
     route: "/",
     config: { formId: "form_estimate" }
   }], "compiler did not derive SDK capabilities from rendered markup");
-  assert(artifact.sharedCss?.includes(".intro{font-weight:700"), "nested CSS module was not included in the artifact");
+  assert(!JSON.stringify(artifact.capabilityBindings).match(/gallery|disclosure|map/), "Canonical compiler emitted a removed managed binding for static gallery, native details, or directions.");
+  assert(artifact.sharedCss?.includes(".intro{color:var(--site-color-accent)"), "nested CSS module was not included in the artifact");
+  assert(artifact.sharedCss?.includes("--site-color-accent:#176b5b"), "the site-local design token root was not retained");
+  assert(artifact.sharedCss?.includes("color:var(--site-color-accent)"), "component CSS did not consume the site-local token system");
+  assert.equal(artifact.routes?.length, 2, "the shared-component fixture did not compile both routes");
   assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered for"), "local TSX module was not rendered");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Legacy boundary:"), "legacy relative SDK import was not rendered");
+  const routeHeaders = artifact.routes?.map((route) => route.bodyHtml?.match(/<header>[\s\S]*?<\/header>/)?.[0]);
+  const routeFooters = artifact.routes?.map((route) => route.bodyHtml?.match(/<footer>[\s\S]*?<\/footer>/)?.[0]);
+  assert(routeHeaders?.every((header) => header === routeHeaders[0]), "ordinary routes did not render the same shared SiteHeader source component");
+  assert(routeFooters?.every((footer) => footer === routeFooters[0]), "ordinary routes did not render the same shared SiteFooter source component");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="modal"'), "NavigationDisclosure did not retain its required modal behavior");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-icon=""'), "NavigationDisclosure did not render its default hamburger trigger");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('aria-label="Open navigation"'), "NavigationDisclosure omitted its default accessible label");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="inline"'), "NavigationDisclosure did not retain an owner-selected inline behavior");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes("Menu choices"), "NavigationDisclosure did not retain a custom visible trigger");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("(512) 555-0142"), "compiler did not render the canonical formatted phone");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday–Friday: 8:00 AM-5:30 PM"), "compiler did not render a compact source-bound hours summary");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("<dt>Monday</dt><dd>8:00 AM-5:30 PM</dd>"), "compiler did not render structured weekly hours");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("1200 Main Street, Austin, TX 78701"), "compiler did not render the natural US address variant");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-location-id="location_primary"'), "BusinessAddress did not retain its SDK-owned location identity.");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('href="https://www.google.com/maps/dir/?api=1&amp;destination=1200%20Main%20Street%2C%20Austin%2C%20TX%2C%2078701%2C%20US"'), "DirectionsLink did not encode the retained canonical address.");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('target="_blank" rel="noopener noreferrer" data-lodesta-directions=""'), "DirectionsLink did not apply secure default target behavior and analytics marker.");
   assert(!artifact.routes?.[0]?.bodyHtml?.includes(", US"), "compiler leaked a trailing country code into the local address variant");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('loading="eager"'), "Asset did not preserve explicit eager loading.");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('fetchPriority="high"'), "Asset did not preserve explicit fetch priority.");
@@ -116,6 +145,15 @@ try {
     () => assertValidRoutePaths([{ path: "/" }, { path: "/services" }]),
     "The sandbox route contract rejected a valid unique homepage and service route."
   );
+  assert.doesNotThrow(
+    () => assertRenderedRouteBodies([{ path: "/", bodyHtml: "<main>Home</main>" }]),
+    "The sandbox route contract rejected rendered route HTML."
+  );
+  assert.throws(
+    () => assertRenderedRouteBodies([{ path: "/", bodyHtml: "" }]),
+    /element: <PageComponent \/>/,
+    "The sandbox build accepted an empty rendered route."
+  );
   assert.throws(
     () => assertValidRoutePaths([{ path: "/" }, { path: "/services" }, { path: "/services" }]),
     /Duplicate route \/services/,
@@ -125,6 +163,11 @@ try {
     () => assertValidRoutePaths([{ path: "/services" }]),
     /homepage route at \//,
     "The sandbox build accepted a route set without a homepage."
+  );
+  assert.throws(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/*" }]),
+    /not a static site path/,
+    "The sandbox build accepted a wildcard route that cannot become an immutable artifact path."
   );
   await writeFile(join(workspace, "src/site.tsx"), `export const siteDefinition = {
     routes: [
@@ -137,6 +180,15 @@ try {
     /Duplicate route \/services/,
     "The integrated sandbox compiler emitted an artifact with duplicate normalized routes."
   );
+  await writeFile(join(workspace, "src/site.tsx"), `function HomePage() { return <main>Home</main>; }
+  export const siteDefinition = {
+    routes: [{ path: "/", component: HomePage }]
+  };`);
+  await assert.rejects(
+    () => execute(join(workspace, "node_modules", ".bin", "tsx"), ["platform/build.tsx"], workspace),
+    /Route \/ rendered no HTML.*element: <PageComponent \/>/,
+    "The integrated sandbox compiler silently accepted a component reference that rendered an empty route."
+  );
   assert.throws(
     () => formatLocalAddress({ street: "1 King St", city: "Toronto", region: "ON", postalCode: "M5H 1A1", country: "CA" }),
     /supports US locations only/,
@@ -146,6 +198,21 @@ try {
     summarizedLocationHours({ Monday: "Open", Wednesday: "Open" }),
     "Monday: Open; Wednesday: Open",
     "Compact hours formatting combined non-contiguous days into a false range."
+  );
+  assert.equal(
+    formatLocalHoursValue("08:00-17:00"),
+    "8 AM–5 PM",
+    "Canonical 24-hour storage values were exposed as customer-facing military time."
+  );
+  assert.equal(
+    formatLocalHoursValue("09:30–00:00"),
+    "9:30 AM–12 AM",
+    "Canonical local times were not converted across noon and midnight."
+  );
+  assert.equal(
+    formatLocalHoursValue("By appointment"),
+    "By appointment",
+    "Non-clock availability text was rewritten."
   );
   process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, sdkAlias: "pass", automaticJsx: "pass", legacySdkImport: "pass", localImports: "pass", nestedCss: "pass" })}\n`);
 } finally {

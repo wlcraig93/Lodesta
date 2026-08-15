@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "identity": "lodesta-prospect-sample",
+  "targetCount": 1000,
+  "recordsPerMarketVerticalCell": 20,
+  "markets": [
+    {
+      "id": "tx_austin_north",
+      "label": "North Austin exurbs",
+      "region": "TX",
+      "localities": ["Georgetown", "Leander", "Cedar Park", "Round Rock"]
+    },
+    {
+      "id": "tx_i35_secondary",
+      "label": "Central Texas secondary cities",
+      "region": "TX",
+      "localities": ["Waco", "Temple", "Killeen"]
+    },
+    {
+      "id": "nc_triangle_exurbs",
+      "label": "North Carolina Triangle exurbs",
+      "region": "NC",
+      "localities": ["Clayton", "Garner", "Wake Forest", "Fuquay-Varina"]
+    },
+    {
+      "id": "sc_upstate",
+      "label": "South Carolina Upstate",
+      "region": "SC",
+      "localities": ["Greenville", "Spartanburg", "Greer", "Easley"]
+    },
+    {
+      "id": "wy_small_city",
+      "label": "Wyoming small-city cohort",
+      "region": "WY",
+      "localities": ["Cheyenne", "Casper", "Laramie", "Gillette"]
+    }
+  ],
+  "verticals": [
+    { "code": "pest_control", "label": "Pest control" },
+    { "code": "landscaping_tree", "label": "Landscaping and tree service" },
+    { "code": "residential_cleaning", "label": "Residential cleaning" },
+    { "code": "painting", "label": "Painting" },
+    { "code": "roofing", "label": "Roofing" },
+    { "code": "hvac", "label": "HVAC" },
+    { "code": "plumbing", "label": "Plumbing" },
+    { "code": "electrical", "label": "Electrical" },
+    { "code": "auto_repair_detailing", "label": "Auto repair and detailing" },
+    { "code": "beauty_appointment", "label": "Beauty and appointment services" }
+  ],
+  "selection": {
+    "deduplicateBy": ["canonical website host", "normalized business name plus locality and region"],
+    "exclude": ["national chains", "permanently closed businesses", "businesses with unresolved identity conflicts"],
+    "retain": ["owned website", "no owned website", "social or aggregator only"],
+    "randomizeWithinCell": true
+  }
+}

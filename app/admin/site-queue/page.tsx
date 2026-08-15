@@ -3,17 +3,16 @@ import type { Metadata } from "next";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { requireAdminPageAccess } from "@/lib/page-access";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { formatProductDate, statusTone } from "@/lib/product-format";
+import { statusTone } from "@/lib/product-format";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function AdminSiteCandidatesPage() {
   await requireAdminPageAccess("/admin/site-queue");
-  const [sites, queue, verticalDemand] = await Promise.all([
+  const [sites, queue] = await Promise.all([
     sitePlatformRepository.listSites(),
-    sitePlatformRepository.listOperatorQueue(),
-    sitePlatformRepository.listVerticalDemandEvents("open")
+    sitePlatformRepository.listOperatorQueue()
   ]);
   const versions = (await Promise.all(sites.map((site) => sitePlatformRepository.listSiteVersions(site.id)))).flat();
   const candidates = versions.filter((version) => version.status === "candidate");
@@ -21,16 +20,7 @@ export default async function AdminSiteCandidatesPage() {
   const open = queue.filter((item) => item.status === "open" || item.status === "in_review");
 
   return <main className="admin-page">
-    <AdminPageHeader eyebrow="Build" title="Website review" description={`${open.length} operator item${open.length === 1 ? "" : "s"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"} · ${verticalDemand.length} domain-context opportunit${verticalDemand.length === 1 ? "y" : "ies"}`} />
-    <section className="admin-workstream"><h2>Domain-context opportunities</h2><div className="finding-list">
-      {verticalDemand.map((item) => <article key={item.id} className="finding-card">
-        <div className="button-row"><span className="badge">{item.observedVertical ?? "unclassified"}</span><span className="badge">{formatProductDate(item.createdAt)}</span></div>
-        <h3>{new URL(item.sourceUrl).hostname}</h3>
-        <p className="muted">The site continued with neutral context. This category may justify a future optional enrichment module.</p>
-        <a className="button secondary" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source</a>
-      </article>)}
-      {verticalDemand.length === 0 ? <p className="muted">No unmatched domain-context opportunities have been recorded.</p> : null}
-    </div></section>
+    <AdminPageHeader eyebrow="Build" title="Website review" description={`${open.length} operator item${open.length === 1 ? "" : "s"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`} />
     <section className="admin-workstream"><h2>Operator queue</h2><div className="finding-list">
       {open.map((item) => <article key={item.id} className="finding-card">
         <div className="button-row"><span className={`badge is-${statusTone(item.severity)}`}>{item.severity}</span><span className="badge">{item.reason.replaceAll("_", " ")}</span></div>

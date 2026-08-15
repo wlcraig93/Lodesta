@@ -51,9 +51,22 @@ export function parseObservedBusinessHoursLine(input: string): { label: string; 
   if (!match) return undefined;
   const start = canonicalDay(match[1]);
   const end = canonicalDay(match[2]);
-  const value = match[3]?.replace(/^[:\s-]+/, "").trim();
+  const value = normalizeBusinessHoursValue(match[3]?.replace(/^[:\s-]+/, "").trim());
   if (!start || !value) return undefined;
   return { label: end ? `${start}-${end}` : start, value };
+}
+
+function normalizeBusinessHoursValue(value: string | undefined) {
+  if (!value || value.length > 80) return undefined;
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (/^(?:closed|by appointment|open 24 hours?|24 hours?)$/i.test(compact)) return compact;
+  const time12 = "(?:1[0-2]|0?[1-9])(?::[0-5]\\d)?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)";
+  const time24 = "(?:[01]?\\d|2[0-3]):[0-5]\\d";
+  const time = `(?:${time12}|${time24})`;
+  const range = new RegExp(`^${time}\\s*(?:-|\\u2013|\\u2014|to)\\s*${time}$`, "i");
+  const multipleRanges = compact.split(/\s*[,;]\s*/).filter(Boolean);
+  if (!multipleRanges.length || multipleRanges.some((candidate) => !range.test(candidate))) return undefined;
+  return compact;
 }
 
 export function preferBusinessNameCandidate(current: string | undefined, candidate: string | undefined, hostname: string) {

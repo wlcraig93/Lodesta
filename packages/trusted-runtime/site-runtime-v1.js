@@ -8,7 +8,7 @@
   const previewContext = location.pathname.startsWith("/preview/")
     || location.pathname.startsWith("/api/site-versions/")
     || location.pathname.startsWith("/api/site-agent/");
-  const internalAgent = /\bLodesta(?:GenerationCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i.test(navigator.userAgent);
+  const internalAgent = /\bLodesta(?:WebsiteCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i.test(navigator.userAgent);
   const analyticsAllowed = Boolean(siteId && versionId && analyticsEnabled && !previewContext && !internalAgent);
   const visit = analyticsAllowed ? visitContext() : null;
   const pageStartedAt = Date.now();
@@ -17,15 +17,158 @@
   let maxScrollDepth = 0;
   let engagementSent = false;
 
+  let openNavigation = null;
+  let activeNavigation = null;
   for (const toggle of document.querySelectorAll("[data-lodesta-menu-toggle]")) {
-    toggle.addEventListener("click", () => {
-      const targetId = toggle.getAttribute("aria-controls");
-      const target = targetId ? document.getElementById(targetId) : null;
-      if (!target) return;
-      const expanded = toggle.getAttribute("aria-expanded") === "true";
-      toggle.setAttribute("aria-expanded", String(!expanded));
-      target.toggleAttribute("data-lodesta-open", !expanded);
+    const targetId = toggle.getAttribute("aria-controls");
+    const target = targetId ? document.getElementById(targetId) : null;
+    if (!target) continue;
+    const wrapper = toggle.closest("[data-lodesta-navigation-disclosure]") || toggle.parentElement;
+    const behavior = wrapper?.getAttribute("data-lodesta-navigation-behavior") === "modal" ? "modal" : "inline";
+    const managedPanel = target.hasAttribute("data-lodesta-navigation-panel");
+    const state = { toggle, target, wrapper, behavior, managedPanel, inertRecords: [], scrollLock: null };
+    toggle.addEventListener("click", () => setNavigationOpen(state, toggle.getAttribute("aria-expanded") !== "true", true));
+    target.addEventListener("click", (event) => {
+      const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (link && isInternalNavigationLink(link)) setNavigationOpen(state, false, false);
     });
+    const initiallyOpen = toggle.getAttribute("aria-expanded") === "true";
+    if (initiallyOpen) {
+      if (openNavigation && openNavigation !== state) setNavigationOpen(openNavigation, false, false);
+      updateNavigationMarkup(state, true);
+      openNavigation = state;
+      if (behavior === "modal") activateModalNavigation(state, false);
+    } else updateNavigationMarkup(state, false);
+  }
+  document.addEventListener("keydown", (event) => {
+    if (!openNavigation) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setNavigationOpen(openNavigation, false, true);
+      return;
+    }
+    if (event.key === "Tab" && activeNavigation?.behavior === "modal") trapNavigationFocus(event, activeNavigation);
+  });
+  addEventListener("resize", () => {
+    if (activeNavigation?.behavior === "modal") positionNavigation(activeNavigation);
+  }, { passive: true });
+
+  function setNavigationOpen(state, open, restoreFocus) {
+    if (open && openNavigation && openNavigation !== state) setNavigationOpen(openNavigation, false, false);
+    updateNavigationMarkup(state, open);
+    if (open) {
+      openNavigation = state;
+      if (state.behavior === "modal") activateModalNavigation(state, true);
+      return;
+    }
+    if (activeNavigation === state) deactivateModalNavigation(state, restoreFocus);
+    else if (restoreFocus) state.toggle.focus({ preventScroll: true });
+    if (openNavigation === state) openNavigation = null;
+  }
+
+  function updateNavigationMarkup(state, open) {
+    state.toggle.setAttribute("aria-expanded", String(open));
+    const label = state.toggle.getAttribute(open ? "data-lodesta-close-label" : "data-lodesta-open-label");
+    if (label) state.toggle.setAttribute("aria-label", label);
+    state.toggle.toggleAttribute("data-lodesta-open", open);
+    state.target.toggleAttribute("data-lodesta-open", open);
+    state.wrapper?.toggleAttribute("data-lodesta-open", open);
+    if (state.managedPanel) state.target.hidden = !open;
+  }
+
+  function activateModalNavigation(state, moveFocus) {
+    activeNavigation = state;
+    positionNavigation(state);
+    state.inertRecords = suppressOutsideNavigation(state.wrapper);
+    state.scrollLock = {
+      rootOverflow: root.style.overflow,
+      bodyOverflow: document.body.style.overflow
+    };
+    root.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    root.setAttribute("data-lodesta-navigation-locked", "");
+    if (moveFocus) {
+      const first = navigationFocusables(state)[0];
+      (first || state.target).focus({ preventScroll: true });
+    }
+  }
+
+  function deactivateModalNavigation(state, restoreFocus) {
+    for (const record of state.inertRecords) {
+      if (record.hadAttribute) record.element.setAttribute("inert", "");
+      else record.element.removeAttribute("inert");
+    }
+    state.inertRecords = [];
+    if (state.scrollLock) {
+      root.style.overflow = state.scrollLock.rootOverflow;
+      document.body.style.overflow = state.scrollLock.bodyOverflow;
+    }
+    state.scrollLock = null;
+    root.removeAttribute("data-lodesta-navigation-locked");
+    activeNavigation = null;
+    if (restoreFocus) state.toggle.focus({ preventScroll: true });
+  }
+
+  function positionNavigation(state) {
+    const header = state.toggle.closest("header");
+    const top = header ? Math.max(0, Math.min(innerHeight, header.getBoundingClientRect().bottom)) : 0;
+    const value = `${Math.round(top * 100) / 100}px`;
+    state.wrapper?.style.setProperty("--lodesta-navigation-top", value);
+    state.target.style.setProperty("--lodesta-navigation-top", value);
+  }
+
+  function suppressOutsideNavigation(wrapper) {
+    if (!wrapper) return [];
+    const records = [];
+    let branch = wrapper;
+    while (branch.parentElement) {
+      const parent = branch.parentElement;
+      for (const sibling of parent.children) {
+        if (sibling === branch) continue;
+        records.push({ element: sibling, hadAttribute: sibling.hasAttribute("inert") });
+        sibling.setAttribute("inert", "");
+      }
+      if (parent === document.body) break;
+      branch = parent;
+    }
+    return records;
+  }
+
+  function navigationFocusables(state) {
+    const selector = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
+    return [state.toggle, ...state.target.querySelectorAll(selector)].filter((element, index, all) =>
+      all.indexOf(element) === index
+      && !element.closest("[hidden],[inert]")
+      && element.getClientRects().length > 0
+    );
+  }
+
+  function trapNavigationFocus(event, state) {
+    const focusables = navigationFocusables(state);
+    if (!focusables.length) {
+      event.preventDefault();
+      state.target.focus({ preventScroll: true });
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables.at(-1);
+    if (event.shiftKey && (document.activeElement === first || !state.wrapper?.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !state.wrapper?.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function isInternalNavigationLink(link) {
+    const href = link.getAttribute("href") || "";
+    if (!href || /^(?:mailto:|tel:|javascript:|data:)/i.test(href)) return false;
+    try {
+      return new URL(href, location.href).origin === location.origin;
+    } catch {
+      return false;
+    }
   }
 
   for (const button of document.querySelectorAll("[data-lodesta-gallery-direction]")) {
@@ -40,8 +183,7 @@
 
   for (const form of document.querySelectorAll("form[data-lodesta-form-id]")) {
     if (previewContext) {
-      form.setAttribute("data-lodesta-disabled", "true");
-      for (const control of form.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+      form.setAttribute("data-lodesta-preview", "true");
     }
     form.setAttribute("data-lodesta-rendered-at", String(Date.now()));
     const formId = form.getAttribute("data-lodesta-form-id") || "";
@@ -54,9 +196,12 @@
     form.addEventListener("input", start, { once: true });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (form.hasAttribute("data-lodesta-disabled")) return;
       const submit = form.querySelector("button[type=submit],input[type=submit]");
       const status = form.querySelector("[data-lodesta-form-status]");
+      if (previewContext) {
+        if (status) status.textContent = "Preview successful. This form is valid and no lead was created.";
+        return;
+      }
       if (submit) submit.disabled = true;
       if (status) status.textContent = "Sending...";
       const payload = Object.fromEntries(new FormData(form).entries());

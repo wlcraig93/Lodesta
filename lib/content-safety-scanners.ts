@@ -6,7 +6,7 @@ export type PlaceholderTextMatch = {
 export type SensitiveClaimEvidenceKind = "proof" | "reviews" | "insurance" | "pricing" | "emergency";
 
 export type SensitiveClaimMatch = {
-  category: "credential" | "insurance" | "pricing" | "warranty" | "reviews" | "guarantee" | "emergency" | "regulated" | "marketing" | "longevity";
+  category: "credential" | "insurance" | "pricing" | "warranty" | "reviews" | "guarantee" | "emergency" | "regulated" | "marketing" | "longevity" | "safety" | "cadence";
   label: string;
   severity: "block" | "warning";
   requiredEvidence: SensitiveClaimEvidenceKind;
@@ -44,16 +44,20 @@ const sensitiveClaimPatterns: Array<Omit<SensitiveClaimMatch, "matchedText" | "s
   { category: "insurance", label: "insurance or bonding claim", severity: "block", pattern: /\b(insured|bonded|insurance|insurer|deductible|rental cars?)\b/i, requiredEvidence: "insurance" },
   { category: "warranty", label: "warranty claim", severity: "block", pattern: /\b(?:lifetime|limited|written|\d+[-\s]?(?:year|month))?\s*warrant(?:y|ies)\b/i, requiredEvidence: "proof" },
   { category: "guarantee", label: "guarantee", severity: "block", pattern: /\b(guaranteed|guarantee|risk[-\s]?free)\b/i, requiredEvidence: "proof" },
+  { category: "guarantee", label: "free return-service promise", severity: "block", pattern: /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,120}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated approval", severity: "block", pattern: /\b(fda[-\s]?approved|hipaa[-\s]?compliant|irs[-\s]?certified)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "regulated advice", severity: "block", pattern: /\b(medical advice|legal advice|financial advice|tax advice|case results?)\b/i, requiredEvidence: "proof" },
   { category: "regulated", label: "medical outcome", severity: "block", pattern: /\b(medical diagnos(?:e|is)|diagnos(?:e|is) (?:a |the )?(?:disease|condition|symptoms?|illness)|medical treatment|(?:cures?|treats?) (?:a |the )?(?:disease|condition|symptoms?|illness|pain)|pain[-\s]?free)\b/i, requiredEvidence: "proof" },
   { category: "pricing", label: "pricing claim", severity: "warning", pattern: /(?:\bbest prices?\b|\bfree\b.{0,24}\b(?:estimates?|quotes?)\b|\bno out of pocket\b|\baffordable\b)/i, requiredEvidence: "pricing" },
   { category: "reviews", label: "top-rated review claim", severity: "warning", pattern: /\b(top[-\s]?rated|highest[-\s]?rated|5[-\s]?star|five[-\s]?star|great reviews?|loved by customers)\b/i, requiredEvidence: "reviews" },
-  { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bbest\b(?!\s+(?:way|time|place)\b)|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
+  { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bthe\s+best\b(?!\s+(?:way|time|place|fit)\b)|\bbest\s+(?:prices?|pest\s+control|termite\s+control|service|services|company|contractor|provider|team|choice|option|solution|results?)\b|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
   { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
   { category: "marketing", label: "market leadership claim", severity: "warning", pattern: /\b(leading|most trusted|premier)\b/i, requiredEvidence: "proof" },
   { category: "longevity", label: "business longevity claim", severity: "block", pattern: /\b(?:serving\s+(?:the\s+)?(?:[a-z][a-z .'-]+\s+)?for\s+)?\d{1,3}\+?\s+years?(?:\s+in\s+business)?\b/i, requiredEvidence: "proof" },
-  { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" }
+  { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" },
+  { category: "safety", label: "safety or environmental claim", severity: "warning", pattern: /\b(?:eco[- ]?friendly|environmentally friendly|non[- ]?toxic|pet[- ]?safe|child[- ]?safe|safe for (?:people|pets|children|famil(?:y|ies)|the environment)|gentle on (?:your )?home|kind to the earth)\b/i, requiredEvidence: "proof" },
+  { category: "safety", label: "safe service-performance claim", severity: "warning", pattern: /(?:\b(?:safe|safer)\s+(?:(?:bee|wasp|hornet|nest|hive|pest)\s+)?(?:removal|relocation|treatment|application)\b|\b(?:remove|relocate|treat|apply)\b.{0,40}\bsafely\b)/i, requiredEvidence: "proof" },
+  { category: "cadence", label: "specific recurring-service cadence", severity: "warning", pattern: /\b(?:service|visits?|treatments?)\b.{0,80}\bevery\s+(?:\d+|one|two|three|other)\s+months?\b|\bevery\s+(?:\d+|one|two|three|other)\s+months?\b.{0,80}\b(?:service|visits?|treatments?)\b/i, requiredEvidence: "proof" }
 ];
 
 export function scanPlaceholderText(text: string): PlaceholderTextMatch[] {

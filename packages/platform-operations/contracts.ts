@@ -1,56 +1,3 @@
-export type WebsiteSetupStatus = "queued" | "processing" | "linked" | "failed" | "canceled";
-
-export type WebsiteSetupFailureCode =
-  | "source_invalid"
-  | "source_unsuitable"
-  | "crawl_temporarily_unavailable"
-  | "crawl_robots_disallowed"
-  | "crawl_unsupported_content"
-  | "crawl_primary_unavailable"
-  | "bootstrap_failed"
-  | "worker_interrupted";
-
-export type WebsiteSetup = {
-  id: string;
-  ownerUserId: string;
-  sourceUrl: string;
-  normalizedSource: string;
-  reportingTimezone: string;
-  prospectReportId?: string;
-  sourceRevision: number;
-  status: WebsiteSetupStatus;
-  siteId?: string;
-  sessionId?: string;
-  runId?: string;
-  attempts: number;
-  maxAttempts: number;
-  idempotencyKey: string;
-  creationRequestHash: string;
-  lockedBy?: string;
-  lockedAt?: string;
-  failureCode?: WebsiteSetupFailureCode;
-  failureReason?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type CreateWebsiteSetupInput = {
-  ownerUserId: string;
-  sourceUrl: string;
-  normalizedSource: string;
-  reportingTimezone: string;
-  prospectReportId?: string;
-  idempotencyKey: string;
-  creationRequestHash: string;
-};
-
-export type WebsiteSetupSourceUpdate = {
-  setupId: string;
-  ownerUserId: string;
-  sourceUrl: string;
-  normalizedSource: string;
-};
-
 export type AdoptionInvitation = {
   id: string;
   siteId: string;
@@ -127,8 +74,10 @@ export function normalizeSiteRedirectPath(input: string) {
   }
   const withLeadingSlash = value.startsWith("/") ? value : `/${value}`;
   const normalized = withLeadingSlash.length > 1 ? withLeadingSlash.replace(/\/$/, "") : withLeadingSlash;
-  if (normalized !== "/" && !/^\/(?:[a-z0-9]+(?:-[a-z0-9]+)*)(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(normalized)) {
-    throw new Error("Redirect paths must use lowercase URL slugs.");
+  const segments = normalized.split("/").slice(1);
+  const safeSegment = /^(?:[a-zA-Z0-9._~!$&'()*+,;=:@-]|%[a-fA-F0-9]{2})+$/;
+  if (normalized !== "/" && (segments.some((segment) => segment === "." || segment === "..") || segments.some((segment) => !safeSegment.test(segment)))) {
+    throw new Error("Redirect paths must use safe internal URL segments.");
   }
   return normalized;
 }
@@ -164,7 +113,6 @@ export type OutboundCampaign = {
 export type OutboundProspect = {
   id: string;
   prospectId: string;
-  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
@@ -251,7 +199,6 @@ export type CreateOutboundCampaignInput = {
 export type UpsertOutboundProspectInput = {
   id?: string;
   prospectId: string;
-  selectionObservationId: string;
   campaignId: string;
   siteId?: string;
   reportId?: string;
@@ -274,6 +221,7 @@ export type RecordOutboundEventInput = {
 export type ProspectReportFinding = {
   id: string;
   dimension: string;
+  controlOwner: "site_author" | "lodesta_platform" | "source_research" | "shared";
   severity: "critical" | "major" | "minor" | "advisory";
   status: "fail" | "warning";
   title: string;
@@ -319,6 +267,24 @@ export type ProspectReportVisualQuality = {
   findings: ProspectReportFinding[];
   note: string;
 };
+export type ProspectReportSiteInventory = {
+  source: "complete_crawl" | "retained_artifact";
+  coverage: "complete" | "restricted" | "incomplete" | "retained_artifact";
+  discoveredUrls: number;
+  eligiblePages: number;
+  assessedPages: number;
+  failedPages: number;
+  contentDepth: {
+    substantivePages: number;
+    thinPages: number;
+    unclassifiedPages: number;
+  };
+  pageTypes: Array<{
+    id: "home" | "service" | "location" | "about" | "contact" | "faq" | "proof" | "comparison" | "editorial" | "legal" | "other";
+    label: string;
+    count: number;
+  }>;
+};
 export type BusinessStrengthSignal = {
   id: string;
   label: string;
@@ -344,26 +310,64 @@ export type ProspectReportStage = { id: string; label: string; status: "queued" 
 export type ProspectReportGatedPlan = { summary: string; priorities: Array<{ title: string; detail: string }> };
 export type ProspectReportAccessPolicy = "email_gate" | "public_link";
 export type ProspectPresenceReportResult = {
-  schemaVersion: 1;
-  kind: "prospect-presence-report";
+  schemaVersion: 2;
+  kind: "prospect-website-health-report";
   generatedAt: string;
   websiteKind: ProspectWebsiteKind;
   sourceUrl?: string;
   sourceHost?: string;
   assessmentId?: string;
   coverage?: {
-    value: number;
+    siteEvidence: number;
+    pipelineCompleteness: number;
     assessedCriteria: number;
     applicableCriteria: number;
+    provisional: boolean;
     limitations: string[];
   };
+  snapshot?: {
+    verifiedChecks: number;
+    opportunityChecks: number;
+    unverifiedChecks: number;
+    assessedChecks: number;
+    applicableChecks: number;
+  };
+  methodology?: {
+    producerIdentity: string;
+    registryIdentity: string;
+    scannerIdentity: string;
+    routeSelectionIdentity: string;
+  };
+  grade?: {
+    withheld: true;
+    note: string;
+  };
+  dimensions?: Array<{
+    id: string;
+    label: string;
+    state: "scored" | "not_yet_scored" | "insufficient_evidence" | "not_applicable";
+    reviewMode: "measured" | "advisory";
+    siteEvidence: number;
+    pipelineCompleteness: number;
+    verifiedChecks: number;
+    opportunityChecks: number;
+    unverifiedChecks: number;
+    notApplicableChecks: number;
+  }>;
+  siteInventory?: ProspectReportSiteInventory;
   siteUnderstanding: {
     businessName?: string;
     primaryLocation?: string;
     services: string[];
     customerJourneys: string[];
   };
-  whatsWorking: Array<{ id: string; dimension: string; title: string; evidence: string[] }>;
+  whatsWorking: Array<{
+    id: string;
+    dimension: string;
+    controlOwner: "site_author" | "lodesta_platform" | "source_research" | "shared";
+    title: string;
+    evidence: string[];
+  }>;
   findings: ProspectReportFinding[];
   agentReadiness?: ProspectReportAgentReadiness;
   visualQuality?: ProspectReportVisualQuality;

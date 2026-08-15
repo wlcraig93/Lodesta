@@ -80,6 +80,7 @@ async function verifyLiveSite(value: string, runExternalScan: boolean) {
   assert(homepage.headers.get("content-type")?.includes("text/html"), `${base}: homepage is not HTML`);
   assertVary(homepage, base);
   assert(homepage.headers.get("link")?.includes('rel="alternate"'), `${base}: HTML response lacks Markdown alternate Link`);
+  assert(homepage.headers.get("link")?.includes('rel="canonical"'), `${base}: HTML response lacks canonical Link`);
   const html = await homepage.text();
   assert(html.includes('type="application/ld+json"'), `${base}: eligible JSON-LD is missing`);
 

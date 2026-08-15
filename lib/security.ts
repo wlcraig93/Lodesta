@@ -33,3 +33,22 @@ export async function requireAdminOrSiteOwner(request: Request, siteId: string) 
   if (site?.ownerUserId === userId) return null;
   return NextResponse.json({ error: "Site owner authorization required" }, { status: 403 });
 }
+
+export async function requireSiteOwner(siteId: string) {
+  const auth = await getCurrentUser();
+  const userId = auth.user?.id;
+  if (!auth.configured || !userId) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ error: "Site owner authorization required" }, { status: 401 })
+    };
+  }
+  const site = await sitePlatformRepository.getSite(siteId);
+  if (site?.ownerUserId !== userId) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ error: "Site owner authorization required" }, { status: 403 })
+    };
+  }
+  return { ok: true as const, actorId: userId };
+}

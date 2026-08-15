@@ -7,6 +7,10 @@ import type {
   VisualQualityCheckInput,
   VisualQualityGroupId
 } from "./contracts";
+import {
+  websiteHealthRouteSelectionIdentity,
+  websiteHealthRouteSelectionPolicy
+} from "./route-selection";
 
 type VisualQualityCheckDefinition = {
   id: string;
@@ -35,24 +39,35 @@ export const visualQualityCheckDefinitions: ReadonlyArray<VisualQualityCheckDefi
   definition("visual.typography.consistency", "typography", "Typography follows a coherent system", "minor", "Inconsistent type treatments create noise and weaken the perceived quality of the site.", "Use a consistent type scale, weight hierarchy, and treatment across equivalent elements."),
   definition("visual.composition.spacing_rhythm", "composition", "Spacing creates a consistent visual rhythm", "minor", "Uneven density or spacing makes important information feel disorganized.", "Normalize section, component, and text spacing so related elements read as intentional groups."),
   definition("visual.composition.alignment_balance", "composition", "Alignment and visual balance feel intentional", "minor", "Misaligned or poorly balanced elements distract from the content and reduce perceived polish.", "Align repeated elements to a shared grid and rebalance areas with awkward weight or empty space."),
+  definition("visual.composition.density_pacing", "composition", "Density and pacing support the reading journey", "minor", "Crowded or overextended sections make the site tiring to scan.", "Vary density intentionally and give important decisions appropriate visual breathing room."),
   definition("visual.imagery.relevance_quality", "imagery", "Prominent imagery is relevant and presentation-ready", "minor", "Weak or irrelevant imagery can undermine confidence in the business before visitors read the copy.", "Use clear, appropriately cropped imagery that directly supports the service, location, team, or proof being presented.", "business_specific"),
   definition("visual.imagery.presentation_consistency", "imagery", "Imagery is presented consistently", "advisory", "Inconsistent crops, treatments, or visual styles make the site feel assembled rather than designed.", "Apply a coherent aspect-ratio, crop, and treatment system to prominent imagery.", "business_specific"),
   definition("visual.brand.coherence", "brand_trust", "The visual language is coherent across the reviewed pages", "minor", "A fragmented visual system weakens recognition and makes navigation feel less predictable.", "Use consistent colors, controls, typography, imagery treatment, and component styling across important pages."),
+  definition("visual.brand.distinctiveness", "brand_trust", "The visual direction is distinctive without obscuring usability", "minor", "A generic presentation makes the business harder to remember and compare.", "Use a coherent, business-specific visual idea across typography, imagery, color, and composition."),
   definition("visual.trust.vertical_fit", "brand_trust", "The presentation supports trust for the business category", "major", "A presentation that conflicts with category expectations can make customers hesitate even when the content is accurate.", "Align the visual emphasis with the decision signals customers need for this business category.", "vertical"),
   definition("visual.responsive.cross_viewport_consistency", "responsive_polish", "Desktop and mobile preserve the same hierarchy", "major", "A mobile composition that loses hierarchy or actions creates a materially weaker customer journey.", "Preserve the primary message, action, proof, and reading order across desktop and mobile."),
+  definition("visual.navigation.presentation", "responsive_polish", "Header and navigation presentation feel intentional", "minor", "An awkward or visually fragmented header weakens the first impression and orientation.", "Unify the header composition, action treatment, disclosure affordances, and breakpoint behavior."),
   definition("visual.polish.visible_defects", "responsive_polish", "No obvious visual defects distract from the experience", "major", "Clipping, overlap, awkward crops, or visibly broken composition can make the website feel unreliable.", "Resolve visible clipping, overlap, crop, alignment, and component-presentation defects.")
 ] as const;
 
 export const visualQualityPrompt = [
   "Review the supplied labeled website contact sheet as a visual-quality evaluator for a US local-business website.",
   "Return every requested check exactly once using only the supplied screenshots and deterministic context.",
-  "Judge observable hierarchy, typography, spacing, alignment, imagery presentation, cross-page consistency, responsive composition, and visible defects.",
+  "Judge only composition and taste: hierarchy, editorial typography, spacing rhythm, alignment balance, imagery treatment, brand coherence, density, pacing, distinctiveness, header presentation, and residual polish.",
+  "The labeled evidence contains separate desktop and mobile sheets with native top, middle, and bottom viewport frames. Do not treat an overview or full-page strip as native viewport evidence.",
+  "Black contact-sheet headers identify route URLs and evidence frames; a page's visible marketing heading does not need to repeat its URL label literally.",
+  "Deterministic context is authoritative for font size, line length, contrast, overflow, clipping, overlap, target size, hit-testing, element geometry, and cross-viewport presence or order.",
+  "Do not contradict deterministic measurements or make a visual finding from a measurable property.",
+  "Never mention measurable, functional, or compliance topics in any explanation or evidence string, even to say they are absent: font size, contrast ratio, overflow, clipping, overlap, target size, page speed, forms, links, buttons, HTTPS, SEO, accessibility standards, or source code.",
   "Do not judge source code, performance, SEO, accessibility compliance, business truth, or functionality from screenshots.",
   "Do not infer facts, demographics, intent, or customer sentiment that are not visible.",
+  "Never predict what customers, visitors, or users will feel, think, prefer, trust, distrust, or do.",
   "Every pass, warning, or fail must cite at least one supplied route and viewport and describe the exact visible observation.",
+  "Across the complete review, cite every labeled route and both labeled viewports at least once; a site-wide conclusion cannot be supported only by the homepage.",
   "Use unknown when the screenshots do not support a reliable judgment and not_applicable only when the supplied applicability context requires it.",
   "Use fail only for a clear, material visual problem; use warning for a defensible improvement opportunity.",
   "Never use vague or demeaning labels such as ugly, amateur, dated, bad, cheap, or unprofessional.",
+  "For the residual-polish check, judge only subjective presentation issues such as awkward crops, visual fragments, or composition artifacts; measurable geometry remains deterministic.",
   "Write concise, specific evidence that another reviewer can verify from the cited screenshot."
 ].join(" ");
 
@@ -70,7 +85,7 @@ export const visualQualityOutputContract = {
   statuses: visualQualityResponseStatuses,
   confidenceRange: [0, 1],
   maximumCitationsPerCheck: 3,
-  citationFields: ["route", "viewport", "observation"],
+  citationFields: ["route", "viewport", "frame", "observation"],
   assessedChecksRequireCitations: true,
   citationsMustMatchRetainedScreenshots: true
 } as const;
@@ -81,7 +96,7 @@ export const visualQualityValidationPolicy = {
   unsupportedApplicabilityRejected: true,
   malformedOutputFailsSectionClosed: true,
   prohibitedLanguagePattern: String.raw`\b(?:ugly|amateur|dated|cheap|unprofessional|bad)\b`,
-  prohibitedAssertionPattern: String.raw`\b(?:lcp|cls|inp|seo|search ranking|wcag|screen reader|source code|html (?:error|validation)|javascript error|conversion rate|bounce rate|https|secure connection|(?:page|site) loads? (?:slowly|quickly|in|within)|form (?:works|submits|fails)|link (?:works|is broken)|button (?:works|does not work)|(?:customers|visitors|users) (?:will|would|are likely to|feel|think|prefer|trust|distrust))\b`
+  prohibitedAssertionPattern: String.raw`\b(?:lcp|cls|inp|seo|search ranking|wcag|screen reader|source code|html (?:error|validation)|javascript error|conversion rate|bounce rate|https|secure connection|font[- ]?size|contrast ratio|horizontal overflow|clipp(?:ed|ing)|overlap(?:ped|ping)?|hit[- ]?test|target size|(?:page|site) loads? (?:slowly|quickly|in|within)|form (?:works|submits|fails)|link (?:works|is broken)|button (?:works|does not work)|(?:customers|visitors|users) (?:will|would|are likely to|feel|think|prefer|trust|distrust))\b`
 } as const;
 
 export const visualQualityPromptIdentity = contentIdentity("visual-prompt", {
@@ -93,10 +108,11 @@ export const visualQualityPromptIdentity = contentIdentity("visual-prompt", {
 export const visualQualityMethodologyIdentity = contentIdentity("visual-quality", {
   groups: visualQualityGroupLabels,
   checks: visualQualityCheckDefinitions,
-  publicConfidenceThreshold: 0.9,
+  scoreAndPublicEligibility: "criterion-registry-calibration-identity-only",
   imageryApplicability: "prominent-imagery-required",
   verticalFitMinimumConfidence: 0.8,
-  responsiveEvidence: "desktop-and-mobile-required"
+  responsiveEvidence: "separate-native-desktop-and-mobile-frames-required",
+  routeSelectionIdentity: websiteHealthRouteSelectionIdentity
 });
 
 export function configuredVisualQualityModelId() {
@@ -111,11 +127,12 @@ export function currentVisualQualityEvaluatorIdentity(modelId = configuredVisual
     outputContract: visualQualityOutputContract,
     validationPolicy: visualQualityValidationPolicy,
     capturePolicy: {
-      maximumRoutes: 3,
-      assessedViewports: ["desktop", "mobile"],
-      homepageMeasurementViewports: ["desktop", "tablet", "mobile"],
-      contactSheetMaximumWidth: 1600,
-      contactSheetMaximumHeight: 4096,
+      routeSelectionIdentity: websiteHealthRouteSelectionIdentity,
+      semanticSlots: websiteHealthRouteSelectionPolicy.requestedSlots,
+      assessedViewports: websiteHealthRouteSelectionPolicy.viewportPolicy,
+      frames: websiteHealthRouteSelectionPolicy.framePolicy.positions,
+      fullPageOverviewUse: "rhythm-only",
+      malformedNativeFramePolicy: "reject",
       maximumImageBytes: 20_000_000
     }
   });
@@ -123,19 +140,7 @@ export function currentVisualQualityEvaluatorIdentity(modelId = configuredVisual
 
 export const visualQualityEvaluatorIdentity = currentVisualQualityEvaluatorIdentity();
 
-export const publiclyEligibleVisualQualityCheckIds: ReadonlySet<string> = new Set([
-  "visual.hierarchy.value_proposition",
-  "visual.hierarchy.primary_action",
-  "visual.hierarchy.scanability",
-  "visual.typography.readability",
-  "visual.typography.consistency",
-  "visual.composition.spacing_rhythm",
-  "visual.composition.alignment_balance",
-  "visual.imagery.relevance_quality",
-  "visual.imagery.presentation_consistency",
-  "visual.responsive.cross_viewport_consistency",
-  "visual.polish.visible_defects"
-]);
+export const publiclyEligibleVisualQualityCheckIds: ReadonlySet<string> = new Set();
 
 export function buildVisualQuality(input: {
   checks: VisualQualityCheckInput[];
@@ -235,6 +240,7 @@ export function visualEvidence(input: {
   observedAt: string;
   route?: string;
   viewport?: "desktop" | "tablet" | "mobile";
+  frame?: "top" | "middle" | "bottom" | "overview";
   artifactKey?: string;
   sourceUrl?: string;
 }): AssessmentEvidence {
@@ -245,6 +251,7 @@ export function visualEvidence(input: {
     observedAt: input.observedAt,
     route: input.route,
     viewport: input.viewport,
+    frame: input.frame,
     artifactKey: input.artifactKey,
     sourceUrl: input.sourceUrl
   };

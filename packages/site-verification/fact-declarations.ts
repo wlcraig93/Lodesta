@@ -1,7 +1,7 @@
 import { DomUtils, parseDocument } from "htmlparser2";
 import type { AnyNode, Element } from "domhandler";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
-import { gatedSensitiveClaims, scanSensitiveClaimText } from "@/lib/content-safety-scanners";
+import { scanSensitiveClaimText } from "@/lib/content-safety-scanners";
 import { isContinuousAvailabilityValue } from "@/packages/business-data/availability";
 import {
   factBindingSchema,
@@ -66,11 +66,14 @@ export class FactBindingValidator {
     }
 
     if (!routes.some((route) => route.hasBusinessNameMarker)) {
+      const officialLogoAvailable = input.buildInput.business.assets.some((asset) => asset.kind === "logo");
       findings.push(finding(
         "identity.rendered_mismatch",
-        "The rendered site does not use the compiler-backed BusinessName component; verify that visible branding matches canonical identity.",
+        officialLogoAvailable
+          ? "The rendered site uses no compiler-backed BusinessName text. An official logo is available, so browser verification must confirm that exact logo supplies the visible primary identity."
+          : "The rendered site does not use the compiler-backed BusinessName component; verify that visible branding matches canonical identity.",
         "/",
-        "warning"
+        officialLogoAvailable ? "info" : "warning"
       ));
     }
 
@@ -190,7 +193,8 @@ function visibleRoute(
 
 function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInput) {
   return factualMarkers(route.bodyText).flatMap((marker) => {
-    const supported = route.bindings.some((binding) => binding.span
+    const supported = naturallySupportedFactualMarker(marker.text, buildInput)
+      || route.bindings.some((binding) => binding.span
       && marker.start >= binding.span.start
       && marker.end <= binding.span.end
       && bindingSupportsText(binding, marker.text, buildInput));
@@ -204,13 +208,14 @@ function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInpu
 
 function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildInput) {
   return scanSensitiveClaimText(route.bodyText).flatMap((match) => {
-    const supported = route.bindings.some((binding) => binding.span
+    const supported = naturallySupportedSensitiveClaim(match, buildInput)
+      || route.bindings.some((binding) => binding.span
       && match.start >= binding.span.start
       && match.end <= binding.span.end
       && sensitiveBindingMatches(match, binding, buildInput));
     return supported ? [] : [finding(
       "fact.sensitive_unsupported",
-      `${match.label} ${JSON.stringify(match.matchedText)} appears outside a compatible canonical fact binding.`,
+      `${match.label} ${JSON.stringify(match.matchedText)} has neither matching canonical source evidence nor a compatible fact binding.`,
       route.path
     )];
   });
@@ -231,7 +236,13 @@ function metadataFindings(
   }));
   const sensitive = scanSensitiveClaimText(text).map((match) => ({ ...match, category: match.category as string | undefined }));
   return [...markers, ...sensitive].flatMap((match) => {
-    const supported = route.bindings.some((binding) => {
+    const canonicalNameSupported = Boolean(match.category)
+      && route.bindings.some((binding) => bindingIsExactCanonicalBusinessName(binding, buildInput))
+      && exactTextOccurrenceContains(text, buildInput.business.name, match.start, match.end);
+    const naturallySupported = match.category
+      ? naturallySupportedSensitiveClaim(match as ReturnType<typeof scanSensitiveClaimText>[number], buildInput)
+      : naturallySupportedFactualMarker(match.matchedText, buildInput);
+    const supported = canonicalNameSupported || naturallySupported || route.bindings.some((binding) => {
       if (!binding.span || !bindingSupportsText(binding, binding.text, buildInput)) return false;
       const occurrence = completeValueOccurrence(text, binding.text, match.start, match.end);
       if (!occurrence) return false;
@@ -248,6 +259,37 @@ function metadataFindings(
       route.path
     )];
   });
+}
+
+function naturallySupportedFactualMarker(text: string, buildInput: SitePublicBuildInput) {
+  return buildInput.publicFacts.some((fact) => (
+    fact.kind === "phone" || fact.kind === "email"
+  ) && factSupportsText(fact, text, true));
+}
+
+function naturallySupportedSensitiveClaim(
+  match: ReturnType<typeof scanSensitiveClaimText>[number],
+  buildInput: SitePublicBuildInput
+) {
+  if (match.severity !== "warning") return false;
+  return buildInput.publicFacts.some((fact) => (
+    fact.kind === "description" || fact.kind === "offering" || fact.kind === "proof"
+  ) && factDisplayValues(fact).some((value) => scanSensitiveClaimText(value).some((candidate) => (
+    candidate.category === match.category
+    && sameCompleteValue(candidate.matchedText, match.matchedText)
+  ))));
+}
+
+function exactTextOccurrenceContains(text: string, value: string, matchStart: number, matchEnd: number) {
+  const haystack = text.normalize("NFKC").toLocaleLowerCase("en-US");
+  const needle = value.normalize("NFKC").toLocaleLowerCase("en-US");
+  if (!needle) return false;
+  let index = haystack.indexOf(needle);
+  while (index >= 0) {
+    if (matchStart >= index && matchEnd <= index + needle.length) return true;
+    index = haystack.indexOf(needle, index + 1);
+  }
+  return false;
 }
 
 function completeValueOccurrence(text: string, value: string, matchStart: number, matchEnd: number) {
@@ -269,7 +311,8 @@ function sensitiveBindingMatches(
   binding: FactBinding,
   buildInput: SitePublicBuildInput
 ) {
-  if (!gatedSensitiveClaims(binding.text).some((candidate) => candidate.category === match.category)) return false;
+  if (bindingIsExactCanonicalBusinessName(binding, buildInput)) return true;
+  if (!scanSensitiveClaimText(binding.text).some((candidate) => candidate.category === match.category)) return false;
   if (!bindingSupportsText(binding, binding.text, buildInput, true)) return false;
   if (buildInput.publicFacts.some((fact) => fact.kind === "offering"
       && binding.sourceFactIds.includes(fact.id)
@@ -279,6 +322,15 @@ function sensitiveBindingMatches(
   const compatibleKinds = proofKindsFor(match);
   return buildInput.business.proof.some((proof) => compatibleKinds.has(proof.kind)
     && proof.sourceFactIds.some((factId) => binding.sourceFactIds.includes(factId)));
+}
+
+function bindingIsExactCanonicalBusinessName(binding: FactBinding, buildInput: SitePublicBuildInput) {
+  return sameCompleteValue(binding.text, buildInput.business.name)
+    && binding.sourceFactIds.some((factId) => buildInput.publicFacts.some((fact) => (
+      fact.id === factId
+      && fact.kind === "business_name"
+      && factSupportsText(fact, binding.text, true)
+    )));
 }
 
 function bindingSupportsText(binding: FactBinding, text: string, buildInput: SitePublicBuildInput, sensitive = false) {
@@ -387,7 +439,9 @@ function factualMarkers(text: string) {
     /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g,
     /\$\s?\d+(?:[,.]\d{2})?/g,
     /\b24\s*\/\s*7\b/gi,
-    /\b\d+(?:\.\d+)?\s*(?:stars?|years? in business|year warranty)\b/gi
+    /\b\d+(?:\.\d+)?\s*(?:stars?|years? in business|year warranty)\b/gi,
+    /\b(?:main shop|headquarters|flagship location|only location)\b/gi,
+    /\b\d{1,3}(?:\.\d+)?\s*°(?:\s*\d{1,2}(?:\.\d+)?\s*[′']?)?(?:\s*\d{1,2}(?:\.\d+)?\s*[″"]?)?\s*[NSEW]\b/gi
   ]) {
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;

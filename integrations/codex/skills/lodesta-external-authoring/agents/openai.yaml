@@ -1,4 +1,0 @@
-interface:
-  display_name: "Lodesta External Authoring"
-  short_description: "Build Lodesta prospect candidates through Codex"
-  default_prompt: "Use $lodesta-external-authoring to claim and complete the next prepared Lodesta prospect website."

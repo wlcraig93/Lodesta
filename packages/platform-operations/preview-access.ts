@@ -53,7 +53,10 @@ export function previewLink(grant: SitePreviewGrant, origin: string) {
     keyVersion: grant.keyVersion,
     secretVersion: grant.secretVersion
   });
-  return `${origin.replace(/\/$/, "")}/preview/${encodeURIComponent(grant.id)}#${secret}`;
+  // Keep the fragment-bearing secret on the canonical trailing-slash URL.
+  // Redirecting a fragment URL before the exchange shell loads is unreliable
+  // across embedded, mobile, and automated browsers.
+  return `${origin.replace(/\/$/, "")}/preview/${encodeURIComponent(grant.id)}/#${secret}`;
 }
 
 export function validatePreviewSecret(grant: SitePreviewGrant, providedSecret: string) {

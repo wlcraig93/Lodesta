@@ -9,17 +9,27 @@ import {
   platformSiteRecordSchema,
   siteAgentRunSchema,
   siteAgentRunEventSchema,
+  siteAgentContinuationHeadSchema,
+  siteAgentContinuationSegmentSchema,
+  siteAgentWorkspaceCheckpointSchema,
   siteAgentMessageSchema,
   siteAgentSessionSchema,
+  siteSandboxControlSchema,
+  siteSandboxDeploymentSchema,
   siteBuildArtifactSchema,
   siteIntentSchema,
   sitePublicBuildInputSchema,
   siteVersionSchema,
+  siteVersionRedirectSchema,
+  siteSourceCoverageReportSchema,
   siteWorkspaceRevisionSchema,
+  sourceSnapshotPageSchema,
+  sourceSnapshotResourceSchema,
   sourceSnapshotSchema,
   trustedRuntimePatchSchema,
   trustedRuntimeSeriesSchema,
-  verticalDemandEventSchema,
+  expectedSiteSandboxManifest,
+  sandboxImageDigest,
   type BusinessState,
   type AssetRevision,
   type ControlPlaneChangeRequest,
@@ -28,21 +38,28 @@ import {
   type PlatformSiteRecord,
   type SiteAgentRun,
   type SiteAgentRunEvent,
+  type SiteAgentContinuationHead,
+  type SiteAgentContinuationSegment,
+  type SiteAgentWorkspaceCheckpoint,
   type SiteAgentMessage,
   type SiteAgentPrincipal,
   type SiteAgentSession,
+  type SiteSandboxControl,
+  type SiteSandboxDeployment,
   type SiteBuildArtifact,
   type SiteIntent,
   type SitePublicBuildInput,
   type SiteVersion,
+  type SiteVersionRedirect,
+  type SiteSourceCoverageReport,
   type SiteWorkspaceRevision,
   type SourceSnapshot,
+  type SourceSnapshotPage,
+  type SourceSnapshotResource,
   type TrustedRuntimePatch,
-  type TrustedRuntimeSeries,
-  type VerticalDemandEvent
+  type TrustedRuntimeSeries
 } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
-import { siteIntentMatchesBuildContent } from "@/packages/business-data/public-projection";
 
 export type { SiteAgentMessage } from "@/packages/site-contracts";
 
@@ -79,12 +96,11 @@ export type SiteAgentRunAdminListItem = {
   status: SiteAgentRun["status"];
   stage: SiteAgentRun["stage"];
   kind: SiteAgentRun["kind"];
-  executionDriver: SiteAgentRun["executionDriver"];
   apiProvider?: SiteAgentRun["apiProvider"];
   modelId?: string;
   tokenCount?: number;
   costUsd?: number;
-  costSource?: Extract<SiteAgentRun["usage"], { kind: "model_reported" }>["costSource"];
+  costSource?: SiteAgentRun["usage"]["costSource"];
   durationMs: number;
   startedAt: string;
   completedAt?: string;
@@ -107,6 +123,74 @@ export type BootstrapSiteV1Input = {
   sourceSnapshots: SourceSnapshot[];
   assetRevisions: AssetRevision[];
   publicBuildInput: SitePublicBuildInput;
+  sourceMirrorReferences?: SourceMirrorReference[];
+};
+
+export type SourceMirrorReference = {
+  sourceSnapshotId: string;
+  retainedSourceSnapshotId: string;
+};
+
+export type BootstrapSiteAuthoringInput = BootstrapSiteV1Input & {
+  ownerUserId: string;
+  idempotencyKey: string;
+  requestHash: `sha256:${string}`;
+  session: SiteAgentSession;
+  run: SiteAgentRun;
+  message: SiteAgentMessage;
+};
+
+export type BootstrapSiteAuthoringResult = {
+  siteId: string;
+  sessionId: string;
+  runId: string;
+  existing: boolean;
+};
+
+export type ApplyPreparedAuthorityChangeInput = {
+  actorId: string;
+  request: ControlPlaneChangeRequest;
+  sourceSnapshot?: SourceSnapshot;
+  assetRevision?: AssetRevision;
+  businessState?: BusinessState;
+  siteIntent?: SiteIntent;
+  publicBuildInput?: SitePublicBuildInput;
+  session?: SiteAgentSession;
+  run?: SiteAgentRun;
+  message?: SiteAgentMessage;
+};
+
+export type ApplyPreparedProvisionalContextInput = {
+  expectedPublicBuildInputId: string;
+  expectedBusinessRevision: number;
+  sourceSnapshots: SourceSnapshot[];
+  sourceSnapshotResources: SourceSnapshotResource[];
+  sourceSnapshotPages: SourceSnapshotPage[];
+  assetRevisions: AssetRevision[];
+  businessState: BusinessState;
+  publicBuildInput: SitePublicBuildInput;
+  session: SiteAgentSession;
+  run: SiteAgentRun;
+};
+
+export type ApplyPreparedSourceRecaptureInput = {
+  expectedPublicBuildInputId: string;
+  snapshot: SourceSnapshot;
+  resources: SourceSnapshotResource[];
+  pages: SourceSnapshotPage[];
+  assetRevisions: AssetRevision[];
+  businessState: BusinessState;
+  publicBuildInput: SitePublicBuildInput;
+};
+
+export type ApplyManagedFormAuthoringChangeInput = {
+  expectedPublicBuildInputId: string;
+  expectedIntentRevision: number;
+  form: FormDefinition;
+  siteIntent: SiteIntent;
+  publicBuildInput: SitePublicBuildInput;
+  session: SiteAgentSession;
+  run: SiteAgentRun;
 };
 
 export type FinalizeVerifiedAuthoringInput = {
@@ -116,7 +200,8 @@ export type FinalizeVerifiedAuthoringInput = {
   version: SiteVersion;
   run: SiteAgentRun;
   session: SiteAgentSession;
-  outboxDocument: Record<string, unknown>;
+  sourceCoverage?: SiteSourceCoverageReport;
+  redirects?: SiteVersionRedirect[];
   previewGrantDocument?: Record<string, unknown>;
   mediaAdoption?: {
     expectedBusinessRevision: number;
@@ -124,19 +209,19 @@ export type FinalizeVerifiedAuthoringInput = {
     businessState: BusinessState;
     publicBuildInput: SitePublicBuildInput;
   };
-  external?: {
-    executionId: string;
-    batchItemId: string;
-    claimId: string;
-    leaseGeneration: number;
-    capabilityHash: `sha256:${string}`;
-    expectedStateRevision: number;
-    receiptIds?: string[];
-  };
 };
 
 export interface SitePlatformRepository {
   bootstrapSite(input: BootstrapSiteV1Input): Promise<void>;
+  bootstrapSiteAuthoring(input: BootstrapSiteAuthoringInput): Promise<BootstrapSiteAuthoringResult>;
+  applyPreparedAuthorityChange(
+    input: ApplyPreparedAuthorityChangeInput
+  ): Promise<{ request: ControlPlaneChangeRequest; run?: SiteAgentRun }>;
+  applyPreparedProvisionalContext(input: ApplyPreparedProvisionalContextInput): Promise<boolean>;
+  applyPreparedSourceRecapture(input: ApplyPreparedSourceRecaptureInput): Promise<boolean>;
+  applyManagedFormAuthoringChange(
+    input: ApplyManagedFormAuthoringChangeInput
+  ): Promise<{ run: SiteAgentRun; session: SiteAgentSession } | undefined>;
   createSite(site: PlatformSiteRecord): Promise<void>;
   getSite(siteId: string): Promise<PlatformSiteRecord | undefined>;
   getSiteBySlug(slug: string): Promise<PlatformSiteRecord | undefined>;
@@ -151,8 +236,33 @@ export interface SitePlatformRepository {
   disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   updateReportingTimezone(siteId: string, timezone: string): Promise<PlatformSiteRecord | undefined>;
   setCurrentPublicBuildInput(siteId: string, inputId: string): Promise<void>;
+  setCurrentPublicBuildInputIfAuthorityMatches(
+    siteId: string,
+    inputId: string,
+    ownerOperationalRevision: number,
+    ownerIntentRevision: number,
+    runId: string,
+    executionNumber: number
+  ): Promise<boolean>;
   saveSourceSnapshot(snapshot: SourceSnapshot): Promise<void>;
+  saveWebsiteSourceSnapshot(input: {
+    snapshot: SourceSnapshot;
+    resources: SourceSnapshotResource[];
+    pages: SourceSnapshotPage[];
+  }): Promise<void>;
+  saveWebsiteSourceSnapshotReference(input: {
+    snapshot: SourceSnapshot;
+    retainedSourceSnapshotId: string;
+  }): Promise<void>;
   getSourceSnapshot(id: string): Promise<SourceSnapshot | undefined>;
+  resolveRetainedSourceSnapshotId(sourceSnapshotId: string): Promise<string>;
+  findReusableWebsiteSourceSnapshot(sourceUrl: string, contentHash: string): Promise<string | undefined>;
+  saveSourceSnapshotResources(resources: SourceSnapshotResource[]): Promise<void>;
+  getSourceSnapshotResource(id: string, sourceSnapshotId?: string): Promise<SourceSnapshotResource | undefined>;
+  listSourceSnapshotResources(sourceSnapshotId: string): Promise<SourceSnapshotResource[]>;
+  saveSourceSnapshotPages(pages: SourceSnapshotPage[]): Promise<void>;
+  listSourceSnapshotPages(sourceSnapshotId: string, pageId?: string): Promise<SourceSnapshotPage[]>;
+  searchSourceSnapshotPages(input: { query: string; sourceIds: string[]; filters?: Record<string, unknown>; maxResults: number }): Promise<import("@/packages/site-contracts").SourceSearchResult[]>;
   saveAssetRevision(revision: AssetRevision): Promise<void>;
   getAssetRevision(id: string): Promise<AssetRevision | undefined>;
   getAssetRevisionByStorageKey(storageKey: string): Promise<AssetRevision | undefined>;
@@ -172,7 +282,11 @@ export interface SitePlatformRepository {
   getBuildArtifact(id: string): Promise<SiteBuildArtifact | undefined>;
   createSiteVersion(version: SiteVersion): Promise<void>;
   getSiteVersion(id: string): Promise<SiteVersion | undefined>;
+  getSiteVersionSourceCoverage(versionId: string): Promise<SiteSourceCoverageReport | undefined>;
+  listSiteVersionRedirects(versionId: string): Promise<SiteVersionRedirect[]>;
+  resolveSiteVersionRedirect(versionId: string, sourcePath: string): Promise<SiteVersionRedirect | undefined>;
   listSiteVersions(siteId: string): Promise<SiteVersion[]>;
+  listSiteVersionsBySiteIds(siteIds: string[]): Promise<SiteVersion[]>;
   markUnpublishedVersionsStale(siteId: string): Promise<void>;
   promoteSiteVersion(versionId: string, actorId: string): Promise<void>;
   saveRuntimePatch(patch: TrustedRuntimePatch): Promise<void>;
@@ -180,13 +294,57 @@ export interface SitePlatformRepository {
   getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatch | undefined>;
   saveRuntimeSeries(series: TrustedRuntimeSeries): Promise<void>;
   getRuntimeSeries(id: string): Promise<TrustedRuntimeSeries | undefined>;
+  saveSandboxDeployment(deployment: SiteSandboxDeployment): Promise<void>;
+  getSandboxDeployment(id: string): Promise<SiteSandboxDeployment | undefined>;
+  getSandboxDeploymentDrain(id: string): Promise<{ runningRunIds: string[]; liveSessionIds: string[] }>;
+  getSandboxControl(): Promise<SiteSandboxControl | undefined>;
+  saveSandboxControl(control: SiteSandboxControl): Promise<void>;
+  rollbackSandboxDeployment(input: { failedDeploymentId: string; previousDeploymentId: string; now: string }): Promise<string[]>;
+  getAgentWorkspaceCheckpoint(id: string): Promise<SiteAgentWorkspaceCheckpoint | undefined>;
+  checkpointAgentRunWorkspace(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+  }): Promise<SiteAgentRun>;
+  pauseAgentRunForInput(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+    session: SiteAgentSession;
+  }): Promise<{ run: SiteAgentRun; session: SiteAgentSession }>;
+  requeueCheckpointedAgentRun(run: SiteAgentRun): Promise<SiteAgentRun | undefined>;
+  cancelAgentRun(runId: string, completedAt: string): Promise<SiteAgentRun | undefined>;
   saveAgentSession(session: SiteAgentSession): Promise<void>;
+  saveAgentSessionForExecution(session: SiteAgentSession, runId: string, executionNumber: number): Promise<boolean>;
   getAgentSession(id: string): Promise<SiteAgentSession | undefined>;
   getActiveAgentSession(siteId: string, principal: SiteAgentPrincipal): Promise<SiteAgentSession | undefined>;
   listExpiredAgentSessions(expiredBefore: string, limit: number): Promise<SiteAgentSession[]>;
+  fenceExpiredAgentSession(input: {
+    session: SiteAgentSession;
+    run?: SiteAgentRun;
+    now: string;
+  }): Promise<SiteAgentSession | undefined>;
   enqueueAgentRun(run: SiteAgentRun): Promise<SiteAgentRun>;
-  saveAgentRun(run: SiteAgentRun): Promise<void>;
+  enqueueAgentRunWithMessage(input: {
+    run: SiteAgentRun;
+    message: SiteAgentMessage;
+  }): Promise<SiteAgentRun>;
+  saveAgentRun(run: SiteAgentRun): Promise<SiteAgentRun>;
+  touchAgentRunHeartbeat(runId: string, executionNumber: number, heartbeatAt: string): Promise<boolean>;
+  requeueInterruptedAgentRun(input: { runId: string; executionNumber: number; now: string; failureReason: string }): Promise<SiteAgentRun | undefined>;
   claimAgentRun(runId: string): Promise<SiteAgentRun | undefined>;
+  claimNextAgentRun(workerId: string): Promise<SiteAgentRun | undefined>;
+  getAgentContinuationHead(runId: string): Promise<SiteAgentContinuationHead | undefined>;
+  listAgentContinuationSegments(runId: string, generation: number): Promise<SiteAgentContinuationSegment[]>;
+  appendAgentContinuation(input: {
+    head: SiteAgentContinuationHead;
+    segment: SiteAgentContinuationSegment;
+  }): Promise<SiteAgentContinuationHead>;
+  resetAgentContinuation(head: SiteAgentContinuationHead): Promise<SiteAgentContinuationHead>;
+  closeAgentContinuation(input: {
+    runId: string;
+    executionNumber: number;
+    status: "awaiting_input" | "terminal";
+    purgeAfter?: string;
+  }): Promise<void>;
   getAgentRun(id: string): Promise<SiteAgentRun | undefined>;
   getAgentRunAdminRecord(id: string): Promise<SiteAgentRunAdminRecord | undefined>;
   listAgentRuns(sessionId: string): Promise<SiteAgentRun[]>;
@@ -209,13 +367,14 @@ export interface SitePlatformRepository {
   listControlPlaneChangeRequests(siteId: string): Promise<ControlPlaneChangeRequest[]>;
   saveOperatorQueueItem(item: OperatorQueueItem): Promise<void>;
   listOperatorQueue(status?: OperatorQueueItem["status"]): Promise<OperatorQueueItem[]>;
-  saveVerticalDemandEvent(event: VerticalDemandEvent): Promise<void>;
-  listVerticalDemandEvents(status?: VerticalDemandEvent["status"]): Promise<VerticalDemandEvent[]>;
 }
 
 type LocalState = {
   sites: Record<string, PlatformSiteRecord>;
   sourceSnapshots: Record<string, SourceSnapshot>;
+  sourceSnapshotResources: Record<string, SourceSnapshotResource>;
+  sourceSnapshotPages: Record<string, SourceSnapshotPage>;
+  sourceMirrorReferences: Record<string, string>;
   assetRevisions: Record<string, AssetRevision>;
   businessStates: Record<string, BusinessState>;
   intents: Record<string, SiteIntent>;
@@ -224,8 +383,13 @@ type LocalState = {
   workspaceRevisions: Record<string, SiteWorkspaceRevision>;
   artifacts: Record<string, SiteBuildArtifact>;
   versions: Record<string, SiteVersion>;
+  sourceCoverage: Record<string, SiteSourceCoverageReport>;
+  versionRedirects: Record<string, SiteVersionRedirect>;
   runtimePatches: Record<string, TrustedRuntimePatch>;
   runtimeSeries: Record<string, TrustedRuntimeSeries>;
+  sandboxDeployments: Record<string, SiteSandboxDeployment>;
+  sandboxControl?: SiteSandboxControl;
+  workspaceCheckpoints: Record<string, SiteAgentWorkspaceCheckpoint>;
   sessions: Record<string, SiteAgentSession>;
   runs: Record<string, SiteAgentRun>;
   runEvents: Record<string, SiteAgentRunEvent>;
@@ -233,13 +397,22 @@ type LocalState = {
   messages: Record<string, SiteAgentMessage>;
   controlPlaneChanges: Record<string, ControlPlaneChangeRequest>;
   operatorQueue: Record<string, OperatorQueueItem>;
-  verticalDemandEvents: Record<string, VerticalDemandEvent>;
   finalizations: Record<string, { versionId: string; runId: string }>;
+  bootstrapRequests: Record<string, {
+    ownerUserId: string;
+    idempotencyKey: string;
+    requestHash: `sha256:${string}`;
+    siteId: string;
+    sessionId: string;
+    runId: string;
+  }>;
+  continuationHeads: Record<string, SiteAgentContinuationHead>;
+  continuationSegments: Record<string, SiteAgentContinuationSegment>;
 };
 
 const emptyLocalState = (): LocalState => ({
-  sites: {}, sourceSnapshots: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {},
-  runtimePatches: {}, runtimeSeries: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, verticalDemandEvents: {}, finalizations: {}
+  sites: {}, sourceSnapshots: {}, sourceSnapshotResources: {}, sourceSnapshotPages: {}, sourceMirrorReferences: {}, assetRevisions: {}, businessStates: {}, intents: {}, forms: {}, buildInputs: {}, workspaceRevisions: {}, artifacts: {}, versions: {}, sourceCoverage: {}, versionRedirects: {},
+  runtimePatches: {}, runtimeSeries: {}, sandboxDeployments: {}, workspaceCheckpoints: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, finalizations: {}, bootstrapRequests: {}, continuationHeads: {}, continuationSegments: {}
 });
 
 export class LocalSitePlatformRepository implements SitePlatformRepository {
@@ -249,25 +422,376 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
 
   bootstrapSite(input: BootstrapSiteV1Input) {
     return this.write((store) => {
-      const site = platformSiteRecordSchema.parse(input.site);
-      const state = businessStateSchema.parse(input.state);
-      const intent = siteIntentSchema.parse(input.intent);
-      const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
-      const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotSchema.parse(snapshot));
-      const assetRevisions = input.assetRevisions.map((revision) => assetRevisionSchema.parse(revision));
-      const publicBuildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
-      if (site.id !== state.siteId || site.businessId !== state.businessId || intent.siteId !== site.id || forms.some((form) => form.siteId !== site.id)) {
-        throw new Error("Bootstrap authorities do not belong to the same site.");
+      insertLocalBootstrapSite(store, input);
+      for (const reference of input.sourceMirrorReferences ?? []) {
+        retainLocalSourceMirrorReference(store, reference);
       }
-      assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
-      if (store.sites[site.id] || Object.values(store.sites).some((item) => item.slug === site.slug)) throw new Error("Site ID or slug already exists.");
-      store.sites[site.id] = { ...site, currentPublicBuildInputId: publicBuildInput.id };
+    });
+  }
+
+  bootstrapSiteAuthoring(input: BootstrapSiteAuthoringInput) {
+    return this.write((store) => {
+      const requestKey = `${input.ownerUserId}:${input.idempotencyKey}`;
+      const existing = store.bootstrapRequests[requestKey];
+      if (existing) {
+        if (existing.requestHash !== input.requestHash) throw new Error("idempotency_key_conflict");
+        return { siteId: existing.siteId, sessionId: existing.sessionId, runId: existing.runId, existing: true };
+      }
+      const site = platformSiteRecordSchema.parse(input.site);
+      const session = siteAgentSessionSchema.parse(input.session);
+      const run = siteAgentRunSchema.parse(input.run);
+      const message = siteAgentMessageSchema.parse(input.message);
+      if (
+        site.ownerUserId !== input.ownerUserId
+        || session.siteId !== site.id
+        || session.principal.kind !== "owner"
+        || session.principal.id !== input.ownerUserId
+        || run.siteId !== site.id
+        || run.sessionId !== session.id
+        || message.sessionId !== session.id
+        || message.runId !== run.id
+      ) {
+        throw new Error("Authoring bootstrap documents do not share one owner, site, session, and run.");
+      }
+      insertLocalBootstrapSite(store, input);
+      store.sessions[session.id] = session;
+      store.runs[run.id] = run;
+      store.messages[message.id] = message;
+      store.bootstrapRequests[requestKey] = {
+        ownerUserId: input.ownerUserId,
+        idempotencyKey: input.idempotencyKey,
+        requestHash: input.requestHash,
+        siteId: site.id,
+        sessionId: session.id,
+        runId: run.id
+      };
+      return { siteId: site.id, sessionId: session.id, runId: run.id, existing: false };
+    });
+  }
+
+  applyPreparedAuthorityChange(input: ApplyPreparedAuthorityChangeInput) {
+    return this.write((store) => {
+      const request = controlPlaneChangeRequestSchema.parse(input.request);
+      const site = store.sites[request.siteId];
+      const currentState = site ? store.businessStates[site.businessId] : undefined;
+      const currentIntent = Object.values(store.intents).find((candidate) => candidate.siteId === request.siteId);
+      if (
+        !site
+        || !site.ownerUserId
+        || site.ownerUserId !== request.requestedBy
+        || request.businessId !== site.businessId
+        || request.status !== "applied"
+      ) {
+        throw new Error("stale_control_plane_change");
+      }
+      if (
+        !currentState
+        || !currentIntent
+        || currentState.revision !== request.expectedBusinessRevision
+        || currentIntent.revision !== request.expectedIntentRevision
+      ) {
+        throw new Error("stale_control_plane_change");
+      }
+      const lockedState = currentState;
+      const lockedIntent = currentIntent;
+      const sourceSnapshot = input.sourceSnapshot
+        ? sourceSnapshotSchema.parse(input.sourceSnapshot)
+        : undefined;
+      const assetRevision = input.assetRevision
+        ? assetRevisionSchema.parse(input.assetRevision)
+        : undefined;
+      const businessState = input.businessState
+        ? businessStateSchema.parse(input.businessState)
+        : undefined;
+      const siteIntent = input.siteIntent
+        ? siteIntentSchema.parse(input.siteIntent)
+        : undefined;
+      const publicBuildInput = input.publicBuildInput
+        ? sitePublicBuildInputSchema.parse(input.publicBuildInput)
+        : undefined;
+      const session = input.session ? siteAgentSessionSchema.parse(input.session) : undefined;
+      const run = input.run ? siteAgentRunSchema.parse(input.run) : undefined;
+      const message = input.message ? siteAgentMessageSchema.parse(input.message) : undefined;
+      if (
+        sourceSnapshot && sourceSnapshot.businessId !== site.businessId
+        || assetRevision && assetRevision.businessId !== site.businessId
+        || businessState && (
+          businessState.businessId !== site.businessId
+          || businessState.siteId !== site.id
+          || businessState.revision !== lockedState.revision + 1
+        )
+        || siteIntent && (
+          siteIntent.siteId !== site.id
+          || siteIntent.revision !== lockedIntent.revision + 1
+        )
+        || publicBuildInput && (
+          publicBuildInput.siteId !== site.id
+          || publicBuildInput.businessId !== site.businessId
+          || publicBuildInput.ownerOperationalRevision !== (businessState ?? lockedState).ownerOperationalRevision
+          || publicBuildInput.ownerIntentRevision !== (siteIntent ?? lockedIntent).ownerIntentRevision
+        )
+        || Boolean(run) !== Boolean(message)
+        || run && (
+          !session
+          || run.siteId !== site.id
+          || run.sessionId !== session.id
+          || (
+            request.targetAuthority === "workspace"
+              ? run.publicBuildInputId !== session.publicBuildInputId
+                || run.request.kind !== "owner_instruction"
+                || !run.request.messageIds.includes(message?.id ?? "")
+              : run.publicBuildInputId !== publicBuildInput?.id
+                || run.request.kind !== "authority_refresh"
+                || !run.request.changeRequestIds.includes(request.id)
+          )
+        )
+        || message && (
+          message.runId !== run?.id
+          || message.sessionId !== session?.id
+        )
+      ) {
+        throw new Error("prepared_authority_change_mismatch");
+      }
+      if (sourceSnapshot) {
+        const existing = store.sourceSnapshots[sourceSnapshot.id];
+        if (existing && existing.contentHash !== sourceSnapshot.contentHash) {
+          throw new Error("source_snapshot_conflict");
+        }
+        store.sourceSnapshots[sourceSnapshot.id] = sourceSnapshot;
+      }
+      if (assetRevision) {
+        const existing = store.assetRevisions[assetRevision.id];
+        if (existing && existing.contentHash !== assetRevision.contentHash) {
+          throw new Error("asset_revision_conflict");
+        }
+        store.assetRevisions[assetRevision.id] = assetRevision;
+      }
+      if (businessState) store.businessStates[businessState.businessId] = businessState;
+      if (siteIntent) store.intents[siteIntent.id] = siteIntent;
+      const ownerAuthorityAdvanced = Boolean(
+        businessState && businessState.ownerOperationalRevision > lockedState.ownerOperationalRevision
+        || siteIntent && siteIntent.ownerIntentRevision > lockedIntent.ownerIntentRevision
+      );
+      if (ownerAuthorityAdvanced) {
+        for (const version of Object.values(store.versions)) {
+          if (version.siteId !== site.id || version.status !== "candidate") continue;
+          store.versions[version.id] = siteVersionSchema.parse({
+            ...version,
+            status: "stale",
+            staleReason: "owner_authority_changed"
+          });
+        }
+      }
+      if (publicBuildInput) {
+        if (store.buildInputs[publicBuildInput.id]) throw new Error("public_build_input_conflict");
+        store.buildInputs[publicBuildInput.id] = publicBuildInput;
+        site.currentPublicBuildInputId = publicBuildInput.id;
+        site.updatedAt = new Date().toISOString();
+      }
+      if (session) store.sessions[session.id] = session;
+      if (run && message) {
+        if (store.runs[run.id] || store.messages[message.id]) throw new Error("site_agent_request_conflict");
+        store.runs[run.id] = run;
+        store.messages[message.id] = message;
+      }
+      store.controlPlaneChanges[request.id] = request;
+      return {
+        request: clone(request) as ControlPlaneChangeRequest,
+        run: run ? clone(run) as SiteAgentRun : undefined
+      };
+    });
+  }
+
+  applyPreparedProvisionalContext(input: ApplyPreparedProvisionalContextInput) {
+    return this.write((store) => {
+      const state = businessStateSchema.parse(input.businessState);
+      const buildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
+      const session = siteAgentSessionSchema.parse(input.session);
+      const run = siteAgentRunSchema.parse(input.run);
+      const site = store.sites[run.siteId];
+      const retainedRun = store.runs[run.id];
+      const currentState = store.businessStates[state.businessId];
+      const currentIntent = Object.values(store.intents).find((intent) => intent.siteId === run.siteId);
+      if (
+        !site
+        || !currentState
+        || !currentIntent
+        || site.currentPublicBuildInputId !== input.expectedPublicBuildInputId
+        || currentState.revision !== input.expectedBusinessRevision
+        || currentState.ownerOperationalRevision !== state.ownerOperationalRevision
+        || state.revision !== currentState.revision + 1
+        || buildInput.ownerOperationalRevision !== state.ownerOperationalRevision
+        || buildInput.ownerIntentRevision !== currentIntent.ownerIntentRevision
+        || buildInput.siteId !== site.id
+        || session.siteId !== site.id
+        || session.publicBuildInputId !== buildInput.id
+        || run.publicBuildInputId !== buildInput.id
+        || retainedRun?.status !== "running"
+        || retainedRun.executionNumber !== run.executionNumber
+      ) {
+        return false;
+      }
+      for (const snapshot of input.sourceSnapshots.map((item) => sourceSnapshotSchema.parse(item))) {
+        const existing = store.sourceSnapshots[snapshot.id];
+        if (existing && existing.contentHash !== snapshot.contentHash) throw new Error("source_snapshot_conflict");
+        store.sourceSnapshots[snapshot.id] = snapshot;
+      }
+      for (const resource of input.sourceSnapshotResources.map((item) => sourceSnapshotResourceSchema.parse(item))) {
+        if (!store.sourceSnapshots[resource.sourceSnapshotId]) throw new Error("source_snapshot_resource_parent_missing");
+        const existing = store.sourceSnapshotResources[resource.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(resource)) throw new Error("source_snapshot_resource_conflict");
+        store.sourceSnapshotResources[resource.id] = resource;
+      }
+      for (const page of input.sourceSnapshotPages.map((item) => sourceSnapshotPageSchema.parse(item))) {
+        if (!store.sourceSnapshots[page.sourceSnapshotId]) throw new Error("source_snapshot_page_parent_missing");
+        if (!store.sourceSnapshotResources[page.resourceId]) throw new Error("source_snapshot_page_resource_missing");
+        if (page.renderedResourceId && !store.sourceSnapshotResources[page.renderedResourceId]) throw new Error("source_snapshot_page_rendered_resource_missing");
+        const existing = store.sourceSnapshotPages[page.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(page)) throw new Error("source_snapshot_page_conflict");
+        store.sourceSnapshotPages[page.id] = page;
+      }
+      for (const asset of input.assetRevisions.map((item) => assetRevisionSchema.parse(item))) {
+        const existing = store.assetRevisions[asset.id];
+        if (existing && existing.contentHash !== asset.contentHash) throw new Error("asset_revision_conflict");
+        store.assetRevisions[asset.id] = asset;
+      }
       store.businessStates[state.businessId] = state;
+      store.buildInputs[buildInput.id] = buildInput;
+      site.currentPublicBuildInputId = buildInput.id;
+      site.updatedAt = new Date().toISOString();
+      store.sessions[session.id] = session;
+      store.runs[run.id] = run;
+      return true;
+    });
+  }
+
+  applyPreparedSourceRecapture(input: ApplyPreparedSourceRecaptureInput) {
+    return this.write((store) => {
+      const snapshot = sourceSnapshotSchema.parse(input.snapshot);
+      const resources = input.resources.map((resource) => sourceSnapshotResourceSchema.parse(resource));
+      const pages = input.pages.map((page) => sourceSnapshotPageSchema.parse(page));
+      const assets = input.assetRevisions.map((asset) => assetRevisionSchema.parse(asset));
+      const nextState = businessStateSchema.parse(input.businessState);
+      const buildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
+      const site = store.sites[buildInput.siteId];
+      const state = site ? store.businessStates[site.businessId] : undefined;
+      const intent = Object.values(store.intents).find((candidate) => candidate.siteId === buildInput.siteId);
+      if (!site || !state || !intent || site.currentPublicBuildInputId !== input.expectedPublicBuildInputId) return false;
+      if (Object.values(store.runs).some((run) => run.siteId === site.id && ["queued", "running", "needs_input"].includes(run.status))) return false;
+      if (Object.values(store.sessions).some((session) => session.siteId === site.id && Boolean(session.sandboxId))) return false;
+      if (buildInput.businessId !== site.businessId
+        || buildInput.ownerOperationalRevision !== state.ownerOperationalRevision
+        || buildInput.ownerIntentRevision !== intent.ownerIntentRevision
+        || nextState.businessId !== state.businessId
+        || nextState.siteId !== site.id
+        || nextState.ownerOperationalRevision !== state.ownerOperationalRevision
+        || (nextState.revision !== state.revision && nextState.revision !== state.revision + 1)
+        || !buildInput.sourceSnapshotIds.includes(snapshot.id)) return false;
+      const existingSnapshot = store.sourceSnapshots[snapshot.id];
+      if (existingSnapshot && JSON.stringify(existingSnapshot) !== JSON.stringify(snapshot)) throw new Error("source_snapshot_conflict");
+      store.sourceSnapshots[snapshot.id] = snapshot;
+      for (const resource of resources) {
+        if (resource.sourceSnapshotId !== snapshot.id) throw new Error("source_snapshot_resource_parent_mismatch");
+        if (store.sourceMirrorReferences[resource.sourceSnapshotId]) throw new Error("source_snapshot_reference_cannot_own_mirror_rows");
+        if (store.sourceMirrorReferences[resource.sourceSnapshotId]) throw new Error("source_snapshot_reference_cannot_own_mirror_rows");
+        const existing = store.sourceSnapshotResources[resource.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(resource)) throw new Error("source_snapshot_resource_conflict");
+        store.sourceSnapshotResources[resource.id] = resource;
+      }
+      for (const page of pages) {
+        if (page.sourceSnapshotId !== snapshot.id || !store.sourceSnapshotResources[page.resourceId]) throw new Error("source_snapshot_page_parent_mismatch");
+        if (page.renderedResourceId && !store.sourceSnapshotResources[page.renderedResourceId]) throw new Error("source_snapshot_page_rendered_resource_missing");
+        const existing = store.sourceSnapshotPages[page.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(page)) throw new Error("source_snapshot_page_conflict");
+        store.sourceSnapshotPages[page.id] = page;
+      }
+      for (const asset of assets) {
+        if (asset.businessId !== site.businessId) throw new Error("source_recapture_asset_scope_mismatch");
+        const existing = store.assetRevisions[asset.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(asset)) throw new Error("asset_revision_conflict");
+        store.assetRevisions[asset.id] = asset;
+      }
+      store.businessStates[nextState.businessId] = nextState;
+      const existingBuildInput = store.buildInputs[buildInput.id];
+      if (existingBuildInput && JSON.stringify(existingBuildInput) !== JSON.stringify(buildInput)) throw new Error("public_build_input_conflict");
+      store.buildInputs[buildInput.id] = buildInput;
+      site.currentPublicBuildInputId = buildInput.id;
+      site.updatedAt = buildInput.createdAt;
+      for (const version of Object.values(store.versions)) {
+        if (version.siteId === site.id && version.status === "candidate") {
+          version.status = "stale";
+          version.staleReason = "managed_dependency_changed";
+        }
+      }
+      for (const session of Object.values(store.sessions)) {
+        if (session.siteId !== site.id || session.sandboxId || session.status === "closed" || session.status === "failed") continue;
+        session.status = "closed";
+        session.leaseExpiresAt = buildInput.createdAt;
+        session.updatedAt = buildInput.createdAt;
+      }
+      return true;
+    });
+  }
+
+  applyManagedFormAuthoringChange(input: ApplyManagedFormAuthoringChangeInput) {
+    return this.write((store) => {
+      const form = formDefinitionSchema.parse(input.form);
+      const intent = siteIntentSchema.parse(input.siteIntent);
+      const buildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
+      const session = siteAgentSessionSchema.parse(input.session);
+      const run = siteAgentRunSchema.parse(input.run);
+      const retainedRun = store.runs[run.id];
+      const site = store.sites[run.siteId];
+      const retainedIntent = Object.values(store.intents).find((candidate) => candidate.siteId === run.siteId);
+      const state = site ? store.businessStates[site.businessId] : undefined;
+      if (
+        !site
+        || !state
+        || !retainedIntent
+        || !retainedRun
+        || retainedRun.status !== "running"
+        || retainedRun.executionNumber !== run.executionNumber
+        || retainedRun.sessionId !== session.id
+        || retainedRun.publicBuildInputId !== input.expectedPublicBuildInputId
+        || site.currentPublicBuildInputId !== input.expectedPublicBuildInputId
+        || retainedIntent.revision !== input.expectedIntentRevision
+        || intent.id !== retainedIntent.id
+        || intent.revision !== retainedIntent.revision + 1
+        || intent.ownerIntentRevision !== retainedIntent.ownerIntentRevision + 1
+        || form.siteId !== site.id
+        || intent.siteId !== site.id
+        || buildInput.siteId !== site.id
+        || buildInput.businessId !== site.businessId
+        || buildInput.ownerOperationalRevision !== state.ownerOperationalRevision
+        || buildInput.ownerIntentRevision !== intent.ownerIntentRevision
+        || !buildInput.forms.some((candidate) => candidate.id === form.id)
+        || session.siteId !== site.id
+        || session.publicBuildInputId !== buildInput.id
+        || run.publicBuildInputId !== buildInput.id
+      ) {
+        return undefined;
+      }
+      const retainedForm = store.forms[form.id];
+      if (retainedForm && JSON.stringify(retainedForm) !== JSON.stringify(form)) {
+        throw new Error("form_definition_conflict");
+      }
+      if (store.buildInputs[buildInput.id]) throw new Error("public_build_input_conflict");
+      store.forms[form.id] = form;
       store.intents[intent.id] = intent;
-      for (const form of forms) store.forms[form.id] = form;
-      for (const snapshot of sourceSnapshots) store.sourceSnapshots[snapshot.id] = snapshot;
-      for (const revision of assetRevisions) store.assetRevisions[revision.id] = revision;
-      store.buildInputs[publicBuildInput.id] = publicBuildInput;
+      store.buildInputs[buildInput.id] = buildInput;
+      site.currentPublicBuildInputId = buildInput.id;
+      site.updatedAt = intent.updatedAt;
+      for (const version of Object.values(store.versions)) {
+        if (version.siteId !== site.id || version.status !== "candidate") continue;
+        store.versions[version.id] = siteVersionSchema.parse({
+          ...version,
+          status: "stale",
+          staleReason: "owner_authority_changed"
+        });
+      }
+      store.sessions[session.id] = session;
+      store.runs[run.id] = run;
+      return { run: clone(run) as SiteAgentRun, session: clone(session) as SiteAgentSession };
     });
   }
 
@@ -315,9 +839,36 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     await this.write((store) => {
       const site = store.sites[siteId];
       if (!site || site.ownerUserId !== ownerUserId) return;
+      const disposedAt = new Date().toISOString();
+      for (const run of Object.values(store.runs)) {
+        if (run.siteId !== siteId || !["queued", "running", "needs_input"].includes(run.status)) continue;
+        store.runs[run.id] = siteAgentRunSchema.parse({
+          ...run,
+          status: "cancelled",
+          completedAt: disposedAt,
+          heartbeatAt: disposedAt
+        });
+      }
+      for (const event of Object.values(store.runEvents)) {
+        if (event.status !== "running" || store.runs[event.runId]?.siteId !== siteId) continue;
+        store.runEvents[event.id] = siteAgentRunEventSchema.parse({
+          ...event,
+          status: "cancelled",
+          completedAt: disposedAt
+        });
+      }
+      for (const session of Object.values(store.sessions)) {
+        if (session.siteId !== siteId || !["active", "checkpointed", "rotating"].includes(session.status)) continue;
+        store.sessions[session.id] = siteAgentSessionSchema.parse({
+          ...session,
+          leaseExpiresAt: disposedAt,
+          rotateAt: disposedAt,
+          updatedAt: disposedAt
+        });
+      }
       site.status = "paused";
       site.ownerUserId = undefined;
-      site.updatedAt = new Date().toISOString();
+      site.updatedAt = disposedAt;
       result = clone(site) as PlatformSiteRecord;
     });
     return result;
@@ -341,9 +892,201 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       site.updatedAt = new Date().toISOString();
     });
   }
+  async setCurrentPublicBuildInputIfAuthorityMatches(
+    siteId: string,
+    inputId: string,
+    ownerOperationalRevision: number,
+    ownerIntentRevision: number,
+    runId: string,
+    executionNumber: number
+  ) {
+    let updated = false;
+    await this.write((store) => {
+      const site = store.sites[siteId];
+      const input = store.buildInputs[inputId];
+      const state = site ? store.businessStates[site.businessId] : undefined;
+      const intent = Object.values(store.intents).find((candidate) => candidate.siteId === siteId);
+      const run = store.runs[runId];
+      if (
+        !site
+        || !input
+        || !run
+        || run.siteId !== siteId
+        || run.status !== "running"
+        || run.executionNumber !== executionNumber
+        || input.siteId !== siteId
+        || state?.ownerOperationalRevision !== ownerOperationalRevision
+        || intent?.ownerIntentRevision !== ownerIntentRevision
+        || input.ownerOperationalRevision !== ownerOperationalRevision
+        || input.ownerIntentRevision !== ownerIntentRevision
+      ) {
+        return;
+      }
+      site.currentPublicBuildInputId = inputId;
+      site.updatedAt = new Date().toISOString();
+      updated = true;
+    });
+    return updated;
+  }
 
   saveSourceSnapshot(snapshot: SourceSnapshot) { return this.insertImmutable("sourceSnapshots", sourceSnapshotSchema.parse(snapshot)); }
+  saveWebsiteSourceSnapshot(input: { snapshot: SourceSnapshot; resources: SourceSnapshotResource[]; pages: SourceSnapshotPage[] }) {
+    return this.write((store) => {
+      const snapshot = sourceSnapshotSchema.parse(input.snapshot);
+      const resources = input.resources.map((resource) => sourceSnapshotResourceSchema.parse(resource));
+      const pages = input.pages.map((page) => sourceSnapshotPageSchema.parse(page));
+      const reusable = Object.values(store.sourceSnapshots).find((candidate) =>
+        candidate.id !== snapshot.id
+        && candidate.sourceType === "website"
+        && candidate.sourceUrl === snapshot.sourceUrl
+        && candidate.contentHash === snapshot.contentHash
+        && !store.sourceMirrorReferences[candidate.id]
+        && Object.values(store.sourceSnapshotPages).some((page) => page.sourceSnapshotId === candidate.id)
+      );
+      if (reusable) {
+        const existing = store.sourceSnapshots[snapshot.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(snapshot)) throw new Error("source_snapshot_conflict");
+        store.sourceSnapshots[snapshot.id] = snapshot;
+        retainLocalSourceMirrorReference(store, {
+          sourceSnapshotId: snapshot.id,
+          retainedSourceSnapshotId: reusable.id
+        });
+        return;
+      }
+      const existingSnapshot = store.sourceSnapshots[snapshot.id];
+      if (existingSnapshot && existingSnapshot.contentHash !== snapshot.contentHash) throw new Error("source_snapshot_conflict");
+      store.sourceSnapshots[snapshot.id] = snapshot;
+      for (const resource of resources) {
+        if (resource.sourceSnapshotId !== snapshot.id) throw new Error("source_snapshot_resource_parent_mismatch");
+        const existing = store.sourceSnapshotResources[resource.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(resource)) throw new Error("source_snapshot_resource_conflict");
+        store.sourceSnapshotResources[resource.id] = resource;
+      }
+      for (const page of pages) {
+        if (page.sourceSnapshotId !== snapshot.id) throw new Error("source_snapshot_page_parent_mismatch");
+        if (store.sourceMirrorReferences[page.sourceSnapshotId]) throw new Error("source_snapshot_reference_cannot_own_mirror_rows");
+        if (!store.sourceSnapshotResources[page.resourceId]) throw new Error("source_snapshot_page_resource_missing");
+        if (page.renderedResourceId && !store.sourceSnapshotResources[page.renderedResourceId]) throw new Error("source_snapshot_page_rendered_resource_missing");
+        const existing = store.sourceSnapshotPages[page.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(page)) throw new Error("source_snapshot_page_conflict");
+        store.sourceSnapshotPages[page.id] = page;
+      }
+    });
+  }
+  saveWebsiteSourceSnapshotReference(input: { snapshot: SourceSnapshot; retainedSourceSnapshotId: string }) {
+    return this.write((store) => {
+      const snapshot = sourceSnapshotSchema.parse(input.snapshot);
+      const existing = store.sourceSnapshots[snapshot.id];
+      if (existing && JSON.stringify(existing) !== JSON.stringify(snapshot)) throw new Error("source_snapshot_conflict");
+      store.sourceSnapshots[snapshot.id] = snapshot;
+      retainLocalSourceMirrorReference(store, {
+        sourceSnapshotId: snapshot.id,
+        retainedSourceSnapshotId: input.retainedSourceSnapshotId
+      });
+    });
+  }
   async getSourceSnapshot(id: string) { return clone((await this.read()).sourceSnapshots[id]); }
+  async resolveRetainedSourceSnapshotId(sourceSnapshotId: string) {
+    const store = await this.read();
+    return store.sourceMirrorReferences[sourceSnapshotId] ?? sourceSnapshotId;
+  }
+  async findReusableWebsiteSourceSnapshot(sourceUrl: string, contentHash: string) {
+    const store = await this.read();
+    return Object.values(store.sourceSnapshots).find((candidate) =>
+      candidate.sourceType === "website"
+      && candidate.sourceUrl === sourceUrl
+      && candidate.contentHash === contentHash
+      && !store.sourceMirrorReferences[candidate.id]
+      && Object.values(store.sourceSnapshotPages).some((page) => page.sourceSnapshotId === candidate.id)
+    )?.id;
+  }
+  saveSourceSnapshotResources(resources: SourceSnapshotResource[]) {
+    return this.write((store) => {
+      for (const input of resources) {
+        const resource = sourceSnapshotResourceSchema.parse(input);
+        if (!store.sourceSnapshots[resource.sourceSnapshotId]) throw new Error("source_snapshot_resource_parent_missing");
+        if (store.sourceMirrorReferences[resource.sourceSnapshotId]) throw new Error("source_snapshot_reference_cannot_own_mirror_rows");
+        const existing = store.sourceSnapshotResources[resource.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(resource)) throw new Error("source_snapshot_resource_conflict");
+        store.sourceSnapshotResources[resource.id] = resource;
+      }
+    });
+  }
+  async getSourceSnapshotResource(id: string, sourceSnapshotId?: string) {
+    const store = await this.read();
+    const resource = store.sourceSnapshotResources[id];
+    if (!resource || !sourceSnapshotId) return clone(resource);
+    const retainedSourceSnapshotId = store.sourceMirrorReferences[sourceSnapshotId] ?? sourceSnapshotId;
+    return resource.sourceSnapshotId === retainedSourceSnapshotId
+      ? sourceSnapshotResourceSchema.parse({ ...clone(resource), sourceSnapshotId })
+      : undefined;
+  }
+  async listSourceSnapshotResources(sourceSnapshotId: string) {
+    const store = await this.read();
+    const retainedSourceSnapshotId = store.sourceMirrorReferences[sourceSnapshotId] ?? sourceSnapshotId;
+    return Object.values(store.sourceSnapshotResources)
+      .filter((object) => object.sourceSnapshotId === retainedSourceSnapshotId)
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((object) => sourceSnapshotResourceSchema.parse({ ...clone(object), sourceSnapshotId }));
+  }
+  saveSourceSnapshotPages(pages: SourceSnapshotPage[]) {
+    return this.write((store) => {
+      for (const input of pages) {
+        const page = sourceSnapshotPageSchema.parse(input);
+        if (!store.sourceSnapshots[page.sourceSnapshotId]) throw new Error("source_snapshot_page_parent_missing");
+        if (store.sourceMirrorReferences[page.sourceSnapshotId]) throw new Error("source_snapshot_reference_cannot_own_mirror_rows");
+        if (!store.sourceSnapshotResources[page.resourceId]) throw new Error("source_snapshot_page_resource_missing");
+        if (page.renderedResourceId && !store.sourceSnapshotResources[page.renderedResourceId]) throw new Error("source_snapshot_page_rendered_resource_missing");
+        const existing = store.sourceSnapshotPages[page.id];
+        if (existing && JSON.stringify(existing) !== JSON.stringify(page)) throw new Error("source_snapshot_page_conflict");
+        store.sourceSnapshotPages[page.id] = page;
+      }
+    });
+  }
+  async listSourceSnapshotPages(sourceSnapshotId: string, pageId?: string) {
+    const store = await this.read();
+    const retainedSourceSnapshotId = store.sourceMirrorReferences[sourceSnapshotId] ?? sourceSnapshotId;
+    return Object.values(store.sourceSnapshotPages)
+      .filter((page) => page.sourceSnapshotId === retainedSourceSnapshotId && (!pageId || page.id === pageId))
+      .sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id))
+      .map((page) => sourceSnapshotPageSchema.parse({ ...clone(page), sourceSnapshotId }));
+  }
+  async searchSourceSnapshotPages(input: { query: string; sourceIds: string[]; filters?: Record<string, unknown>; maxResults: number }) {
+    const terms = input.query.toLocaleLowerCase().split(/\W+/).filter((term) => term.length > 1);
+    const store = await this.read();
+    const requestedByRetained = new Map<string, string[]>();
+    for (const sourceId of input.sourceIds) {
+      const retainedId = store.sourceMirrorReferences[sourceId] ?? sourceId;
+      requestedByRetained.set(retainedId, [...(requestedByRetained.get(retainedId) ?? []), sourceId]);
+    }
+    const paths = Array.isArray(input.filters?.paths) ? input.filters.paths.map(String) : [];
+    const statuses = Array.isArray(input.filters?.statuses) ? new Set(input.filters.statuses.map(Number)) : undefined;
+    const indexability = Array.isArray(input.filters?.indexability) ? new Set(input.filters.indexability.map(String)) : undefined;
+    const sitemapOnly = input.filters?.sitemapOnly === true;
+    return Object.values(store.sourceSnapshotPages)
+      .filter((page) => (!input.sourceIds.length || requestedByRetained.has(page.sourceSnapshotId))
+        && (!paths.length || paths.some((path) => page.path.startsWith(path)))
+        && (!statuses?.size || page.status !== undefined && statuses.has(page.status))
+        && (!indexability?.size || indexability.has(page.indexability))
+        && (!sitemapOnly || Boolean(page.sitemap)))
+      .map((page) => ({
+        page,
+        lexical: terms.reduce((score, term) => score + occurrences(`${page.title ?? ""} ${page.extractedText}`.toLocaleLowerCase(), term), 0)
+      }))
+      .filter((candidate) => candidate.lexical > 0)
+      .sort((a, b) => b.lexical - a.lexical || a.page.id.localeCompare(b.page.id))
+      .slice(0, Math.max(1, Math.min(input.maxResults, 50)))
+      .flatMap(({ page, lexical }) => (requestedByRetained.get(page.sourceSnapshotId) ?? [page.sourceSnapshotId]).map((sourceId) => ({
+        sourceId,
+        pageId: page.id,
+        url: page.finalUrl ?? page.requestedUrl,
+        path: page.path,
+        title: page.title,
+        score: lexical,
+        excerpt: page.extractedText.slice(0, 2_000),
+        contentHash: page.textContentHash
+      })));
+  }
   saveAssetRevision(revision: AssetRevision) { return this.insertImmutable("assetRevisions", assetRevisionSchema.parse(revision)); }
   async getAssetRevision(id: string) { return clone((await this.read()).assetRevisions[id]); }
   async getAssetRevisionByStorageKey(storageKey: string) { return clone(Object.values((await this.read()).assetRevisions).find((item) => item.storageKey === storageKey)); }
@@ -412,7 +1155,16 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         return { version: clone(version) as SiteVersion, run: clone(priorRun) as SiteAgentRun };
       }
       if (artifact.qa.hardGate !== "passed") throw new Error("Only hard-gate-passed builds can be committed.");
-      if (artifact.siteId !== revision.siteId || artifact.workspaceRevisionId !== revision.id) {
+      if (
+        artifact.siteId !== revision.siteId
+        || artifact.workspaceRevisionId !== revision.id
+        || artifact.publicBuildInputId !== revision.publicBuildInputId
+        || requestedVersion.publicBuildInputId !== revision.publicBuildInputId
+        || artifact.ownerOperationalRevision !== revision.ownerOperationalRevision
+        || artifact.ownerIntentRevision !== revision.ownerIntentRevision
+        || requestedVersion.ownerOperationalRevision !== revision.ownerOperationalRevision
+        || requestedVersion.ownerIntentRevision !== revision.ownerIntentRevision
+      ) {
         throw new Error("Verified artifact and workspace revision do not match.");
       }
       if (store.workspaceRevisions[revision.id] || store.artifacts[artifact.id]) throw new Error("Verified build records are immutable.");
@@ -422,6 +1174,15 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       if (Object.values(store.artifacts).some((item) => item.artifactHash === artifact.artifactHash)) throw new Error("Artifact content already exists.");
       const site = store.sites[revision.siteId];
       if (!site) throw new Error("Site not found.");
+      const retainedRun = store.runs[run.id];
+      if (
+        !site.ownerUserId
+        || site.status === "paused"
+        || retainedRun?.status !== "running"
+        || retainedRun.executionNumber !== run.executionNumber
+      ) {
+        throw new Error("site_agent_run_not_active");
+      }
       if ((site.currentWorkspaceRevisionId ?? undefined) !== (revision.parentRevisionId ?? undefined)) {
         throw new Error("stale_parent_revision");
       }
@@ -431,7 +1192,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
           !currentState ||
           currentState.revision !== adoption.expectedBusinessRevision ||
           adoption.businessState.revision !== adoption.expectedBusinessRevision + 1 ||
-          adoption.publicBuildInput.businessStateRevision !== adoption.businessState.revision ||
+          adoption.publicBuildInput.ownerOperationalRevision !== adoption.businessState.ownerOperationalRevision ||
           adoption.publicBuildInput.id !== artifact.publicBuildInputId ||
           requestedVersion.publicBuildInputId !== adoption.publicBuildInput.id
         ) {
@@ -445,20 +1206,36 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         store.buildInputs[adoption.publicBuildInput.id] = adoption.publicBuildInput;
         for (const candidate of Object.values(store.versions)) {
           if (candidate.siteId === site.id && candidate.status === "candidate") {
-            candidate.status = "stale";
-            candidate.staleReason = "stale_input";
+            candidate.status = "superseded";
+            candidate.staleReason = undefined;
           }
         }
         site.currentPublicBuildInputId = adoption.publicBuildInput.id;
       }
       store.workspaceRevisions[revision.id] = revision;
       store.artifacts[artifact.id] = artifact;
+      const currentState = store.businessStates[site.businessId];
+      const currentIntent = Object.values(store.intents).find((item) => item.siteId === site.id);
+      const authorityCurrent = currentState?.ownerOperationalRevision === requestedVersion.ownerOperationalRevision
+        && currentIntent?.ownerIntentRevision === requestedVersion.ownerIntentRevision;
       const version = siteVersionSchema.parse({
         ...requestedVersion,
+        status: authorityCurrent ? "candidate" : "stale",
+        staleReason: authorityCurrent ? undefined : "owner_authority_changed",
         number: Math.max(0, ...Object.values(store.versions).filter((item) => item.siteId === site.id).map((item) => item.number)) + 1
       });
       if (store.versions[version.id]) throw new Error("Site versions are immutable.");
+      if (authorityCurrent) {
+        for (const candidate of Object.values(store.versions)) {
+          if (candidate.siteId === site.id && candidate.status === "candidate") {
+            candidate.status = "superseded";
+            candidate.staleReason = undefined;
+          }
+        }
+      }
       store.versions[version.id] = version;
+      if (input.sourceCoverage) store.sourceCoverage[version.id] = siteSourceCoverageReportSchema.parse(input.sourceCoverage);
+      for (const redirect of input.redirects ?? []) store.versionRedirects[redirect.id] = siteVersionRedirectSchema.parse(redirect);
       store.runs[run.id] = run;
       store.sessions[session.id] = session;
       store.finalizations[input.finalizationKey] = { versionId: version.id, runId: run.id };
@@ -472,29 +1249,61 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async getBuildArtifact(id: string) { return clone((await this.read()).artifacts[id]); }
   createSiteVersion(version: SiteVersion) { return this.insertImmutable("versions", siteVersionSchema.parse(version)); }
   async getSiteVersion(id: string) { return clone((await this.read()).versions[id]); }
+  async getSiteVersionSourceCoverage(versionId: string) { return clone((await this.read()).sourceCoverage[versionId]); }
+  async listSiteVersionRedirects(versionId: string) {
+    return Object.values((await this.read()).versionRedirects).filter((redirect) => redirect.versionId === versionId).sort((a, b) => a.sourcePath.localeCompare(b.sourcePath)).map((redirect) => clone(redirect) as SiteVersionRedirect);
+  }
+  async resolveSiteVersionRedirect(versionId: string, sourcePath: string) {
+    return clone(Object.values((await this.read()).versionRedirects).find((redirect) => redirect.versionId === versionId && redirect.sourcePath === sourcePath));
+  }
   async listSiteVersions(siteId: string) {
     return Object.values((await this.read()).versions).filter((item) => item.siteId === siteId).sort((a, b) => b.number - a.number).map((item) => clone(item) as SiteVersion);
+  }
+  async listSiteVersionsBySiteIds(siteIds: string[]) {
+    const ids = new Set(siteIds);
+    if (!ids.size) return [];
+    return Object.values((await this.read()).versions)
+      .filter((item) => ids.has(item.siteId))
+      .sort((a, b) => b.number - a.number)
+      .map((item) => clone(item) as SiteVersion);
   }
   markUnpublishedVersionsStale(siteId: string) {
     return this.write((store) => {
       for (const version of Object.values(store.versions)) {
         if (version.siteId !== siteId || version.status !== "candidate") continue;
         version.status = "stale";
-        version.staleReason = "stale_input";
+        version.staleReason = "owner_authority_changed";
       }
     });
   }
   promoteSiteVersion(versionId: string, actorId: string) {
     return this.write((store) => {
       const target = store.versions[versionId];
-      if (!target || !["candidate", "superseded"].includes(target.status)) throw new Error("Version is not promotable.");
+      if (!target || target.status !== "candidate") throw new Error("Version is not promotable.");
+      const site = store.sites[target.siteId];
+      if (!site || site.ownerUserId !== actorId) throw new Error("site_owner_required");
       const artifact = store.artifacts[target.artifactId];
-      if (!artifact || artifact.qa.hardGate !== "passed") throw new Error("Version artifact has not passed the hard gate.");
+      if (!artifact || artifact.artifactHash !== target.artifactHash || artifact.qa.hardGate !== "passed") {
+        throw new Error("candidate_integrity_failed");
+      }
       const input = store.buildInputs[target.publicBuildInputId];
       const state = Object.values(store.businessStates).find((item) => item.siteId === target.siteId);
       const intent = Object.values(store.intents).find((item) => item.siteId === target.siteId);
-      if (!input || !state || !intent || input.businessStateRevision !== state.revision || !siteIntentMatchesBuildContent(intent, input.intent)) {
-        throw new Error("stale_candidate");
+      if (!input || !state || !intent
+        || target.ownerOperationalRevision !== state.ownerOperationalRevision
+        || target.ownerIntentRevision !== intent.ownerIntentRevision
+        || input.ownerOperationalRevision !== state.ownerOperationalRevision
+        || input.ownerIntentRevision !== intent.ownerIntentRevision) {
+        throw new Error("owner_authority_changed");
+      }
+      const liveRoutes = new Set(artifact.routes.map((route) => route.path));
+      const redirects = Object.values(store.versionRedirects).filter((redirect) => redirect.versionId === target.id);
+      const redirectSources = new Set(redirects.map((redirect) => redirect.sourcePath));
+      if (redirects.some((redirect) => liveRoutes.has(redirect.sourcePath) || !liveRoutes.has(redirect.destinationPath) || redirectSources.has(redirect.destinationPath))) {
+        throw new Error("candidate_redirect_conflict_or_stranded");
+      }
+      if (target.sourceSnapshotIds.some((sourceId) => store.sourceSnapshots[sourceId]?.payload.kind === "website-mirror") && !store.sourceCoverage[target.id]) {
+        throw new Error("candidate_source_coverage_missing");
       }
       const prior = Object.values(store.versions).find((item) => item.siteId === target.siteId && item.status === "published");
       if (prior) prior.status = "superseded";
@@ -506,11 +1315,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         if (!form || form.siteId !== target.siteId) throw new Error("Published version references an invalid form definition.");
         if (form.status === "candidate_only") form.status = "published";
       }
-      const site = store.sites[target.siteId];
       site.status = "active";
       site.publishedVersionId = target.id;
       site.currentWorkspaceRevisionId = target.workspaceRevisionId;
-      site.currentPublicBuildInputId = target.publicBuildInputId;
       site.updatedAt = target.publishedAt;
       void actorId;
     });
@@ -523,8 +1330,242 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return this.write((store) => { store.runtimeSeries[series.id] = trustedRuntimeSeriesSchema.parse(series); });
   }
   async getRuntimeSeries(id: string) { return clone((await this.read()).runtimeSeries[id]); }
+  saveSandboxDeployment(deployment: SiteSandboxDeployment) {
+    return this.write((store) => {
+      const value = siteSandboxDeploymentSchema.parse(deployment);
+      const current = store.sandboxDeployments[value.id];
+      if (current && JSON.stringify(current) !== JSON.stringify(value)) {
+        throw new Error("sandbox_deployment_is_immutable");
+      }
+      store.sandboxDeployments[value.id] = value;
+    });
+  }
+  async getSandboxDeployment(id: string) {
+    return clone((await this.read()).sandboxDeployments[id]);
+  }
+  async getSandboxDeploymentDrain(id: string) {
+    const store = await this.read();
+    return {
+      runningRunIds: Object.values(store.runs).filter((run) => run.status === "running" && run.sandboxDeploymentId === id).map((run) => run.id).sort(),
+      liveSessionIds: Object.values(store.sessions).filter((session) => Boolean(session.sandboxId) && session.sandboxDeploymentId === id).map((session) => session.id).sort()
+    };
+  }
+  async getSandboxControl() {
+    return clone((await this.read()).sandboxControl);
+  }
+  saveSandboxControl(control: SiteSandboxControl) {
+    return this.write((store) => {
+      const value = siteSandboxControlSchema.parse(control);
+      assertLocalSandboxControl(store, value);
+      const retained = store.sandboxControl;
+      if (retained) {
+        for (const deploymentId of [
+          retained.blueDeploymentId !== value.blueDeploymentId ? retained.blueDeploymentId : undefined,
+          retained.greenDeploymentId !== value.greenDeploymentId ? retained.greenDeploymentId : undefined
+        ]) {
+          if (!deploymentId) continue;
+          const pinnedRun = Object.values(store.runs).some((run) => run.status === "running" && run.sandboxDeploymentId === deploymentId);
+          const liveSession = Object.values(store.sessions).some((session) => Boolean(session.sandboxId) && session.sandboxDeploymentId === deploymentId);
+          if (pinnedRun || liveSession) throw new Error(`sandbox_slot_is_draining:${deploymentId}`);
+        }
+      }
+      store.sandboxControl = value;
+    });
+  }
+  rollbackSandboxDeployment(input: { failedDeploymentId: string; previousDeploymentId: string; now: string }) {
+    return this.write((store) => {
+      const control = store.sandboxControl;
+      if (!control
+        || control.activeDeploymentId !== input.failedDeploymentId
+        || ![control.blueDeploymentId, control.greenDeploymentId].includes(input.previousDeploymentId)) {
+        throw new Error("sandbox_rollback_pointer_mismatch");
+      }
+      const affected: string[] = [];
+      for (const run of Object.values(store.runs)) {
+        if (run.status !== "running" || run.sandboxDeploymentId !== input.failedDeploymentId) continue;
+        affected.push(run.id);
+        store.runs[run.id] = siteAgentRunSchema.parse({
+          ...run,
+          status: "queued",
+          stage: "queued",
+          sandboxDeploymentId: undefined,
+          executionNumber: run.executionNumber + 1,
+          workerId: undefined,
+          heartbeatAt: undefined,
+          failureReason: "sandbox_deployment_rollback",
+          completedAt: undefined
+        });
+      }
+      for (const session of Object.values(store.sessions)) {
+        if (!session.sandboxId || session.sandboxDeploymentId !== input.failedDeploymentId) continue;
+        store.sessions[session.id] = siteAgentSessionSchema.parse({
+          ...session,
+          status: "rotating",
+          leaseExpiresAt: input.now,
+          updatedAt: input.now
+        });
+      }
+      store.sandboxControl = siteSandboxControlSchema.parse({
+        ...control,
+        activeDeploymentId: input.previousDeploymentId,
+        updatedAt: input.now
+      });
+      return affected.sort();
+    });
+  }
+  async getAgentWorkspaceCheckpoint(id: string) {
+    return clone((await this.read()).workspaceCheckpoints[id]);
+  }
+  checkpointAgentRunWorkspace(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+  }) {
+    return this.write((store) => {
+      const checkpoint = siteAgentWorkspaceCheckpointSchema.parse(input.checkpoint);
+      const run = siteAgentRunSchema.parse(input.run);
+      const currentRun = store.runs[run.id];
+      const session = store.sessions[run.sessionId];
+      if (
+        !currentRun
+        || currentRun.status !== "running"
+        || currentRun.executionNumber !== checkpoint.executionNumber
+        || checkpoint.runId !== run.id
+        || checkpoint.publicBuildInputId !== run.publicBuildInputId
+        || checkpoint.baseWorkspaceRevisionId !== run.exactParentRevisionId
+        || run.status !== "running"
+        || run.executionNumber !== checkpoint.executionNumber
+        || run.resumeCheckpointId !== checkpoint.id
+        || run.sandboxDeploymentId !== checkpoint.sandboxDeploymentId
+        || !session
+        || session.sandboxId !== checkpoint.sandboxId
+        || session.sandboxDeploymentId !== checkpoint.sandboxDeploymentId
+      ) {
+        throw new Error("checkpoint_execution_fenced");
+      }
+      if (store.workspaceCheckpoints[checkpoint.id]) throw new Error("workspace_checkpoint_is_immutable");
+      store.workspaceCheckpoints[checkpoint.id] = checkpoint;
+      store.runs[run.id] = run;
+      return clone(run) as SiteAgentRun;
+    });
+  }
+  pauseAgentRunForInput(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+    session: SiteAgentSession;
+  }) {
+    return this.write((store) => {
+      const checkpoint = siteAgentWorkspaceCheckpointSchema.parse(input.checkpoint);
+      const run = siteAgentRunSchema.parse(input.run);
+      const session = siteAgentSessionSchema.parse(input.session);
+      const currentRun = store.runs[run.id];
+      const currentSession = store.sessions[session.id];
+      if (
+        !currentRun
+        || currentRun.status !== "running"
+        || currentRun.executionNumber !== checkpoint.executionNumber
+        || checkpoint.runId !== run.id
+        || checkpoint.publicBuildInputId !== run.publicBuildInputId
+        || checkpoint.baseWorkspaceRevisionId !== run.exactParentRevisionId
+        || run.status !== "needs_input"
+        || run.executionNumber !== checkpoint.executionNumber
+        || run.resumeCheckpointId !== checkpoint.id
+        || run.sandboxDeploymentId !== checkpoint.sandboxDeploymentId
+        || !currentSession
+        || session.id !== run.sessionId
+        || currentSession.siteId !== run.siteId
+        || currentSession.sandboxId !== checkpoint.sandboxId
+        || currentSession.sandboxDeploymentId !== checkpoint.sandboxDeploymentId
+        || session.sandboxId !== checkpoint.sandboxId
+        || session.sandboxDeploymentId !== checkpoint.sandboxDeploymentId
+      ) {
+        throw new Error("checkpoint_execution_fenced");
+      }
+      if (store.workspaceCheckpoints[checkpoint.id]) throw new Error("workspace_checkpoint_is_immutable");
+      store.workspaceCheckpoints[checkpoint.id] = checkpoint;
+      store.runs[run.id] = run;
+      store.sessions[session.id] = session;
+      const head = store.continuationHeads[run.id];
+      if (head && head.executionNumber === run.executionNumber) {
+        store.continuationHeads[run.id] = siteAgentContinuationHeadSchema.parse({
+          ...head,
+          status: "awaiting_input",
+          updatedAt: checkpoint.createdAt
+        });
+      }
+      return { run: clone(run) as SiteAgentRun, session: clone(session) as SiteAgentSession };
+    });
+  }
+  requeueCheckpointedAgentRun(run: SiteAgentRun) {
+    return this.write((store) => {
+      const queued = siteAgentRunSchema.parse(run);
+      const current = store.runs[queued.id];
+      const checkpoint = queued.resumeCheckpointId
+        ? store.workspaceCheckpoints[queued.resumeCheckpointId]
+        : undefined;
+      if (
+        !current
+        || current.status !== "failed"
+        || !current.retryableByOwner
+        || current.executionNumber !== queued.executionNumber
+        || !current.resumeCheckpointId
+        || queued.resumeCheckpointId !== current.resumeCheckpointId
+        || queued.status !== "queued"
+        || queued.stage !== "queued"
+        || !checkpoint
+        || checkpoint.runId !== queued.id
+      ) return undefined;
+      store.runs[queued.id] = queued;
+      return clone(queued) as SiteAgentRun;
+    });
+  }
+  cancelAgentRun(runId: string, completedAt: string) {
+    return this.write((store) => {
+      const current = store.runs[runId];
+      if (!current) return undefined;
+      if (!["queued", "running", "needs_input"].includes(current.status)) {
+        return clone(current) as SiteAgentRun;
+      }
+      const run = siteAgentRunSchema.parse({
+        ...current,
+        status: "cancelled",
+        executionNumber: current.executionNumber + 1,
+        workerId: undefined,
+        heartbeatAt: undefined,
+        retryableByOwner: false,
+        completedAt
+      });
+      store.runs[runId] = run;
+      const head = store.continuationHeads[runId];
+      if (head) {
+        store.continuationHeads[runId] = siteAgentContinuationHeadSchema.parse({
+          ...head,
+          status: "terminal",
+          updatedAt: completedAt
+        });
+      }
+      for (const event of Object.values(store.runEvents)) {
+        if (event.runId !== runId || event.status !== "running") continue;
+        store.runEvents[event.id] = siteAgentRunEventSchema.parse({
+          ...event,
+          status: "cancelled",
+          errorCode: "owner_cancelled",
+          completedAt
+        });
+      }
+      return clone(run) as SiteAgentRun;
+    });
+  }
   saveAgentSession(session: SiteAgentSession) {
     return this.write((store) => { store.sessions[session.id] = siteAgentSessionSchema.parse(session); });
+  }
+  saveAgentSessionForExecution(session: SiteAgentSession, runId: string, executionNumber: number) {
+    return this.write((store) => {
+      const value = siteAgentSessionSchema.parse(session);
+      const run = store.runs[runId];
+      if (!run || run.status !== "running" || run.executionNumber !== executionNumber || run.sessionId !== value.id) return false;
+      store.sessions[value.id] = value;
+      return true;
+    });
   }
   async getAgentSession(id: string) { return clone((await this.read()).sessions[id]); }
   async getActiveAgentSession(siteId: string, principal: SiteAgentPrincipal) {
@@ -542,37 +1583,220 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       .slice(0, limit)
       .map((session) => clone(session) as SiteAgentSession);
   }
+  fenceExpiredAgentSession(input: { session: SiteAgentSession; run?: SiteAgentRun; now: string }) {
+    return this.write((store) => {
+      const expected = siteAgentSessionSchema.parse(input.session);
+      const current = store.sessions[expected.id];
+      if (!current
+        || current.sandboxId !== expected.sandboxId
+        || current.sandboxDeploymentId !== expected.sandboxDeploymentId
+        || current.leaseExpiresAt !== expected.leaseExpiresAt
+        || current.leaseExpiresAt > input.now) return undefined;
+      if (input.run) {
+        const expectedRun = siteAgentRunSchema.parse(input.run);
+        const currentRun = store.runs[expectedRun.id];
+        if (!currentRun
+          || currentRun.status !== "needs_input"
+          || currentRun.executionNumber !== expectedRun.executionNumber
+          || currentRun.resumeCheckpointId !== expectedRun.resumeCheckpointId
+          || currentRun.sandboxDeploymentId !== expectedRun.sandboxDeploymentId) return undefined;
+      } else if (Object.values(store.runs).some((run) => run.sessionId === current.id && (
+        ["running", "needs_input"].includes(run.status)
+        || (run.status === "queued" && current.status !== "rotating")
+      ))) {
+        return undefined;
+      }
+      const fenced = siteAgentSessionSchema.parse({ ...current, status: "rotating", updatedAt: input.now });
+      store.sessions[current.id] = fenced;
+      return clone(fenced) as SiteAgentSession;
+    });
+  }
   async enqueueAgentRun(run: SiteAgentRun) {
     const value = siteAgentRunSchema.parse(run);
     return this.write((state) => {
       if (state.maintenanceLeases.site_authoring_maintenance?.leaseUntil > new Date().toISOString()) {
         throw new Error("site_authoring_maintenance_active");
       }
-      if (value.executionDriver === "responses_api") {
       const active = Object.values(state.runs).filter((candidate) =>
-        candidate.executionDriver === "responses_api"
-        && candidate.requestedBy === value.requestedBy
+        candidate.requestedBy === value.requestedBy
         && ["queued", "running"].includes(candidate.status)
       ).length;
       if (active >= 3) throw new Error("concurrent_project_limit");
-      }
       state.runs[value.id] = value;
       return value;
     });
   }
-  saveAgentRun(run: SiteAgentRun) { return this.write((store) => { store.runs[run.id] = siteAgentRunSchema.parse(run); }); }
-  async claimAgentRun(runId: string) {
-    let claimed: SiteAgentRun | undefined;
+  enqueueAgentRunWithMessage(input: { run: SiteAgentRun; message: SiteAgentMessage }) {
+    return this.write((state) => {
+      const run = siteAgentRunSchema.parse(input.run);
+      const message = siteAgentMessageSchema.parse(input.message);
+      if (
+        message.runId !== run.id
+        || message.sessionId !== run.sessionId
+        || state.runs[run.id]
+        || state.messages[message.id]
+      ) {
+        throw new Error("site_agent_request_conflict");
+      }
+      const session = state.sessions[run.sessionId];
+      const site = state.sites[run.siteId];
+      if (!session || !site || session.siteId !== run.siteId) {
+        throw new Error("site_agent_request_scope_mismatch");
+      }
+      const now = new Date().toISOString();
+      if (state.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) {
+        throw new Error("site_authoring_maintenance_active");
+      }
+      const active = Object.values(state.runs).filter((candidate) => {
+        const candidateSite = state.sites[candidate.siteId];
+        return candidateSite?.ownerUserId === site.ownerUserId
+          && ["queued", "running"].includes(candidate.status);
+      }).length;
+      if (site.ownerUserId && active >= 3) throw new Error("concurrent_project_limit");
+      state.runs[run.id] = run;
+      state.messages[message.id] = message;
+      return clone(run) as SiteAgentRun;
+    });
+  }
+  saveAgentRun(run: SiteAgentRun) {
+    return this.write((store) => {
+      const value = siteAgentRunSchema.parse(run);
+      const current = store.runs[value.id];
+      if (current) {
+        const currentExecution = current.executionNumber;
+        const transitionAllowed = currentExecution === value.executionNumber && (
+          (current.status === "queued" && ["queued", "cancelled"].includes(value.status))
+          || (current.status === "running")
+          || (current.status === "needs_input" && ["needs_input", "queued", "running", "failed", "cancelled"].includes(value.status))
+        );
+        if (!transitionAllowed) return clone(current) as SiteAgentRun;
+      }
+      store.runs[value.id] = value;
+      return clone(value) as SiteAgentRun;
+    });
+  }
+  async touchAgentRunHeartbeat(runId: string, executionNumber: number, heartbeatAt: string) {
+    let touched = false;
     await this.write((store) => {
       const current = store.runs[runId];
-      if (!current || current.status !== "queued" || current.executionDriver !== "responses_api") return;
-      const now = new Date().toISOString();
-      if (store.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) return;
-      if (Object.values(store.runs).filter((run) => run.status === "running" && run.executionDriver === "responses_api").length >= 4) return;
-      claimed = siteAgentRunSchema.parse({ ...current, status: "running", stage: "authoring", executionNumber: current.executionNumber + 1, heartbeatAt: now });
-      store.runs[runId] = claimed;
+      if (!current || current.status !== "running" || current.executionNumber !== executionNumber) return;
+      store.runs[runId] = siteAgentRunSchema.parse({ ...current, heartbeatAt });
+      touched = true;
     });
-    return clone(claimed);
+    return touched;
+  }
+  requeueInterruptedAgentRun(input: { runId: string; executionNumber: number; now: string; failureReason: string }) {
+    return this.write((store) => {
+      const current = store.runs[input.runId];
+      if (!current || current.status !== "running" || current.executionNumber !== input.executionNumber) {
+        return current ? clone(current) as SiteAgentRun : undefined;
+      }
+      const requeued = siteAgentRunSchema.parse({
+        ...current,
+        status: "queued",
+        stage: "queued",
+        sandboxDeploymentId: undefined,
+        executionNumber: current.executionNumber + 1,
+        workerId: undefined,
+        heartbeatAt: undefined,
+        fastPreviewPath: undefined,
+        failureCode: undefined,
+        failureCategory: undefined,
+        retryableByOwner: false,
+        failureReason: input.failureReason,
+        completedAt: undefined
+      });
+      store.runs[current.id] = requeued;
+      return clone(requeued) as SiteAgentRun;
+    });
+  }
+  claimAgentRun(runId: string) {
+    return this.claimRun(runId, `targeted-${process.pid}`);
+  }
+  claimNextAgentRun(workerId: string) {
+    return this.claimRun(undefined, workerId);
+  }
+  async getAgentContinuationHead(runId: string) {
+    return clone((await this.read()).continuationHeads[runId]);
+  }
+  async listAgentContinuationSegments(runId: string, generation: number) {
+    return Object.values((await this.read()).continuationSegments)
+      .filter((segment) => segment.runId === runId && segment.generation === generation)
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((segment) => clone(segment) as SiteAgentContinuationSegment);
+  }
+  appendAgentContinuation(input: {
+    head: SiteAgentContinuationHead;
+    segment: SiteAgentContinuationSegment;
+  }) {
+    return this.write((store) => {
+      const head = siteAgentContinuationHeadSchema.parse(input.head);
+      const segment = siteAgentContinuationSegmentSchema.parse(input.segment);
+      const run = store.runs[head.runId];
+      const current = store.continuationHeads[head.runId];
+      if (
+        !run
+        || run.status !== "running"
+        || run.executionNumber !== head.executionNumber
+        || segment.runId !== head.runId
+        || segment.executionNumber !== head.executionNumber
+        || segment.generation !== head.generation
+        || segment.sequence !== head.latestSequence
+        || segment.responseCount !== head.responseCount
+      ) {
+        throw new Error("continuation_execution_fenced");
+      }
+      if (current && (
+        current.generation !== head.generation
+        || current.latestSequence + 1 !== segment.sequence
+        || current.apiProvider !== head.apiProvider
+        || current.modelId !== head.modelId
+        || current.stablePrefixHash !== head.stablePrefixHash
+        || current.inputHash !== head.inputHash
+      )) {
+        throw new Error("continuation_sequence_conflict");
+      }
+      if (!current && segment.sequence !== 1) throw new Error("continuation_sequence_conflict");
+      if (store.continuationSegments[segment.id]) throw new Error("continuation_segment_conflict");
+      store.continuationSegments[segment.id] = segment;
+      store.continuationHeads[head.runId] = head;
+      return clone(head) as SiteAgentContinuationHead;
+    });
+  }
+  resetAgentContinuation(headDocument: SiteAgentContinuationHead) {
+    return this.write((store) => {
+      const head = siteAgentContinuationHeadSchema.parse(headDocument);
+      const run = store.runs[head.runId];
+      const current = store.continuationHeads[head.runId];
+      if (!run || run.status !== "running" || run.executionNumber !== head.executionNumber) {
+        throw new Error("continuation_execution_fenced");
+      }
+      if (head.latestSequence !== 0 || head.responseCount !== 0) {
+        throw new Error("continuation_reset_must_be_empty");
+      }
+      if (current && head.generation !== current.generation + 1) {
+        throw new Error("continuation_generation_conflict");
+      }
+      store.continuationHeads[head.runId] = head;
+      return clone(head) as SiteAgentContinuationHead;
+    });
+  }
+  closeAgentContinuation(input: {
+    runId: string;
+    executionNumber: number;
+    status: "awaiting_input" | "terminal";
+    purgeAfter?: string;
+  }) {
+    return this.write((store) => {
+      const current = store.continuationHeads[input.runId];
+      if (!current || current.executionNumber !== input.executionNumber) return;
+      store.continuationHeads[input.runId] = siteAgentContinuationHeadSchema.parse({
+        ...current,
+        status: input.status,
+        purgeAfter: input.purgeAfter,
+        updatedAt: new Date().toISOString()
+      });
+    });
   }
   async getAgentRun(id: string) { return clone((await this.read()).runs[id]); }
   async getAgentRunAdminRecord(id: string) {
@@ -607,11 +1831,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return { items: items.slice(offset, offset + limit), total: items.length };
   }
   async listQueuedAgentRuns(limit: number) {
-    return Object.values((await this.read()).runs).filter((run) => run.status === "queued" && run.executionDriver === "responses_api")
+    return Object.values((await this.read()).runs).filter((run) => run.status === "queued")
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
-    return Object.values((await this.read()).runs).filter((run) => run.status === "running" && run.executionDriver === "responses_api" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
+    return Object.values((await this.read()).runs).filter((run) => run.status === "running" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
       .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
   saveAgentRunEvents(events: SiteAgentRunEvent[]) {
@@ -701,16 +1925,103 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   async listOperatorQueue(status?: OperatorQueueItem["status"]) {
     return Object.values((await this.read()).operatorQueue).filter((item) => !status || item.status === status).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((item) => clone(item) as OperatorQueueItem);
   }
-  saveVerticalDemandEvent(event: VerticalDemandEvent) {
-    return this.write((store) => {
-      const value = verticalDemandEventSchema.parse(event);
-      if (store.verticalDemandEvents[value.id]) throw new Error("Vertical demand events are immutable.");
-      store.verticalDemandEvents[value.id] = value;
+
+  private async claimRun(targetRunId: string | undefined, workerId: string) {
+    let claimed: SiteAgentRun | undefined;
+    await this.write((store) => {
+      const now = new Date().toISOString();
+      if (store.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) return;
+      const control = ensureLocalSandboxRegistry(store, now);
+      const activeDeployment = store.sandboxDeployments[control.activeDeploymentId];
+      if (!activeDeployment) throw new Error("active_sandbox_deployment_missing");
+      if (Object.values(store.runs).filter((run) => run.status === "running").length >= 4) return;
+
+      const queued = Object.values(store.runs)
+        .filter((run) => run.status === "queued")
+        .sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id));
+      const eligible = (run: SiteAgentRun) => {
+        const claimSession = store.sessions[run.sessionId];
+        if (!claimSession || (claimSession.status === "rotating" && claimSession.sandboxId)) return false;
+        const predecessor = run.deferredUntilRunId ? store.runs[run.deferredUntilRunId] : undefined;
+        if (predecessor && ["queued", "running"].includes(predecessor.status)) return false;
+        return !Object.values(store.runs).some((candidate) => candidate.siteId === run.siteId && candidate.status === "running");
+      };
+      const first = targetRunId
+        ? queued.find((run) => run.id === targetRunId && eligible(run))
+        : queued.find(eligible);
+      if (!first) return;
+
+      let target = first;
+      if (!targetRunId && first.request.kind === "authority_refresh") {
+        const siteQueue = queued.filter((run) => run.siteId === first.siteId);
+        const start = siteQueue.findIndex((run) => run.id === first.id);
+        const group: SiteAgentRun[] = [];
+        for (const candidate of siteQueue.slice(start)) {
+          if (candidate.request.kind !== "authority_refresh") break;
+          group.push(candidate);
+        }
+        if (group.length > 1) {
+          target = group.at(-1)!;
+          const changeRequestIds = [...new Set(group.flatMap((run) =>
+            run.request.kind === "authority_refresh" ? run.request.changeRequestIds : []
+          ))];
+          target = siteAgentRunSchema.parse({
+            ...target,
+            request: { kind: "authority_refresh", changeRequestIds },
+            deferredUntilRunId: undefined
+          });
+          store.runs[target.id] = target;
+          for (const coalesced of group.slice(0, -1)) {
+            store.runs[coalesced.id] = siteAgentRunSchema.parse({
+              ...coalesced,
+              status: "cancelled",
+              coalescedIntoRunId: target.id,
+              completedAt: now
+            });
+          }
+        }
+      }
+
+      const site = store.sites[target.siteId];
+      const session = store.sessions[target.sessionId];
+      if (!site || !session || !site.currentPublicBuildInputId) {
+        throw new Error("claim_site_authority_missing");
+      }
+      const checkpoint = target.resumeCheckpointId
+        ? store.workspaceCheckpoints[target.resumeCheckpointId]
+        : undefined;
+      const checkpointCurrent = Boolean(
+        checkpoint
+        && checkpoint.baseWorkspaceRevisionId === site.currentWorkspaceRevisionId
+        && checkpoint.publicBuildInputId === site.currentPublicBuildInputId
+      );
+      if (target.resumeCheckpointId && !checkpointCurrent) {
+        const head = store.continuationHeads[target.id];
+        if (head) {
+          store.continuationHeads[target.id] = siteAgentContinuationHeadSchema.parse({
+            ...head,
+            status: "stale",
+            updatedAt: now
+          });
+        }
+      }
+      claimed = siteAgentRunSchema.parse({
+        ...target,
+        status: "running",
+        stage: target.request.kind === "initial_build" ? "retrieving_sources" : "authoring",
+        publicBuildInputId: site.currentPublicBuildInputId,
+        exactParentRevisionId: site.currentWorkspaceRevisionId,
+        sandboxDeploymentId: activeDeployment.id,
+        resumeCheckpointId: checkpointCurrent ? target.resumeCheckpointId : undefined,
+        checkpointRestartedAt: target.resumeCheckpointId && !checkpointCurrent ? now : target.checkpointRestartedAt,
+        executionNumber: target.executionNumber + 1,
+        workerId,
+        heartbeatAt: now,
+        completedAt: undefined
+      });
+      store.runs[target.id] = claimed;
     });
-  }
-  async listVerticalDemandEvents(status?: VerticalDemandEvent["status"]) {
-    return Object.values((await this.read()).verticalDemandEvents ?? {}).filter((item) => !status || item.status === status)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => clone(item) as VerticalDemandEvent);
+    return clone(claimed);
   }
 
   private insertImmutable<K extends keyof Pick<LocalState, "sourceSnapshots" | "assetRevisions" | "buildInputs" | "workspaceRevisions" | "artifacts" | "versions" | "runtimePatches">>(
@@ -749,6 +2060,47 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
 }
 
+function ensureLocalSandboxRegistry(store: LocalState, now: string) {
+  if (store.sandboxControl) {
+    assertLocalSandboxControl(store, store.sandboxControl);
+    return siteSandboxControlSchema.parse(store.sandboxControl);
+  }
+  const deploymentId = `sandbox_deployment_local_${expectedSiteSandboxManifest.toolchainIdentity.slice(-16)}`;
+  const deployment = siteSandboxDeploymentSchema.parse({
+    schemaVersion: 1,
+    id: deploymentId,
+    slot: "blue",
+    workerVersionId: "local",
+    releaseSha: "0".repeat(40),
+    imageDigest: sandboxImageDigest,
+    credentialSlot: "blue",
+    manifest: expectedSiteSandboxManifest,
+    createdAt: now
+  });
+  const control = siteSandboxControlSchema.parse({
+    schemaVersion: 1,
+    id: "production",
+    blueDeploymentId: deployment.id,
+    activeDeploymentId: deployment.id,
+    updatedAt: now
+  });
+  store.sandboxDeployments[deployment.id] = deployment;
+  store.sandboxControl = control;
+  return control;
+}
+
+function assertLocalSandboxControl(store: LocalState, control: SiteSandboxControl) {
+  const blue = store.sandboxDeployments[control.blueDeploymentId];
+  const green = control.greenDeploymentId ? store.sandboxDeployments[control.greenDeploymentId] : undefined;
+  if (!blue || blue.slot !== "blue") throw new Error("sandbox_blue_deployment_invalid");
+  if (control.greenDeploymentId && (!green || green.slot !== "green")) {
+    throw new Error("sandbox_green_deployment_invalid");
+  }
+  if (control.activeDeploymentId !== blue.id && control.activeDeploymentId !== green?.id) {
+    throw new Error("sandbox_active_deployment_invalid");
+  }
+}
+
 export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   private get client() { return getSupabaseAdminClient(); }
 
@@ -770,6 +2122,133 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       asset_documents: assetRevisions,
       public_input_document: publicBuildInput
     }), "Bootstrap site");
+    for (const reference of input.sourceMirrorReferences ?? []) {
+      const snapshot = sourceSnapshots.find((candidate) => candidate.id === reference.sourceSnapshotId);
+      if (!snapshot) throw new Error("source_snapshot_mirror_reference_parent_missing");
+      await this.saveWebsiteSourceSnapshotReference({
+        snapshot,
+        retainedSourceSnapshotId: reference.retainedSourceSnapshotId
+      });
+    }
+  }
+
+  async bootstrapSiteAuthoring(input: BootstrapSiteAuthoringInput) {
+    const site = platformSiteRecordSchema.parse(input.site);
+    const state = businessStateSchema.parse(input.state);
+    const intent = siteIntentSchema.parse(input.intent);
+    const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
+    const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotSchema.parse(snapshot));
+    const assetRevisions = input.assetRevisions.map((revision) => assetRevisionSchema.parse(revision));
+    const publicBuildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
+    const session = siteAgentSessionSchema.parse(input.session);
+    const run = siteAgentRunSchema.parse(input.run);
+    const message = siteAgentMessageSchema.parse(input.message);
+    assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
+    const result = await requireData<Record<string, unknown>>(this.client.rpc("bootstrap_site_authoring", {
+      target_owner_user_id: input.ownerUserId,
+      target_idempotency_key: input.idempotencyKey,
+      target_request_hash: input.requestHash,
+      site_document: site,
+      state_document: state,
+      intent_document: intent,
+      form_documents: forms,
+      source_documents: sourceSnapshots,
+      asset_documents: assetRevisions,
+      public_input_document: publicBuildInput,
+      session_document: session,
+      run_document: run,
+      message_document: message
+    }), "Bootstrap site authoring");
+    return {
+      siteId: String(result.siteId),
+      sessionId: String(result.sessionId),
+      runId: String(result.runId),
+      existing: result.existing === true
+    };
+  }
+
+  async applyPreparedAuthorityChange(input: ApplyPreparedAuthorityChangeInput) {
+    const request = controlPlaneChangeRequestSchema.parse(input.request);
+    const sourceSnapshot = input.sourceSnapshot ? sourceSnapshotSchema.parse(input.sourceSnapshot) : null;
+    const assetRevision = input.assetRevision ? assetRevisionSchema.parse(input.assetRevision) : null;
+    const businessState = input.businessState ? businessStateSchema.parse(input.businessState) : null;
+    const siteIntent = input.siteIntent ? siteIntentSchema.parse(input.siteIntent) : null;
+    const publicBuildInput = input.publicBuildInput ? sitePublicBuildInputSchema.parse(input.publicBuildInput) : null;
+    const session = input.session ? siteAgentSessionSchema.parse(input.session) : null;
+    const run = input.run ? siteAgentRunSchema.parse(input.run) : null;
+    const message = input.message ? siteAgentMessageSchema.parse(input.message) : null;
+    const result = await requireData<Record<string, unknown>>(this.client.rpc("apply_prepared_owner_authority_change", {
+      target_actor_id: input.actorId,
+      request_document: request,
+      source_document: sourceSnapshot,
+      asset_document: assetRevision,
+      state_document: businessState,
+      intent_document: siteIntent,
+      public_input_document: publicBuildInput,
+      session_document: session,
+      run_document: run,
+      message_document: message
+    }), "Apply prepared owner-authority change");
+    return {
+      request: controlPlaneChangeRequestSchema.parse(result.request),
+      run: result.run ? siteAgentRunSchema.parse(result.run) : undefined
+    };
+  }
+
+  async applyPreparedProvisionalContext(input: ApplyPreparedProvisionalContextInput) {
+    // Retain each website mirror to ready-only completion before advancing mutable
+    // authority. A failed compare-and-swap may leave an unreferenced immutable
+    // mirror, but can never attach an incomplete snapshot to a build input.
+    for (const snapshot of input.sourceSnapshots) {
+      const resources = input.sourceSnapshotResources.filter((resource) => resource.sourceSnapshotId === snapshot.id);
+      const pages = input.sourceSnapshotPages.filter((page) => page.sourceSnapshotId === snapshot.id);
+      if (resources.length || pages.length) {
+        await this.saveWebsiteSourceSnapshot({ snapshot, resources, pages });
+      } else {
+        await this.saveSourceSnapshot(snapshot);
+      }
+    }
+    const result = await requireData<boolean>(this.client.rpc("apply_prepared_provisional_authoring_context", {
+      target_expected_public_input_id: input.expectedPublicBuildInputId,
+      target_expected_business_revision: input.expectedBusinessRevision,
+      source_documents: input.sourceSnapshots.map((item) => sourceSnapshotSchema.parse(item)),
+      asset_documents: input.assetRevisions.map((item) => assetRevisionSchema.parse(item)),
+      state_document: businessStateSchema.parse(input.businessState),
+      public_input_document: sitePublicBuildInputSchema.parse(input.publicBuildInput),
+      session_document: siteAgentSessionSchema.parse(input.session),
+      run_document: siteAgentRunSchema.parse(input.run)
+    }), "Apply prepared provisional authoring context");
+    return result;
+  }
+
+  async applyPreparedSourceRecapture(input: ApplyPreparedSourceRecaptureInput) {
+    await this.saveWebsiteSourceSnapshot({
+      snapshot: input.snapshot,
+      resources: input.resources,
+      pages: input.pages
+    });
+    return requireData<boolean>(this.client.rpc("apply_prepared_source_recapture", {
+      target_expected_public_input_id: input.expectedPublicBuildInputId,
+      asset_documents: input.assetRevisions.map((item) => assetRevisionSchema.parse(item)),
+      state_document: businessStateSchema.parse(input.businessState),
+      public_input_document: sitePublicBuildInputSchema.parse(input.publicBuildInput)
+    }), "Apply prepared source recapture");
+  }
+
+  async applyManagedFormAuthoringChange(input: ApplyManagedFormAuthoringChangeInput) {
+    const result = await requireData<Record<string, unknown> | null>(this.client.rpc("apply_managed_form_authoring_change", {
+      target_expected_public_input_id: input.expectedPublicBuildInputId,
+      target_expected_intent_revision: input.expectedIntentRevision,
+      form_document: formDefinitionSchema.parse(input.form),
+      intent_document: siteIntentSchema.parse(input.siteIntent),
+      public_input_document: sitePublicBuildInputSchema.parse(input.publicBuildInput),
+      session_document: siteAgentSessionSchema.parse(input.session),
+      run_document: siteAgentRunSchema.parse(input.run)
+    }), "Apply managed form authoring change");
+    return result ? {
+      run: siteAgentRunSchema.parse(result.run),
+      session: siteAgentSessionSchema.parse(result.session)
+    } : undefined;
   }
 
   async createSite(site: PlatformSiteRecord) {
@@ -853,6 +2332,23 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
     await requireOk(this.client.from("sites").update({ current_public_build_input_id: inputId, updated_at: new Date().toISOString() }).eq("id", siteId), "Set current public build input");
   }
+  async setCurrentPublicBuildInputIfAuthorityMatches(
+    siteId: string,
+    inputId: string,
+    ownerOperationalRevision: number,
+    ownerIntentRevision: number,
+    runId: string,
+    executionNumber: number
+  ) {
+    return requireData<boolean>(this.client.rpc("set_current_public_build_input_if_authority_matches", {
+      target_site_id: siteId,
+      target_input_id: inputId,
+      target_owner_operational_revision: ownerOperationalRevision,
+      target_owner_intent_revision: ownerIntentRevision,
+      target_run_id: runId,
+      target_execution_number: executionNumber
+    }), "Set current public build input with authority fence");
+  }
   async saveSourceSnapshot(snapshot: SourceSnapshot) {
     const value = sourceSnapshotSchema.parse(snapshot);
     const existing = await this.getSourceSnapshot(value.id);
@@ -866,13 +2362,234 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       payload: value.payload
     }), "Save source snapshot");
   }
+  async saveWebsiteSourceSnapshot(input: { snapshot: SourceSnapshot; resources: SourceSnapshotResource[]; pages: SourceSnapshotPage[] }) {
+    const snapshot = sourceSnapshotSchema.parse(input.snapshot);
+    const resources = input.resources.map((resource) => sourceSnapshotResourceSchema.parse(resource));
+    const pages = input.pages.map((page) => sourceSnapshotPageSchema.parse(page));
+    if (!snapshot.sourceUrl) throw new Error("website_source_snapshot_url_missing");
+    const reusableSourceSnapshotId = await this.findReusableWebsiteSourceSnapshot(snapshot.sourceUrl, snapshot.contentHash);
+    if (reusableSourceSnapshotId && reusableSourceSnapshotId !== snapshot.id) {
+      await this.saveWebsiteSourceSnapshotReference({
+        snapshot,
+        retainedSourceSnapshotId: reusableSourceSnapshotId
+      });
+      return;
+    }
+    const alreadyReady = await requireData<boolean>(this.client.rpc("begin_incremental_website_source_snapshot", {
+      snapshot_document: snapshot,
+      expected_resource_count: resources.length,
+      expected_page_count: pages.length
+    }), "Begin incremental website source snapshot");
+    if (alreadyReady) return;
+    await this.saveSourceSnapshotResources(resources);
+    await this.saveSourceSnapshotPages(pages);
+    await requireOk(this.client.rpc("complete_incremental_website_source_snapshot", {
+      target_snapshot_id: snapshot.id,
+      expected_resource_count: resources.length,
+      expected_page_count: pages.length
+    }), "Complete incremental website source snapshot");
+  }
+  async saveWebsiteSourceSnapshotReference(input: { snapshot: SourceSnapshot; retainedSourceSnapshotId: string }) {
+    const snapshot = sourceSnapshotSchema.parse(input.snapshot);
+    await requireOk(this.client.rpc("retain_website_source_snapshot_reference", {
+      snapshot_document: snapshot,
+      target_retained_source_snapshot_id: input.retainedSourceSnapshotId
+    }), "Retain website source snapshot reference");
+  }
   async getSourceSnapshot(id: string) {
-    const row = await requireData<Record<string, unknown> | null>(this.client.from("source_snapshots").select("*").eq("id", id).maybeSingle(), "Load source snapshot");
+    const row = await requireData<Record<string, unknown> | null>(this.client.from("source_snapshots").select("*").eq("id", id).not("ready_at", "is", null).maybeSingle(), "Load source snapshot");
     return row ? sourceSnapshotSchema.parse({
       schemaVersion: row.schema_version, id: row.id, businessId: row.business_id,
       sourceType: row.source_type, sourceUrl: row.source_url ?? undefined,
       contentHash: row.content_hash, capturedAt: row.captured_at, payload: row.payload
     }) : undefined;
+  }
+  async resolveRetainedSourceSnapshotId(sourceSnapshotId: string) {
+    const row = await requireData<Record<string, unknown> | null>(
+      this.client
+        .from("source_snapshot_mirror_references")
+        .select("retained_source_snapshot_id")
+        .eq("source_snapshot_id", sourceSnapshotId)
+        .maybeSingle(),
+      "Resolve retained source mirror"
+    );
+    return row ? String(row.retained_source_snapshot_id) : sourceSnapshotId;
+  }
+  async findReusableWebsiteSourceSnapshot(sourceUrl: string, contentHash: string) {
+    return requireData<string | null>(this.client.rpc("find_reusable_website_source_snapshot", {
+      target_source_url: sourceUrl,
+      target_content_hash: contentHash
+    }), "Find reusable website source snapshot").then((value) => value ?? undefined);
+  }
+  async saveSourceSnapshotResources(resources: SourceSnapshotResource[]) {
+    for (let offset = 0; offset < resources.length; offset += 200) {
+      const rows = resources.slice(offset, offset + 200).map((input) => {
+        const value = sourceSnapshotResourceSchema.parse(input);
+        return {
+          id: value.id,
+          source_snapshot_id: value.sourceSnapshotId,
+          schema_version: value.schemaVersion,
+          capture_kind: value.captureKind,
+          role: value.role,
+          requested_url: value.requestedUrl,
+          final_url: value.finalUrl,
+          outcome: value.outcome,
+          reason: value.reason,
+          status: value.status,
+          content_type: value.contentType,
+          stored_encoding: value.storedEncoding,
+          raw_content_hash: value.rawContentHash,
+          // PostgREST retains absent optional columns as SQL null. Normalize
+          // the write-side value so immutable verification does not mistake a
+          // legitimate body-less failed/excluded resource for a collision.
+          blob_content_hash: value.blobContentHash ?? null,
+          storage_key: value.storageKey,
+          raw_bytes: value.rawBytes,
+          stored_bytes: value.storedBytes,
+          headers: value.headers,
+          redirect_chain: value.redirectChain,
+          initiator_urls: value.initiatorUrls,
+          captured_at: value.capturedAt,
+          metadata: value.metadata
+        };
+      });
+      if (rows.length) {
+        await requireOk(this.client.from("source_snapshot_resources").upsert(rows, { onConflict: "id", ignoreDuplicates: true }), "Save source snapshot resources");
+        const retained = await requireData<Array<Record<string, unknown>>>(this.client.from("source_snapshot_resources").select("id,source_snapshot_id,blob_content_hash").in("id", rows.map((row) => row.id)), "Verify source snapshot resources");
+        const retainedById = new Map(retained.map((row) => [String(row.id), row]));
+        if (rows.some((row) => retainedById.get(row.id)?.source_snapshot_id !== row.source_snapshot_id || retainedById.get(row.id)?.blob_content_hash !== row.blob_content_hash)) {
+          throw new Error("source_snapshot_resource_conflict");
+        }
+      }
+    }
+  }
+  async getSourceSnapshotResource(id: string, sourceSnapshotId?: string) {
+    const row = await requireData<Record<string, unknown> | null>(this.client.from("source_snapshot_resources").select("*").eq("id", id).maybeSingle(), "Load source snapshot resource");
+    if (!row) return undefined;
+    const resource = sourceSnapshotResourceFromRow(row);
+    if (!sourceSnapshotId) return resource;
+    const retainedSourceSnapshotId = await this.resolveRetainedSourceSnapshotId(sourceSnapshotId);
+    return resource.sourceSnapshotId === retainedSourceSnapshotId
+      ? sourceSnapshotResourceSchema.parse({ ...resource, sourceSnapshotId })
+      : undefined;
+  }
+  async listSourceSnapshotResources(sourceSnapshotId: string) {
+    const retainedSourceSnapshotId = await this.resolveRetainedSourceSnapshotId(sourceSnapshotId);
+    const rows: Record<string, unknown>[] = [];
+    const pageSize = 1_000;
+    let cursor: string | undefined;
+    while (true) {
+      let query = this.client
+        .from("source_snapshot_resources")
+        .select("*")
+        .eq("source_snapshot_id", retainedSourceSnapshotId)
+        .order("id")
+        .limit(pageSize);
+      if (cursor) query = query.gt("id", cursor);
+      const page = await requireData<Record<string, unknown>[]>(
+        query,
+        "List source snapshot resources"
+      );
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      cursor = String(page.at(-1)?.id ?? "");
+      if (!cursor) throw new Error("source_snapshot_resource_pagination_cursor_missing");
+    }
+    return rows.map((row) => sourceSnapshotResourceSchema.parse({
+      ...sourceSnapshotResourceFromRow(row),
+      sourceSnapshotId
+    }));
+  }
+  async saveSourceSnapshotPages(pages: SourceSnapshotPage[]) {
+    for (let offset = 0; offset < pages.length; offset += 200) {
+      const rows = pages.slice(offset, offset + 200).map((input) => {
+        const value = sourceSnapshotPageSchema.parse(input);
+        return {
+          id: value.id,
+          source_snapshot_id: value.sourceSnapshotId,
+          schema_version: value.schemaVersion,
+          resource_id: value.resourceId,
+          rendered_resource_id: value.renderedResourceId,
+          requested_url: value.requestedUrl,
+          final_url: value.finalUrl,
+          path: value.path,
+          outcome: value.outcome,
+          reason: value.reason,
+          status: value.status,
+          content_type: value.contentType,
+          canonical: value.canonical,
+          indexability: value.indexability,
+          sitemap: value.sitemap,
+          title: value.title,
+          headings: value.headings,
+          word_count: value.wordCount,
+          internal_links: value.internalLinks,
+          external_links: value.externalLinks,
+          raw_content_hash: value.rawContentHash,
+          exact_duplicate_of: value.exactDuplicateOf,
+          template_signature: value.templateSignature,
+          link_prominence: value.linkProminence,
+          extracted_text: value.extractedText,
+          text_content_hash: value.textContentHash,
+          producer: value.producer,
+          input_hash: value.inputHash,
+          created_at: value.createdAt
+        };
+      });
+      if (rows.length) {
+        await requireOk(this.client.from("source_snapshot_pages").upsert(rows, { onConflict: "id", ignoreDuplicates: true }), "Save source snapshot pages");
+        const retained = await requireData<Array<Record<string, unknown>>>(this.client.from("source_snapshot_pages").select("id,source_snapshot_id,text_content_hash").in("id", rows.map((row) => row.id)), "Verify source snapshot pages");
+        const retainedById = new Map(retained.map((row) => [String(row.id), row]));
+        if (rows.some((row) => retainedById.get(row.id)?.source_snapshot_id !== row.source_snapshot_id || retainedById.get(row.id)?.text_content_hash !== row.text_content_hash)) {
+          throw new Error("source_snapshot_page_conflict");
+        }
+      }
+    }
+  }
+  async listSourceSnapshotPages(sourceSnapshotId: string, pageId?: string) {
+    const retainedSourceSnapshotId = await this.resolveRetainedSourceSnapshotId(sourceSnapshotId);
+    const rows: Record<string, unknown>[] = [];
+    const pageSize = 1_000;
+    let cursor: string | undefined;
+    while (true) {
+      let query = this.client
+        .from("source_snapshot_pages")
+        .select("*")
+        .eq("source_snapshot_id", retainedSourceSnapshotId)
+        .order("id")
+        .limit(pageSize);
+      if (pageId) query = query.eq("id", pageId);
+      if (cursor) query = query.gt("id", cursor);
+      const page = await requireData<Record<string, unknown>[]>(query, "List source snapshot pages");
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      cursor = String(page.at(-1)?.id ?? "");
+      if (!cursor) throw new Error("source_snapshot_page_pagination_cursor_missing");
+    }
+    return rows
+      .map((row) => sourceSnapshotPageSchema.parse({
+        ...sourceSnapshotPageFromRow(row),
+        sourceSnapshotId
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path) || left.id.localeCompare(right.id));
+  }
+  async searchSourceSnapshotPages(input: { query: string; sourceIds: string[]; filters?: Record<string, unknown>; maxResults: number }) {
+    const rows = await requireData<Record<string, unknown>[]>(this.client.rpc("search_source_snapshot_pages", {
+      search_query: input.query,
+      source_ids: input.sourceIds,
+      filters: input.filters ?? {},
+      max_results: input.maxResults
+    }), "Search source snapshot pages");
+    return rows.map((row) => ({
+      sourceId: String(row.source_snapshot_id),
+      pageId: String(row.page_id),
+      url: String(row.url),
+      path: String(row.path),
+      title: typeof row.title === "string" ? row.title : undefined,
+      score: Number(row.score),
+      excerpt: String(row.excerpt),
+      contentHash: String(row.content_hash) as `sha256:${string}`
+    }));
   }
   async saveAssetRevision(revision: AssetRevision) {
     const value = assetRevisionSchema.parse(revision);
@@ -978,8 +2695,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const value = sitePublicBuildInputSchema.parse(input);
     await requireOk(this.client.from("site_public_build_inputs").insert({
       id: value.id, site_id: value.siteId, business_id: value.businessId, schema_version: value.schemaVersion,
-      business_state_revision: value.businessStateRevision, site_intent_revision: value.siteIntentRevision,
-      domain_context_id: value.domainContext?.id, domain_context_version: value.domainContext?.version,
+      owner_operational_revision: value.ownerOperationalRevision, owner_intent_revision: value.ownerIntentRevision,
       input_hash: value.inputHash, input: value, created_at: value.createdAt
     }), "Save public build input");
     await insertRefs(this.client, "site_public_build_input_sources", "input_id", value.id, "source_snapshot_id", value.sourceSnapshotIds);
@@ -1000,11 +2716,16 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       version_document: version,
       run_document: run,
       session_document: session,
-      outbox_document: input.outboxDocument,
       preview_grant_document: input.previewGrantDocument,
-      external_document: input.external ?? null,
       media_adoption_document: input.mediaAdoption ?? null
     }), "Finalize verified authoring");
+    const coverage = input.sourceCoverage ? siteSourceCoverageReportSchema.parse(input.sourceCoverage) : null;
+    const redirects = (input.redirects ?? []).map((candidate) => siteVersionRedirectSchema.parse(candidate));
+    await requireOk(this.client.rpc("bind_site_version_source_migration", {
+      target_version_id: version.id,
+      coverage_document: coverage,
+      redirects_document: redirects
+    }), "Bind immutable candidate source migration");
     return {
       version: siteVersionSchema.parse(result.version),
       run: siteAgentRunSchema.parse(result.run)
@@ -1020,7 +2741,10 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     await requireOk(this.client.from("site_versions").insert({
       id: value.id, site_id: value.siteId, schema_version: value.schemaVersion, version_number: value.number,
       status: value.status, artifact_id: value.artifactId, workspace_revision_id: value.workspaceRevisionId,
-      public_build_input_id: value.publicBuildInputId, version: value, created_by_kind: value.createdBy.kind,
+      public_build_input_id: value.publicBuildInputId,
+      owner_operational_revision: value.ownerOperationalRevision,
+      owner_intent_revision: value.ownerIntentRevision,
+      version: value, created_by_kind: value.createdBy.kind,
       created_by_id: value.createdBy.id, created_at: value.createdAt, published_at: value.publishedAt,
       replaced_version_id: value.replacedVersionId, stale_reason: value.staleReason
     }), "Create site version");
@@ -1038,6 +2762,18 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return row ? siteVersionFromRow(row) : undefined;
   }
+  async getSiteVersionSourceCoverage(versionId: string) {
+    const row = await requireData<{ report: unknown } | null>(this.client.from("site_version_source_coverage").select("report").eq("version_id", versionId).maybeSingle(), "Load site source coverage");
+    return row ? siteSourceCoverageReportSchema.parse(row.report) : undefined;
+  }
+  async listSiteVersionRedirects(versionId: string) {
+    const rows = await requireData<Record<string, unknown>[]>(this.client.from("site_version_redirects").select("*").eq("version_id", versionId).order("source_path"), "List site version redirects");
+    return rows.map(siteVersionRedirectFromRow);
+  }
+  async resolveSiteVersionRedirect(versionId: string, sourcePath: string) {
+    const row = await requireData<Record<string, unknown> | null>(this.client.from("site_version_redirects").select("*").eq("version_id", versionId).eq("source_path", sourcePath).maybeSingle(), "Resolve site version redirect");
+    return row ? siteVersionRedirectFromRow(row) : undefined;
+  }
   async listSiteVersions(siteId: string) {
     const rows = await requireData<Record<string, unknown>[]>(
       this.client.from("site_versions")
@@ -1048,14 +2784,26 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(siteVersionFromRow);
   }
+  async listSiteVersionsBySiteIds(siteIds: string[]) {
+    const ids = [...new Set(siteIds)];
+    if (!ids.length) return [];
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("site_versions")
+        .select("version,status,published_at,replaced_version_id,stale_reason")
+        .in("site_id", ids)
+        .order("version_number", { ascending: false }),
+      "List site versions by site IDs"
+    );
+    return rows.map(siteVersionFromRow);
+  }
   async markUnpublishedVersionsStale(siteId: string) {
     const candidates = (await this.listSiteVersions(siteId)).filter((version) => version.status === "candidate");
     for (const version of candidates) {
-      const stale = siteVersionSchema.parse({ ...version, status: "stale", staleReason: "stale_input" });
+      const stale = siteVersionSchema.parse({ ...version, status: "stale", staleReason: "owner_authority_changed" });
       await requireOk(
         this.client.from("site_versions").update({
           status: "stale",
-          stale_reason: "stale_input",
+          stale_reason: "owner_authority_changed",
           version: stale
         }).eq("id", stale.id).eq("status", "candidate"),
         "Mark site version stale"
@@ -1090,18 +2838,130 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_series").select("*").eq("id", id).maybeSingle(), "Load runtime series");
     return row ? runtimeSeriesFromRow(row) : undefined;
   }
+  async saveSandboxDeployment(deployment: SiteSandboxDeployment) {
+    const value = siteSandboxDeploymentSchema.parse(deployment);
+    await requireOk(this.client.from("site_sandbox_deployments").insert({
+      id: value.id,
+      schema_version: value.schemaVersion,
+      slot: value.slot,
+      worker_version_id: value.workerVersionId,
+      release_sha: value.releaseSha,
+      image_digest: value.imageDigest,
+      credential_slot: value.credentialSlot,
+      manifest: value.manifest,
+      deployment: value,
+      created_at: value.createdAt
+    }), "Save sandbox deployment");
+  }
+  async getSandboxDeployment(id: string) {
+    const row = await requireData<{ deployment: unknown } | null>(
+      this.client.from("site_sandbox_deployments").select("deployment").eq("id", id).maybeSingle(),
+      "Load sandbox deployment"
+    );
+    return row ? siteSandboxDeploymentSchema.parse(row.deployment) : undefined;
+  }
+  async getSandboxDeploymentDrain(id: string) {
+    const [runs, sessions] = await Promise.all([
+      requireData<Array<{ id: string }>>(this.client.from("site_agent_runs").select("id").eq("status", "running").eq("sandbox_deployment_id", id), "Load sandbox deployment run drain"),
+      requireData<Array<{ id: string }>>(this.client.from("site_agent_sessions").select("id").eq("sandbox_deployment_id", id).not("sandbox_id", "is", null), "Load sandbox deployment session drain")
+    ]);
+    return {
+      runningRunIds: runs.map((row) => row.id).sort(),
+      liveSessionIds: sessions.map((row) => row.id).sort()
+    };
+  }
+  async getSandboxControl() {
+    const row = await requireData<{ control: unknown } | null>(
+      this.client.from("site_sandbox_control").select("control").eq("id", "production").maybeSingle(),
+      "Load sandbox control"
+    );
+    return row ? siteSandboxControlSchema.parse(row.control) : undefined;
+  }
+  async saveSandboxControl(control: SiteSandboxControl) {
+    const value = siteSandboxControlSchema.parse(control);
+    await requireData(this.client.rpc("set_site_sandbox_control", { control_document: value }), "Save sandbox control");
+  }
+  async rollbackSandboxDeployment(input: { failedDeploymentId: string; previousDeploymentId: string; now: string }) {
+    const value = await requireData<unknown[]>(this.client.rpc("rollback_site_sandbox_deployment", {
+      target_failed_deployment_id: input.failedDeploymentId,
+      target_previous_deployment_id: input.previousDeploymentId,
+      target_now: input.now
+    }), "Rollback sandbox deployment");
+    return value.map(String).sort();
+  }
+  async getAgentWorkspaceCheckpoint(id: string) {
+    const row = await requireData<{ checkpoint: unknown } | null>(
+      this.client.from("site_agent_workspace_checkpoints").select("checkpoint").eq("id", id).maybeSingle(),
+      "Load agent workspace checkpoint"
+    );
+    return row ? siteAgentWorkspaceCheckpointSchema.parse(row.checkpoint) : undefined;
+  }
+  async checkpointAgentRunWorkspace(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+  }) {
+    const checkpoint = siteAgentWorkspaceCheckpointSchema.parse(input.checkpoint);
+    const run = siteAgentRunSchema.parse(input.run);
+    const value = await requireData<unknown>(this.client.rpc("checkpoint_site_agent_run_workspace", {
+      checkpoint_document: checkpoint,
+      run_document: run
+    }), "Checkpoint site-agent workspace");
+    return siteAgentRunSchema.parse(value);
+  }
+  async pauseAgentRunForInput(input: {
+    checkpoint: SiteAgentWorkspaceCheckpoint;
+    run: SiteAgentRun;
+    session: SiteAgentSession;
+  }) {
+    const checkpoint = siteAgentWorkspaceCheckpointSchema.parse(input.checkpoint);
+    const run = siteAgentRunSchema.parse(input.run);
+    const session = siteAgentSessionSchema.parse(input.session);
+    const value = await requireData<Record<string, unknown>>(this.client.rpc("pause_site_agent_run_for_input", {
+      checkpoint_document: checkpoint,
+      run_document: run,
+      session_document: session
+    }), "Pause site-agent run for input");
+    return {
+      run: siteAgentRunSchema.parse(value.run),
+      session: siteAgentSessionSchema.parse(value.session)
+    };
+  }
+  async requeueCheckpointedAgentRun(run: SiteAgentRun) {
+    const value = siteAgentRunSchema.parse(run);
+    const retained = await requireData<unknown>(this.client.rpc("requeue_checkpointed_site_agent_run", {
+      run_document: value
+    }), "Requeue checkpointed site-agent run");
+    return retained ? siteAgentRunSchema.parse(retained) : undefined;
+  }
+  async cancelAgentRun(runId: string, completedAt: string) {
+    const value = await requireData<unknown>(this.client.rpc("cancel_site_agent_run", {
+      target_run_id: runId,
+      target_completed_at: completedAt
+    }), "Cancel site-agent run");
+    return value ? siteAgentRunSchema.parse(value) : undefined;
+  }
   async saveAgentSession(session: SiteAgentSession) {
     const value = siteAgentSessionSchema.parse(session);
     await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_sessions").upsert({
         id: value.id, site_id: value.siteId, principal_kind: value.principal.kind, principal_id: value.principal.id, schema_version: value.schemaVersion,
         status: value.status, current_workspace_revision_id: value.currentWorkspaceRevisionId ?? null,
         public_build_input_id: value.publicBuildInputId, sandbox_provider: value.sandboxProvider,
+        sandbox_deployment_id: value.sandboxDeploymentId ?? null,
         sandbox_id: value.sandboxId ?? null, lease_token_hash: value.leaseTokenHash,
         sandbox_last_started_at: value.sandboxLastStartedAt ?? null, sandbox_last_destroyed_at: value.sandboxLastDestroyedAt ?? null,
         sandbox_provisioned_ms: value.sandboxProvisionedMs, sandbox_destroy_attempts: value.sandboxDestroyAttempts,
         lease_expires_at: value.leaseExpiresAt, rotate_at: value.rotateAt,
         created_at: value.createdAt, updated_at: value.updatedAt
       }), "Save agent session"), "Save agent session");
+  }
+  async saveAgentSessionForExecution(session: SiteAgentSession, runId: string, executionNumber: number) {
+    const value = siteAgentSessionSchema.parse(session);
+    const retained = await requireData<unknown>(this.client.rpc("save_site_agent_session_for_execution", {
+      session_document: value,
+      target_run_id: runId,
+      target_execution_number: executionNumber
+    }), "Save site-agent session for execution");
+    return Boolean(retained);
   }
   async getAgentSession(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("site_agent_sessions").select("*").eq("id", id).maybeSingle(), "Load agent session");
@@ -1128,15 +2988,39 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     );
     return rows.map(sessionFromRow);
   }
+  async fenceExpiredAgentSession(input: { session: SiteAgentSession; run?: SiteAgentRun; now: string }) {
+    const session = siteAgentSessionSchema.parse(input.session);
+    const run = input.run ? siteAgentRunSchema.parse(input.run) : null;
+    const value = await requireData<unknown>(this.client.rpc("fence_expired_site_agent_session", {
+      session_document: session,
+      run_document: run,
+      target_now: input.now
+    }), "Fence expired agent session");
+    return value ? siteAgentSessionSchema.parse(value) : undefined;
+  }
   async saveAgentRun(run: SiteAgentRun) {
     const value = siteAgentRunSchema.parse(run);
-    await retryIdempotentTransport(() => requireOk(this.client.from("site_agent_runs").upsert({
-        id: value.id, session_id: value.sessionId, site_id: value.siteId, schema_version: value.schemaVersion,
-        kind: value.kind, status: value.status, exact_parent_revision_id: value.exactParentRevisionId,
-        output_revision_id: value.outputRevisionId, execution_driver: value.executionDriver,
-        api_provider: value.apiProvider, model_id: value.modelId, run: value,
-        started_at: value.startedAt, completed_at: value.completedAt
-      }), "Save agent run"), "Save agent run");
+    const saved = await retryIdempotentTransport(
+      () => requireData<unknown>(this.client.rpc("save_site_agent_run", { run_document: value }), "Save agent run"),
+      "Save agent run"
+    );
+    return siteAgentRunSchema.parse(saved);
+  }
+  async touchAgentRunHeartbeat(runId: string, executionNumber: number, heartbeatAt: string) {
+    return requireData<boolean>(this.client.rpc("touch_site_agent_run_heartbeat", {
+      target_run_id: runId,
+      target_execution_number: executionNumber,
+      target_heartbeat_at: heartbeatAt
+    }), "Touch site-agent run heartbeat");
+  }
+  async requeueInterruptedAgentRun(input: { runId: string; executionNumber: number; now: string; failureReason: string }) {
+    const value = await requireData<unknown>(this.client.rpc("requeue_interrupted_site_agent_run", {
+      target_run_id: input.runId,
+      target_execution_number: input.executionNumber,
+      target_now: input.now,
+      target_failure_reason: input.failureReason
+    }), "Requeue interrupted site-agent run");
+    return value ? siteAgentRunSchema.parse(value) : undefined;
   }
   async enqueueAgentRun(run: SiteAgentRun) {
     const value = siteAgentRunSchema.parse(run);
@@ -1149,9 +3033,86 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     if (!result.data) throw new Error("Enqueue site agent run: no data returned");
     return siteAgentRunSchema.parse(result.data);
   }
+  async enqueueAgentRunWithMessage(input: { run: SiteAgentRun; message: SiteAgentMessage }) {
+    const run = siteAgentRunSchema.parse(input.run);
+    const message = siteAgentMessageSchema.parse(input.message);
+    const result = await this.client.rpc("enqueue_site_agent_request", {
+      run_document: run,
+      message_document: message
+    });
+    if (result.error) {
+      if (/concurrent_project_limit/i.test(result.error.message)) throw new Error("concurrent_project_limit");
+      if (/site_authoring_maintenance_active/i.test(result.error.message)) throw new Error("site_authoring_maintenance_active");
+      throw new Error(`Enqueue site-agent request: ${result.error.message}`);
+    }
+    if (!result.data) throw new Error("Enqueue site-agent request: no data returned");
+    return siteAgentRunSchema.parse(result.data);
+  }
   async claimAgentRun(runId: string) {
-    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", { target_run_id: runId }), "Claim site agent run");
+    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", {
+      target_run_id: runId,
+      target_worker_id: `targeted-${process.pid}`,
+      target_claimed_at: new Date().toISOString()
+    }), "Claim site agent run");
     return value ? siteAgentRunSchema.parse(value) : undefined;
+  }
+  async claimNextAgentRun(workerId: string) {
+    const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", {
+      target_run_id: null,
+      target_worker_id: workerId,
+      target_claimed_at: new Date().toISOString()
+    }), "Claim next site agent run");
+    return value ? siteAgentRunSchema.parse(value) : undefined;
+  }
+  async getAgentContinuationHead(runId: string) {
+    const row = await requireData<{ head: unknown } | null>(
+      this.client.from("site_agent_continuation_heads").select("head").eq("run_id", runId).maybeSingle(),
+      "Load site-agent continuation head"
+    );
+    return row ? siteAgentContinuationHeadSchema.parse(row.head) : undefined;
+  }
+  async listAgentContinuationSegments(runId: string, generation: number) {
+    const rows = await requireData<Array<{ segment: unknown }>>(
+      this.client.from("site_agent_continuation_segments")
+        .select("segment")
+        .eq("run_id", runId)
+        .eq("generation", generation)
+        .order("sequence", { ascending: true }),
+      "List site-agent continuation segments"
+    );
+    return rows.map((row) => siteAgentContinuationSegmentSchema.parse(row.segment));
+  }
+  async appendAgentContinuation(input: {
+    head: SiteAgentContinuationHead;
+    segment: SiteAgentContinuationSegment;
+  }) {
+    const head = siteAgentContinuationHeadSchema.parse(input.head);
+    const segment = siteAgentContinuationSegmentSchema.parse(input.segment);
+    const value = await requireData<unknown>(this.client.rpc("append_site_agent_continuation", {
+      head_document: head,
+      segment_document: segment
+    }), "Append site-agent continuation");
+    return siteAgentContinuationHeadSchema.parse(value);
+  }
+  async resetAgentContinuation(headDocument: SiteAgentContinuationHead) {
+    const head = siteAgentContinuationHeadSchema.parse(headDocument);
+    const value = await requireData<unknown>(this.client.rpc("reset_site_agent_continuation", {
+      head_document: head
+    }), "Reset site-agent continuation");
+    return siteAgentContinuationHeadSchema.parse(value);
+  }
+  async closeAgentContinuation(input: {
+    runId: string;
+    executionNumber: number;
+    status: "awaiting_input" | "terminal";
+    purgeAfter?: string;
+  }) {
+    await requireData(this.client.rpc("close_site_agent_continuation", {
+      target_run_id: input.runId,
+      target_execution_number: input.executionNumber,
+      target_status: input.status,
+      target_purge_after: input.purgeAfter ?? null
+    }), "Close site-agent continuation");
   }
   async getAgentRun(id: string) { return getJson(this.client, "site_agent_runs", "run", id, siteAgentRunSchema); }
   async getAgentRunAdminRecord(id: string) {
@@ -1200,14 +3161,14 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   }
   async listQueuedAgentRuns(limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs").select("run").eq("status", "queued").eq("execution_driver", "responses_api").order("started_at").limit(limit),
+      this.client.from("site_agent_runs").select("run").eq("status", "queued").order("started_at").limit(limit),
       "List queued site agent runs"
     );
     return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     const rows = await requireData<Array<{ run: unknown }>>(
-      this.client.from("site_agent_runs").select("run").eq("status", "running").eq("execution_driver", "responses_api").order("started_at").limit(Math.max(limit, 100)),
+      this.client.from("site_agent_runs").select("run").eq("status", "running").order("started_at").limit(Math.max(limit, 100)),
       "List running site agent runs"
     );
     return rows.map((row) => siteAgentRunSchema.parse(row.run))
@@ -1328,20 +3289,6 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Record<string, unknown>[]>(query, "List operator queue");
     return rows.map(operatorItemFromRow);
   }
-  async saveVerticalDemandEvent(event: VerticalDemandEvent) {
-    const value = verticalDemandEventSchema.parse(event);
-    await requireOk(this.client.from("vertical_demand_events").insert({
-      id: value.id, schema_version: value.schemaVersion, source_url: value.sourceUrl,
-      observed_vertical: value.observedVertical, requested_by: value.requestedBy, status: value.status,
-      created_at: value.createdAt, reviewed_at: value.reviewedAt, reviewed_by: value.reviewedBy
-    }), "Save vertical demand event");
-  }
-  async listVerticalDemandEvents(status?: VerticalDemandEvent["status"]) {
-    let query = this.client.from("vertical_demand_events").select("*").order("created_at", { ascending: false });
-    if (status) query = query.eq("status", status);
-    const rows = await requireData<Record<string, unknown>[]>(query, "List vertical demand events");
-    return rows.map(verticalDemandEventFromRow);
-  }
 }
 
 export async function persistSiteIntentAuthority(
@@ -1386,6 +3333,30 @@ export const sitePlatformRepository: SitePlatformRepository = process.env.LODEST
   ? new LocalSitePlatformRepository()
   : new SupabaseSitePlatformRepository();
 
+function insertLocalBootstrapSite(store: LocalState, input: BootstrapSiteV1Input) {
+  const site = platformSiteRecordSchema.parse(input.site);
+  const state = businessStateSchema.parse(input.state);
+  const intent = siteIntentSchema.parse(input.intent);
+  const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
+  const sourceSnapshots = input.sourceSnapshots.map((snapshot) => sourceSnapshotSchema.parse(snapshot));
+  const assetRevisions = input.assetRevisions.map((revision) => assetRevisionSchema.parse(revision));
+  const publicBuildInput = sitePublicBuildInputSchema.parse(input.publicBuildInput);
+  if (site.id !== state.siteId || site.businessId !== state.businessId || intent.siteId !== site.id || forms.some((form) => form.siteId !== site.id)) {
+    throw new Error("Bootstrap authorities do not belong to the same site.");
+  }
+  assertBootstrapReferences({ site, state, intent, forms, sourceSnapshots, assetRevisions, publicBuildInput });
+  if (store.sites[site.id] || Object.values(store.sites).some((item) => item.slug === site.slug)) {
+    throw new Error("Site ID or slug already exists.");
+  }
+  store.sites[site.id] = { ...site, currentPublicBuildInputId: publicBuildInput.id };
+  store.businessStates[state.businessId] = state;
+  store.intents[intent.id] = intent;
+  for (const form of forms) store.forms[form.id] = form;
+  for (const snapshot of sourceSnapshots) store.sourceSnapshots[snapshot.id] = snapshot;
+  for (const revision of assetRevisions) store.assetRevisions[revision.id] = revision;
+  store.buildInputs[publicBuildInput.id] = publicBuildInput;
+}
+
 function assertRevisionAdvance(current: number | undefined, next: number, label: string) {
   if (current === undefined && next !== 1) throw new Error(`Initial ${label} revision must be 1.`);
   if (current !== undefined && next !== current + 1) throw new Error(`${label} must advance exactly one revision.`);
@@ -1397,7 +3368,7 @@ function assertBootstrapReferences(input: BootstrapSiteV1Input) {
   assertUniqueBootstrapIds(assetRevisions, "asset revision");
   assertUniqueBootstrapIds(forms, "form definition");
   if (publicBuildInput.siteId !== site.id || publicBuildInput.businessId !== site.businessId ||
-      publicBuildInput.businessStateRevision !== state.revision || publicBuildInput.siteIntentRevision !== intent.revision) {
+      publicBuildInput.ownerOperationalRevision !== state.ownerOperationalRevision || publicBuildInput.ownerIntentRevision !== intent.ownerIntentRevision) {
     throw new Error("Bootstrap public input does not match its canonical authorities.");
   }
   if (sourceSnapshots.some((snapshot) => snapshot.businessId !== site.businessId) ||
@@ -1412,6 +3383,35 @@ function assertBootstrapReferences(input: BootstrapSiteV1Input) {
       publicBuildInput.forms.some((form) => !formIds.has(form.id))) {
     throw new Error("Bootstrap public input references unretained evidence, assets, or forms.");
   }
+  const mirrorSourceIds = new Set<string>();
+  for (const reference of input.sourceMirrorReferences ?? []) {
+    if (!sourceIds.has(reference.sourceSnapshotId)
+      || reference.sourceSnapshotId === reference.retainedSourceSnapshotId
+      || mirrorSourceIds.has(reference.sourceSnapshotId)) {
+      throw new Error("Bootstrap source-mirror references are invalid or duplicated.");
+    }
+    mirrorSourceIds.add(reference.sourceSnapshotId);
+  }
+}
+
+function retainLocalSourceMirrorReference(store: LocalState, reference: SourceMirrorReference) {
+  const snapshot = store.sourceSnapshots[reference.sourceSnapshotId];
+  const retained = store.sourceSnapshots[reference.retainedSourceSnapshotId];
+  if (!snapshot || !retained
+    || snapshot.sourceType !== "website"
+    || retained.sourceType !== "website"
+    || snapshot.payload.kind !== "website-mirror"
+    || retained.payload.kind !== "website-mirror"
+    || snapshot.contentHash !== retained.contentHash
+    || snapshot.sourceUrl !== retained.sourceUrl
+    || store.sourceMirrorReferences[reference.retainedSourceSnapshotId]
+    || Object.values(store.sourceSnapshotResources).some((resource) => resource.sourceSnapshotId === snapshot.id)
+    || Object.values(store.sourceSnapshotPages).some((page) => page.sourceSnapshotId === snapshot.id)) {
+    throw new Error("retained_website_source_snapshot_mismatch");
+  }
+  const existing = store.sourceMirrorReferences[snapshot.id];
+  if (existing && existing !== retained.id) throw new Error("source_snapshot_mirror_reference_conflict");
+  store.sourceMirrorReferences[snapshot.id] = retained.id;
 }
 
 function assertUniqueBootstrapIds(values: Array<{ id: string }>, label: string) {
@@ -1476,6 +3476,9 @@ function siteFromRow(row: Record<string, unknown>) {
 function workspaceFromRow(row: Record<string, unknown>) {
   return siteWorkspaceRevisionSchema.parse({
     schemaVersion: row.schema_version, id: row.id, siteId: row.site_id,
+    publicBuildInputId: row.public_build_input_id,
+    ownerOperationalRevision: row.owner_operational_revision,
+    ownerIntentRevision: row.owner_intent_revision,
     parentRevisionId: row.parent_revision_id ?? undefined, revisionNumber: row.revision_number,
     sourceHash: row.source_hash, sourceArchiveKey: row.source_archive_key, files: row.files,
     createdAt: row.created_at, createdBy: { kind: row.created_by_kind, id: row.created_by_id }
@@ -1515,6 +3518,7 @@ function sessionFromRow(row: Record<string, unknown>) {
     principal: { kind: row.principal_kind, id: row.principal_id },
     status: row.status, currentWorkspaceRevisionId: row.current_workspace_revision_id ?? undefined,
     publicBuildInputId: row.public_build_input_id, sandboxProvider: row.sandbox_provider,
+    sandboxDeploymentId: row.sandbox_deployment_id ?? undefined,
     sandboxId: row.sandbox_id ?? undefined,
     sandboxLastStartedAt: row.sandbox_last_started_at ?? undefined,
     sandboxLastDestroyedAt: row.sandbox_last_destroyed_at ?? undefined,
@@ -1541,7 +3545,7 @@ function adminRunRecord(row: { id: string; schema_version: string; run: unknown 
 }
 
 function adminRunListItem(run: SiteAgentRun, siteSlug?: string): SiteAgentRunAdminListItem {
-  const usage = run.usage.kind === "model_reported" ? run.usage : undefined;
+  const usage = run.usage;
   return {
     id: run.id,
     siteId: run.siteId,
@@ -1549,12 +3553,11 @@ function adminRunListItem(run: SiteAgentRun, siteSlug?: string): SiteAgentRunAdm
     status: run.status,
     stage: run.stage,
     kind: run.kind,
-    executionDriver: run.executionDriver,
     apiProvider: run.apiProvider,
-    modelId: run.modelId ?? run.externalProvenance?.clientReportedModelId,
-    tokenCount: usage ? usage.inputTokens + usage.outputTokens : undefined,
-    costUsd: usage?.costSource === "unavailable" ? undefined : usage?.costUsd,
-    costSource: usage?.costSource,
+    modelId: run.modelId,
+    tokenCount: usage.inputTokens + usage.outputTokens,
+    costUsd: usage.costSource === "unavailable" ? undefined : usage.costUsd,
+    costSource: usage.costSource,
     durationMs: run.usage.durationMs,
     startedAt: run.startedAt,
     completedAt: run.completedAt,
@@ -1572,7 +3575,6 @@ function adminRunListItemFromRow(row: Record<string, unknown>): SiteAgentRunAdmi
     status: row.status as SiteAgentRun["status"],
     stage: (row.stage ?? "failed") as SiteAgentRun["stage"],
     kind: row.kind as SiteAgentRun["kind"],
-    executionDriver: row.execution_driver as SiteAgentRun["executionDriver"],
     apiProvider: row.api_provider as SiteAgentRun["apiProvider"] | undefined,
     modelId: typeof row.model_id === "string" ? row.model_id : undefined,
     tokenCount: numeric(row.token_count),
@@ -1595,7 +3597,6 @@ function adminRunSearchText(item: SiteAgentRunAdminListItem) {
     item.siteSlug,
     item.modelId,
     item.apiProvider,
-    item.executionDriver,
     item.kind,
     item.failureCode
   ].filter(Boolean).join(" ").toLocaleLowerCase();
@@ -1688,11 +3689,86 @@ function runEventFromRow(row: Record<string, unknown>) {
   });
 }
 
-function verticalDemandEventFromRow(row: Record<string, unknown>) {
-  return verticalDemandEventSchema.parse({
-    schemaVersion: row.schema_version, id: row.id, sourceUrl: row.source_url,
-    observedVertical: row.observed_vertical ?? undefined, requestedBy: row.requested_by,
-    status: row.status, createdAt: row.created_at, reviewedAt: row.reviewed_at ?? undefined,
-    reviewedBy: row.reviewed_by ?? undefined
+function sourceSnapshotResourceFromRow(row: Record<string, unknown>) {
+  return sourceSnapshotResourceSchema.parse({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    sourceSnapshotId: row.source_snapshot_id,
+    captureKind: row.capture_kind,
+    role: row.role,
+    requestedUrl: row.requested_url,
+    finalUrl: row.final_url ?? undefined,
+    outcome: row.outcome,
+    reason: row.reason ?? undefined,
+    status: row.status ?? undefined,
+    contentType: row.content_type ?? undefined,
+    storedEncoding: row.stored_encoding ?? undefined,
+    rawContentHash: row.raw_content_hash ?? undefined,
+    blobContentHash: row.blob_content_hash ?? undefined,
+    storageKey: row.storage_key ?? undefined,
+    rawBytes: Number(row.raw_bytes),
+    storedBytes: Number(row.stored_bytes),
+    headers: row.headers ?? {},
+    redirectChain: row.redirect_chain ?? [],
+    initiatorUrls: row.initiator_urls ?? [],
+    capturedAt: row.captured_at,
+    metadata: row.metadata ?? {}
   });
+}
+
+function sourceSnapshotPageFromRow(row: Record<string, unknown>) {
+  return sourceSnapshotPageSchema.parse({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    sourceSnapshotId: row.source_snapshot_id,
+    resourceId: row.resource_id,
+    renderedResourceId: row.rendered_resource_id ?? undefined,
+    requestedUrl: row.requested_url,
+    finalUrl: row.final_url ?? undefined,
+    path: row.path,
+    outcome: row.outcome,
+    reason: row.reason ?? undefined,
+    status: row.status ?? undefined,
+    contentType: row.content_type ?? undefined,
+    canonical: row.canonical ?? undefined,
+    indexability: row.indexability,
+    sitemap: row.sitemap ?? undefined,
+    title: row.title ?? undefined,
+    headings: row.headings ?? [],
+    wordCount: Number(row.word_count),
+    internalLinks: row.internal_links ?? [],
+    externalLinks: row.external_links ?? [],
+    rawContentHash: row.raw_content_hash ?? undefined,
+    exactDuplicateOf: row.exact_duplicate_of ?? undefined,
+    templateSignature: row.template_signature ?? undefined,
+    linkProminence: Number(row.link_prominence),
+    extractedText: row.extracted_text,
+    textContentHash: row.text_content_hash,
+    producer: row.producer,
+    inputHash: row.input_hash,
+    createdAt: row.created_at
+  });
+}
+
+function siteVersionRedirectFromRow(row: Record<string, unknown>) {
+  return siteVersionRedirectSchema.parse({
+    schemaVersion: row.schema_version,
+    id: row.id,
+    siteId: row.site_id,
+    versionId: row.version_id,
+    sourcePath: row.source_path,
+    destinationPath: row.destination_path,
+    reason: row.reason ?? undefined,
+    createdAt: row.created_at
+  });
+}
+
+function occurrences(value: string, needle: string) {
+  let count = 0;
+  let offset = 0;
+  while ((offset = value.indexOf(needle, offset)) >= 0) {
+    count += 1;
+    offset += Math.max(1, needle.length);
+  }
+  return count;
 }

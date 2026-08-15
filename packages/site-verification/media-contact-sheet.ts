@@ -9,10 +9,37 @@ const imageHeight = 220;
 const headerHeight = 76;
 
 export async function createMediaContactSheet(
-  assets: Array<{ asset: AssetRevisionRef; bytes: Buffer; sourcePageUrl?: string; sourceAssetUrl?: string }>
+  assets: Array<{ asset: AssetRevisionRef; bytes: Buffer; sourcePageUrl?: string; sourceAssetUrl?: string }>,
+  options: { neutralSemantics?: boolean } = {}
 ) {
-  if (!assets.length) return undefined;
-  const rows = Math.ceil(assets.length / columns);
+  return createLabeledMediaContactSheet(assets.map((item) => {
+    const sourceHost = options.neutralSemantics ? undefined : sourceHostFor(item.sourcePageUrl);
+    const sourcePath = options.neutralSemantics ? undefined : sourcePathFor(item.sourceAssetUrl);
+    return {
+      bytes: item.bytes,
+      labels: [
+        item.asset.assetId,
+        `${item.asset.kind} · ${item.asset.width ?? "?"}×${item.asset.height ?? "?"} · ${item.asset.origin.replaceAll("_", " ")}`,
+        options.neutralSemantics ? "judge the visible pixels; semantics are unverified" : `alt: ${item.asset.alt || "(empty)"}`.slice(0, 58),
+        sourcePath ? `file: ${sourcePath}` : "",
+        sourceHost ? `page: ${sourceHost}` : ""
+      ].filter(Boolean)
+    };
+  }));
+}
+
+export async function createSourceMediaContactSheet(
+  resources: Array<{ resourceId: string; likelyKind: "photo" | "logo" | "icon" | "other"; bytes: Buffer }>
+) {
+  return createLabeledMediaContactSheet(resources.map((item) => ({
+    bytes: item.bytes,
+    labels: [item.resourceId, `${item.likelyKind} · retained first-party candidate`, "judge the visible pixels; semantics are unverified"]
+  })));
+}
+
+async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labels: string[] }>) {
+  if (!items.length) return undefined;
+  const rows = Math.ceil(items.length / columns);
   const width = columns * tileWidth;
   const height = headerHeight + rows * tileHeight;
   const composites = [{
@@ -24,7 +51,7 @@ export async function createMediaContactSheet(
     left: 0,
     top: 0
   }];
-  for (const [index, item] of assets.entries()) {
+  for (const [index, item] of items.entries()) {
     const column = index % columns;
     const row = Math.floor(index / columns);
     const left = column * tileWidth + 20;
@@ -33,18 +60,9 @@ export async function createMediaContactSheet(
       .resize(imageWidth, imageHeight, { fit: "contain", background: "#ece9e2" })
       .png()
       .toBuffer();
-    const sourceHost = sourceHostFor(item.sourcePageUrl);
-    const sourcePath = sourcePathFor(item.sourceAssetUrl);
-    const label = [
-      item.asset.assetId,
-      `${item.asset.kind} · ${item.asset.width ?? "?"}×${item.asset.height ?? "?"} · ${item.asset.origin.replaceAll("_", " ")}`,
-      `alt: ${item.asset.alt || "(empty)"}`.slice(0, 58),
-      sourcePath ? `file: ${sourcePath}` : "",
-      sourceHost ? `page: ${sourceHost}` : ""
-    ].filter(Boolean);
     composites.push({ input: thumbnail, left, top });
     composites.push({
-      input: Buffer.from(svgText(imageWidth, 112, label.map((line, lineIndex) =>
+      input: Buffer.from(svgText(imageWidth, 112, item.labels.map((line, lineIndex) =>
         `<text x="0" y="${18 + lineIndex * 19}" class="${lineIndex === 0 ? "id" : "meta"}">${escapeXml(line)}</text>`
       ).join(""))),
       left,
@@ -53,7 +71,7 @@ export async function createMediaContactSheet(
   }
   return sharp({
     create: { width, height, channels: 3, background: "#f8f6f1" }
-  }).composite(composites).png().toBuffer();
+  }).composite(composites).webp({ quality: 82, effort: 4 }).toBuffer();
 }
 
 function svgText(width: number, height: number, content: string) {

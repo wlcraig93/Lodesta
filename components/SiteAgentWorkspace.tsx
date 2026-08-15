@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type {
   OperatorQueueItem,
   PlatformSiteRecord,
   SiteAgentSession,
   SiteElementSelection,
-  SitePublicationReadiness,
+  SiteCandidateIntegrity,
   SitePublicBuildInput,
   SiteVersion
 } from "@/packages/site-contracts";
@@ -18,7 +18,9 @@ import type {
 } from "@/packages/site-platform/owner-run-view";
 import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
+import { useProductTooltip } from "@/components/ProductTooltip";
 import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
+import { ConfirmDialog } from "@/components/ProductDialog";
 import { WebsiteBuildCanvas } from "@/components/WebsiteBuildCanvas";
 import { WebsiteWorkspaceFrame, type MobilePane } from "@/components/WebsiteWorkspaceFrame";
 
@@ -30,7 +32,7 @@ type WorkspacePayload = {
   versionRoutes: Record<string, Array<{ path: string; title: string }>>;
   messages: SiteAgentMessage[];
   runs: OwnerSiteAgentRun[];
-  readiness?: SitePublicationReadiness;
+  candidateIntegrity?: SiteCandidateIntegrity;
   openFindings?: OperatorQueueItem[];
 };
 
@@ -49,6 +51,7 @@ type DiscussionResult = {
 
 type VoiceSupport = "checking" | "supported" | "unsupported";
 type ActivityLoadState = "idle" | "loading" | "loaded" | "error";
+type PreviewViewport = "desktop" | "tablet" | "mobile";
 
 type SpeechRecognitionResultLike = {
   0?: { transcript?: string };
@@ -110,7 +113,7 @@ export function SiteAgentWorkspace({
   });
   const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit");
   const [discussionSuggestion, setDiscussionSuggestion] = useState<DiscussionSuggestion>();
-  const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
+  const [viewport, setViewport] = useState<PreviewViewport>("desktop");
   const [mobilePane, setMobilePane] = useState<MobilePane>("chat");
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState(true);
@@ -121,6 +124,7 @@ export function SiteAgentWorkspace({
   const [compare, setCompare] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selection, setSelection] = useState<SiteElementSelection>();
+  const [selectionKind, setSelectionKind] = useState<string>();
   const [clock, setClock] = useState(Date.now());
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
   const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
@@ -131,6 +135,7 @@ export function SiteAgentWorkspace({
   const [activityLoads, setActivityLoads] = useState<Record<string, ActivityLoadState>>({});
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
   const [newActivity, setNewActivity] = useState(false);
+  const [cancelRunTarget, setCancelRunTarget] = useState<OwnerSiteAgentRun>();
   const previewMoreId = useId();
   const publishReasonId = useId();
   const composerUnavailableId = useId();
@@ -143,6 +148,7 @@ export function SiteAgentWorkspace({
   const previewMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const previewMoreMobileTriggerRef = useRef<HTMLButtonElement>(null);
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
+  const previewHoverCleanupRef = useRef<(() => void) | undefined>(undefined);
   const previewSelectionCleanupRef = useRef<(() => void) | undefined>(undefined);
   const selectionModeRef = useRef(false);
   const selectedPagePathRef = useRef("/");
@@ -152,6 +158,7 @@ export function SiteAgentWorkspace({
   const announcedRunsRef = useRef(new Map<string, OwnerSiteAgentRun>());
   const followsLatestRef = useRef(true);
   const transcriptVersionRef = useRef("");
+  const focusedMessageRef = useRef("");
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
   const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
@@ -190,12 +197,13 @@ export function SiteAgentWorkspace({
       }));
   const selectedPageExists = pages.some((page) => page.path === selectedPagePath);
   const selectedPageValue = selectedPageExists ? selectedPagePath : "/";
+  const currentPreviewUrl = previewRouteUrl(previewBaseUrl, selectedPageValue);
   const status = deriveOwnerSiteLifecycle({
     slug: workspace.site.slug,
     site: workspace.site,
     versions: workspace.versions,
     runs: workspace.runs,
-    readiness: workspace.readiness,
+    candidateIntegrity: workspace.candidateIntegrity,
     attention: { operatorItems: workspace.openFindings?.length }
   });
   const diagnosticRuns = workspace.runs.slice(0, 4);
@@ -203,20 +211,35 @@ export function SiteAgentWorkspace({
   const compareDisabled = !publishedPreviewUrl || (!fastPreview && published?.id === selectedVersion?.id);
   const starterPrompts = editorStarterPrompts(workspace.input ?? initialInput);
   const selectionAvailable = previewAvailable && !activeRun && !busy && Boolean(selectedVersion);
+  const selectPageTooltip = useProductTooltip(
+    selectionMode ? "Cancel selection" : "Select an element",
+    { hoverDelay: 150 }
+  );
   const showMore = previewAvailable && workspace.versions.length > 0;
-  const showPublish = Boolean(latestCandidate);
+  const selectedIsCurrentCandidate = Boolean(
+    selectedVersion
+    && latestCandidate
+    && selectedVersion.status === "candidate"
+    && selectedVersion.id === latestCandidate.id
+  );
+  const showPublish = selectedIsCurrentCandidate;
   const buildCanvas = editorBuildCanvas({ activeRun, waitingRun, busy, latestCompletedRun });
   const selectionPageLabel = selection
     ? pages.find((page) => page.path === selection.route)?.title ?? pageLabelForRoute(selection.route)
+    : undefined;
+  const selectionDescription = selection
+    ? `${selection.label ?? selectionKind ?? "Page element"}${selectionPageLabel ? ` on ${selectionPageLabel}` : ""}`
     : undefined;
   const publishDisabledReason = activeRun
     ? "Finish the current website update before publishing."
     : busy
       ? "Wait for the workspace to finish loading."
-      : !latestCandidate
-        ? "Create a verified website update before publishing."
-        : workspace.readiness?.status !== "ready"
-          ? `${workspace.readiness?.blockers.length ?? 1} publishing requirement${(workspace.readiness?.blockers.length ?? 1) === 1 ? "" : "s"} must be resolved first.`
+      : !selectedIsCurrentCandidate
+        ? "Select the current candidate before publishing."
+        : workspace.candidateIntegrity?.status === "stale_owner_authority"
+          ? "Business details or site preferences changed after this version. Review the refreshed candidate."
+          : workspace.candidateIntegrity?.status === "failed_integrity"
+            ? "The current preview has a technical integrity issue and must be rebuilt."
           : undefined;
   const publishBlocked = Boolean(publishDisabledReason);
   const voiceStatus = initialBuildActive
@@ -566,6 +589,19 @@ export function SiteAgentWorkspace({
   }, [selectionMode]);
 
   useEffect(() => {
+    const focused = [...workspace.messages].reverse().find((message) =>
+      message.role === "agent" && message.selection?.route
+    );
+    if (!focused?.selection || focusedMessageRef.current === focused.id) return;
+    focusedMessageRef.current = focused.id;
+    const route = normalizePagePath(focused.selection.route);
+    selectedPagePathRef.current = route;
+    setSelectedPagePath(route);
+    if (focused.selection.versionId) setSelectedVersionId(focused.selection.versionId);
+    setMobilePane("preview");
+  }, [workspace.messages]);
+
+  useEffect(() => {
     if (!selectionMode) return;
     const document = previewRef.current?.contentDocument;
     if (!document) return;
@@ -573,8 +609,17 @@ export function SiteAgentWorkspace({
     style.dataset.lodestaOwnerSelectionMode = "true";
     style.textContent = "* { cursor: crosshair !important; }";
     document.head.appendChild(style);
+    const cancelSelection = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setSelectionMode(false);
+      setLiveAnnouncement("Page selection cancelled.");
+    };
+    window.addEventListener("keydown", cancelSelection);
     return () => {
+      window.removeEventListener("keydown", cancelSelection);
       style.remove();
+      previewHoverCleanupRef.current?.();
     };
   }, [previewIdentity, selectionMode]);
 
@@ -608,6 +653,7 @@ export function SiteAgentWorkspace({
 
   useEffect(() => () => {
     previewListenerCleanupRef.current?.();
+    previewHoverCleanupRef.current?.();
     previewSelectionCleanupRef.current?.();
   }, []);
 
@@ -615,6 +661,7 @@ export function SiteAgentWorkspace({
     previewSelectionCleanupRef.current?.();
     previewSelectionCleanupRef.current = undefined;
     setSelection(undefined);
+    setSelectionKind(undefined);
   }
 
   function toggleSelectionMode() {
@@ -646,7 +693,11 @@ export function SiteAgentWorkspace({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: workspace.session.id,
-          selection,
+          selection: selection ?? {
+            route: selectedPagePath,
+            workspaceRevisionId: selectedVersion?.workspaceRevisionId,
+            versionId: selectedVersion?.id
+          },
           ...(asking ? { message } : { instruction: message, resumeRunId: waitingRun?.id })
         })
       });
@@ -690,9 +741,12 @@ export function SiteAgentWorkspace({
 
   function handlePreviewLoad() {
     previewListenerCleanupRef.current?.();
+    previewHoverCleanupRef.current?.();
     previewSelectionCleanupRef.current?.();
+    previewHoverCleanupRef.current = undefined;
     previewSelectionCleanupRef.current = undefined;
     setSelection(undefined);
+    setSelectionKind(undefined);
     setSelectionMode(false);
     const frame = previewRef.current;
     const document = frame?.contentDocument;
@@ -705,25 +759,70 @@ export function SiteAgentWorkspace({
       // Same-origin previews are expected; a navigated external page simply cannot be selected.
     }
 
-    const click = (event: MouseEvent) => {
-      if (!selectionModeRef.current) return;
-      const element = document.defaultView && event.target instanceof document.defaultView.Element
+    const hoverOverlay = createPreviewSelectionOverlay(document, "hover");
+    const selectedOverlay = createPreviewSelectionOverlay(document, "selected");
+    let hoveredElement: Element | undefined;
+    let selectedElement: Element | undefined;
+
+    const clearHover = () => {
+      hoveredElement = undefined;
+      hoverOverlay.hidden = true;
+    };
+    previewHoverCleanupRef.current = clearHover;
+
+    const updateHover = (event: MouseEvent) => {
+      if (!selectionModeRef.current) {
+        clearHover();
+        return;
+      }
+      const rawElement = document.defaultView && event.target instanceof document.defaultView.Element
         ? event.target
         : undefined;
-      if (!element || element === document.documentElement || element === document.body) return;
+      const element = rawElement ? previewSelectionTargetFor(rawElement, document) : undefined;
+      if (!element) {
+        clearHover();
+        return;
+      }
+      if (hoveredElement === element && !hoverOverlay.hidden) return;
+      hoveredElement = element;
+      positionPreviewSelectionOverlay(hoverOverlay, element, previewSelectionKindFor(element));
+    };
+
+    const refreshOverlays = () => {
+      if (selectionModeRef.current && hoveredElement) {
+        positionPreviewSelectionOverlay(hoverOverlay, hoveredElement, previewSelectionKindFor(hoveredElement));
+      }
+      if (selectedElement) {
+        positionPreviewSelectionOverlay(selectedOverlay, selectedElement, previewSelectionKindFor(selectedElement));
+      }
+    };
+
+    const cancelWithKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !selectionModeRef.current) return;
       event.preventDefault();
       event.stopPropagation();
+      clearHover();
+      setSelectionMode(false);
+      setLiveAnnouncement("Page selection cancelled.");
+    };
+
+    const click = (event: MouseEvent) => {
+      if (!selectionModeRef.current) return;
+      const rawElement = document.defaultView && event.target instanceof document.defaultView.Element
+        ? event.target
+        : undefined;
+      const element = rawElement ? previewSelectionTargetFor(rawElement, document) : undefined;
+      if (!element || element === document.documentElement || element === document.body) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      clearHover();
       previewSelectionCleanupRef.current?.();
-      const selectedElement = element as HTMLElement;
-      const previousOutline = selectedElement.style.outline;
-      const previousOutlineOffset = selectedElement.style.outlineOffset;
-      element.setAttribute("data-lodesta-owner-selected", "true");
-      selectedElement.style.outline = "2px solid #2f604f";
-      selectedElement.style.outlineOffset = "3px";
+      selectedElement = element;
+      const kind = previewSelectionKindFor(element);
+      positionPreviewSelectionOverlay(selectedOverlay, element, kind);
       previewSelectionCleanupRef.current = () => {
-        element.removeAttribute("data-lodesta-owner-selected");
-        selectedElement.style.outline = previousOutline;
-        selectedElement.style.outlineOffset = previousOutlineOffset;
+        selectedElement = undefined;
+        selectedOverlay.hidden = true;
       };
       const route = previewRouteFromPath(new URL(frame.contentWindow!.location.href).pathname);
       setSelection({
@@ -733,13 +832,28 @@ export function SiteAgentWorkspace({
         workspaceRevisionId: selectedVersion?.workspaceRevisionId,
         versionId: selectedVersion?.id
       });
+      setSelectionKind(kind);
       setSelectionMode(false);
       setMobilePane("chat");
-      setLiveAnnouncement("Page element selected. Add your instruction in Chat.");
+      setLiveAnnouncement(`${kind} selected. Add your instruction in Chat.`);
       window.requestAnimationFrame(() => composerRef.current?.focus());
     };
+    document.addEventListener("mouseover", updateHover, true);
     document.addEventListener("click", click, true);
-    previewListenerCleanupRef.current = () => document.removeEventListener("click", click, true);
+    document.addEventListener("keydown", cancelWithKeyboard, true);
+    document.addEventListener("scroll", refreshOverlays, true);
+    document.documentElement.addEventListener("mouseleave", clearHover);
+    document.defaultView?.addEventListener("resize", refreshOverlays);
+    previewListenerCleanupRef.current = () => {
+      document.removeEventListener("mouseover", updateHover, true);
+      document.removeEventListener("click", click, true);
+      document.removeEventListener("keydown", cancelWithKeyboard, true);
+      document.removeEventListener("scroll", refreshOverlays, true);
+      document.documentElement.removeEventListener("mouseleave", clearHover);
+      document.defaultView?.removeEventListener("resize", refreshOverlays);
+      hoverOverlay.remove();
+      selectedOverlay.remove();
+    };
   }
 
   async function restore(versionId: string) {
@@ -760,11 +874,11 @@ export function SiteAgentWorkspace({
   }
 
   async function publish() {
-    if (!latestCandidate || busy) return;
+    if (!selectedVersion || !selectedIsCurrentCandidate || busy) return;
     setBusy(true);
     setNotice(undefined);
     try {
-      const response = await fetch(`/api/site-versions/${encodeURIComponent(latestCandidate.id)}/publish`, { method: "POST" });
+      const response = await fetch(`/api/site-versions/${encodeURIComponent(selectedVersion.id)}/publish`, { method: "POST" });
       if (!response.ok) throw new Error(await responseMessage(response));
       await refresh();
       setNotice("Published version is live.");
@@ -784,6 +898,29 @@ export function SiteAgentWorkspace({
       const response = await fetch(`/api/site-agent/runs/${encodeURIComponent(failed.id)}/retry`, { method: "POST" });
       if (!response.ok) throw new Error(await responseMessage(response));
       await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelRun(run: OwnerSiteAgentRun) {
+    if (!workspace.session || busy || !["queued", "running", "needs_input"].includes(run.status)) return;
+    const label = run.kind === "initial_build" ? "website build" : "website update";
+    setBusy(true);
+    setNotice(undefined);
+    try {
+      const response = await fetch("/api/site-agent/runs", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: workspace.session.id, runId: run.id })
+      });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      setInstruction("");
+      await refresh();
+      setCancelRunTarget(undefined);
+      setNotice(`The ${label} was stopped. Your published website was not changed.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
@@ -813,7 +950,8 @@ export function SiteAgentWorkspace({
   const transcriptItems = ownerTranscriptItems(workspace.messages, workspace.runs);
 
   return (
-    <WebsiteWorkspaceFrame
+    <>
+      <WebsiteWorkspaceFrame
       storageId={initialSite.id}
       backHref={`/workspace/${workspace.site.slug}`}
       backLabel="Back to website overview"
@@ -875,16 +1013,14 @@ export function SiteAgentWorkspace({
       previewToolbar={
         previewAvailable ? <>
           <div className="site-agent-preview-primary">
+            <PreviewViewportControl value={viewport} onChange={setViewport} />
             <label className="site-agent-page-picker">
               <span className="site-agent-visually-hidden">Website page</span>
-              <ProductSelect compact value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length}>
-                {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
+              <ProductSelect className="site-agent-page-path-select" compact value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length}>
+                {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.path}</option>) : <option value="/">/</option>}
               </ProductSelect>
             </label>
-            <div className="site-agent-preview-controls" aria-label="Preview viewport">
-              <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
-              <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
-            </div>
+            <PreviewOpenLink href={currentPreviewUrl} />
           </div>
           <div className="site-agent-preview-outcome">
             {showMore ? <div className="site-agent-more-menu">
@@ -901,19 +1037,6 @@ export function SiteAgentWorkspace({
               </button>
               {previewMoreOpen ? (
                 <div ref={previewMoreRef} className="site-agent-more-popover" id={previewMoreId} role="dialog" aria-label="More preview actions">
-                  <section className="site-agent-more-section site-agent-more-mobile-tools">
-                    <span className="site-agent-more-heading">Preview tools</span>
-                    <label className="site-agent-page-picker">
-                      <span>Page</span>
-                      <ProductSelect value={selectedPageValue} onChange={(event) => navigatePreview(event.target.value)} disabled={!pages.length}>
-                        {pages.length ? pages.map((page) => <option key={page.id} value={page.path}>{page.title}</option>) : <option value="/">Homepage</option>}
-                      </ProductSelect>
-                    </label>
-                    <div className="site-agent-preview-controls" aria-label="Preview viewport">
-                      <button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button>
-                      <button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button>
-                    </div>
-                  </section>
                   <section className="site-agent-more-section">
                     <span className="site-agent-more-heading">Preview</span>
                     <button
@@ -1031,13 +1154,24 @@ export function SiteAgentWorkspace({
           <span className="site-agent-visually-hidden" aria-live="polite" aria-atomic="true">{liveAnnouncement}</span>
 
           <div className={`site-agent-compose ${initialBuildActive ? "is-unavailable" : ""}`}>
-            {selection ? (
-              <div className="site-agent-selection-strip">
-                <span>Selected: {selection.label ?? "Page element"} · {selectionPageLabel}</span>
-                <button type="button" onClick={clearPreviewSelection}>Clear</button>
+            {initialBuildActive ? <span className="site-agent-visually-hidden" id={composerUnavailableId}>Available when your first draft is ready.</span> : null}
+            {activeRun ? (
+              <div className="site-agent-compose-run-actions">
+                <span>
+                  <strong>{activeRun.status === "queued" ? "Waiting to start" : "Build in progress"}</strong>
+                  <small>Your published website remains unchanged until you publish a finished draft.</small>
+                </span>
+                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => setCancelRunTarget(activeRun)}>
+                  Stop {activeRun.kind === "initial_build" ? "build" : "update"}
+                </button>
               </div>
             ) : null}
-            {initialBuildActive ? <span className="site-agent-visually-hidden" id={composerUnavailableId}>Available when your first draft is ready.</span> : null}
+            {waitingRun ? (
+              <div className="site-agent-compose-pause-actions">
+                <span>You can answer whenever you are ready.</span>
+                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => setCancelRunTarget(waitingRun)}>Stop update</button>
+              </div>
+            ) : null}
             <textarea
               ref={composerRef}
               value={instruction}
@@ -1056,6 +1190,15 @@ export function SiteAgentWorkspace({
               }}
               rows={1}
             />
+            {selection ? (
+              <div className="site-agent-selection-chip" title={selectionDescription}>
+                <SelectOnPageIcon />
+                <span>{selectionKind ?? "Page element"}</span>
+                <button type="button" aria-label={`Clear selected ${selectionKind?.toLowerCase() ?? "page element"}`} onClick={clearPreviewSelection}>
+                  <CloseIcon />
+                </button>
+              </div>
+            ) : null}
             <span className="site-agent-visually-hidden" id={voiceStatusId} aria-live="polite">{voiceStatus}</span>
             <div className="site-agent-compose-footer">
               <div className="site-agent-compose-context">
@@ -1066,6 +1209,7 @@ export function SiteAgentWorkspace({
                   describedBy={initialBuildActive ? composerUnavailableId : undefined}
                 />
                 <button
+                  {...selectPageTooltip.triggerProps}
                   className={`site-agent-select-page ${selectionMode ? "is-active" : ""}`}
                   type="button"
                   aria-pressed={selectionMode}
@@ -1074,8 +1218,8 @@ export function SiteAgentWorkspace({
                   onClick={toggleSelectionMode}
                 >
                   <SelectOnPageIcon />
-                  <span>{selectionMode ? "Cancel selection" : "Select on page"}</span>
                 </button>
+                {selectPageTooltip.tooltip}
               </div>
               <div className="site-agent-compose-actions">
                 <button
@@ -1109,10 +1253,10 @@ export function SiteAgentWorkspace({
       }
       previewContent={
         <>
-          {latestCandidate && workspace.readiness?.status === "blocked" ? (
+          {latestCandidate && workspace.candidateIntegrity && workspace.candidateIntegrity.status !== "current" ? (
             <details className="site-agent-blockers">
-              <summary>{workspace.readiness.blockers.length} publication blocker{workspace.readiness.blockers.length === 1 ? "" : "s"}</summary>
-              <ul>{workspace.readiness.blockers.map((blocker) => <li key={`${blocker.code}:${blocker.referenceId ?? "site"}`}>{blocker.message}</li>)}</ul>
+              <summary>{workspace.candidateIntegrity.status === "stale_owner_authority" ? "Website update pending" : "Technical verification required"}</summary>
+              <ul>{workspace.candidateIntegrity.issues.map((issue) => <li key={`${issue.code}:${issue.referenceId ?? "site"}`}>{issue.message}</li>)}</ul>
             </details>
           ) : null}
           <div className={`site-agent-preview-stage is-${viewport} ${compare ? "is-comparing" : ""}`}>
@@ -1130,7 +1274,19 @@ export function SiteAgentWorkspace({
           </div>
         </>
       }
-    />
+      />
+      <ConfirmDialog
+        open={Boolean(cancelRunTarget)}
+        title={`Stop this ${cancelRunTarget?.kind === "initial_build" ? "website build" : "website update"}?`}
+        description="Your published website will not be changed."
+        confirmLabel="Stop"
+        confirmPendingLabel="Stopping"
+        tone="danger"
+        pending={busy}
+        onConfirm={() => cancelRunTarget && void cancelRun(cancelRunTarget)}
+        onClose={() => setCancelRunTarget(undefined)}
+      />
+    </>
   );
 }
 
@@ -1157,8 +1313,11 @@ function RunActivityCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const active = run.status === "queued" || run.status === "running";
+  const elapsed = elapsedLabel(clock - Date.parse(
+    run.status === "running" ? snapshot?.activeSince ?? run.startedAt : run.startedAt
+  ));
   const timestamp = active
-    ? elapsedLabel(clock - Date.parse(run.startedAt))
+    ? run.status === "queued" ? `Queued ${elapsed}` : `Active ${elapsed}`
     : quietDateTime(run.completedAt ?? run.startedAt);
 
   if (!autoLoad) {
@@ -1319,6 +1478,125 @@ function ownerTranscriptItems(messages: SiteAgentMessage[], runs: OwnerSiteAgent
     });
   }
   return items.sort((left, right) => left.at - right.at || left.rank - right.rank);
+}
+
+function createPreviewSelectionOverlay(document: Document, state: "hover" | "selected") {
+  const overlay = document.createElement("div");
+  overlay.dataset.lodestaOwnerOverlay = state;
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.hidden = true;
+  overlay.style.cssText = [
+    "position: fixed",
+    "z-index: 2147483646",
+    "box-sizing: border-box",
+    "pointer-events: none",
+    state === "hover" ? "border: 1px dashed #173f35" : "border: 2px solid #173f35",
+    "border-radius: 3px",
+    "box-shadow: 0 0 0 1px rgba(255, 255, 255, .94), 0 0 0 3px rgba(23, 63, 53, .2)"
+  ].join(";");
+
+  const label = document.createElement("span");
+  label.style.cssText = [
+    "position: absolute",
+    "top: 0",
+    "left: -1px",
+    "max-width: min(240px, calc(100vw - 16px))",
+    "min-height: 24px",
+    "box-sizing: border-box",
+    "padding: 4px 8px",
+    "overflow: hidden",
+    "border-radius: 4px 4px 4px 0",
+    "background: #173f35",
+    "box-shadow: 0 1px 3px rgba(0, 0, 0, .2)",
+    "color: #fff",
+    "font: 500 12px/16px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+    "letter-spacing: 0",
+    "text-overflow: ellipsis",
+    "white-space: nowrap"
+  ].join(";");
+  overlay.appendChild(label);
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function positionPreviewSelectionOverlay(overlay: HTMLDivElement, element: Element, label: string) {
+  const rect = element.getBoundingClientRect();
+  const document = element.ownerDocument;
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  if (
+    rect.width < 1
+    || rect.height < 1
+    || rect.right <= 0
+    || rect.bottom <= 0
+    || rect.left >= viewportWidth
+    || rect.top >= viewportHeight
+  ) {
+    overlay.hidden = true;
+    return;
+  }
+
+  overlay.style.left = `${rect.left}px`;
+  overlay.style.top = `${rect.top}px`;
+  overlay.style.width = `${rect.width}px`;
+  overlay.style.height = `${rect.height}px`;
+  const tag = overlay.firstElementChild as HTMLElement | null;
+  if (tag) {
+    tag.textContent = label;
+    tag.style.right = rect.left + Math.min(rect.width, 240) > viewportWidth - 8 ? "-1px" : "";
+    tag.style.left = tag.style.right ? "" : "-1px";
+    tag.style.transform = rect.top < 30 ? "translateY(2px)" : "translateY(-100%)";
+    tag.style.borderRadius = rect.top < 30 ? "0 0 4px 0" : "4px 4px 4px 0";
+  }
+  overlay.hidden = false;
+}
+
+function previewSelectionTargetFor(element: Element, document: Document) {
+  if (
+    element === document.documentElement
+    || element === document.body
+    || element.closest("[data-lodesta-owner-overlay]")
+  ) return undefined;
+
+  const tag = element.tagName.toLowerCase();
+  const actionableSelector = "a, button, input, textarea, select, label, summary, [role=\"button\"], [role=\"link\"], [role=\"checkbox\"], [role=\"radio\"], [role=\"tab\"]";
+  if (tag === "svg" || tag === "path" || tag === "use" || tag === "circle" || tag === "rect" || tag === "polygon" || tag === "line") {
+    const actionable = element.closest(actionableSelector);
+    if (actionable) return actionable;
+    const icon = element.closest("svg");
+    if (icon) return icon;
+  }
+
+  const media = element.closest("img, picture, video, canvas, figure");
+  if (media) return media;
+  const actionable = element.closest(actionableSelector);
+  if (actionable) return actionable;
+  const text = element.closest("h1, h2, h3, h4, h5, h6, p, blockquote, li, dt, dd");
+  if (text) return text;
+  const boundElement = element.closest("[data-lodesta-fact-id], [data-lodesta-form-id]");
+  if (boundElement) return boundElement;
+  const region = element.closest("section, article, header, footer, nav, main, form");
+  return region ?? element;
+}
+
+function previewSelectionKindFor(element: Element) {
+  const tag = element.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tag)) return "Heading";
+  if (tag === "button" || element.getAttribute("role") === "button") return "Button";
+  if (tag === "a" || element.getAttribute("role") === "link") return "Link";
+  if (tag === "img" || tag === "picture" || tag === "video" || tag === "canvas" || tag === "figure") return "Image";
+  if (tag === "input" || tag === "textarea" || tag === "select") return "Form field";
+  if (tag === "label") return "Field label";
+  if (tag === "header") return "Header";
+  if (tag === "footer") return "Footer";
+  if (tag === "nav") return "Navigation";
+  if (tag === "form") return "Form";
+  if (tag === "section" || tag === "article") return "Section";
+  if (tag === "main") return "Page content";
+  if (tag === "p" || tag === "blockquote" || tag === "dt" || tag === "dd") return "Text";
+  if (tag === "li") return "List item";
+  if (tag === "svg") return "Icon";
+  return "Page element";
 }
 
 function selectorFor(element: Element) {
@@ -1524,12 +1802,84 @@ function ComposerModeMenu({
   );
 }
 
+function PreviewViewportControl({
+  value,
+  onChange
+}: {
+  value: PreviewViewport;
+  onChange: (viewport: PreviewViewport) => void;
+}) {
+  return (
+    <div className="site-agent-preview-controls" aria-label="Preview viewport">
+      <PreviewViewportButton value="desktop" label="Desktop preview" active={value === "desktop"} onSelect={onChange}>
+        <DesktopPreviewIcon />
+      </PreviewViewportButton>
+      <PreviewViewportButton value="tablet" label="Tablet preview" active={value === "tablet"} onSelect={onChange}>
+        <TabletPreviewIcon />
+      </PreviewViewportButton>
+      <PreviewViewportButton value="mobile" label="Mobile preview" active={value === "mobile"} onSelect={onChange}>
+        <MobilePreviewIcon />
+      </PreviewViewportButton>
+    </div>
+  );
+}
+
+function PreviewViewportButton({
+  value,
+  label,
+  active,
+  onSelect,
+  children
+}: {
+  value: PreviewViewport;
+  label: string;
+  active: boolean;
+  onSelect: (viewport: PreviewViewport) => void;
+  children: ReactNode;
+}) {
+  const tooltip = useProductTooltip(label, { hoverDelay: 150 });
+  return <>
+    <button
+      type="button"
+      className={active ? "is-active" : ""}
+      aria-label={label}
+      aria-pressed={active}
+      {...tooltip.triggerProps}
+      onClick={() => onSelect(value)}
+    >
+      {children}
+    </button>
+    {tooltip.tooltip}
+  </>;
+}
+
+function PreviewOpenLink({ href }: { href: string }) {
+  const tooltip = useProductTooltip("Open preview in a new tab", { hoverDelay: 150 });
+  return <>
+    <a
+      className="site-agent-tool-button site-agent-preview-open"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Open preview in a new tab"
+      {...tooltip.triggerProps}
+    >
+      <OpenPreviewIcon />
+    </a>
+    {tooltip.tooltip}
+  </>;
+}
+
 function ArrowUpIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4m0 0L5.5 8.5M10 4l4.5 4.5" /></svg>;
 }
 
 function CheckIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 10.5 3.5 3.5 7.5-8" /></svg>;
+}
+
+function CloseIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9m0-9-9 9" /></svg>;
 }
 
 function ChevronDownIcon() {
@@ -1552,6 +1902,22 @@ function SelectOnPageIcon() {
       <path d="m8 8 6 2.5-2.6 1-1 2.5L8 8Z" />
     </svg>
   );
+}
+
+function DesktopPreviewIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="10.5" rx="1.5" /><path d="M7 17h6M10 14v3" /></svg>;
+}
+
+function TabletPreviewIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="2.5" width="12" height="15" rx="1.75" /><path d="M8.5 14.75h3" /></svg>;
+}
+
+function MobilePreviewIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6" y="2" width="8" height="16" rx="1.75" /><path d="M9 15.25h2" /></svg>;
+}
+
+function OpenPreviewIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 3.5h5.5V9M16.25 3.75 9.5 10.5" /><path d="M15 11.5v4a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" /></svg>;
 }
 
 function joinTranscript(current: string, next: string) {

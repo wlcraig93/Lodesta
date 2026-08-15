@@ -4,7 +4,6 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { sha256 } from "../packages/business-data";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { externalAuthoringRepository } from "../packages/external-authoring";
 
 const task = "site_authoring_maintenance";
 const leasePath = resolve(process.cwd(), ".data/maintenance/site-authoring-maintenance.json");
@@ -37,12 +36,12 @@ if (command === "acquire") {
   const timeoutMinutes = parseTimeoutMinutes(process.argv.slice(3));
   const deadline = Date.now() + timeoutMinutes * 60_000;
   let active = await activeWork();
-  while (active.runningRuns.length || active.externalExecutions.length) {
+  while (active.runningRuns.length) {
     if (!await sitePlatformRepository.isMaintenanceLeaseActive(task, new Date().toISOString())) {
       throw new Error("The site-authoring maintenance lease expired while waiting for active work.");
     }
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for active authoring: ${active.runningRuns.length} run(s), ${active.externalExecutions.length} external execution(s).`);
+      throw new Error(`Timed out waiting for active authoring: ${active.runningRuns.length} run(s).`);
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 5_000));
     active = await activeWork();
@@ -52,8 +51,7 @@ if (command === "acquire") {
     action: "wait-active",
     task,
     leaseUntil: lease.leaseUntil,
-    runningRuns: 0,
-    externalExecutions: 0
+    runningRuns: 0
   })}\n`);
 } else if (command === "renew") {
   const lease = await readLease();
@@ -89,11 +87,8 @@ async function assertDrained() {
 }
 
 async function activeWork() {
-  const [runningRuns, externalExecutions] = await Promise.all([
-    sitePlatformRepository.listRecentAgentRuns({ status: "running", limit: 1000 }),
-    externalAuthoringRepository.listExecutionsByStatuses(["claimed", "authoring", "finalizing"], 1000)
-  ]);
-  return { runningRuns, externalExecutions };
+  const runningRuns = await sitePlatformRepository.listRecentAgentRuns({ status: "running", limit: 1000 });
+  return { runningRuns };
 }
 
 async function readLease() {

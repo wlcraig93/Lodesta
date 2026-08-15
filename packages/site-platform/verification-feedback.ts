@@ -22,8 +22,12 @@ export function verificationBlockerFeedback<T>(findings: T[], maximum = 100) {
   };
 }
 
+export function groupVerificationFindings<T>(findings: T[]) {
+  return groupModelFacingRootCauses(deduplicateVerificationFindings(findings));
+}
+
 function groupModelFacingRootCauses<T>(findings: T[]) {
-  const groups = new Map<string, { finding: T; routes: Set<string> }>();
+  const groups = new Map<string, { finding: T; routes: Set<string>; viewports: Set<string> }>();
   for (const finding of findings) {
     const record = finding && typeof finding === "object" && !Array.isArray(finding)
       ? finding as Record<string, unknown>
@@ -32,27 +36,45 @@ function groupModelFacingRootCauses<T>(findings: T[]) {
       normalized(record.code ?? record.id ?? "unknown"),
       normalized(record.severity ?? "unknown"),
       normalized(record.area ?? "unknown"),
+      normalizedFindingSource(record),
       normalizedRootMessage(record.message ?? finding)
     ].join("\u0000");
     const route = typeof record.route === "string" ? record.route : typeof record.path === "string" ? record.path : undefined;
+    const viewport = typeof record.viewport === "string" ? record.viewport : undefined;
     const prior = groups.get(key);
     if (prior) {
       if (route) prior.routes.add(route);
+      if (viewport) prior.viewports.add(viewport);
       continue;
     }
-    groups.set(key, { finding, routes: new Set(route ? [route] : []) });
+    groups.set(key, {
+      finding,
+      routes: new Set(route ? [route] : []),
+      viewports: new Set(viewport ? [viewport] : [])
+    });
   }
-  return [...groups.values()].map(({ finding, routes }) => {
-    if (routes.size <= 1 || !finding || typeof finding !== "object" || Array.isArray(finding)) return finding;
+  return [...groups.values()].map(({ finding, routes, viewports }) => {
+    if ((routes.size <= 1 && viewports.size <= 1) || !finding || typeof finding !== "object" || Array.isArray(finding)) return finding;
     const record = finding as Record<string, unknown>;
     const affectedRoutes = [...routes].sort();
+    const affectedViewports = [...viewports].sort();
+    const affected = [
+      affectedRoutes.length > 1 ? `Affected routes: ${affectedRoutes.join(", ")}.` : "",
+      affectedViewports.length > 1 ? `Affected viewports: ${affectedViewports.join(", ")}.` : ""
+    ].filter(Boolean).join(" ");
     return {
       ...record,
-      route: affectedRoutes[0],
-      affectedRoutes,
-      message: `${String(record.message ?? "")} Affected routes: ${affectedRoutes.join(", ")}.`
+      ...(affectedRoutes.length ? { route: affectedRoutes[0], affectedRoutes } : {}),
+      ...(affectedViewports.length ? { viewport: affectedViewports[0], affectedViewports } : {}),
+      message: `${String(record.message ?? "")} ${affected}`.trim()
     } as T;
   });
+}
+
+function normalizedFindingSource(record: Record<string, unknown>) {
+  const selector = record.selector ?? record.focusSelector ?? record.normalizedSelector;
+  const source = record.source ?? record.sourceId ?? record.assetRevisionId ?? record.bindingId;
+  return [normalized(selector ?? "site"), normalized(source ?? "site")].join("\u0001");
 }
 
 function verificationFindingKey(value: unknown) {

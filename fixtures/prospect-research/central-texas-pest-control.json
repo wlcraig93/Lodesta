@@ -1,0 +1,403 @@
+[
+  {
+    "prospect": {
+      "canonicalKey": "website:dmpestcontrol.com",
+      "businessName": "D.M. Pest Control",
+      "vertical": "pest_control",
+      "industryCode": "pest_control",
+      "status": "active",
+      "websiteKind": "owned_website",
+      "websiteUrl": "https://dmpestcontrol.com/",
+      "addressLine1": "3313 Flat Iron Ct",
+      "locality": "Leander",
+      "region": "TX",
+      "postalCode": "78641",
+      "countryCode": "US",
+      "phone": "512-905-4984",
+      "doNotContact": false
+    },
+    "contacts": [
+      {
+        "contactType": "business_general",
+        "phone": "512-905-4984",
+        "sourceType": "business_website",
+        "sourceProvider": "business_website",
+        "sourceUrl": "https://dmpestcontrol.com/georgetown-pest-control/",
+        "verificationStatus": "public_source",
+        "outreachEligible": true,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      }
+    ],
+    "observations": [
+      {
+        "sourceType": "business_website",
+        "sourceUrl": "https://dmpestcontrol.com/georgetown-pest-control/",
+        "observedAt": "2026-07-29T12:00:00.000Z",
+        "websiteKind": "owned_website",
+        "websiteUrl": "https://dmpestcontrol.com/",
+        "yearsInBusiness": 25,
+        "cms": "WordPress",
+        "siteBuilder": "WordPress",
+        "agencyStatus": "unknown",
+        "websiteOpportunityScore": 65,
+        "reachabilityScore": 25,
+        "priorityScore": 43.75,
+        "scoringModel": "lodesta-prospect-priority-v1",
+        "producer": "manual-prospect-research",
+        "methodologyIdentity": "manual-prospect-screen-v1",
+        "inputHash": "manual:2026-07-29:dmpestcontrol.com",
+        "notes": "Initial manual screen. Website opportunity is provisional until a Lodesta Website Health assessment is attached.",
+        "evidence": {
+          "addressAndPhoneSource": "business website",
+          "longevityClaim": "Business website states over 25 years"
+        },
+        "observationKind": "business_website",
+        "sourceProvider": "business_website",
+        "identityMatchStatus": "verified",
+        "identityMatchPolicyVersion": "prospect-identity-v1",
+        "identityMatchBasis": {
+          "nameMatch": "compatible",
+          "corroboratingSignals": [
+            {
+              "field": "website_host",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://dmpestcontrol.com/georgetown-pest-control/"
+            },
+            {
+              "field": "address",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://dmpestcontrol.com/georgetown-pest-control/"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    ]
+  },
+  {
+    "prospect": {
+      "canonicalKey": "website:allstatepestcontrolinc.com",
+      "businessName": "Allstate Pest Control",
+      "vertical": "pest_control",
+      "industryCode": "pest_control",
+      "status": "active",
+      "websiteKind": "owned_website",
+      "websiteUrl": "https://www.allstatepestcontrolinc.com/",
+      "addressLine1": "5800 Williams Dr",
+      "locality": "Georgetown",
+      "region": "TX",
+      "postalCode": "78633",
+      "countryCode": "US",
+      "phone": "512-863-7964",
+      "doNotContact": false
+    },
+    "contacts": [
+      {
+        "contactType": "business_general",
+        "phone": "512-863-7964",
+        "sourceType": "business_website",
+        "sourceProvider": "business_website",
+        "sourceUrl": "https://www.allstatepestcontrolinc.com/contact-exterminator.html",
+        "verificationStatus": "public_source",
+        "outreachEligible": true,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      }
+    ],
+    "observations": [
+      {
+        "sourceType": "business_website",
+        "sourceUrl": "https://www.allstatepestcontrolinc.com/contact-exterminator.html",
+        "observedAt": "2026-07-29T12:00:00.000Z",
+        "websiteKind": "owned_website",
+        "websiteUrl": "https://www.allstatepestcontrolinc.com/",
+        "siteBuilder": "custom static",
+        "managedProvider": "Olympic Publishing",
+        "agencyStatus": "confirmed",
+        "agencyName": "Olympic Publishing",
+        "websiteOpportunityScore": 82,
+        "reachabilityScore": 25,
+        "priorityScore": 34.35,
+        "scoringModel": "lodesta-prospect-priority-v1",
+        "producer": "manual-prospect-research",
+        "methodologyIdentity": "manual-prospect-screen-v1",
+        "inputHash": "manual:2026-07-29:allstatepestcontrolinc.com",
+        "notes": "Initial manual screen. Website opportunity is provisional until a Lodesta Website Health assessment is attached.",
+        "evidence": {
+          "addressAndPhoneSource": "business website",
+          "providerEvidence": "website footer"
+        },
+        "observationKind": "business_website",
+        "sourceProvider": "business_website",
+        "identityMatchStatus": "verified",
+        "identityMatchPolicyVersion": "prospect-identity-v1",
+        "identityMatchBasis": {
+          "nameMatch": "compatible",
+          "corroboratingSignals": [
+            {
+              "field": "website_host",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://www.allstatepestcontrolinc.com/contact-exterminator.html"
+            },
+            {
+              "field": "address",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://www.allstatepestcontrolinc.com/contact-exterminator.html"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    ]
+  },
+  {
+    "prospect": {
+      "canonicalKey": "website:advantagectx.com",
+      "businessName": "Advantage Pest Control",
+      "vertical": "pest_control",
+      "industryCode": "pest_control",
+      "status": "active",
+      "websiteKind": "owned_website",
+      "websiteUrl": "https://advantagectx.com/",
+      "addressLine1": "2508 Williams Drive",
+      "addressLine2": "Suite 206",
+      "locality": "Georgetown",
+      "region": "TX",
+      "postalCode": "78628",
+      "countryCode": "US",
+      "phone": "512-968-7075",
+      "doNotContact": false
+    },
+    "contacts": [
+      {
+        "contactType": "business_general",
+        "email": "info@advantagectx.com",
+        "phone": "512-968-7075",
+        "sourceType": "business_website",
+        "sourceProvider": "business_website",
+        "sourceUrl": "https://advantagectx.com/contacts.html",
+        "verificationStatus": "public_source",
+        "outreachEligible": true,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      }
+    ],
+    "observations": [
+      {
+        "sourceType": "business_website",
+        "sourceUrl": "https://advantagectx.com/contacts.html",
+        "observedAt": "2026-07-29T12:00:00.000Z",
+        "websiteKind": "owned_website",
+        "websiteUrl": "https://advantagectx.com/",
+        "siteBuilder": "custom static",
+        "agencyStatus": "not_observed",
+        "websiteOpportunityScore": 78,
+        "reachabilityScore": 55,
+        "priorityScore": 38.15,
+        "scoringModel": "lodesta-prospect-priority-v1",
+        "producer": "manual-prospect-research",
+        "methodologyIdentity": "manual-prospect-screen-v1",
+        "inputHash": "manual:2026-07-29:advantagectx.com",
+        "notes": "Initial manual screen. Website opportunity is provisional until a Lodesta Website Health assessment is attached.",
+        "evidence": {
+          "addressPhoneAndEmailSource": "business website"
+        },
+        "observationKind": "business_website",
+        "sourceProvider": "business_website",
+        "identityMatchStatus": "verified",
+        "identityMatchPolicyVersion": "prospect-identity-v1",
+        "identityMatchBasis": {
+          "nameMatch": "compatible",
+          "corroboratingSignals": [
+            {
+              "field": "website_host",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://advantagectx.com/contacts.html"
+            },
+            {
+              "field": "address",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://advantagectx.com/contacts.html"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    ]
+  },
+  {
+    "prospect": {
+      "canonicalKey": "website:kingspest.com",
+      "businessName": "King's Pest Control",
+      "vertical": "pest_control",
+      "industryCode": "pest_control",
+      "status": "active",
+      "websiteKind": "owned_website",
+      "websiteUrl": "https://www.kingspest.com/",
+      "addressLine1": "603 River Bend Dr",
+      "locality": "Georgetown",
+      "region": "TX",
+      "postalCode": "78628",
+      "countryCode": "US",
+      "phone": "512-930-7378",
+      "doNotContact": false
+    },
+    "contacts": [
+      {
+        "contactType": "owner",
+        "fullName": "Landon King",
+        "sourceType": "manual_research",
+        "sourceProvider": "better_business_bureau",
+        "sourceUrl": "https://www.bbb.org/us/tx/georgetown/profile/pest-control/kings-pest-control-0825-51782",
+        "verificationStatus": "public_source",
+        "outreachEligible": false,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      },
+      {
+        "contactType": "business_general",
+        "email": "info@kingspest.com",
+        "phone": "512-930-7378",
+        "sourceType": "business_website",
+        "sourceProvider": "business_website",
+        "sourceUrl": "https://www.kingspest.com/",
+        "verificationStatus": "public_source",
+        "outreachEligible": true,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      }
+    ],
+    "observations": [
+      {
+        "sourceType": "business_website",
+        "sourceUrl": "https://www.kingspest.com/",
+        "observedAt": "2026-07-29T12:00:00.000Z",
+        "websiteKind": "owned_website",
+        "websiteUrl": "https://www.kingspest.com/",
+        "yearsInBusiness": 44,
+        "siteBuilder": "Hibu",
+        "managedProvider": "Hibu",
+        "agencyStatus": "confirmed",
+        "agencyName": "Hibu",
+        "businessStrengthScore": 90,
+        "websiteOpportunityScore": 72,
+        "reachabilityScore": 55,
+        "priorityScore": 51.8,
+        "scoringModel": "lodesta-prospect-priority-v1",
+        "producer": "manual-prospect-research",
+        "methodologyIdentity": "manual-prospect-screen-v1",
+        "inputHash": "manual:2026-07-29:kingspest.com",
+        "notes": "Initial manual screen. Website opportunity is provisional until a Lodesta Website Health assessment is attached.",
+        "evidence": {
+          "addressPhoneEmailAndLongevitySource": "business website",
+          "ownerNameSource": "BBB business profile"
+        },
+        "observationKind": "business_website",
+        "sourceProvider": "business_website",
+        "identityMatchStatus": "verified",
+        "identityMatchPolicyVersion": "prospect-identity-v1",
+        "identityMatchBasis": {
+          "nameMatch": "compatible",
+          "corroboratingSignals": [
+            {
+              "field": "website_host",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://www.kingspest.com/"
+            },
+            {
+              "field": "address",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://www.kingspest.com/"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    ]
+  },
+  {
+    "prospect": {
+      "canonicalKey": "website:surgepest.com",
+      "businessName": "Surge Pest Control",
+      "vertical": "pest_control",
+      "industryCode": "pest_control",
+      "status": "active",
+      "websiteKind": "owned_website",
+      "websiteUrl": "https://surgepest.com/",
+      "addressLine1": "2006 Rivery Blvd",
+      "addressLine2": "Unit 109",
+      "locality": "Georgetown",
+      "region": "TX",
+      "postalCode": "78628",
+      "countryCode": "US",
+      "phone": "512-887-1110",
+      "doNotContact": false
+    },
+    "contacts": [
+      {
+        "contactType": "business_general",
+        "email": "info@surgepest.com",
+        "phone": "512-887-1110",
+        "sourceType": "business_website",
+        "sourceProvider": "business_website",
+        "sourceUrl": "https://surgepest.com/",
+        "verificationStatus": "public_source",
+        "outreachEligible": true,
+        "observedAt": "2026-07-29T12:00:00.000Z"
+      }
+    ],
+    "observations": [
+      {
+        "sourceType": "business_website",
+        "sourceUrl": "https://surgepest.com/",
+        "observedAt": "2026-07-29T12:00:00.000Z",
+        "websiteKind": "owned_website",
+        "websiteUrl": "https://surgepest.com/",
+        "reviewRating": 5,
+        "reviewCount": 227,
+        "cms": "WordPress",
+        "siteBuilder": "TenWeb",
+        "managedProvider": "TenWeb",
+        "agencyStatus": "likely",
+        "agencyName": "TenWeb",
+        "websiteOpportunityScore": 58,
+        "reachabilityScore": 55,
+        "priorityScore": 60.87,
+        "scoringModel": "lodesta-prospect-priority-v1",
+        "producer": "manual-prospect-research",
+        "methodologyIdentity": "manual-prospect-screen-v1",
+        "inputHash": "manual:2026-07-29:surgepest.com",
+        "notes": "Review metric is the business website's displayed Google-review claim, not a stored Google Places response. Website opportunity is provisional until a Lodesta assessment is attached.",
+        "evidence": {
+          "addressPhoneEmailAndReviewClaimSource": "business website"
+        },
+        "observationKind": "business_website",
+        "sourceProvider": "business_website",
+        "identityMatchStatus": "verified",
+        "identityMatchPolicyVersion": "prospect-identity-v1",
+        "identityMatchBasis": {
+          "nameMatch": "compatible",
+          "corroboratingSignals": [
+            {
+              "field": "website_host",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://surgepest.com/"
+            },
+            {
+              "field": "address",
+              "result": "exact",
+              "sourceProvider": "business_website",
+              "sourceUrl": "https://surgepest.com/"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    ]
+  }
+]

@@ -5,25 +5,28 @@ import {
   developmentSandboxTokenPath,
   isDevelopmentSandboxToken
 } from "../packages/site-sandbox/runtime-config";
+import type { SiteSandboxSlot } from "../packages/site-contracts";
 
 export async function ensureDevelopmentSandboxToken(
+  slot: SiteSandboxSlot,
   environment: NodeJS.ProcessEnv = process.env,
   root = process.cwd()
 ) {
-  const configured = environment.LODESTA_DEV_SANDBOX_TOKEN?.trim();
+  const key = `LODESTA_DEV_SANDBOX_${slot.toUpperCase()}_TOKEN`;
+  const configured = environment[key]?.trim();
   if (configured) {
     if (!isDevelopmentSandboxToken(configured)) {
-      throw new Error("LODESTA_DEV_SANDBOX_TOKEN is malformed.");
+      throw new Error(`${key} is malformed.`);
     }
     return { token: configured, created: false, source: "environment" as const };
   }
 
-  const path = resolve(root, developmentSandboxTokenPath);
+  const path = resolve(root, developmentSandboxTokenPath(slot));
   const retained = await readFile(path, "utf8").catch(() => undefined);
   if (retained !== undefined) {
     const token = retained.trim();
     if (!isDevelopmentSandboxToken(token)) {
-      throw new Error(`Development sandbox credentials are malformed at ${developmentSandboxTokenPath}.`);
+      throw new Error(`Development ${slot} sandbox credentials are malformed at ${developmentSandboxTokenPath(slot)}.`);
     }
     return { token, created: false, source: "file" as const };
   }

@@ -14,17 +14,19 @@ let server: ReturnType<typeof spawn> | undefined;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 
 const fullResult = {
-  schemaVersion: 1 as const,
-  kind: "prospect-presence-report" as const,
+  schemaVersion: 2 as const,
+  kind: "prospect-website-health-report" as const,
   generatedAt: now,
   websiteKind: "owned_website" as const,
   sourceUrl: "https://example.com/",
   sourceHost: "example.com",
   assessmentId: "assessment-test",
   coverage: {
-    value: 1,
+    siteEvidence: 1,
+    pipelineCompleteness: 1,
     assessedCriteria: 3,
     applicableCriteria: 3,
+    provisional: false,
     limitations: ["The booking flow was not submitted."]
   },
   siteUnderstanding: {
@@ -36,12 +38,14 @@ const fullResult = {
   whatsWorking: [{
     id: "strength-call",
     dimension: "Conversion",
+    controlOwner: "site_author" as const,
     title: "The phone link works on mobile",
     evidence: ["A tap-friendly tel link was found."]
   }],
   findings: [{
     id: "local-context",
     dimension: "Local content",
+    controlOwner: "site_author" as const,
     severity: "major" as const,
     status: "warning" as const,
     title: "The service area is hard to confirm",
@@ -52,6 +56,7 @@ const fullResult = {
   }, {
     id: "booking-label",
     dimension: "Conversion",
+    controlOwner: "site_author" as const,
     severity: "minor" as const,
     status: "warning" as const,
     title: "The booking action could be clearer",
@@ -239,18 +244,21 @@ try {
   const page = await mainContext.newPage();
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   const search = page.getByLabel("Business name, city, or website").first();
-  const mobileCtaBottom = await page.locator(".marketing-hero .health-search-form button").boundingBox();
+  const heroForm = search.locator("xpath=ancestor::form");
+  const submit = heroForm.locator('button[type="submit"]');
+  const mobileCtaBottom = await submit.boundingBox();
   assert((mobileCtaBottom?.y ?? 900) + (mobileCtaBottom?.height ?? 0) <= 844, "The mobile hero's primary action is outside the initial viewport.");
   await search.fill("Example Plumbing, Austin");
-  const submit = page.locator(".marketing-hero .health-search-form button[type=submit]");
-  await submit.click();
+  const submission = submit.click();
   await assertEventually(async () => await submit.isDisabled(), "The homepage did not disable duplicate submission.");
+  await submission;
   await page.waitForURL((url) => url.origin === origin && url.pathname.replace(/\/$/, "") === `/website-health-report/${reportId}`);
   assert.equal(postCount, 1, "Homepage submission created more than one report.");
 
   await page.getByRole("heading", { name: "Example Plumbing" }).waitFor();
   await page.getByRole("heading", { name: "Start with the part worth keeping" }).waitFor();
   await page.getByRole("heading", { name: "The service area is hard to confirm" }).waitFor();
+  await page.locator("details summary").first().click();
   assert(await page.getByText("No city or service-area language was found.").isVisible(), "The complete teaser finding is not visible.");
   assert.equal(await page.getByText("The booking action could be clearer").count(), 0, "A hidden finding was sent to the teaser UI.");
   assert(await page.getByText(/1 additional evidence-backed finding/).isVisible(), "The teaser does not truthfully summarize the remaining report.");
@@ -260,14 +268,17 @@ try {
   assert.equal(leadCount, 0, "Invalid local email validation reached the API.");
   await page.getByLabel("Email address").fill("owner@example.com");
   await page.getByRole("button", { name: "Unlock my complete report" }).click();
-  await page.getByRole("heading", { name: "Your prioritized fix plan" }).waitFor();
+  await page.getByRole("heading", { name: "Fix the most consequential problems first" }).waitFor();
   await page.getByRole("heading", { name: "The booking action could be clearer" }).waitFor();
   await page.getByRole("link", { name: "Have Lodesta fix this" }).waitFor();
+  assert.equal(await page.getByRole("link", { name: "Site footprint" }).count(), 0, "The report linked to a missing footprint section.");
+  assert.equal(await page.getByRole("link", { name: "Visual quality" }).count(), 0, "The report linked to a missing visual-quality section.");
+  assert.equal(await page.getByRole("link", { name: "Search & AI" }).count(), 0, "The report linked to a missing agent-readiness section.");
   assert.equal(leadCount, 1, "A valid report unlock did not submit exactly once.");
 
   const postsBeforeRefresh = postCount;
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "Your prioritized fix plan" }).waitFor();
+  await page.getByRole("heading", { name: "Fix the most consequential problems first" }).waitFor();
   assert.equal(postCount, postsBeforeRefresh, "Refreshing the stable report URL created a new scan.");
   assert(getCount >= 2, "The stable report URL did not retrieve the existing report.");
   const robots = await page.locator('meta[name="robots"]').getAttribute("content");
@@ -280,18 +291,18 @@ try {
   const cleanPage = await cleanContext.newPage();
   await cleanPage.goto(`${origin}/website-health-report/${reportId}`, { waitUntil: "domcontentloaded" });
   await cleanPage.getByRole("button", { name: "Unlock my complete report" }).waitFor();
-  assert.equal(await cleanPage.getByRole("heading", { name: "Your prioritized fix plan" }).count(), 0, "Sharing a gated URL leaked visitor-specific access.");
+  assert.equal(await cleanPage.getByRole("heading", { name: "Fix the most consequential problems first" }).count(), 0, "Sharing a gated URL leaked visitor-specific access.");
 
   const publicPage = await cleanContext.newPage();
   await publicPage.goto(`${origin}/website-health-report/${publicReportId}`, { waitUntil: "domcontentloaded" });
-  await publicPage.getByRole("heading", { name: "Your prioritized fix plan" }).waitFor();
+  await publicPage.getByRole("heading", { name: "Fix the most consequential problems first" }).waitFor();
   assert.equal(await publicPage.getByLabel("Email address").count(), 0, "A public-link report incorrectly requested email.");
 
   const fragmentContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installRoutes(fragmentContext);
   const fragmentPage = await fragmentContext.newPage();
   await fragmentPage.goto(`${origin}/website-health-report/${reportId}#access=${validFragmentSecret}`, { waitUntil: "domcontentloaded" });
-  await fragmentPage.getByRole("heading", { name: "Your prioritized fix plan" }).waitFor();
+  await fragmentPage.getByRole("heading", { name: "Fix the most consequential problems first" }).waitFor();
   assert.equal(new URL(fragmentPage.url()).hash, "", "The access secret remains in browser history.");
 
   const invalidContext = await browser.newContext({ viewport: { width: 390, height: 844 } });

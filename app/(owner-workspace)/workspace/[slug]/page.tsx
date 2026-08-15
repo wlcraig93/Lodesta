@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
+import { deriveSiteCandidateIntegrity } from "@/packages/site-platform/candidate-integrity";
 import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
@@ -28,7 +28,7 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
   ]);
   const domainAttention = domains.find((domain) => domain.status === "attention_required");
   const candidate = versions.find((version) => version.status === "candidate");
-  const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
+  const candidateIntegrity = candidate ? await deriveSiteCandidateIntegrity({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
   const openQueue = queue.filter((item) => item.siteId === context.site.id && ["open", "in_review"].includes(item.status));
   const pendingProof = context.state.proof.filter((item) => item.status === "observed").length;
   const replyInquiries = inquiries.filter((inquiry) => inquiry.status === "new" || inquiry.status === "needs_reply");
@@ -38,7 +38,7 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
     site: context.site,
     versions,
     runs,
-    readiness,
+    candidateIntegrity,
     attention: {
       operatorItems: openQueue.length,
       pendingProof,
@@ -96,9 +96,22 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
 
       <div className="workspace-home-grid">
         <section className="workspace-home-section">
-          <div className="workspace-panel-heading"><div><span>Website readiness</span><h2>Publication and business details</h2></div><WorkspaceStatus tone={lifecycle.tone}>{lifecycle.label}</WorkspaceStatus></div>
+          <div className="workspace-panel-heading"><div><span>Website</span><h2>Preview and business details</h2></div><WorkspaceStatus tone={lifecycle.tone}>{lifecycle.label}</WorkspaceStatus></div>
           <div className="workspace-health-list">
-            <HealthRow label="Publication review" value={readiness?.status === "blocked" ? `${readiness.blockers.length} requirement${readiness.blockers.length === 1 ? "" : "s"}` : candidate ? "Ready to publish" : published ? "Published" : "Building"} attention={readiness?.status === "blocked"} href={`/workspace/${slug}/editor`} />
+            <HealthRow
+              label="Current preview"
+              value={candidateIntegrity?.status === "stale_owner_authority"
+                ? "Refresh in progress"
+                : candidateIntegrity?.status === "failed_integrity"
+                  ? "Rebuild required"
+                  : candidate
+                    ? "Ready for review"
+                    : published
+                      ? "Published"
+                      : "Building"}
+              attention={Boolean(candidateIntegrity && candidateIntegrity.status !== "current")}
+              href={`/workspace/${slug}/editor`}
+            />
             <HealthRow label="Business confirmations" value={pendingProof ? `${pendingProof} pending` : "Current"} attention={pendingProof > 0} href={`/workspace/${slug}/business-details#proof-media`} />
             <HealthRow label="Media library" value={`${context.state.assets.filter((asset) => asset.activeForFutureBuilds).length} active`} href={`/workspace/${slug}/business-details#proof-media`} />
             <HealthRow label="Custom domain" value="Manage" href={`/workspace/${slug}/settings#domain`} />

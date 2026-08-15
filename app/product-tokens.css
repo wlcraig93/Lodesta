@@ -122,31 +122,31 @@
 :root[data-theme="dark"],
 [data-theme="dark"] {
   color-scheme: dark;
-  --product-color-canvas: #151814;
-  --product-color-canvas-raised: #1a1e19;
-  --product-color-surface: #20241f;
-  --product-color-surface-translucent: rgba(32, 36, 31, 0.92);
-  --product-color-surface-frosted: rgba(32, 36, 31, 0.78);
-  --product-color-surface-soft: #292e27;
-  --product-color-surface-hover: #2c322a;
-  --product-color-surface-selected: #304037;
-  --product-color-surface-disabled: #272c26;
-  --product-color-surface-inverse: #090c0a;
+  --product-color-canvas: #171717;
+  --product-color-canvas-raised: #1b1b1b;
+  --product-color-surface: #212121;
+  --product-color-surface-translucent: rgba(33, 33, 33, 0.92);
+  --product-color-surface-frosted: rgba(33, 33, 33, 0.78);
+  --product-color-surface-soft: #292929;
+  --product-color-surface-hover: #2f2f2f;
+  --product-color-surface-selected: #303030;
+  --product-color-surface-disabled: #262626;
+  --product-color-surface-inverse: #0b0b0b;
 
-  --product-color-text: #edf1eb;
-  --product-color-text-subtle: #c4ccc4;
-  --product-color-text-muted: #a6b0a7;
-  --product-color-text-tertiary: #909b91;
-  --product-color-text-inverse: #f6f8f5;
-  --product-color-text-inverse-muted: #d9dfd9;
-  --product-color-nav: #e0e7e1;
-  --product-color-nav-subtle: #b4bfb6;
+  --product-color-text: #ececec;
+  --product-color-text-subtle: #c5c5c5;
+  --product-color-text-muted: #a7a7a7;
+  --product-color-text-tertiary: #8f8f8f;
+  --product-color-text-inverse: #f5f5f5;
+  --product-color-text-inverse-muted: #d9d9d9;
+  --product-color-nav: #e2e2e2;
+  --product-color-nav-subtle: #b5b5b5;
 
-  --product-color-border: #3a423a;
-  --product-color-border-subtle: #2d342d;
-  --product-color-border-strong: #4b564c;
-  --product-color-border-emphasis: #667367;
-  --product-color-border-dashed: #69766a;
+  --product-color-border: #3a3a3a;
+  --product-color-border-subtle: #2d2d2d;
+  --product-color-border-strong: #4b4b4b;
+  --product-color-border-emphasis: #696969;
+  --product-color-border-dashed: #717171;
 
   --product-color-primary: #b9d8c5;
   --product-color-primary-hover: #d0e7d8;
@@ -171,10 +171,10 @@
   --product-color-error-border: #6d3543;
   --product-color-error-text: #f2a3b3;
   --product-color-danger-surface: #382126;
-  --product-color-info-surface: #29342d;
-  --product-color-info-text: #cbd8ce;
-  --product-color-overlay: rgba(4, 7, 5, 0.72);
-  --product-color-preview-stage: #101310;
+  --product-color-info-surface: #202b36;
+  --product-color-info-text: #bfd3e4;
+  --product-color-overlay: rgba(0, 0, 0, 0.72);
+  --product-color-preview-stage: #101010;
   --product-color-preview-frame: #ffffff;
 
   --product-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22);

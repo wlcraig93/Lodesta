@@ -34,7 +34,41 @@ assert.deepEqual(
     "202607260002_external_authoring_targeted_tools.sql",
     "202607260003_website_setup_managed_model.sql",
     "202607260004_prospect_report_access_policy.sql",
-    "202607290001_normalized_prospect_research.sql"
+    "202607270001_website_health_report_v2.sql",
+    "202607280001_generation_experiments.sql",
+    "202607290001_normalized_prospect_research.sql",
+    "202607300001_simplified_site_authoring.sql",
+    "202607300002_owner_bound_website_setup_link.sql",
+    "202607300003_site_agent_run_cancellation_fence.sql",
+    "202607300004_durable_single_path_site_authoring.sql",
+    "202607300005_remove_site_authoring_mcp.sql",
+    "202607310001_comprehensive_site_ingestion.sql",
+    "202607310002_targeted_site_agent_claim.sql",
+    "202607310003_minimal_blue_green_sandboxes.sql",
+    "202608010001_source_visual_references.sql",
+    "202608010002_replayable_source_mirror.sql",
+    "202608030001_luna_architecture_authoring.sql",
+    "202608030002_bulk_website_source_snapshot.sql",
+    "202608030003_staged_website_source_snapshot.sql",
+    "202608030004_prospect_eligibility_inventory.sql",
+    "202608030005_prospect_contact_provenance.sql",
+    "202608030006_prospect_business_size_eligibility.sql",
+    "202608030007_explainable_prospect_identity.sql",
+    "202608040001_cross_source_prospect_identity.sql",
+    "202608040002_simplify_prospect_research.sql",
+    "202608040003_checkpointed_verification_and_luna_authoring.sql",
+    "202608040004_verified_place_prospect_disposition.sql",
+    "202608040005_incremental_source_snapshot_readiness.sql",
+    "202608040006_minimal_prospect_gtm.sql",
+    "202608040007_core_prospect_data_only.sql",
+    "202608040008_business_locations_primary_contacts.sql",
+    "202608040009_contact_identity_by_business_name.sql",
+    "202608050001_owner_site_agent_run_cancellation.sql",
+    "202608050002_prospect_places_no_result.sql",
+    "202608050003_persist_google_place_candidate_data.sql",
+    "202608080001_shared_retained_source_mirrors.sql",
+    "202608140001_immutable_logo_preparation_revisions.sql",
+    "202608140002_canonical_source_logo_recapture.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -46,13 +80,14 @@ const prospectSourceKeys = await readFile(`${migrationDirectory}/${migrations[4]
 const webResearchSnapshots = await readFile(`${migrationDirectory}/${migrations[5]}`, "utf8");
 const websiteAssessments = await readFile(`${migrationDirectory}/${migrations[6]}`, "utf8");
 const assetRevisionScope = await readFile(`${migrationDirectory}/${migrations[7]}`, "utf8");
+const immutableLogoPreparationRevisions = await readFile(`${migrationDirectory}/202608140001_immutable_logo_preparation_revisions.sql`, "utf8");
+const canonicalSourceLogoRecapture = await readFile(`${migrationDirectory}/202608140002_canonical_source_logo_recapture.sql`, "utf8");
 const modelRoutingTelemetry = await readFile(`${migrationDirectory}/${migrations[8]}`, "utf8");
 const externalCodexAuthoring = await readFile(`${migrationDirectory}/${migrations[9]}`, "utf8");
 const websiteAnalytics = await readFile(`${migrationDirectory}/${migrations[10]}`, "utf8");
 const mediaOriginCleanCut = await readFile(`${migrationDirectory}/${migrations[11]}`, "utf8");
 const canonicalMediaPublication = await readFile(`${migrationDirectory}/${migrations[12]}`, "utf8");
 const sourceUnsuitableFailure = await readFile(`${migrationDirectory}/202607260001_source_unsuitable_website_setup_failure.sql`, "utf8");
-const externalTargetedTools = await readFile(`${migrationDirectory}/202607260002_external_authoring_targeted_tools.sql`, "utf8");
 const canonicalAuthorityRefresh = await readFile(`${migrationDirectory}/${migrations[13]}`, "utf8");
 const verifiedAuthoringFinalizerRefresh = await readFile(`${migrationDirectory}/${migrations[14]}`, "utf8");
 const siteAgentRunawayGuardrails = await readFile(`${migrationDirectory}/${migrations[15]}`, "utf8");
@@ -62,7 +97,312 @@ const websiteSetupInitialModelExperiment = await readFile(`${migrationDirectory}
 const modelBakeoff = await readFile(`${migrationDirectory}/${migrations[20]}`, "utf8");
 const websiteSetupManagedModel = await readFile(`${migrationDirectory}/202607260003_website_setup_managed_model.sql`, "utf8");
 const prospectReportAccessPolicy = await readFile(`${migrationDirectory}/202607260004_prospect_report_access_policy.sql`, "utf8");
+const websiteHealthReportV2 = await readFile(`${migrationDirectory}/202607270001_website_health_report_v2.sql`, "utf8");
+const generationExperiments = await readFile(`${migrationDirectory}/202607280001_generation_experiments.sql`, "utf8");
 const normalizedProspectResearch = await readFile(`${migrationDirectory}/202607290001_normalized_prospect_research.sql`, "utf8");
+const simplifiedSiteAuthoring = await readFile(`${migrationDirectory}/202607300001_simplified_site_authoring.sql`, "utf8");
+const ownerBoundWebsiteSetupLink = await readFile(`${migrationDirectory}/202607300002_owner_bound_website_setup_link.sql`, "utf8");
+const siteAgentRunCancellationFence = await readFile(`${migrationDirectory}/202607300003_site_agent_run_cancellation_fence.sql`, "utf8");
+const durableSinglePathAuthoring = await readFile(`${migrationDirectory}/202607300004_durable_single_path_site_authoring.sql`, "utf8");
+const removeSiteAuthoringMcp = await readFile(`${migrationDirectory}/202607300005_remove_site_authoring_mcp.sql`, "utf8");
+const comprehensiveSiteIngestion = await readFile(`${migrationDirectory}/202607310001_comprehensive_site_ingestion.sql`, "utf8");
+const minimalBlueGreenSandboxes = await readFile(`${migrationDirectory}/202607310003_minimal_blue_green_sandboxes.sql`, "utf8");
+const replayableSourceMirror = await readFile(`${migrationDirectory}/202608010002_replayable_source_mirror.sql`, "utf8");
+const lunaArchitectureAuthoring = await readFile(`${migrationDirectory}/202608030001_luna_architecture_authoring.sql`, "utf8");
+const bulkWebsiteSourceSnapshot = await readFile(`${migrationDirectory}/202608030002_bulk_website_source_snapshot.sql`, "utf8");
+const stagedWebsiteSourceSnapshot = await readFile(`${migrationDirectory}/202608030003_staged_website_source_snapshot.sql`, "utf8");
+const prospectEligibilityInventory = await readFile(`${migrationDirectory}/202608030004_prospect_eligibility_inventory.sql`, "utf8");
+const prospectContactProvenance = await readFile(`${migrationDirectory}/202608030005_prospect_contact_provenance.sql`, "utf8");
+const prospectBusinessSizeEligibility = await readFile(`${migrationDirectory}/202608030006_prospect_business_size_eligibility.sql`, "utf8");
+const explainableProspectIdentity = await readFile(`${migrationDirectory}/202608030007_explainable_prospect_identity.sql`, "utf8");
+const crossSourceProspectIdentity = await readFile(`${migrationDirectory}/202608040001_cross_source_prospect_identity.sql`, "utf8");
+const simplifiedProspectResearch = await readFile(`${migrationDirectory}/202608040002_simplify_prospect_research.sql`, "utf8");
+const checkpointedVerification = await readFile(`${migrationDirectory}/202608040003_checkpointed_verification_and_luna_authoring.sql`, "utf8");
+const verifiedPlaceProspectDisposition = await readFile(`${migrationDirectory}/202608040004_verified_place_prospect_disposition.sql`, "utf8");
+const incrementalSourceSnapshotReadiness = await readFile(`${migrationDirectory}/202608040005_incremental_source_snapshot_readiness.sql`, "utf8");
+const businessLocationsPrimaryContacts = await readFile(`${migrationDirectory}/202608040008_business_locations_primary_contacts.sql`, "utf8");
+const contactIdentityByBusinessName = await readFile(`${migrationDirectory}/202608040009_contact_identity_by_business_name.sql`, "utf8");
+const ownerSiteAgentRunCancellation = await readFile(`${migrationDirectory}/202608050001_owner_site_agent_run_cancellation.sql`, "utf8");
+const prospectPlacesNoResult = await readFile(`${migrationDirectory}/202608050002_prospect_places_no_result.sql`, "utf8");
+assert(
+  businessLocationsPrimaryContacts.includes("add column business_email text")
+    && businessLocationsPrimaryContacts.includes("add column is_primary boolean not null default false")
+    && businessLocationsPrimaryContacts.includes("drop column location_id")
+    && businessLocationsPrimaryContacts.includes("drop column status")
+    && businessLocationsPrimaryContacts.includes("prospect_contacts_one_primary_idx")
+    && businessLocationsPrimaryContacts.includes("primary_location.phone as location_phone")
+    && businessLocationsPrimaryContacts.includes("as outreach_email")
+    && businessLocationsPrimaryContacts.includes("as outreach_phone"),
+  "Prospects must use the canonical business, locations, named contacts, and outreach projection."
+);
+assert(
+  contactIdentityByBusinessName.includes("create unique index prospect_contacts_business_name_idx")
+    && contactIdentityByBusinessName.includes("prospect_id, lower(btrim(full_name))"),
+  "Contact identity must be the normalized person name within a business."
+);
+assert(
+  prospectPlacesNoResult.includes("'pending', 'matched', 'ambiguous', 'no_result', 'not_found'")
+    && prospectPlacesNoResult.includes("prospects_research_state_check"),
+  "Places no-result outcomes must be distinct from unsearched and web-researched prospects."
+);
+assert(
+  verifiedPlaceProspectDisposition.includes("eligibility_status = 'review_required'")
+    && verifiedPlaceProspectDisposition.includes("prospect.eligibility_status = 'eligible'")
+    && verifiedPlaceProspectDisposition.includes("observation.location_id = location.id")
+    && verifiedPlaceProspectDisposition.includes("observation.google_place_id = location.google_place_id")
+    && verifiedPlaceProspectDisposition.includes("observation.evidence #>> '{placeIdLookup,status}' = 'found'")
+    && verifiedPlaceProspectDisposition.includes("prospect.ownership_scope in ('independent_single_location', 'independent_multi_location')")
+    && verifiedPlaceProspectDisposition.includes("prospect.location_research_status = 'confirmed_complete'")
+    && !verifiedPlaceProspectDisposition.includes("delete from public.prospects"),
+  "Verified-Place Keep disposition cutover or retained-data safety is incomplete."
+);
+assert(
+  checkpointedVerification.includes("'siteAgentModel', 'gpt-5.6-luna'")
+    && checkpointedVerification.includes("create or replace function public.checkpoint_site_agent_run_workspace")
+    && checkpointedVerification.includes("create or replace function public.requeue_checkpointed_site_agent_run")
+    && checkpointedVerification.includes("for update")
+    && checkpointedVerification.includes("checkpoint_execution_fenced")
+    && checkpointedVerification.includes("grant execute on function public.checkpoint_site_agent_run_workspace(jsonb,jsonb) to service_role")
+    && checkpointedVerification.includes("grant execute on function public.requeue_checkpointed_site_agent_run(jsonb) to service_role"),
+  "Verification checkpoints, same-run retry, or canonical Luna authoring migration is incomplete."
+);
+assert(
+  simplifiedProspectResearch.includes("create table public.prospect_person_observations")
+    && simplifiedProspectResearch.includes("add column location_id text")
+    && simplifiedProspectResearch.includes("add column founded_year integer")
+    && simplifiedProspectResearch.includes("drop column address_line_1")
+    && simplifiedProspectResearch.includes("drop column phone")
+    && simplifiedProspectResearch.includes("drop column priority_score")
+    && simplifiedProspectResearch.includes("drop column target_fit_status")
+    && simplifiedProspectResearch.includes("prospect_observations_verified_google_location_check")
+    && simplifiedProspectResearch.includes("relationship_status")
+    && !/delete\s+from\s+public\.prospects/i.test(simplifiedProspectResearch),
+  "Prospect research must be business-first, location-bound, source-observed, and free of opaque persisted scores without deleting retained businesses."
+);
+assert(
+  prospectEligibilityInventory.includes("add column eligibility_status")
+    && prospectEligibilityInventory.includes("add column google_place_id")
+    && prospectEligibilityInventory.includes("metadata->>'googlePlaceId'")
+    && prospectEligibilityInventory.includes("add column disqualification_reason")
+    && prospectEligibilityInventory.includes("prospects_disqualification_reason_consistency")
+    && prospectEligibilityInventory.includes("'national_corporate_chain'")
+    && prospectEligibilityInventory.includes("eligibility_policy_version")
+    && prospectEligibilityInventory.includes("observation.review_rating as google_rating")
+    && prospectEligibilityInventory.includes("observation.review_count as google_review_count")
+    && prospectEligibilityInventory.includes("locations.google_place_id")
+    && prospectEligibilityInventory.includes("as website_platform")
+    && prospectEligibilityInventory.includes("as website_provider")
+    && prospectEligibilityInventory.includes("as brand_name")
+    && prospectEligibilityInventory.includes("as public_phone")
+    && prospectEligibilityInventory.includes("prospects_eligibility_idx")
+    && prospectEligibilityInventory.includes("prospect_locations_google_place_id_idx")
+    && prospectEligibilityInventory.includes("drop index if exists public.prospect_contacts_phone_unique")
+    && prospectEligibilityInventory.includes("prospect_contacts_phone_source_idx")
+    && prospectEligibilityInventory.includes("as contact_details")
+    && prospectEligibilityInventory.includes("'sourceUrl', contact.source_url")
+    && !prospectEligibilityInventory.includes("delete from public.prospects"),
+  "Prospect eligibility, chain disqualification, operator inventory projection, or safe retained-data backfill is incomplete."
+);
+assert(
+  prospectContactProvenance.includes("add column source_provider")
+    && prospectContactProvenance.includes("create table public.prospect_people")
+    && prospectContactProvenance.includes("create table public.prospect_contact_points")
+    && prospectContactProvenance.includes("create table public.prospect_contact_point_observations")
+    && prospectContactProvenance.includes("create table public.prospect_organization_groups")
+    && prospectContactProvenance.includes("create table public.prospect_organization_memberships")
+    && prospectContactProvenance.includes("create view public.prospect_contact_details")
+    && prospectContactProvenance.includes("drop table public.prospect_contacts")
+    && prospectContactProvenance.includes("drop table public.prospect_affiliations")
+    && prospectContactProvenance.includes("contact.source_provider")
+    && prospectContactProvenance.includes("grant select, insert on table public.prospect_contact_point_observations to service_role"),
+  "Prospect people, sourced contact points, organization groups, or their server-only access boundary is incomplete."
+);
+assert(
+  prospectBusinessSizeEligibility.includes("'outside_target_business_size'")
+    && prospectBusinessSizeEligibility.includes("active_location_count between 1 and 5")
+    && prospectBusinessSizeEligibility.includes("active_location_count >= 6")
+    && prospectBusinessSizeEligibility.includes("ownership_scope = 'regional_independent'")
+    && prospectBusinessSizeEligibility.includes("eligibility_policy_version = 'lodesta-icp-v2'")
+    && !prospectBusinessSizeEligibility.includes("delete from public.prospects"),
+  "Prospect business-size policy or retained-data backfill is incomplete."
+);
+assert(
+  explainableProspectIdentity.includes("add column location_research_status")
+    && explainableProspectIdentity.includes("'agent_research'")
+    && explainableProspectIdentity.includes("rename column verification_status to identity_match_status")
+    && explainableProspectIdentity.includes("drop column verification_score")
+    && explainableProspectIdentity.includes("drop column evidence_coverage")
+    && explainableProspectIdentity.includes("add column observation_kind")
+    && explainableProspectIdentity.includes("add column identity_match_basis jsonb")
+    && explainableProspectIdentity.includes("add column google_business_name")
+    && explainableProspectIdentity.includes("observation.observation_kind = 'google_business_profile'")
+    && explainableProspectIdentity.includes("observation.observation_kind = 'business_website'")
+    && !explainableProspectIdentity.includes("delete from public.prospects"),
+  "Explainable prospect identity, separated observations, or retained-data migration safety is incomplete."
+);
+assert(
+  crossSourceProspectIdentity.includes("add column identity_verification_level")
+    && crossSourceProspectIdentity.includes("prospect_identity_basis_is_valid")
+    && crossSourceProspectIdentity.includes("business_email_domain")
+    && crossSourceProspectIdentity.includes("explained_stale")
+    && crossSourceProspectIdentity.includes("cross_source_verified")
+    && crossSourceProspectIdentity.includes("observation.identity_match_status = 'verified'")
+    && crossSourceProspectIdentity.includes("observation.observation_kind = 'business_website'")
+    && !crossSourceProspectIdentity.includes("delete from public.prospects"),
+  "Cross-source prospect verification policy or retained-data migration safety is incomplete."
+);
+assert(
+  replayableSourceMirror.includes("create table public.source_snapshot_resources")
+    && replayableSourceMirror.includes("create table public.source_snapshot_pages")
+    && replayableSourceMirror.includes("create or replace function public.save_website_source_snapshot")
+    && replayableSourceMirror.includes("create or replace function public.search_source_snapshot_pages")
+    && replayableSourceMirror.includes("create or replace function public.apply_prepared_source_recapture")
+    && replayableSourceMirror.includes("source_snapshot_pages_search_idx")
+    && replayableSourceMirror.includes("foreign key (source_snapshot_id, resource_id)")
+    && replayableSourceMirror.includes("left(extracted_text, 500000)")
+    && replayableSourceMirror.includes("drop table public.source_snapshot_chunks")
+    && replayableSourceMirror.includes("drop table public.source_snapshot_objects")
+    && replayableSourceMirror.includes("drop extension if exists vector")
+    && !replayableSourceMirror.includes("embedding extensions"),
+  "The replayable source mirror, atomic save/recapture, page-level full-text index, or derived-corpus removal is incomplete."
+);
+assert(
+  lunaArchitectureAuthoring.includes("jsonb_set(value, '{siteAgentModel}', '\"gpt-5.6-luna\"', true)")
+    && lunaArchitectureAuthoring.includes("value->>'siteAgentModel' = 'gpt-5.6-sol'"),
+  "The canonical Luna authoring-model cutover is incomplete."
+);
+assert(
+  bulkWebsiteSourceSnapshot.includes("create or replace function public.save_website_source_snapshot")
+    && bulkWebsiteSourceSnapshot.includes("from jsonb_array_elements(resource_documents) as input(document)")
+    && bulkWebsiteSourceSnapshot.includes("from jsonb_array_elements(page_documents) as input(document)")
+    && bulkWebsiteSourceSnapshot.includes("left join public.source_snapshot_resources retained")
+    && bulkWebsiteSourceSnapshot.includes("left join public.source_snapshot_pages retained")
+    && bulkWebsiteSourceSnapshot.includes("pg_advisory_xact_lock")
+    && bulkWebsiteSourceSnapshot.includes("website_source_snapshot_manifest_incomplete")
+    && !bulkWebsiteSourceSnapshot.includes("for resource_document in")
+    && !bulkWebsiteSourceSnapshot.includes("for page_document in"),
+  "Website source-mirror persistence must use atomic bulk insertion and aggregate verification."
+);
+assert(
+  stagedWebsiteSourceSnapshot.includes("create table public.website_source_snapshot_staging")
+    && stagedWebsiteSourceSnapshot.includes("create table public.website_source_snapshot_staging_documents")
+    && stagedWebsiteSourceSnapshot.includes("create or replace function public.begin_website_source_snapshot_staging")
+    && stagedWebsiteSourceSnapshot.includes("create or replace function public.stage_website_source_snapshot_documents")
+    && stagedWebsiteSourceSnapshot.includes("create or replace function public.finalize_staged_website_source_snapshot")
+    && stagedWebsiteSourceSnapshot.includes("jsonb_array_length(documents) > 100")
+    && stagedWebsiteSourceSnapshot.includes("website_source_snapshot_staging_incomplete")
+    && stagedWebsiteSourceSnapshot.includes("website_source_snapshot_manifest_incomplete")
+    && stagedWebsiteSourceSnapshot.includes("delete from public.website_source_snapshot_staging")
+    && stagedWebsiteSourceSnapshot.includes("input.document->>'id'")
+    && stagedWebsiteSourceSnapshot.includes("retained.document is distinct from input.document")
+    && stagedWebsiteSourceSnapshot.includes("drop function public.save_website_source_snapshot(jsonb,jsonb,jsonb)"),
+  "Large website mirrors must use bounded staging batches and atomic canonical finalization."
+);
+assert(
+  incrementalSourceSnapshotReadiness.includes("add column ready_at timestamptz")
+    && incrementalSourceSnapshotReadiness.includes("create or replace function public.begin_incremental_website_source_snapshot")
+    && incrementalSourceSnapshotReadiness.includes("create or replace function public.complete_incremental_website_source_snapshot")
+    && incrementalSourceSnapshotReadiness.includes("create trigger site_public_build_input_sources_require_ready")
+    && incrementalSourceSnapshotReadiness.includes("public_build_input_source_not_ready")
+    && incrementalSourceSnapshotReadiness.includes("website_source_snapshot_manifest_incomplete")
+    && incrementalSourceSnapshotReadiness.includes("website_source_snapshot_staging_not_empty")
+    && incrementalSourceSnapshotReadiness.includes("drop table public.website_source_snapshot_staging_documents")
+    && incrementalSourceSnapshotReadiness.includes("drop table public.website_source_snapshot_staging"),
+  "Large website mirrors must persist incrementally and remain unreadable until their complete manifest is ready."
+);
+assert(
+  minimalBlueGreenSandboxes.includes("create table public.site_sandbox_deployments")
+    && minimalBlueGreenSandboxes.includes("create table public.site_sandbox_control")
+    && minimalBlueGreenSandboxes.includes("create table public.site_agent_workspace_checkpoints")
+    && minimalBlueGreenSandboxes.includes("create function public.claim_site_agent_run")
+    && minimalBlueGreenSandboxes.includes("drop function if exists public.claim_next_site_agent_run")
+    && minimalBlueGreenSandboxes.includes("site-sandbox-control")
+    && minimalBlueGreenSandboxes.includes("checkpoint_current")
+    && minimalBlueGreenSandboxes.includes("pause_site_agent_run_for_input")
+    && minimalBlueGreenSandboxes.includes("fence_expired_site_agent_session")
+    && minimalBlueGreenSandboxes.includes("requeue_interrupted_site_agent_run")
+    && minimalBlueGreenSandboxes.includes("save_site_agent_session_for_execution")
+    && minimalBlueGreenSandboxes.includes("apply_managed_form_authoring_change")
+    && minimalBlueGreenSandboxes.includes("public.finalize_verified_authoring(text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure")
+    && !minimalBlueGreenSandboxes.includes("public.finalize_verified_authoring(text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure")
+    && minimalBlueGreenSandboxes.includes("interval '5 minutes'")
+    && minimalBlueGreenSandboxes.includes("cancel_site_agent_needs_input_run")
+    && !minimalBlueGreenSandboxes.includes("sandboxWarmUntil")
+    && !minimalBlueGreenSandboxes.includes("deployment_status"),
+  "Blue-green deployment pointers, durable pause checkpoints, canonical claims, or teardown fencing are incomplete."
+);
+assert(
+  ownerSiteAgentRunCancellation.includes("create or replace function public.cancel_site_agent_run")
+    && ownerSiteAgentRunCancellation.includes("status in ('queued', 'running', 'needs_input')")
+    && ownerSiteAgentRunCancellation.includes("'{executionNumber}'")
+    && ownerSiteAgentRunCancellation.includes("status = 'cancelled'")
+    && ownerSiteAgentRunCancellation.includes("error_code = 'owner_cancelled'")
+    && ownerSiteAgentRunCancellation.includes("drop function public.cancel_site_agent_needs_input_run"),
+  "Owner cancellation must atomically fence queued, running, and paused runs and close their open activity."
+);
+assert(
+  comprehensiveSiteIngestion.includes("create table public.source_snapshot_objects")
+    && comprehensiveSiteIngestion.includes("create table public.source_snapshot_chunks")
+    && comprehensiveSiteIngestion.includes("create table public.site_version_source_coverage")
+    && comprehensiveSiteIngestion.includes("create table public.site_version_redirects")
+    && comprehensiveSiteIngestion.includes("create or replace function public.bind_site_version_source_migration")
+    && comprehensiveSiteIngestion.includes("create or replace function public.search_source_snapshot_chunks")
+    && comprehensiveSiteIngestion.includes("extensions.vector(1536)")
+    && comprehensiveSiteIngestion.includes("on delete restrict")
+    && comprehensiveSiteIngestion.includes("validate_site_version_redirects_before_publish")
+    && comprehensiveSiteIngestion.includes("candidate_redirect_coverage_mismatch")
+    && comprehensiveSiteIngestion.includes("candidate_source_coverage_missing")
+    && comprehensiveSiteIngestion.includes("drop table public.vertical_demand_events"),
+  "Complete source capture, hybrid retrieval, candidate coverage, redirect validation, or the catalog/vertical clean cut is missing."
+);
+assert(
+  removeSiteAuthoringMcp.includes("remove_site_authoring_mcp_requires_reviewed_prelaunch_reset")
+    && removeSiteAuthoringMcp.includes("drop table public.external_authoring_credential_requests")
+    && removeSiteAuthoringMcp.includes("drop table public.external_authoring_credentials")
+    && removeSiteAuthoringMcp.includes("drop table public.external_authoring_operations")
+    && removeSiteAuthoringMcp.includes("drop table public.external_authoring_claims")
+    && removeSiteAuthoringMcp.includes("drop table public.external_authoring_executions")
+    && removeSiteAuthoringMcp.includes("drop table public.authoring_execution_bundles")
+    && removeSiteAuthoringMcp.includes("drop table public.staged_blob_receipts")
+    && removeSiteAuthoringMcp.includes("drop column execution_driver")
+    && removeSiteAuthoringMcp.includes("invalid_site_agent_run_contract")
+    && removeSiteAuthoringMcp.includes("create index site_agent_runs_claim_queue_idx")
+    && removeSiteAuthoringMcp.includes("create view public.site_agent_run_admin_inventory"),
+  "The MCP removal must fail loudly on retained rows and leave one canonical authoring queue, run contract, finalizer, and admin view."
+);
+assert(
+  durableSinglePathAuthoring.includes("create unique index site_versions_one_candidate_idx")
+    && durableSinglePathAuthoring.includes("where status = 'candidate'")
+    && durableSinglePathAuthoring.includes("create unique index site_agent_runs_one_running_per_site_idx")
+    && durableSinglePathAuthoring.includes("create index site_agent_runs_claim_queue_idx")
+    && durableSinglePathAuthoring.includes("create or replace function public.bootstrap_site_authoring")
+    && durableSinglePathAuthoring.includes("create or replace function public.claim_next_site_agent_run")
+    && durableSinglePathAuthoring.includes("create table public.site_agent_continuation_heads")
+    && durableSinglePathAuthoring.includes("create table public.site_agent_continuation_segments")
+    && durableSinglePathAuthoring.includes("create or replace function public.apply_prepared_owner_authority_change")
+    && durableSinglePathAuthoring.includes("drop table public.website_setups cascade")
+    && durableSinglePathAuthoring.includes("drop table public.authoring_outbox")
+    && durableSinglePathAuthoring.includes("prelaunch_site_authoring_reset_required"),
+  "The durable single-path cutover must atomically bootstrap, claim, resume, and apply owner authority while removing setup and candidate-assessment queues."
+);
+assert(
+  ownerBoundWebsiteSetupLink.includes("owner_user_id is null or owner_user_id = target_owner")
+    && ownerBoundWebsiteSetupLink.includes("site_id = target_site_id")
+    && ownerBoundWebsiteSetupLink.includes("session_id = target_session_id")
+    && ownerBoundWebsiteSetupLink.includes("grant execute on function public.link_website_setup"),
+  "Website setup linking must accept the same authenticated owner while rejecting cross-site session or run references."
+);
+assert(
+  siteAgentRunCancellationFence.includes("create or replace function public.save_site_agent_run")
+    && siteAgentRunCancellationFence.includes("create or replace function public.touch_site_agent_run_heartbeat")
+    && siteAgentRunCancellationFence.includes("create or replace function public.claim_site_agent_run")
+    && siteAgentRunCancellationFence.includes("'{heartbeatAt}'")
+    && siteAgentRunCancellationFence.includes("current_run.status = 'queued'")
+    && siteAgentRunCancellationFence.includes("site_agent_run_not_active")
+    && siteAgentRunCancellationFence.includes("owner_user_id is not null")
+    && siteAgentRunCancellationFence.includes("status <> 'paused'"),
+  "Cancelled or disposed authoring runs are not fenced from stale worker updates and finalization."
+);
 assert(
   baseline.includes("origin text not null check (origin in ('source_website', 'owner_upload', 'platform_generated'))")
     && !baseline.includes("rights_status")
@@ -173,6 +513,18 @@ assert(
   "The operator-only model bake-off must retain candidate provenance and use the server-only database boundary."
 );
 assert(
+  generationExperiments.includes("create table public.generation_experiments")
+    && generationExperiments.includes("create table public.generation_experiment_runs")
+    && generationExperiments.includes("schema_version integer not null check (schema_version = 2)")
+    && generationExperiments.includes("variant_key text not null")
+    && generationExperiments.includes("replicate integer not null check (replicate between 1 and 4)")
+    && generationExperiments.includes("candidate_version_id text references public.site_versions(id) on delete restrict")
+    && generationExperiments.includes("assessment_id text references public.website_assessments(id) on delete restrict")
+    && generationExperiments.includes("enable row level security")
+    && generationExperiments.includes("revoke all on table public.generation_experiments from public, anon, authenticated"),
+  "Generation experiments must retain process, replicate, candidate, and assessment provenance behind the server-only boundary."
+);
+assert(
   normalizedProspectResearch.includes("create table public.prospects")
     && normalizedProspectResearch.includes("create table public.prospect_observations")
     && normalizedProspectResearch.includes("create table public.prospect_contacts")
@@ -189,6 +541,22 @@ assert(
     && normalizedProspectResearch.includes("drop column vertical")
     && normalizedProspectResearch.includes("drop column source_url"),
   "Prospect research must separate canonical business identity, immutable observations, sourced contacts, verification/fit status, and campaign membership."
+);
+assert(
+  simplifiedSiteAuthoring.includes("simplified_site_authoring_requires_reviewed_prelaunch_reset")
+    && simplifiedSiteAuthoring.includes("rename column business_state_revision to owner_operational_revision")
+    && simplifiedSiteAuthoring.includes("rename column site_intent_revision to owner_intent_revision")
+    && simplifiedSiteAuthoring.includes("add column owner_user_id uuid not null")
+    && simplifiedSiteAuthoring.includes("add column site_id text not null references public.sites")
+    && simplifiedSiteAuthoring.includes("owner_user_id::text = actor_id")
+    && simplifiedSiteAuthoring.includes("owner_authority_changed")
+    && simplifiedSiteAuthoring.includes("intent->>'ownerIntentRevision'")
+    && simplifiedSiteAuthoring.includes("runtime_patch.security_status = 'audited'")
+    && simplifiedSiteAuthoring.includes("drop table public.external_authoring_batches")
+    && simplifiedSiteAuthoring.includes("drop table public.generation_experiments")
+    && simplifiedSiteAuthoring.includes("drop table public.model_bakeoff_experiments")
+    && !simplifiedSiteAuthoring.includes("regexp_replace("),
+  "The simplified authoring cut must enforce reviewed reset, retained candidate integrity, owner authority, and clean experiment removal."
 );
 assert(
   normalizedProspectResearch.includes("where do_not_contact")
@@ -318,16 +686,19 @@ assert(
   "Closed or parked first-party sources do not have a canonical setup failure."
 );
 assert(
-  externalTargetedTools.includes("'read_files'")
-    && externalTargetedTools.includes("'search_files'")
-    && externalTargetedTools.includes("'edit_file'")
-    && externalTargetedTools.includes("'read_file'"),
-  "The external authoring operation ledger must accept the canonical editing tools while retaining historical read operation records."
+  assetRevisionScope.includes("asset_revisions_business_content_hash_idx")
+    && assetRevisionScope.includes("business_id, content_hash")
+    && baseline.includes("create index asset_revisions_business_content_hash_idx")
+    && !baseline.includes("create unique index asset_revisions_business_content_hash_idx")
+    && immutableLogoPreparationRevisions.includes("drop index if exists public.asset_revisions_business_content_hash_idx")
+    && immutableLogoPreparationRevisions.includes("create index asset_revisions_business_content_hash_idx"),
+  "Asset revision content-hash lookup must remain business-scoped without conflating byte identity and immutable revision provenance."
 );
 assert(
-  assetRevisionScope.includes("asset_revisions_business_content_hash_idx")
-    && assetRevisionScope.includes("business_id, content_hash"),
-  "Asset revision content-hash uniqueness must remain scoped to its business."
+  canonicalSourceLogoRecapture.includes("asset_documents jsonb")
+    && canonicalSourceLogoRecapture.includes("state_document jsonb")
+    && canonicalSourceLogoRecapture.includes("source_recapture_asset_scope_mismatch"),
+  "Source recapture must atomically advance the canonical logo and mutable business authority."
 );
 assert(
   modelRoutingTelemetry.includes("add column api_provider text")
@@ -374,6 +745,13 @@ assert(
     && websiteAssessments.includes("enable row level security"),
   "The canonical website-assessment cutover is incomplete."
 );
+assert(
+  websiteHealthReportV2.includes(`assessment_json @> '{"schemaVersion": 1}'::jsonb`)
+    && websiteHealthReportV2.includes(`assessment_json @> '{"schemaVersion": 2, "kind": "website-health-report"}'::jsonb`)
+    && !/\bdelete\s+from\s+public\.website_assessments\b/i.test(websiteHealthReportV2)
+    && !/\bupdate\s+public\.website_assessments\b/i.test(websiteHealthReportV2),
+  "Website Health v2 must preserve retained v1 payloads and admit only the canonical v2 report kind."
+);
 const businessesBody = baseline.match(/create table businesses\s*\((.*?)\n\);/s)?.[1] ?? "";
 const businessColumns = [...businessesBody.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((match) => match[1]);
 assert.deepEqual(
@@ -385,15 +763,16 @@ assert.deepEqual(
 if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
   const admin = getSupabaseAdminClient();
   const liveTables = [
-    ...requiredTables.filter((table) => table !== "prospect_report_jobs"),
+    ...requiredTables.filter((table) => !["prospect_report_jobs", "website_setups"].includes(table)),
     "website_assessments",
     "website_assessment_jobs",
+    "site_authoring_bootstrap_requests",
+    "site_agent_continuation_heads",
+    "site_agent_continuation_segments",
     "analytics_collection_daily",
-    "model_bakeoff_experiments",
-    "model_bakeoff_runs",
     "prospect_report_access_grants",
     "prospects",
-    "prospect_observations",
+    "prospect_locations",
     "prospect_contacts"
   ];
   for (const table of liveTables) {

@@ -39,7 +39,8 @@ export async function computeSiteToolchainIdentity(root = process.cwd()) {
   const files = [
     join(sandboxRoot, "Dockerfile"),
     join(sandboxRoot, ".dockerignore"),
-    join(sandboxRoot, "wrangler.jsonc"),
+    join(sandboxRoot, "wrangler.blue.jsonc"),
+    join(sandboxRoot, "wrangler.green.jsonc"),
     ...await listWorkerInputs(join(sandboxRoot, "src")),
     ...await listScaffoldInputs(scaffoldRoot)
   ];
@@ -106,15 +107,21 @@ export async function synchronizeSiteSandboxManifest(input: {
 
 function assertManifestAgreement(platformSource: string, componentSource: string, manifest: Record<string, unknown>) {
   if (manifest.kind !== "site-sandbox-manifest"
-    || Object.keys(manifest).sort().join(",") !== "artifactContractIdentity,kind,sourcePolicyIdentity,toolchainIdentity") {
+    || Object.keys(manifest).sort().join(",") !== "apiIdentity,artifactContractIdentity,durableObjectIdentity,kind,sourcePolicyIdentity,storageIdentity,toolchainIdentity") {
     throw new Error("Generated sandbox manifest kind or fields are invalid.");
   }
   const expected = {
+    apiIdentity: readIdentity(platformSource, "siteSandboxApiIdentity"),
+    storageIdentity: readIdentity(platformSource, "siteSandboxStorageIdentity"),
+    durableObjectIdentity: readIdentity(platformSource, "siteSandboxDurableObjectIdentity"),
     artifactContractIdentity: readIdentity(platformSource, "agentAuthoredArtifactIdentity"),
     toolchainIdentity: readIdentity(platformSource, "siteToolchainIdentity"),
     sourcePolicyIdentity: readIdentity(platformSource, "workspaceSourcePolicyIdentity")
   };
   const component = {
+    apiIdentity: readIdentity(componentSource, "sandboxApiIdentity"),
+    storageIdentity: readIdentity(componentSource, "sandboxStorageIdentity"),
+    durableObjectIdentity: readIdentity(componentSource, "sandboxDurableObjectIdentity"),
     artifactContractIdentity: readIdentity(componentSource, "sandboxArtifactContractIdentity"),
     toolchainIdentity: readIdentity(componentSource, "sandboxToolchainIdentity"),
     sourcePolicyIdentity: readIdentity(componentSource, "sandboxSourcePolicyIdentity")

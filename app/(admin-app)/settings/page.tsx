@@ -16,7 +16,7 @@ export default async function SettingsPage() {
       <AdminPageHeader
         eyebrow="Operator settings"
         title="Runtime settings"
-        description="Manage the API provider and model policy used by ingestion and the website manager."
+        description="Manage the internal API provider and model policy used by the website manager."
       />
 
       <div className={`admin-grid ${styles.settingsGrid}`}>

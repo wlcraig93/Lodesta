@@ -10,7 +10,10 @@ if (!apply || !actorId || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159}$/.test(actorId)) 
   throw new Error("Use --apply --verified-by=<operator-id> after runtime security, capability, CSP, browser, and compatibility verification passes.");
 }
 
-const seriesId = "site-runtime-v1";
+const seriesId = process.argv.find((value) => value.startsWith("--series-id="))?.slice("--series-id=".length);
+if (!seriesId || !/^site-runtime-v[1-9][0-9]*$/.test(seriesId)) {
+  throw new Error("Use --series-id=site-runtime-vN to select the explicit runtime series.");
+}
 const prepared = await createSiteRuntimePatch({
   id: `runtime_patch_${crypto.randomUUID().replaceAll("-", "")}`,
   seriesId,

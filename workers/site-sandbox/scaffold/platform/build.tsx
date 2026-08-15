@@ -3,9 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { LodestaSite } from "./sdk";
-import { platformCapabilityStyles } from "./capability-styles";
+import { platformCapabilityStylesFor } from "./capability-styles";
+import { platformFontStyles } from "./font-library";
 import { removeReactImagePreloads } from "./preloads";
-import { assertValidRoutePaths } from "./route-contract";
+import { assertRenderedRouteBodies, assertValidRoutePaths } from "./route-contract";
 import { siteDefinition } from "../src/site";
 
 const root = process.cwd();
@@ -17,7 +18,7 @@ const cssPaths = (await readdir(sourceRoot, { recursive: true }))
   .filter((path) => path.endsWith(".css"))
   .sort((left, right) => left === "styles.css" ? -1 : right === "styles.css" ? 1 : left.localeCompare(right));
 const sharedCss = (await Promise.all(cssPaths.map(async (path) => `/* ${path} */\n${await readFile(join(sourceRoot, path), "utf8")}`))).join("\n");
-const previewCss = previewCssBindings(`${platformCapabilityStyles}\n${sharedCss}`, publicInput);
+const previewCss = previewCssBindings(`${platformFontStyles}\n${platformCapabilityStylesFor(publicInput.capabilityConfiguration.trustedRuntimeSeries)}\n${sharedCss}`, publicInput);
 const routes = siteDefinition.routes.map((route) => {
   const path = normalizeRoute(route.path);
   return {
@@ -28,6 +29,7 @@ const routes = siteDefinition.routes.map((route) => {
   };
 });
 assertValidRoutePaths(routes);
+assertRenderedRouteBodies(routes);
 if ("siteName" in siteDefinition || "claims" in siteDefinition || "factDeclarations" in siteDefinition) {
   throw new Error("siteDefinition accepts routes only. The compiler owns siteName and fact bindings.");
 }
@@ -60,14 +62,11 @@ function fallbackRouteTitle(path: string, siteName: string) {
 }
 function deriveCapabilityBindings(renderedRoutes: Array<{ path: string; bodyHtml: string }>) {
   const attributes = {
-    "form-id": { kind: "form", configKey: "formId" },
-    map: { kind: "map", configKey: "locationId" },
-    gallery: { kind: "gallery", configKey: "galleryId" },
-    disclosure: { kind: "disclosure", configKey: "disclosureId" }
+    "form-id": { kind: "form", configKey: "formId" }
   } as const;
   return renderedRoutes.flatMap((route) => {
-    const bindings: Array<{ id: string; kind: "form" | "map" | "gallery" | "disclosure"; route: string; config: Record<string, string> }> = [];
-    const matcher = /data-lodesta-(form-id|map|gallery|disclosure)="([^"]*)"/g;
+    const bindings: Array<{ id: string; kind: "form"; route: string; config: Record<string, string> }> = [];
+    const matcher = /data-lodesta-(form-id)="([^"]*)"/g;
     for (const match of route.bodyHtml.matchAll(matcher)) {
       const attribute = attributes[match[1] as keyof typeof attributes];
       const index = bindings.length + 1;

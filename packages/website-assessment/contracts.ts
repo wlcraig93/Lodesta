@@ -6,13 +6,16 @@ export const websiteAssessmentTargetKindSchema = z.enum([
   "published_site"
 ]);
 export const assessmentDimensionIdSchema = z.enum([
+  "business_truth",
   "functional_integrity",
-  "mobile_performance",
-  "discoverability",
-  "conversion",
-  "local_content",
-  "trust",
-  "automated_accessibility"
+  "responsive_usability",
+  "performance",
+  "accessibility",
+  "search_answer_discoverability",
+  "content_intent_coverage",
+  "trust_proof",
+  "conversion_usability",
+  "visual_editorial_craft"
 ]);
 export const assessmentCriterionStatusSchema = z.enum([
   "pass",
@@ -24,7 +27,31 @@ export const assessmentCriterionStatusSchema = z.enum([
 export const assessmentImpactSchema = z.enum(["critical", "major", "minor", "advisory"]);
 export const assessmentCertaintySchema = z.enum(["deterministic", "inferred", "human_reviewed"]);
 export const assessmentApplicabilitySchema = z.enum(["universal", "vertical", "business_specific", "capability"]);
-export const assessmentVerdictSchema = z.enum(["strong", "serviceable", "weak", "poor"]);
+export const assessmentVerdictSchema = z.enum(["excellent", "strong", "serviceable", "weak", "poor"]);
+export const assessmentControlOwnerSchema = z.enum([
+  "site_author",
+  "lodesta_platform",
+  "source_research",
+  "shared"
+]);
+export const assessmentEvaluatorTypeSchema = z.enum([
+  "deterministic",
+  "model",
+  "human"
+]);
+export const assessmentReleaseDispositionSchema = z.enum(["blocking", "advisory"]);
+export const assessmentUnknownReasonSchema = z.enum([
+  "site_evidence_missing",
+  "collector_unavailable",
+  "evidence_not_retained",
+  "inconclusive"
+]);
+export const assessmentDimensionStateSchema = z.enum([
+  "scored",
+  "not_yet_scored",
+  "insufficient_evidence",
+  "not_applicable"
+]);
 export const agentReadinessGroupIdSchema = z.enum([
   "answer_quality",
   "basic_web_presence",
@@ -69,32 +96,67 @@ export const assessmentEvidenceSchema = z.object({
   value: z.union([z.string(), z.number(), z.boolean()]).optional(),
   unit: z.string().max(40).optional(),
   artifactKey: z.string().max(500).optional(),
+  contentHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  frame: z.enum(["top", "middle", "bottom", "overview"]).optional(),
+  stage: z.enum(["natural", "settled", "derived"]).optional(),
+  width: z.number().int().positive().max(10_000).optional(),
+  height: z.number().int().positive().max(100_000).optional(),
   observedAt: z.string().datetime({ offset: true })
 }).strict();
 
 export const assessmentCriterionSchema = z.object({
   id: z.string().min(1).max(180),
+  definitionIdentity: z.string().regex(/^criterion@sha256:[a-f0-9]{64}$/),
   dimensionId: assessmentDimensionIdSchema,
+  topics: z.array(z.string().min(1).max(80)).max(12),
   title: z.string().min(1).max(240),
   status: assessmentCriterionStatusSchema,
   impact: assessmentImpactSchema,
   certainty: assessmentCertaintySchema,
   confidence: z.number().min(0).max(1).optional(),
   applicability: assessmentApplicabilitySchema,
+  evaluatorType: assessmentEvaluatorTypeSchema,
+  controlOwner: assessmentControlOwnerSchema,
+  releaseDisposition: assessmentReleaseDispositionSchema,
+  scoreEligible: z.boolean(),
+  publicEligible: z.boolean(),
+  unknownReason: assessmentUnknownReasonSchema.optional(),
   explanation: z.string().min(1).max(2_000),
   businessConsequence: z.string().min(1).max(1_000),
   recommendation: z.string().min(1).max(1_000),
   evidence: z.array(assessmentEvidenceSchema).min(1).max(30),
   pointsEarned: z.number().min(0).max(100).optional(),
-  pointsPossible: z.number().positive().max(100).optional()
-}).strict();
+  pointsPossible: z.number().nonnegative().max(100)
+}).strict().superRefine((criterion, context) => {
+  if (criterion.status === "unknown" && !criterion.unknownReason) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["unknownReason"],
+      message: "Unknown criteria must identify why evidence was unavailable or inconclusive."
+    });
+  }
+  if (criterion.status !== "unknown" && criterion.unknownReason) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["unknownReason"],
+      message: "Only unknown criteria may carry an unknown reason."
+    });
+  }
+});
 
 export const assessmentDimensionSchema = z.object({
   id: assessmentDimensionIdSchema,
   label: z.string().min(1).max(120),
   weight: z.number().positive().max(100),
-  coverage: z.number().min(0).max(1),
+  state: assessmentDimensionStateSchema,
+  coverage: z.object({
+    siteEvidence: z.number().min(0).max(1),
+    pipelineCompleteness: z.number().min(0).max(1)
+  }).strict(),
   score: z.number().min(0).max(100).optional(),
+  capEligible: z.boolean(),
+  assessedPoints: z.number().nonnegative(),
+  possiblePoints: z.number().nonnegative(),
   assessedCriteria: z.number().int().nonnegative(),
   applicableCriteria: z.number().int().nonnegative(),
   criteria: z.array(assessmentCriterionSchema)
@@ -208,8 +270,48 @@ export const visualQualitySchema = z.object({
   groups: z.array(visualQualityGroupSchema).length(6)
 }).strict();
 
-export const websiteAssessmentSchema = z.object({
-  schemaVersion: z.literal(1),
+export const websiteSiteInventorySchema = z.object({
+  source: z.enum(["complete_crawl", "retained_artifact"]),
+  coverage: z.enum(["complete", "restricted", "incomplete", "retained_artifact"]),
+  discoveredUrls: z.number().int().nonnegative(),
+  eligiblePages: z.number().int().nonnegative(),
+  assessedPages: z.number().int().nonnegative(),
+  failedPages: z.number().int().nonnegative(),
+  contentDepth: z.object({
+    substantivePages: z.number().int().nonnegative(),
+    thinPages: z.number().int().nonnegative(),
+    unclassifiedPages: z.number().int().nonnegative()
+  }).strict(),
+  pageTypes: z.array(z.object({
+    id: z.enum([
+      "home",
+      "service",
+      "location",
+      "about",
+      "contact",
+      "faq",
+      "proof",
+      "comparison",
+      "editorial",
+      "legal",
+      "other"
+    ]),
+    label: z.string().min(1).max(80),
+    count: z.number().int().nonnegative()
+  }).strict()).length(11)
+}).strict();
+
+const assessmentScoreScopeSchema = z.object({
+  value: z.number().min(0).max(100).optional(),
+  coverage: z.number().min(0).max(1),
+  activeWeight: z.number().min(0).max(100),
+  assessedPoints: z.number().nonnegative(),
+  possiblePoints: z.number().nonnegative()
+}).strict();
+
+export const websiteHealthReportSchema = z.object({
+  schemaVersion: z.literal(2),
+  kind: z.literal("website-health-report"),
   id: z.string().min(1).max(180),
   target: z.object({
     kind: websiteAssessmentTargetKindSchema,
@@ -220,10 +322,11 @@ export const websiteAssessmentSchema = z.object({
     versionId: z.string().min(1).max(180).optional()
   }).strict(),
   producer: z.object({
-    name: z.literal("lodesta-website-assessment"),
+    name: z.literal("lodesta-website-health"),
     identity: z.string().min(1).max(180),
     rubricIdentity: z.string().min(1).max(180),
     scannerIdentity: z.string().min(1).max(180),
+    routeSelectionIdentity: z.string().regex(/^route-selection@sha256:[a-f0-9]{64}$/),
     inputHash: z.string().startsWith("sha256:"),
     generatedAt: z.string().datetime({ offset: true })
   }).strict(),
@@ -236,21 +339,72 @@ export const websiteAssessmentSchema = z.object({
     verticalEvidence: z.array(z.string().min(1).max(500)).max(20),
     customerJourneys: z.array(z.string().min(1).max(300)).max(20)
   }).strict(),
+  canonicalFactAvailability: z.object({
+    businessName: z.boolean(),
+    phone: z.boolean(),
+    email: z.boolean(),
+    address: z.boolean(),
+    hours: z.boolean(),
+    coordinates: z.boolean(),
+    serviceAreas: z.boolean(),
+    proof: z.boolean()
+  }).strict(),
+  routeSelection: z.object({
+    identity: z.string().regex(/^route-selection@sha256:[a-f0-9]{64}$/),
+    requestedSlots: z.array(z.enum(["home", "primary_service", "contact_or_about"])).length(3),
+    selected: z.array(z.object({
+      slot: z.enum(["home", "primary_service", "contact_or_about"]),
+      route: z.string().startsWith("/").optional(),
+      sourceUrl: z.string().url().optional(),
+      purpose: z.string().min(1).max(80).optional()
+    }).strict()).length(3)
+  }).strict(),
+  siteInventory: websiteSiteInventorySchema,
   coverage: z.object({
-    value: z.number().min(0).max(1),
+    siteEvidence: z.number().min(0).max(1),
+    pipelineCompleteness: z.number().min(0).max(1),
     assessedCriteria: z.number().int().nonnegative(),
     applicableCriteria: z.number().int().nonnegative(),
-    scoreEligible: z.boolean(),
+    comparisonEligible: z.boolean(),
     limitations: z.array(z.string().min(1).max(500)).max(40)
   }).strict(),
   score: z.object({
+    rawValue: z.number().min(0).max(100).optional(),
+    activeWeight: z.number().min(0).max(100),
+    renormalized: z.boolean(),
+    scopes: z.object({
+      siteAuthor: assessmentScoreScopeSchema
+    }).strict()
+  }).strict(),
+  grade: z.object({
     value: z.number().min(0).max(100),
-    verdict: assessmentVerdictSchema,
-    provisional: z.boolean()
+    band: assessmentVerdictSchema,
+    provisional: z.boolean(),
+    appliedCaps: z.array(z.object({
+      id: z.string().min(1).max(180),
+      maximum: z.number().min(0).max(100),
+      explanation: z.string().min(1).max(500)
+    }).strict()).max(20)
   }).strict().optional(),
-  dimensions: z.array(assessmentDimensionSchema).length(7),
-  agentReadiness: agentReadinessSchema,
-  visualQuality: visualQualitySchema,
+  release: z.object({
+    status: z.enum(["passed", "failed", "not_applicable"]),
+    blockers: z.array(z.string().min(1).max(180)).max(40)
+  }).strict(),
+  dimensions: z.array(assessmentDimensionSchema).length(10),
+  evaluators: z.array(z.object({
+    kind: z.enum(["deterministic", "model", "human"]),
+    identity: z.string().min(1).max(180),
+    status: z.enum(["completed", "unavailable", "not_configured"]),
+    modelId: z.string().min(1).max(180).optional(),
+    promptIdentity: z.string().min(1).max(180).optional(),
+    evidenceSetHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+    generatedAt: z.string().datetime({ offset: true }),
+    inputTokens: z.number().int().nonnegative().optional(),
+    cachedInputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    estimatedCostUsd: z.number().nonnegative().optional()
+  }).strict()).min(1).max(12),
   summary: z.object({
     strengths: z.array(z.string().min(1).max(500)).max(12),
     opportunities: z.array(z.string().min(1).max(500)).max(12),
@@ -258,13 +412,20 @@ export const websiteAssessmentSchema = z.object({
   }).strict()
 }).strict();
 
-export type WebsiteAssessment = z.infer<typeof websiteAssessmentSchema>;
+export const websiteAssessmentSchema = websiteHealthReportSchema;
+export type WebsiteHealthReport = z.infer<typeof websiteHealthReportSchema>;
+export type WebsiteAssessment = WebsiteHealthReport;
 export type WebsiteAssessmentTargetKind = z.infer<typeof websiteAssessmentTargetKindSchema>;
 export type AssessmentDimensionId = z.infer<typeof assessmentDimensionIdSchema>;
 export type AssessmentCriterionStatus = z.infer<typeof assessmentCriterionStatusSchema>;
 export type AssessmentImpact = z.infer<typeof assessmentImpactSchema>;
 export type AssessmentCertainty = z.infer<typeof assessmentCertaintySchema>;
 export type AssessmentApplicability = z.infer<typeof assessmentApplicabilitySchema>;
+export type AssessmentControlOwner = z.infer<typeof assessmentControlOwnerSchema>;
+export type AssessmentEvaluatorType = z.infer<typeof assessmentEvaluatorTypeSchema>;
+export type AssessmentReleaseDisposition = z.infer<typeof assessmentReleaseDispositionSchema>;
+export type AssessmentUnknownReason = z.infer<typeof assessmentUnknownReasonSchema>;
+export type AssessmentDimensionState = z.infer<typeof assessmentDimensionStateSchema>;
 export type AssessmentEvidence = z.infer<typeof assessmentEvidenceSchema>;
 export type AssessmentCriterion = z.infer<typeof assessmentCriterionSchema>;
 export type AssessmentDimension = z.infer<typeof assessmentDimensionSchema>;
@@ -277,8 +438,20 @@ export type VisualQualityGroupId = z.infer<typeof visualQualityGroupIdSchema>;
 export type VisualQualityCheck = z.infer<typeof visualQualityCheckSchema>;
 export type VisualQualityGroup = z.infer<typeof visualQualityGroupSchema>;
 export type VisualQuality = z.infer<typeof visualQualitySchema>;
+export type WebsiteSiteInventory = z.infer<typeof websiteSiteInventorySchema>;
 
-export type AssessmentCriterionInput = Omit<AssessmentCriterion, "pointsEarned" | "pointsPossible"> & {
+export type AssessmentCriterionInput = Pick<
+  AssessmentCriterion,
+  "id" | "status" | "certainty" | "explanation" | "evidence"
+> & {
+  dimensionId?: AssessmentDimensionId;
+  title?: string;
+  impact?: AssessmentImpact;
+  applicability?: AssessmentApplicability;
+  businessConsequence?: string;
+  recommendation?: string;
+  confidence?: number;
+  unknownReason?: AssessmentUnknownReason;
   pointsPossible?: number;
 };
 export type AgentReadinessCheckInput = Omit<

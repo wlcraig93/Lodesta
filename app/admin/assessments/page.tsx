@@ -15,7 +15,7 @@ export default async function AssessmentsPage() {
   const completed = records.filter((record) => record.status === "completed");
   const failures = records.filter((record) => record.status === "failed").length;
   const coverageValues = completed
-    .flatMap((record) => record.assessment ? [record.assessment.coverage.value] : [])
+    .flatMap((record) => record.assessment ? [record.assessment.coverage.siteEvidence] : [])
     .sort((left, right) => left - right);
   const medianCoverage = coverageValues.length
     ? coverageValues[Math.floor((coverageValues.length - 1) / 2)]
@@ -26,7 +26,7 @@ export default async function AssessmentsPage() {
       <AdminPageHeader
         eyebrow="Evidence"
         title="Website assessments"
-        description="Run and inspect the canonical local-business rubric. Scores and verdicts remain provisional and internal."
+        description="Run and inspect the canonical Website Health Report across external, artifact, and published targets."
       />
       <section className="metric-row" aria-label="Assessment monitoring">
         <Metric label="Completed" value={`${completed.length}/${records.length}`} />
@@ -64,7 +64,9 @@ export default async function AssessmentsPage() {
                     : record.status === "completed"
                       ? "Stale schema — rebuild"
                       : "Pending"}
-                  <small>{record.assessment?.score ? `${record.assessment.score.value} provisional · ${record.assessment.score.verdict}` : "No eligible composite"}</small>
+                  <small>{record.assessment?.grade
+                    ? `${record.assessment.grade.value} ${record.assessment.grade.band} · raw ${record.assessment.score.rawValue ?? "—"} · author ${record.assessment.score.scopes.siteAuthor.value ?? "—"}`
+                    : "No eligible composite"}</small>
                 </td>
                 <td>{record.rubricIdentity}<small>{record.scannerIdentity}</small></td>
                 <td>{formatProductDate(record.createdAt)}</td>

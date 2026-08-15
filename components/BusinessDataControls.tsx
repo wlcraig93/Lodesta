@@ -84,7 +84,7 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
         <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "identity" ? "Saving" : state.identity.status === "verified" ? "Update name" : "Confirm name"}</button>
       </form>
     </section>
-    <section className="panel" id="contact"><div className="section-heading-row"><div><h2>Contact</h2><p className="muted">Confirmed changes recompile the current design without a redesign.</p></div><span className="badge">Revision {state.revision}</span></div>
+    <section className="panel" id="contact"><div className="section-heading-row"><div><h2>Contact</h2><p className="muted">Confirmed changes become the authority for the next website candidate.</p></div><span className="badge">Revision {state.ownerOperationalRevision}</span></div>
       <form className="owner-authority-form" noValidate onSubmit={(event) => { event.preventDefault(); if (blockedByEmptyField(event.currentTarget)) return; const form = new FormData(event.currentTarget); void submit("contact", { kind: "update_contact", phone: String(form.get("phone") ?? "") || undefined, email: String(form.get("email") ?? "") || undefined }); }}>
         <label>Phone<input name="phone" defaultValue={state.contacts.phone ?? ""} /></label><label>Email<input name="email" type="email" defaultValue={state.contacts.email ?? ""} /></label><button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "contact" ? "Saving" : "Save contact"}</button>
       </form>
@@ -96,15 +96,14 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
         <button className="button secondary" type="submit" disabled={Boolean(busy)}>{busy === `hours:${location.id}` ? "Saving" : "Save hours"}</button>
       </form>)}{!state.locations.length ? <p className="muted">No source-backed location is available yet.</p> : null}</div>
     </section>
-    <section className="panel" id="services"><div className="section-heading-row"><div><h2>Services</h2><p className="muted">Observed services can be confirmed, hidden, or assigned a dedicated page.</p></div><span className="badge">{state.offerings.length}</span></div>
-      <form className="owner-authority-form" noValidate onSubmit={(event) => { event.preventDefault(); if (blockedByEmptyField(event.currentTarget)) return; const form = new FormData(event.currentTarget); void submit("offering:new", { kind: "add_offering", name: String(form.get("name") ?? ""), pageMode: form.get("pageMode") }); }}>
+    <section className="panel" id="services"><div className="section-heading-row"><div><h2>Services</h2><p className="muted">These are owner-controlled business offerings. Website routes are designed separately from this list.</p></div><span className="badge">{state.offerings.length}</span></div>
+      <form className="owner-authority-form" noValidate onSubmit={(event) => { event.preventDefault(); if (blockedByEmptyField(event.currentTarget)) return; const form = new FormData(event.currentTarget); void submit("offering:new", { kind: "add_offering", name: String(form.get("name") ?? ""), description: String(form.get("description") ?? "") || undefined }); }}>
         <label>New service<input name="name" minLength={2} maxLength={160} placeholder="Service name" required /></label>
-        <label>Page<ProductSelect name="pageMode" defaultValue="dedicated"><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></ProductSelect></label>
+        <label>Description<input name="description" maxLength={600} placeholder="Optional owner-confirmed description" /></label>
         <button className="button primary" type="submit" disabled={Boolean(busy)}>{busy === "offering:new" ? "Adding" : "Add service"}</button>
       </form>
-      <div className="owner-authority-list">{state.offerings.map((offering) => <form className="owner-authority-row" key={offering.id} noValidate onSubmit={(event) => { event.preventDefault(); if (blockedByEmptyField(event.currentTarget)) return; const form = new FormData(event.currentTarget); void submit(offering.id, { kind: "set_offering", offeringId: offering.id, enabled: form.get("enabled") === "on", pageMode: form.get("pageMode") }); }}>
-        <label className="owner-authority-check"><input name="enabled" type="checkbox" defaultChecked={offering.status !== "inactive" && offering.status !== "rejected"} /><span><strong>{offering.name}</strong><small>{offering.catalogId ? "Catalog service" : "Custom service"} · {offering.status}</small></span></label>
-        <ProductSelect name="pageMode" defaultValue={offering.pageMode}><option value="none">No page</option><option value="shared">Shared page</option><option value="dedicated">Dedicated page</option></ProductSelect>
+      <div className="owner-authority-list">{state.offerings.map((offering) => <form className="owner-authority-row" key={offering.id} noValidate onSubmit={(event) => { event.preventDefault(); if (blockedByEmptyField(event.currentTarget)) return; const form = new FormData(event.currentTarget); void submit(offering.id, { kind: "set_offering", offeringId: offering.id, enabled: form.get("enabled") === "on" }); }}>
+        <label className="owner-authority-check"><input name="enabled" type="checkbox" defaultChecked={offering.status === "confirmed"} /><span><strong>{offering.name}</strong><small>{offering.description ?? "Owner-confirmed service"} · {offering.status}</small></span></label>
         <button className="button secondary" type="submit" disabled={Boolean(busy)}>{busy === offering.id ? "Saving" : "Update"}</button>
       </form>)}</div>
     </section>

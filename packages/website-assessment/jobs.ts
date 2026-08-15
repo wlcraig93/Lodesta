@@ -130,17 +130,18 @@ export async function processNextWebsiteAssessmentJob(input: {
 }
 
 function assertAssessmentIdentity(assessment: WebsiteAssessment, record: WebsiteAssessmentRecord) {
-  if (
-    assessment.id !== record.id
-    || assessment.target.kind !== record.targetKind
-    || assessment.target.sourceKey !== record.sourceKey
-    || assessment.producer.rubricIdentity !== record.rubricIdentity
-    || assessment.producer.scannerIdentity !== record.scannerIdentity
-    || (record.siteId !== undefined && assessment.target.siteId !== record.siteId)
-    || (record.artifactId !== undefined && assessment.target.artifactId !== record.artifactId)
-    || (record.versionId !== undefined && assessment.target.versionId !== record.versionId)
-  ) {
-    throw new Error("Generated website assessment identity does not match its immutable operational record.");
+  const mismatches = [
+    assessment.id !== record.id ? "id" : undefined,
+    assessment.target.kind !== record.targetKind ? "target.kind" : undefined,
+    assessment.target.sourceKey !== record.sourceKey ? "target.sourceKey" : undefined,
+    assessment.producer.rubricIdentity !== record.rubricIdentity ? "producer.rubricIdentity" : undefined,
+    assessment.producer.scannerIdentity !== record.scannerIdentity ? "producer.scannerIdentity" : undefined,
+    record.siteId !== undefined && assessment.target.siteId !== record.siteId ? "target.siteId" : undefined,
+    record.artifactId !== undefined && assessment.target.artifactId !== record.artifactId ? "target.artifactId" : undefined,
+    record.versionId !== undefined && assessment.target.versionId !== record.versionId ? "target.versionId" : undefined
+  ].filter((value): value is string => Boolean(value));
+  if (mismatches.length) {
+    throw new Error(`Generated website assessment identity does not match its immutable operational record: ${mismatches.join(", ")}.`);
   }
 }
 
@@ -166,6 +167,13 @@ export async function processWebsiteAssessmentJobs(input: {
 
 async function runAssessmentForRecord(record: WebsiteAssessmentRecord) {
   if ((record.targetKind === "public_url" || record.targetKind === "published_site") && record.sourceUrl) {
+    const canonicalBuildInput = record.targetKind === "published_site" && record.artifactId
+      ? await (async () => {
+          const artifact = await sitePlatformRepository.getBuildArtifact(record.artifactId!);
+          if (!artifact) return undefined;
+          return await sitePlatformRepository.getPublicBuildInput(artifact.publicBuildInputId) ?? undefined;
+        })()
+      : undefined;
     return (await assessPublicUrl({
       url: record.sourceUrl,
       assessmentId: record.id,
@@ -173,7 +181,8 @@ async function runAssessmentForRecord(record: WebsiteAssessmentRecord) {
       captureScreenshots: true,
       targetKind: record.targetKind,
       siteId: record.siteId,
-      versionId: record.versionId
+      versionId: record.versionId,
+      canonicalBuildInput
     })).assessment;
   }
   if (record.targetKind === "site_artifact" && record.artifactId) {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
-import { deriveSitePublicationReadiness } from "@/packages/site-platform/publication-readiness";
+import { deriveSiteCandidateIntegrity } from "@/packages/site-platform/candidate-integrity";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { authorizedSiteActor } from "../auth";
 
@@ -42,7 +42,7 @@ async function workspacePayload(siteId: string, actorId: string) {
   ]);
   const artifacts = await Promise.all(versions.map((version) => sitePlatformRepository.getBuildArtifact(version.artifactId)));
   const candidate = versions.find((version) => version.status === "candidate");
-  const readiness = candidate ? await deriveSitePublicationReadiness({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
+  const candidateIntegrity = candidate ? await deriveSiteCandidateIntegrity({ versionId: candidate.id, repository: sitePlatformRepository }) : undefined;
   const versionRoutes = Object.fromEntries(versions.map((version, index) => [
     version.id,
     artifacts[index]?.routes.map((route) => ({ path: route.path, title: route.title })) ?? []
@@ -55,7 +55,7 @@ async function workspacePayload(siteId: string, actorId: string) {
     versionRoutes,
     messages,
     runs: runs.map(ownerSiteAgentRun),
-    readiness,
+    candidateIntegrity,
     openFindings: []
   };
 }

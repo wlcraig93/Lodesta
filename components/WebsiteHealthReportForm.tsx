@@ -7,10 +7,12 @@ import { prospectReportResponseSchema } from "@/packages/acquisition/public-repo
 
 export function WebsiteHealthReportForm({
   buttonLabel = "Check my website",
-  className = ""
+  className = "",
+  note = "Free report. No generic grade. See what is working and what could improve."
 }: {
   buttonLabel?: string;
   className?: string;
+  note?: string;
 }) {
   const router = useRouter();
   const errorId = useId();
@@ -70,7 +72,7 @@ export function WebsiteHealthReportForm({
         </button>
       </div>
       {error ? <p className="form-error" id={errorId} role="alert">{error}</p> : null}
-      <p className="health-search-note">Free report. No generic grade. See what is working and what could improve.</p>
+      <p className="health-search-note">{note}</p>
     </form>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "../packages/site-artifacts/blob-store";
 import { configuredArtifactBlobMaintenanceStore } from "../packages/site-artifacts/maintenance-store";
 import { siteBuildArtifactSchema } from "../packages/site-contracts";
+import { sha256 } from "../packages/business-data";
 
 const options = parseArgs(process.argv.slice(2));
 const client = getSupabaseAdminClient();
@@ -75,8 +76,30 @@ if (!options.apply) {
 }
 
 async function createReport() {
-  const [inventory, referencedObjects] = await Promise.all([listAllObjects(), collectReferencedObjects()]);
-  return buildArtifactBlobAudit({ inventory, referencedObjects });
+  const [inventory, references] = await Promise.all([listAllObjects(), collectReferencedObjects()]);
+  const corruptReferencedIds = new Set<string>();
+  for (const batch of chunks(references.exactObjects, 25)) {
+    const checks = await Promise.all(batch.map(async (capture) => {
+      try {
+        const blob = await store.get(capture.store, capture.key);
+        return Boolean(
+          blob
+          && blob.bytes.byteLength === capture.bytes
+          && blob.contentHash === capture.contentHash
+          && sha256(blob.bytes) === capture.contentHash
+        );
+      } catch {
+        return false;
+      }
+    }));
+    checks.forEach((valid, index) => {
+      if (!valid) corruptReferencedIds.add(`${batch[index].store}:${batch[index].key}`);
+    });
+  }
+  return buildArtifactBlobAudit({
+    inventory: inventory.filter((object) => !corruptReferencedIds.has(`${object.store}:${object.key}`)),
+    referencedObjects: references.objects
+  });
 }
 
 async function listAllObjects() {
@@ -98,13 +121,13 @@ async function listAllObjects() {
 
 async function collectReferencedObjects() {
   const objects = new Map<string, ArtifactBlobLocator>();
-  const [assetRows, workspaceRows, runtimeRows, artifactRows, executionRows, stagedReceiptRows] = await Promise.all([
+  const [assetRows, workspaceRows, runtimeRows, artifactRows, sourceCaptureRows, checkpointRows] = await Promise.all([
     selectAll("asset_revisions", "storage_path"),
     selectAll("site_workspace_revisions", "source_archive_key"),
     selectAll("trusted_runtime_patches", "storage_key"),
     selectAll("site_build_artifacts", "artifact"),
-    selectAll("external_authoring_executions", "checkpoint_key"),
-    selectAll("staged_blob_receipts", "storage_key,consumed_at")
+    selectAll("source_snapshot_resources", "storage_key,blob_content_hash,stored_bytes"),
+    selectAll("site_agent_workspace_checkpoints", "backup_key,backup_hash,backup_bytes,sidecar_key,sidecar_hash,sidecar_bytes")
   ]);
   for (const row of assetRows) addObject(objects, "artifact", row.storage_path, "asset_revisions.storage_path");
   for (const row of workspaceRows) {
@@ -118,13 +141,27 @@ async function collectReferencedObjects() {
     for (const file of artifact.files) addObject(objects, "artifact", file.storageKey, "site_build_artifacts.artifact.files.storageKey");
     for (const screenshotKey of artifact.qa.screenshotKeys) addObject(objects, "artifact", screenshotKey, "site_build_artifacts.artifact.qa.screenshotKeys");
   }
-  for (const row of executionRows) {
-    if (row.checkpoint_key) addObject(objects, "artifact", row.checkpoint_key, "external_authoring_executions.checkpoint_key");
+  const exactObjects: Array<ArtifactBlobLocator & { contentHash: `sha256:${string}`; bytes: number }> = sourceCaptureRows.filter((row) => row.storage_key && row.blob_content_hash).map((row) => ({
+    store: "artifact" as const,
+    key: requiredKey(row.storage_key, "source_snapshot_resources.storage_key"),
+    contentHash: requiredContentHash(row.blob_content_hash, "source_snapshot_resources.blob_content_hash"),
+    bytes: requiredBytes(row.stored_bytes, "source_snapshot_resources.stored_bytes")
+  }));
+  for (const row of checkpointRows) {
+    exactObjects.push({
+      store: "workspace",
+      key: requiredKey(row.backup_key, "site_agent_workspace_checkpoints.backup_key"),
+      contentHash: requiredContentHash(row.backup_hash, "site_agent_workspace_checkpoints.backup_hash"),
+      bytes: requiredBytes(row.backup_bytes, "site_agent_workspace_checkpoints.backup_bytes")
+    }, {
+      store: "artifact",
+      key: requiredKey(row.sidecar_key, "site_agent_workspace_checkpoints.sidecar_key"),
+      contentHash: requiredContentHash(row.sidecar_hash, "site_agent_workspace_checkpoints.sidecar_hash"),
+      bytes: requiredBytes(row.sidecar_bytes, "site_agent_workspace_checkpoints.sidecar_bytes")
+    });
   }
-  for (const row of stagedReceiptRows) {
-    if (row.consumed_at) addObject(objects, "artifact", row.storage_key, "consumed staged_blob_receipts.storage_key");
-  }
-  return objects.values();
+  for (const object of exactObjects) addObject(objects, object.store, object.key, "immutable retained object");
+  return { objects: objects.values(), exactObjects };
 }
 
 async function selectAll(table: string, columns: string) {
@@ -140,14 +177,10 @@ async function selectAll(table: string, columns: string) {
 }
 
 async function assertPlatformQuiescent() {
-  const [runs, external] = await Promise.all([
-    client.from("site_agent_runs").select("id", { count: "exact", head: true }).in("status", ["queued", "running", "needs_input"]),
-    client.from("external_authoring_executions").select("id", { count: "exact", head: true }).in("status", ["queued", "claimed", "needs_input", "authoring", "finalizing"])
-  ]);
+  const runs = await client.from("site_agent_runs").select("id", { count: "exact", head: true }).in("status", ["queued", "running", "needs_input"]);
   if (runs.error) throw new Error(`Check active site-agent runs: ${runs.error.message}`);
-  if (external.error) throw new Error(`Check active external authoring executions: ${external.error.message}`);
-  if ((runs.count ?? 0) > 0 || (external.count ?? 0) > 0) {
-    throw new Error(`Artifact deletion requires a quiescent platform; ${runs.count ?? 0} site-agent and ${external.count ?? 0} external execution(s) remain active.`);
+  if ((runs.count ?? 0) > 0) {
+    throw new Error(`Artifact deletion requires a quiescent platform; ${runs.count ?? 0} site-agent run(s) remain active.`);
   }
 }
 
@@ -158,6 +191,16 @@ function addObject(objects: Map<string, ArtifactBlobLocator>, storeName: Artifac
 
 function requiredKey(value: unknown, source: string) {
   if (typeof value !== "string" || !value) throw new Error(`${source} contains an invalid storage key.`);
+  return value;
+}
+
+function requiredContentHash(value: unknown, source: string) {
+  if (typeof value !== "string" || !/^sha256:[a-f0-9]{64}$/.test(value)) throw new Error(`${source} contains an invalid content hash.`);
+  return value as `sha256:${string}`;
+}
+
+function requiredBytes(value: unknown, source: string) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`${source} contains an invalid byte count.`);
   return value;
 }
 

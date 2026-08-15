@@ -6,9 +6,7 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AssessmentAutoRefresh } from "@/components/admin/AssessmentAutoRefresh";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import type {
-  AgentReadinessCheck,
   AssessmentCriterion,
-  VisualQualityCheck,
   WebsiteAssessment
 } from "@/packages/website-assessment/contracts";
 import { formatProductDate, statusTone } from "@/lib/product-format";
@@ -16,7 +14,11 @@ import { formatProductDate, statusTone } from "@/lib/product-format";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
-export default async function AssessmentPage({ params }: { params: Promise<{ assessmentId: string }> }) {
+export default async function AssessmentPage({
+  params
+}: {
+  params: Promise<{ assessmentId: string }>;
+}) {
   const { assessmentId } = await params;
   await requireAdminPageAccess(`/admin/assessments/${assessmentId}`);
   const record = await platformOperationsRepository.getWebsiteAssessment(assessmentId);
@@ -27,16 +29,16 @@ export default async function AssessmentPage({ params }: { params: Promise<{ ass
     <main className="admin-page">
       <AssessmentAutoRefresh active={record.status === "queued" || record.status === "running"} />
       <AdminPageHeader
-        eyebrow="Website assessment"
+        eyebrow="Website Health Report"
         title={assessment?.siteUnderstanding.businessName ?? record.sourceUrl ?? record.artifactId ?? record.id}
         description={`Target: ${record.targetKind.replaceAll("_", " ")} · Created ${formatProductDate(record.createdAt)}`}
-        actions={<Link className="button secondary" href="/admin/assessments">All assessments</Link>}
+        actions={<Link className="button secondary" href="/admin/assessments">All reports</Link>}
       />
       {!assessment ? (
         <section className="panel">
           <span className={`badge is-${statusTone(record.status)}`}>{record.status}</span>
-          <h2>{staleSchema ? "Stale assessment schema — rebuild required" : record.status === "failed" ? "Assessment failed" : "Evidence collection is in progress"}</h2>
-          <p>{record.errorCode ?? (staleSchema ? "This retained assessment cannot be inspected with the current contract." : "The bounded crawl, destination probes, render inspection, and automated checks are running.")}</p>
+          <h2>{staleSchema ? "Stale schema — rebuild required" : record.status === "failed" ? "Assessment failed" : "Evidence collection is in progress"}</h2>
+          <p>{record.errorCode ?? (staleSchema ? "This retained legacy assessment remains immutable and is not parsed by the current application reader." : "The canonical evidence pipeline is running.")}</p>
         </section>
       ) : <AssessmentInspector assessment={assessment} />}
     </main>
@@ -44,20 +46,23 @@ export default async function AssessmentPage({ params }: { params: Promise<{ ass
 }
 
 function AssessmentInspector({ assessment }: { assessment: WebsiteAssessment }) {
-  const screenshots = unique([
-    ...assessment.dimensions.flatMap((dimension) => dimension.criteria),
-    ...assessment.visualQuality.groups.flatMap((group) => group.checks)
-  ].flatMap((evidenceGroup) => evidenceGroup.evidence
-    .map((item) => item.artifactKey)
-    .filter((key): key is string => Boolean(key))));
+  const criteria = assessment.dimensions.flatMap((dimension) => dimension.criteria);
+  const screenshots = unique(criteria.flatMap((criterion) =>
+    criterion.evidence.flatMap((item) => item.artifactKey ? [item.artifactKey] : [])
+  ));
   return (
     <>
       <section className="metric-row">
-        <Metric label="Coverage" value={`${Math.round(assessment.coverage.value * 100)}%`} />
-        <Metric label="Assessed criteria" value={`${assessment.coverage.assessedCriteria}/${assessment.coverage.applicableCriteria}`} />
-        <Metric label="Provisional score" value={assessment.score ? `${assessment.score.value}` : "—"} />
-        <Metric label="Internal verdict" value={assessment.score?.verdict ?? "insufficient coverage"} />
+        <Metric label="Canonical grade" value={assessment.grade ? `${assessment.grade.value} · ${assessment.grade.band}` : "Not scoreable"} />
+        <Metric label="Uncapped raw score" value={assessment.score.rawValue === undefined ? "—" : `${assessment.score.rawValue}`} />
+        <Metric label="Author-only subscore" value={assessment.score.scopes.siteAuthor.value === undefined ? "—" : `${assessment.score.scopes.siteAuthor.value}`} />
+        <Metric label="Active weight" value={`${assessment.score.activeWeight}/100${assessment.score.renormalized ? " · renormalized" : ""}`} />
+        <Metric label="Site evidence" value={`${Math.round(assessment.coverage.siteEvidence * 100)}%`} />
+        <Metric label="Pipeline completeness" value={`${Math.round(assessment.coverage.pipelineCompleteness * 100)}%`} />
+        <Metric label="Formal comparison" value={assessment.coverage.comparisonEligible ? "Eligible" : "Disabled"} />
+        <Metric label="Release" value={`${assessment.release.status}${assessment.release.blockers.length ? ` · ${assessment.release.blockers.length} blockers` : ""}`} />
       </section>
+
       <section className="panel">
         <div className="admin-grid">
           <div>
@@ -67,121 +72,78 @@ function AssessmentInspector({ assessment }: { assessment: WebsiteAssessment }) 
             <p className="muted">{assessment.siteUnderstanding.services.join(" · ") || "No services confidently extracted."}</p>
           </div>
           <div>
-            <h2>Customer journeys</h2>
-            <p>{assessment.siteUnderstanding.customerJourneys.join(" · ") || "No journey confidently detected."}</p>
+            <h2>Semantic route sample</h2>
+            <ul>{assessment.routeSelection.selected.map((item) => (
+              <li key={item.slot}><strong>{item.slot.replaceAll("_", " ")}</strong>: {item.route ?? "missing requested slot"}</li>
+            ))}</ul>
           </div>
         </div>
-        <p className="muted">Rubric identity {assessment.producer.rubricIdentity} · Agent methodology identity {assessment.agentReadiness.methodologyIdentity} · Scanner identity {assessment.producer.scannerIdentity} · Input {assessment.producer.inputHash}</p>
+        <p className="muted">
+          Registry {assessment.producer.rubricIdentity} · Scanner {assessment.producer.scannerIdentity} · Route policy {assessment.producer.routeSelectionIdentity} · Input {assessment.producer.inputHash}
+        </p>
       </section>
-      <section className="panel">
-        <h2>Coverage limitations</h2>
-        <ul>{assessment.coverage.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>
-      </section>
+
+      {assessment.grade?.appliedCaps.length ? (
+        <section className="panel">
+          <h2>Applied grade caps</h2>
+          <ul>{assessment.grade.appliedCaps.map((cap) => <li key={cap.id}><strong>Maximum {cap.maximum}</strong> · {cap.explanation}</li>)}</ul>
+        </section>
+      ) : null}
+
+      {assessment.coverage.limitations.length ? (
+        <section className="panel">
+          <h2>Evidence and comparison limitations</h2>
+          <ul>{assessment.coverage.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul>
+        </section>
+      ) : null}
+
       <section className="metric-row">
         {assessment.dimensions.map((dimension) => (
           <Metric
             key={dimension.id}
-            label={`${dimension.label} · ${Math.round(dimension.coverage * 100)}% covered`}
+            label={`${dimension.label} · ${dimension.state.replaceAll("_", " ")} · ${Math.round(dimension.coverage.siteEvidence * 100)}% site evidence`}
             value={dimension.score === undefined ? "—" : `${dimension.score}`}
           />
         ))}
       </section>
+
       {assessment.dimensions.map((dimension) => (
         <section className="panel admin-section" key={dimension.id}>
           <div className="admin-section-heading">
-            <div><h2>{dimension.label}</h2><p className="muted">Weight {dimension.weight}% · {dimension.assessedCriteria}/{dimension.applicableCriteria} applicable criteria assessed</p></div>
-          </div>
-          <table className="data-table">
-            <thead><tr><th>Status</th><th>Criterion</th><th>Reason and consequence</th><th>Evidence</th></tr></thead>
-            <tbody>{dimension.criteria.map((criterion) => <CriterionRow criterion={criterion} assessmentId={assessment.id} key={criterion.id} />)}</tbody>
-          </table>
-        </section>
-      ))}
-      <section className="metric-row">
-        <Metric label="Agent coverage" value={`${Math.round(assessment.agentReadiness.coverage.value * 100)}%`} />
-        <Metric label="Verified checks" value={`${assessment.agentReadiness.counts.verified}`} />
-        <Metric label="Opportunities" value={`${assessment.agentReadiness.counts.opportunities}`} />
-        <Metric label="Unknown / not applicable" value={`${assessment.agentReadiness.counts.unknown} / ${assessment.agentReadiness.counts.notApplicable}`} />
-      </section>
-      <section className="panel admin-section">
-        <div className="admin-section-heading">
-          <div>
-            <span className="badge">Unweighted evidence section</span>
-            <h2>Agent Readiness</h2>
-            <p className="muted">
-              {assessment.agentReadiness.coverage.assessedChecks}/{assessment.agentReadiness.coverage.applicableChecks} applicable checks assessed. Raw standards are separated from local-business applicability and do not affect the website score.
-            </p>
-          </div>
-        </div>
-        {assessment.agentReadiness.coverage.limitations.length ? (
-          <p className="muted">Limitations: {assessment.agentReadiness.coverage.limitations.join(" · ")}</p>
-        ) : null}
-      </section>
-      {assessment.agentReadiness.groups.map((group) => (
-        <section className="panel admin-section" key={group.id}>
-          <div className="admin-section-heading">
             <div>
-              <h2>{group.label}</h2>
+              <h2>{dimension.label}</h2>
               <p className="muted">
-                {group.verifiedChecks} verified · {group.opportunityChecks} opportunities · {group.unknownChecks} unknown · {group.notApplicableChecks} not applicable
+                Weight {dimension.weight}% · {dimension.state.replaceAll("_", " ")} · {dimension.assessedCriteria}/{dimension.applicableCriteria} score-eligible criteria assessed · cap {dimension.capEligible ? "eligible" : "ineligible"}
               </p>
             </div>
           </div>
           <table className="data-table">
-            <thead><tr><th>Status</th><th>Check and standard</th><th>Observed alignment</th><th>Evidence</th></tr></thead>
-            <tbody>{group.checks.map((check) => <AgentReadinessRow check={check} assessmentId={assessment.id} key={check.id} />)}</tbody>
+            <thead><tr><th>Status</th><th>Criterion and owner</th><th>Reason and consequence</th><th>Evidence</th></tr></thead>
+            <tbody>{dimension.criteria.map((criterion) => (
+              <CriterionRow criterion={criterion} assessmentId={assessment.id} key={criterion.id} />
+            ))}</tbody>
           </table>
         </section>
       ))}
-      <section className="metric-row">
-        <Metric label="Visual coverage" value={`${Math.round(assessment.visualQuality.coverage.value * 100)}%`} />
-        <Metric label="Visual strengths" value={`${assessment.visualQuality.counts.verified}`} />
-        <Metric label="Visual opportunities" value={`${assessment.visualQuality.counts.opportunities}`} />
-        <Metric label="Unknown / not applicable" value={`${assessment.visualQuality.counts.unknown} / ${assessment.visualQuality.counts.notApplicable}`} />
+
+      <section className="panel">
+        <h2>Evaluators</h2>
+        <ul>{assessment.evaluators.map((evaluator) => (
+          <li key={`${evaluator.kind}:${evaluator.identity}`}>
+            <strong>{evaluator.kind}</strong> · {evaluator.status} · {evaluator.identity}
+            {evaluator.modelId ? ` · ${evaluator.modelId}` : ""}
+            {evaluator.evidenceSetHash ? ` · evidence ${evaluator.evidenceSetHash}` : ""}
+          </li>
+        ))}</ul>
       </section>
-      <section className="panel admin-section">
-        <div className="admin-section-heading">
-          <div>
-            <span className="badge">Advisory · unweighted</span>
-            <h2>Visual Quality</h2>
-            <p className="muted">
-              {assessment.visualQuality.coverage.assessedChecks}/{assessment.visualQuality.coverage.applicableChecks} applicable checks assessed from retained screenshots. These findings do not change the objective website score or release gate.
-            </p>
-          </div>
-        </div>
-        <p className="muted">
-          Evaluator {assessment.visualQuality.evaluator.status} · {assessment.visualQuality.evaluator.provider}/{assessment.visualQuality.evaluator.modelId} · {assessment.visualQuality.evaluator.durationMs} ms · estimated ${assessment.visualQuality.evaluator.estimatedCostUsd.toFixed(4)}
-        </p>
-        <p className="muted">
-          Methodology {assessment.visualQuality.methodologyIdentity} · Evaluator {assessment.visualQuality.evaluator.identity} · Prompt {assessment.visualQuality.evaluator.promptIdentity} · Screenshots {assessment.visualQuality.evaluator.screenshotSetHash}
-        </p>
-        {assessment.visualQuality.coverage.limitations.length ? (
-          <p className="muted">Limitations: {assessment.visualQuality.coverage.limitations.join(" · ")}</p>
-        ) : null}
-      </section>
-      {assessment.visualQuality.groups.map((group) => (
-        <section className="panel admin-section" key={group.id}>
-          <div className="admin-section-heading">
-            <div>
-              <h2>{group.label}</h2>
-              <p className="muted">
-                {group.verifiedChecks} verified · {group.opportunityChecks} opportunities · {group.unknownChecks} unknown · {group.notApplicableChecks} not applicable
-              </p>
-            </div>
-          </div>
-          <table className="data-table">
-            <thead><tr><th>Status</th><th>Visual check</th><th>Observed result</th><th>Screenshot evidence</th></tr></thead>
-            <tbody>{group.checks.map((check) => <VisualQualityRow check={check} assessmentId={assessment.id} key={check.id} />)}</tbody>
-          </table>
-        </section>
-      ))}
+
       {screenshots.length ? (
         <section className="panel">
           <h2>Retained visual evidence</h2>
           <div className="assessment-screenshot-grid">
             {screenshots.map((key) => (
               <figure key={key}>
-                <img src={`/api/admin/website-assessments/${assessment.id}/evidence?key=${encodeURIComponent(key)}`} alt="Captured website assessment evidence" />
+                <img src={`/api/admin/website-assessments/${assessment.id}/evidence?key=${encodeURIComponent(key)}`} alt="Captured Website Health evidence" />
                 <figcaption>{key}</figcaption>
               </figure>
             ))}
@@ -192,84 +154,40 @@ function AssessmentInspector({ assessment }: { assessment: WebsiteAssessment }) 
   );
 }
 
-function AgentReadinessRow({ check, assessmentId }: { check: AgentReadinessCheck; assessmentId: string }) {
+function CriterionRow({
+  criterion,
+  assessmentId
+}: {
+  criterion: AssessmentCriterion;
+  assessmentId: string;
+}) {
   return (
     <tr>
       <td>
-        <span className={`badge severity-${severityTone(check.status)}`}>{check.status.replaceAll("_", " ")}</span>
-        <small>{check.impact} · {check.certainty}{check.confidence === undefined ? "" : ` · ${Math.round(check.confidence * 100)}% confidence`}</small>
-      </td>
-      <td>
-        <strong>{check.title}</strong>
-        <small>{check.id} · {check.applicability}</small>
+        <span className={`badge severity-${severityTone(criterion.status)}`}>{criterion.status.replaceAll("_", " ")}</span>
         <small>
-          <a href={check.standard.referenceUrl} target="_blank" rel="noreferrer">{check.standard.authority}</a>
-          {" · "}{check.standard.countedByAuthority ? "counted by published methodology" : "emerging / unscored"}
+          {criterion.impact} · {criterion.certainty}
+          {criterion.confidence === undefined ? "" : ` · ${Math.round(criterion.confidence * 100)}% confidence`}
+          {criterion.unknownReason ? ` · ${criterion.unknownReason.replaceAll("_", " ")}` : ""}
         </small>
       </td>
       <td>
-        {check.alignment.replaceAll("_", " ")}
-        <small>{check.explanation}</small>
-        <small><strong>Recommendation:</strong> {check.recommendation}</small>
-      </td>
-      <td>{check.evidence.map((item) => (
-        <small key={item.id}>
-          {item.summary}
-          {item.artifactKey ? <> · <a href={`/api/admin/website-assessments/${assessmentId}/evidence?key=${encodeURIComponent(item.artifactKey)}`}>open evidence</a></> : null}
-        </small>
-      ))}</td>
-    </tr>
-  );
-}
-
-function VisualQualityRow({ check, assessmentId }: { check: VisualQualityCheck; assessmentId: string }) {
-  return (
-    <tr>
-      <td>
-        <span className={`badge severity-${severityTone(check.status)}`}>{check.status.replaceAll("_", " ")}</span>
-        <small>{check.impact} · model inferred{check.confidence === undefined ? "" : ` · ${Math.round(check.confidence * 100)}% confidence`}</small>
+        <strong>{criterion.title}</strong>
+        <small>{criterion.id}</small>
+        <small>{criterion.controlOwner.replaceAll("_", " ")} · {criterion.evaluatorType} · {criterion.scoreEligible ? `${criterion.pointsPossible} points` : "unscored"} · {criterion.releaseDisposition}</small>
       </td>
       <td>
-        <strong>{check.title}</strong>
-        <small>{check.id} · {check.applicability}</small>
+        {criterion.explanation}
+        <small>{criterion.businessConsequence}</small>
+        <small><strong>Recommendation:</strong> {criterion.recommendation}</small>
       </td>
-      <td>
-        {check.explanation}
-        <small>{check.businessConsequence}</small>
-        <small><strong>Recommendation:</strong> {check.recommendation}</small>
-      </td>
-      <td>
-        <div className="assessment-screenshot-grid">
-          {check.evidence.map((item) => item.artifactKey ? (
-            <figure key={item.id}>
-              <a
-                href={`/api/admin/website-assessments/${assessmentId}/evidence?key=${encodeURIComponent(item.artifactKey)}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <img
-                  src={`/api/admin/website-assessments/${assessmentId}/evidence?key=${encodeURIComponent(item.artifactKey)}`}
-                  alt={`${item.route ?? "Captured route"} at ${item.viewport ?? "the cited viewport"}`}
-                />
-              </a>
-              <figcaption>{item.summary}</figcaption>
-            </figure>
-          ) : <small key={item.id}>{item.summary}</small>)}
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-function CriterionRow({ criterion, assessmentId }: { criterion: AssessmentCriterion; assessmentId: string }) {
-  return (
-    <tr>
-      <td><span className={`badge severity-${severityTone(criterion.status)}`}>{criterion.status.replaceAll("_", " ")}</span><small>{criterion.impact} · {criterion.certainty}{criterion.confidence === undefined ? "" : ` · ${Math.round(criterion.confidence * 100)}% confidence`}</small></td>
-      <td><strong>{criterion.title}</strong><small>{criterion.id} · {criterion.applicability}</small></td>
-      <td>{criterion.explanation}<small>{criterion.businessConsequence}</small><small><strong>Recommendation:</strong> {criterion.recommendation}</small></td>
       <td>{criterion.evidence.map((item) => (
         <small key={item.id}>
           {item.summary}
+          {item.route ? ` · ${item.route}` : ""}
+          {item.viewport ? ` · ${item.viewport}` : ""}
+          {item.frame ? ` · ${item.frame}` : ""}
+          {item.contentHash ? ` · ${item.contentHash}` : ""}
           {item.artifactKey ? <> · <a href={`/api/admin/website-assessments/${assessmentId}/evidence?key=${encodeURIComponent(item.artifactKey)}`}>open evidence</a></> : null}
         </small>
       ))}</td>
@@ -277,17 +195,20 @@ function CriterionRow({ criterion, assessmentId }: { criterion: AssessmentCriter
   );
 }
 
-function severityTone(status: AssessmentCriterion["status"] | AgentReadinessCheck["status"] | VisualQualityCheck["status"]) {
-  if (status === "fail") return "critical";
-  if (status === "warning") return "major";
-  if (status === "pass") return "pass";
-  return "advisory";
+function severityTone(status: AssessmentCriterion["status"]) {
+  return {
+    pass: "pass",
+    warning: "warning",
+    fail: "critical",
+    unknown: "advisory",
+    not_applicable: "advisory"
+  }[status];
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="metric-card"><strong>{value}</strong><span>{label}</span></div>;
 }
 
-function unique(values: string[]) {
+function unique<T>(values: T[]) {
   return [...new Set(values)];
 }

@@ -4,23 +4,35 @@ import {
   isSiteAuthoringTerminalError,
   managerCompletionSchema,
   managerToolArguments,
+  validateWorkspaceSourcePolicy,
   workspaceSourceFileSchema,
+  type ManagerCompletion,
   type ManagerRunRequest,
   type ManagerToolCall,
   type ManagerToolExecution,
   type ManagerToolRuntime,
+  type WorkspaceReferenceFile,
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
+import { normalizeRoutePath } from "@/packages/site-verification";
 import {
-  deduplicateVerificationFindings,
+  groupVerificationFindings,
   verificationBlockerFeedback
 } from "./verification-feedback";
+import { validateCandidateSourceDispositions } from "./source-coverage";
 
 export type BuildResult = {
   revision: string;
   buildDurationMs: number;
   previewPath: string;
   placementId?: string;
+};
+
+export type WorkspaceReleasePlan = {
+  routePaths: string[];
+  browserRoutePaths: string[];
+  redirects: ManagerCompletion["redirects"];
+  retiredSourcePaths: ManagerCompletion["retiredSourcePaths"];
 };
 
 export type RuntimeInspection<Checkpoint> = {
@@ -45,12 +57,6 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   workspaceHash?: `sha256:${string}`;
   sandboxRevision: string;
   successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
-  lastSuccessfulBuild?: {
-    workspaceHash: `sha256:${string}`;
-    sandboxRevision: string;
-    result: BuildResult;
-    files: WorkspaceSourceFile[];
-  };
   failedBuild?: {
     workspaceHash: `sha256:${string}`;
     sandboxRevision: string;
@@ -60,7 +66,17 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   };
   inspection?: RuntimeInspection<Checkpoint>;
   visualInspection?: RuntimeVisualInspection;
-  metrics: { builds: number; inspections: number; readCalls: number; readBytes: number; readLines: number };
+  metrics: {
+    builds: number;
+    inspections: number;
+    readCalls: number;
+    readBytes: number;
+    readLines: number;
+    sourceOpens: number;
+    sourceSearches: number;
+    retrievalRequests: number;
+    retrievalFailures: number;
+  };
   mutatedWorkspace: boolean;
 };
 
@@ -70,10 +86,10 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
  */
 export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private files = new Map<string, string>();
+  private referenceFiles = new Map<string, string>();
   private workspaceHash?: `sha256:${string}`;
   private sandboxRevision: string;
   private successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
-  private lastSuccessfulBuild?: WorkspaceManagerRuntimeSnapshot<Checkpoint>["lastSuccessfulBuild"];
   private failedBuild?: WorkspaceManagerRuntimeSnapshot<Checkpoint>["failedBuild"];
   private inspection?: RuntimeInspection<Checkpoint>;
   private visualInspection?: RuntimeVisualInspection;
@@ -82,6 +98,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private readCalls = 0;
   private readBytes = 0;
   private readLines = 0;
+  private sourceOpens = 0;
+  private sourceSearches = 0;
+  private retrievalRequests = 0;
+  private retrievalFailures = 0;
   private mutatedWorkspace = false;
 
   constructor(private readonly options: {
@@ -91,21 +111,32 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     toolchainVersion: string;
     sandboxImageDigest: `sha256:${string}`;
     initialFiles?: WorkspaceSourceFile[];
+    referenceFiles?: WorkspaceReferenceFile[];
     initialSandboxRevision: string;
     initialSnapshot?: WorkspaceManagerRuntimeSnapshot<Checkpoint>;
+    releasePlan?: WorkspaceReleasePlan;
+    selection?: ManagerRunRequest["selection"];
     applyBuild(files: WorkspaceSourceFile[], expectedRevision: string): Promise<BuildResult>;
     inspect(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeInspection<Checkpoint>>;
-    inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeVisualInspection>;
+    listBuiltRoutePaths?(sandboxRevision: string): Promise<string[]>;
+    inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string, target: {
+      route?: string;
+      selector?: string;
+      label?: string;
+    }): Promise<RuntimeVisualInspection>;
+    visualInspectionFeedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence";
+    configureLeadForm?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
     createImage?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
+    executeSourceTool?(call: ManagerToolCall): Promise<ManagerToolExecution>;
     retainDiagnostic?(kind: string, content: string): Promise<{ key: string; contentHash: `sha256:${string}`; bytes: number }>;
   }) {
     const snapshot = options.initialSnapshot;
     this.sandboxRevision = snapshot?.sandboxRevision ?? options.initialSandboxRevision;
     for (const file of snapshot?.files ?? options.initialFiles ?? []) this.files.set(file.path, file.content);
+    for (const file of options.referenceFiles ?? []) this.referenceFiles.set(file.path, file.content);
     if (snapshot) {
       this.workspaceHash = snapshot.workspaceHash;
       this.successfulBuild = snapshot.successfulBuild;
-      this.lastSuccessfulBuild = snapshot.lastSuccessfulBuild;
       this.failedBuild = snapshot.failedBuild;
       this.inspection = snapshot.inspection;
       this.visualInspection = snapshot.visualInspection;
@@ -114,6 +145,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       this.readCalls = snapshot.metrics.readCalls;
       this.readBytes = snapshot.metrics.readBytes;
       this.readLines = snapshot.metrics.readLines;
+      this.sourceOpens = snapshot.metrics.sourceOpens;
+      this.sourceSearches = snapshot.metrics.sourceSearches;
+      this.retrievalRequests = snapshot.metrics.retrievalRequests;
+      this.retrievalFailures = snapshot.metrics.retrievalFailures;
       this.mutatedWorkspace = snapshot.mutatedWorkspace;
     } else {
       this.refreshWorkspaceHash();
@@ -125,10 +160,43 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       case "list_files": return this.list();
       case "search_files": return this.search(call.arguments);
       case "read_files": return this.read(call.arguments);
+      case "search_sources":
+      case "read_source_page":
+      case "list_source_pages":
+      case "list_source_resources":
+      case "adopt_source_asset":
+      case "search_public_web":
+      case "retry_source":
+      case "inspect_assets":
+      case "retrieve_public_source": {
+        if (!this.options.executeSourceTool) return result({ ok: false, error: "source_tool_unavailable" });
+        if (call.name === "search_sources") this.sourceSearches += 1;
+        if (call.name === "read_source_page" || call.name === "list_source_pages" || call.name === "list_source_resources" || call.name === "adopt_source_asset" || call.name === "inspect_assets") this.sourceOpens += 1;
+        if (call.name === "retry_source" || call.name === "retrieve_public_source" || call.name === "search_public_web") this.retrievalRequests += 1;
+        const execution = await this.options.executeSourceTool(call);
+        if (
+          (call.name === "retry_source" || call.name === "retrieve_public_source" || call.name === "search_public_web")
+          && execution.diagnosticOutput.ok === false
+        ) {
+          this.retrievalFailures += 1;
+        }
+        return execution;
+      }
       case "write_file": return this.write(call.arguments);
       case "delete_file": return this.delete(call.arguments);
       case "apply_patch": return this.patch(call.arguments);
       case "edit_file": return this.edit(call.arguments);
+      case "configure_lead_form": {
+        if (!this.options.configureLeadForm) return result({ ok: false, error: "lead_form_configuration_unavailable" });
+        const configured = await this.options.configureLeadForm(call.arguments);
+        if (configured.diagnosticOutput.ok !== false) {
+          this.successfulBuild = undefined;
+          this.failedBuild = undefined;
+          this.inspection = undefined;
+          this.visualInspection = undefined;
+        }
+        return configured;
+      }
       case "create_image": {
         if (!this.options.createImage) return result({ ok: false, error: "image_generation_unavailable" });
         const created = await this.options.createImage(call.arguments);
@@ -140,8 +208,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         }
         return created;
       }
+      // Retained run events and internal diagnostics may still replay this
+      // operation. New authors are not offered it as a model-facing tool.
       case "build_preview": return this.build();
-      case "inspect_site": return this.inspect();
+      case "inspect_site": return this.inspect(call.arguments);
       case "request_input": return this.requestInput(call.arguments);
       case "finish": return this.finish(call.arguments);
     }
@@ -152,26 +222,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     return this.inspection.checkpoint;
   }
 
-  hasAssessableBuild() {
-    return Boolean(this.successfulBuild || this.lastSuccessfulBuild);
-  }
-
-  restoreLastSuccessfulBuild() {
-    if (!this.lastSuccessfulBuild) return false;
-    this.files = new Map(this.lastSuccessfulBuild.files.map((file) => [file.path, file.content]));
-    this.workspaceHash = this.lastSuccessfulBuild.workspaceHash;
-    this.sandboxRevision = this.lastSuccessfulBuild.sandboxRevision;
-    this.successfulBuild = {
-      workspaceHash: this.lastSuccessfulBuild.workspaceHash,
-      sandboxRevision: this.lastSuccessfulBuild.sandboxRevision,
-      result: structuredClone(this.lastSuccessfulBuild.result)
-    };
-    this.failedBuild = undefined;
-    this.inspection = undefined;
-    this.visualInspection = undefined;
-    return true;
-  }
-
   currentFiles(): WorkspaceSourceFile[] {
     return [...this.files.entries()]
       .map(([path, content]) => workspaceSourceFileSchema.parse({ path, content }))
@@ -179,7 +229,17 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 
   metrics() {
-    return { builds: this.builds, inspections: this.inspections, readCalls: this.readCalls, readBytes: this.readBytes, readLines: this.readLines };
+    return {
+      builds: this.builds,
+      inspections: this.inspections,
+      readCalls: this.readCalls,
+      readBytes: this.readBytes,
+      readLines: this.readLines,
+      sourceOpens: this.sourceOpens,
+      sourceSearches: this.sourceSearches,
+      retrievalRequests: this.retrievalRequests,
+      retrievalFailures: this.retrievalFailures
+    };
   }
 
   snapshot(): WorkspaceManagerRuntimeSnapshot<Checkpoint> {
@@ -189,7 +249,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       workspaceHash: this.workspaceHash,
       sandboxRevision: this.sandboxRevision,
       successfulBuild: this.successfulBuild ? structuredClone(this.successfulBuild) : undefined,
-      lastSuccessfulBuild: this.lastSuccessfulBuild ? structuredClone(this.lastSuccessfulBuild) : undefined,
       failedBuild: this.failedBuild ? structuredClone(this.failedBuild) : undefined,
       inspection: this.inspection ? structuredClone(this.inspection) : undefined,
       visualInspection: this.visualInspection ? structuredClone(this.visualInspection) : undefined,
@@ -228,7 +287,16 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     return result({
       ok: true,
       workspaceHash: this.workspaceHash,
-      files: this.currentFiles().map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content), lines: file.content.split("\n").length }))
+      files: [
+        ...this.currentFiles().map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content), lines: file.content.split("\n").length, readOnly: false })),
+        ...[...this.referenceFiles.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, content]) => ({
+          path,
+          contentHash: sha256(content),
+          bytes: Buffer.byteLength(content),
+          lines: content.split("\n").length,
+          readOnly: true
+        }))
+      ]
     });
   }
 
@@ -236,8 +304,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const parsed = managerToolArguments.search_files.parse(args);
     const query = parsed.caseSensitive ? parsed.query : parsed.query.toLocaleLowerCase();
     const selected = parsed.paths.length
-      ? parsed.paths.map((path) => [path, this.files.get(path)] as const)
-      : [...this.files.entries()];
+      ? parsed.paths.map((path) => [path, this.readableFile(path)] as const)
+      : [...this.files.entries(), ...this.referenceFiles.entries()];
     const matches: Array<{ path: string; line: number; content: string }> = [];
     const missingPaths: string[] = [];
     let truncated = false;
@@ -271,7 +339,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     this.readCalls += 1;
     const requested = managerToolArguments.read_files.parse(args).files;
     const files = requested.map((request) => {
-      const content = this.files.get(request.path);
+      const content = this.readableFile(request.path);
       if (content === undefined) return { ok: false as const, error: "workspace_file_missing", path: request.path };
       const lines = content.split("\n");
       const start = request.startLine ?? 1;
@@ -310,9 +378,15 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (this.files.get(file.path) === file.content) {
       return result({ ok: true, unchanged: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
     }
+    const rejected = invalidSourceMutation(file);
+    if (rejected) return rejected;
     this.files.set(file.path, file.content);
     this.mutated();
     return result({ ok: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
+  }
+
+  private readableFile(path: string) {
+    return this.files.get(path) ?? this.referenceFiles.get(path);
   }
 
   private delete(args: Record<string, unknown>): ManagerToolExecution {
@@ -331,7 +405,12 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       paths.add(change.path);
       const path = workspaceSourceFileSchema.shape.path.parse(change.path);
       if (change.content === null) next.delete(path);
-      else next.set(path, workspaceSourceFileSchema.shape.content.parse(change.content));
+      else {
+        const file = workspaceSourceFileSchema.parse({ path, content: change.content });
+        const rejected = invalidSourceMutation(file);
+        if (rejected) return rejected;
+        next.set(path, file.content);
+      }
     }
     const changedFiles = [...paths].filter((path) => this.files.get(path) !== next.get(path));
     if (changedFiles.length) {
@@ -386,6 +465,25 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (nextContent === current) {
       return result({ ok: true, unchanged: true, path: parsed.path, contentHash: currentHash, workspaceHash: this.workspaceHash });
     }
+    if (
+      parsed.path.endsWith(".css")
+      && lines.length === 1
+      && current.length >= 4_096
+      && nextContent.length < current.length * 0.75
+      && edits.some((edit) => edit.startLine === 1 && edit.endLine === 1)
+    ) {
+      return result({
+        ok: false,
+        error: "minified_stylesheet_destructive_edit",
+        path: parsed.path,
+        currentBytes: Buffer.byteLength(current),
+        proposedBytes: Buffer.byteLength(nextContent),
+        workspaceUnchanged: true,
+        guidance: "This stylesheet is one long source line, so replacing line 1 would discard most existing styles. To append CSS, insert at EOF with startLine 2 and endLine 1. To replace it intentionally, use write_file with the complete stylesheet."
+      });
+    }
+    const rejected = invalidSourceMutation({ path: parsed.path, content: nextContent });
+    if (rejected) return rejected;
     this.files.set(parsed.path, nextContent);
     this.mutated();
     return result({
@@ -413,12 +511,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       const built = await this.options.applyBuild(files, this.sandboxRevision);
       this.sandboxRevision = built.revision;
       this.successfulBuild = { workspaceHash: this.workspaceHash, sandboxRevision: built.revision, result: built };
-      this.lastSuccessfulBuild = {
-        workspaceHash: this.workspaceHash,
-        sandboxRevision: built.revision,
-        result: structuredClone(built),
-        files: this.currentFiles()
-      };
       this.failedBuild = undefined;
       this.inspection = undefined;
       this.visualInspection = undefined;
@@ -441,27 +533,95 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     }
   }
 
-  private async inspect(): Promise<ManagerToolExecution> {
+  private async inspect(args: Record<string, unknown>): Promise<ManagerToolExecution> {
+    const parsed = managerToolArguments.inspect_site.parse(args);
+    const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
+    const selection = this.options.selection?.route === route ? this.options.selection : undefined;
+    let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
-      return result({ ok: false, error: "inspection_requires_current_successful_build", workspaceHash: this.workspaceHash });
+      const built = await this.build();
+      if (built.diagnosticOutput.ok === false) {
+        return withFailureStage(built, "compilation", { buildPerformed: true });
+      }
+      buildPerformed = true;
     }
     if (!this.options.inspectVisual) {
       return result({ ok: false, error: "visual_inspection_unavailable" });
     }
-    const cached = Boolean(this.visualInspection);
-    if (!this.visualInspection) {
+    const mechanicalCached = Boolean(this.inspection);
+    if (!this.inspection) {
       this.inspections += 1;
-      this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision);
+      this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
+      this.inspection.diagnosticSummary = {
+        ...this.inspection.diagnosticSummary,
+        verificationTimings: {
+          compilationMs: this.successfulBuild?.result.buildDurationMs ?? 0,
+          ...recordValue(this.inspection.diagnosticSummary.verificationTimings)
+        }
+      };
     }
-    return visualInspectionResult(this.visualInspection, cached);
+    const cached = Boolean(
+      this.visualInspection
+      && this.visualInspection.modelSummary.requestedRoute === route
+      && this.visualInspection.modelSummary.requestedSelector === selection?.selector
+    );
+    if (!cached) {
+      this.inspections += 1;
+      this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision, {
+        route,
+        selector: selection?.selector,
+        label: selection?.label
+      });
+    }
+    const inspection = this.visualInspection;
+    if (!inspection) return result({ ok: false, error: "visual_inspection_unavailable" });
+    return visualInspectionResult(
+      inspection,
+      cached,
+      buildPerformed,
+      this.options.visualInspectionFeedback,
+      this.inspection,
+      mechanicalCached,
+      this.successfulBuild?.result.previewPath
+    );
   }
 
   private async finish(args: Record<string, unknown>): Promise<ManagerToolExecution> {
-    let buildPerformed = false;
-    if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
-      const built = await this.build();
-      if (built.diagnosticOutput.ok === false) return withFailureStage(built, "compilation", { buildPerformed: true });
-      buildPerformed = true;
+    const finish = managerToolArguments.finish.parse(args);
+    const redirects = this.options.releasePlan?.redirects ?? finish.redirects;
+    const retiredSourcePaths = this.options.releasePlan?.retiredSourcePaths ?? finish.retiredSourcePaths;
+    try {
+      validateCandidateSourceDispositions({
+        redirects,
+        retiredSourcePaths
+      });
+    } catch (error) {
+      return invalidSourceDisposition(error);
+    }
+    const preflightRoutes = inspectionRoutes(
+      this.visualInspection?.modelSummary
+      ?? this.inspection?.modelSummary
+      ?? {}
+    );
+    const preflightRouteError = invalidFinishRoutes(finish, preflightRoutes);
+    if (preflightRouteError) return preflightRouteError;
+    const built = await this.build();
+    if (built.diagnosticOutput.ok === false) return withFailureStage(built, "compilation", { buildPerformed: true });
+    const buildPerformed = built.diagnosticOutput.cached !== true;
+    if (this.options.releasePlan) {
+      if (!this.options.listBuiltRoutePaths) throw new Error("release_plan_route_reader_required");
+      const builtRoutePaths = await this.options.listBuiltRoutePaths(this.sandboxRevision);
+      const plannedRouteError = invalidPlannedRoutes(this.options.releasePlan.routePaths, builtRoutePaths);
+      if (plannedRouteError) return plannedRouteError;
+      try {
+        validateCandidateSourceDispositions({
+          redirects,
+          retiredSourcePaths,
+          liveRoutes: new Set(builtRoutePaths)
+        });
+      } catch (error) {
+        return invalidSourceDisposition(error);
+      }
     }
     const cached = Boolean(this.inspection);
     if (!this.inspection) {
@@ -482,19 +642,46 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         { buildPerformed }
       );
     }
+    const availableRoutes = inspectionRoutes(this.inspection.modelSummary);
+    const normalizedFinish = {
+      focusRoute: normalizeRoutePath(finish.focusRoute),
+      changedRoutes: [...new Set(finish.changedRoutes.map(normalizeRoutePath))]
+    };
+    const verifiedRouteError = invalidFinishRoutes(normalizedFinish, availableRoutes);
+    if (verifiedRouteError) return verifiedRouteError;
+    try {
+      validateCandidateSourceDispositions({
+        redirects,
+        retiredSourcePaths,
+        ...(availableRoutes.size ? { liveRoutes: availableRoutes } : {})
+      });
+    } catch (error) {
+      return invalidSourceDisposition(error);
+    }
     const completion = managerCompletionSchema.parse({
       schemaVersion: "manager-completion",
-      ownerMessage: args.ownerMessage,
+      ownerMessage: finish.ownerMessage,
       workspaceHash: this.workspaceHash,
       sandboxRevision: this.sandboxRevision,
       publicBuildInputId: this.options.getPublicBuildInputId?.() ?? this.options.publicBuildInputId,
       toolchainVersion: this.options.toolchainVersion,
       sandboxImageDigest: this.options.sandboxImageDigest,
-      inspectionHash: this.inspection.inspectionHash
+      inspectionHash: this.inspection.inspectionHash,
+      focusRoute: normalizedFinish.focusRoute,
+      changedRoutes: normalizedFinish.changedRoutes,
+      redirects,
+      retiredSourcePaths
     });
     return {
       modelOutput: JSON.stringify({ ok: true, completed: true, buildPerformed }),
-      diagnosticOutput: { ok: true, completed: true, buildPerformed, workspaceHash: this.workspaceHash, inspectionHash: this.inspection.inspectionHash },
+      diagnosticOutput: {
+        ok: true,
+        completed: true,
+        buildPerformed,
+        releasePlanApplied: Boolean(this.options.releasePlan),
+        workspaceHash: this.workspaceHash,
+        inspectionHash: this.inspection.inspectionHash
+      },
       completion
     };
   }
@@ -519,19 +706,447 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 }
 
-function visualInspectionResult(inspection: RuntimeVisualInspection, cached: boolean): ManagerToolExecution {
-  const summary = { ...inspection.modelSummary, ok: true, cached, visualOnly: true };
+function visualInspectionResult(
+  inspection: RuntimeVisualInspection,
+  cached: boolean,
+  buildPerformed: boolean,
+  feedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence",
+  mechanicalInspection?: RuntimeInspection<unknown>,
+  mechanicalCached = false,
+  previewPath?: string
+): ManagerToolExecution {
+  const modelSummary = feedback === "component-diagnostic-route-family-component-evidence"
+    ? componentDiagnosticRouteFamilyComponentEvidenceVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family-balanced"
+    ? componentDiagnosticRouteFamilyBalancedVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family-material-copy"
+    ? componentDiagnosticRouteFamilyMaterialCopyVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family-material-only"
+    ? componentDiagnosticRouteFamilyMaterialOnlyVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family-quality-led"
+    ? componentDiagnosticRouteFamilyQualityLedVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family-shared-first"
+    ? componentDiagnosticRouteFamilySharedFirstVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-route-family"
+    ? componentDiagnosticRouteFamilyVisualSummary(inspection.modelSummary)
+    : feedback === "blockers-only-homepage"
+    ? blockersOnlyHomepageVisualSummary(inspection.modelSummary)
+    : feedback === "material-only-homepage"
+    ? materialOnlyHomepageVisualSummary(inspection.modelSummary)
+    : feedback === "component-diagnostic-homepage"
+    ? componentDiagnosticHomepageVisualSummary(inspection.modelSummary)
+    : feedback === "prioritized-homepage"
+      ? prioritizedHomepageVisualSummary(inspection.modelSummary)
+      : inspection.modelSummary;
+  const visualFindings = Array.isArray(modelSummary.findings)
+    ? modelSummary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const mechanicalSummary = mechanicalInspection ? compactInspectionSummary(mechanicalInspection.modelSummary) : undefined;
+  const mechanicalBlockers = mechanicalSummary && Array.isArray(mechanicalSummary.blockers) ? mechanicalSummary.blockers : [];
+  const mechanicalAdvisories = mechanicalSummary && Array.isArray(mechanicalSummary.advisories) ? mechanicalSummary.advisories : [];
+  const blockingFindings = groupVerificationFindings([
+    ...mechanicalBlockers,
+    ...visualFindings.filter((finding) => finding.severity === "error")
+  ]);
+  const advisoryFindings = groupVerificationFindings([
+    ...mechanicalAdvisories,
+    ...visualFindings.filter((finding) => finding.severity === "warning")
+  ]);
+  const summary = {
+    ...modelSummary,
+    ok: mechanicalInspection?.passed !== false,
+    cached,
+    mechanicalCached,
+    buildPerformed,
+    previewPath,
+    blockingFindings,
+    advisoryFindings,
+    mechanicalInspection: mechanicalInspection ? {
+      passed: mechanicalInspection.passed,
+      inspectionHash: mechanicalInspection.inspectionHash
+    } : undefined,
+    visualScope: "targeted",
+    mechanicalScope: "all-routes"
+  };
   return {
     modelOutput: inspection.images?.length
       ? [{ type: "input_text", text: JSON.stringify(summary) }, ...inspection.images]
       : JSON.stringify(summary),
     diagnosticOutput: {
       ...inspection.diagnosticSummary,
-      ok: true,
+      ok: mechanicalInspection?.passed !== false,
       cached,
-      visualOnly: true
+      mechanicalCached,
+      buildPerformed,
+      previewPath,
+      blockingFindings,
+      advisoryFindings,
+      mechanicalInspectionHash: mechanicalInspection?.inspectionHash,
+      visualScope: "targeted",
+      mechanicalScope: "all-routes"
     }
   };
+}
+
+export function prioritizedHomepageVisualSummary(summary: Record<string, unknown>) {
+  return homepageVisualSummary(summary, "launch-floor");
+}
+
+export function blockersOnlyHomepageVisualSummary(summary: Record<string, unknown>) {
+  const findings = Array.isArray(summary.findings)
+    ? summary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const blockers = findings.filter((finding) => finding.severity === "error");
+  const result = homepageVisualSummary({ ...summary, findings: blockers }, "launch-floor");
+  return {
+    ...result,
+    evaluationFindingCount: findings.length,
+    advisoryFindingCount: findings.filter((finding) => finding.severity === "warning").length,
+    authorFeedbackPolicy: "blockers-only"
+  };
+}
+
+const materialHomepageAdvisoryIds = new Set([
+  "functional.navigation_toggle",
+  "render.inline_link_spacing",
+  "render.call_action_label_spacing",
+  "render.mobile_navigation_design",
+  "render.horizontal_overflow",
+  "render.clipping_overlap",
+  "render.empty_control",
+  "render.primary_geometry",
+  "render.adjacent_duplicate_text",
+  "render.internal_provenance_copy",
+  "render.duplicate_navigation_icon",
+  "render.geography_circle",
+  "render.decorative_diagram",
+  "render.synthetic_identity_device",
+  "render.desktop_dual_navigation",
+  "render.duplicate_header_action",
+  "render.false_affordance",
+  "render.footer_group_layout",
+  "render.mobile_narrow_split",
+  "render.raster_logo_filter",
+  "render.raster_logo_content_scale",
+  "render.duplicate_field_label",
+  "render.oversized_single_line_field",
+  "render.form_text",
+  "render.body_font",
+  "render.tiny_text",
+  "render.target_size"
+]);
+
+/**
+ * Operator-only middle arm: preserve all hard errors and expose only a small
+ * grouped set of concrete, high-confidence integrity warnings. The complete
+ * inspection remains in diagnostic events and the release gate is unchanged.
+ */
+export function materialOnlyHomepageVisualSummary(summary: Record<string, unknown>) {
+  const findings = Array.isArray(summary.findings)
+    ? summary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const errors = findings.filter((finding) => finding.severity === "error");
+  const advisories = findings.filter((finding) =>
+    finding.severity === "warning" && materialHomepageAdvisoryIds.has(String(finding.id ?? ""))
+  );
+  const summarized = homepageVisualSummary({ ...summary, findings: [...errors, ...advisories] }, "launch-floor");
+  const returned = Array.isArray(summarized.findings)
+    ? summarized.findings.filter((finding) => Boolean(finding && typeof finding === "object" && !Array.isArray(finding))) as Array<Record<string, unknown>>
+    : [];
+  const returnedErrors = returned.filter((finding) => finding.severity === "error");
+  const returnedAdvisories = returned.filter((finding) => finding.severity === "warning");
+  return {
+    ...summarized,
+    evaluationFindingCount: findings.length,
+    advisoryFindingCount: findings.filter((finding) => finding.severity === "warning").length,
+    actionableFindingCount: errors.length + advisories.length,
+    returnedFindingCount: returnedErrors.length + returnedAdvisories.length,
+    findingsTruncated: errors.length + advisories.length > returnedErrors.length + returnedAdvisories.length,
+    findings: [...returnedErrors, ...returnedAdvisories],
+    authorFeedbackPolicy: "material-only",
+    feedbackGuidance: errors.length || advisories.length
+      ? "Correct every returned error. Treat warnings as grouped visual-integrity evidence, not an invitation to redesign unrelated working components. Repair shared causes once, then reinspect only if the changed pixels remain materially uncertain; otherwise finish and let deterministic release verification check operability."
+      : "The deterministic homepage launch floor and material-integrity screen are clean. If the supplied pixels show no plainly visible broken hierarchy, misleading visual, or unfinished composition, finish now without cosmetic churn."
+  };
+}
+
+export function componentDiagnosticHomepageVisualSummary(summary: Record<string, unknown>) {
+  return homepageVisualSummary(summary, "component-diagnostic");
+}
+
+export function componentDiagnosticRouteFamilyVisualSummary(summary: Record<string, unknown>) {
+  return homepageVisualSummary(summary, "component-diagnostic-route-family");
+}
+
+export function componentDiagnosticRouteFamilySharedFirstVisualSummary(summary: Record<string, unknown>) {
+  return homepageVisualSummary(summary, "component-diagnostic-route-family-shared-first");
+}
+
+export function componentDiagnosticRouteFamilyQualityLedVisualSummary(summary: Record<string, unknown>) {
+  return homepageVisualSummary(summary, "component-diagnostic-route-family-quality-led");
+}
+
+/**
+ * Operator-only route-family treatment. Preserve the complete diagnostic event,
+ * but return grouped hard errors and high-confidence
+ * visual-integrity warnings to the author. This keeps browser evidence useful
+ * without turning every heuristic observation into a redesign request.
+ */
+export function componentDiagnosticRouteFamilyMaterialOnlyVisualSummary(summary: Record<string, unknown>) {
+  return boundedRouteFamilyVisualSummary(summary, materialHomepageAdvisoryIds, "route-family-material-only");
+}
+
+const materialCopyRouteFamilyAdvisoryIds = new Set([
+  ...materialHomepageAdvisoryIds,
+  "render.vague_process_copy",
+  "route.orphan",
+  "render.local_presence_missing"
+]);
+
+/** Operator-only follow-up that adds grouped copy and route-integrity evidence. */
+export function componentDiagnosticRouteFamilyMaterialCopyVisualSummary(summary: Record<string, unknown>) {
+  return boundedRouteFamilyVisualSummary(summary, materialCopyRouteFamilyAdvisoryIds, "route-family-material-copy");
+}
+
+const balancedRouteFamilyAdvisoryIds = new Set([
+  ...materialHomepageAdvisoryIds,
+  "render.vague_process_copy",
+  "route.orphan"
+]);
+
+/** Operator-only balanced launch-floor treatment with five grouped advisories. */
+export function componentDiagnosticRouteFamilyBalancedVisualSummary(summary: Record<string, unknown>) {
+  return boundedRouteFamilyVisualSummary(summary, balancedRouteFamilyAdvisoryIds, "route-family-balanced");
+}
+
+const componentEvidenceRouteFamilyAdvisoryIds = new Set([
+  ...balancedRouteFamilyAdvisoryIds,
+  "render.header_control_wrap"
+]);
+
+/** Operator-only follow-up with complete shared-component examples and tablet-header evidence. */
+export function componentDiagnosticRouteFamilyComponentEvidenceVisualSummary(summary: Record<string, unknown>) {
+  return boundedRouteFamilyVisualSummary(summary, componentEvidenceRouteFamilyAdvisoryIds, "route-family-component-evidence");
+}
+
+function boundedRouteFamilyVisualSummary(
+  summary: Record<string, unknown>,
+  advisoryIds: ReadonlySet<string>,
+  policy: "route-family-material-only" | "route-family-material-copy" | "route-family-balanced" | "route-family-component-evidence"
+) {
+  const findings = Array.isArray(summary.findings)
+    ? summary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const errors = findings.filter((finding) => finding.severity === "error");
+  const advisories = findings.filter((finding) =>
+    finding.severity === "warning" && advisoryIds.has(String(finding.id ?? ""))
+  );
+  const summarized = homepageVisualSummary(
+    { ...summary, findings: [...errors, ...advisories] },
+    "component-diagnostic-route-family"
+  );
+  const returned = Array.isArray(summarized.findings)
+    ? summarized.findings.filter((finding) => Boolean(finding && typeof finding === "object" && !Array.isArray(finding))) as Array<Record<string, unknown>>
+    : [];
+  const returnedErrors = returned.filter((finding) => finding.severity === "error");
+  const returnedAdvisories = returned.filter((finding) => finding.severity === "warning");
+  const selected = [...returnedErrors, ...returnedAdvisories];
+  return {
+    ...summarized,
+    evaluationFindingCount: findings.length,
+    advisoryFindingCount: findings.filter((finding) => finding.severity === "warning").length,
+    actionableFindingCount: errors.length + advisories.length,
+    returnedFindingCount: selected.length,
+    findingsTruncated: errors.length + advisories.length > selected.length,
+    findings: selected,
+    authorFeedbackPolicy: policy,
+    feedbackGuidance: selected.length
+      ? "Correct every returned error. Treat each grouped warning as advisory evidence: repair it only when the supplied pixels confirm a material defect and the change preserves working page structure, H1s, primary actions, navigation, routes, and brand decisions. Repair shared causes once at their canonical declaration. Reinspect one affected route only when changed pixels remain materially uncertain; otherwise finish and let deterministic release verification check the full site."
+      : "The deterministic route-family launch floor and material-integrity screen are clean. If the supplied pixels show no plainly visible broken hierarchy, misleading visual, or unfinished composition, finish now without cosmetic churn."
+  };
+}
+
+function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "launch-floor" | "component-diagnostic" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led") {
+  const findings = Array.isArray(summary.findings)
+    ? summary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const actionable = findings.filter((finding) => finding.severity === "error" || finding.severity === "warning");
+  const builtRoutes = stringRouteList(summary.routes);
+  const inspectedRoutes = Array.isArray(summary.inspectedRoutes)
+    ? stringRouteList(summary.inspectedRoutes)
+    : builtRoutes;
+  const visualEvidenceRoutes = stringRouteList(summary.visualEvidenceRoutes);
+  const routeCount = inspectedRoutes.length;
+  const qualityLed = feedbackMode === "component-diagnostic-route-family-quality-led";
+  const familyDiagnostic = (feedbackMode === "component-diagnostic-route-family" || feedbackMode === "component-diagnostic-route-family-shared-first" || qualityLed) && routeCount > 1;
+  const grouped = new Map<string, Record<string, unknown> & { occurrences: number; viewports: string[]; affectedRoutes: string[]; exampleRoutes: string[]; exampleMessages: string[] }>();
+  for (const finding of actionable) {
+    const id = typeof finding.id === "string" ? finding.id : "unknown";
+    const route = typeof finding.route === "string" ? finding.route : "";
+    const message = typeof finding.message === "string" ? finding.message : "";
+    const key = familyDiagnostic
+      ? id === "fact.sensitive_unsupported" ? `${id}:${message}` : id
+      : `${id}:${route}`;
+    const viewports = ["desktop", "tablet", "mobile"].filter((viewport) => new RegExp(`\\b${viewport}\\b`, "i").test(message));
+    const retained = grouped.get(key);
+    if (retained) {
+      retained.occurrences += 1;
+      retained.viewports = [...new Set([...retained.viewports, ...viewports])];
+      retained.affectedRoutes = [...new Set([...retained.affectedRoutes, route].filter(Boolean))];
+      if (message && !retained.exampleMessages.includes(message) && retained.exampleMessages.length < 3 && (!route || !retained.exampleRoutes.includes(route))) {
+        retained.exampleMessages.push(message);
+        if (route) retained.exampleRoutes.push(route);
+      }
+      if (finding.severity === "error" && retained.severity !== "error") {
+        grouped.set(key, {
+          ...finding,
+          occurrences: retained.occurrences,
+          viewports: retained.viewports,
+          affectedRoutes: retained.affectedRoutes,
+          exampleRoutes: retained.exampleRoutes,
+          exampleMessages: retained.exampleMessages
+        });
+      }
+      continue;
+    }
+    grouped.set(key, { ...finding, occurrences: 1, viewports, affectedRoutes: route ? [route] : [], exampleRoutes: route ? [route] : [], exampleMessages: message ? [message] : [] });
+  }
+  const priority = new Map([
+    ["functional.navigation_toggle", 0],
+    ["render.call_action_label_spacing", 1],
+    ["render.inline_link_spacing", 1],
+    ["render.mobile_navigation_design", 2],
+    ["render.header_control_wrap", 2],
+    ["render.contrast", 3],
+    ["render.empty_control", 3],
+    ["render.horizontal_overflow", 4],
+    ["render.clipping_overlap", 5],
+    ["render.primary_geometry", 6],
+    ["render.adjacent_duplicate_text", 7],
+    ["render.internal_provenance_copy", 7],
+    ["render.vague_process_copy", 7],
+    ["route.orphan", 8],
+    ["render.local_presence_missing", 9],
+    ["render.duplicate_navigation_icon", 8],
+    ["render.geography_circle", 7],
+    ["render.decorative_diagram", 8],
+    ["render.synthetic_identity_device", 9],
+    ["render.desktop_dual_navigation", 10],
+    ["render.duplicate_header_action", 11],
+    ["render.false_affordance", 12],
+    ["render.footer_group_layout", 13],
+    ["render.mobile_narrow_split", 14],
+    ["render.raster_logo_filter", 15],
+    ["render.raster_logo_content_scale", 16],
+    ["render.duplicate_field_label", 17],
+    ["render.oversized_single_line_field", 17],
+    ["render.form_text", 18],
+    ["render.body_font", 19],
+    ["render.tiny_text", 20],
+    ["render.target_size", 21]
+  ]);
+  if (feedbackMode === "component-diagnostic-route-family-shared-first" || qualityLed) {
+    priority.set("metadata.description_duplicate", -3);
+    priority.set("route.orphan", -2);
+    priority.set("render.browser_default_control_chrome", -1);
+  }
+  const prioritized = [...grouped.values()].sort((left, right) =>
+    (left.severity === "error" ? 0 : 1) - (right.severity === "error" ? 0 : 1)
+    || (priority.get(String(left.id)) ?? 100) - (priority.get(String(right.id)) ?? 100)
+    || String(left.id).localeCompare(String(right.id))
+  );
+  const diverse = prioritized;
+  const { findings: _findings, ...rest } = summary;
+  const baseFeedbackGuidance = actionable.length === 0
+    ? qualityLed
+      ? "The deterministic launch floor is clean. Use the supplied pixels and business evidence to make your own final visual-quality judgment. A focused refinement is worthwhile when it materially improves brand fidelity, hierarchy, responsive composition, or route distinctiveness—for example by replacing an invented identity device, using strong authentic first-party photography that was unnecessarily omitted, or varying an obviously repeated primary-route composition. Preserve working behavior and avoid minor preference churn. Finish when you honestly see no clear material opportunity; reinspect only routes affected by a material change."
+      : "The deterministic homepage launch floor is clean. Inspect the supplied pixels only for a concrete material integrity problem the checks cannot see, such as an invented identity mark, misleading visual, broken hierarchy, or visibly unfinished composition. If no such problem is plainly visible, call finish now. Do not edit or reinspect for taste alone."
+    : feedbackMode === "component-diagnostic" || feedbackMode === "component-diagnostic-route-family" || feedbackMode === "component-diagnostic-route-family-shared-first" || feedbackMode === "component-diagnostic-route-family-quality-led"
+      ? "Correct every error and use warnings as concrete evidence, not an order to redesign unrelated working components. Grouped findings include up to three exampleMessages from distinct routes or viewports; use them together to repair the named element or its nearest shared component at the canonical declaration instead of discovering the same issue one route at a time. Clipping examples include visible text, bounds, and layout context so trace those values before editing. Preserve working navigation, composition, and brand decisions unless their own finding or the supplied pixels show a material failure. Readability, contrast, broken interaction, hidden content, and meaningful mobile clipping are launch issues; minor advisory geometry with no lost content or control is not a reason for cosmetic churn. Reinspect only when the changed component remains materially uncertain; otherwise call finish and let deterministic release verification check operability."
+      : "Assess the screenshots holistically and correct every error. In this private visual canary, render.contrast, render.form_text, render.oversized_single_line_field, render.body_font, render.tiny_text, and render.target_size are explicit launch-floor evidence: rendered text and control glyphs must meet required contrast; meaningful copy, service descriptions, form labels, and controls must meet 16px and 44px; ordinary single-line fields must remain visually compact; and decorative labels and utility metadata must remain at least 12px. Treat render.synthetic_identity_device, render.geography_circle, render.decorative_diagram, render.desktop_dual_navigation, render.raster_logo_filter, render.duplicate_header_action, render.false_affordance, and render.footer_group_layout as component-floor rejections for this experiment rather than optional polish. Fix grouped shared-component failures once at their canonical source. Use another inspect_site only when the repaired pixels remain materially uncertain; otherwise call finish and let deterministic release verification check operability. If computed style disagrees with an edit, read the full cascade and repair the canonical declaration instead of appending another override block.";
+  const scopeGuidance = builtRoutes.length > inspectedRoutes.length
+    ? `Fresh browser evidence in this pass covers only ${inspectedRoutes.join(", ")} (${inspectedRoutes.length} of ${builtRoutes.length} built routes). Do not treat it as current evidence for the other ${builtRoutes.length - inspectedRoutes.length} routes.`
+    : visualEvidenceRoutes.length > 0 && inspectedRoutes.length > visualEvidenceRoutes.length
+      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied pixel sheets cover ${visualEvidenceRoutes.length}: ${visualEvidenceRoutes.join(", ")}. Do not infer visual review for routes absent from those sheets.`
+      : "";
+  const feedbackGuidance = scopeGuidance ? `${scopeGuidance} ${baseFeedbackGuidance}` : baseFeedbackGuidance;
+  return {
+    ...rest,
+    builtRouteCount: builtRoutes.length,
+    inspectedRouteCount: inspectedRoutes.length,
+    visualEvidenceRouteCount: visualEvidenceRoutes.length,
+    findingCount: findings.length,
+    actionableFindingCount: actionable.length,
+    returnedFindingCount: diverse.length,
+    findingsTruncated: false,
+    findings: diverse,
+    feedbackGuidance
+  };
+}
+
+function stringRouteList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.flatMap((route) => {
+    if (typeof route === "string" && route.startsWith("/")) return [normalizeRoutePath(route)];
+    if (!route || typeof route !== "object" || Array.isArray(route)) return [];
+    const path = (route as Record<string, unknown>).path;
+    return typeof path === "string" && path.startsWith("/") ? [normalizeRoutePath(path)] : [];
+  }))];
+}
+
+function inspectionRoutes(summary: Record<string, unknown>) {
+  const routes = Array.isArray(summary.routes) ? summary.routes : [];
+  return new Set(routes.flatMap((route) => {
+    if (typeof route === "string") return route.startsWith("/") ? [normalizeRoutePath(route)] : [];
+    const path = route && typeof route === "object" ? (route as Record<string, unknown>).path : undefined;
+    return typeof path === "string" && path.startsWith("/") ? [normalizeRoutePath(path)] : [];
+  }));
+}
+
+function invalidFinishRoutes(
+  finish: { focusRoute: string; changedRoutes: string[] },
+  availableRoutes: Set<string>
+) {
+  const invalidRoutes = [finish.focusRoute, ...finish.changedRoutes]
+    .filter((route, index, routes) => routes.indexOf(route) === index)
+    .filter((route) => availableRoutes.size > 0 && !availableRoutes.has(route));
+  return invalidRoutes.length
+    ? result({
+        ok: false,
+        error: "finish_route_not_found",
+        invalidRoutes,
+        availableRoutes: [...availableRoutes]
+      })
+    : undefined;
+}
+
+function invalidPlannedRoutes(expectedRoutes: string[], actualRoutes: string[]): ManagerToolExecution | undefined {
+  const expectedCounts = countPaths(expectedRoutes);
+  const actualCounts = countPaths(actualRoutes);
+  const duplicateExpectedRoutes = [...expectedCounts].filter(([, count]) => count > 1).map(([path]) => path);
+  if (duplicateExpectedRoutes.length) throw new Error(`release_plan_duplicate_routes:${duplicateExpectedRoutes.join(",")}`);
+  const expected = new Set(expectedCounts.keys());
+  const actual = new Set(actualCounts.keys());
+  const missingRoutes = [...expected].filter((path) => !actual.has(path)).sort();
+  const extraRoutes = [...actual].filter((path) => !expected.has(path)).sort();
+  if (!missingRoutes.length && !extraRoutes.length && actualRoutes.length === expectedRoutes.length) return undefined;
+  return result({
+    ok: false,
+    error: "release_plan_route_mismatch",
+    expectedRouteCount: expectedRoutes.length,
+    actualRouteCount: actualRoutes.length,
+    missingRouteCount: missingRoutes.length,
+    extraRouteCount: extraRoutes.length,
+    missingRoutes: missingRoutes.slice(0, 50),
+    extraRoutes: extraRoutes.slice(0, 50),
+    guidance: "Make the emitted route set exactly match the approved architecture before finishing. The release plan is authoritative for this run."
+  });
+}
+
+function countPaths(paths: string[]) {
+  const counts = new Map<string, number>();
+  for (const path of paths) counts.set(path, (counts.get(path) ?? 0) + 1);
+  return counts;
 }
 
 function withFailureStage(
@@ -604,7 +1219,7 @@ function failedBuildResult(
   failed: NonNullable<WorkspaceManagerRuntimeSnapshot<unknown>["failedBuild"]>,
   cached: boolean
 ): ManagerToolExecution {
-  const guidance = "Edit the workspace source before running build_preview again.";
+  const guidance = "Edit the workspace source before inspecting or finishing again.";
   return {
     modelOutput: JSON.stringify({
       ok: false,
@@ -645,7 +1260,7 @@ function compactInspectionSummary(summary: Record<string, unknown>) {
   const findings = Array.isArray(summary.findings) ? summary.findings : [];
   const blockerFeedback = verificationBlockerFeedback(Array.isArray(summary.blockers) ? summary.blockers : []);
   const blockers = blockerFeedback.blockers;
-  const advisories = deduplicateVerificationFindings(Array.isArray(summary.advisories) ? summary.advisories : []);
+  const advisories = groupVerificationFindings(Array.isArray(summary.advisories) ? summary.advisories : []);
   const { findings: _findings, blockers: _blockers, advisories: _advisories, ...rest } = summary;
   const common = {
     ...rest,
@@ -657,13 +1272,11 @@ function compactInspectionSummary(summary: Record<string, unknown>) {
     advisoryCount: numericCount(summary.advisoryCount, advisories.length),
     blockers
   };
-  return blockers.length
-    ? { ...common, advisoriesOmitted: advisories.length > 0 }
-    : {
-        ...common,
-        advisories: advisories.slice(0, 8),
-        advisoriesTruncated: numericCount(summary.advisoryCount, advisories.length) > 8
-      };
+  return {
+    ...common,
+    advisories,
+    advisoriesTruncated: false
+  };
 }
 
 function hasVisualBlocker(summary: Record<string, unknown>) {
@@ -679,8 +1292,33 @@ function numericCount(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
+function invalidSourceMutation(file: WorkspaceSourceFile): ManagerToolExecution | undefined {
+  const findings = validateWorkspaceSourcePolicy([file]).filter((finding) => (
+    finding.id !== "source.required_file"
+    && finding.path === file.path
+  ));
+  if (!findings.length) return undefined;
+  return result({
+    ok: false,
+    error: "source_validation_failed",
+    path: file.path,
+    workspaceUnchanged: true,
+    findings,
+    guidance: "The mutation was not applied. Correct every reported source-policy or syntax finding and retry against the same current file hash."
+  });
+}
+
 function result(value: Record<string, unknown>): ManagerToolExecution {
   return { modelOutput: JSON.stringify(value), diagnosticOutput: value };
+}
+
+function invalidSourceDisposition(error: unknown): ManagerToolExecution {
+  return result({
+    ok: false,
+    error: "finish_source_disposition_invalid",
+    detail: boundedError(error),
+    guidance: "Use plain same-site pathname values only. Omit query-string or fragment variants, remove conflicting or duplicate dispositions, and point every redirect directly to a live route before calling finish again."
+  });
 }
 
 function boundedError(error: unknown) {

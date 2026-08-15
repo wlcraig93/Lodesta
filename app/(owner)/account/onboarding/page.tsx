@@ -30,7 +30,7 @@ export default async function WebsiteOnboardingPage({
               ? "We did not find an owned website in your report. Paste another public business source and Lodesta will create a private website you can review."
               : "Paste an existing website or public business source and Lodesta will create a new version you can customize."}
         </p>
-        <WebsiteOnboardingForm initialSource={source} prospectReportId={reportId} />
+        <WebsiteOnboardingForm initialSource={source} />
         <ol className="onboarding-steps" aria-label="What happens next">
           <li><span>1</span><div><strong>We learn the essentials</strong><small>Lodesta reviews your current website and business details.</small></div></li>
           <li><span>2</span><div><strong>You review a private draft</strong><small>Make changes with the editor before anything goes live.</small></div></li>

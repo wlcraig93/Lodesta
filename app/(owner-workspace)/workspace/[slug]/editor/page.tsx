@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { SiteAgentWorkspace } from "@/components/SiteAgentWorkspace";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { SourceCoveragePanel } from "@/components/SourceCoveragePanel";
 
 export default async function WorkspaceWebsitePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -11,5 +12,9 @@ export default async function WorkspaceWebsitePage({ params }: { params: Promise
     : undefined;
   if (!input) notFound();
   const versions = await sitePlatformRepository.listSiteVersions(context.site.id);
-  return <SiteAgentWorkspace initialSite={context.site} initialInput={input} initialVersions={versions} isAdmin={context.canAccessAdmin} />;
+  const candidate = versions.find((version) => version.status === "candidate");
+  const coverage = candidate
+    ? await sitePlatformRepository.getSiteVersionSourceCoverage(candidate.id)
+    : undefined;
+  return <><SiteAgentWorkspace initialSite={context.site} initialInput={input} initialVersions={versions} isAdmin={context.canAccessAdmin} />{coverage ? <SourceCoveragePanel report={coverage} /> : null}</>;
 }

@@ -7,16 +7,8 @@ on:
         description: Exact previous Git SHA to redeploy to Railway
         required: true
         type: string
-      cloudflare_version:
-        description: Exact previous Cloudflare Worker version ID
-        required: true
-        type: string
-      sandbox_image_digest:
-        description: Exact previous Cloudflare container image digest
-        required: true
-        type: string
-      maintenance_lease_owner:
-        description: Lease owner from the failed release evidence
+      sandbox_deployment_id:
+        description: Immutable blue or green deployment ID to reactivate
         required: true
         type: string
 
@@ -33,10 +25,10 @@ jobs:
     timeout-minutes: 150
     environment: production
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      LODESTA_SANDBOX_URL: ${{ vars.LODESTA_SANDBOX_URL }}
-      LODESTA_SANDBOX_TOKEN: ${{ secrets.LODESTA_SANDBOX_TOKEN }}
+      LODESTA_SANDBOX_BLUE_URL: ${{ vars.LODESTA_SANDBOX_BLUE_URL }}
+      LODESTA_SANDBOX_BLUE_TOKEN: ${{ secrets.LODESTA_SANDBOX_BLUE_TOKEN }}
+      LODESTA_SANDBOX_GREEN_URL: ${{ vars.LODESTA_SANDBOX_GREEN_URL }}
+      LODESTA_SANDBOX_GREEN_TOKEN: ${{ secrets.LODESTA_SANDBOX_GREEN_TOKEN }}
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
@@ -45,7 +37,6 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       LODESTA_APP_ORIGIN: ${{ vars.LODESTA_APP_ORIGIN }}
       LODESTA_ADMIN_TOKEN: ${{ secrets.LODESTA_ADMIN_TOKEN }}
-      LODESTA_MAINTENANCE_LEASE_OWNER: ${{ inputs.maintenance_lease_owner }}
       EVIDENCE_DIR: .data/rollback-evidence
     steps:
       - uses: actions/checkout@v4
@@ -55,104 +46,37 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            workers/site-sandbox/scaffold/package-lock.json
       - run: npm ci
-      - run: npm ci --prefix workers/site-sandbox/scaffold --ignore-scripts --no-audit --no-fund
       - run: npm install --global @railway/cli@5.28.1
-
-      - name: Validate rollback identifiers
+      - name: Validate and reactivate the retained sandbox deployment
         run: |
           set -Eeuo pipefail
           [[ "${{ inputs.release_sha }}" =~ ^[a-f0-9]{40}$ ]]
-          [[ "${{ inputs.cloudflare_version }}" =~ ^[a-f0-9-]{36}$ ]]
-          [[ "${{ inputs.sandbox_image_digest }}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "${{ inputs.sandbox_deployment_id }}" =~ ^sandbox_deployment_[a-z0-9_]+$ ]]
           git cat-file -e "${{ inputs.release_sha }}^{commit}"
           mkdir -p "$EVIDENCE_DIR"
-          node --input-type=module -e '
-            process.stdout.write(`${JSON.stringify({
-              schemaVersion: "lodesta-production-rollback-v1",
-              requestedAt: new Date().toISOString(),
-              releaseSha: process.argv[1],
-              cloudflareVersion: process.argv[2],
-              sandboxImageDigest: process.argv[3],
-              leaseOwner: process.env.LODESTA_MAINTENANCE_LEASE_OWNER
-            }, null, 2)}\n`);
-          ' "${{ inputs.release_sha }}" "${{ inputs.cloudflare_version }}" "${{ inputs.sandbox_image_digest }}" > "$EVIDENCE_DIR/rollback.json"
-
-      - name: Retain or reacquire authoring maintenance
+          npm run sandbox:deployments -- rollback --deployment-id "${{ inputs.sandbox_deployment_id }}" \
+            > "$EVIDENCE_DIR/sandbox-rollback.json"
+      - name: Redeploy the retained controller
         run: |
           set -Eeuo pipefail
-          npm run maintenance:site-authoring -- renew --minutes=60 \
-            || npm run maintenance:site-authoring -- acquire --minutes=90 --draining
-          npm run maintenance:site-authoring -- wait-active --timeout-minutes=75
-          npm run maintenance:site-authoring -- renew --minutes=60
-
-      - name: Preserve current canary and check out rollback commit
-        run: |
-          cp scripts/verify-site-sandbox-deployed.ts "$RUNNER_TEMP/verify-site-sandbox-deployed.ts"
-          cp scripts/release-evidence.ts "$RUNNER_TEMP/release-evidence.ts"
           git checkout --detach "${{ inputs.release_sha }}"
-          test "$(git rev-parse HEAD)" = "${{ inputs.release_sha }}"
           npm ci
-
-      - name: Redeploy previous Git SHA to Railway
-        run: |
-          set -Eeuo pipefail
-          railway variable set \
-            "LODESTA_SANDBOX_IMAGE_DIGEST=${{ inputs.sandbox_image_digest }}" \
-            "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" \
-            --skip-deploys \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" > /dev/null
-          railway up --ci \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" \
-            --message "Approved rollback to ${{ inputs.release_sha }}"
+          railway variable set "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" --skip-deploys \
+            --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" > /dev/null
+          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" --message "Approved rollback to ${{ inputs.release_sha }}"
           for attempt in $(seq 1 90); do
-            railway deployment list \
-              --environment "$RAILWAY_ENVIRONMENT_ID" \
-              --service "$RAILWAY_SERVICE_ID" \
-              --limit 1 --json > "$EVIDENCE_DIR/railway.raw.json"
-            status="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway.raw.json'))[0]?.status ?? 'UNKNOWN'")"
-            if [ "$status" = "SUCCESS" ]; then
-              node --import tsx "$RUNNER_TEMP/release-evidence.ts" current-railway "$EVIDENCE_DIR/railway.raw.json" > "$EVIDENCE_DIR/railway.json"
-              rm "$EVIDENCE_DIR/railway.raw.json"
-              break
-            fi
-            if [ "$status" = "FAILED" ] || [ "$status" = "CRASHED" ] || [ "$status" = "CANCELLED" ] || [ "$status" = "CANCELED" ]; then exit 1; fi
-            if [ "$attempt" -eq 90 ]; then exit 1; fi
+            railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" \
+              --limit 1 --json > "$EVIDENCE_DIR/railway.json"
+            status="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway.json'))[0]?.status ?? 'UNKNOWN'")"
+            [ "$status" = "SUCCESS" ] && break
+            case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
+            [ "$attempt" -eq 90 ] && exit 1
             sleep 20
           done
-
-      - name: Restore previous Cloudflare version
-        run: |
-          set -Eeuo pipefail
-          npx wrangler versions deploy "${{ inputs.cloudflare_version }}@100%" \
-            --config workers/site-sandbox/wrangler.jsonc \
-            --yes \
-            --message "Approved rollback to ${{ inputs.release_sha }}"
-          cp "$RUNNER_TEMP/verify-site-sandbox-deployed.ts" scripts/verify-site-sandbox-deployed.ts
-          node --import tsx scripts/verify-site-sandbox-deployed.ts > "$EVIDENCE_DIR/sandbox-canary.json"
-
-      - name: Verify restored pair and reopen authoring
-        run: |
-          set -Eeuo pipefail
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error \
-              --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/deep-health.json"; then
-              node --import tsx scripts/site-authoring-maintenance.ts release
-              touch "$EVIDENCE_DIR/rollback-succeeded"
-              exit 0
-            fi
-            sleep 10
-          done
-          exit 1
-
+          curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+            "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/deep-health.json"
       - name: Upload rollback evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -79,7 +79,7 @@ create table asset_revisions (
   created_at timestamptz not null
 );
 create index asset_revisions_business_id_idx on asset_revisions(business_id);
-create unique index asset_revisions_business_content_hash_idx on asset_revisions(business_id, content_hash);
+create index asset_revisions_business_content_hash_idx on asset_revisions(business_id, content_hash);
 
 create table form_definitions (
   id text primary key,
@@ -688,8 +688,17 @@ begin
     for update;
   if target_owner is null then return; end if;
   update sites set owner_user_id = target_owner, updated_at = now()
-    where id = target_site_id and owner_user_id is null;
+    where id = target_site_id
+      and (owner_user_id is null or owner_user_id = target_owner);
   if not found then return; end if;
+  if not exists (
+    select 1 from site_agent_sessions
+    where id = target_session_id and site_id = target_site_id
+  ) then return; end if;
+  if not exists (
+    select 1 from site_agent_runs
+    where id = target_run_id and site_id = target_site_id and session_id = target_session_id
+  ) then return; end if;
   return query update website_setups
     set status = 'linked', site_id = target_site_id, session_id = target_session_id,
       run_id = target_run_id, locked_by = null, locked_at = null, updated_at = now()

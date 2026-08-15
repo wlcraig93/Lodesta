@@ -59,7 +59,13 @@ export type InquiryEvent = {
 
 export type CapabilityFormDefinition = {
   id: string;
-  fields: Array<{ id: string; label: string; type: "text" | "email" | "phone" | "textarea" | "select" }>;
+  destination: "lead_inbox";
+  fields: Array<{
+    id: string;
+    label: string;
+    role: "contact_name" | "contact_email" | "contact_phone" | "message" | "custom";
+    type: "text" | "email" | "phone" | "textarea" | "select" | "radio" | "checkbox";
+  }>;
 };
 
 export const analyticsEventTypes = [

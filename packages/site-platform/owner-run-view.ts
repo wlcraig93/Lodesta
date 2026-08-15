@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SiteAgentRun, SiteAgentRunEvent } from "@/packages/site-contracts";
+import { ownerCanRetrySiteAgentRun } from "@/packages/site-agent/retry-policy";
 
 type OwnerRunProgress = {
   label: string;
@@ -25,6 +26,7 @@ export type OwnerActivityGroup = {
 
 export type OwnerActivitySnapshot = {
   run: OwnerSiteAgentRun;
+  activeSince?: string;
   current?: OwnerActivityGroup;
   completed: OwnerActivityGroup[];
   hasEarlierActivity: boolean;
@@ -55,7 +57,7 @@ export function ownerSiteAgentRun(run: SiteAgentRun): OwnerSiteAgentRun {
     completedAt: run.completedAt,
     fastPreviewPath: run.fastPreviewPath,
     inputQuestion: run.inputQuestion,
-    retryableByOwner: run.retryableByOwner,
+    retryableByOwner: ownerCanRetrySiteAgentRun(run),
     progress: ownerRunProgress(run)
   };
 }
@@ -90,6 +92,7 @@ export function ownerActivitySnapshot(
 
   return {
     run: ownerSiteAgentRun(run),
+    activeSince: chronologicalEvents[0]?.startedAt,
     current: currentEvent ? { ...currentEvent } : undefined,
     completed,
     hasEarlierActivity
@@ -124,18 +127,34 @@ function ownerActivityGroup(
 }
 
 function ownerRunProgress(run: SiteAgentRun): OwnerRunProgress {
+  const retryableByOwner = ownerCanRetrySiteAgentRun(run);
+  if (run.status === "cancelled") {
+    return {
+      label: run.kind === "initial_build" ? "Website build stopped" : "Website update stopped",
+      detail: "The active work was stopped. Your published website was not changed."
+    };
+  }
   if (run.status === "failed" || run.stage === "failed") {
+    const savedCheckpoint = Boolean(run.resumeCheckpointId);
     const specific = ({
       authoring_stalled: `The build stopped after the same release check failed ${run.guardrails?.maxConsecutiveIdenticalFailures ?? 3} times without a source change. Change the request or source before trying again; retrying the unchanged request will not help.`,
-      cost_limit_exhausted: "The build reached its safety cost limit before another model turn could begin. Lodesta saved the work; ask Lodesta to review and resume it instead of repeatedly retrying.",
+      cost_limit_exhausted: savedCheckpoint
+        ? "The build reached its safety cost limit after Lodesta saved the latest workspace. You can retry without starting the website over."
+        : "The build reached its safety cost limit before it completed. Try a narrower request.",
       cost_telemetry_unavailable: "The selected model route stopped reporting reliable cost data, so Lodesta ended the build safely. Wait for Lodesta to repair the model route before retrying.",
-      browser_verification_unavailable: "Lodesta created the edit but could not complete accessibility verification. You can try this request again; the current website was not changed.",
-      deadline_exhausted: "The build reached its overall time limit and Lodesta saved the work. Try a narrower request, or ask Lodesta to resume the saved work if this repeats.",
+      browser_verification_unavailable: savedCheckpoint
+        ? "Lodesta saved the completed workspace but could not finish browser verification. Retry to resume from the saved workspace."
+        : "Lodesta could not complete browser verification. You can try this request again; the current website was not changed.",
+      deadline_exhausted: savedCheckpoint
+        ? "The build reached its overall time limit after Lodesta saved the latest workspace. Retry to resume from that workspace."
+        : "The build reached its overall time limit before a durable workspace was available. Try the request again.",
+      model_tool_schema_invalid: "Lodesta’s authoring tools are temporarily incompatible with the selected model. Your website was not changed. Wait for Lodesta to repair the model route before starting a new request.",
+      source_preparation_failed: "Lodesta could not finish collecting the source website. No model authoring was started, and this source-preparation step can be tried again.",
       platform_version_mismatch: "Lodesta’s authoring platform changed while this work was paused. Your website was not changed. Wait for the update to finish, then start a new request instead of retrying this run."
-    } as const)[run.failureCode as "authoring_stalled" | "cost_limit_exhausted" | "cost_telemetry_unavailable" | "browser_verification_unavailable" | "deadline_exhausted" | "platform_version_mismatch"];
+    } as const)[run.failureCode as "authoring_stalled" | "cost_limit_exhausted" | "cost_telemetry_unavailable" | "browser_verification_unavailable" | "deadline_exhausted" | "model_tool_schema_invalid" | "source_preparation_failed" | "platform_version_mismatch"];
     return {
       label: "Website needs attention",
-      detail: specific ?? (run.retryableByOwner
+      detail: specific ?? (retryableByOwner
         ? "The work stopped before it finished. You can try this request again."
         : "Lodesta is reviewing an internal problem. You do not need to keep retrying.")
     };
@@ -145,10 +164,18 @@ function ownerRunProgress(run: SiteAgentRun): OwnerRunProgress {
       label: "Preparing your website",
       detail: "Your request is ready and waiting for Lodesta to begin."
     },
+    retrieving_sources: {
+      label: "Gathering business context",
+      detail: "Lodesta is collecting the available public source material for this website."
+    },
+    architecting: {
+      label: "Planning your complete website",
+      detail: "Lodesta is accounting for the existing site and deciding the complete route structure before design begins."
+    },
     authoring: {
       label: "Designing your website",
       detail: run.kind === "initial_build"
-        ? "Lodesta is turning the verified business information into a complete website."
+        ? "Lodesta is reviewing the available source material and turning your business information into a complete website."
         : "Lodesta is applying your request while preserving the rest of the website."
     },
     building: {
@@ -158,6 +185,10 @@ function ownerRunProgress(run: SiteAgentRun): OwnerRunProgress {
     fast_preview: {
       label: "Preview ready; finishing checks",
       detail: "You can review the preview while Lodesta checks the final website."
+    },
+    inspecting: {
+      label: "Inspecting your website",
+      detail: "Lodesta is reviewing the rendered website in a browser and correcting obvious problems."
     },
     verifying: {
       label: "Reviewing your website",

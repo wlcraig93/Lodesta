@@ -4,9 +4,7 @@ import { requireAdminPageAccess } from "@/lib/page-access";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import type {
-  AgentReadinessCheck,
   AssessmentCriterion,
-  VisualQualityCheck,
   WebsiteAssessment
 } from "@/packages/website-assessment/contracts";
 
@@ -26,128 +24,95 @@ export default async function AssessmentComparisonPage({
   ]);
   const left = leftRecord?.assessment;
   const right = rightRecord?.assessment;
+  const comparable = left && right && identitiesMatch(left, right)
+    && left.coverage.comparisonEligible
+    && right.coverage.comparisonEligible;
   return (
     <main className="admin-page">
       <AdminPageHeader
-        eyebrow="Matched evidence"
-        title="Assessment comparison"
-        description="Compare matched objective, Agent Readiness, and Visual Quality checks only when both records use the same identities."
-        actions={<Link className="button secondary" href="/admin/assessments">All assessments</Link>}
+        eyebrow="Matched Website Health evidence"
+        title="Report comparison"
+        description="Compare unified criteria only when registry, scanner, route-selection, evaluator, and evidence-completeness identities match."
+        actions={<Link className="button secondary" href="/admin/assessments">All reports</Link>}
       />
       <section className="panel">
         <form action="/admin/assessments/compare" className="admin-filter-form">
-          <input name="left" placeholder="Current/source assessment ID" defaultValue={leftId} required />
-          <input name="right" placeholder="Candidate assessment ID" defaultValue={rightId} required />
+          <input name="left" placeholder="Current/source report ID" defaultValue={leftId} required />
+          <input name="right" placeholder="Candidate report ID" defaultValue={rightId} required />
           <button className="button primary" type="submit">Compare</button>
         </form>
       </section>
-      {!leftId || !rightId ? <section className="panel"><p>Choose two completed assessment IDs.</p></section> : null}
-      {leftId && !left ? <section className="panel"><p className="error-text">The left assessment is missing, incomplete, or stale.</p></section> : null}
-      {rightId && !right ? <section className="panel"><p className="error-text">The right assessment is missing, incomplete, or stale.</p></section> : null}
-      {left && right && !identitiesMatch(left, right) ? (
+      {!leftId || !rightId ? <section className="panel"><p>Choose two completed canonical report IDs.</p></section> : null}
+      {leftId && !left ? <section className="panel"><p className="error-text">The left report is missing, incomplete, or stale.</p></section> : null}
+      {rightId && !right ? <section className="panel"><p className="error-text">The right report is missing, incomplete, or stale.</p></section> : null}
+      {left && right && !comparable ? (
         <section className="panel">
           <span className="badge severity-warning">Comparison blocked</span>
-          <h2>Reassess before comparing</h2>
-          <p>The records identify different rubrics, Agent Readiness methodologies, or Visual Quality evaluators. A numeric or status delta would be misleading.</p>
+          <h2>Reassess with matching complete methodology</h2>
+          <p>A formal delta would be misleading because methodology identities differ or at least one report records an evidence-pipeline limitation.</p>
           <p className="muted">
-            Left: {left.producer.rubricIdentity} · {left.agentReadiness.methodologyIdentity} · {left.visualQuality.methodologyIdentity} · {left.visualQuality.evaluator.identity}<br />
-            Right: {right.producer.rubricIdentity} · {right.agentReadiness.methodologyIdentity} · {right.visualQuality.methodologyIdentity} · {right.visualQuality.evaluator.identity}
+            Left: {methodologySummary(left)}<br />
+            Right: {methodologySummary(right)}
           </p>
         </section>
       ) : null}
-      {left && right && identitiesMatch(left, right) ? <Comparison left={left} right={right} /> : null}
+      {left && right && comparable ? <Comparison left={left} right={right} /> : null}
     </main>
   );
 }
 
 function Comparison({ left, right }: { left: WebsiteAssessment; right: WebsiteAssessment }) {
-  const leftCriteria = new Map(left.dimensions.flatMap((dimension) => dimension.criteria).map((criterion) => [criterion.id, criterion]));
-  const rightCriteria = new Map(right.dimensions.flatMap((dimension) => dimension.criteria).map((criterion) => [criterion.id, criterion]));
-  const ids = [...new Set([...leftCriteria.keys(), ...rightCriteria.keys()])];
-  const improved = ids.filter((id) => comparableChange(leftCriteria.get(id), rightCriteria.get(id)) === 1).length;
-  const regressed = ids.filter((id) => comparableChange(leftCriteria.get(id), rightCriteria.get(id)) === -1).length;
-  const leftAgentChecks = new Map(left.agentReadiness.groups.flatMap((group) => group.checks).map((check) => [check.id, check]));
-  const rightAgentChecks = new Map(right.agentReadiness.groups.flatMap((group) => group.checks).map((check) => [check.id, check]));
-  const agentIds = [...new Set([...leftAgentChecks.keys(), ...rightAgentChecks.keys()])];
-  const agentImproved = agentIds.filter((id) => comparableChange(leftAgentChecks.get(id), rightAgentChecks.get(id)) === 1).length;
-  const agentRegressed = agentIds.filter((id) => comparableChange(leftAgentChecks.get(id), rightAgentChecks.get(id)) === -1).length;
-  const leftVisualChecks = new Map(left.visualQuality.groups.flatMap((group) => group.checks).map((check) => [check.id, check]));
-  const rightVisualChecks = new Map(right.visualQuality.groups.flatMap((group) => group.checks).map((check) => [check.id, check]));
-  const visualIds = [...new Set([...leftVisualChecks.keys(), ...rightVisualChecks.keys()])];
-  const visualImproved = visualIds.filter((id) => comparableChange(leftVisualChecks.get(id), rightVisualChecks.get(id)) === 1).length;
-  const visualRegressed = visualIds.filter((id) => comparableChange(leftVisualChecks.get(id), rightVisualChecks.get(id)) === -1).length;
+  const leftCriteria = criterionMap(left);
+  const rightCriteria = criterionMap(right);
+  const ids = [...new Set([...leftCriteria.keys(), ...rightCriteria.keys()])].sort();
+  const changes = ids.map((id) => ({
+    id,
+    left: leftCriteria.get(id),
+    right: rightCriteria.get(id),
+    change: comparableChange(leftCriteria.get(id), rightCriteria.get(id))
+  }));
+  const improved = changes.filter((item) => item.change === 1).length;
+  const regressed = changes.filter((item) => item.change === -1).length;
+  const authorChanges = changes.filter((item) =>
+    item.left?.controlOwner === "site_author" && item.right?.controlOwner === "site_author"
+  );
   return (
     <>
       <section className="metric-row">
         <Metric label="Improved criteria" value={`${improved}`} />
         <Metric label="Regressed criteria" value={`${regressed}`} />
-        <Metric label="Improved agent checks" value={`${agentImproved}`} />
-        <Metric label="Regressed agent checks" value={`${agentRegressed}`} />
-        <Metric label="Improved visual checks" value={`${visualImproved}`} />
-        <Metric label="Regressed visual checks" value={`${visualRegressed}`} />
-        <Metric label="Left coverage" value={`${Math.round(left.coverage.value * 100)}%`} />
-        <Metric label="Right coverage" value={`${Math.round(right.coverage.value * 100)}%`} />
+        <Metric label="Author improvements" value={`${authorChanges.filter((item) => item.change === 1).length}`} />
+        <Metric label="Author regressions" value={`${authorChanges.filter((item) => item.change === -1).length}`} />
+        <Metric label="Left grade / raw" value={`${left.grade?.value ?? "—"} / ${left.score.rawValue ?? "—"}`} />
+        <Metric label="Right grade / raw" value={`${right.grade?.value ?? "—"} / ${right.score.rawValue ?? "—"}`} />
+        <Metric label="Left author subscore" value={`${left.score.scopes.siteAuthor.value ?? "—"}`} />
+        <Metric label="Right author subscore" value={`${right.score.scopes.siteAuthor.value ?? "—"}`} />
       </section>
       <section className="panel">
         <h2>Comparison basis</h2>
-        <p>Rubric identity {left.producer.rubricIdentity}. Agent methodology identity {left.agentReadiness.methodologyIdentity}. Visual methodology {left.visualQuality.methodologyIdentity}. Left score {left.score?.value ?? "—"}; right score {right.score?.value ?? "—"}. Visual Quality remains advisory and unweighted.</p>
-        <p className="muted">Left limitations: {left.coverage.limitations.join(" · ") || "none"}<br />Right limitations: {right.coverage.limitations.join(" · ") || "none"}</p>
+        <p>{methodologySummary(left)}</p>
+        <p className="muted">
+          Left site/pipeline evidence: {Math.round(left.coverage.siteEvidence * 100)}% / {Math.round(left.coverage.pipelineCompleteness * 100)}%.
+          Right site/pipeline evidence: {Math.round(right.coverage.siteEvidence * 100)}% / {Math.round(right.coverage.pipelineCompleteness * 100)}%.
+        </p>
       </section>
       <section className="panel admin-section">
-        <div className="admin-section-heading"><div><h2>Scored website criteria</h2><p className="muted">Unknown and not-applicable states are not compared.</p></div></div>
+        <div className="admin-section-heading">
+          <div><h2>Unified criterion deltas</h2><p className="muted">Unknown and not-applicable states are retained but not ranked.</p></div>
+        </div>
         <table className="data-table">
-          <thead><tr><th>Criterion</th><th>Current/source</th><th>Candidate</th><th>Change</th></tr></thead>
-          <tbody>{ids.map((id) => {
-            const leftCriterion = leftCriteria.get(id);
-            const rightCriterion = rightCriteria.get(id);
-            const change = comparableChange(leftCriterion, rightCriterion);
-            return (
-              <tr key={id}>
-                <td><strong>{leftCriterion?.title ?? rightCriterion?.title ?? id}</strong><small>{id}</small></td>
-                <CriterionCell criterion={leftCriterion} />
-                <CriterionCell criterion={rightCriterion} />
-                <td><span className={`badge ${change === 1 ? "severity-pass" : change === -1 ? "severity-critical" : "severity-advisory"}`}>{change === 1 ? "improved" : change === -1 ? "regressed" : change === 0 ? "unchanged" : "not comparable"}</span></td>
-              </tr>
-            );
-          })}</tbody>
-        </table>
-      </section>
-      <section className="panel admin-section">
-        <div className="admin-section-heading"><div><h2>Visual Quality checks</h2><p className="muted">Matched by stable check ID; unknown and not-applicable states are not compared.</p></div></div>
-        <table className="data-table">
-          <thead><tr><th>Check</th><th>Current/source</th><th>Candidate</th><th>Change</th></tr></thead>
-          <tbody>{visualIds.map((id) => {
-            const leftCheck = leftVisualChecks.get(id);
-            const rightCheck = rightVisualChecks.get(id);
-            const change = comparableChange(leftCheck, rightCheck);
-            return (
-              <tr key={id}>
-                <td><strong>{leftCheck?.title ?? rightCheck?.title ?? id}</strong><small>{id}</small></td>
-                <VisualCheckCell check={leftCheck} />
-                <VisualCheckCell check={rightCheck} />
-                <td><span className={`badge ${change === 1 ? "severity-pass" : change === -1 ? "severity-critical" : "severity-advisory"}`}>{change === 1 ? "improved" : change === -1 ? "regressed" : change === 0 ? "unchanged" : "not comparable"}</span></td>
-              </tr>
-            );
-          })}</tbody>
-        </table>
-      </section>
-      <section className="panel admin-section">
-        <div className="admin-section-heading"><div><h2>Agent Readiness checks</h2><p className="muted">Matched by stable check ID; unknown and not-applicable states are not compared.</p></div></div>
-        <table className="data-table">
-          <thead><tr><th>Check</th><th>Current/source</th><th>Candidate</th><th>Change</th></tr></thead>
-          <tbody>{agentIds.map((id) => {
-            const leftCheck = leftAgentChecks.get(id);
-            const rightCheck = rightAgentChecks.get(id);
-            const change = comparableChange(leftCheck, rightCheck);
-            return (
-              <tr key={id}>
-                <td><strong>{leftCheck?.title ?? rightCheck?.title ?? id}</strong><small>{id}</small></td>
-                <AgentCheckCell check={leftCheck} />
-                <AgentCheckCell check={rightCheck} />
-                <td><span className={`badge ${change === 1 ? "severity-pass" : change === -1 ? "severity-critical" : "severity-advisory"}`}>{change === 1 ? "improved" : change === -1 ? "regressed" : change === 0 ? "unchanged" : "not comparable"}</span></td>
-              </tr>
-            );
-          })}</tbody>
+          <thead><tr><th>Criterion and owner</th><th>Current/source</th><th>Candidate</th><th>Change</th></tr></thead>
+          <tbody>{changes.map((item) => (
+            <tr key={item.id}>
+              <td>
+                <strong>{item.left?.title ?? item.right?.title ?? item.id}</strong>
+                <small>{item.id} · {(item.left?.controlOwner ?? item.right?.controlOwner ?? "unknown").replaceAll("_", " ")}</small>
+              </td>
+              <CriterionCell criterion={item.left} />
+              <CriterionCell criterion={item.right} />
+              <td><span className={`badge ${item.change === 1 ? "severity-pass" : item.change === -1 ? "severity-critical" : "severity-advisory"}`}>{item.change === 1 ? "improved" : item.change === -1 ? "regressed" : item.change === 0 ? "unchanged" : "not comparable"}</span></td>
+            </tr>
+          ))}</tbody>
         </table>
       </section>
     </>
@@ -155,31 +120,43 @@ function Comparison({ left, right }: { left: WebsiteAssessment; right: WebsiteAs
 }
 
 function CriterionCell({ criterion }: { criterion?: AssessmentCriterion }) {
-  return <td>{criterion?.status.replaceAll("_", " ") ?? "missing"}<small>{criterion?.explanation ?? "Criterion not present."}</small></td>;
+  return (
+    <td>
+      {criterion?.status.replaceAll("_", " ") ?? "missing"}
+      <small>{criterion?.explanation ?? "Criterion not present."}</small>
+    </td>
+  );
 }
 
-function AgentCheckCell({ check }: { check?: AgentReadinessCheck }) {
-  return <td>{check?.status.replaceAll("_", " ") ?? "missing"}<small>{check?.alignment.replaceAll("_", " ") ?? "Check not present."}</small></td>;
-}
-
-function VisualCheckCell({ check }: { check?: VisualQualityCheck }) {
-  return <td>{check?.status.replaceAll("_", " ") ?? "missing"}<small>{check?.explanation ?? "Check not present."}</small></td>;
-}
-
-function comparableChange(
-  left?: Pick<AssessmentCriterion, "status"> | Pick<AgentReadinessCheck, "status"> | Pick<VisualQualityCheck, "status">,
-  right?: Pick<AssessmentCriterion, "status"> | Pick<AgentReadinessCheck, "status"> | Pick<VisualQualityCheck, "status">
-) {
+function comparableChange(left?: AssessmentCriterion, right?: AssessmentCriterion) {
   const values = { fail: 0, warning: 1, pass: 2 } as const;
   if (!left || !right || !(left.status in values) || !(right.status in values)) return undefined;
   return Math.sign(values[right.status as keyof typeof values] - values[left.status as keyof typeof values]);
 }
 
+function criterionMap(assessment: WebsiteAssessment) {
+  return new Map(assessment.dimensions.flatMap((dimension) =>
+    dimension.criteria.map((criterion) => [criterion.id, criterion] as const)
+  ));
+}
+
 function identitiesMatch(left: WebsiteAssessment, right: WebsiteAssessment) {
   return left.producer.rubricIdentity === right.producer.rubricIdentity
-    && left.agentReadiness.methodologyIdentity === right.agentReadiness.methodologyIdentity
-    && left.visualQuality.methodologyIdentity === right.visualQuality.methodologyIdentity
-    && left.visualQuality.evaluator.identity === right.visualQuality.evaluator.identity;
+    && left.producer.scannerIdentity === right.producer.scannerIdentity
+    && left.producer.routeSelectionIdentity === right.producer.routeSelectionIdentity
+    && left.routeSelection.requestedSlots.join("|") === right.routeSelection.requestedSlots.join("|")
+    && evaluatorIdentity(left) === evaluatorIdentity(right);
+}
+
+function evaluatorIdentity(assessment: WebsiteAssessment) {
+  return assessment.evaluators
+    .map((evaluator) => `${evaluator.kind}:${evaluator.identity}:${evaluator.status}`)
+    .sort()
+    .join("|");
+}
+
+function methodologySummary(assessment: WebsiteAssessment) {
+  return `${assessment.producer.rubricIdentity} · ${assessment.producer.scannerIdentity} · ${assessment.producer.routeSelectionIdentity} · ${evaluatorIdentity(assessment)} · comparison ${assessment.coverage.comparisonEligible ? "eligible" : "disabled"}`;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

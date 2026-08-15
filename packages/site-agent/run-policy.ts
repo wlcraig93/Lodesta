@@ -8,14 +8,14 @@ export const siteAgentModelPricing = {
     outputUsdPerMillion: 30
   },
   "gpt-5.6-terra": {
-    inputUsdPerMillion: 2.5,
-    cachedInputUsdPerMillion: 0.25,
-    outputUsdPerMillion: 15
+    inputUsdPerMillion: 2,
+    cachedInputUsdPerMillion: 0.2,
+    outputUsdPerMillion: 12
   },
   "gpt-5.6-luna": {
-    inputUsdPerMillion: 1,
-    cachedInputUsdPerMillion: 0.1,
-    outputUsdPerMillion: 6
+    inputUsdPerMillion: 0.2,
+    cachedInputUsdPerMillion: 0.02,
+    outputUsdPerMillion: 1.2
   },
   "gpt-5.5": {
     inputUsdPerMillion: 5,
@@ -27,7 +27,9 @@ export const siteAgentModelPricing = {
 export type SupportedSiteAgentModel = keyof typeof siteAgentModelPricing;
 
 export const siteAgentReasoningEffort = "high" as const;
+export const siteAgentReasoningContext = "all_turns" as const;
 export const siteAgentTextVerbosity = "low" as const;
+export const siteAgentCompactionThresholdTokens = 200_000;
 
 export const siteAgentRunGuardrailDefaults = {
   initial_build: {
@@ -54,7 +56,7 @@ export function isSupportedSiteAgentModel(modelId: string): modelId is Supported
 export function managerGuardrailsForKind(kind: "initial_build" | "edit" | "rebase"): ManagerRunGuardrails {
   const defaults = siteAgentRunGuardrailDefaults[kind];
   return {
-    maxCostUsd: defaults.maxCostUsd,
+    maxCostUsd: configuredMaximumCost(defaults.maxCostUsd),
     maxConsecutiveIdenticalFailures: defaults.maxConsecutiveIdenticalFailures
   };
 }
@@ -63,9 +65,16 @@ export function siteAgentRunGuardrailsForKind(kind: "initial_build" | "edit" | "
   const defaults = siteAgentRunGuardrailDefaults[kind];
   return {
     deadlineAt: new Date(Date.parse(startedAt) + defaults.deadlineMs).toISOString(),
-    maxCostUsd: defaults.maxCostUsd,
+    maxCostUsd: configuredMaximumCost(defaults.maxCostUsd),
     maxConsecutiveIdenticalFailures: defaults.maxConsecutiveIdenticalFailures
   };
+}
+
+function configuredMaximumCost(defaultMaximum: number) {
+  const configured = Number.parseFloat(process.env.LODESTA_SITE_AGENT_MAX_COST_USD?.trim() ?? "");
+  return Number.isFinite(configured) && configured > 0
+    ? Math.min(defaultMaximum, configured)
+    : defaultMaximum;
 }
 
 export function managerGuardrailsAfterPriorUsage(

@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
@@ -14,7 +14,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
   if (!session || session.principal.kind !== "owner" || !canAccessAgentSession(actor, session.principal.id)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
   try {
     const run = await siteAuthoringWorkflow.retryFailedRun({ runId, actorId: actor.actorId });
-    after(async () => { await siteAuthoringWorkflow.executeRunAndFinalize(run.id); });
     return NextResponse.json({ run: ownerSiteAgentRun(run) }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -3,7 +3,6 @@ import { siteAgentMessageSchema, siteElementSelectionSchema } from "@/packages/s
 
 const component = await readFile("components/SiteAgentWorkspace.tsx", "utf8");
 const frame = await readFile("components/WebsiteWorkspaceFrame.tsx", "utf8");
-const setupWorkspace = await readFile("components/WebsiteSetupWorkspace.tsx", "utf8");
 const buildCanvas = await readFile("components/WebsiteBuildCanvas.tsx", "utf8");
 const ownerRunView = await readFile("packages/site-platform/owner-run-view.ts", "utf8");
 const sessionRoute = await readFile("app/api/site-agent/sessions/route.ts", "utf8");
@@ -24,24 +23,50 @@ await assertMissing("app/(owner)/dashboard/[slug]/page.tsx");
 assert(component.includes('const [composerMode, setComposerMode] = useState<"edit" | "ask">("edit")'), "Edit is not the default workspace mode");
 assert(component.includes('const asking = composerMode === "ask"') && component.includes('asking ? "/api/site-agent/discuss" : "/api/site-agent/runs"'), "Ask and Edit do not use their canonical endpoints");
 assert(component.includes("result.discussion.requiresApply && result.discussion.proposedAction"), "Discussion suggestions are not captured from the response");
+assert(component.includes("async function cancelRun(run: OwnerSiteAgentRun)")
+  && component.includes('method: "DELETE"')
+  && component.includes('Stop {activeRun.kind === "initial_build" ? "build" : "update"}')
+  && component.includes(">Stop update</button>"), "An owner cannot stop an active or paused website run from the editor.");
+assert(runRoute.includes("export async function DELETE")
+  && runRoute.includes("cancelRun"), "The owner run cancellation API is missing.");
+assert(component.includes('className="site-agent-compose-run-actions"')
+  && component.includes('className="button danger-secondary"')
+  && css.includes(".site-agent-compose-run-actions"), "The bottom composer does not expose the active-run Stop control.");
+assert(component.includes('run.status === "queued" ? `Queued ${elapsed}` : `Active ${elapsed}`')
+  && ownerRunView.includes("activeSince: chronologicalEvents[0]?.startedAt"), "Queued time is still presented as active website-design time.");
 assert(component.includes("setInstruction(discussionSuggestion.action)"), "Using a suggestion does not place the proposed action in the composer");
 assert(component.includes('setComposerMode("edit")'), "Using a suggestion does not return the composer to Edit");
 const useSuggestionBody = component.match(/function useSuggestion\(\) \{([\s\S]*?)\n  \}\n\n  function navigatePreview/)?.[1] ?? "";
 assert(useSuggestionBody.length > 0 && !useSuggestionBody.includes("submit("), "Using a suggestion auto-submits the Build request");
 assert(component.includes("frameWindow.location.assign(target)"), "Page selection does not navigate the mounted preview iframe");
 assert(component.includes("setSelectedPagePath(route)"), "Iframe navigation does not synchronize the page picker");
+assert(component.includes("selection: selection ?? {") && component.includes("route: selectedPagePath"), "Edits without an element selection do not retain the currently previewed route");
+assert(component.includes('message.role === "agent" && message.selection?.route') && component.includes("focusedMessageRef"), "Completed edits do not focus the agent-reported changed route");
 assert(component.includes("key={previewIdentity}"), "Preview remount identity is not isolated from the selected page path");
 assert(component.includes("event.target instanceof document.defaultView.Element"), "Element selection does not account for the iframe document realm");
 assert(frame.includes('data-mobile-pane={mobilePane}'), "Mobile pane state is not exposed to the mounted workspace");
 assert(frame.includes("inert={compactViewport && mobilePane"), "The inactive mobile pane is not made inert");
-assert(component.includes("<WebsiteWorkspaceFrame") && setupWorkspace.includes("<WebsiteWorkspaceFrame"), "The editor and setup thread do not share the canonical workspace frame");
-assert(component.includes("<WebsiteBuildCanvas") && setupWorkspace.includes("<WebsiteBuildCanvas") && buildCanvas.includes('data-stage={stage}'), "Setup and blank editor states do not share the stage-aware build canvas");
-assert(component.includes("previewAvailable ? <>") && component.includes("const showMore = previewAvailable && workspace.versions.length > 0") && component.includes("const showPublish = Boolean(latestCandidate)"), "Preview controls are not progressively revealed from real preview and candidate state");
+assert(component.includes("<WebsiteWorkspaceFrame"), "The editor does not use the canonical workspace frame");
+assert(component.includes("<WebsiteBuildCanvas") && buildCanvas.includes('data-stage={stage}'), "Blank editor states do not use the stage-aware build canvas");
+assert(component.includes("previewAvailable ? <>") && component.includes("const showMore = previewAvailable && workspace.versions.length > 0") && component.includes("selectedIsCurrentCandidate"), "Preview controls are not progressively revealed from the selected current candidate state");
 assert(component.includes('stage: "attention" as const') && component.includes('stage: "paused" as const'), "Blank-preview failure and paused states are not represented by static build-canvas states");
-assert(component.includes('className={`site-agent-select-page') && component.includes("Select on page") && !component.includes(">Select</button>") && !component.includes("<strong>Select an element"), "Element selection is not exclusively activated from the command dock");
+assert(
+  component.includes('className={`site-agent-select-page')
+  && component.includes('selectionMode ? "Cancel selection" : "Select an element"')
+  && component.includes("{ hoverDelay: 150 }")
+  && component.includes("{selectPageTooltip.tooltip}")
+  && !component.includes('<span>{selectionMode ? "Cancel selection" : "Select on page"}</span>'),
+  "Element selection is not exposed as an icon-only command-dock action with a quick tooltip"
+);
 assert(component.includes('setMobilePane("preview")') && component.includes('setMobilePane("chat")') && component.includes("composerRef.current?.focus()"), "Mobile selection does not complete the Chat to Preview to Chat flow");
 assert(frame.includes("previewInteractionActive") && frame.includes('panelMode === "full-chat"') && frame.includes("restoreSplitPanel()"), "Selection cannot restore the desktop split preview from full-chat mode");
-assert(component.includes("selection.label ?? \"Page element\"") && component.includes("selectionLabelFor(element)") && component.includes("stale_selection"), "Owner-facing selection labels or stale-selection guidance are incomplete");
+assert(component.includes("selection.label ?? selectionKind ?? \"Page element\"") && component.includes("selectionLabelFor(element)") && component.includes("stale_selection"), "Owner-facing selection labels or stale-selection guidance are incomplete");
+assert(component.includes("createPreviewSelectionOverlay(document, \"hover\")") && component.includes('document.addEventListener("mouseover", updateHover, true)'), "Element selection does not preview the normalized target on hover");
+assert(component.includes("previewSelectionTargetFor(rawElement, document)") && component.includes("previewSelectionKindFor(element)"), "Element selection does not normalize nested preview targets into meaningful owner-facing elements");
+assert(component.includes("createPreviewSelectionOverlay(document, \"selected\")") && !component.includes("selectedElement.style.outline"), "Committed selection does not use a non-destructive preview overlay");
+assert(component.includes('window.addEventListener("keydown", cancelSelection)') && component.includes('event.key !== "Escape"'), "Selection mode cannot be cancelled from the owner workspace keyboard context");
+assert(component.includes('className="site-agent-selection-chip"') && component.includes("<CloseIcon />") && !component.includes("site-agent-selection-strip"), "Selected preview context is not shown as a compact removable composer token");
+assert(css.includes(".site-agent-selection-chip") && css.includes("--product-color-primary-surface"), "The selection token does not use the canonical product active-state treatment");
 assert(!component.includes("site-agent-rail"), "The retired pages and capabilities rail remains in the workspace");
 assert(component.includes("{isAdmin ? ("), "Workspace diagnostics are not restricted to admins");
 assert(component.includes("Admin diagnostics") && component.includes("workspace.site.id"), "Admin site diagnostics do not expose the site ID");
@@ -53,6 +78,26 @@ assert(component.includes("workspace.input?.business.name ?? initialInput.busine
 assert(component.includes("site-agent-command-title-desktop") && component.includes("Editor · "), "Desktop editor header does not identify the active website and task");
 assert(component.includes('className="site-agent-preview-primary"') && component.includes('className="site-agent-preview-outcome"'), "Preview toolbar does not separate context/tools from the outcome actions");
 assert(component.includes("site-agent-more-popover") && component.includes('aria-haspopup="dialog"') && component.includes('event.key !== "Escape"'), "Preview More menu is not keyboard-operable");
+assert(
+  component.includes('type PreviewViewport = "desktop" | "tablet" | "mobile"')
+  && component.includes('value="tablet" label="Tablet preview"')
+  && css.includes(".site-agent-preview-stage.is-tablet iframe")
+  && css.includes("width: min(768px, 100%)"),
+  "Preview dimensions do not expose the canonical desktop, tablet, and mobile choices"
+);
+assert(
+  component.includes("<option key={page.id} value={page.path}>{page.path}</option>")
+  && component.includes('className="site-agent-page-path-select"')
+  && css.includes("width: clamp(160px, 28vw, 240px)"),
+  "The compact page selector does not present canonical route paths"
+);
+assert(
+  component.includes("const currentPreviewUrl = previewRouteUrl(previewBaseUrl, selectedPageValue)")
+  && component.includes("<PreviewOpenLink href={currentPreviewUrl} />")
+  && component.includes('target="_blank"')
+  && component.includes('aria-label="Open preview in a new tab"'),
+  "The selected private preview route cannot be opened in a new tab"
+);
 for (const label of ["Compare with live", "Version history", "Restore selected", "Open live site", "Admin diagnostics"]) {
   assert(component.includes(label), `Preview More menu is missing ${label}`);
 }
@@ -129,6 +174,7 @@ assert(css.includes('.site-agent-workspace[data-panel-mode="collapsed"]') && css
 assert(css.includes('.site-agent-workspace[data-panel-mode="full-chat"]') && css.includes("width: min(100%, 760px)"), "Full-chat composition is not implemented");
 assert(css.includes("max-height: 160px") && css.includes("border-radius: var(--product-radius-lg)") && css.includes("resize: none") && css.includes("caret-color: var(--product-color-primary)"), "Composer does not use the canonical content-hugging command-dock treatment");
 assert(css.includes(".site-agent-send-button") && css.includes("width: var(--product-control-height-compact)"), "Desktop arrow send control is not compact");
+assert(css.includes(".site-agent-select-page") && css.includes("width: var(--product-control-height-compact)") && css.includes("width: var(--product-control-height-touch)"), "The element selector is not a compact icon control with a mobile touch target");
 assert(css.includes(".site-agent-voice-button,\n  .site-agent-send-button {\n    width: 44px") && css.includes(".site-agent-compose-mode-trigger") && css.includes(".site-agent-compose-mode-menu button"), "Mobile composer controls do not meet the touch-target contract");
 assert(css.includes("background: var(--product-color-primary-surface)"), "Owner messages do not retain the green surface");
 assert(css.includes('.site-agent-workspace[data-mobile-pane="chat"] .site-agent-preview-column'), "Mobile Chat mode does not hide the mounted preview pane");
@@ -137,7 +183,8 @@ assert(!css.includes(".site-agent-rail"), "Retired rail CSS remains after the cl
 const previewBarCss = css.match(/\.site-agent-preview-bar \{([\s\S]*?)\n\}/)?.[1] ?? "";
 assert(previewBarCss.includes("grid-template-columns: minmax(0, 1fr) auto") && previewBarCss.includes("overflow: visible") && !previewBarCss.includes("overflow-x"), "Preview toolbar can still scroll Publish out of view");
 assert(css.includes(".site-agent-preview-outcome") && css.includes(".site-agent-more-popover") && css.includes("right: 0"), "Preview outcome actions and More menu are not pinned to the toolbar edge");
-assert(css.includes(".site-agent-more-mobile-tools") && css.includes("position: fixed") && css.includes("top: 66px"), "Mobile Preview tools do not move into the topbar More sheet");
+assert(!component.includes("site-agent-more-mobile-tools") && !css.includes("site-agent-more-mobile-tools"), "Mobile retains duplicate preview controls in the More sheet");
+assert(css.includes('grid-template-columns: max-content minmax(0, 240px) max-content') && css.includes("top: 126px"), "Mobile preview controls or the repositioned More sheet are incomplete");
 assert(css.includes(".website-build-canvas") && css.includes("@keyframes website-build-gather") && css.includes("@keyframes website-build-sweep"), "The build canvas is missing aggregation, assembly, or render motion");
 assert(css.includes(".website-build-canvas *") && css.includes("animation: none"), "The build canvas does not provide a static reduced-motion composition");
 assert(css.includes('.owner-workspace-shell[data-shell-mode="focused-editor"] > .owner-workspace-mobile-header'), "Focused mobile editor does not hide duplicate global chrome");

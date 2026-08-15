@@ -3,43 +3,59 @@ import { sha256, stableJson } from "@/packages/business-data";
 import type { ManagerToolName } from "./contracts";
 
 /**
- * Stateless Responses replay must remain append-only for prompt-cache prefix
- * continuity. No model summary, rolling replacement, or build checkpoint is
- * introduced here.
+ * Stateless Responses replay preserves every model output item so encrypted
+ * reasoning remains available across tool turns. When OpenAI emits an opaque
+ * compaction item, that item becomes the canonical history boundary and older
+ * input items are discarded exactly as the Responses API contract permits.
  */
 export class DeterministicManagerHistory {
+  private prefix: ResponseInputItem[];
   private readonly tail: ResponseInputItem[] = [];
+  private readonly pending: ResponseInputItem[] = [];
   private readonly readHashes = new Map<string, string>();
   private rereads = 0;
+  private compactions = 0;
+  private prunedItems = 0;
 
-  constructor(private readonly stablePrefix: ResponseInputItem[]) {}
+  constructor(stablePrefix: ResponseInputItem[], restoredItems: ResponseInputItem[] = []) {
+    this.prefix = [...stablePrefix];
+    if (restoredItems.length) this.restore(restoredItems);
+  }
 
   prefixItems() {
-    return this.stablePrefix;
+    return [...this.prefix];
   }
 
   prefixHash() {
-    return sha256(stableJson(this.stablePrefix));
+    return sha256(stableJson(this.prefix));
   }
 
   requestItems(_requestIndex?: number) {
-    return [...this.stablePrefix, ...this.tail];
+    return [...this.prefix, ...this.tail];
   }
 
   activeTailItems(_requestIndex?: number) {
-    return [...this.tail];
+    return oneTurnVisualEvidenceView(this.tail);
   }
 
   appendRuntimeState(item: ResponseInputItem) {
     this.tail.push(item);
+    this.pending.push(item);
   }
 
   noteNoToolResponse(input: {
     responseItems: ResponseInputItem[];
     responseIndex: number;
   }) {
+    this.appendResponseItems(input.responseItems);
     this.tail.push(
-      ...input.responseItems,
+      {
+        role: "user",
+        type: "message",
+        content: [{ type: "input_text", text: "Continue the website task using the available workspace tools." }]
+      }
+    );
+    this.pending.push(
       {
         role: "user",
         type: "message",
@@ -73,13 +89,120 @@ export class DeterministicManagerHistory {
         this.readHashes.set(file.path, file.contentHash);
       }
     }
-    if (input.includeResponseItems !== false) this.tail.push(...input.responseItems);
+    if (input.includeResponseItems !== false) this.appendResponseItems(input.responseItems);
     this.tail.push(input.functionOutput);
+    this.pending.push(input.functionOutput);
+  }
+
+  drainContinuationItems() {
+    const items = [...this.pending];
+    this.pending.length = 0;
+    return items;
   }
 
   unchangedPathRereads() {
     return this.rereads;
   }
+
+  compactionCount() {
+    return this.compactions;
+  }
+
+  compactedHistoryItems() {
+    return this.prunedItems;
+  }
+
+  private appendResponseItems(items: ResponseInputItem[]) {
+    let latestCompactionIndex = -1;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (!isCompactionItem(items[index]!)) continue;
+      latestCompactionIndex = index;
+      break;
+    }
+    if (latestCompactionIndex < 0) {
+      this.tail.push(...items);
+      this.pending.push(...items);
+      return;
+    }
+    this.compactions += items.filter(isCompactionItem).length;
+    this.prunedItems += this.prefix.length + this.tail.length + latestCompactionIndex;
+    this.prefix = [];
+    this.tail.length = 0;
+    const retained = items.slice(latestCompactionIndex);
+    this.tail.push(...retained);
+    this.pending.length = 0;
+    this.pending.push(...retained);
+  }
+
+  private restore(items: ResponseInputItem[]) {
+    let latestCompactionIndex = -1;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      if (!isCompactionItem(items[index]!)) continue;
+      latestCompactionIndex = index;
+      break;
+    }
+    if (latestCompactionIndex >= 0) {
+      this.prefix = [];
+      this.tail.push(...items.slice(latestCompactionIndex));
+      this.compactions = items.filter(isCompactionItem).length;
+      this.prunedItems = latestCompactionIndex;
+      return;
+    }
+    this.tail.push(...items);
+  }
+}
+
+/**
+ * Image-bearing tool outputs are useful for exactly one model turn: the author
+ * needs the pixels to identify an asset or inspect a render, but replaying the
+ * same base64 payload on every later tool turn adds substantial cost without
+ * adding evidence. Once a later model output proves the pixels were consumed,
+ * retain the labels and textual diagnostics while omitting only the image
+ * blocks from subsequent request views. The canonical continuation history is
+ * left untouched.
+ */
+function oneTurnVisualEvidenceView(items: ResponseInputItem[]) {
+  return items.map((item, index) => {
+    const record = objectValue(item);
+    if (record?.type !== "function_call_output" || !containsInputImage(record.output)) return item;
+    const consumed = items.slice(index + 1).some(isModelOutputItem);
+    if (!consumed) return item;
+    return {
+      ...record,
+      output: omitInputImages(record.output)
+    } as ResponseInputItem;
+  });
+}
+
+function isModelOutputItem(value: ResponseInputItem) {
+  const record = objectValue(value);
+  return record?.type === "reasoning"
+    || record?.type === "function_call"
+    || (record?.type === "message" && record.role === "assistant");
+}
+
+function containsInputImage(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsInputImage);
+  const record = objectValue(value);
+  if (!record) return false;
+  if (record.type === "input_image") return true;
+  return Object.values(record).some(containsInputImage);
+}
+
+function omitInputImages(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const retained = value.filter((item) => objectValue(item)?.type !== "input_image").map(omitInputImages);
+    if (retained.length !== value.length) {
+      retained.push({
+        type: "input_text",
+        text: "Visual previews were supplied and inspected on the preceding model turn; their labels and metadata remain above."
+      });
+    }
+    return retained;
+  }
+  const record = objectValue(value);
+  if (!record) return value;
+  return Object.fromEntries(Object.entries(record).map(([key, nested]) => [key, omitInputImages(nested)]));
 }
 
 export function managerPromptTelemetry(input: {
@@ -137,6 +260,10 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+function isCompactionItem(value: ResponseInputItem) {
+  return objectValue(value)?.type === "compaction";
 }
 
 function bytes(value: unknown) {

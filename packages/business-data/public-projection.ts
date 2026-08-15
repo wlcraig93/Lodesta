@@ -4,44 +4,26 @@ import {
   publicFactSchema,
   siteIntentSchema,
   sitePublicBuildInputSchema,
-  verticalContextModuleSchema,
   type BusinessState,
   type FormDefinition,
   type SiteIntent,
-  type SitePublicBuildInput,
-  type VerticalContextModule
+  type SitePublicBuildInput
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "./hash";
 
-export function siteIntentBuildContent(intent: SiteIntent) {
-  const {
-    agentAccessPolicy: _agentAccessPolicy,
-    revision: _revision,
-    updatedAt: _updatedAt,
-    intentHash: _intentHash,
-    ...content
-  } = intent;
-  return content;
-}
-
-export function siteIntentMatchesBuildContent(current: SiteIntent, built: SiteIntent) {
-  return stableJson(siteIntentBuildContent(current)) === stableJson(siteIntentBuildContent(built));
-}
 export type CreatePublicBuildInput = {
   id: string;
   state: BusinessState;
   intent: SiteIntent;
   forms: FormDefinition[];
-  domainContext?: VerticalContextModule;
   sourceSnapshotIds: string[];
   createdAt?: string;
-  runtimeSeriesId?: string;
+  runtimeSeriesId: string;
 };
 
 export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInput {
   const state = businessStateSchema.parse(input.state);
   const intent = siteIntentSchema.parse(input.intent);
-  const domainContext = input.domainContext ? verticalContextModuleSchema.parse(input.domainContext) : undefined;
   const forms = input.forms.map((form) => formDefinitionSchema.parse(form));
 
   if (state.siteId !== intent.siteId || forms.some((form) => form.siteId !== state.siteId)) {
@@ -65,10 +47,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     .map((fact) => publicFactSchema.parse(fact));
   const publicFactById = new Map(publicFacts.map((fact) => [fact.id, fact]));
   const eligibleSource = (ids: string[]) => ids.some((id) => publicFactById.has(id));
-  const offerings = state.offerings.filter((offering) => {
-    if (offering.status === "rejected" || offering.status === "inactive" || !eligibleSource(offering.sourceFactIds)) return false;
-    return offering.visibility === "public" || offering.visibility === "preview";
-  });
+  const offerings = state.offerings.filter((offering) => offering.status === "confirmed" && offering.visibility === "public");
   const assets = state.assets.filter((asset) => asset.activeForFutureBuilds);
   const links = state.links.filter((link) => link.publicEligible && eligibleSource(link.sourceFactIds));
   const serviceAreas = state.serviceAreas.filter((area) => eligibleSource(area.sourceFactIds));
@@ -100,13 +79,6 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
       throw new Error(`Confirmed testimonial ${item.id} must retain its complete source excerpt verbatim.`);
     }
   }
-  const businessNameFact = publicFacts.find((fact) => fact.kind === "business_name");
-  if (state.identity.status === "verified" && (!businessNameFact || String(businessNameFact.value).trim() !== state.identity.name.trim())) {
-    throw new Error("Public build input requires a source-backed business-name fact matching canonical identity.");
-  }
-  if (state.identity.status === "provisional" && businessNameFact) {
-    throw new Error("Provisional identity cannot expose a canonical business-name fact.");
-  }
   const descriptionFact = publicFacts.find((fact) => fact.kind === "description" && sameFactValue(fact.value, state.identity.description));
   const phoneFact = publicFacts.find((fact) => fact.kind === "phone" && sameFactValue(fact.value, state.contacts.phone));
   const emailFact = publicFacts.find((fact) => fact.kind === "email" && sameFactValue(fact.value, state.contacts.email));
@@ -123,9 +95,8 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
     siteId: state.siteId,
     businessId: state.businessId,
     createdAt,
-    businessStateRevision: state.revision,
-    siteIntentRevision: intent.revision,
-    domainContext,
+    ownerOperationalRevision: state.ownerOperationalRevision,
+    ownerIntentRevision: intent.ownerIntentRevision,
     business: {
       name: state.identity.name,
       identityStatus: state.identity.status,
@@ -148,7 +119,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
       formsEndpoint: "/api/forms/submit",
       analyticsEndpoint: "/api/analytics",
       mapsMode: "managed_directions" as const,
-      trustedRuntimeSeries: input.runtimeSeriesId ?? "site-runtime-v1"
+      trustedRuntimeSeries: input.runtimeSeriesId
     },
     sourceSnapshotIds,
     assetRevisionIds

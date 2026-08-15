@@ -2,12 +2,18 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { lodestaBrandSans } from "@/app/fonts";
 import { getCurrentUser } from "@/lib/supabase/server";
+import styles from "./MarketingShell.module.css";
 
 export async function MarketingShell({ children }: { children: ReactNode }) {
   return (
-    <div className={`${lodestaBrandSans.variable} marketing-shell`} data-theme="light">
+    <div className={`${lodestaBrandSans.variable} marketing-shell ${styles.shell}`} data-theme="light">
+      <a className={styles.skipLink} href="#marketing-content">
+        Skip to content
+      </a>
       <MarketingHeader />
-      {children}
+      <div className={styles.content} id="marketing-content" tabIndex={-1}>
+        {children}
+      </div>
       <MarketingFooter />
     </div>
   );
@@ -20,18 +26,18 @@ async function MarketingHeader() {
   const appLabel = user ? "Open app" : "Sign in";
 
   return (
-    <header className="app-header marketing-header">
-      <Link className="app-brand" href="/" aria-label="Lodesta home">
+    <header className={styles.header}>
+      <Link className={styles.brand} href="/" aria-label="Lodesta home">
         <img src="/brand/lodesta-wordmark-boxed.svg" alt="Lodesta" />
       </Link>
-      <nav className="app-nav" aria-label="Primary navigation">
-        <Link href="/#how-it-works">How it works</Link>
-        <Link href="/#what-we-check">What Lodesta checks</Link>
-        <Link className="app-nav-primary" href={appHref}>
+      <nav className={styles.nav} aria-label="Primary navigation">
+        <Link className={styles.sectionLink} href="/#how-it-works">How it works</Link>
+        <Link className={styles.sectionLink} href="/#what-lodesta-manages">What Lodesta manages</Link>
+        <Link className={styles.account} href={appHref}>
           {appLabel}
         </Link>
-        <Link className="button primary marketing-nav-cta" href="/#health-report">
-          Check my website
+        <Link className={styles.cta} href="/#health-report">
+          Get my free website report
         </Link>
       </nav>
     </header>
@@ -40,11 +46,11 @@ async function MarketingHeader() {
 
 function MarketingFooter() {
   return (
-    <footer className="marketing-footer">
-      <Link className="app-brand marketing-footer-brand" href="/" aria-label="Lodesta home">
+    <footer className={styles.footer}>
+      <Link className={`${styles.brand} ${styles.footerBrand}`} href="/" aria-label="Lodesta home">
         <img src="/brand/lodesta-wordmark-boxed.svg" alt="Lodesta" />
       </Link>
-      <p>The AI website manager for local businesses.</p>
+      <p>The AI website manager built for local-business growth.</p>
       <nav aria-label="Legal and support">
         <Link href="/privacy/">Privacy Policy</Link>
         <Link href="/terms/">Terms of Service</Link>

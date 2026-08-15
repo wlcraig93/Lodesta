@@ -94,7 +94,7 @@ jobs:
       - name: Build the real Wrangler container integration
         run: >-
           npx wrangler deploy
-          --config workers/site-sandbox/wrangler.jsonc
+          --config workers/site-sandbox/wrangler.blue.jsonc
           --dry-run
           --strict
           --containers-rollout=immediate

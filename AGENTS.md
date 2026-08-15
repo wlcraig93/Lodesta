@@ -56,6 +56,13 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - Use `.env.example` for documented placeholder configuration only.
 - Do not use production customer data in tests, fixtures, screenshots, or docs.
 
+## Prospect Research
+
+- Prospect enrichment is browser-only. Do not call the Google Places API, Google Maps Platform APIs, `places.googleapis.com`, or any paid Google business-data endpoint.
+- Do not use `GOOGLE_PROSPECT_PLACES_API_KEY`, even when it is configured locally.
+- Research through visible browser pages and first-party business websites. Persist only information that the browser evidence supports, and leave unavailable Google Place IDs blank rather than inferring them.
+- Any future paid enrichment API requires a new explicit product-owner decision that names the endpoint, field mask, request cap, and maximum approved cost before implementation or execution.
+
 ## Stack Context
 
 - Use the existing stack: Next.js App Router, React, TypeScript, plain global CSS, Supabase, Playwright, and Zod.

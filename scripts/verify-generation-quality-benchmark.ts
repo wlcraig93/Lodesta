@@ -5,13 +5,16 @@ import {
 } from "../packages/website-assessment/generation-quality-benchmark";
 
 const dimensions = (score: number, gatedScore = score) => ({
+  business_truth: gatedScore,
   functional_integrity: gatedScore,
-  mobile_performance: score,
-  discoverability: score,
-  conversion: score,
-  local_content: score,
-  trust: score,
-  automated_accessibility: gatedScore
+  responsive_usability: score,
+  performance: score,
+  accessibility: gatedScore,
+  search_answer_discoverability: score,
+  content_intent_coverage: score,
+  trust_proof: score,
+  conversion_usability: score,
+  visual_editorial_craft: score
 });
 const runs: GenerationQualityBenchmarkRun[] = [];
 for (let index = 0; index < 9; index += 1) {

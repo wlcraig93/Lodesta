@@ -27,7 +27,7 @@ export const analyticsSufficiency = {
 } as const;
 
 const knownBots = /bot\b|crawler\b|spider\b|slurp\b|bingpreview\b|facebookexternalhit\b|googleother\b|google-inspectiontool\b|headlesschrome\b|lighthouse\b|curl\/|wget\/|python-requests|go-http-client|postmanruntime/i;
-const lodestaAgents = /\bLodesta(?:GenerationCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i;
+const lodestaAgents = /\bLodesta(?:WebsiteCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i;
 const searchHosts = /(^|\.)((google|bing|yahoo|duckduckgo|brave)\.[a-z.]+|search\.aol\.com)$/i;
 const socialHosts = /(^|\.)(facebook\.com|instagram\.com|linkedin\.com|pinterest\.com|reddit\.com|tiktok\.com|x\.com|twitter\.com|youtube\.com)$/i;
 

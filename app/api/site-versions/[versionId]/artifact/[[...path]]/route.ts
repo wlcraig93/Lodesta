@@ -1,6 +1,7 @@
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { requireAdminOrSiteOwner } from "@/lib/security";
+import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function GET(
     headers: {
       "content-type": blob.contentType,
       "cache-control": "private, no-store",
-      "content-security-policy": "default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'",
+      "content-security-policy": generatedSiteContentSecurityPolicy("none"),
       "x-robots-tag": "noindex, nofollow"
     }
   });

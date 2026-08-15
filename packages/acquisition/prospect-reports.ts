@@ -13,6 +13,7 @@ import type {
 import { publicWebsiteAssessmentProjection } from "@/packages/website-assessment/public-projection";
 import type { WebsiteAssessment } from "@/packages/website-assessment/contracts";
 import { usageForModel } from "@/packages/site-agent/run-policy";
+import { assertOpenAiStrictJsonSchema } from "@/packages/site-agent/strict-tool-schema";
 import { assessBusinessStrength } from "./business-strength";
 import { publicProspectReportSchema } from "./public-report-contract";
 
@@ -118,6 +119,21 @@ export async function resolveProspectBusiness(input: { query: string }) {
   const modelId = "gpt-5.6-sol";
   const startedAt = Date.now();
   const client = new OpenAI({ apiKey, maxRetries: 0, timeout: 90_000 });
+  const responseJsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      businessName: { type: "string" },
+      locality: { type: "string" },
+      websiteUrl: { type: ["string", "null"] },
+      usMarket: { type: "boolean" },
+      reviewRating: { type: ["number", "null"] },
+      reviewCount: { type: ["integer", "null"] },
+      yearsInBusiness: { type: ["number", "null"] }
+    },
+    required: ["businessName", "locality", "websiteUrl", "usMarket", "reviewRating", "reviewCount", "yearsInBusiness"]
+  };
+  assertOpenAiStrictJsonSchema(responseJsonSchema, "prospect_business_resolution");
   const response = await client.responses.create({
     model: modelId,
     store: false,
@@ -131,20 +147,7 @@ export async function resolveProspectBusiness(input: { query: string }) {
         type: "json_schema",
         name: "prospect_business_resolution",
         strict: true,
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            businessName: { type: "string" },
-            locality: { type: "string" },
-            websiteUrl: { type: ["string", "null"] },
-            usMarket: { type: "boolean" },
-            reviewRating: { type: ["number", "null"] },
-            reviewCount: { type: ["integer", "null"] },
-            yearsInBusiness: { type: ["number", "null"] }
-          },
-          required: ["businessName", "locality", "websiteUrl", "usMarket", "reviewRating", "reviewCount", "yearsInBusiness"]
-        }
+        schema: responseJsonSchema
       }
     }
   });
@@ -193,14 +196,19 @@ export function prospectReportFromAssessment(
   const projection = publicWebsiteAssessmentProjection(assessment);
   const findings = projection.findings;
   return {
-    schemaVersion: 1,
-    kind: "prospect-presence-report",
+    schemaVersion: 2,
+    kind: "prospect-website-health-report",
     generatedAt: projection.generatedAt,
     websiteKind: input.websiteKind ?? "owned_website",
     sourceUrl: projection.sourceUrl,
     sourceHost: input.sourceHost ?? hostFromUrl(projection.sourceUrl),
     assessmentId: projection.assessmentId,
     coverage: projection.coverage,
+    snapshot: projection.snapshot,
+    methodology: projection.methodology,
+    grade: projection.grade,
+    dimensions: projection.dimensions,
+    siteInventory: projection.siteInventory,
     siteUnderstanding: projection.siteUnderstanding,
     whatsWorking: projection.whatsWorking,
     findings,
@@ -227,6 +235,7 @@ export function noOwnedWebsiteProspectReport(input: {
   const finding: ProspectReportFinding = {
     id: "no_owned_website",
     dimension: "Owned website foundation",
+    controlOwner: "shared",
     severity: "critical",
     status: "fail",
     title: socialOnly ? "The listing points to a profile, not an owned website" : "No owned website was found",
@@ -242,8 +251,8 @@ export function noOwnedWebsiteProspectReport(input: {
     recommendation: "Create an owned, mobile-ready website with service, trust, contact, schema, and local content."
   };
   return {
-    schemaVersion: 1,
-    kind: "prospect-presence-report",
+    schemaVersion: 2,
+    kind: "prospect-website-health-report",
     generatedAt: new Date().toISOString(),
     websiteKind: input.websiteKind,
     sourceUrl: input.sourceUrl,
@@ -293,32 +302,11 @@ export function publicProspectReport(
 }
 
 export function prospectReportTeaser(result: ProspectPresenceReportResult) {
-  const strengths = [
-    ...result.whatsWorking,
-    ...(result.agentReadiness?.verified ?? []).map((item) => ({
-      id: item.id,
-      dimension: "AI-search readiness",
-      title: item.title,
-      evidence: item.evidence
-    })),
-    ...(result.visualQuality?.strengths ?? []).map((item) => ({
-      id: item.id,
-      dimension: "Visual experience",
-      title: item.title,
-      evidence: item.evidence
-    }))
-  ];
-  const findings = dedupeReportFindings([
-    ...result.findings,
-    ...(result.agentReadiness?.findings ?? []),
-    ...(result.visualQuality?.findings ?? [])
-  ]).sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const strengths = result.whatsWorking;
+  const findings = dedupeReportFindings(result.findings)
+    .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
   const finding = findings[0];
-  const limitations = [...new Set([
-    ...(result.coverage?.limitations ?? []),
-    ...(result.agentReadiness?.coverage.limitations ?? []),
-    ...(result.visualQuality?.coverage.limitations ?? [])
-  ])];
+  const limitations = [...new Set(result.coverage?.limitations ?? [])];
 
   return {
     siteUnderstanding: result.siteUnderstanding,

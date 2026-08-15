@@ -1,0 +1,17 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "lodesta-site-sandbox-green",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "SANDBOX_TRANSPORT": "rpc" },
+  "containers": [{
+    "class_name": "Sandbox",
+    "image": "./Dockerfile",
+    "instance_type": "standard-2",
+    "max_instances": 5
+  }],
+  "durable_objects": { "bindings": [{ "name": "Sandbox", "class_name": "Sandbox" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Sandbox"] }],
+  "r2_buckets": [{ "binding": "WORKSPACE_BUCKET", "bucket_name": "lodesta-workspace-backups-v1" }]
+}

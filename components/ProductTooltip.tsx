@@ -27,7 +27,13 @@ type Placement = "top" | "bottom";
  * horizontally. Touch pointers are ignored — there is no hover on touch, and
  * the trigger's own accessible name already covers assistive tech.
  */
-export function useProductTooltip(label: string, { disabled = false }: { disabled?: boolean } = {}) {
+export function useProductTooltip(
+  label: string,
+  {
+    disabled = false,
+    hoverDelay = SHOW_DELAY_MS
+  }: { disabled?: boolean; hoverDelay?: number } = {}
+) {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLElement | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
@@ -71,9 +77,9 @@ export function useProductTooltip(label: string, { disabled = false }: { disable
         setOpen(true);
       };
       if (immediate) reveal();
-      else timerRef.current = window.setTimeout(reveal, SHOW_DELAY_MS);
+      else timerRef.current = window.setTimeout(reveal, hoverDelay);
     },
-    [disabled, position]
+    [disabled, hoverDelay, position]
   );
 
   useEffect(() => {

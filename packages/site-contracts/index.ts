@@ -70,6 +70,147 @@ export const sourceSnapshotSchema = z.object({
 }).strict();
 export type SourceSnapshot = z.infer<typeof sourceSnapshotSchema>;
 
+export const sourceSnapshotResourceRoleSchema = z.enum([
+  "robots",
+  "sitemap",
+  "document",
+  "rendered_document",
+  "stylesheet",
+  "script",
+  "image",
+  "font",
+  "data",
+  "other"
+]);
+export type SourceSnapshotResourceRole = z.infer<typeof sourceSnapshotResourceRoleSchema>;
+
+export const sourceSnapshotResourceSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  sourceSnapshotId: identifier,
+  captureKind: z.enum(["http_response", "rendered_dom"]),
+  role: sourceSnapshotResourceRoleSchema,
+  requestedUrl: publicUrl,
+  finalUrl: publicUrl.optional(),
+  outcome: z.enum(["fetched", "excluded", "failed", "unfinished"]),
+  reason: z.string().min(1).max(160).optional(),
+  status: z.number().int().min(100).max(599).optional(),
+  contentType: z.string().min(1).max(200).optional(),
+  storedEncoding: z.enum(["identity", "gzip"]).optional(),
+  rawContentHash: contentHash.optional(),
+  blobContentHash: contentHash.optional(),
+  storageKey: z.string().min(1).max(1024).optional(),
+  rawBytes: z.number().int().nonnegative(),
+  storedBytes: z.number().int().nonnegative(),
+  headers: z.record(z.string(), z.string()),
+  redirectChain: z.array(z.object({
+    url: publicUrl,
+    status: z.number().int().min(300).max(399),
+    location: publicUrl
+  }).strict()),
+  initiatorUrls: z.array(publicUrl),
+  capturedAt: isoTimestamp,
+  metadata: z.record(z.string(), z.unknown())
+}).strict().superRefine((value, context) => {
+  const retainedFields = [value.finalUrl, value.status, value.contentType, value.storedEncoding, value.rawContentHash, value.blobContentHash, value.storageKey];
+  if (value.outcome === "fetched" && retainedFields.some((field) => field === undefined)) {
+    context.addIssue({ code: "custom", message: "Fetched source resources require complete response and blob provenance." });
+  }
+  const retainedBodyFields = [value.storedEncoding, value.rawContentHash, value.blobContentHash, value.storageKey];
+  if (retainedBodyFields.some((field) => field !== undefined) && retainedBodyFields.some((field) => field === undefined)) {
+    context.addIssue({ code: "custom", message: "Retained source response bodies require complete encoding and blob provenance." });
+  }
+  if ((value.outcome === "excluded" || value.outcome === "unfinished") && (retainedBodyFields.some((field) => field !== undefined) || value.rawBytes || value.storedBytes)) {
+    context.addIssue({ code: "custom", message: "Excluded and unfinished source resources cannot claim retained body bytes." });
+  }
+});
+export type SourceSnapshotResource = z.infer<typeof sourceSnapshotResourceSchema>;
+
+export const sourceSnapshotPageSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  sourceSnapshotId: identifier,
+  resourceId: identifier,
+  renderedResourceId: identifier.optional(),
+  requestedUrl: publicUrl,
+  finalUrl: publicUrl.optional(),
+  path: z.string().startsWith("/").max(2048),
+  outcome: z.enum(["fetched", "excluded", "failed", "unfinished"]),
+  reason: z.string().min(1).max(160).optional(),
+  status: z.number().int().min(100).max(599).optional(),
+  contentType: z.string().max(200).optional(),
+  canonical: publicUrl.optional(),
+  indexability: z.enum(["indexable", "noindex", "unknown"]),
+  sitemap: z.object({ url: publicUrl, lastModified: isoTimestamp.optional() }).strict().optional(),
+  title: z.string().max(500).optional(),
+  headings: z.array(z.string().min(1).max(500)),
+  wordCount: z.number().int().nonnegative(),
+  internalLinks: z.array(publicUrl),
+  externalLinks: z.array(publicUrl),
+  rawContentHash: contentHash.optional(),
+  exactDuplicateOf: identifier.optional(),
+  templateSignature: contentHash.optional(),
+  linkProminence: z.number().int().nonnegative(),
+  extractedText: z.string(),
+  textContentHash: contentHash,
+  producer: z.string().min(1).max(200),
+  inputHash: contentHash,
+  createdAt: isoTimestamp
+}).strict();
+export type SourceSnapshotPage = z.infer<typeof sourceSnapshotPageSchema>;
+
+export const websiteSourceSnapshotPayloadSchema = z.object({
+  schemaVersion: z.literal(1),
+  kind: z.literal("website-mirror"),
+  sourceUrl: publicUrl,
+  coverage: z.enum(["complete", "restricted", "incomplete"]),
+  completionReason: z.enum(["queue_exhausted", "restricted", "deadline", "capture_size_fuse", "cancelled", "failures"]),
+  manifestHash: contentHash,
+  counts: z.object({
+    documentsDiscovered: z.number().int().nonnegative(),
+    documentsEligible: z.number().int().nonnegative(),
+    documentsFetched: z.number().int().nonnegative(),
+    documentsExcluded: z.number().int().nonnegative(),
+    documentsFailed: z.number().int().nonnegative(),
+    documentsUnfinished: z.number().int().nonnegative(),
+    resourcesDiscovered: z.number().int().nonnegative(),
+    resourcesFetched: z.number().int().nonnegative(),
+    resourcesExcluded: z.number().int().nonnegative(),
+    resourcesFailed: z.number().int().nonnegative(),
+    resourcesUnfinished: z.number().int().nonnegative(),
+    browserRendered: z.number().int().nonnegative(),
+    uniqueBlobs: z.number().int().nonnegative(),
+    rawBytes: z.number().int().nonnegative(),
+    storedBytes: z.number().int().nonnegative()
+  }).strict(),
+  stages: z.object({
+    discoveryMs: z.number().int().nonnegative(),
+    documentFetchMs: z.number().int().nonnegative(),
+    dependencyFetchMs: z.number().int().nonnegative(),
+    browserFallbackMs: z.number().int().nonnegative(),
+    blobPersistenceMs: z.number().int().nonnegative(),
+    pageIndexMs: z.number().int().nonnegative(),
+    factExtractionMs: z.number().int().nonnegative(),
+    finalizationMs: z.number().int().nonnegative()
+  }).strict(),
+  startedAt: isoTimestamp,
+  completedAt: isoTimestamp,
+  elapsedMs: z.number().int().nonnegative()
+}).strict();
+export type WebsiteSourceSnapshotPayload = z.infer<typeof websiteSourceSnapshotPayloadSchema>;
+
+export const sourceSearchResultSchema = z.object({
+  sourceId: identifier,
+  pageId: identifier,
+  url: publicUrl,
+  path: z.string().startsWith("/"),
+  title: z.string().max(500).optional(),
+  score: z.number().nonnegative(),
+  excerpt: z.string().min(1),
+  contentHash
+}).strict();
+export type SourceSearchResult = z.infer<typeof sourceSearchResultSchema>;
+
 export const assetOriginSchema = z.enum(["source_website", "owner_upload", "platform_generated"]);
 export type AssetOrigin = z.infer<typeof assetOriginSchema>;
 
@@ -79,7 +220,29 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
     sourceUrl: publicUrl,
     sourcePageUrl: publicUrl,
     sourceSnapshotId: identifier,
-    alt: z.string().max(500).optional()
+    sourceResourceId: identifier.optional(),
+    alt: z.string().max(500).optional(),
+    preparation: z.object({
+      processor: z.literal("sharp"),
+      recipe: z.literal("logo-presentation"),
+      recipeVersion: z.literal(1),
+      sourceContentHash: contentHash,
+      operations: z.array(z.enum([
+        "trim_transparent_canvas",
+        "trim_uniform_canvas",
+        "remove_uniform_background"
+      ])).max(3),
+      sourceWidth: z.number().int().positive(),
+      sourceHeight: z.number().int().positive(),
+      contentBounds: z.object({
+        left: z.number().int().nonnegative(),
+        top: z.number().int().nonnegative(),
+        width: z.number().int().positive(),
+        height: z.number().int().positive()
+      }).strict(),
+      backgroundColor: z.string().regex(/^#[a-f0-9]{6}$/).optional(),
+      confidence: z.number().min(0).max(1)
+    }).strict().optional()
   }).strict(),
   z.object({
     origin: z.literal("owner_upload"),
@@ -123,19 +286,13 @@ export type AssetRevision = z.infer<typeof assetRevisionSchema>;
 
 export const businessOfferingSchema = z.object({
   id: identifier,
-  catalogId: identifier.optional(),
-  customName: z.string().min(1).max(160).optional(),
   name: z.string().min(1).max(160),
   description: z.string().max(600).optional(),
-  status: z.enum(["observed", "confirmed", "rejected", "inactive"]),
-  visibility: z.enum(["preview", "public", "hidden"]),
-  pageMode: z.enum(["none", "shared", "dedicated"]),
-  featured: z.boolean(),
+  status: z.enum(["confirmed", "inactive"]),
+  visibility: z.enum(["public", "hidden"]),
   sourceFactIds: z.array(identifier),
   confirmedAt: isoTimestamp.optional()
-}).strict().refine((value) => value.catalogId || value.customName, {
-  message: "An offering must use a catalog ID or a custom name."
-});
+}).strict();
 export type BusinessOffering = z.infer<typeof businessOfferingSchema>;
 
 export const businessProofSchema = z.object({
@@ -172,6 +329,7 @@ export const businessStateSchema = z.object({
   businessId: identifier,
   siteId: identifier,
   revision: z.number().int().positive(),
+  ownerOperationalRevision: z.number().int().positive(),
   stateHash: contentHash,
   updatedAt: isoTimestamp,
   identity: z.object({
@@ -248,6 +406,7 @@ export const siteIntentSchema = z.object({
   id: identifier,
   siteId: identifier,
   revision: z.number().int().positive(),
+  ownerIntentRevision: z.number().int().positive(),
   intentHash: contentHash,
   updatedAt: isoTimestamp,
   audience: z.string().max(600).optional(),
@@ -259,9 +418,8 @@ export const siteIntentSchema = z.object({
     purpose: z.enum(["home", "service", "about", "contact", "location", "gallery", "custom"]),
     slug: z.string().max(160).regex(/^(?:[a-z0-9]+(?:-[a-z0-9]+)*\/)*[a-z0-9]+(?:-[a-z0-9]+)*$|^$/),
     title: z.string().min(1).max(120),
-    required: z.boolean(),
-    offeringId: identifier.optional()
-  }).strict()).min(1).max(40),
+    required: z.boolean()
+  }).strict()),
   brandConstraints: z.object({
     preferredColors: z.array(z.string().max(80)).max(8),
     prohibitedColors: z.array(z.string().max(80)).max(8),
@@ -274,51 +432,98 @@ export const siteIntentSchema = z.object({
 }).strict();
 export type SiteIntent = z.infer<typeof siteIntentSchema>;
 
-export const verticalContextModuleSchema = z.object({
-  schemaVersion: z.literal(1),
-  id: z.string().min(1).max(80),
-  version: z.string().min(1).max(120),
-  status: z.enum(["active", "test_only", "tombstoned"]),
-  aliases: z.array(z.string().min(1).max(120)),
-  classificationSignals: z.array(z.string().min(1).max(240)),
-  terminology: z.record(z.string(), z.array(z.string().min(1).max(160))),
-  offeringCatalog: z.array(z.object({
-    id: identifier,
-    name: z.string().min(1).max(160),
-    aliases: z.array(z.string().min(1).max(160)),
-    status: z.enum(["active", "tombstoned"])
-  }).strict()),
-  customerJourneys: z.array(z.string().min(1).max(500)),
-  conversionRecommendations: z.array(z.string().min(1).max(500)),
-  proofCautions: z.array(z.string().min(1).max(500)),
-  contentOpportunities: z.array(z.string().min(1).max(500)),
-  faqOpportunities: z.array(z.string().min(1).max(500)),
-  seoAeoOpportunities: z.array(z.string().min(1).max(500)),
-  structuredDataType: z.string().min(1).max(80).regex(/^[A-Za-z][A-Za-z0-9]*$/),
-  skillRef: z.string().min(1).max(255),
-  evaluationRef: z.string().min(1).max(255)
+export const leadFormFieldRoleSchema = z.enum([
+  "contact_name",
+  "contact_email",
+  "contact_phone",
+  "message",
+  "custom"
+]);
+export type LeadFormFieldRole = z.infer<typeof leadFormFieldRoleSchema>;
+export const leadFormFieldSchema = z.object({
+  id: identifier,
+  label: z.string().min(1).max(120),
+  role: leadFormFieldRoleSchema,
+  type: z.enum(["text", "email", "phone", "textarea", "select", "radio", "checkbox"]),
+  required: z.boolean(),
+  options: z.array(z.string().min(1).max(120)).max(40).optional(),
+  placeholder: z.string().max(160).optional(),
+  helpText: z.string().max(300).optional()
 }).strict();
-export type VerticalContextModule = z.infer<typeof verticalContextModuleSchema>;
 
 export const formDefinitionSchema = z.object({
   schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
+  key: identifier,
   revision: z.number().int().positive(),
   name: z.string().min(1).max(120),
   status: z.enum(["candidate_only", "published", "retired"]),
-  fields: z.array(z.object({
-    id: identifier,
-    label: z.string().min(1).max(120),
-    type: z.enum(["text", "email", "phone", "textarea", "select"]),
-    required: z.boolean(),
-    options: z.array(z.string().max(120)).max(40).optional()
-  }).strict()).min(1).max(30),
+  destination: z.literal("lead_inbox"),
+  fields: z.array(leadFormFieldSchema).min(1).max(30).superRefine((fields, context) => {
+    const fieldIds = new Map<string, number>();
+    for (const role of ["contact_email", "contact_phone", "message"] as const) {
+      if (fields.filter((field) => field.role === role).length > 1) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A lead form may define at most one ${role} field.`
+        });
+      }
+    }
+    for (const [index, field] of fields.entries()) {
+      const firstFieldIndex = fieldIds.get(field.id);
+      if (firstFieldIndex !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Lead form field IDs must be unique; ${field.id} is also used at index ${firstFieldIndex}.`,
+          path: [index, "id"]
+        });
+      } else {
+        fieldIds.set(field.id, index);
+      }
+      if ((field.type === "select" || field.type === "radio") && !field.options?.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${field.type} fields require options.`,
+          path: [index, "options"]
+        });
+      }
+      if (field.options && new Set(field.options).size !== field.options.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Field options must be unique.",
+          path: [index, "options"]
+        });
+      }
+      if (field.role === "contact_email" && field.type !== "email") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "The contact_email role requires an email field.",
+          path: [index, "type"]
+        });
+      }
+      if (field.role === "contact_phone" && field.type !== "phone") {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "The contact_phone role requires a phone field.",
+          path: [index, "type"]
+        });
+      }
+    }
+  }),
   submitLabel: z.string().min(1).max(80),
   successMessage: z.string().min(1).max(300),
   createdAt: isoTimestamp
 }).strict();
 export type FormDefinition = z.infer<typeof formDefinitionSchema>;
+export const leadFormConfigurationSchema = formDefinitionSchema.pick({
+  key: true,
+  name: true,
+  fields: true,
+  submitLabel: true,
+  successMessage: true
+}).strict();
+export type LeadFormConfiguration = z.infer<typeof leadFormConfigurationSchema>;
 
 export const sitePublicBuildInputSchema = z.object({
   schemaVersion: z.literal(1),
@@ -326,10 +531,9 @@ export const sitePublicBuildInputSchema = z.object({
   siteId: identifier,
   businessId: identifier,
   createdAt: isoTimestamp,
-  businessStateRevision: z.number().int().positive(),
-  siteIntentRevision: z.number().int().positive(),
+  ownerOperationalRevision: z.number().int().positive(),
+  ownerIntentRevision: z.number().int().positive(),
   inputHash: contentHash,
-  domainContext: verticalContextModuleSchema.optional(),
   business: z.object({
     name: z.string().min(1).max(200),
     identityStatus: z.enum(["verified", "provisional"]),
@@ -344,7 +548,32 @@ export const sitePublicBuildInputSchema = z.object({
   }).strict(),
   publicFacts: z.array(publicFactSchema),
   intent: siteIntentSchema,
-  forms: z.array(formDefinitionSchema),
+  forms: z.array(formDefinitionSchema).superRefine((forms, context) => {
+    const formIds = new Map<string, number>();
+    const formKeys = new Map<string, number>();
+    for (const [index, form] of forms.entries()) {
+      const firstIdIndex = formIds.get(form.id);
+      if (firstIdIndex !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Form definition IDs must be unique; ${form.id} is also used at index ${firstIdIndex}.`,
+          path: [index, "id"]
+        });
+      } else {
+        formIds.set(form.id, index);
+      }
+      const firstKeyIndex = formKeys.get(form.key);
+      if (firstKeyIndex !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Form definition keys must be unique; ${form.key} is also used at index ${firstKeyIndex}.`,
+          path: [index, "key"]
+        });
+      } else {
+        formKeys.set(form.key, index);
+      }
+    }
+  }),
   capabilityConfiguration: z.object({
     formsEndpoint: z.string().startsWith("/"),
     analyticsEndpoint: z.string().startsWith("/"),
@@ -366,6 +595,9 @@ export const siteWorkspaceRevisionSchema = z.object({
   schemaVersion: z.literal(1),
   id: identifier,
   siteId: identifier,
+  publicBuildInputId: identifier,
+  ownerOperationalRevision: z.number().int().positive(),
+  ownerIntentRevision: z.number().int().positive(),
   parentRevisionId: identifier.optional(),
   revisionNumber: z.number().int().positive(),
   sourceHash: contentHash,
@@ -410,6 +642,8 @@ export const siteBuildArtifactSchema = z.object({
   siteId: identifier,
   workspaceRevisionId: identifier,
   publicBuildInputId: identifier,
+  ownerOperationalRevision: z.number().int().positive(),
+  ownerIntentRevision: z.number().int().positive(),
   createdAt: isoTimestamp,
   artifactHash: contentHash,
   storagePrefix: z.string().min(1).max(1024),
@@ -451,6 +685,8 @@ export const siteVersionSchema = z.object({
   artifactHash: contentHash,
   workspaceRevisionId: identifier,
   publicBuildInputId: identifier,
+  ownerOperationalRevision: z.number().int().positive(),
+  ownerIntentRevision: z.number().int().positive(),
   formDefinitionIds: z.array(identifier),
   sourceSnapshotIds: z.array(identifier),
   assetRevisionIds: z.array(identifier),
@@ -458,9 +694,64 @@ export const siteVersionSchema = z.object({
   createdBy: z.object({ kind: z.enum(["agent", "owner", "operator", "system"]), id: identifier }).strict(),
   publishedAt: isoTimestamp.optional(),
   replacedVersionId: identifier.optional(),
-  staleReason: z.literal("stale_input").optional()
+  staleReason: z.enum(["owner_authority_changed", "managed_dependency_changed"]).optional()
 }).strict();
 export type SiteVersion = z.infer<typeof siteVersionSchema>;
+
+export const candidateRedirectSchema = z.object({
+  sourcePath: z.string().startsWith("/").max(512),
+  destinationPath: z.string().startsWith("/").max(512),
+  reason: z.string().min(1).max(500).optional()
+}).strict();
+export type CandidateRedirect = z.infer<typeof candidateRedirectSchema>;
+
+export const siteVersionRedirectSchema = candidateRedirectSchema.extend({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  siteId: identifier,
+  versionId: identifier,
+  createdAt: isoTimestamp
+}).strict();
+export type SiteVersionRedirect = z.infer<typeof siteVersionRedirectSchema>;
+
+export const retiredSourcePathSchema = z.object({
+  sourcePath: z.string().startsWith("/").max(512),
+  reason: z.string().min(1).max(500).optional()
+}).strict();
+export type RetiredSourcePath = z.infer<typeof retiredSourcePathSchema>;
+
+export const siteSourceCoverageEntrySchema = z.object({
+  sourcePageId: identifier,
+  sourceUrl: publicUrl,
+  sourcePath: z.string().startsWith("/").max(2048),
+  indexability: z.enum(["indexable", "noindex", "unknown"]),
+  disposition: z.enum(["preserved", "redirected", "canonical_duplicate", "retired", "unaccounted"]),
+  destinationPath: z.string().startsWith("/").max(512).optional(),
+  reason: z.string().max(500).optional()
+}).strict();
+
+export const siteSourceCoverageReportSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  siteId: identifier,
+  versionId: identifier,
+  sourceSnapshotId: identifier,
+  sourceContentHash: contentHash,
+  artifactHash: contentHash,
+  generatedAt: isoTimestamp,
+  counts: z.object({
+    sourcePages: z.number().int().nonnegative(),
+    preserved: z.number().int().nonnegative(),
+    redirected: z.number().int().nonnegative(),
+    canonicalDuplicates: z.number().int().nonnegative(),
+    retired: z.number().int().nonnegative(),
+    unaccounted: z.number().int().nonnegative(),
+    newRoutes: z.number().int().nonnegative()
+  }).strict(),
+  entries: z.array(siteSourceCoverageEntrySchema),
+  newRoutes: z.array(z.string().startsWith("/"))
+}).strict();
+export type SiteSourceCoverageReport = z.infer<typeof siteSourceCoverageReportSchema>;
 
 export const siteElementSelectionSchema = z.object({
   route: z.string().startsWith("/"),
@@ -488,19 +779,6 @@ export const platformSiteRecordSchema = z.object({
 }).strict();
 export type PlatformSiteRecord = z.infer<typeof platformSiteRecordSchema>;
 
-export const verticalDemandEventSchema = z.object({
-  schemaVersion: z.literal("vertical-demand-event"),
-  id: identifier,
-  sourceUrl: publicUrl,
-  observedVertical: z.string().min(1).max(80).optional(),
-  requestedBy: z.string().min(1).max(320),
-  status: z.enum(["open", "reviewed", "dismissed"]),
-  createdAt: isoTimestamp,
-  reviewedAt: isoTimestamp.optional(),
-  reviewedBy: identifier.optional()
-}).strict();
-export type VerticalDemandEvent = z.infer<typeof verticalDemandEventSchema>;
-
 export const operatorQueueItemSchema = z.object({
   schemaVersion: z.literal("operator-queue-item"),
   id: identifier,
@@ -523,26 +801,110 @@ export const operatorQueueItemSchema = z.object({
 });
 export type OperatorQueueItem = z.infer<typeof operatorQueueItemSchema>;
 
-export const sitePublicationReadinessSchema = z.object({
+export const siteCandidateIntegritySchema = z.object({
   schemaVersion: z.literal(1),
   siteId: identifier,
   versionId: identifier,
   artifactHash: contentHash,
-  status: z.enum(["ready", "blocked"]),
-  blockers: z.array(z.object({
-    code: z.enum(["business_identity", "stale_input", "objective_qa", "unsafe_form", "stranded_redirect"]),
+  status: z.enum(["current", "stale_owner_authority", "failed_integrity"]),
+  issues: z.array(z.object({
+    code: z.enum(["owner_authority_changed", "artifact_integrity", "managed_capability", "stranded_redirect"]),
     message: z.string().min(1).max(2000),
     referenceId: identifier.optional()
   }).strict()),
   checkedAt: isoTimestamp
 }).strict();
-export type SitePublicationReadiness = z.infer<typeof sitePublicationReadinessSchema>;
+export type SiteCandidateIntegrity = z.infer<typeof siteCandidateIntegritySchema>;
 
 export const siteAgentPrincipalSchema = z.object({
   kind: z.enum(["owner", "operator"]),
   id: identifier
 }).strict();
 export type SiteAgentPrincipal = z.infer<typeof siteAgentPrincipalSchema>;
+
+export const siteSandboxSlotSchema = z.enum(["blue", "green"]);
+export type SiteSandboxSlot = z.infer<typeof siteSandboxSlotSchema>;
+
+export const siteSandboxManifestSchema = z.object({
+  kind: z.literal("site-sandbox-manifest"),
+  apiIdentity: z.string().min(1).max(200),
+  storageIdentity: z.string().min(1).max(200),
+  durableObjectIdentity: z.string().min(1).max(200),
+  artifactContractIdentity: z.string().min(1).max(200),
+  toolchainIdentity: z.string().min(1).max(200),
+  sourcePolicyIdentity: z.string().min(1).max(200)
+}).strict();
+export type SiteSandboxManifest = z.infer<typeof siteSandboxManifestSchema>;
+
+export const siteSandboxDeploymentSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  slot: siteSandboxSlotSchema,
+  workerVersionId: z.string().min(1).max(200),
+  releaseSha: z.string().regex(/^[a-f0-9]{40}$/),
+  imageDigest: contentHash,
+  credentialSlot: siteSandboxSlotSchema,
+  manifest: siteSandboxManifestSchema,
+  createdAt: isoTimestamp
+}).strict().superRefine((value, context) => {
+  if (value.credentialSlot !== value.slot) {
+    context.addIssue({ code: "custom", path: ["credentialSlot"], message: "Credential slot must match the physical deployment slot." });
+  }
+});
+export type SiteSandboxDeployment = z.infer<typeof siteSandboxDeploymentSchema>;
+
+export const siteSandboxControlSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: z.literal("production"),
+  blueDeploymentId: identifier,
+  greenDeploymentId: identifier.optional(),
+  activeDeploymentId: identifier,
+  updatedAt: isoTimestamp
+}).strict().superRefine((value, context) => {
+  if (value.activeDeploymentId !== value.blueDeploymentId && value.activeDeploymentId !== value.greenDeploymentId) {
+    context.addIssue({ code: "custom", path: ["activeDeploymentId"], message: "Active deployment must be assigned to blue or green." });
+  }
+});
+export type SiteSandboxControl = z.infer<typeof siteSandboxControlSchema>;
+
+export const siteAgentWorkspaceCheckpointSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  runId: identifier,
+  executionNumber: z.number().int().positive(),
+  baseWorkspaceRevisionId: identifier.optional(),
+  publicBuildInputId: identifier,
+  sandboxDeploymentId: identifier,
+  sandboxId: z.string().min(1).max(255),
+  sandboxRevision: z.string().min(1).max(200),
+  workspaceHash: contentHash,
+  continuation: z.object({
+    generation: z.number().int().positive(),
+    sequence: z.number().int().nonnegative()
+  }).strict().optional(),
+  backup: z.object({
+    id: z.string().regex(/^[a-f0-9]{64}$/),
+    key: z.string().regex(/^workspace-backups\/[a-f0-9]{64}\.tar\.gz$/),
+    contentHash,
+    bytes: z.number().int().nonnegative()
+  }).strict(),
+  sidecar: z.object({
+    key: z.string().regex(/^workspace-sources\/[a-f0-9]{64}\.json$/),
+    contentHash,
+    bytes: z.number().int().nonnegative()
+  }).strict(),
+  producer: z.string().min(1).max(200),
+  modelId: z.string().min(1).max(120),
+  skillIdentity: z.string().min(1).max(200),
+  inputHash: contentHash,
+  createdAt: isoTimestamp
+}).strict().superRefine((value, context) => {
+  if (value.backup.key !== `workspace-backups/${value.backup.id}.tar.gz`
+    || value.sidecar.key !== `workspace-sources/${value.backup.id}.json`) {
+    context.addIssue({ code: "custom", path: ["backup"], message: "Checkpoint object keys must match the backup ID." });
+  }
+});
+export type SiteAgentWorkspaceCheckpoint = z.infer<typeof siteAgentWorkspaceCheckpointSchema>;
 
 export const siteAgentSessionSchema = z.object({
   schemaVersion: z.literal("site-agent-session"),
@@ -553,6 +915,7 @@ export const siteAgentSessionSchema = z.object({
   currentWorkspaceRevisionId: identifier.optional(),
   publicBuildInputId: identifier,
   sandboxProvider: z.literal("cloudflare"),
+  sandboxDeploymentId: identifier.optional(),
   sandboxId: z.string().max(255).optional(),
   sandboxLastStartedAt: isoTimestamp.optional(),
   sandboxLastDestroyedAt: isoTimestamp.optional(),
@@ -623,7 +986,9 @@ export const siteAgentRunEventSchema = z.object({
 export type SiteAgentRunEvent = z.infer<typeof siteAgentRunEventSchema>;
 
 export const siteAgentFailureCodeSchema = z.enum([
+  "source_preparation_failed",
   "platform_version_mismatch",
+  "model_tool_schema_invalid",
   "artifact_contract_invalid",
   "sandbox_unavailable",
   "provider_quota_exhausted",
@@ -646,83 +1011,182 @@ export type SiteAgentFailureCode = z.infer<typeof siteAgentFailureCodeSchema>;
 export const siteAgentFailureCategorySchema = z.enum(["platform", "provider", "budget", "authoring", "worker"]);
 export type SiteAgentFailureCategory = z.infer<typeof siteAgentFailureCategorySchema>;
 
+export const siteArchitectureRouteSchema = z.object({
+  path: z.string().startsWith("/").max(512),
+  label: z.string().min(1).max(240),
+  purpose: z.string().min(12).max(1000),
+  pageType: z.string().min(1).max(120),
+  parentPath: z.string().startsWith("/").max(512).nullable(),
+  navigation: z.enum(["primary", "footer", "contextual", "none"]),
+  sourcePaths: z.array(z.string().startsWith("/").max(2048))
+}).strict();
+export type SiteArchitectureRoute = z.infer<typeof siteArchitectureRouteSchema>;
+
+export const siteArchitectureSourceDispositionSchema = z.object({
+  sourcePath: z.string().startsWith("/").max(2048),
+  disposition: z.enum(["preserved", "redirected", "canonical_duplicate", "retired"]),
+  targetPath: z.string().startsWith("/").max(512).nullable()
+}).strict();
+export type SiteArchitectureSourceDisposition = z.infer<typeof siteArchitectureSourceDispositionSchema>;
+
+export const siteArchitecturePlanSchema = z.object({
+  strategy: z.string().min(1).max(4000),
+  primaryNavigation: z.array(z.object({
+    label: z.string().min(1).max(120),
+    path: z.string().startsWith("/").max(512)
+  }).strict()),
+  routes: z.array(siteArchitectureRouteSchema).min(1),
+  sourceDispositions: z.array(siteArchitectureSourceDispositionSchema),
+  authoringGuidance: z.array(z.string().min(1).max(1200))
+}).strict();
+export type SiteArchitecturePlan = z.infer<typeof siteArchitecturePlanSchema>;
+
+const siteAgentUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  cachedInputTokens: z.number().int().nonnegative().default(0),
+  reasoningTokens: z.number().int().nonnegative().default(0),
+  outputTokens: z.number().int().nonnegative(),
+  costUsd: z.number().nonnegative(),
+  costSource: siteAgentCostSourceSchema,
+  upstreamInferenceCostUsd: z.number().nonnegative().default(0),
+  durationMs: z.number().int().nonnegative()
+}).strict();
+
+export const siteAgentArchitectureSchema = z.object({
+  schemaVersion: z.literal(1),
+  producer: z.string().min(1).max(200),
+  modelId: z.literal("gpt-5.6-luna"),
+  reasoningEffort: z.literal("high"),
+  publicBuildInputId: identifier,
+  sourceInventoryHash: contentHash,
+  planHash: contentHash,
+  generatedAt: isoTimestamp,
+  plan: siteArchitecturePlanSchema,
+  usage: siteAgentUsageSchema
+}).strict();
+export type SiteAgentArchitecture = z.infer<typeof siteAgentArchitectureSchema>;
+
+export const siteAgentRunRequestSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("initial_build"),
+    sourceUrl: publicUrl
+  }).strict(),
+  z.object({
+    kind: z.literal("owner_instruction"),
+    messageIds: z.array(identifier).min(1).max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal("authority_refresh"),
+    changeRequestIds: z.array(identifier).min(1).max(200)
+  }).strict(),
+  z.object({
+    kind: z.literal("restore_design"),
+    sourceVersionId: identifier
+  }).strict()
+]);
+export type SiteAgentRunRequest = z.infer<typeof siteAgentRunRequestSchema>;
+
+export const siteAgentContinuationHeadSchema = z.object({
+  schemaVersion: z.literal(1),
+  runId: identifier,
+  generation: z.number().int().positive(),
+  executionNumber: z.number().int().positive(),
+  apiProvider: siteAgentApiProviderSchema,
+  modelId: z.string().min(1).max(120),
+  producer: z.string().min(1).max(200),
+  skillIdentity: z.string().min(1).max(200),
+  inputHash: contentHash,
+  stablePrefixHash: contentHash,
+  publicBuildInputId: identifier,
+  workspaceCheckpoint: z.object({
+    sandboxId: z.string().min(1).max(255).optional(),
+    workspaceHash: contentHash.optional(),
+    parentRevisionId: identifier.optional()
+  }).strict(),
+  latestSequence: z.number().int().nonnegative(),
+  responseCount: z.number().int().nonnegative(),
+  status: z.enum(["active", "awaiting_input", "terminal", "stale"]),
+  regeneration: z.enum(["fresh", "resumed", "restarted_after_mismatch"]),
+  createdAt: isoTimestamp,
+  updatedAt: isoTimestamp,
+  purgeAfter: isoTimestamp.optional()
+}).strict();
+export type SiteAgentContinuationHead = z.infer<typeof siteAgentContinuationHeadSchema>;
+
+export const siteAgentContinuationSegmentSchema = z.object({
+  schemaVersion: z.literal(1),
+  id: identifier,
+  runId: identifier,
+  generation: z.number().int().positive(),
+  sequence: z.number().int().positive(),
+  executionNumber: z.number().int().positive(),
+  apiProvider: siteAgentApiProviderSchema,
+  modelId: z.string().min(1).max(120),
+  producer: z.string().min(1).max(200),
+  skillIdentity: z.string().min(1).max(200),
+  inputHash: contentHash,
+  stablePrefixHash: contentHash,
+  responseCount: z.number().int().nonnegative(),
+  kind: z.enum(["model_output", "tool_result", "continuation_prompt"]),
+  blobRef: z.string().min(1).max(1024),
+  contentHash,
+  byteCount: z.number().int().nonnegative(),
+  workspaceHash: contentHash.optional(),
+  providerMetadata: z.record(z.string(), z.unknown()),
+  createdAt: isoTimestamp
+}).strict();
+export type SiteAgentContinuationSegment = z.infer<typeof siteAgentContinuationSegmentSchema>;
+
 export const siteAgentRunSchema = z.object({
   schemaVersion: z.literal("site-agent-run"),
   id: identifier,
   sessionId: identifier,
   siteId: identifier,
   publicBuildInputId: identifier,
-  origin: z.enum(["owner_request", "control_plane", "external_batch", "system"]),
-  executionDriver: z.enum(["responses_api", "external_mcp"]).default("responses_api"),
+  request: siteAgentRunRequestSchema,
+  origin: z.enum(["owner_request", "control_plane", "system"]),
   requestedBy: z.string().min(1).max(320),
-  publishAfterSuccess: z.boolean(),
   kind: z.enum(["initial_build", "edit", "rebase"]),
   status: z.enum(["queued", "running", "needs_input", "succeeded", "failed", "cancelled"]),
-  stage: z.enum(["queued", "authoring", "building", "fast_preview", "verifying", "needs_input", "candidate_ready", "failed"]),
+  stage: z.enum(["queued", "retrieving_sources", "architecting", "authoring", "building", "fast_preview", "inspecting", "verifying", "needs_input", "candidate_ready", "failed"]),
+  sandboxDeploymentId: identifier.optional(),
+  resumeCheckpointId: identifier.optional(),
+  checkpointRestartedAt: isoTimestamp.optional(),
   exactParentRevisionId: identifier.optional(),
   deferredUntilRunId: identifier.optional(),
   outputRevisionId: identifier.optional(),
   outputArtifactId: identifier.optional(),
-  screenshotKeys: z.array(z.string().min(1).max(1024)).max(100).optional(),
+  screenshotKeys: z.array(z.string().min(1).max(1024)).optional(),
   fastPreviewPath: z.string().startsWith("/").optional(),
   candidateVersionId: identifier.optional(),
-  apiProvider: siteAgentApiProviderSchema.optional(),
-  modelId: z.string().min(1).max(120).optional(),
-  externalProvenance: z.object({
-    clientAuthExpectation: z.literal("chatgpt"),
-    clientAuthVerification: z.enum(["operator_configured", "unverified"]),
-    clientSkillVerification: z.enum(["operator_configured", "unverified"]),
-    clientReportedModelId: z.string().min(1).max(160).optional(),
-    modelUsage: z.literal("unavailable")
-  }).strict().optional(),
-  authoringExecutionBundleId: identifier.optional(),
+  focusRoute: z.string().startsWith("/").max(300).optional(),
+  changedRoutes: z.array(z.string().startsWith("/").max(300)).optional(),
+  apiProvider: siteAgentApiProviderSchema,
+  modelId: z.string().min(1).max(120),
+  // Reader-only provenance may contain a retired experiment label. Live execution accepts only the canonical profile.
+  authoringProfileId: z.string().min(1).optional(),
+  architecture: siteAgentArchitectureSchema.optional(),
   supersedesRunId: identifier.optional(),
+  retryOfRunId: identifier.optional(),
+  coalescedIntoRunId: identifier.optional(),
   executionNumber: z.number().int().nonnegative().default(0),
+  workerId: z.string().min(1).max(200).optional(),
   heartbeatAt: isoTimestamp.optional(),
   skillVersions: z.record(z.string(), z.string()),
   guardrails: z.object({
     deadlineAt: isoTimestamp,
     maxCostUsd: z.number().positive(),
     maxConsecutiveIdenticalFailures: z.number().int().min(2).max(20)
-  }).strict().optional(),
-  usage: z.discriminatedUnion("kind", [
-    z.object({
-      kind: z.literal("model_reported"),
-      inputTokens: z.number().int().nonnegative(),
-      cachedInputTokens: z.number().int().nonnegative().default(0),
-      reasoningTokens: z.number().int().nonnegative().default(0),
-      outputTokens: z.number().int().nonnegative(),
-      costUsd: z.number().nonnegative(),
-      costSource: siteAgentCostSourceSchema,
-      upstreamInferenceCostUsd: z.number().nonnegative().default(0),
-      durationMs: z.number().int().nonnegative()
-    }).strict(),
-    z.object({
-      kind: z.literal("external_unavailable"),
-      modelUsage: z.literal("unavailable"),
-      sandboxDurationMs: z.number().int().nonnegative().default(0),
-      browserDurationMs: z.number().int().nonnegative().default(0),
-      storageBytes: z.number().int().nonnegative().default(0),
-      durationMs: z.number().int().nonnegative()
-    }).strict()
-  ]),
+  }).strict(),
+  usage: siteAgentUsageSchema,
   inputQuestion: z.string().min(1).max(600).optional(),
-  inputExpiresAt: isoTimestamp.optional(),
   failureCode: siteAgentFailureCodeSchema.optional(),
   failureCategory: siteAgentFailureCategorySchema.optional(),
   retryableByOwner: z.boolean().default(false),
   failureReason: z.string().max(2000).optional(),
   startedAt: isoTimestamp,
   completedAt: isoTimestamp.optional()
-}).strict().superRefine((value, context) => {
-  if (value.executionDriver === "responses_api") {
-    if (!value.apiProvider || !value.modelId || value.usage.kind !== "model_reported" || value.externalProvenance || !value.guardrails) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: "Responses API runs require API model provenance, reported usage, and canonical guardrails." });
-    }
-  } else if (!value.externalProvenance || value.usage.kind !== "external_unavailable" || value.apiProvider || value.modelId || value.guardrails) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "External MCP runs require external provenance and unavailable model usage." });
-  }
-});
+}).strict();
 export type SiteAgentRun = z.infer<typeof siteAgentRunSchema>;
 
 export const trustedRuntimePatchSchema = z.object({
@@ -757,13 +1221,13 @@ export const controlPlaneChangePayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("confirm_identity"), name: z.string().min(1).max(200) }).strict(),
   z.object({ kind: z.literal("update_contact"), phone: z.string().max(60).optional(), email: z.string().email().optional() }).strict(),
   z.object({ kind: z.literal("update_hours"), locationId: identifier, hours: canonicalHoursSchema }).strict(),
-  z.object({ kind: z.literal("add_offering"), name: z.string().min(2).max(160), pageMode: z.enum(["none", "shared", "dedicated"]) }).strict(),
-  z.object({ kind: z.literal("set_offering"), offeringId: identifier, enabled: z.boolean(), pageMode: z.enum(["none", "shared", "dedicated"]) }).strict(),
+  z.object({ kind: z.literal("add_offering"), name: z.string().min(2).max(160), description: z.string().max(600).optional() }).strict(),
+  z.object({ kind: z.literal("set_offering"), offeringId: identifier, enabled: z.boolean() }).strict(),
   z.object({ kind: z.literal("set_proof"), proofId: identifier, enabled: z.boolean() }).strict(),
   z.object({ kind: z.literal("set_asset_active"), assetId: identifier, active: z.boolean() }).strict(),
   z.object({ kind: z.literal("register_asset"), asset: assetRevisionRefSchema, revision: assetRevisionSchema }).strict(),
   z.object({ kind: z.literal("update_external_link"), linkId: identifier, url: publicUrl }).strict(),
-  z.object({ kind: z.literal("update_site_intent"), patch: siteIntentSchema.partial().omit({ schemaVersion: true, id: true, siteId: true, revision: true, intentHash: true, updatedAt: true, agentAccessPolicy: true }) }).strict(),
+  z.object({ kind: z.literal("update_site_intent"), patch: siteIntentSchema.partial().omit({ schemaVersion: true, id: true, siteId: true, revision: true, ownerIntentRevision: true, intentHash: true, updatedAt: true, agentAccessPolicy: true }) }).strict(),
   z.object({ kind: z.literal("update_agent_access_policy"), policy: agentAccessPolicySchema }).strict(),
   z.object({ kind: z.literal("request_site_edit"), instruction: z.string().min(1).max(4000), selection: siteElementSelectionSchema.optional() }).strict()
 ]);

@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { crawlWebsiteForGeneration, fetchGenerationPageWithBrowser, generationIngestionLimits } from "../packages/business-data/generation-crawler";
-import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "../packages/business-data/crawl-errors";
+import { gzipSync } from "node:zlib";
 import {
-  assertSourceSuitableForGeneration,
-  hasContradictoryFirstPartyLocationHours,
-  isAffirmativeEmergencyServiceStatement,
-  isExplicitNamedServiceArea,
-  selectSourceLinksForGeneration
-} from "../packages/business-data/website-ingestion";
+  crawlWebsiteForGeneration,
+  generationIngestionLimits
+} from "../packages/business-data/generation-crawler";
 import {
   generationCrawlerProductToken,
   generationCrawlerUserAgent,
@@ -15,11 +11,13 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
+import { retainedContactConsensus } from "../packages/business-data/website-ingestion";
+
+const origin = "https://fixture.example";
 
 const squarespaceRules = parseRobotsPolicy("User-agent: *\nDisallow: /*?author=*\n");
-assert.equal(robotsAllows("https://fixture.example/", squarespaceRules.rules), true, "Squarespace query rules blocked the homepage.");
-assert.equal(robotsAllows("https://fixture.example/?author=123", squarespaceRules.rules), false, "Squarespace author query was not blocked.");
-assert.equal(robotsAllows("https://fixture.example/about?author=123", squarespaceRules.rules), false, "Wildcard query matching omitted non-home routes.");
+assert.equal(robotsAllows(`${origin}/`, squarespaceRules.rules), true);
+assert.equal(robotsAllows(`${origin}/about?author=123`, squarespaceRules.rules), false);
 
 const exactAgent = parseRobotsPolicy(`
 User-agent: *
@@ -28,374 +26,309 @@ Disallow: /
 User-agent: Lodesta
 Disallow: /prefix-only
 
-User-agent: lodestagenerationcrawler
+User-agent: lodestawebsitecrawler
 Allow: /
 `);
-assert.equal(robotsAllows("https://fixture.example/", exactAgent.rules), true, "Exact crawler group did not outrank prefix and wildcard groups.");
-const prefixAgent = parseRobotsPolicy(`
-User-agent: *
-Disallow: /
+assert.equal(robotsAllows(`${origin}/`, exactAgent.rules), true);
+assert.match(generationCrawlerUserAgent, new RegExp(generationCrawlerProductToken));
+assert.equal("selectedPages" in generationIngestionLimits, false);
+assert.equal("browserFallbackPages" in generationIngestionLimits, false);
+assert.equal("totalMs" in generationIngestionLimits, false);
 
-User-agent: Lodesta
-Allow: /
-`);
-assert.equal(robotsAllows("https://fixture.example/", prefixAgent.rules), true, "Product-token prefix did not outrank wildcard.");
-const stackedAndTied = parseRobotsPolicy(`
-User-agent: unrelated
-User-agent: LodestaGenerationCrawler
-Disallow: /stacked
-
-User-agent: LodestaGenerationCrawler
-Disallow: /second
-`);
-assert.equal(robotsAllows("https://fixture.example/stacked", stackedAndTied.rules), false, "Stacked user-agent lines were not treated as one group.");
-assert.equal(robotsAllows("https://fixture.example/second", stackedAndTied.rules), false, "Tied most-specific groups were not combined.");
-const precedence = parseRobotsPolicy(`
-User-agent: *
-Disallow: /private/*
-Allow: /private/public$
-Disallow: /same
-Allow: /same
-`);
-assert.equal(robotsAllows("https://fixture.example/private/other", precedence.rules), false, "Wildcard disallow did not match.");
-assert.equal(robotsAllows("https://fixture.example/private/public", precedence.rules), true, "Longer terminal Allow did not win.");
-assert.equal(robotsAllows("https://fixture.example/private/public/more", precedence.rules), false, "Terminal $ rule matched beyond the end.");
-assert.equal(robotsAllows("https://fixture.example/same", precedence.rules), true, "Allow did not win an equal-length tie.");
-const homepageOnly = parseRobotsPolicy("User-agent: *\nDisallow: /$\n");
-assert.equal(robotsAllows("https://fixture.example/", homepageOnly.rules), false);
-assert.equal(robotsAllows("https://fixture.example/about", homepageOnly.rules), true);
-assert.equal(generationCrawlerProductToken, "LodestaGenerationCrawler");
-
-const pageStarts: number[] = [];
-const observedUserAgents: string[] = [];
-const site = new Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\nSitemap: https://fixture.example/sitemap.xml\n" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://fixture.example/</loc></url><url><loc>https://fixture.example/contact</loc></url></urlset>" }],
-  ["/", { type: "text/html", body: pageHtml("Northstar Repair", "/contact", "Collision repair in Austin. Call our team or request an estimate at our Austin shop.") }],
-  ["/contact", { type: "text/html", body: pageHtml("Contact Northstar", "/", "Visit our Austin shop or call the repair team to request an estimate for collision repair.") }]
+const retainedContacts = retainedContactConsensus([
+  { url: `${origin}/`, extractedText: "Call (512) 555-0198 or email hello@fixture.example." },
+  { url: `${origin}/services`, extractedText: "Questions? 512.555.0198 · HELLO@FIXTURE.EXAMPLE" },
+  { url: `${origin}/about`, extractedText: "Office: +1 512 555 0198 · hello@fixture.example" },
+  { url: `${origin}/article`, extractedText: "Article author: writer@fixture.example · reference 212-555-0134" }
 ]);
-const fetched = await crawlWebsiteForGeneration({
-  url: "https://fixture.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(site, (url, init) => {
-    observedUserAgents.push(new Headers(init?.headers).get("user-agent") ?? "");
-    if (!["/robots.txt", "/sitemap.xml"].includes(url.pathname)) pageStarts.push(Date.now());
-  }),
-  browserFetch: async () => { throw new Error("browser should not be required"); },
-  limits: { minimumStartSpacingMs: 20, totalMs: 10_000, requestTimeoutMs: 1_000 }
+assert.deepEqual(retainedContacts, {
+  phone: "+15125550198",
+  email: "hello@fixture.example"
 });
-assert.equal(fetched.ingestion.coverage, "complete");
-assert.equal(fetched.ingestion.schemaVersion, 1);
-assert.equal(fetched.ingestion.counts.discovered, 2);
-assert.equal(fetched.ingestion.counts.selected, 2);
-assert.equal(fetched.ingestion.counts.fetched, 2);
-assert(pageStarts.length === 2 && pageStarts[1] - pageStarts[0] >= 15, "request starts were not politely spaced across concurrent workers");
-assert(fetched.ingestion.counts.modelTextCharacters <= generationIngestionLimits.modelTextCharacters, "model text budget was exceeded");
-assert(observedUserAgents.length > 0 && observedUserAgents.every((value) => value === generationCrawlerUserAgent), "Generation requests used the wrong User-Agent.");
+assert.deepEqual(retainedContactConsensus([
+  { url: `${origin}/one`, extractedText: "Call 512-555-0198" },
+  { url: `${origin}/two`, extractedText: "Call 212-555-0134" }
+]), { phone: undefined, email: undefined });
 
-const oddContentTypeSite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "application/octet-stream", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://odd.example/</loc></url></urlset>" }],
-  ["/", { type: "text/html", body: pageHtml("Odd Robots Repair", "/", "Austin repair service with phone support and online estimate requests.") }]
+const sitemapPages = Array.from({ length: 260 }, (_, index) => `/pages/page-${String(index).padStart(3, "0")}`);
+const firstSitemap = urlSet(sitemapPages.slice(0, 130));
+const secondSitemap = urlSet([
+  ...sitemapPages.slice(130),
+  "/private/secret",
+  "/assets/brochure.pdf",
+  "/redirect-old",
+  "/redirect-new"
 ]);
-const oddContentType = await crawlWebsiteForGeneration({
-  url: "https://odd.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(oddContentTypeSite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.equal(oddContentType.crawl.robotsFound, true, "Successful robots text with an unusual content type was ignored.");
+const sitemapIndex = sitemapIndexXml(["/sitemaps/pages-a.xml.gz", "/sitemaps/nested-index.xml"]);
+const nestedIndex = sitemapIndexXml(["/sitemaps/pages-b.xml", "/sitemaps/index.xml"]);
+const attempts = new Map<string, number>();
 
-const missingRobotsSite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { status: 404, type: "text/plain", body: "not found" }],
-  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
-  ["/", { type: "text/html", body: pageHtml("No Robots Repair", "/", "Austin repair service with phone support and online estimate requests.") }]
-]);
-const missingRobots = await crawlWebsiteForGeneration({
-  url: "https://no-robots.example/",
+const comprehensive = await crawlWebsiteForGeneration({
+  url: `${origin}/`,
   validateUrl: async (value) => value,
-  fetchImpl: mockFetch(missingRobotsSite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.equal(missingRobots.crawl.robotsFound, false, "A 404 robots response was reported as parsed.");
-
-const serviceAreaSite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://areas.example/</loc></url></urlset>" }],
-  ["/", {
-    type: "text/html",
-    body: `<!doctype html><html><head><title>Austin Plumbing</title></head><body><main>
-      <h1>Austin Plumbing</h1>
-      <p>Emergency plumbing and water heater repair are available 24 hours a day.</p>
-      <p>Areas we serve: Austin, Round Rock, and Cedar Park.</p>
-    </main></body></html>`
-  }]
-]);
-const serviceAreas = await crawlWebsiteForGeneration({
-  url: "https://areas.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(serviceAreaSite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.deepEqual(
-  serviceAreas.crawl.extractedFacts.serviceAreas,
-  ["Austin", "Round Rock", "Cedar Park"],
-  "Explicit visible service-area copy was not retained as structured first-party evidence."
-);
-assert.equal(isExplicitNamedServiceArea("Austin"), true);
-assert.equal(isExplicitNamedServiceArea("Greater Austin and surrounding areas"), false, "A broad inferred region survived the named-place service-area gate.");
-assert.equal(isExplicitNamedServiceArea("within a 50 mile radius"), false, "A radius was treated as a named service area.");
-assert.equal(isAffirmativeEmergencyServiceStatement("Emergency plumbing is available 24/7."), true);
-assert.equal(isAffirmativeEmergencyServiceStatement("Emergency plumbing is not available."), false);
-assert.equal(isAffirmativeEmergencyServiceStatement("24-hour emergency line only."), false);
-
-const socialSite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
-  ["/", {
-    type: "text/html",
-    body: `<!doctype html><html><head><title>Social Repair</title></head><body><main>
-      <h1>Social Repair</h1><p>Collision repair in Austin.</p>
-      <a href="https://instagram.com/socialrepair">Instagram</a>
-      <a href="https://instagram.com/p/post-id">Latest post</a>
-      <a href="https://facebook.com/socialrepair/posts/123">Facebook post</a>
-    </main></body></html>`
-  }]
-]);
-const socialCrawl = await crawlWebsiteForGeneration({
-  url: "https://social.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(socialSite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.deepEqual(
-  selectSourceLinksForGeneration("https://social.example/", socialCrawl.crawl)
-    .filter((link) => link.kind === "social")
-    .map((link) => link.url),
-  ["https://instagram.com/socialrepair"],
-  "Individual social posts or multiple account links entered generated business state."
-);
-
-const closedSite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
-  ["/", {
-    type: "text/html",
-    body: "<!doctype html><html><head><title>Closed Repair</title></head><body><main><h1>Closed Repair</h1><p>We have permanently closed our doors.</p></main></body></html>"
-  }]
-]);
-const closedCrawl = await crawlWebsiteForGeneration({
-  url: "https://closed.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(closedSite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.throws(
-  () => assertSourceSuitableForGeneration(closedCrawl.crawl, closedCrawl.ingestion),
-  (error) => error instanceof WebsiteCrawlError && error.code === "source_unsuitable",
-  "A closed first-party source was allowed to proceed into authoring."
-);
-const contradictoryCrawl = structuredClone(serviceAreas.crawl);
-contradictoryCrawl.pageSummaries = [
-  {
-    ...structuredClone(serviceAreas.crawl.pageSummaries[0]!),
-    url: "https://areas.example/location",
-    extractedFacts: {
-      ...structuredClone(serviceAreas.crawl.pageSummaries[0]!.extractedFacts),
-      address: { street: "100 Main Street", city: "Austin", region: "TX", postalCode: "78701", country: "US" },
-      hours: { Monday: "8:00 AM-5:00 PM" }
-    }
+  limits: {
+    concurrentPerOrigin: 8,
+    minimumStartSpacingMs: 0,
+    requestTimeoutMs: 2_000,
+    transientRetries: 1
   },
-  {
-    ...structuredClone(serviceAreas.crawl.pageSummaries[0]!),
-    url: "https://areas.example/contact",
-    extractedFacts: {
-      ...structuredClone(serviceAreas.crawl.pageSummaries[0]!.extractedFacts),
-      address: { street: "100 Main Street", city: "Austin", region: "TX", postalCode: "78701", country: "US" },
-      hours: { Monday: "9:00 AM-4:00 PM" }
+  sleep: async () => undefined,
+  random: () => 0,
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    attempts.set(path, (attempts.get(path) ?? 0) + 1);
+    if (path === "/robots.txt") {
+      return response(`User-agent: *\nDisallow: /private\nSitemap: ${origin}/sitemaps/index.xml\n`, 200, "text/plain");
     }
-  }
-];
-assert.equal(hasContradictoryFirstPartyLocationHours(contradictoryCrawl), true);
-
-for (const status of [408, 429, 500, 503]) {
-  await expectCrawlFailure(crawlWebsiteForGeneration({
-    url: `https://robots-${status}.example/`,
-    validateUrl: async (value) => value,
-    fetchImpl: async () => new Response("temporary", { status }),
-    limits: { transientRetries: 0, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-  }), "crawl_temporarily_unavailable");
-}
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://robots-network.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: async () => { throw new Error("network unavailable"); },
-  limits: { transientRetries: 0, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "crawl_temporarily_unavailable");
-
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://blocked.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(new Map([
-    ["/robots.txt", { type: "text/plain", body: "User-agent: *\nDisallow: /$\n" }]
-  ])),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "crawl_robots_disallowed");
-
-const missingPrimarySite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
-  ["/", { status: 404, type: "text/plain", body: "not found" }]
-]);
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://missing-primary.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(missingPrimarySite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "crawl_primary_unavailable");
-
-const unsupportedPrimarySite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /\n" }],
-  ["/sitemap.xml", { status: 404, type: "text/plain", body: "not found" }],
-  ["/", { type: "application/pdf", body: "%PDF synthetic" }]
-]);
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://unsupported-primary.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(unsupportedPrimarySite),
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "crawl_unsupported_content");
-
-const manyUrls = Array.from({ length: 75 }, (_, index) => `https://many.example/services/service-${index + 1}`);
-const manySite = new Map<string, { type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /" }],
-  ["/sitemap.xml", { type: "application/xml", body: `<urlset>${manyUrls.map((url) => `<url><loc>${url}</loc></url>`).join("")}</urlset>` }],
-  ...manyUrls.map((url, index) => [new URL(url).pathname, { type: "text/html", body: pageHtml(`Service ${index + 1}`, "/", `Detailed first-party service information for repair option ${index + 1}. Request a quote in Austin from our team.`) }] as const)
-]);
-const bounded = await crawlWebsiteForGeneration({
-  url: manyUrls[0],
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(manySite),
-  browserFetch: async () => { throw new Error("browser should not be required"); },
-  limits: { minimumStartSpacingMs: 0, totalMs: 20_000, requestTimeoutMs: 1_000 }
+    if (path === "/sitemap.xml") return response("missing", 404, "text/plain");
+    if (path === "/sitemaps/index.xml") return response(sitemapIndex, 200, "application/xml");
+    if (path === "/sitemaps/nested-index.xml") return response(nestedIndex, 200, "application/xml");
+    if (path === "/sitemaps/pages-a.xml.gz") return response(gzipSync(firstSitemap), 200, "application/gzip");
+    if (path === "/sitemaps/pages-b.xml") return response(secondSitemap, 200, "application/xml");
+    if (path === "/redirect-old") return response("", 301, "text/html", { location: `${origin}/redirect-new` });
+    if (path === "/pages/page-010" && attempts.get(path) === 1) return response("retry", 503, "text/plain");
+    if (path === "/") return response(pageHtml("Home", ["/linked-only", "/assets/site-map.kml"]), 200);
+    if (path === "/linked-only") return response(pageHtml("Linked-only page"), 200);
+    if (path === "/redirect-new") return response(pageHtml("Redirect destination"), 200);
+    const pageMatch = path.match(/^\/pages\/page-(\d{3})$/);
+    if (pageMatch) {
+      const pageNumber = Number(pageMatch[1]);
+      if (pageNumber === 5) {
+        return response(pageHtml("Noindex retained", [], '<meta name="robots" content="noindex,follow">'), 200);
+      }
+      if (pageNumber === 6) {
+        return response(pageHtml("Canonical retained", [], `<link rel="canonical" href="${origin}/pages/page-006">`), 200);
+      }
+      if (pageNumber === 7 || pageNumber === 8) return response(pageHtml("Duplicate body"), 200);
+      if (pageNumber === 9) return response("<!doctype html><title>JavaScript shell</title><div id=app></div>", 200);
+      return response(pageHtml(`Substantive page ${pageNumber}`), 200);
+    }
+    throw new Error(`unexpected_fixture_url:${url}`);
+  },
+  browserFetch: async (url) => pageHtml(`Rendered ${new URL(url).pathname}`)
 });
-assert.equal(bounded.ingestion.coverage, "bounded");
-assert.equal(bounded.ingestion.counts.discovered, 76);
-assert.equal(bounded.ingestion.counts.selected, 50);
-assert.equal(bounded.ingestion.counts.fetched, 50);
-assert.equal(bounded.ingestion.skipped.filter((entry) => entry.reason === "selection_limit").length, 26);
 
-let retryRequests = 0;
-const retrySite = new Map<string, { status?: number; type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://retry.example/</loc></url></urlset>" }],
-  ["/", { type: "text/html", body: pageHtml("Retry Repair", "/", "Collision repair in Austin with phone and estimate request options for local drivers.") }]
-]);
-const retryFetch: typeof fetch = async (value, init) => {
-  const url = new URL(typeof value === "string" ? value : value instanceof URL ? value.href : value.url);
-  if (url.pathname === "/") {
-    retryRequests += 1;
-    if (retryRequests === 1) return new Response("temporary", { status: 503, headers: { "content-type": "text/plain" } });
+assert.equal(comprehensive.ingestion.coverage, "restricted");
+assert.equal(comprehensive.ingestion.completionReason, "restricted");
+assert(comprehensive.ingestion.counts.discovered > 260, "The crawler did not retain the complete sitemap and linked-page inventory.");
+assert(comprehensive.ingestion.counts.fetched >= 263, "An implicit page cap prevented complete fetching.");
+assert.equal(comprehensive.ingestion.counts.unfinished, 0);
+assert.equal(comprehensive.ingestion.counts.failed, 0);
+assert.equal(comprehensive.ingestion.counts.browserRendered, 1);
+assert.equal(comprehensive.ingestion.pages.every((page) => ["fetched", "excluded", "failed", "unfinished"].includes(page.outcome)), true);
+assert.equal(comprehensive.ingestion.pages.some((page) => page.reason === "selection_limit"), false);
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/private/secret`)?.reason, "robots_disallowed");
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/assets/brochure.pdf`)?.reason, "unsupported_content");
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/assets/site-map.kml`)?.reason, "unsupported_content");
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/pages/page-005`)?.indexability, "noindex");
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/linked-only`)?.discoveryReason, "linked_page");
+assert.equal(attempts.get("/pages/page-010"), 2, "Transient document failures were not retried.");
+assert(comprehensive.captures.some((capture) => capture.role === "sitemap" && capture.requestedUrl.endsWith(".gz")), "The gzip sitemap capture was not retained.");
+assert(comprehensive.captures.some((capture) => capture.requestedUrl === `${origin}/sitemap.xml` && capture.outcome === "failed" && capture.reason === "not_found" && capture.bytes), "An absent conventional sitemap response was not retained without degrading document coverage.");
+assert(comprehensive.captures.some((capture) => capture.role === "robots"), "robots.txt was not retained.");
+assert(comprehensive.captures.some((capture) => capture.role === "rendered_document"), "Rendered DOM evidence was not retained.");
+assert(comprehensive.captures.some((capture) => capture.redirectChain.some((hop) => hop.status === 301)), "Redirect-chain evidence was not retained.");
+assert.equal(comprehensive.documents.length, comprehensive.ingestion.counts.fetched);
+
+const adaptiveOrigin = "https://adaptive.example";
+const adaptiveAttempts = new Map<string, number>();
+const adaptiveWaits: number[] = [];
+let adaptiveNow = Date.parse("2026-08-01T12:00:00.000Z");
+const recoveryPages = Array.from({ length: 45 }, (_, index) => `/recovery-${String(index).padStart(2, "0")}`);
+const adaptive = await crawlWebsiteForGeneration({
+  url: `${adaptiveOrigin}/`,
+  validateUrl: async (value) => value,
+  now: () => adaptiveNow,
+  sleep: async (milliseconds, signal) => {
+    signal.throwIfAborted();
+    adaptiveWaits.push(milliseconds);
+    adaptiveNow += milliseconds;
+  },
+  random: () => 0,
+  limits: { transientRetries: 1 },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    adaptiveAttempts.set(path, (adaptiveAttempts.get(path) ?? 0) + 1);
+    if (path === "/robots.txt") return response(`User-agent: ${generationCrawlerProductToken}\nAllow: /\n`, 200, "text/plain");
+    if (path === "/sitemap.xml") return response(urlSetFor(adaptiveOrigin, ["/", "/rate-date", "/rate-seconds", ...recoveryPages]), 200, "application/xml");
+    if (path === "/rate-seconds" && adaptiveAttempts.get(path) === 1) return response("slow down", 429, "text/plain", { "retry-after": "2" });
+    if (path === "/rate-date" && adaptiveAttempts.get(path) === 1) return response("temporarily unavailable", 503, "text/plain", { "retry-after": new Date(adaptiveNow + 3_000).toUTCString() });
+    if (path === "/" || path.startsWith("/recovery-") || path.startsWith("/rate-")) return response(pageHtml(path === "/" ? "Adaptive home" : path), 200);
+    throw new Error(`unexpected_adaptive_url:${url}`);
   }
-  return mockFetch(retrySite)(value, init);
-};
-const retried = await crawlWebsiteForGeneration({
-  url: "https://retry.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: retryFetch,
-  browserFetch: async () => { throw new Error("browser should not be required"); },
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
 });
-assert.equal(retryRequests, 2, "one transient fetch retry was not applied");
-assert.equal(retried.ingestion.pages[0]?.fetchAttempts, 2);
+assert.equal(adaptive.ingestion.counts.failed, 0);
+assert.equal(adaptiveAttempts.get("/rate-seconds"), 2);
+assert.equal(adaptiveAttempts.get("/rate-date"), 2);
+assert(adaptiveWaits.some((milliseconds) => milliseconds >= 2_000), "The shared origin cooldown did not delay throttled work.");
+const adaptiveDiagnostics = adaptive.captures
+  .flatMap((capture) => Array.isArray(capture.metadata?.attempts) ? capture.metadata.attempts : [])
+  .filter((attempt): attempt is { reason: string; originConcurrency: number } => Boolean(attempt) && typeof attempt === "object" && typeof (attempt as { reason?: unknown }).reason === "string" && typeof (attempt as { originConcurrency?: unknown }).originConcurrency === "number");
+assert(adaptiveDiagnostics.some((attempt) => ["rate_limited", "temporary_upstream_failure"].includes(attempt.reason) && attempt.originConcurrency === 2), "Repeated throttling did not reduce origin concurrency to two.");
+assert(adaptiveDiagnostics.some((attempt) => attempt.reason === "success" && attempt.originConcurrency > 2), "Sustained success did not recover origin concurrency.");
+const rateCapture = adaptive.captures.find((capture) => capture.requestedUrl === `${adaptiveOrigin}/rate-seconds` && capture.role === "document");
+const dateCapture = adaptive.captures.find((capture) => capture.requestedUrl === `${adaptiveOrigin}/rate-date` && capture.role === "document");
+assert.equal(rateCapture?.metadata?.retryCount, 1);
+assert.equal(rateCapture?.metadata?.retryWaitMs, 2_000);
+assert.equal(rateCapture?.metadata?.throttleEvents, 1);
+assert.equal(dateCapture?.metadata?.retryCount, 1);
+assert.equal(dateCapture?.metadata?.retryWaitMs, 3_000);
+assert.equal(dateCapture?.metadata?.throttleEvents, 1);
 
-const oversizedSite = new Map<string, { type: string; body: string; headers?: Record<string, string> }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://large.example/</loc></url></urlset>" }],
-  ["/", { type: "text/html", body: "x".repeat(200), headers: { "content-length": "200" } }]
-]);
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://large.example/",
+const classificationOrigin = "https://classification.example";
+const classified = await crawlWebsiteForGeneration({
+  url: `${classificationOrigin}/`,
   validateUrl: async (value) => value,
-  fetchImpl: mockFetch(oversizedSite),
-  limits: { maximumHtmlBytes: 100, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "crawl_unsupported_content");
+  limits: { transientRetries: 0 },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/sitemap.xml") return response(urlSetFor(classificationOrigin, ["/", "/auth", "/denied", "/challenge", "/limited", "/upstream"]), 200, "application/xml");
+    if (path === "/") return response(pageHtml("Classification home"), 200);
+    if (path === "/auth") return response("authentication required", 401);
+    if (path === "/denied") return response("access denied", 403);
+    if (path === "/challenge") return response("challenge", 403, "text/html", { "cf-mitigated": "challenge" });
+    if (path === "/limited") return response("rate limited", 429);
+    if (path === "/upstream") return response("upstream unavailable", 504);
+    throw new Error(`unexpected_classification_url:${url}`);
+  }
+});
+const classifiedReasons = new Map(classified.ingestion.pages.map((page) => [new URL(page.url).pathname, page.reason]));
+assert.equal(classifiedReasons.get("/auth"), "authentication_required");
+assert.equal(classifiedReasons.get("/denied"), "access_denied");
+assert.equal(classifiedReasons.get("/challenge"), "bot_challenge");
+assert.equal(classifiedReasons.get("/limited"), "rate_limited");
+assert.equal(classifiedReasons.get("/upstream"), "temporary_upstream_failure");
 
-let unsafeRedirectRequests = 0;
-const redirectFetch: typeof fetch = async (value) => {
-  const url = new URL(typeof value === "string" ? value : value instanceof URL ? value.href : value.url);
-  if (url.hostname !== "redirect.example") unsafeRedirectRequests += 1;
-  if (url.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /", { headers: { "content-type": "text/plain" } });
-  if (url.pathname === "/sitemap.xml") return new Response('<urlset><url><loc>https://redirect.example/</loc></url></urlset>', { headers: { "content-type": "application/xml" } });
-  return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/private", "content-type": "text/html" } });
-};
-await expectCrawlFailure(crawlWebsiteForGeneration({
-  url: "https://redirect.example/",
+const safeOrigin = "https://safe-source.example";
+const unsafeDependency = await crawlWebsiteForGeneration({
+  url: `${safeOrigin}/`,
   validateUrl: async (value) => {
-    if (new URL(value).hostname !== "redirect.example") throw new PublicFetchUrlError("private_address", "private redirect rejected");
+    if (new URL(value).hostname === "unresolvable-dependency.example") {
+      throw new PublicFetchUrlError("dns_unavailable", "URL host could not be resolved for safety checks.");
+    }
     return value;
   },
-  fetchImpl: redirectFetch,
-  limits: { minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-}), "source_invalid");
-assert.equal(unsafeRedirectRequests, 0, "generation crawl followed a cross-site or private redirect");
-
-const shellSite = new Map<string, { type: string; body: string }>([
-  ["/robots.txt", { type: "text/plain", body: "User-agent: *\nAllow: /" }],
-  ["/sitemap.xml", { type: "application/xml", body: "<urlset><url><loc>https://shell.example/</loc></url><url><loc>https://shell.example/contact</loc></url></urlset>" }],
-  ["/", { type: "text/html", body: '<html><head><title>Shell</title></head><body><a href="/contact">Contact</a></body></html>' }],
-  ["/contact", { type: "text/html", body: '<html><head><title>Contact shell</title></head><body><a href="/">Home</a></body></html>' }]
-]);
-let browserCalls = 0;
-const browserBounded = await crawlWebsiteForGeneration({
-  url: "https://shell.example/",
-  validateUrl: async (value) => value,
-  fetchImpl: mockFetch(shellSite),
-  browserFetch: async (url) => { browserCalls += 1; return pageHtml("Rendered shell", "/", `Rendered first-party details for ${url}, including Austin collision repair and an estimate form.`); },
-  limits: { browserFallbackPages: 1, minimumStartSpacingMs: 0, totalMs: 10_000, requestTimeoutMs: 1_000 }
-});
-assert.equal(browserCalls, 1, "browser fallback exceeded its page budget");
-assert.equal(browserBounded.ingestion.counts.browserRendered, 1);
-assert(browserBounded.ingestion.skipped.some((entry) => entry.reason === "browser_limit"));
-
-const browserLifecycleHtml = await fetchGenerationPageWithBrowser(
-  "data:text/html,<main><h1>Browser lifecycle</h1></main>",
-  AbortSignal.timeout(5_000),
-  5_000,
-  async (value) => value,
-  async (value) => value
-);
-assert(browserLifecycleHtml.includes("Browser lifecycle"), "browser closed before page content serialization completed");
-
-const block = fetched.ingestion.modelBlocks[0];
-assert(block, "generation crawl did not retain authoring text blocks");
-assert.deepEqual(Object.keys(block).sort(), ["displayText", "evidenceClass", "id", "sourceUrl"], "authoring block retained obsolete token-offset machinery");
-
-console.log(JSON.stringify({ ok: true, robotsPolicy: "pass", completeCoverage: "pass", boundedCoverage: "pass", serviceAreaEvidence: "pass", politeness: "pass", retry: "pass", responseLimit: "pass", safeRedirects: "pass", browserBudget: "pass", browserLifecycle: "pass", authoringBlocks: "pass" }));
-
-function pageHtml(title: string, href: string, copy: string) {
-  return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${copy}"></head><body><main><h1>${title}</h1><p>${copy} ${copy} ${copy}</p><a href="${href}">Continue</a><form><input type="tel" name="phone"><button>Request estimate</button></form></main></body></html>`;
-}
-
-function mockFetch(entries: Map<string, { status?: number; type: string; body: string; headers?: Record<string, string> }>, onRequest?: (url: URL, init?: RequestInit) => void): typeof fetch {
-  return async (value, init) => {
-    const url = new URL(typeof value === "string" ? value : value instanceof URL ? value.href : value.url);
-    onRequest?.(url, init);
-    const entry = entries.get(url.pathname);
-    if (!entry) return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
-    return new Response(entry.body, { status: entry.status ?? 200, headers: { "content-type": entry.type, ...entry.headers } });
-  };
-}
-
-async function expectCrawlFailure(
-  promise: Promise<unknown>,
-  code: WebsiteCrawlFailureCode
-) {
-  try {
-    await promise;
-    assert.fail(`Expected crawl failure ${code}.`);
-  } catch (error) {
-    assert(error instanceof WebsiteCrawlError, `Expected WebsiteCrawlError, received ${String(error)}.`);
-    assert.equal(error.code, code);
+  limits: { transientRetries: 0 },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const parsed = new URL(url);
+    if (parsed.hostname === "cdn-dependency.example") return response("", 302, "text/plain", { location: "https://unresolvable-dependency.example/asset.png" });
+    if (parsed.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (parsed.pathname === "/sitemap.xml") return response(urlSetFor(safeOrigin, ["/"]), 200, "application/xml");
+    if (parsed.pathname === "/") return response(`${pageHtml("Safe source")}<img src="https://cdn-dependency.example/asset.png" alt="">`, 200);
+    throw new Error(`unexpected_unsafe_dependency_url:${url}`);
   }
+});
+assert.equal(unsafeDependency.ingestion.coverage, "complete");
+assert(unsafeDependency.captures.some((capture) => capture.requestedUrl === "https://cdn-dependency.example/asset.png" && capture.outcome === "excluded" && capture.reason === "unsafe_url"), "An unsafe dependency redirect aborted or degraded the source crawl instead of becoming an explicit exclusion.");
+
+const deadlineOrigin = "https://deadline.example";
+const deadlineController = new AbortController();
+const deadlineResult = await crawlWebsiteForGeneration({
+  url: `${deadlineOrigin}/`,
+  signal: deadlineController.signal,
+  validateUrl: async (value) => value,
+  random: () => 0,
+  sleep: async (_milliseconds, signal) => {
+    deadlineController.abort(new Error("generation crawl deadline"));
+    signal.throwIfAborted();
+  },
+  limits: { concurrentPerOrigin: 1, transientRetries: 1 },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/sitemap.xml") return response(urlSetFor(deadlineOrigin, ["/", "/limited", "/never-started"]), 200, "application/xml");
+    if (path === "/") return response(pageHtml("Deadline home"), 200);
+    if (path === "/limited") return response("slow down", 429);
+    if (path === "/never-started") return response(pageHtml("Never started"), 200);
+    throw new Error(`unexpected_deadline_url:${url}`);
+  }
+});
+assert.equal(deadlineResult.ingestion.coverage, "incomplete");
+assert.equal(deadlineResult.ingestion.completionReason, "deadline");
+assert(deadlineResult.ingestion.counts.unfinished >= 1, "Deadline cancellation hid queued unfinished work.");
+
+const fuseOrigin = "https://fuse.example";
+const fuseResult = await crawlWebsiteForGeneration({
+  url: `${fuseOrigin}/`,
+  validateUrl: async (value) => value,
+  limits: {
+    concurrentPerOrigin: 1,
+    minimumStartSpacingMs: 0,
+    requestTimeoutMs: 2_000,
+    transientRetries: 0,
+    rawResponseFuseBytes: 700
+  },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /\n", 200, "text/plain");
+    if (path === "/sitemap.xml") return response("missing", 404, "text/plain");
+    if (path === "/") return response(pageHtml("Large homepage", ["/unfinished"], "", "x ".repeat(500)), 200);
+    if (path === "/unfinished") return response(pageHtml("Should remain unfinished"), 200);
+    throw new Error(`unexpected_fuse_url:${url}`);
+  }
+});
+assert.equal(fuseResult.ingestion.coverage, "incomplete");
+assert.equal(fuseResult.ingestion.completionReason, "capture_size_fuse");
+assert(fuseResult.ingestion.counts.unfinished >= 1, "The crawl hid its unfinished queue after crossing the byte fuse.");
+
+const dependencyOrigin = "https://dependency-failure.example";
+const dependencyFailure = await crawlWebsiteForGeneration({
+  url: `${dependencyOrigin}/`,
+  validateUrl: async (value) => value,
+  limits: { transientRetries: 0 },
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/sitemap.xml") return response("missing", 404, "text/plain");
+    if (path === "/") return response('<!doctype html><html><head><title>Dependency failure</title></head><body><h1>Dependency failure</h1><p>This page has enough useful source content to avoid browser fallback while retaining its referenced design dependency.</p><img src="/missing.webp" alt="Missing"></body></html>', 200);
+    if (path === "/missing.webp") return response("missing", 404, "image/webp");
+    throw new Error(`unexpected_dependency_url:${url}`);
+  }
+});
+assert.equal(dependencyFailure.ingestion.coverage, "incomplete");
+assert.equal(dependencyFailure.ingestion.completionReason, "failures");
+assert(dependencyFailure.captures.some((capture) => capture.requestedUrl.endsWith("/missing.webp") && capture.outcome === "failed"));
+
+console.log(JSON.stringify({
+  ok: true,
+  discovered: comprehensive.ingestion.counts.discovered,
+  fetched: comprehensive.ingestion.counts.fetched,
+  excluded: comprehensive.ingestion.counts.excluded,
+  gzipSitemaps: comprehensive.captures.filter((capture) => capture.role === "sitemap" && capture.requestedUrl.endsWith(".gz")).length,
+  fuseCoverage: fuseResult.ingestion.coverage,
+  dependencyFailureCoverage: dependencyFailure.ingestion.coverage
+}));
+
+function urlSet(paths: string[]) {
+  return urlSetFor(origin, paths);
+}
+
+function urlSetFor(targetOrigin: string, paths: string[]) {
+  return `<?xml version="1.0"?><urlset>${paths.map((path) => `<url><loc>${targetOrigin}${path}</loc><lastmod>2026-07-30</lastmod></url>`).join("")}</urlset>`;
+}
+
+function sitemapIndexXml(paths: string[]) {
+  return `<?xml version="1.0"?><sitemapindex>${paths.map((path) => `<sitemap><loc>${origin}${path}</loc></sitemap>`).join("")}</sitemapindex>`;
+}
+
+function pageHtml(title: string, links: string[] = [], head = "", extra = "") {
+  const body = `${title} provides substantial, useful first-party information for local customers. `.repeat(5);
+  return `<!doctype html><html><head><title>${title}</title>${head}</head><body><main><h1>${title}</h1><p>${body}${extra}</p>${links.map((href) => `<a href="${href}">${href}</a>`).join("")}</main></body></html>`;
+}
+
+function response(
+  body: BodyInit,
+  status = 200,
+  contentType = "text/html; charset=utf-8",
+  headers: Record<string, string> = {}
+) {
+  return new Response(body, { status, headers: { "content-type": contentType, ...headers } });
 }

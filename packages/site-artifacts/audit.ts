@@ -12,7 +12,19 @@ export type ArtifactBlobLocator = {
 };
 
 export const managedArtifactBlobPrefixes: Record<ArtifactBlobStoreName, readonly string[]> = {
-  artifact: ["site-assets/", "workspace-backups/", "workspace-sources/", "site-artifacts/", "site-captures/", "trusted-runtime/", "agent-run-events/", "external-authoring/"],
+  artifact: [
+    "site-assets/",
+    "workspace-backups/",
+    "workspace-sources/",
+    "site-artifacts/",
+    "site-captures/",
+    "source-captures/",
+    "source-mirror/",
+    "trusted-runtime/",
+    "agent-run-events/",
+    "site-agent-runs/",
+    "generation-experiments/"
+  ],
   workspace: ["workspace-backups/"]
 };
 

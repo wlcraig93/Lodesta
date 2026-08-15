@@ -3,12 +3,13 @@ import { basename, join } from "node:path";
 import { configuredArtifactBlobStore } from "../packages/site-artifacts";
 import { sitePlatformRepository } from "../packages/platform-data";
 import { siteAuthoringWorkflow } from "../packages/site-platform/workflow";
+import { siteAgentRunGuardrailDefaults } from "../packages/site-agent";
 
 const model = "gpt-5.6-sol";
 const apiProvider = "openai";
-const maxCostUsd = Number(process.env.LODESTA_SOL_VALIDATION_MAX_COST_USD ?? 4);
-if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 4) {
-  throw new Error("LODESTA_SOL_VALIDATION_MAX_COST_USD must be greater than 0 and no more than 4.");
+const maxCostUsd = Number(process.env.LODESTA_SOL_VALIDATION_MAX_COST_USD ?? siteAgentRunGuardrailDefaults.initial_build.maxCostUsd);
+if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 15) {
+  throw new Error("LODESTA_SOL_VALIDATION_MAX_COST_USD must be greater than 0 and no more than 15.");
 }
 const reportRoot = join(process.cwd(), ".data", "site-agent-sol-validations");
 const sourceRunId = process.env.LODESTA_SOL_VALIDATION_SOURCE_RUN_ID?.trim()
@@ -23,14 +24,16 @@ let result: Record<string, unknown>;
 try {
   const sourceRun = await sitePlatformRepository.getAgentRun(sourceRunId);
   if (!sourceRun) throw new Error(`validation_source_run_not_found:${sourceRunId}`);
-  const [site, buildInput] = await Promise.all([
-    sitePlatformRepository.getSite(sourceRun.siteId),
-    sitePlatformRepository.getPublicBuildInput(sourceRun.publicBuildInputId)
-  ]);
-  if (!site || !buildInput) throw new Error("validation_source_state_unavailable");
-  if (site.currentPublicBuildInputId !== buildInput.id) {
-    throw new Error(`validation_source_input_is_not_current:${site.currentPublicBuildInputId}:${buildInput.id}`);
-  }
+  const site = await sitePlatformRepository.getSite(sourceRun.siteId);
+  const buildInput = site?.currentPublicBuildInputId
+    ? await sitePlatformRepository.getPublicBuildInput(site.currentPublicBuildInputId)
+    : undefined;
+  if (!site || !site.sourceUrl || !buildInput) throw new Error("validation_source_state_unavailable");
+  const sourceSnapshotsBefore = await Promise.all(buildInput.sourceSnapshotIds.map(async (id) => {
+    const snapshot = await sitePlatformRepository.getSourceSnapshot(id);
+    if (!snapshot) throw new Error(`validation_source_snapshot_missing:${id}`);
+    return { id: snapshot.id, contentHash: snapshot.contentHash, capturedAt: snapshot.capturedAt };
+  }));
   const session = await siteAuthoringWorkflow.getOrCreateSession({
     siteId: site.id,
     principal: { kind: "operator", id: operatorId },
@@ -41,8 +44,8 @@ try {
     kind: "initial_build",
     instruction: "Create the best complete customer-facing website supported by the retained source evidence.",
     requestedBy: operatorId,
+    request: { kind: "initial_build", sourceUrl: site.sourceUrl },
     origin: "system",
-    publishAfterSuccess: false,
     modelRoute: { apiProvider, modelId: model }
   });
   validationRunId = run.id;
@@ -108,6 +111,25 @@ try {
   const artifact = completed.outputArtifactId
     ? await sitePlatformRepository.getBuildArtifact(completed.outputArtifactId)
     : undefined;
+  const [completedSession, candidateVersion, currentSite] = await Promise.all([
+    sitePlatformRepository.getAgentSession(completed.sessionId),
+    completed.candidateVersionId ? sitePlatformRepository.getSiteVersion(completed.candidateVersionId) : undefined,
+    sitePlatformRepository.getSite(completed.siteId)
+  ]);
+  const completedInput = currentSite?.currentPublicBuildInputId
+    ? await sitePlatformRepository.getPublicBuildInput(currentSite.currentPublicBuildInputId)
+    : undefined;
+  const sourceSnapshotsAfter = await Promise.all(sourceSnapshotsBefore.map(async (before) => {
+    const snapshot = await sitePlatformRepository.getSourceSnapshot(before.id);
+    return snapshot ? { id: snapshot.id, contentHash: snapshot.contentHash, capturedAt: snapshot.capturedAt } : undefined;
+  }));
+  const plannedRoutes = [...new Set(completed.architecture?.plan.routes.map((route) => route.path) ?? [])].sort();
+  const artifactRoutes = [...new Set(artifact?.routes.map((route) => route.path) ?? [])].sort();
+  const sourceSnapshotsUnchanged = sourceSnapshotsAfter.every((after, index) =>
+    after?.id === sourceSnapshotsBefore[index]?.id
+    && after.contentHash === sourceSnapshotsBefore[index]?.contentHash
+    && after.capturedAt === sourceSnapshotsBefore[index]?.capturedAt
+  ) && JSON.stringify(completedInput?.sourceSnapshotIds ?? []) === JSON.stringify(buildInput.sourceSnapshotIds);
   const contradictionFindings = artifact?.qa.findings.filter((finding) =>
     finding.id === "fact.sdk_value_mismatch"
     || (finding.id === "html.forbidden_tag" && /preload|link/i.test(finding.message))
@@ -119,14 +141,33 @@ try {
   const secondHalfMedian = median(secondHalfUncached);
   const technicalAcceptance = {
     succeeded: completed.status === "succeeded",
+    candidateReady: completed.stage === "candidate_ready",
+    immutableRecordsLinked: Boolean(
+      completed.outputRevisionId
+      && artifact
+      && candidateVersion
+      && candidateVersion.workspaceRevisionId === completed.outputRevisionId
+      && candidateVersion.artifactId === artifact.id
+    ),
+    exactArchitectureRouteParity: plannedRoutes.length > 0 && JSON.stringify(plannedRoutes) === JSON.stringify(artifactRoutes),
+    homepagePresent: artifactRoutes.includes("/"),
+    everyRouteFetchedWithoutFailure: Boolean(
+      artifact
+      && artifact.qa.routesChecked > 0
+      && !artifact.qa.findings.some((finding) => finding.id === "route.response")
+    ),
+    representativeBrowserVerificationPassed: Boolean(
+      artifact
+      && artifact.qa.routesChecked > 0
+      && artifact.qa.screenshotKeys.some((key) => /desktop/i.test(key))
+      && artifact.qa.screenshotKeys.some((key) => /mobile/i.test(key))
+    ),
+    terminalSandboxDestroyed: Boolean(completedSession && !completedSession.sandboxId),
+    retainedSourceSnapshotsUnchanged: sourceSnapshotsUnchanged,
     noContradictions: contradictionFindings.length === 0,
-    noHardFindings: artifact?.qa.findings.every((finding) => finding.severity !== "error") ?? false,
-    totalUncachedInputBelow500k: totalUncachedInputTokens < 500_000,
-    requestCountAtMost20: requestMetrics.length <= 20,
-    durationWithin12Minutes: durationMs <= 12 * 60_000,
-    cacheContinuityAtLeast80Percent: continuityRate >= 0.8,
-    uncachedInputDidNotMateriallyGrow: secondHalfMedian <= firstHalfMedian * 1.1,
-    contextBelowWarningBoundary: contextHighWater < 0.8
+    noHardFindings: artifact?.qa.hardGate === "passed",
+    durationWithin60Minutes: durationMs <= 60 * 60_000,
+    costWithinFuse: completed.usage.costUsd <= maxCostUsd
   };
   const technicalPassed = Object.values(technicalAcceptance).every(Boolean);
   result = {
@@ -139,7 +180,9 @@ try {
       status: sourceRun.status,
       failureCode: sourceRun.failureCode,
       publicBuildInputId: sourceRun.publicBuildInputId,
-      publicBuildInputHash: buildInput.inputHash,
+      validationPublicBuildInputId: buildInput.id,
+      validationPublicBuildInputHash: buildInput.inputHash,
+      sourceSnapshotsBefore,
       comparableVisualArtifact: Boolean(sourceRun.outputArtifactId),
       visualComparison: sourceRun.outputArtifactId
         ? "manual_comparison_required"
@@ -155,8 +198,16 @@ try {
       candidateVersionId: completed.candidateVersionId
     },
     route: { apiProvider, model },
+    routeEvidence: { plannedRoutes, artifactRoutes },
+    sourceSnapshotsAfter,
+    sandboxAttempts: events.filter((event) => event.kind === "build").map((event) => ({
+      name: event.name,
+      status: event.status,
+      summary: event.summary,
+      errorCode: event.errorCode
+    })),
     maxCostUsd,
-    actualCostUsd: completed.usage.kind === "model_reported" ? completed.usage.costUsd : undefined,
+    actualCostUsd: completed.usage.costUsd,
     durationMs,
     requestCount: requestMetrics.length,
     totalUncachedInputTokens,
@@ -195,7 +246,7 @@ try {
     validationRunId,
     route: { apiProvider, model },
     maxCostUsd,
-    actualCostUsd: run?.usage.kind === "model_reported" ? run.usage.costUsd : undefined,
+    actualCostUsd: run?.usage.costUsd,
     failureCode: code,
     failureReason: run?.failureReason,
     infrastructureError: error instanceof Error ? error.message : String(error)

@@ -140,6 +140,18 @@ export class HttpArtifactBlobStore implements ArtifactBlobStore {
 
   async putImmutable(blob: ImmutableBlob) {
     assertBlob(blob);
+    const retained = await fetch(this.url(blob.key), {
+      method: "HEAD",
+      headers: { authorization: `Bearer ${this.bearerToken}` }
+    });
+    if (retained.ok) {
+      const retainedHash = retained.headers.get("x-lodesta-content-sha256");
+      if (retainedHash === blob.contentHash) return;
+      throw new Error(`Immutable R2 blob key collision at ${blob.key}.`);
+    }
+    if (retained.status !== 404) {
+      throw new Error(`R2 bridge metadata request failed with ${retained.status} for ${blob.key}.`);
+    }
     const response = await fetch(this.url(blob.key), {
       method: "PUT",
       headers: {
@@ -150,7 +162,10 @@ export class HttpArtifactBlobStore implements ArtifactBlobStore {
       body: new Uint8Array(blob.bytes)
     });
     if (response.status === 409) throw new Error(`Immutable R2 blob key collision at ${blob.key}.`);
-    if (!response.ok) throw new Error(`R2 bridge write failed with ${response.status}.`);
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500).replace(/\s+/g, " ").trim();
+      throw new Error(`R2 bridge write failed with ${response.status} for ${blob.key}${detail ? `: ${detail}` : "."}`);
+    }
   }
 
   async get(key: string) {

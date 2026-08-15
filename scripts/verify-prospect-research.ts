@@ -1,270 +1,179 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { LocalPlatformOperationsRepository } from "../packages/platform-operations";
-import {
-  canonicalProspectKey,
-  prospectWebsiteKindForUrl,
-  scoreProspectPriority
-} from "../packages/prospect-research";
+import { resolve } from "node:path";
+import { LocalPlatformOperationsRepository } from "../packages/platform-operations/repository";
+import { evaluateProspectPlace, prospectAddressFromGoogleComponents, prospectImportSchema } from "../packages/prospect-research";
 
-const directory = await mkdtemp(join(tmpdir(), "lodesta-prospect-research-"));
-const repository = new LocalPlatformOperationsRepository(join(directory, "operations.json"));
+assert.deepEqual(prospectAddressFromGoogleComponents([
+  { longText: "609", shortText: "609", types: ["street_number"] },
+  { longText: "10th Street", shortText: "10th St", types: ["route"] },
+  { longText: "Suite 4", shortText: "Ste 4", types: ["subpremise"] },
+  { longText: "Port Saint Joe", shortText: "Port Saint Joe", types: ["locality"] },
+  { longText: "Florida", shortText: "FL", types: ["administrative_area_level_1"] },
+  { longText: "Gulf County", shortText: "Gulf County", types: ["administrative_area_level_2"] },
+  { longText: "32456", shortText: "32456", types: ["postal_code"] },
+  { longText: "United States", shortText: "US", types: ["country"] }
+]), {
+  address_line_1: "609 10th Street",
+  address_line_2: "Suite 4",
+  locality: "Port Saint Joe",
+  region: "FL",
+  postal_code: "32456",
+  country_code: "US",
+  county: "Gulf County"
+});
 
+assert.equal(evaluateProspectPlace({ names: ["99 Pest Solutions LLC"], region: "TX" }, {
+  displayName: { text: "99 Pest Solutions, LLC" },
+  primaryType: "pest_control_service",
+  types: ["pest_control_service"],
+  formattedAddress: "19507 Wied Rd Ste A, Spring, TX 77388, USA",
+  addressComponents: [
+    { longText: "Texas", shortText: "TX", types: ["administrative_area_level_1"] }
+  ],
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+
+assert.equal(evaluateProspectPlace({ names: ["2 Brothers Environmental Services"], region: "FL" }, {
+  displayName: { text: "4642 NW 3rd Dr" },
+  primaryType: "street_address",
+  types: ["street_address"],
+  formattedAddress: "4642 NW 3rd Dr, Delray Beach, FL 33445, USA"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["1up Pest Control LLC"], region: "GA" }, {
+  displayName: { text: "1up Pest Control" },
+  primaryType: "pest_control_service",
+  types: ["pest_control_service"],
+  formattedAddress: "7411 Legacy Pines Dr, Cypress, TX 77433, USA",
+  addressComponents: [
+    { longText: "Texas", shortText: "TX", types: ["administrative_area_level_1"] }
+  ],
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["410 Pest Control"], region: "TX" }, {
+  displayName: { text: "4D Pest Control, LLC" },
+  primaryType: "service",
+  formattedAddress: "631 Blueberry Hl Rd, Somerville, TX 77879, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["A J Pest Control"], region: "TX" }, {
+  displayName: { text: "J&J Pest Control Inc" },
+  primaryType: "service",
+  formattedAddress: "2300 Pasadena Dr Ste A, Austin, TX 78757, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["A + Pest Control"], region: "TX" }, {
+  displayName: { text: "Alta Pest Control" },
+  primaryType: "pest_control_service",
+  formattedAddress: "Austin, TX 78701, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Control"], region: "TX" }, {
+  displayName: { text: "A-Plus Pest Control Midland" },
+  primaryType: "pest_control_service",
+  formattedAddress: "111 W Wall St, Midland, TX 79701, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+
+assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Services LLC"], region: "NY" }, {
+  displayName: { text: "A + Pest Services" },
+  primaryType: "pest_control_service",
+  formattedAddress: "123 N Main St, New City, NY 10956, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+
+assert.equal(evaluateProspectPlace({ names: ["05 Total Solutions LLC"], region: "FL" }, {
+  displayName: { text: "Total Pest Solutions" },
+  primaryType: "pest_control_service",
+  formattedAddress: "Tampa, FL 33602, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["A Aardvark Pest Control"], region: "TX" }, {
+  displayName: { text: "Aardvark Pest Control Services" },
+  primaryType: "pest_control_service",
+  formattedAddress: "San Antonio, TX 78201, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+
+assert.equal(evaluateProspectPlace({ names: ["A 1 Shot Pest Control"], region: "TX" }, {
+  displayName: { text: "A-1 Pest Control Service Inc" },
+  primaryType: "pest_control_service",
+  formattedAddress: "Fort Worth, TX 76133, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+assert.equal(evaluateProspectPlace({ names: ["A Bear Pest Control And Tree Service"], region: "TX" }, {
+  displayName: { text: "A-Bear Pest Control" },
+  primaryType: "pest_control_service",
+  formattedAddress: "San Antonio, TX 78212, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+
+const sameStateDifferentCounty = evaluateProspectPlace({ names: ["A And B Pest Control"], region: "TX", county: "Harris" }, {
+  displayName: { text: "A and B Pest Control, Inc." },
+  primaryType: "pest_control_service",
+  addressComponents: [
+    { longText: "Llano County", shortText: "Llano County", types: ["administrative_area_level_2"] },
+    { longText: "Texas", shortText: "TX", types: ["administrative_area_level_1"] }
+  ],
+  businessStatus: "OPERATIONAL"
+});
+assert.equal(sameStateDifferentCounty.plausible, true);
+assert(sameStateDifferentCounty.reasons.includes("conflicting_county"));
+
+const directory = await mkdtemp(resolve(tmpdir(), "lodesta-prospect-research-"));
 try {
-  assert.equal(
-    canonicalProspectKey({
-      websiteUrl: "https://www.example.com/services/?campaign=test",
-      businessName: "Example"
-    }),
-    "website:example.com"
-  );
-  assert.equal(
-    canonicalProspectKey({
-      websiteUrl: "https://www.facebook.com/example-plumbing/",
-      businessName: "Example Plumbing"
-    }),
-    "website:facebook.com/example-plumbing"
-  );
-  assert.equal(prospectWebsiteKindForUrl("https://www.facebook.com/example-plumbing/"), "social_or_aggregator");
-  assert.equal(prospectWebsiteKindForUrl("https://example.com/"), "owned_website");
+  const repository = new LocalPlatformOperationsRepository(resolve(directory, "operations.json"));
+  const records = prospectImportSchema.parse({ records: [{
+    prospect: {
+      canonicalKey: "business:4-a pest control:san antonio:tx",
+      businessName: "4-A Pest Control, LLC",
+      vertical: "pest_control",
+      researchState: "matched",
+      websitePlatform: "Unknown",
+      businessEmail: "hello@example.com"
+    },
+    locations: [{
+      canonicalKey: "business:4-a pest control:san antonio:tx:primary",
+      kind: "service_area",
+      locality: "San Antonio",
+      region: "TX",
+      countryCode: "US",
+      isPrimary: true,
+      googlePlaceId: "ChIJwY3dg0X1GQkRdtIgv2aw4Zk",
+      googleBusinessName: "4-A Pest Control, LLC",
+      googleCategory: "Pest control service",
+      googlePhone: "+12106820014",
+      googleRating: 5,
+      googleReviewCount: 4
+    }],
+    contacts: [{
+      fullName: "Example Owner",
+      roleTitle: "Owner",
+      phone: "+12106820014",
+      isPrimary: true
+    }]
+  }] }).records;
 
-  const prospect = await repository.upsertProspect({
-    canonicalKey: "website:example.com",
-    businessName: "Example Plumbing",
-    vertical: "plumbing",
-    industryCode: "plumbing",
-    status: "active",
-    websiteKind: "owned_website",
-    websiteUrl: "https://www.example.com/",
-    locality: "Georgetown",
-    region: "tx",
-    countryCode: "us",
-    phone: "512-555-0100",
-    doNotContact: false
-  });
-  assert.equal(prospect.websiteHost, "example.com");
-  assert.equal(prospect.region, "TX");
-  assert.equal(prospect.countryCode, "US");
-
-  const scoring = scoreProspectPriority({
-    reviewRating: 4.8,
-    reviewCount: 180,
-    yearsInBusiness: 12,
-    websiteOpportunityScore: 78,
-    hasBusinessPhone: true,
-    hasPublicBusinessEmail: true,
-    evidenceCoverage: 0.8
-  });
-  const observation = await repository.createProspectObservation({
-    prospectId: prospect.id,
-    sourceType: "public_listing",
-    sourceUrl: "https://data.example.test/business/example",
-    observedAt: "2026-07-29T12:00:00.000Z",
-    websiteKind: "owned_website",
-    websiteUrl: "https://www.example.com/",
-    reviewRating: 4.8,
-    reviewCount: 180,
-    yearsInBusiness: 12,
-    cms: "WordPress",
-    agencyStatus: "not_observed",
-    websiteOpportunityScore: 78,
-    reachabilityScore: scoring.reachability,
-    priorityScore: scoring.priority,
-    scoringModel: scoring.model,
-    verificationStatus: "verified",
-    verificationScore: 96,
-    operatingStatus: "operational",
-    targetFitStatus: "target",
-    evidenceCoverage: 0.8,
-    producer: "verify-prospect-research",
-    methodologyIdentity: "verify-prospect-research",
-    inputHash: "sha256:example-observation"
-  });
-  const repeatedObservation = await repository.createProspectObservation({
-    ...observation,
-    sourceType: observation.sourceType,
-    inputHash: observation.inputHash
-  });
-  assert.equal(repeatedObservation.id, observation.id);
-  assert.equal(observation.verificationStatus, "verified");
-  assert.equal(observation.targetFitStatus, "target");
-
-  await assert.rejects(
-    () => repository.upsertProspectContact({
-      prospectId: prospect.id,
-      contactType: "owner",
-      email: "guessed@example.com",
-      sourceType: "import",
-      verificationStatus: "unverified",
-      outreachEligible: true,
-      observedAt: "2026-07-29T12:00:00.000Z"
-    }),
-    /Unverified contact data/
-  );
-  const businessContact = await repository.upsertProspectContact({
-    prospectId: prospect.id,
-    contactType: "business_general",
-    email: "hello@example.com",
-    phone: "512-555-0100",
-    sourceType: "business_website",
-    sourceUrl: "https://www.example.com/contact",
-    verificationStatus: "public_source",
-    outreachEligible: true,
-    observedAt: "2026-07-29T12:00:00.000Z"
-  });
-  const refreshedBusinessContact = await repository.upsertProspectContact({
-    prospectId: prospect.id,
-    contactType: "business_general",
-    fullName: "Office Team",
-    email: "HELLO@example.com",
-    phone: "512-555-0199",
-    sourceType: "business_website",
-    sourceUrl: "https://www.example.com/contact",
-    verificationStatus: "public_source",
-    outreachEligible: true,
-    observedAt: "2026-07-29T13:00:00.000Z"
-  });
-  assert.equal(refreshedBusinessContact.id, businessContact.id);
-  assert.equal((await repository.listProspectContacts(prospect.id)).length, 1);
-
-  const noWebsite = await repository.upsertProspect({
-    canonicalKey: "business:sample landscaping:casper:wy",
-    businessName: "Sample Landscaping",
-    vertical: "landscaping_tree",
-    industryCode: "landscaping_tree",
-    status: "active",
-    websiteKind: "no_website",
-    locality: "Casper",
-    region: "WY",
-    countryCode: "US",
-    doNotContact: false
-  });
-  const noWebsiteObservation = await repository.createProspectObservation({
-    prospectId: noWebsite.id,
-    sourceType: "licensed_dataset",
-    observedAt: "2026-07-29T11:00:00.000Z",
-    websiteKind: "no_website",
-    agencyStatus: "not_observed",
-    websiteOpportunityScore: 100,
-    priorityScore: 30,
-    scoringModel: scoring.model,
-    evidenceCoverage: 0.5,
-    producer: "verify-prospect-research",
-    methodologyIdentity: "verify-prospect-research",
-    inputHash: "sha256:no-website-observation"
-  });
-
-  const candidates = await repository.listProspectCandidates({ minimumPriorityScore: 20 });
-  assert.deepEqual(candidates.map((candidate) => candidate.businessName), ["Example Plumbing", "Sample Landscaping"]);
-  assert.equal(await repository.countProspectCandidates({ minimumPriorityScore: 20 }), 2);
-  assert.deepEqual(
-    (await repository.listProspectCandidates({
-      minimumPriorityScore: 20,
-      sortBy: "business_name",
-      sortDirection: "desc",
-      offset: 1,
-      limit: 1
-    })).map((candidate) => candidate.businessName),
-    ["Example Plumbing"]
-  );
-  assert.equal(candidates[0]?.publicEmail, "hello@example.com");
-  assert.equal((await repository.listProspectCandidates({ region: "WY" }))[0]?.websiteKind, "no_website");
-  assert.equal((await repository.listProspectCandidates({ verificationStatus: "verified" }))[0]?.businessName, "Example Plumbing");
-  assert.equal((await repository.listProspectCandidates({ targetFitStatus: "target" }))[0]?.verificationScore, 96);
-  assert.equal((await repository.listProspectCandidates({ minimumVerificationScore: 95 })).length, 1);
-
-  const campaign = await repository.createOutboundCampaign({ name: "Research verification" });
-  const member = await repository.upsertOutboundProspect({
-    prospectId: prospect.id,
-    selectionObservationId: observation.id,
-    campaignId: campaign.id
-  });
-  assert.equal(member.businessName, "Example Plumbing");
-  assert.equal(member.prospectId, prospect.id);
-  await assert.rejects(
-    () => repository.upsertOutboundProspect({
-      prospectId: prospect.id,
-      selectionObservationId: noWebsiteObservation.id,
-      campaignId: campaign.id
-    }),
-    /observation for the canonical prospect/
-  );
-
-  await assert.rejects(
-    () => repository.importProspectResearch([
-      {
-        prospect: {
-          canonicalKey: "website:duplicate.test",
-          businessName: "Duplicate One",
-          status: "active",
-          websiteKind: "owned_website",
-          websiteUrl: "https://duplicate.test/",
-          countryCode: "US",
-          doNotContact: false
-        }
-      },
-      {
-        prospect: {
-          canonicalKey: "website:duplicate.test",
-          businessName: "Duplicate Two",
-          status: "active",
-          websiteKind: "owned_website",
-          websiteUrl: "https://duplicate.test/",
-          countryCode: "US",
-          doNotContact: false
-        }
-      }
-    ]),
-    /duplicate canonical keys/
-  );
-
-  await repository.upsertProspectSource({
-    id: "test:TX:source-snapshot",
-    vertical: "plumbing",
-    jurisdiction: "TX",
-    authorityName: "Verification authority",
-    sourceName: "Verification source",
-    sourceUrl: "https://data.example.test/source-snapshot",
-    accessMethod: "json",
-    coverageStatus: "complete",
-    recordScope: "business"
-  });
-  const retainedSourceProspect = await repository.upsertProspect({
-    canonicalKey: "license-holder:test:retained",
-    businessName: "Retained Source Prospect",
-    vertical: "plumbing",
-    status: "active",
-    websiteKind: "unknown",
-    countryCode: "US",
-    doNotContact: false,
-    metadata: { acquisitionSource: "test:TX:source-snapshot" }
-  });
-  const staleSourceProspect = await repository.upsertProspect({
-    canonicalKey: "license-holder:test:stale",
-    businessName: "Stale Source Prospect",
-    vertical: "plumbing",
-    status: "active",
-    websiteKind: "unknown",
-    countryCode: "US",
-    doNotContact: false,
-    metadata: { acquisitionSource: "test:TX:source-snapshot" }
-  });
-  const pruned = await repository.pruneProspectSourceSnapshots([{
-    sourceId: "test:TX:source-snapshot",
-    retainedCanonicalKeys: [retainedSourceProspect.canonicalKey]
-  }]);
-  assert.equal(pruned.prospects, 1);
-  assert.ok(await repository.getProspect(retainedSourceProspect.id));
-  assert.equal(await repository.getProspect(staleSourceProspect.id), null);
-
-  console.log(JSON.stringify({
-    ok: true,
-    candidates: candidates.length,
-    topCandidate: candidates[0]?.businessName,
-    campaignProspect: member.id
-  }));
+  const imported = await repository.importProspectResearch(records);
+  assert.deepEqual(imported, { prospects: 1, locations: 1, contacts: 1 });
+  const matched = await repository.listProspectCandidates({ filters: [{ field: "research_state", operator: "equals", value: "matched" }] });
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0]?.googlePlaceId, "ChIJwY3dg0X1GQkRdtIgv2aw4Zk");
+  assert.equal(matched[0]?.googleReviewCount, 4);
+  assert.equal(matched[0]?.businessEmail, "hello@example.com");
+  assert.equal(matched[0]?.primaryContactName, "Example Owner");
+  assert.equal(matched[0]?.primaryContactRole, "Owner");
+  assert.equal(matched[0]?.outreachEmail, "hello@example.com");
+  assert.equal(matched[0]?.outreachPhone, "+12106820014");
+  console.log(JSON.stringify({ ok: true, contract: "business-locations-contacts-v1" }));
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

@@ -1,5 +1,5 @@
-export const generationCrawlerProductToken = "LodestaGenerationCrawler";
-export const generationCrawlerUserAgent = `${generationCrawlerProductToken}/2.0 (+https://lodesta.com/crawler)`;
+export const generationCrawlerProductToken = "LodestaWebsiteCrawler";
+export const generationCrawlerUserAgent = `${generationCrawlerProductToken}/1.0 (+https://lodesta.com/crawler)`;
 
 export type RobotsRule = {
   kind: "allow" | "disallow";

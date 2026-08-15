@@ -114,11 +114,11 @@ for (const forbidden of [
   assert(!redacted.includes(forbidden), `Owner activity leaked ${forbidden}`);
 }
 
-const [component, activityRoute, manager, discussionBrief, css, tokens, documentation] = await Promise.all([
+const [component, activityRoute, manager, discussionContext, css, tokens, documentation] = await Promise.all([
   readFile("components/SiteAgentWorkspace.tsx", "utf8"),
   readFile("app/api/site-agent/runs/[runId]/activity/route.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
-  readFile("packages/site-agent/briefs.ts", "utf8"),
+  readFile("packages/site-agent/context.ts", "utf8"),
   readFile("app/globals.css", "utf8"),
   readFile("app/product-tokens.css", "utf8"),
   readFile("docs/owner-chat-legibility-plan.md", "utf8")
@@ -147,8 +147,9 @@ assert(component.includes("event.nativeEvent.isComposing") && component.includes
   && component.includes("event.preventDefault()"), "Enter submission, Shift+Enter, or IME behavior is incomplete.");
 assert(manager.includes("recordBestEffort") && manager.includes("isOwnerVisibleSlowTool")
   && manager.includes("id: toolEventId") && manager.includes("Owner activity is telemetry only"), "Slow opening spans are not best-effort or do not preserve terminal identity.");
-assert(discussionBrief.includes("Speak in owner-facing page and section terms.")
-  && discussionBrief.includes("raw run telemetry"), "Ordinary Ask is not guided toward owner-facing language.");
+assert(discussionContext.includes("Speak in owner-facing page and section terms.")
+  && discussionContext.includes("currentRoutes")
+  && !discussionContext.includes("SiteAgentRunEvent"), "Ordinary Ask is not scoped to owner-facing site context.");
 assert(tokens.includes("--product-shadow-command-dock") && tokens.includes("--product-radius-lg: 20px"), "Command dock tokens are incomplete.");
 assert(css.includes("width: var(--product-control-height-compact)") && css.includes("@keyframes site-agent-mode-menu-in")
   && css.includes(".site-agent-activity-dot.is-running") && css.includes("min-height: var(--product-control-height-touch)"), "Composer and activity responsive/motion styling is incomplete.");
@@ -166,10 +167,9 @@ function runFixture(input: { status?: SiteAgentRun["status"] } = {}) {
     sessionId: "owner-session",
     siteId: "owner-site",
     publicBuildInputId: "owner-input",
+    request: { kind: "owner_instruction", messageIds: ["owner-message"] },
     origin: "owner_request",
-    executionDriver: "responses_api",
     requestedBy: "owner",
-    publishAfterSuccess: false,
     kind: "edit",
     status,
     stage: status === "succeeded" ? "candidate_ready" : status === "failed" || status === "cancelled" ? "failed" : "authoring",
@@ -183,7 +183,6 @@ function runFixture(input: { status?: SiteAgentRun["status"] } = {}) {
       maxConsecutiveIdenticalFailures: 3
     },
     usage: {
-      kind: "model_reported",
       inputTokens: 0,
       cachedInputTokens: 0,
       reasoningTokens: 0,

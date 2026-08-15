@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { HttpArtifactBlobStore } from "../packages/site-artifacts/blob-store";
+import { isManagedArtifactBlob } from "../packages/site-artifacts";
 import worker from "../workers/artifact-broker/src/index";
 
 const values = new Map<string, { bytes: Uint8Array; contentType: string; contentHash: string }>();
@@ -27,6 +29,8 @@ const key = "site-artifacts/site_test/artifact_test/index.html";
 const url = `https://broker.test/v1/blobs/${key}`;
 const bytes = new TextEncoder().encode("immutable artifact");
 const hash = `sha256:${Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+
+assert.equal(isManagedArtifactBlob({ store: "artifact", key: `source-mirror/${"a".repeat(64)}.gz` }), true);
 
 assert.equal((await dispatch(new Request(url))).status, 401, "artifact broker accepted an unauthenticated read");
 assert.equal((await dispatch(new Request("https://broker.test/v1/blobs", { headers: authorized() }))).status, 404, "artifact broker exposed collection inventory");
@@ -67,7 +71,24 @@ const raced = await Promise.all([
 assert.deepEqual(raced.map((response) => response.status).sort(), [201, 409], "concurrent first writers bypassed immutable conditional storage");
 assert([leftHash, rightHash].includes((await dispatch(new Request(raceUrl, { method: "HEAD", headers: authorized() }))).headers.get("x-lodesta-content-sha256") ?? ""), "concurrent immutable winner was not retained");
 
-process.stdout.write(`${JSON.stringify({ ok: true, exactObjectReadWriteHead: "pass", inventoryAbsent: "pass", deletionAbsent: "pass" })}\n`);
+const originalFetch = globalThis.fetch;
+const clientMethods: string[] = [];
+try {
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    clientMethods.push(init?.method ?? "GET");
+    if (init?.method === "HEAD") {
+      return new Response(null, { status: 200, headers: { "x-lodesta-content-sha256": hash } });
+    }
+    throw new Error("Idempotent client write re-uploaded a retained blob.");
+  }) as typeof fetch;
+  const client = new HttpArtifactBlobStore("https://broker.test", "verification-token");
+  await client.putImmutable({ key, bytes: Buffer.from(bytes), contentType: "text/html", contentHash: hash as `sha256:${string}` });
+  assert.deepEqual(clientMethods, ["HEAD"], "idempotent HTTP writes did not short-circuit on retained content-hash metadata");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+process.stdout.write(`${JSON.stringify({ ok: true, exactObjectReadWriteHead: "pass", idempotentClientHead: "pass", inventoryAbsent: "pass", deletionAbsent: "pass" })}\n`);
 
 function authorized() {
   return { authorization: "Bearer verification-token" };

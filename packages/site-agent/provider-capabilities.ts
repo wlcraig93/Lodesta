@@ -11,7 +11,8 @@ type CapabilityEvidence =
   | { mechanism: "request_parameter"; detail: string }
   | { mechanism: "documented_provider_guarantee"; detail: string }
   | { mechanism: "runtime_usage_validation"; detail: string }
-  | { mechanism: "retained_probe"; detail: string };
+  | { mechanism: "retained_probe"; detail: string }
+  | { mechanism: "unsupported"; detail: string };
 
 export type ProviderAuthoringCapabilities = {
   schemaVersion: 1;
@@ -36,6 +37,7 @@ export type ProviderAuthoringCapabilities = {
   cacheTelemetry: CapabilityEvidence;
   promptCaching: CapabilityEvidence;
   reasoningControls: CapabilityEvidence;
+  contextCompaction: CapabilityEvidence;
   requestFields: Record<string, "accepted" | "stripped" | "translated">;
 };
 
@@ -133,8 +135,13 @@ function declaredCapabilities(
       costTelemetry: { mechanism: "runtime_usage_validation", detail: "provider usage or catalog estimate; unavailable is terminal" },
       cacheTelemetry: { mechanism: "runtime_usage_validation", detail: "input_tokens_details.cached_tokens" },
       promptCaching: { mechanism: "request_parameter", detail: "prompt_cache_key, implicit 30m mode, and a stable explicit breakpoint" },
-      reasoningControls: { mechanism: "request_parameter", detail: "reasoning.effort" },
+      reasoningControls: { mechanism: "request_parameter", detail: "reasoning.effort=high and reasoning.context=all_turns" },
+      contextCompaction: {
+        mechanism: "request_parameter",
+        detail: "context_management compaction with a 200000-token threshold"
+      },
       requestFields: {
+        context_management: "accepted",
         include: "accepted",
         parallel_tool_calls: "accepted",
         store: "accepted",
@@ -196,7 +203,12 @@ function declaredCapabilities(
       mechanism: "request_parameter",
       detail: "reasoning.effort=high"
     },
+    contextCompaction: {
+      mechanism: "unsupported",
+      detail: "OpenAI Responses compaction is not sent through unestablished OpenRouter provider routes"
+    },
     requestFields: {
+      context_management: "stripped",
       include: "stripped",
       parallel_tool_calls: anthropic ? "translated" : "accepted",
       store: anthropic ? "stripped" : "accepted",
@@ -229,6 +241,8 @@ function probeEvidence(
         "parallel_tool_calls=false",
         "store=false",
         "encrypted_reasoning",
+        "reasoning.context=all_turns",
+        "context_management.compaction",
         "prompt_cache_options",
         "prompt_cache_breakpoint"
       ]

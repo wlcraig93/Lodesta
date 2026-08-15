@@ -12,10 +12,12 @@ const child = spawn(next, ["start", ...process.argv.slice(2)], {
   env: {
     ...process.env,
     LODESTA_DEV_SANDBOX: "0",
-    LODESTA_DEV_SANDBOX_TOKEN: "",
-    LODESTA_SANDBOX_URL: "",
-    LODESTA_SANDBOX_TOKEN: "",
-    LODESTA_SANDBOX_IMAGE_DIGEST: "",
+    LODESTA_DEV_SANDBOX_BLUE_TOKEN: "",
+    LODESTA_DEV_SANDBOX_GREEN_TOKEN: "",
+    LODESTA_SANDBOX_BLUE_URL: "",
+    LODESTA_SANDBOX_BLUE_TOKEN: "",
+    LODESTA_SANDBOX_GREEN_URL: "",
+    LODESTA_SANDBOX_GREEN_TOKEN: "",
     LODESTA_RELEASE_GIT_SHA: ""
   }
 });

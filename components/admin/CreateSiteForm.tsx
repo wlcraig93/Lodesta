@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 
 type BootstrapResponse = {
   site?: { slug?: string };
   run?: { id?: string };
+  workspacePath?: string;
   error?: string;
 };
 
-export function CreateSiteForm() {
+type CanaryModel = "luna" | "terra" | "sol";
+
+export function CreateSiteForm({ canaryMode = false }: { canaryMode?: boolean }) {
   const router = useRouter();
+  const idempotencyKey = useRef(crypto.randomUUID());
   const [url, setUrl] = useState("");
   const [slug, setSlug] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,17 +24,27 @@ export function CreateSiteForm() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
+    const formData = new FormData(event.currentTarget);
+    const submittedModel = canaryMode
+      ? String(formData.get("model")) as CanaryModel
+      : "luna";
     setBusy(true);
     setError(undefined);
     try {
-      const response = await fetch("/api/site-agent/sites", {
+      const response = await fetch(canaryMode ? "/api/admin/site-authoring-canaries" : "/api/site-agent/sites", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), mode: "draft", ...(slug.trim() ? { slug: slug.trim() } : {}) })
+        body: JSON.stringify({
+          url: url.trim(),
+          idempotencyKey: idempotencyKey.current,
+          reportingTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          ...(canaryMode ? { model: submittedModel } : {}),
+          ...(slug.trim() ? { slug: slug.trim() } : {})
+        })
       });
       const payload = await response.json().catch(() => ({})) as BootstrapResponse;
-      if (!response.ok || !payload.site?.slug) throw new Error(payload.error ?? "Site creation failed.");
-      router.push(`/workspace/${encodeURIComponent(payload.site.slug)}/editor`);
+      if (!response.ok || (canaryMode ? !payload.workspacePath : !payload.site?.slug)) throw new Error(payload.error ?? "Site creation failed.");
+      router.push(canaryMode ? payload.workspacePath! : `/workspace/${encodeURIComponent(payload.site!.slug!)}/editor`);
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -39,9 +53,18 @@ export function CreateSiteForm() {
   }
 
   return <form className="editor-form create-site-form" onSubmit={submit}>
+    {canaryMode ? <p className="muted">The canary runs the canonical generator from the retained mirror for this exact URL. It does not recrawl the source or publish the result.</p> : null}
+    {canaryMode ? <label htmlFor="site-authoring-model">
+      Authoring model
+      <select id="site-authoring-model" name="model" defaultValue="luna" disabled={busy}>
+        <option value="luna">Luna — economical</option>
+        <option value="terra">Terra — balanced</option>
+        <option value="sol">Sol — strongest</option>
+      </select>
+    </label> : null}
     <label htmlFor="source-url">
       Business website
-      <input id="source-url" type="url" inputMode="url" placeholder="https://example.com" value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} required autoFocus />
+      <input id="source-url" type="text" inputMode="url" autoComplete="url" placeholder="example.com" value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} required autoFocus />
     </label>
     <label htmlFor="site-slug">
       Site slug <span className="muted">Optional</span>

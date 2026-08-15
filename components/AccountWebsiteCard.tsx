@@ -14,7 +14,6 @@ export function AccountWebsiteCard({
   thumbnailUrl,
   lifecycle,
   targetId,
-  targetKind,
   removable
 }: {
   name: string;
@@ -24,7 +23,6 @@ export function AccountWebsiteCard({
   thumbnailUrl?: string;
   lifecycle: OwnerSiteLifecycle;
   targetId?: string;
-  targetKind: "site" | "setup";
   removable: boolean;
 }) {
   const menuId = useId();
@@ -77,7 +75,6 @@ export function AccountWebsiteCard({
               <div id={menuId} role="menu">
                 <RemoveWebsiteButton
                   targetId={targetId}
-                  targetKind={targetKind}
                   websiteName={name}
                   appearance="menu-item"
                   onDialogOpenChange={setRemovalDialogOpen}

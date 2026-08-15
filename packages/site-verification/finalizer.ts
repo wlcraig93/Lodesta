@@ -14,7 +14,8 @@ import {
   type ArtifactGateFinding
 } from "./contracts";
 import { sanitizeAgentCss, sanitizeAgentHtml } from "./sanitizer";
-import { platformCapabilityStyles } from "../../workers/site-sandbox/scaffold/platform/capability-styles";
+import { platformCapabilityStylesFor } from "../../workers/site-sandbox/scaffold/platform/capability-styles";
+import { platformFontStyles } from "../../workers/site-sandbox/scaffold/platform/font-library";
 import { siteTechnicalReleasePolicy } from "@/packages/site-contracts/platform-manifest";
 
 export type PreparedArtifactFile = {
@@ -24,6 +25,7 @@ export type PreparedArtifactFile = {
 };
 
 export type PreparedSiteArtifact = {
+  runtimeSeriesId: string;
   authored: AgentAuthoredArtifact;
   files: PreparedArtifactFile[];
   routes: Array<{ path: string; htmlFile: string; title: string; description: string; html: string }>;
@@ -54,12 +56,8 @@ export function prepareSiteArtifact(input: {
   const allowedPhoneNumbers = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))));
   const allowedEmailAddresses = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()));
   const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
-  const finalCss = `${platformCapabilityStyles}\n${cssResult.css}`;
+  const finalCss = `${platformFontStyles}\n${platformCapabilityStylesFor(input.runtimeSeriesId)}\n${cssResult.css}`;
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
-  for (const page of input.buildInput.intent.pageRequirements.filter((item) => item.required)) {
-    const requiredRoute = normalizeRoutePath(page.slug ? `/${page.slug}` : "/");
-    if (!routes.has(requiredRoute)) findings.push(gateFinding("route.required", "route", `Requested route ${requiredRoute} is missing.`, requiredRoute, "warning"));
-  }
   for (const route of authored.routes) {
     if (/<(?:script|style)\b/i.test(route.bodyHtml)) {
       findings.push(gateFinding("html.agent_executable", "html", "Agent-authored script and style elements are forbidden.", normalizeRoutePath(route.path)));
@@ -82,14 +80,14 @@ export function prepareSiteArtifact(input: {
   });
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
-  findings.push(...validateManagedForms(sanitized, input.buildInput));
+  findings.push(...validateLeadForms(sanitized, input.buildInput));
   const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
     buildInput: input.buildInput
   });
   findings.push(...factBindings.findings);
   const qualityMetrics = { routeSimilarity: routeSimilarityMetrics(sanitized) };
-  findings.push(...validateSiteStructure({ routes: sanitized, bindings: factBindings.bindings, buildInput: input.buildInput, similarities: qualityMetrics.routeSimilarity }));
+  findings.push(...validateSiteStructure({ routes: sanitized, similarities: qualityMetrics.routeSimilarity }));
 
   const structured = structuredDataFor(input.buildInput);
   const structuredBindings = structured.factBindings;
@@ -129,6 +127,7 @@ export function prepareSiteArtifact(input: {
   ];
 
   return {
+    runtimeSeriesId: input.runtimeSeriesId,
     authored,
     files,
     routes: routeOutputs,
@@ -178,6 +177,8 @@ export function finalizePreparedArtifact(input: {
     siteId: input.buildInput.siteId,
     workspaceRevisionId: input.workspaceRevisionId,
     publicBuildInputId: input.buildInput.id,
+    ownerOperationalRevision: input.buildInput.ownerOperationalRevision,
+    ownerIntentRevision: input.buildInput.ownerIntentRevision,
     createdAt,
     artifactHash,
     storagePrefix: input.storagePrefix,
@@ -205,8 +206,11 @@ export function finalizePreparedArtifact(input: {
  * Authoring findings are retained for assessment, but only failures that make the
  * finalized artifact unsafe or technically unusable control publication. Inputs
  * already neutralized by the sanitizer do not force another authoring turn.
- * Business facts, metadata, content structure, visual quality, and accessibility
- * are intentionally advisory while the product is learning what models produce.
+ * Factual identity and canonical fact violations remain blockers. Subjective
+ * content structure, visual quality, and accessibility findings stay advisory
+ * while the product learns what models produce. Deterministic viewport overflow,
+ * clipping, and solid-color text/control contrast are functional blockers when
+ * they hide or make content and controls unreadable.
  */
 export function isTechnicalReleaseBlocker(finding: ArtifactGateFinding) {
   if (finding.severity !== "error") return false;
@@ -221,8 +225,6 @@ function advisoryUnlessTechnicalBlocker(finding: ArtifactGateFinding): ArtifactG
 
 function validateSiteStructure(input: {
   routes: Array<{ path: string; title: string; description: string; bodyHtml: string }>;
-  bindings: FactBinding[];
-  buildInput: SitePublicBuildInput;
   similarities: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
 }) {
   const findings: ArtifactGateFinding[] = [];
@@ -242,32 +244,6 @@ function validateSiteStructure(input: {
       findings.push(gateFinding("route.orphan", "route", `Declared route ${route.path} has no inbound link from another site route.`, route.path, "warning"));
     }
   }
-  const purposeByRoute = new Map(input.buildInput.intent.pageRequirements.map((page) => [
-    normalizeRoutePath(page.slug ? `/${page.slug}` : "/"),
-    page.purpose
-  ]));
-  for (const route of input.routes.filter((candidate) => purposeByRoute.get(candidate.path) === "service")) {
-    const words = visibleMainWordCount(route.bodyHtml);
-    if (words < 150) {
-      findings.push(gateFinding(
-        "route.thin_service_content",
-        "route",
-        `Dedicated service-page main content contains ${words} words; target at least 150 substantive words excluding shared navigation and footer content.`,
-        route.path,
-        "warning"
-      ));
-    }
-  }
-  for (const requirement of input.buildInput.intent.pageRequirements.filter((page) => page.required && page.purpose === "service" && page.offeringId)) {
-    const routePath = normalizeRoutePath(requirement.slug ? `/${requirement.slug}` : "/");
-    const route = input.routes.find((candidate) => candidate.path === routePath);
-    const offering = input.buildInput.business.offerings.find((candidate) => candidate.id === requirement.offeringId);
-    if (!route || !offering || offering.status !== "confirmed" || offering.visibility !== "public") continue;
-    const factIds = new Set(offering.sourceFactIds);
-    const boundInHtml = [...factIds].some((factId) => route.bodyHtml.includes(`data-lodesta-fact-id="${factId}"`));
-    const boundInFact = input.bindings.some((binding) => normalizeRoutePath(binding.route) === routePath && binding.sourceFactIds.some((factId) => factIds.has(factId)));
-    if (!boundInHtml && !boundInFact) findings.push(gateFinding("fact.service_detail_source", "claim", `Service page ${routePath} must render source-bound detail for ${offering.name}.`, routePath));
-  }
   for (const similarity of input.similarities) {
     if (similarity.jaccard >= 0.9 || similarity.smallerPageContainment >= 0.95) {
       findings.push(gateFinding(
@@ -283,24 +259,61 @@ function validateSiteStructure(input: {
 }
 
 function routeSimilarityMetrics(routes: Array<{ path: string; bodyHtml: string }>) {
-  const values = routes.map((route) => ({ path: route.path, shingles: fiveWordShingles(visibleBodyText(route.bodyHtml)) }));
+  const values = routes.map((route) => {
+    const text = visibleBodyText(route.bodyHtml);
+    const shingles = fiveWordShingles(text);
+    return {
+      path: route.path,
+      textHash: sha256(text),
+      templateHash: sha256(route.bodyHtml.replace(/>[\s\S]*?</g, "><").replace(/\s+/g, " ")),
+      wordBand: Math.floor(text.split(/\s+/).length / 100),
+      shingles,
+      fingerprint: [...shingles].map((shingle) => sha256(shingle)).sort().slice(0, 12)
+    };
+  });
   const result: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }> = [];
-  for (let leftIndex = 0; leftIndex < values.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < values.length; rightIndex += 1) {
-      const left = values[leftIndex];
-      const right = values[rightIndex];
-      if (!left.shingles.size || !right.shingles.size) continue;
-      const intersection = [...left.shingles].filter((shingle) => right.shingles.has(shingle)).length;
-      const union = new Set([...left.shingles, ...right.shingles]).size;
-      result.push({
-        left: left.path,
-        right: right.path,
-        jaccard: intersection / union,
-        smallerPageContainment: intersection / Math.min(left.shingles.size, right.shingles.size)
-      });
+  const buckets = new Map<string, number[]>();
+  for (const [index, value] of values.entries()) {
+    const keys = [
+      `exact:${value.textHash}`,
+      `template:${value.templateHash}:${value.wordBand}`,
+      ...value.fingerprint.slice(0, 4).map((hash) => `near:${hash}`)
+    ];
+    for (const key of keys) buckets.set(key, [...(buckets.get(key) ?? []), index]);
+  }
+  const pairs = new Set<string>();
+  for (const [key, members] of buckets) {
+    const bucket = [...new Set(members)].sort((left, right) => left - right);
+    if (key.startsWith("exact:")) {
+      for (let index = 1; index < bucket.length; index += 1) pairs.add(`${bucket[0]}:${bucket[index]}`);
+      continue;
+    }
+    for (let index = 1; index < bucket.length; index += 1) {
+      const first = Math.min(bucket[0], bucket[index]);
+      const second = Math.max(bucket[0], bucket[index]);
+      pairs.add(`${first}:${second}`);
+      for (let prior = Math.max(0, index - 4); prior < index; prior += 1) {
+        const leftIndex = Math.min(bucket[prior], bucket[index]);
+        const rightIndex = Math.max(bucket[prior], bucket[index]);
+        pairs.add(`${leftIndex}:${rightIndex}`);
+      }
     }
   }
-  return result;
+  for (const pair of pairs) {
+    const [leftIndex, rightIndex] = pair.split(":").map(Number);
+    const left = values[leftIndex];
+    const right = values[rightIndex];
+    if (!left.shingles.size || !right.shingles.size) continue;
+    const intersection = [...left.shingles].filter((shingle) => right.shingles.has(shingle)).length;
+    const union = left.shingles.size + right.shingles.size - intersection;
+    result.push({
+      left: left.path,
+      right: right.path,
+      jaccard: intersection / union,
+      smallerPageContainment: intersection / Math.min(left.shingles.size, right.shingles.size)
+    });
+  }
+  return result.sort((left, right) => left.left.localeCompare(right.left) || left.right.localeCompare(right.right));
 }
 
 function visibleBodyText(html: string) {
@@ -309,19 +322,6 @@ function visibleBodyText(html: string) {
     if (node.type === "tag") DomUtils.removeElement(node);
   }
   return DomUtils.textContent(document).replace(/\s+/g, " ").trim();
-}
-
-function visibleMainWordCount(html: string) {
-  const document = parseDocument(html, { decodeEntities: true });
-  const main = DomUtils.findOne((candidate) => candidate.type === "tag" && candidate.name === "main", document.children);
-  const roots = main?.type === "tag" ? main.children : document.children;
-  for (const node of DomUtils.findAll(
-    (candidate) => candidate.type === "tag" && ["script", "style", "svg", "noscript", "header", "nav", "footer"].includes(candidate.name),
-    roots
-  )) {
-    if (node.type === "tag") DomUtils.removeElement(node);
-  }
-  return normalizeText(DomUtils.textContent(roots)).split(" ").filter(Boolean).length;
 }
 
 function fiveWordShingles(value: string) {
@@ -374,7 +374,7 @@ function validateCapabilityBindings(artifact: AgentAuthoredArtifact, buildInput:
   return findings;
 }
 
-function validateManagedForms(
+function validateLeadForms(
   routes: Array<{ path: string; bodyHtml: string }>,
   buildInput: SitePublicBuildInput
 ) {
@@ -388,8 +388,22 @@ function validateManagedForms(
       const formId = form.attribs["data-lodesta-form-id"];
       const definition = definitions.get(formId);
       if (!definition) continue;
+      if (
+        form.attribs["data-lodesta-form-key"] !== definition.key
+        || form.attribs["data-lodesta-form-revision"] !== String(definition.revision)
+        || form.attribs["data-lodesta-form-destination"] !== "lead_inbox"
+      ) {
+        findings.push(gateFinding(
+          "capability.form_revision",
+          "capability",
+          `Form ${formId} does not match its retained lead-inbox schema revision.`,
+          route.path
+        ));
+      }
       const controls = DomUtils.findAll(
-        (node) => node.type === "tag" && ["input", "textarea", "select"].includes(node.name),
+        (node) => node.type === "tag"
+          && (["input", "textarea", "select"].includes(node.name)
+            || (node.name === "fieldset" && Boolean(node.attribs["data-lodesta-field-id"]))),
         form.children
       );
       const counts = new Map<string, number>();
@@ -398,10 +412,13 @@ function validateManagedForms(
         if (!fieldId) continue;
         counts.set(fieldId, (counts.get(fieldId) ?? 0) + 1);
         const id = control.attribs.id;
+        const labelledBy = control.attribs["aria-labelledby"];
         const label = id
           ? DomUtils.findOne((node) => node.type === "tag" && node.name === "label" && node.attribs.for === id, form.children)
-          : undefined;
-        if (!id || !label) {
+          : labelledBy
+            ? DomUtils.findOne((node) => node.type === "tag" && node.attribs.id === labelledBy, form.children)
+            : undefined;
+        if ((!id && !labelledBy) || !label) {
           findings.push(gateFinding("capability.form_label", "capability", `Field ${fieldId} in form ${formId} must have a label associated by for/id.`, route.path));
         }
       }
@@ -446,7 +463,7 @@ function structuredDataFor(buildInput: SitePublicBuildInput) {
   const location = buildInput.business.locations[0];
   const value: Record<string, unknown> = {
     "@context": "https://schema.org",
-    "@type": buildInput.domainContext?.structuredDataType ?? "LocalBusiness",
+    "@type": "LocalBusiness",
     name: buildInput.business.name
   };
   const factBindings: FactBinding[] = [];
@@ -469,6 +486,40 @@ function structuredDataFor(buildInput: SitePublicBuildInput) {
         factBindings.push(structuredBinding(`jsonld:address:${key}`, String(item), addressFact.id));
       }
     }
+    const coordinateFact = buildInput.publicFacts.find((fact) =>
+      (fact.kind === "location" || fact.kind === "address")
+      && location.sourceFactIds.includes(fact.id)
+    );
+    if (
+      coordinateFact
+      && location.latitude !== undefined
+      && location.longitude !== undefined
+    ) {
+      value.geo = {
+        "@type": "GeoCoordinates",
+        latitude: location.latitude,
+        longitude: location.longitude
+      };
+      factBindings.push(
+        structuredBinding("jsonld:geo:latitude", String(location.latitude), coordinateFact.id),
+        structuredBinding("jsonld:geo:longitude", String(location.longitude), coordinateFact.id)
+      );
+    }
+  }
+  const hoursFact = facts.get("hours");
+  const openingHours = hoursFact ? structuredOpeningHours(hoursFact.value) : [];
+  if (hoursFact && openingHours.length) {
+    value.openingHours = openingHours;
+    for (const item of openingHours) {
+      factBindings.push(structuredBinding(`jsonld:opening-hours:${factBindings.length + 1}`, item, hoursFact.id));
+    }
+  }
+  const serviceAreaFacts = buildInput.publicFacts.filter((fact) => fact.kind === "service_area");
+  if (serviceAreaFacts.length) {
+    value.areaServed = serviceAreaFacts.map((fact) => String(fact.value));
+    for (const fact of serviceAreaFacts) {
+      factBindings.push(structuredBinding(`jsonld:area-served:${fact.id}`, String(fact.value), fact.id));
+    }
   }
   const offeringFacts = buildInput.publicFacts.filter((fact) => fact.kind === "offering");
   if (offeringFacts.length) {
@@ -476,6 +527,46 @@ function structuredDataFor(buildInput: SitePublicBuildInput) {
     for (const fact of offeringFacts) factBindings.push(structuredBinding(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
   }
   return { value, factBindings };
+}
+
+function structuredOpeningHours(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const dayAbbreviation: Record<string, string> = {
+    Monday: "Mo",
+    Tuesday: "Tu",
+    Wednesday: "We",
+    Thursday: "Th",
+    Friday: "Fr",
+    Saturday: "Sa",
+    Sunday: "Su"
+  };
+  return Object.entries(value as Record<string, unknown>).flatMap(([days, hours]) => {
+    if (typeof hours !== "string") return [];
+    const normalizedHours = hours.trim();
+    const continuous = /^(?:open\s*)?24\s*(?:hours?|\/\s*7)$/i.test(normalizedHours);
+    const match = normalizedHours.match(/^(.+?)\s*[-–]\s*(.+)$/);
+    const startTime = continuous ? "00:00" : match ? structuredClockTime(match[1]) : undefined;
+    const endTime = continuous ? "23:59" : match ? structuredClockTime(match[2]) : undefined;
+    if (!startTime || !endTime) return [];
+    const [startDay, endDay] = days.split("-");
+    const start = dayAbbreviation[startDay];
+    const end = dayAbbreviation[endDay ?? startDay];
+    if (!start || !end) return [];
+    const dayRange = start === end ? start : `${start}-${end}`;
+    return [`${dayRange} ${startTime}-${endTime}`];
+  });
+}
+
+function structuredClockTime(value: string) {
+  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (!match) return undefined;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  const meridiem = match[3]?.toUpperCase();
+  if (minute > 59 || hour > (meridiem ? 12 : 23) || hour < (meridiem ? 1 : 0)) return undefined;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  if (meridiem === "PM" && hour !== 12) hour += 12;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function addStructuredFact(
@@ -514,15 +605,23 @@ function documentHtml(input: {
 function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
   const values = [
     ...buildInput.business.links.map((link) => link.url),
-    ...buildInput.business.locations.map(mapHrefForLocation)
+    ...buildInput.business.locations.flatMap((location) => [
+      legacyMapHrefForLocation(location),
+      directionsHrefForLocation(location)
+    ])
   ];
   return new Set(values.map((value) => new URL(value).toString()));
 }
 
-function mapHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
+function legacyMapHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
   const address = [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || location.label)}`;
+}
+
+function directionsHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
+  const address = [location.street, location.city, location.region, location.postalCode, location.country].filter(Boolean).join(", ");
   const query = address || location.label;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
 }
 
 function comparablePhone(value: string) {

@@ -1,3 +1,32 @@
-:root { color: #151515; background: #ffffff; font-family: Arial, sans-serif; }
+:root {
+  --site-color-background: #ffffff;
+  --site-color-surface: #ffffff;
+  --site-color-text: #151515;
+  --site-color-muted: #5f6360;
+  --site-color-accent: #245c4f;
+  --site-color-on-accent: #ffffff;
+  --site-color-border: #d9ddda;
+  --site-font-body: Arial, sans-serif;
+  --site-font-display: Georgia, serif;
+  --site-space-1: 0.25rem;
+  --site-space-2: 0.5rem;
+  --site-space-3: 0.75rem;
+  --site-space-4: 1rem;
+  --site-space-5: 1.5rem;
+  --site-space-6: 2rem;
+  --site-space-7: 3rem;
+  --site-space-8: 4rem;
+  --site-content-width: 72rem;
+  --site-radius-sm: 0.25rem;
+  --site-radius-md: 0.5rem;
+  --site-radius-lg: 1rem;
+  --site-shadow-sm: 0 0.25rem 0.75rem rgb(0 0 0 / 0.08);
+  --site-shadow-md: 0 1rem 2.5rem rgb(0 0 0 / 0.12);
+  --site-motion-fast: 120ms;
+  --site-motion-standard: 180ms;
+  color: var(--site-color-text);
+  background: var(--site-color-background);
+  font-family: var(--site-font-body);
+}
 body { margin: 0; }
 main { min-height: 100vh; display: grid; place-items: center; padding: 2rem; }

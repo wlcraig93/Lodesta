@@ -28,7 +28,7 @@ for (const requiredBehavior of [
   'redirect: "manual"',
   "magicLinkSessionCookies",
   '"/account/onboarding"',
-  '"Create another website?"',
+  '"reusable_source_creation"',
   "currentWorkspaceRevisionId",
   "files.length >= 2",
   "The initial authoring run ended as",
@@ -38,14 +38,16 @@ for (const requiredBehavior of [
   "cleanupCanaryState",
   '"service_role_fallback"',
   '".data", "owner-journey"',
-  '".data/site-sandbox-dev.json"',
-  '"website_setups"'
+  "readDevelopmentSandboxReceipt",
+  "active_deployment_id",
+  '"atomic_project_handoff"'
 ]) {
   assert(source.includes(requiredBehavior), `Owner canary behavior is missing ${requiredBehavior}.`);
 }
 assert(source.includes("LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION")
   && source.includes('"true"'), "The owner canary must fail closed outside a confirmed non-production environment.");
 assert(!source.includes("signInWithPassword") && !source.includes("auth bypass"), "The owner canary must not add or use an authentication bypass.");
+assert(!source.includes("duplicateDialog"), "Reusable source URLs must never pause owner creation behind a duplicate confirmation.");
 assert(!source.includes("page.goto(actionLink"), "Credential-bearing magic links must never enter browser history or Playwright diagnostics.");
 assert(source.includes("safeDiagnostic") && source.includes("[redacted-url]"), "Canary failures must redact credential-bearing URLs before storage or output.");
 assert(gitignore.split(/\r?\n/).includes(".data"), "Owner-canary evidence must remain gitignored.");

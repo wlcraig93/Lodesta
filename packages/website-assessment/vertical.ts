@@ -11,7 +11,7 @@ const signals: VerticalSignal[] = [
   { vertical: "med_spa", pattern: /\b(med spa|medspa|botox|injectable|laser treatment|aesthetic medicine)\b/i, label: "medical aesthetics language", weight: 0.48 },
   { vertical: "law_firm", pattern: /\b(attorney|law firm|legal counsel|lawyer|litigation)\b/i, label: "legal service language", weight: 0.46 },
   { vertical: "dental", pattern: /\b(dentist|dental|orthodont|teeth|oral surgery)\b/i, label: "dental language", weight: 0.46 },
-  { vertical: "home_services", pattern: /\b(plumber|plumbing|electrician|electrical|hvac|roofing|contractor|heating|cooling)\b/i, label: "home service language", weight: 0.42 },
+  { vertical: "home_services", pattern: /\b(plumber|plumbing|electrician|electrical|hvac|roofing|contractor|heating|cooling|pest control|exterminator|termite control)\b/i, label: "home service language", weight: 0.42 },
   { vertical: "fitness", pattern: /\b(gym|fitness|personal training|pilates|yoga|strength training)\b/i, label: "fitness language", weight: 0.42 },
   { vertical: "real_estate", pattern: /\b(real estate|realtor|homes for sale|property management|brokerage)\b/i, label: "real estate language", weight: 0.45 },
   { vertical: "landscaping", pattern: /\b(landscap|lawn care|hardscape|tree service|irrigation)\b/i, label: "landscaping language", weight: 0.45 },
@@ -19,20 +19,11 @@ const signals: VerticalSignal[] = [
   { vertical: "creative_studio", pattern: /\b(creative studio|photograph|videograph|design studio|branding studio)\b/i, label: "creative studio language", weight: 0.4 }
 ];
 
-const domainContextAssessmentVerticals: Readonly<Record<string, Vertical>> = {
-  auto_body: "auto_body",
-  plumbing: "home_services"
-};
-
-export function assessmentVerticalForDomainContext(domainContextId: string | undefined): Vertical | "general_local" {
-  if (!domainContextId) return "general_local";
-  return domainContextAssessmentVerticals[domainContextId] ?? "general_local";
-}
-
 export function inferAssessmentVertical(input: {
   sourceUrl?: string;
   crawl?: CrawlAssessment;
   declaredVertical?: string;
+  textEvidence?: string[];
 }) {
   if (input.declaredVertical && input.declaredVertical !== "general_local") {
     return {
@@ -48,7 +39,8 @@ export function inferAssessmentVertical(input: {
     input.crawl?.extractedFacts.name,
     ...input.crawl?.extractedFacts.categories ?? [],
     ...input.crawl?.extractedFacts.services ?? [],
-    ...input.crawl?.pageSummaries.flatMap((page) => [page.title, page.metaDescription, page.mainText?.slice(0, 1_500)]) ?? []
+    ...input.crawl?.pageSummaries.flatMap((page) => [page.title, page.metaDescription, page.mainText?.slice(0, 1_500)]) ?? [],
+    ...input.textEvidence ?? []
   ].filter(Boolean).join("\n");
   const scores = new Map<Vertical, { score: number; evidence: string[] }>();
   for (const signal of signals) {

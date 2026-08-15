@@ -17,7 +17,12 @@ const baseline = await readFile("supabase/migrations/202607230001_canonical_base
 for (const path of [
   "app/(marketing)/claim/[slug]/page.tsx", "app/api/claim/route.ts", "app/api/stripe/webhook/route.ts",
   "app/api/billing/portal/route.ts", "lib/billing.ts", "lib/claim-ownership.ts",
-  "lib/claim-verification-challenge.ts", "lib/stripe-webhook.ts", "scripts/run-site-experiment.ts"
+  "lib/claim-verification-challenge.ts", "lib/stripe-webhook.ts", "scripts/run-site-experiment.ts",
+  "app/api/mcp/route.ts", "packages/site-authoring-mcp", "docs/site-authoring-mcp.md",
+  "scripts/manage-site-authoring-mcp-credentials.ts", "scripts/verify-site-authoring-mcp.ts",
+  "scripts/spike-site-authoring-mcp-connectivity.ts",
+  "integrations/codex/skills/lodesta-site-authoring",
+  "integrations/codex/lodesta-owner.config.toml.example"
 ]) await assertMissing(path);
 
 for (const { path, source } of sources) {
@@ -28,7 +33,11 @@ for (const { path, source } of labelSources) {
   const unexpected = numberedInternalLabels(source).filter((label) => !allowedBoundaryLabel(path, label));
   assert.deepEqual(unexpected, [], `${path} contains numbered internal labels: ${unexpected.join(", ")}`);
 }
-const unexpectedVersionedFiles = labelFiles.filter((path) => /(?:^|[/_.-])v\d+(?:\.\d+)?(?:[/_.-]|$)/i.test(path) && path !== "packages/trusted-runtime/site-runtime-v1.js");
+const allowedVersionedFiles = new Set([
+  "packages/trusted-runtime/site-runtime-v1.js",
+  "supabase/migrations/202607270001_website_health_report_v2.sql"
+]);
+const unexpectedVersionedFiles = labelFiles.filter((path) => /(?:^|[/_.-])v\d+(?:\.\d+)?(?:[/_.-]|$)/i.test(path) && !allowedVersionedFiles.has(path));
 assert.deepEqual(unexpectedVersionedFiles, [], `Version-numbered internal filenames remain: ${unexpectedVersionedFiles.join(", ")}`);
 assert.deepEqual(versionedLodestaDeclarations("fixture.ts", `
   import { ListObjectsV2Command } from "@aws-sdk/client-s3";
@@ -44,19 +53,49 @@ for (const table of [
 const workflow = await readFile("packages/site-platform/workflow.ts", "utf8");
 assert(!workflow.includes("ExistingSourceCollisionError") && !workflow.includes("existingSourcePolicy"), "Source collision reuse remains in authoring.");
 assert(!workflow.includes('mode?: "draft" | "experimental"'), "Experimental authoring mode remains.");
+assert(!workflow.includes("publishAfterSuccess"), "A run-level hidden auto-publication path remains in authoring.");
+const bootstrapBody = workflow.match(/async bootstrapFromUrl\([\s\S]*?\n  }\n\n  async prepareExternalOwnerSite/)?.[0] ?? "";
+const enqueueBody = workflow.match(/async enqueueRun\([\s\S]*?\n  }\n\n  async enqueueEdit/)?.[0] ?? "";
+assert(
+  !bootstrapBody.includes("ensureRuntime")
+  && !enqueueBody.includes("configuredSiteSandboxRuntimeForDeployment")
+  && !enqueueBody.includes("developmentSandboxDeploymentMatchesCheckout"),
+  "Private project creation is still blocked on authoring runtime readiness."
+);
 const accessSource = await readFile("lib/page-access.ts", "utf8");
 assert(accessSource.includes("site.ownerUserId === userId") && !accessSource.includes("ownerEmail"), "Site access is not exact user-ID ownership.");
-const publication = await readFile("packages/site-platform/publication-readiness.ts", "utf8");
-assert(publication.includes('from "@/packages/business-data/public-projection"') && !publication.includes('from "@/packages/business-data"'), "Publication readiness imports the broad business-data barrel.");
+const publication = await readFile("packages/site-platform/candidate-integrity.ts", "utf8");
+const releaseVerification = await readFile("packages/site-platform/release-verification.ts", "utf8");
+assert(!publication.includes("score") && !publication.includes("objective_qa"), "Candidate integrity contains subjective readiness scoring.");
+assert(
+  publication.includes("artifactContentHash")
+  && releaseVerification.includes("verifyBlob")
+  && releaseVerification.includes("sha256(read.blob.bytes)")
+  && releaseVerification.includes("workspaceSourceSidecarSchema"),
+  "Candidate integrity does not verify retained bytes, workspace provenance, and the artifact manifest."
+);
+const prelaunchReset = await readFile("scripts/reset-prelaunch-site-authoring.ts", "utf8");
+assert(
+  prelaunchReset.indexOf("const removedPrelaunchTables") < prelaunchReset.indexOf("if (!options.apply)"),
+  "The prelaunch reset table allowlist is initialized after top-level execution."
+);
+assert(
+  prelaunchReset.includes('"website_assessments"')
+  && prelaunchReset.includes('"website_assessment_jobs"')
+  && prelaunchReset.includes("siteAssessments")
+  && prelaunchReset.includes("siteAssessmentJobs"),
+  "The prelaunch reset does not inventory and remove generated-site assessment dependencies."
+);
 const platformDataRepository = await readFile("packages/platform-data/repository.ts", "utf8");
-assert(platformDataRepository.includes('from "@/packages/business-data/public-projection"') && !platformDataRepository.includes('from "@/packages/business-data"'), "Platform data repository imports the broad business-data barrel.");
+assert(!platformDataRepository.includes("siteIntentMatchesBuildContent"), "Platform data still compares candidates to a legacy content-readiness projection.");
 assert(!publication.includes("preview_only_reference_assets") && !publication.includes("asset.reference_only"), "Retired preview-only media publication logic remains.");
-const externalAuthoringPlan = await readFile("docs/external-codex-authoring.md", "utf8");
-assert(externalAuthoringPlan.includes("typed `source_website` origin") && externalAuthoringPlan.includes("does not create a separate approval or publication gate"), "The canonical source-site media policy is not recorded.");
-assert(workflow.includes("createImageBytes") && workflow.includes("createMediaContactSheet"), "Image generation or initial media context is missing from authoring.");
+const mediaAuthoringPolicy = await readFile("docs/media-authoring-policy.md", "utf8");
+assert(mediaAuthoringPolicy.includes("`source_website`") && mediaAuthoringPolicy.includes("There is no owner attestation"), "The canonical source-site media policy is not recorded.");
+assert(workflow.includes("createImageBytes") && workflow.includes("inspect_assets"), "Image generation or selective managed-media inspection is missing from authoring.");
 assert(!publication.includes("checkout") && !publication.includes("verificationLevel"), "Claims-era publication gates remain.");
 const siteContracts = await readFile("packages/site-contracts/index.ts", "utf8");
 assert(siteContracts.includes('"source_website", "owner_upload", "platform_generated"'), "Typed media origin is missing from canonical contracts.");
+assert(!siteContracts.includes('"external_batch"') && !siteContracts.includes("publishAfterSuccess"), "Retired batch or auto-publication run contracts remain.");
 const platformSiteSchema = siteContracts.match(/export const platformSiteRecordSchema = z\.object\(\{([\s\S]*?)\n\}\)\.strict\(\);/)?.[1] ?? "";
 const publicBuildInputSchema = siteContracts.match(/export const sitePublicBuildInputSchema = z\.object\(\{([\s\S]*?)\n\}\)\.strict\(\);/)?.[1] ?? "";
 assert(platformSiteSchema.includes("sourceUrl: publicUrl.optional()"), "Canonical site records made URL input mandatory.");
@@ -132,10 +171,20 @@ function numberedInternalLabels(source: string) {
 
 function allowedBoundaryLabel(path: string, label: string) {
   if (["api.openai.com/v1", "openrouter.ai/api/v1"].includes(label)) return true;
+  if (label.includes("site-runtime-v")) return true;
   const boundaryFiles = [
     /^\.env\.example$/,
     /^\.github\//,
+    /^docs\/generated-site-successor-experiment-plan\.md$/,
+    /^docs\/generated-site-visual-process-experiment-plan\.md$/,
+    /^docs\/generated-site-authoring-status\.md$/,
+    /^docs\/site-authoring-experiment-retrospective-\d{4}-\d{2}-\d{2}\.md$/,
+    /^docs\/decisions\//,
     /^docs\/local-business-cro-research-playbook\.md$/,
+    /^docs\/prospect-research\.md$/,
+    /^docs\/website-assessment-calibration\.md$/,
+    /^supabase\/migrations\//,
+    /^supabase\/migrations\/202607270001_website_health_report_v2\.sql$/,
     /^workers\/(?:site-sandbox|artifact-broker|recovery-watchdog)\//,
     /^packages\/trusted-runtime\//,
     /^packages\/site-artifacts\/(?:blob-store|maintenance-store)\.ts$/,
@@ -147,13 +196,18 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^packages\/website-assessment\/browser-evidence\.ts$/,
     /^app\/api\/site-agent\/sessions\/\[sessionId\]\/preview\//,
     /^app\/api\/operator\/runtime\/route\.ts$/,
-    /^scripts\/(?:configure-r2-lifecycle|deploy-site-sandbox-dev|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-deployment-config|verify-development-sandbox|verify-external-authoring|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-trusted-runtime|verify-website-assessments)\.ts$/,
+    /^scripts\/(?:build-first-five-prospect-reports|discover-open-prospects|enrich-prospect-ownership|enrich-prospect-websites|import-pest-control-license-rosters|import-prospects|rank-prospects|select-prospect-sample|verify-google-business-listings|verify-prospect-research)\.ts$/,
+    /^scripts\/(?:configure-r2-lifecycle|deploy-site-sandbox-dev|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-deployment-config|verify-development-sandbox|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-supabase|verify-trusted-runtime|verify-website-assessments)\.ts$/,
     /^scripts\/support\/synthetic-site-input\.ts$/,
     /^lib\/(?:analytics|analytics-ingestion|domains|privacy|rate-limit|inquiries)\.ts$/,
     /^scripts\/verify-site-authoring-architecture\.ts$/
   ];
   if (boundaryFiles.some((pattern) => pattern.test(path))) return true;
-  if (path === "packages/site-platform/workflow.ts") return ["node:v8", "site-runtime-v1", "V1"].includes(label);
+  if (path === "packages/site-platform/workflow.ts") {
+    return label === "node:v8" || label === "V1" || label.startsWith("site-runtime-v");
+  }
+  if (path === "packages/site-agent/font-library.ts") return label === "v1";
   if (path === "packages/site-agent/manager.ts") return label.endsWith("/v1");
+  if (path === "scripts/verify-site-sandbox-operations.ts") return label === "v1";
   return false;
 }

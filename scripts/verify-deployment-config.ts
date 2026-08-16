@@ -136,7 +136,7 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("sandbox:deployments -- promote")
   && productionRelease.includes("npm run verify:site-sandbox-deployed")
   && productionRelease.includes("previous_deployment")
-  && productionRelease.includes("/api/health?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
+  && productionRelease.includes("/api/health/?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
 assert(
   productionRelease.indexOf("Deploy, canary, and register the inactive sandbox") < productionRelease.indexOf("Acquire the database maintenance fence and drain")
     && productionRelease.indexOf("Acquire the database maintenance fence and drain") < productionRelease.indexOf("railway up --ci")

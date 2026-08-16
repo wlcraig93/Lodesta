@@ -223,7 +223,7 @@ jobs:
           set -Eeuo pipefail
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/pre-promotion-health.json"; then
+              "$LODESTA_APP_ORIGIN/api/health/?deep=1" > "$EVIDENCE_DIR/pre-promotion-health.json"; then
               node --input-type=module -e '
                 import { readFileSync } from "node:fs";
                 const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
@@ -255,7 +255,7 @@ jobs:
           touch "$EVIDENCE_DIR/promoted"
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/post-promotion-health.json"; then
+              "$LODESTA_APP_ORIGIN/api/health/?deep=1" > "$EVIDENCE_DIR/post-promotion-health.json"; then
               node --input-type=module -e '
                 import { readFileSync } from "node:fs";
                 const report = JSON.parse(readFileSync(process.argv[1], "utf8"));

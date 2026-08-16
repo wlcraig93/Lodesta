@@ -113,8 +113,21 @@ jobs:
           version="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).versionId")"
           digest="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).imageDigest")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
-            > "$EVIDENCE_DIR/sandbox-canary.json"
+          if ! LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
+            > "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" \
+            2> "$EVIDENCE_DIR/sandbox-canary-attempt-1.error.log"; then
+            # Cloudflare may accept the Worker version before the new container
+            # application has finished replacing its runtime connections. Keep the
+            # first failure as evidence, then retry the complete canary exactly once
+            # against the same immutable deployment after a bounded readiness delay.
+            sleep 20
+            LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
+              > "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" \
+              2> "$EVIDENCE_DIR/sandbox-canary-attempt-2.error.log"
+            cp "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" "$EVIDENCE_DIR/sandbox-canary.json"
+          else
+            cp "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" "$EVIDENCE_DIR/sandbox-canary.json"
+          fi
           NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- register \
             --slot "$slot" --worker-version "$version" --release-sha "$RELEASE_SHA" \
             --image-digest "$digest" > "$EVIDENCE_DIR/sandbox-registration.json"

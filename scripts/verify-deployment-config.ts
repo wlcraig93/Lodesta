@@ -148,6 +148,10 @@ assert(productionRelease.includes("timeout-minutes: 180")
   && productionRelease.includes("maintenance:site-authoring -- wait-active --timeout-minutes=30")
   && productionRelease.includes("authoring_drain_timeout")
   && productionRelease.includes("Restore only the sandbox pointer after post-promotion failure"), "Coordinated releases must use a bounded maintenance drain and retain pointer-only automatic rollback.");
+assert(productionRelease.includes("sandbox-canary-attempt-1.error.log")
+  && productionRelease.includes("sandbox-canary-attempt-2.error.log")
+  && productionRelease.includes("sleep 20"),
+  "A new Cloudflare container rollout must preserve its first canary failure and retry the complete canary exactly once after a bounded readiness delay.");
 assert(productionRelease.includes("activeDeployments.find")
   && productionRelease.includes("const priorIds = new Set")
   && productionRollback.includes("const priorIds = new Set"), "Release evidence must select a successful current deployment, and deployment polling must ignore stale prior failures.");

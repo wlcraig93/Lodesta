@@ -49,6 +49,10 @@ assert.match(skills, /MobileNavigation and ManagedLeadForm recipes/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
 assert.match(workflow, /canonicalSiteAuthoringRuntimeSeriesId/);
 assert.match(workflow, /olderAuthoringRevision \|\| run\.kind === "initial_build"/);
+assert.match(workflow, /const materializedInitialSource = !resumedSandboxSource[\s\S]*this\.sandbox\.getSource\(sandboxState\.session\.sandboxId!\)/,
+  "Blank initial builds must materialize the sandbox scaffold recipes into the manager workspace.");
+assert.match(workflow, /currentFiles = resumedSandboxSource\?\.files[\s\S]*materializedInitialSource\?\.files[\s\S]*loadWorkspaceSource/,
+  "Blank recipes, resumed source, and retained owner source must share one explicit precedence path.");
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
 assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);

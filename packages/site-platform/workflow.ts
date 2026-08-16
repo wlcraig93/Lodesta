@@ -1010,7 +1010,15 @@ export class SiteAuthoringWorkflow {
       ))
         ? await this.sandbox.getSource(sandboxState.session.sandboxId!).catch(() => undefined)
         : undefined;
+      const materializedInitialSource = !resumedSandboxSource
+        && (olderAuthoringRevision || run.kind === "initial_build" || !site.currentWorkspaceRevisionId)
+        ? await this.sandbox.getSource(sandboxState.session.sandboxId!)
+        : undefined;
+      if (materializedInitialSource && materializedInitialSource.revision !== sandboxState.revision) {
+        throw new Error("materialized_initial_source_revision_mismatch");
+      }
       let currentFiles = resumedSandboxSource?.files
+        ?? materializedInitialSource?.files
         ?? (olderAuthoringRevision || run.kind === "initial_build" || !site.currentWorkspaceRevisionId
           ? undefined
           : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId));

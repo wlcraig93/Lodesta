@@ -55,9 +55,9 @@ Managed-form verification requires the retained schema exactly once, one status 
 
 ## Stored data, rollout, and rollback
 
-The read-only `report:managed-capabilities-v4-cutover` command inventories all strict public inputs, workspace revisions, artifacts, versions, runtime series, runtime patches, retained navigation/form imports, and owner-created revisions. It does not mutate stored rows.
+The read-only `report:managed-capabilities-cutover` command inventories all strict public inputs, workspace revisions, artifacts, versions, runtime series, runtime patches, retained navigation/form imports, and owner-created revisions. It does not mutate stored rows.
 
-The `cutover:managed-capabilities-v4` command is dry-run by default. Applying it requires an audited compatible V4 patch, the active `site_authoring_maintenance` lease, zero running or queued authoring runs, an operator identity, and explicit per-site approval when the current workspace revision was owner-created. It creates new immutable V4 public inputs and repoints only mutable current-input references through an atomic expected-current-input fence, so a concurrent authority change cannot be overwritten. It never rewrites retained inputs, workspaces, artifacts, versions, or runtime patches.
+The `cutover:managed-capabilities` command is dry-run by default. Applying it requires an audited compatible V4 patch, the active `site_authoring_maintenance` lease, zero running or queued authoring runs, an operator identity, and explicit per-site approval when the current workspace revision was owner-created. It creates new immutable V4 public inputs and repoints only mutable current-input references through an atomic expected-current-input fence, so a concurrent authority change cannot be overwritten. It never rewrites retained inputs, workspaces, artifacts, versions, or runtime patches.
 
 Historical rendering remains for every runtime series proven referenced by retained artifacts. Older series are not selectable for new authoring and receive no aliases, fallback dispatch, or live selector. During soak, rollback restores the prior pinned blue/green sandbox deployment and prior immutable current-input references; it does not introduce dual live authoring.
 

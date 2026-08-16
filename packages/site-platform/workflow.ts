@@ -921,7 +921,7 @@ export class SiteAuthoringWorkflow {
       const session = await this.requireSession(run.sessionId);
       const buildInput = await this.requireBuildInput(run.publicBuildInputId);
       if (buildInput.capabilityConfiguration.trustedRuntimeSeries !== canonicalSiteAuthoringRuntimeSeriesId) {
-        throw new Error("legacy_authoring_input_requires_v4_rebuild");
+        throw new Error("legacy_authoring_input_requires_rebuild");
       }
       const site = await this.repository.getSite(run.siteId);
       if (!site) throw new Error("Site not found.");

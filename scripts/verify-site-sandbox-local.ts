@@ -118,7 +118,7 @@ try {
   assert(routeHeaders?.every((header) => header === routeHeaders[0]), "ordinary routes did not render the same shared SiteHeader source component");
   assert(routeFooters?.every((footer) => footer === routeFooters[0]), "ordinary routes did not render the same shared SiteFooter source component");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="modal"'), "NavigationDisclosure did not retain its required modal behavior");
-  assert(!artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-icon=""'), "V4 NavigationDisclosure injected platform trigger artwork");
+  assert(!artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-icon=""'), "Canonical NavigationDisclosure injected platform trigger artwork");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('aria-label="Open navigation"'), "NavigationDisclosure omitted its default accessible label");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="inline"'), "NavigationDisclosure did not retain an owner-selected inline behavior");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Menu choices"), "NavigationDisclosure did not retain a custom visible trigger");

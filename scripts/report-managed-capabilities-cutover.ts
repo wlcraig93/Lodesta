@@ -123,7 +123,7 @@ const report = {
   workspaceSourceUsage,
   missingWorkspaceSidecars,
   cutoverDecision: {
-    currentSitesRequiringNewV4Input: currentInputReferences.filter((entry) => entry.runtimeSeriesId !== "site-runtime-v4").map((entry) => entry.siteId).sort(),
+    currentSitesRequiringCanonicalInput: currentInputReferences.filter((entry) => entry.runtimeSeriesId !== "site-runtime-v4").map((entry) => entry.siteId).sort(),
     ownerApprovalRequiredSiteIds: currentInputReferences.filter((entry) => entry.runtimeSeriesId !== "site-runtime-v4" && entry.ownerCreatedCurrentRevision).map((entry) => entry.siteId).sort(),
     retainedRuntimeSeriesIds: [...new Set([
       ...inputs.map((input) => input.capabilityConfiguration.trustedRuntimeSeries),
@@ -152,7 +152,7 @@ const output = process.argv.includes("--summary") ? {
   workspaceLegacySdkPathCount: report.workspaceSourceUsage.filter((entry) => entry.files.some((file) => file.legacySdkPath)).length,
   missingWorkspaceSidecarCount: report.missingWorkspaceSidecars.length,
   cutoverDecision: {
-    currentSiteCountRequiringNewV4Input: report.cutoverDecision.currentSitesRequiringNewV4Input.length,
+    currentSiteCountRequiringCanonicalInput: report.cutoverDecision.currentSitesRequiringCanonicalInput.length,
     ownerApprovalRequiredSiteCount: report.cutoverDecision.ownerApprovalRequiredSiteIds.length,
     retainedRuntimeSeriesIds: report.cutoverDecision.retainedRuntimeSeriesIds,
     retainedWorkspaceRevisionCount: report.cutoverDecision.retainedWorkspaceRevisionIds.length,

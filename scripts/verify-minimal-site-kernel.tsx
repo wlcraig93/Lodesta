@@ -17,7 +17,7 @@ assert.equal(directionsHrefForLocation({ label: "North office" }), "https://www.
 const [sdkSource, nativeSdkSource, v4SdkSource, auditedRuntimeSource, workflowSource, browserGateSource, previewSource, operatorRuntimeSource, publicRuntimeRouteSource] = await Promise.all([
   readFile("workers/site-sandbox/scaffold/platform/sdk.tsx", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
-  readFile("workers/site-sandbox/scaffold/platform/sdk-v4.tsx", "utf8"),
+  readFile("workers/site-sandbox/scaffold/platform/sdk-canonical.tsx", "utf8"),
   readFile("packages/trusted-runtime/site-runtime-v1.js", "utf8"),
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-verification/browser-gate.ts", "utf8"),

@@ -38,7 +38,7 @@ const [workflow, manager, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await
   readFile("packages/site-agent/skills.ts", "utf8"),
   readFile("workers/site-sandbox/src/index.ts", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
-  readFile("workers/site-sandbox/scaffold/platform/sdk-v4.tsx", "utf8"),
+  readFile("workers/site-sandbox/scaffold/platform/sdk-canonical.tsx", "utf8"),
   readFile("app/api/admin/site-authoring-canaries/route.ts", "utf8")
 ]);
 assert.match(workflow, /run\.kind === "initial_build"[\s\S]*prepareInitialArchitecture/);
@@ -50,7 +50,7 @@ assert.match(workflow, /Older authoring format—full rebuild required/);
 assert.match(workflow, /canonicalSiteAuthoringRuntimeSeriesId/);
 assert.match(workflow, /olderAuthoringRevision \|\| run\.kind === "initial_build"/);
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
-assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-v4\.tsx"/);
+assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);
 assert.doesNotMatch(nativeSdk, /NavigationDisclosure/);
 assert.match(v4Sdk, /NavigationDisclosure/);

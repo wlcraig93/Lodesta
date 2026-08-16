@@ -11,20 +11,20 @@ const approvedOwnerSites = new Set(process.argv.filter((value) => value.startsWi
 const targetSeries = "site-runtime-v4";
 
 if (apply && (!actorId || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159}$/.test(actorId))) {
-  throw new Error("Use --apply --verified-by=<operator-id> after the V4 diagnostic, treatment screen, and release verification pass.");
+  throw new Error("Use --apply --verified-by=<operator-id> after the canonical-runtime diagnostic, treatment screen, and release verification pass.");
 }
 if (apply) {
-  assert(await sitePlatformRepository.isMaintenanceLeaseActive("site_authoring_maintenance", new Date().toISOString()), "The V4 cutover requires the active site-authoring maintenance lease.");
+  assert(await sitePlatformRepository.isMaintenanceLeaseActive("site_authoring_maintenance", new Date().toISOString()), "The managed-capabilities cutover requires the active site-authoring maintenance lease.");
   const [running, queued] = await Promise.all([
     sitePlatformRepository.listRecentAgentRuns({ status: "running", limit: 1 }),
     sitePlatformRepository.listRecentAgentRuns({ status: "queued", limit: 1 })
   ]);
-  assert.equal(running.length, 0, "The V4 cutover requires zero running authoring runs.");
-  assert.equal(queued.length, 0, "The V4 cutover requires zero queued authoring runs.");
+  assert.equal(running.length, 0, "The managed-capabilities cutover requires zero running authoring runs.");
+  assert.equal(queued.length, 0, "The managed-capabilities cutover requires zero queued authoring runs.");
   const series = await sitePlatformRepository.getRuntimeSeries(targetSeries);
-  assert(series, "The V4 runtime series must be promoted before current inputs are repointed.");
+  assert(series, "The canonical runtime series must be promoted before current inputs are repointed.");
   const activePatch = await sitePlatformRepository.getRuntimePatch(series.activePatchId);
-  assert(activePatch?.securityStatus === "audited" && activePatch.compatibilityStatus === "passed", "The active V4 runtime patch must be audited and compatibility-passed.");
+  assert(activePatch?.securityStatus === "audited" && activePatch.compatibilityStatus === "passed", "The active canonical runtime patch must be audited and compatibility-passed.");
 }
 
 const [sites, revisions, inputs] = await Promise.all([
@@ -44,7 +44,7 @@ for (const site of sites) {
   const prior = inputById.get(site.currentPublicBuildInputId);
   if (!prior) throw new Error(`Site ${site.id} references missing public input ${site.currentPublicBuildInputId}.`);
   if (prior.capabilityConfiguration.trustedRuntimeSeries === targetSeries) {
-    changes.push({ siteId: site.id, status: "already_v4", inputId: prior.id });
+    changes.push({ siteId: site.id, status: "already_current_runtime", inputId: prior.id });
     continue;
   }
   const currentRevision = site.currentWorkspaceRevisionId ? revisionById.get(site.currentWorkspaceRevisionId) : undefined;
@@ -58,7 +58,7 @@ for (const site of sites) {
     continue;
   }
 
-  const nextId = deterministicId("input_runtime_v4", { schemaVersion: 1, siteId: site.id, priorInputId: prior.id, runtimeSeriesId: targetSeries });
+  const nextId = deterministicId("input_runtime_upgrade", { schemaVersion: 1, siteId: site.id, priorInputId: prior.id, runtimeSeriesId: targetSeries });
   let next = inputById.get(nextId);
   if (next) {
     assertEquivalentCutoverInput(prior, next);
@@ -71,7 +71,7 @@ for (const site of sites) {
   }
   if (apply) {
     const repointed = await sitePlatformRepository.setCurrentPublicBuildInputIfCurrent(site.id, prior.id, next.id);
-    assert(repointed, `Site ${site.id} changed current input during the V4 cutover; no stale input was installed.`);
+    assert(repointed, `Site ${site.id} changed current input during the managed-capabilities cutover; no stale input was installed.`);
   }
   changes.push({
     siteId: site.id,
@@ -125,7 +125,7 @@ function cutoverInput(prior: SitePublicBuildInput, id: string, createdAt: string
 
 function assertEquivalentCutoverInput(prior: SitePublicBuildInput, retained: SitePublicBuildInput) {
   const expected = cutoverInput(prior, retained.id, retained.createdAt);
-  assert.equal(stableJson(retained), stableJson(expected), `Retained V4 input ${retained.id} does not match its deterministic predecessor.`);
+  assert.equal(stableJson(retained), stableJson(expected), `Retained canonical-runtime input ${retained.id} does not match its deterministic predecessor.`);
 }
 
 function deterministicId(prefix: string, value: unknown) {

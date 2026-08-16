@@ -1031,7 +1031,7 @@ async function writeGenerationInput(sandbox: ReturnType<typeof getSandbox>, root
   if (runtimeSeriesId !== "site-runtime-v4") throw new Error("unsupported_authoring_runtime_series");
   const packageFile = await sandbox.readFile(`${root}/package.json`, { encoding: "utf8" });
   const packageJson = JSON.parse(packageFile.content) as { imports?: Record<string, string> };
-  packageJson.imports = { ...packageJson.imports, "#lodesta-sdk": "./platform/sdk-v4.tsx" };
+  packageJson.imports = { ...packageJson.imports, "#lodesta-sdk": "./platform/sdk-canonical.tsx" };
   await sandbox.writeFile(`${root}/package.json`, `${JSON.stringify(packageJson, null, 2)}\n`);
 }
 

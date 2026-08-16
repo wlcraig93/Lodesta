@@ -55,7 +55,7 @@ jobs:
           [[ "${{ inputs.sandbox_deployment_id }}" =~ ^sandbox_deployment_[a-z0-9_]+$ ]]
           git cat-file -e "${{ inputs.release_sha }}^{commit}"
           mkdir -p "$EVIDENCE_DIR"
-          npm run sandbox:deployments -- rollback --deployment-id "${{ inputs.sandbox_deployment_id }}" \
+          npm run --silent sandbox:deployments -- rollback --deployment-id "${{ inputs.sandbox_deployment_id }}" \
             > "$EVIDENCE_DIR/sandbox-rollback.json"
       - name: Redeploy the retained controller
         run: |

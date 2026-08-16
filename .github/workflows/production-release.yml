@@ -68,7 +68,7 @@ jobs:
         id: slot
         run: |
           set -Eeuo pipefail
-          npm run sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
+          npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
           inactive="$(node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const status = JSON.parse(readFileSync(process.argv[1], "utf8"));
@@ -77,7 +77,7 @@ jobs:
             process.stdout.write(status.control.blueDeploymentId === active ? "green" : "blue");
           ' "$EVIDENCE_DIR/sandbox-control-before.json")"
           previous="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-control-before.json')).control.activeDeploymentId")"
-          npm run sandbox:deployments -- assert-slot-available --slot "$inactive"
+          npm run --silent sandbox:deployments -- assert-slot-available --slot "$inactive"
           echo "slot=$inactive" >> "$GITHUB_OUTPUT"
           echo "previous_deployment=$previous" >> "$GITHUB_OUTPUT"
 
@@ -97,7 +97,7 @@ jobs:
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
             > "$EVIDENCE_DIR/sandbox-canary.json"
-          npm run sandbox:deployments -- register \
+          npm run --silent sandbox:deployments -- register \
             --slot "$slot" --worker-version "$version" --release-sha "$RELEASE_SHA" \
             --image-digest "$digest" > "$EVIDENCE_DIR/sandbox-registration.json"
           deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-registration.json')).deployment.id")"
@@ -130,7 +130,7 @@ jobs:
         id: promotion
         run: |
           set -Eeuo pipefail
-          npm run sandbox:deployments -- promote --deployment-id "${{ steps.sandbox.outputs.deployment }}" \
+          npm run --silent sandbox:deployments -- promote --deployment-id "${{ steps.sandbox.outputs.deployment }}" \
             > "$EVIDENCE_DIR/sandbox-promotion.json"
           touch "$EVIDENCE_DIR/promoted"
           for attempt in $(seq 1 30); do
@@ -145,7 +145,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           [ -f "$EVIDENCE_DIR/promoted" ] || exit 0
-          npm run sandbox:deployments -- rollback --deployment-id "${{ steps.slot.outputs.previous_deployment }}" \
+          npm run --silent sandbox:deployments -- rollback --deployment-id "${{ steps.slot.outputs.previous_deployment }}" \
             > "$EVIDENCE_DIR/automatic-sandbox-rollback.json"
 
       - name: Upload release evidence

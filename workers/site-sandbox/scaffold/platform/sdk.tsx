@@ -166,6 +166,7 @@ export function LeadField({
   className,
   labelClassName,
   controlClassName,
+  helpClassName,
   label,
   placeholder,
   rows
@@ -174,6 +175,7 @@ export function LeadField({
   className?: string;
   labelClassName?: string;
   controlClassName?: string;
+  helpClassName?: string;
   label?: string;
   placeholder?: string;
   rows?: number;
@@ -183,7 +185,7 @@ export function LeadField({
   return <div className={className} data-lodesta-lead-field={field.id}>
     <LeadLabel id={id} className={labelClassName}>{label}</LeadLabel>
     <LeadControl id={id} className={controlClassName} placeholder={placeholder} rows={rows} controlId={controlId} />
-    {field.helpText ? <small>{field.helpText}</small> : null}
+    {field.helpText ? <small className={helpClassName}>{field.helpText}</small> : null}
   </div>;
 }
 
@@ -300,7 +302,21 @@ export function DirectionsLink({
   >{children}</a>;
 }
 
-export function NavigationDisclosure({
+type HeadlessNavigationDisclosureProps = {
+  id: string;
+  label?: string;
+  behavior: "modal" | "inline";
+  openLabel?: string;
+  closeLabel?: string;
+  className?: string;
+  toggleClassName?: string;
+  panelClassName?: string;
+  navClassName?: string;
+  trigger: ReactNode;
+  children: ReactNode;
+};
+
+export function HeadlessNavigationDisclosure({
   id,
   label = "Primary",
   behavior,
@@ -312,19 +328,7 @@ export function NavigationDisclosure({
   navClassName,
   trigger,
   children
-}: {
-  id: string;
-  label?: string;
-  behavior: "modal" | "inline";
-  openLabel?: string;
-  closeLabel?: string;
-  className?: string;
-  toggleClassName?: string;
-  panelClassName?: string;
-  navClassName?: string;
-  trigger?: ReactNode;
-  children: ReactNode;
-}) {
+}: HeadlessNavigationDisclosureProps) {
   return <div
     className={className}
     data-lodesta-navigation-disclosure={id}
@@ -341,7 +345,7 @@ export function NavigationDisclosure({
       data-lodesta-open-label={openLabel}
       data-lodesta-close-label={closeLabel}
     >
-      {trigger ?? <span data-lodesta-navigation-icon="" aria-hidden="true"><span /><span /><span /></span>}
+      {trigger}
     </button>
     <div
       id={id}
@@ -357,6 +361,13 @@ export function NavigationDisclosure({
       <nav className={navClassName} aria-label={label}>{children}</nav>
     </div>
   </div>;
+}
+
+export function NavigationDisclosure({ trigger, ...props }: Omit<HeadlessNavigationDisclosureProps, "trigger"> & { trigger?: ReactNode }) {
+  return <HeadlessNavigationDisclosure
+    {...props}
+    trigger={trigger ?? <span data-lodesta-navigation-icon="" aria-hidden="true"><span /><span /><span /></span>}
+  />;
 }
 
 function stableId(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "item"; }

@@ -1,0 +1,108 @@
+/* @lodesta-recipe {"id":"managed-lead-form","version":1,"templateHash":"sha256:96a2df37be84881ce7ddfc015a9796921327e52fb17a54e42606e5be1c02eed4"} */
+.recipe-managed-lead-form {
+  display: grid;
+  gap: var(--site-space-4, 1rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.recipe-managed-lead-form__fields {
+  display: grid;
+  gap: var(--site-space-4, 1rem);
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recipe-managed-lead-form [data-lodesta-lead-field] {
+  display: grid;
+  gap: var(--site-space-2, 0.5rem);
+  min-width: 0;
+}
+
+.recipe-managed-lead-form [data-lodesta-lead-field] > label,
+.recipe-managed-lead-form [data-lodesta-lead-field] > span {
+  color: var(--site-color-text, #151515);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.recipe-managed-lead-form input:not([type="checkbox"]):not([type="radio"]),
+.recipe-managed-lead-form select,
+.recipe-managed-lead-form textarea {
+  background: var(--site-color-surface, #fff);
+  border: 1px solid var(--site-color-border, #d9ddda);
+  border-radius: var(--site-radius-md, 0.5rem);
+  color: var(--site-color-text, #151515);
+  font: inherit;
+  font-size: 1rem;
+  min-height: 3rem;
+  padding: 0.75rem 0.875rem;
+  width: 100%;
+}
+
+.recipe-managed-lead-form textarea {
+  min-height: 8rem;
+  resize: vertical;
+}
+
+.recipe-managed-lead-form input:focus-visible,
+.recipe-managed-lead-form select:focus-visible,
+.recipe-managed-lead-form textarea:focus-visible,
+.recipe-managed-lead-form button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--site-color-accent, #245c4f) 42%, transparent);
+  outline-offset: 2px;
+}
+
+.recipe-managed-lead-form fieldset[data-lodesta-field-id] {
+  border: 0;
+  display: grid;
+  gap: var(--site-space-2, 0.5rem);
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.recipe-managed-lead-form fieldset[data-lodesta-field-id] label {
+  align-items: center;
+  display: flex;
+  gap: var(--site-space-2, 0.5rem);
+  min-height: 3rem;
+}
+
+.recipe-managed-lead-form__submit,
+.recipe-managed-lead-form > button[type="submit"] {
+  align-items: center;
+  background: var(--site-color-accent, #245c4f);
+  border: 1px solid var(--site-color-accent, #245c4f);
+  border-radius: var(--site-radius-md, 0.5rem);
+  color: var(--site-color-on-accent, #fff);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.75rem 1.25rem;
+  width: fit-content;
+}
+
+.recipe-managed-lead-form > button[type="submit"],
+.recipe-managed-lead-form > [data-lodesta-form-status] {
+  grid-column: 1 / -1;
+}
+
+.recipe-managed-lead-form__status,
+.recipe-managed-lead-form > [data-lodesta-form-status] {
+  color: var(--site-color-muted, #5f6360);
+  margin: 0;
+  min-height: 1.5em;
+}
+
+@media (max-width: 40rem) {
+  .recipe-managed-lead-form { grid-template-columns: 1fr; }
+  .recipe-managed-lead-form__fields { grid-template-columns: 1fr; }
+  .recipe-managed-lead-form__submit,
+  .recipe-managed-lead-form > button[type="submit"] { width: 100%; }
+}

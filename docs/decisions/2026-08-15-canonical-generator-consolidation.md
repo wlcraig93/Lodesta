@@ -1,5 +1,7 @@
 # Canonical generator consolidation
 
+> Superseded for the runtime/capability boundary by `2026-08-15-managed-capabilities-editable-recipes-runtime-v4.md`. The single-profile consolidation remains in force; V1-V3 are retained-history renderers, not selectable new-authoring generators.
+
 Date: 2026-08-15
 Status: implemented and verified
 

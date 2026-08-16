@@ -140,9 +140,17 @@ export const platformCapabilityStyles = `
 // safe destinations, forms, and telemetry do not require platform geometry.
 const nativePresentationCapabilityStyles = "";
 
+// V4 retains only the state invariant needed by the managed disclosure. All
+// geometry, artwork, breakpoints, color, spacing, and motion are authored in
+// editable site source.
+const headlessCapabilityStyles = `[data-lodesta-navigation-panel][hidden] {
+  display: none !important;
+}`;
+
 export function platformCapabilityStylesFor(runtimeSeriesId: string) {
   if (runtimeSeriesId === "site-runtime-v1") return legacyLocationCapabilityStyles;
   if (runtimeSeriesId === "site-runtime-v2") return platformCapabilityStyles;
   if (runtimeSeriesId === "site-runtime-v3") return nativePresentationCapabilityStyles;
+  if (runtimeSeriesId === "site-runtime-v4") return headlessCapabilityStyles;
   throw new Error(`Unknown capability style series ${runtimeSeriesId}.`);
 }

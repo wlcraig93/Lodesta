@@ -12,7 +12,7 @@ import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const sessionId = `sandbox_verify_${crypto.randomUUID().replaceAll("-", "")}`;
 const sandbox = await canarySandboxClient();
-const buildInput = buildSyntheticSiteInput();
+const buildInput = buildSyntheticSiteInput("site-runtime-v4");
 const expectedManifest = configuredExpectedManifest();
 const validFiles = [{
   path: "src/site.tsx",

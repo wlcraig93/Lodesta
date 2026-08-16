@@ -48,7 +48,7 @@ export async function createSiteRuntimePatch(input: {
 export async function buildSiteRuntimeBytes(seriesId: string) {
   const source = await readFile(join(process.cwd(), "packages", "trusted-runtime", "site-runtime-v1.js"), "utf8");
   if (seriesId === "site-runtime-v1") return Buffer.from(source);
-  if (seriesId !== "site-runtime-v2" && seriesId !== "site-runtime-v3") {
+  if (seriesId !== "site-runtime-v2" && seriesId !== "site-runtime-v3" && seriesId !== "site-runtime-v4") {
     throw new Error(`Unknown trusted runtime source series ${seriesId}.`);
   }
 
@@ -63,6 +63,9 @@ export async function buildSiteRuntimeBytes(seriesId: string) {
     .replace(resizeV1, resizeV2)
     .replace(galleryV1, navigationVisibilityHelper);
   if (seriesId === "site-runtime-v2") return Buffer.from(v2Source);
+  if (seriesId === "site-runtime-v4") {
+    return Buffer.from(`/* site-runtime-v4: managed behavior without platform presentation */\n${v2Source}`);
+  }
 
   const presentationStart = "  let openNavigation = null;\n";
   const presentationEnd = "  for (const form of document.querySelectorAll(\"form[data-lodesta-form-id]\")) {\n";

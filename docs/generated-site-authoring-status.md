@@ -2,9 +2,15 @@
 
 Date: 2026-08-15
 
-## Current initial-build baseline
+## V4 implementation status
 
-The one executable product generator is pinned to the following tuple:
+The repository now contains the V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, and editable mobile-navigation and managed-form recipes. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
+
+V4 has not yet been represented as deployed or promoted evidence. The same-authority mechanistic diagnostic, six-run Kind/Surge treatment screen, complete release verification, retained-data report, runtime promotion, and maintenance-fenced current-input cutover still gate activation. Until those records exist, the deployed baseline described below remains the operational rollback point.
+
+## Deployed rollback baseline
+
+The prior deployed generator is pinned to the following tuple:
 
 - authoring profile: `canonical` (the single executable profile, preserving the proven baseline behavior);
 - architecture and author model: direct OpenAI `gpt-5.6-luna` at high reasoning by default;

@@ -32,23 +32,29 @@ assert.deepEqual(ia.report.unreachableFromHome, ["/faq"]);
 assert(ia.findings.length <= 3);
 assert(ia.findings.every((finding) => finding.severity !== "error"));
 
-const [workflow, manager, skills, worker, nativeSdk, canaryRoute] = await Promise.all([
+const [workflow, manager, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
   readFile("packages/site-agent/skills.ts", "utf8"),
   readFile("workers/site-sandbox/src/index.ts", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
+  readFile("workers/site-sandbox/scaffold/platform/sdk-v4.tsx", "utf8"),
   readFile("app/api/admin/site-authoring-canaries/route.ts", "utf8")
 ]);
 assert.match(workflow, /run\.kind === "initial_build"[\s\S]*prepareInitialArchitecture/);
 assert.doesNotMatch(workflow, /initialBuildProfile\?\.initialBuildScope/);
 assert.doesNotMatch(workflow, /architectureInventory:/);
-assert.match(skills, /Use native semantic HTML and authored CSS for navigation presentation and interaction/);
+assert.match(skills, /Preserve every existing workspace source file unconditionally/);
+assert.match(skills, /MobileNavigation and ManagedLeadForm recipes/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
+assert.match(workflow, /canonicalSiteAuthoringRuntimeSeriesId/);
 assert.match(workflow, /olderAuthoringRevision \|\| run\.kind === "initial_build"/);
-assert.match(workflow, /sourceCoverage\.report\.counts\.unaccounted > 0/);
-assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-native\.tsx"/);
+assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
+assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-v4\.tsx"/);
+assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);
 assert.doesNotMatch(nativeSdk, /NavigationDisclosure/);
+assert.match(v4Sdk, /NavigationDisclosure/);
+assert.doesNotMatch(v4Sdk, /LeadLabel|LeadControl/);
 assert.match(canaryRoute, /generator: "canonical"/);
 assert.doesNotMatch(canaryRoute, /site-runtime-v3|retired_authoring_profile|identity-nav-copy/);
 

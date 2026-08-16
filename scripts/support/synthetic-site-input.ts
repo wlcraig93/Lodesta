@@ -3,7 +3,7 @@ import { siteIntentSchema, sitePublicBuildInputSchema } from "../../packages/sit
 
 const createdAt = "2026-07-20T00:00:00.000Z";
 
-export function buildSyntheticSiteInput() {
+export function buildSyntheticSiteInput(runtimeSeriesId = "site-runtime-v1") {
   const intentWithoutHash = {
     schemaVersion: 1 as const,
     id: "intent_synthetic_verification",
@@ -98,7 +98,7 @@ export function buildSyntheticSiteInput() {
       formsEndpoint: "/api/forms/submit",
       analyticsEndpoint: "/api/analytics",
       mapsMode: "managed_directions" as const,
-      trustedRuntimeSeries: "site-runtime-v1"
+      trustedRuntimeSeries: runtimeSeriesId
     },
     sourceSnapshotIds: ["source_owner"],
     assetRevisionIds: []

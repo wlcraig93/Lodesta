@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#lodesta-sdk": "./platform/sdk.tsx"
+    "#lodesta-sdk": "./platform/sdk-v4.tsx"
   },
   "scripts": {
     "build": "tsx platform/build.tsx",

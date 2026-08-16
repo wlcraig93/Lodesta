@@ -1,12 +1,13 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
 export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:5b923f7d403ea7d49c8d42054e0af91390f7d399c583cb1bf79ade6d02fa88bf";
+export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
 export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha256:f60c304d730f280207606d2decd14312c95b211f355dbf1ca2f829cbe2166784";
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:829881bb9135398a846c0c24bf419aafc6fce0458a57f17b77ee499919960b32";
-export const websiteManagerPromptIdentity = "website-manager@sha256:f7166754fae04c086bc682d2f01906eea7536abad0411ad9ff6daa0ecfacd33f";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:8162b8ec18bfc0dd6f1a14103c16d8571973d99eed9996a72bf81446083768ac";
+export const websiteManagerPromptIdentity = "website-manager@sha256:9a30f21bb80d9a764c475f70713cc05a9b6494451da6588903042da89040c3dd";
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:eae1e92ea3eb70818e6a83cedab318494809320bae142a60b3691f46cc0e3a0d";
 export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:8bf130012c8273f60c86d699062db13b663231f9e98fe1f9d952e7089f7f624b";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:2f90904d1ada3eddf23e2c821b7c0841ee327d6b404de909e83f0ecfe9c79cab";

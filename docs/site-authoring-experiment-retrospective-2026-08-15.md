@@ -110,3 +110,17 @@ If that screen is stable, the next improvement should be richer verified busines
 - Some comparisons used different artificial cost fuses and must not be read as direct production economics.
 - Infrastructure failures, provider credit failures, and database transport failures were excluded from causal quality conclusions.
 - Automated visual judges were advisory. Blinded order reversal, exact replay, deterministic gates, and human review were used to reduce—but cannot eliminate—subjective evaluation noise.
+
+## V4 follow-on decision
+
+The retrospective originally recommended six more unchanged V2 runs. Subsequent diagnosis found a more specific architecture conflict: V2's trusted navigation runtime also supplied presentation, while the prompt asked the author to create presentation around a component that a blank workspace did not contain. Forms had the related problem of exposing low-level composition primitives even though submission identity, revision, schema, and destination are platform-owned.
+
+The follow-on V4 decision preserves the simplicity conclusion while moving the boundary:
+
+- trusted runtime keeps only safety- and integrity-critical navigation and form behavior;
+- editable, physically present recipes provide the opinionated starting implementation;
+- the prompt explains ownership and precedence rather than trying to reproduce component code;
+- the skill preserves existing workspace source unconditionally; and
+- verification remains mechanism-neutral and objective.
+
+This is a mechanistic correction, not evidence that V4 is stochastically better. The same-authority V2/V4 diagnostic and the three-Kind/three-Surge V4-plus-recipe reliability screen remain pending. No result should be appended here until the immutable run, candidate, deployment, and cost records exist.

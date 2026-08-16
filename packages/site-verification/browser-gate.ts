@@ -836,7 +836,7 @@ async function runArtifactBrowserGateOnce(input: {
         if (viewport.name === "mobile" && metrics.misalignedMobileNavigationToggleExamples.length > 0) {
           routeFindings.push(finding(
             "render.mobile_navigation_toggle_alignment",
-            `The primary mobile navigation trigger is stranded away from the upper-right edge. Keep the logo and trigger on a deliberate justify-between header row unless the owner requested another pattern. Examples: ${metrics.misalignedMobileNavigationToggleExamples.join("; ")}.`,
+            `The primary mobile navigation trigger is separated from the header's trailing action area. Review whether that placement is deliberate for this site's authored navigation pattern. Examples: ${metrics.misalignedMobileNavigationToggleExamples.join("; ")}.`,
             route.path,
             "render",
             "warning"

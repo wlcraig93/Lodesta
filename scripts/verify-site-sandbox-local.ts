@@ -18,7 +18,7 @@ import {
 
 const scaffold = resolve("workers/site-sandbox/scaffold");
 const workspace = await mkdtemp(join(tmpdir(), "lodesta-multifile-sandbox-"));
-const input = buildSyntheticSiteInput();
+const input = buildSyntheticSiteInput("site-runtime-v4");
 input.business.assets.push({
   assetId: "asset_hero",
   revisionId: "asset_revision_hero",
@@ -34,6 +34,12 @@ input.business.assets.push({
   activeForFutureBuilds: true
 });
 input.assetRevisionIds.push("asset_revision_hero");
+const recipeFiles = await Promise.all([
+  "src/components/managed-lead-form.css",
+  "src/components/managed-lead-form.tsx",
+  "src/components/mobile-navigation.css",
+  "src/components/mobile-navigation.tsx"
+].map(async (path) => ({ path, content: await readFile(join(scaffold, path), "utf8") })));
 const files = [
   {
     path: "src/site.tsx",
@@ -41,8 +47,7 @@ const files = [
 import { LocalIntro } from "./components/LocalIntro";
 import { NavigationFixtures } from "./components/NavigationFixtures";
 import { PageShell } from "./components/PageShell";
-import { LegacyBadge } from "./legacy";
-function HomePage(){ return <PageShell><main><LocalIntro /><LegacyBadge /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><DirectionsLink locationId="location_primary">Get directions</DirectionsLink><div className="gallery"><figure><Asset id="asset_hero" loading="eager" fetchPriority="high" /></figure></div><details><summary>Service details</summary><p>Native disclosure content.</p></details><LeadForm id="${input.forms[0]?.id}" /><NavigationFixtures /></main></PageShell>; }
+function HomePage(){ return <PageShell><main><LocalIntro /><h1><BusinessName /></h1><Fact id="fact_phone" /><BusinessHours locationId="location_primary" /><BusinessHours locationId="location_primary" variant="weekly" /><BusinessAddress locationId="location_primary" /><DirectionsLink locationId="location_primary">Get directions</DirectionsLink><div className="gallery"><figure><Asset id="asset_hero" loading="eager" fetchPriority="high" /></figure></div><details><summary>Service details</summary><p>Native disclosure content.</p></details><LeadForm id="${input.forms[0]?.id}" /><NavigationFixtures /></main></PageShell>; }
 function AboutPage(){ return <PageShell><main><h1>About <BusinessName /></h1></main></PageShell>; }
 export const siteDefinition = {
   routes: [
@@ -54,11 +59,11 @@ export const siteDefinition = {
   { path: "src/styles.css", content: ":root{--site-color-background:#fff;--site-color-text:#111;--site-color-accent:#176b5b;--site-space-4:1rem;--site-content-width:72rem;--site-radius-md:.5rem;--site-shadow-md:0 1rem 2rem #0002;--site-motion-standard:180ms}html{scroll-behavior:smooth}body{margin:0;color:var(--site-color-text);background:var(--site-color-background);font:16px Arial,sans-serif}" },
   { path: "src/components/LocalIntro.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered for <BusinessName />.</p>; }` },
   { path: "src/components/PageShell.tsx", content: `import type { ReactNode } from "react"; import { SiteFooter } from "./SiteFooter"; import { SiteHeader } from "./SiteHeader"; export function PageShell({children}:{children:ReactNode}){ return <><SiteHeader />{children}<SiteFooter /></>; }` },
-  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName, NavigationDisclosure } from "#lodesta-sdk"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><NavigationDisclosure id="primary-navigation" behavior="modal" label="Primary"><a href="/">Home</a><a href="/about">About</a></NavigationDisclosure></header>; }` },
+  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName, NavigationDisclosure } from "#lodesta-sdk"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><NavigationDisclosure id="primary-navigation" behavior="modal" label="Primary" trigger={<span>Menu</span>}><a href="/">Home</a><a href="/about">About</a></NavigationDisclosure></header>; }` },
   { path: "src/components/SiteFooter.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function SiteFooter(){ return <footer>Visit <BusinessName /></footer>; }` },
   { path: "src/components/NavigationFixtures.tsx", content: `import { NavigationDisclosure } from "#lodesta-sdk"; export function NavigationFixtures(){ return <NavigationDisclosure id="inline-navigation" label="Secondary" behavior="inline" trigger={<span>Menu choices</span>}><a href="/about">About</a></NavigationDisclosure>; }` },
-  { path: "src/legacy.tsx", content: `import { BusinessName } from "../platform/sdk"; export function LegacyBadge(){ return <small>Legacy boundary: <BusinessName /></small>; }` },
-  { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" }
+  { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" },
+  ...recipeFiles
 ];
 
 try {
@@ -74,7 +79,7 @@ try {
   await mkdir(join(workspace, ".lodesta"), { recursive: true });
   await writeFile(join(workspace, ".lodesta", "public-build-input.json"), JSON.stringify(input));
   const policyInput = join(workspace, "source-policy-input.json");
-  await writeFile(policyInput, JSON.stringify(files));
+  await writeFile(policyInput, JSON.stringify({ files, runtimeSeriesId: "site-runtime-v4" }));
   await execute(join(workspace, "node_modules", ".bin", "tsx"), ["platform/validate-source.ts", policyInput], workspace);
   for (const file of files) {
     const target = join(workspace, file.path);
@@ -102,17 +107,18 @@ try {
   assert(artifact.sharedCss?.includes(".intro{color:var(--site-color-accent)"), "nested CSS module was not included in the artifact");
   assert(artifact.sharedCss?.includes("--site-color-accent:#176b5b"), "the site-local design token root was not retained");
   assert(artifact.sharedCss?.includes("color:var(--site-color-accent)"), "component CSS did not consume the site-local token system");
+  assert(artifact.sharedCss?.includes(".recipe-mobile-navigation"), "editable mobile-navigation recipe CSS was not compiled");
+  assert(artifact.sharedCss?.includes(".recipe-managed-lead-form"), "editable managed-form recipe CSS was not compiled");
   assert.equal(artifact.routes?.length, 2, "the shared-component fixture did not compile both routes");
   assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Multi-file component rendered for"), "local TSX module was not rendered");
-  assert(artifact.routes?.[0]?.bodyHtml?.includes("Legacy boundary:"), "legacy relative SDK import was not rendered");
   const routeHeaders = artifact.routes?.map((route) => route.bodyHtml?.match(/<header>[\s\S]*?<\/header>/)?.[0]);
   const routeFooters = artifact.routes?.map((route) => route.bodyHtml?.match(/<footer>[\s\S]*?<\/footer>/)?.[0]);
   assert(routeHeaders?.every((header) => header === routeHeaders[0]), "ordinary routes did not render the same shared SiteHeader source component");
   assert(routeFooters?.every((footer) => footer === routeFooters[0]), "ordinary routes did not render the same shared SiteFooter source component");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="modal"'), "NavigationDisclosure did not retain its required modal behavior");
-  assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-icon=""'), "NavigationDisclosure did not render its default hamburger trigger");
+  assert(!artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-icon=""'), "V4 NavigationDisclosure injected platform trigger artwork");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('aria-label="Open navigation"'), "NavigationDisclosure omitted its default accessible label");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="inline"'), "NavigationDisclosure did not retain an owner-selected inline behavior");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Menu choices"), "NavigationDisclosure did not retain a custom visible trigger");
@@ -214,7 +220,7 @@ try {
     "By appointment",
     "Non-clock availability text was rewritten."
   );
-  process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, sdkAlias: "pass", automaticJsx: "pass", legacySdkImport: "pass", localImports: "pass", nestedCss: "pass" })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, sourceFiles: files.length, sdkAlias: "pass", automaticJsx: "pass", v4SdkBoundary: "pass", localImports: "pass", nestedCss: "pass" })}\n`);
 } finally {
   await rm(workspace, { recursive: true, force: true });
 }

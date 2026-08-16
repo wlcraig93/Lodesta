@@ -70,12 +70,31 @@ try {
   const replayed = await client.apply("operation_test", "revision-before", source);
   assert.equal(replayed.replayed, true, "A duplicate submission was not identified as replayed after shared polling completed.");
 
+  let submitCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) {
+      submitCalls += 1;
+      if (submitCalls === 1) throw new DOMException("simulated lost acknowledgement", "TimeoutError");
+      return Response.json({ ...operation("succeeded", "complete"), result, submissionReplayed: true }, { status: 202 });
+    }
+    throw new Error(`Unexpected operation replay request ${url}`);
+  };
+  const recoveredSubmission = await client.apply("operation_test", "revision-before", source);
+  assert.equal(submitCalls, 2, "A lost submission acknowledgement did not replay exactly once in the same sandbox.");
+  assert.equal(recoveredSubmission.operationId, operationId);
+  assert.equal(recoveredSubmission.replayed, true);
+  assert.equal(recoveredSubmission.submissionAttempts, 2);
+  assert.equal(recoveredSubmission.submissionRecoveryCause, "TimeoutError");
+  assert((recoveredSubmission.submissionPayloadBytes ?? 0) > 0);
+
   process.stdout.write(`${JSON.stringify({
     ok: true,
     acceptedSubmission: "pass",
     reconnectablePolling: "pass",
     retainedFailure: "pass",
-    duplicateSubmissionReplay: "pass"
+    duplicateSubmissionReplay: "pass",
+    lostAcknowledgementRecovery: "pass"
   })}\n`);
 } finally {
   globalThis.fetch = originalFetch;

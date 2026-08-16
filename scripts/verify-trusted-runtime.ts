@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { chromium } from "playwright";
-import { platformCapabilityStyles } from "../workers/site-sandbox/scaffold/platform/capability-styles";
+import { platformCapabilityStyles, platformCapabilityStylesFor } from "../workers/site-sandbox/scaffold/platform/capability-styles";
 import { buildSiteRuntimeBytes } from "../packages/trusted-runtime";
 
 const runtimeV1 = await readFile("packages/trusted-runtime/site-runtime-v1.js");
 const runtime = await buildSiteRuntimeBytes("site-runtime-v2");
+const runtimeV4 = await buildSiteRuntimeBytes("site-runtime-v4");
+const v4CapabilityStyles = platformCapabilityStylesFor("site-runtime-v4");
 new Function(runtimeV1.toString("utf8"));
 new Function(runtime.toString("utf8"));
+new Function(runtimeV4.toString("utf8"));
+assert.match(v4CapabilityStyles.trim(), /^\[data-lodesta-navigation-panel\]\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}$/, "V4 retained platform navigation presentation.");
+assert(!v4CapabilityStyles.includes("navigation-icon"), "V4 retained platform trigger artwork.");
 assert(
   platformCapabilityStyles.includes('[data-lodesta-navigation-panel]:not([hidden])')
     && platformCapabilityStyles.includes('inset: var(--lodesta-navigation-top, 0px) 0 0;')
@@ -27,6 +32,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   if (url.pathname === "/_lodesta/runtime/site-runtime-v1.js") return send(response, 200, runtimeV1, "application/javascript; charset=utf-8");
   if (url.pathname === "/_lodesta/runtime/site-runtime-v2.js") return send(response, 200, runtime, "application/javascript; charset=utf-8");
+  if (url.pathname === "/_lodesta/runtime/site-runtime-v4.js") return send(response, 200, runtimeV4, "application/javascript; charset=utf-8");
   if (request.method === "POST" && url.pathname === "/api/analytics") {
     analytics.push(await jsonBody(request));
     return send(response, 204, Buffer.alloc(0), "application/json");
@@ -37,6 +43,11 @@ const server = createServer(async (request, response) => {
   }
   if (["/", "/preview/token", "/api/site-versions/version/artifact/", "/analytics-off"].includes(url.pathname)) {
     return send(response, 200, Buffer.from(documentHtml(url.pathname !== "/analytics-off")), "text/html; charset=utf-8", {
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'"
+    });
+  }
+  if (url.pathname === "/v4") {
+    return send(response, 200, Buffer.from(v4DocumentHtml()), "text/html; charset=utf-8", {
       "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'"
     });
   }
@@ -247,7 +258,42 @@ try {
   await internalContext.close();
   assert.equal(errors.length, 0, errors.join("\n"));
 
-  console.log(JSON.stringify({ ok: true, pageviews: analytics.filter((event) => event.eventType === "page_view").length, formSubmissions: forms.length, internalExclusion: "pass", previewIsolation: "pass", interactions: "pass" }));
+  const v4NoScriptContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
+  const v4NoScriptPage = await v4NoScriptContext.newPage();
+  await v4NoScriptPage.goto(`${origin}/v4`, { waitUntil: "domcontentloaded" });
+  assert(await v4NoScriptPage.locator("#v4-navigation").isHidden(), "V4 navigation covered the page without trusted JavaScript.");
+  assert(await v4NoScriptPage.locator("main").isVisible(), "V4 main content was unavailable without JavaScript.");
+  await v4NoScriptContext.close();
+
+  const v4 = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await v4.goto(`${origin}/v4`, { waitUntil: "networkidle" });
+  const v4Toggle = v4.locator("[data-lodesta-menu-toggle]");
+  const v4Panel = v4.locator("#v4-navigation");
+  assert.equal(await v4.locator("[data-lodesta-navigation-icon]").count(), 0, "V4 injected the legacy platform icon.");
+  assert.deepEqual(await v4Toggle.evaluate((element) => ({
+    width: Math.round(element.getBoundingClientRect().width),
+    height: Math.round(element.getBoundingClientRect().height),
+    authoredBars: element.querySelectorAll(".v4-menu-bar").length
+  })), { width: 48, height: 48, authoredBars: 3 }, "V4 did not preserve authored trigger artwork and target size.");
+  await v4Toggle.click();
+  assert.equal(await v4Toggle.getAttribute("aria-expanded"), "true");
+  assert(await v4Panel.isVisible(), "V4 did not open the authored panel.");
+  assert.deepEqual(await v4.evaluate(() => ({
+    bodyOverflow: document.body.style.overflow,
+    rootOverflow: document.documentElement.style.overflow,
+    mainInert: document.querySelector("main")?.hasAttribute("inert"),
+    focusedLabel: document.activeElement?.getAttribute("aria-label")
+  })), { bodyOverflow: "hidden", rootOverflow: "hidden", mainInert: true, focusedLabel: "Close navigation" }, "V4 did not retain trusted modal state and focus behavior.");
+  await v4.keyboard.press("Escape");
+  assert.equal(await v4Toggle.getAttribute("aria-expanded"), "false");
+  assert.equal(await v4.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Open navigation", "V4 did not restore trigger focus.");
+  await v4.fill('input[name="name"]', "V4 visitor");
+  const formCountBeforeV4 = forms.length;
+  await v4.click('form button[type="submit"]');
+  await v4.waitForFunction(() => document.querySelector("[data-lodesta-form-status]")?.textContent === "Sent.");
+  assert.equal(forms.length, formCountBeforeV4 + 1, "V4 managed form did not submit exactly once.");
+
+  console.log(JSON.stringify({ ok: true, pageviews: analytics.filter((event) => event.eventType === "page_view").length, formSubmissions: forms.length, internalExclusion: "pass", previewIsolation: "pass", interactions: "pass", v4PresentationBoundary: "pass" }));
 } finally {
   await browser.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -255,6 +301,18 @@ try {
 
 function documentHtml(analyticsEnabled: boolean) {
   return `<!doctype html><html data-lodesta-site-id="site_runtime_test" data-lodesta-version-id="version_runtime_test" data-lodesta-analytics="${analyticsEnabled}"><head><meta charset="utf-8"><style>${platformCapabilityStyles}</style><script src="/_lodesta/runtime/site-runtime-v2.js" defer></script></head><body><header><div data-lodesta-navigation-disclosure="primary-navigation" data-lodesta-navigation-behavior="modal"><button type="button" data-lodesta-menu-toggle aria-controls="primary-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span data-lodesta-navigation-icon aria-hidden="true"><span></span><span></span><span></span></span></button><div id="primary-navigation" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#section">Section</a><a href="#contact">Contact</a></nav></div></div><div data-lodesta-navigation-disclosure="inline-navigation" data-lodesta-navigation-behavior="inline"><button type="button" data-lodesta-menu-toggle aria-controls="inline-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation">Menu</button><div id="inline-navigation" data-lodesta-menu data-lodesta-navigation-panel tabindex="-1" hidden><nav aria-label="Secondary"><a href="#section">Section</a></nav></div></div><button id="legacy-navigation-toggle" type="button" data-lodesta-menu-toggle aria-controls="legacy-navigation" aria-expanded="false">Legacy menu</button><nav id="legacy-navigation"><a href="#section">Legacy destination</a></nav></header><main><section id="section"><a href="#directions" data-lodesta-directions>Directions</a><form id="contact" data-lodesta-form-id="form_runtime_test" data-lodesta-success-message="Sent."><label>Name<input name="name" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></section></main></body></html>`;
+}
+
+function v4DocumentHtml() {
+  return `<!doctype html><html data-lodesta-site-id="site_runtime_v4_test" data-lodesta-version-id="version_runtime_v4_test" data-lodesta-analytics="false"><head><meta charset="utf-8"><style>${v4CapabilityStyles}
+  :root{--site-color-primary:#173c33;--site-color-surface:#fff;--site-color-text:#15201d}
+  body{margin:0;color:var(--site-color-text)}.v4-header{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--site-color-primary)}
+  .v4-toggle{width:48px;height:48px;border:0;background:transparent;display:grid;place-content:center;gap:5px}.v4-menu-bar{display:block;width:24px;height:2px;background:#fff;transition:transform .2s,opacity .2s}
+  .v4-toggle[aria-expanded=true] .v4-menu-bar:first-child{transform:translateY(7px) rotate(45deg)}.v4-toggle[aria-expanded=true] .v4-menu-bar:nth-child(2){opacity:0}.v4-toggle[aria-expanded=true] .v4-menu-bar:last-child{transform:translateY(-7px) rotate(-45deg)}
+  .v4-panel{position:fixed;inset:72px 0 0;background:var(--site-color-surface);padding:32px}.v4-panel nav{display:grid;gap:12px}.v4-panel a{display:flex;align-items:center;min-height:48px;color:var(--site-color-text)}
+  label{display:grid;gap:6px}input,button[type=submit]{min-height:48px;font-size:16px}</style><script src="/_lodesta/runtime/site-runtime-v4.js" defer></script></head><body>
+  <header class="v4-header"><a href="#top" style="color:white">Example</a><div data-lodesta-navigation-disclosure="v4-navigation" data-lodesta-navigation-behavior="modal"><button class="v4-toggle" type="button" data-lodesta-menu-toggle aria-controls="v4-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span></button><div id="v4-navigation" class="v4-panel" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#services">Services</a><a href="#contact">Contact</a></nav></div></div></header>
+  <main id="top"><section id="services"><h1>Services</h1></section><form id="contact" data-lodesta-form-id="form_runtime_test" data-lodesta-form-revision="1" data-lodesta-form-destination="lead_inbox" data-lodesta-success-message="Sent."><label for="v4-name">Name</label><input id="v4-name" name="name" required><button type="submit">Send</button><p data-lodesta-form-status role="status"></p></form></main></body></html>`;
 }
 
 async function jsonBody(request: import("node:http").IncomingMessage) {

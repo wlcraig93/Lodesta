@@ -236,6 +236,7 @@ export interface SitePlatformRepository {
   disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   updateReportingTimezone(siteId: string, timezone: string): Promise<PlatformSiteRecord | undefined>;
   setCurrentPublicBuildInput(siteId: string, inputId: string): Promise<void>;
+  setCurrentPublicBuildInputIfCurrent(siteId: string, expectedInputId: string, inputId: string): Promise<boolean>;
   setCurrentPublicBuildInputIfAuthorityMatches(
     siteId: string,
     inputId: string,
@@ -277,9 +278,12 @@ export interface SitePlatformRepository {
   getPublishedFormDefinition(siteId: string, formId: string): Promise<FormDefinition | undefined>;
   savePublicBuildInput(input: SitePublicBuildInput): Promise<void>;
   getPublicBuildInput(id: string): Promise<SitePublicBuildInput | undefined>;
+  listPublicBuildInputs(): Promise<SitePublicBuildInput[]>;
   finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput): Promise<{ version: SiteVersion; run: SiteAgentRun }>;
   getWorkspaceRevision(id: string): Promise<SiteWorkspaceRevision | undefined>;
+  listWorkspaceRevisions(): Promise<SiteWorkspaceRevision[]>;
   getBuildArtifact(id: string): Promise<SiteBuildArtifact | undefined>;
+  listBuildArtifacts(): Promise<SiteBuildArtifact[]>;
   createSiteVersion(version: SiteVersion): Promise<void>;
   getSiteVersion(id: string): Promise<SiteVersion | undefined>;
   getSiteVersionSourceCoverage(versionId: string): Promise<SiteSourceCoverageReport | undefined>;
@@ -292,8 +296,10 @@ export interface SitePlatformRepository {
   saveRuntimePatch(patch: TrustedRuntimePatch): Promise<void>;
   getRuntimePatch(id: string): Promise<TrustedRuntimePatch | undefined>;
   getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatch | undefined>;
+  listRuntimePatches(): Promise<TrustedRuntimePatch[]>;
   saveRuntimeSeries(series: TrustedRuntimeSeries): Promise<void>;
   getRuntimeSeries(id: string): Promise<TrustedRuntimeSeries | undefined>;
+  listRuntimeSeries(): Promise<TrustedRuntimeSeries[]>;
   saveSandboxDeployment(deployment: SiteSandboxDeployment): Promise<void>;
   getSandboxDeployment(id: string): Promise<SiteSandboxDeployment | undefined>;
   getSandboxDeploymentDrain(id: string): Promise<{ runningRunIds: string[]; liveSessionIds: string[] }>;
@@ -892,6 +898,17 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       site.updatedAt = new Date().toISOString();
     });
   }
+  setCurrentPublicBuildInputIfCurrent(siteId: string, expectedInputId: string, inputId: string) {
+    return this.write((store) => {
+      const site = store.sites[siteId];
+      const input = store.buildInputs[inputId];
+      if (!site || site.currentPublicBuildInputId !== expectedInputId) return false;
+      if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
+      site.currentPublicBuildInputId = inputId;
+      site.updatedAt = new Date().toISOString();
+      return true;
+    });
+  }
   async setCurrentPublicBuildInputIfAuthorityMatches(
     siteId: string,
     inputId: string,
@@ -1133,6 +1150,9 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
 
   savePublicBuildInput(input: SitePublicBuildInput) { return this.insertImmutable("buildInputs", sitePublicBuildInputSchema.parse(input)); }
   async getPublicBuildInput(id: string) { return clone((await this.read()).buildInputs[id]); }
+  async listPublicBuildInputs() {
+    return Object.values((await this.read()).buildInputs).map((input) => clone(input) as SitePublicBuildInput);
+  }
 
   finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput) {
     return this.write((store) => {
@@ -1245,8 +1265,14 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     });
   }
   async getWorkspaceRevision(id: string) { return clone((await this.read()).workspaceRevisions[id]); }
+  async listWorkspaceRevisions() {
+    return Object.values((await this.read()).workspaceRevisions).map((revision) => clone(revision) as SiteWorkspaceRevision);
+  }
 
   async getBuildArtifact(id: string) { return clone((await this.read()).artifacts[id]); }
+  async listBuildArtifacts() {
+    return Object.values((await this.read()).artifacts).map((artifact) => clone(artifact) as SiteBuildArtifact);
+  }
   createSiteVersion(version: SiteVersion) { return this.insertImmutable("versions", siteVersionSchema.parse(version)); }
   async getSiteVersion(id: string) { return clone((await this.read()).versions[id]); }
   async getSiteVersionSourceCoverage(versionId: string) { return clone((await this.read()).sourceCoverage[versionId]); }
@@ -1326,10 +1352,16 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   saveRuntimePatch(patch: TrustedRuntimePatch) { return this.insertImmutable("runtimePatches", trustedRuntimePatchSchema.parse(patch)); }
   async getRuntimePatch(id: string) { return clone((await this.read()).runtimePatches[id]); }
   async getRuntimePatchByHash(hash: string) { return clone(Object.values((await this.read()).runtimePatches).find((patch) => patch.contentHash === hash)); }
+  async listRuntimePatches() {
+    return Object.values((await this.read()).runtimePatches).map((patch) => clone(patch) as TrustedRuntimePatch);
+  }
   saveRuntimeSeries(series: TrustedRuntimeSeries) {
     return this.write((store) => { store.runtimeSeries[series.id] = trustedRuntimeSeriesSchema.parse(series); });
   }
   async getRuntimeSeries(id: string) { return clone((await this.read()).runtimeSeries[id]); }
+  async listRuntimeSeries() {
+    return Object.values((await this.read()).runtimeSeries).map((series) => clone(series) as TrustedRuntimeSeries);
+  }
   saveSandboxDeployment(deployment: SiteSandboxDeployment) {
     return this.write((store) => {
       const value = siteSandboxDeploymentSchema.parse(deployment);
@@ -2332,6 +2364,20 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
     await requireOk(this.client.from("sites").update({ current_public_build_input_id: inputId, updated_at: new Date().toISOString() }).eq("id", siteId), "Set current public build input");
   }
+  async setCurrentPublicBuildInputIfCurrent(siteId: string, expectedInputId: string, inputId: string) {
+    const input = await this.getPublicBuildInput(inputId);
+    if (!input || input.siteId !== siteId) throw new Error("Site or public build input not found.");
+    const row = await requireData<{ id: string } | null>(
+      this.client.from("sites")
+        .update({ current_public_build_input_id: inputId, updated_at: new Date().toISOString() })
+        .eq("id", siteId)
+        .eq("current_public_build_input_id", expectedInputId)
+        .select("id")
+        .maybeSingle(),
+      "Conditionally set current public build input"
+    );
+    return Boolean(row);
+  }
   async setCurrentPublicBuildInputIfAuthorityMatches(
     siteId: string,
     inputId: string,
@@ -2703,6 +2749,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     await insertRefs(this.client, "site_public_build_input_forms", "input_id", value.id, "form_definition_id", value.forms.map((form) => form.id));
   }
   async getPublicBuildInput(id: string) { return getJson(this.client, "site_public_build_inputs", "input", id, sitePublicBuildInputSchema); }
+  async listPublicBuildInputs() {
+    const rows = await requireData<Array<{ input: unknown }>>(
+      this.client.from("site_public_build_inputs").select("input"),
+      "List public build inputs"
+    );
+    return rows.map((row) => sitePublicBuildInputSchema.parse(row.input));
+  }
   async finalizeVerifiedAuthoring(input: FinalizeVerifiedAuthoringInput) {
     const revision = siteWorkspaceRevisionSchema.parse(input.revision);
     const artifact = siteBuildArtifactSchema.parse(input.artifact);
@@ -2735,7 +2788,21 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("site_workspace_revisions").select("*").eq("id", id).maybeSingle(), "Load workspace revision");
     return row ? workspaceFromRow(row) : undefined;
   }
+  async listWorkspaceRevisions() {
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("site_workspace_revisions").select("*"),
+      "List workspace revisions"
+    );
+    return rows.map(workspaceFromRow);
+  }
   async getBuildArtifact(id: string) { return getJson(this.client, "site_build_artifacts", "artifact", id, siteBuildArtifactSchema); }
+  async listBuildArtifacts() {
+    const rows = await requireData<Array<{ artifact: unknown }>>(
+      this.client.from("site_build_artifacts").select("artifact"),
+      "List build artifacts"
+    );
+    return rows.map((row) => siteBuildArtifactSchema.parse(row.artifact));
+  }
   async createSiteVersion(version: SiteVersion) {
     const value = siteVersionSchema.parse(version);
     await requireOk(this.client.from("site_versions").insert({
@@ -2830,6 +2897,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_patches").select("*").eq("content_hash", hash).maybeSingle(), "Load runtime patch by hash");
     return row ? runtimePatchFromRow(row) : undefined;
   }
+  async listRuntimePatches() {
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("trusted_runtime_patches").select("*"),
+      "List runtime patches"
+    );
+    return rows.map(runtimePatchFromRow);
+  }
   async saveRuntimeSeries(series: TrustedRuntimeSeries) {
     const value = trustedRuntimeSeriesSchema.parse(series);
     await requireData(this.client.rpc("set_trusted_runtime_series", { series_document: value }), "Save runtime series");
@@ -2837,6 +2911,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
   async getRuntimeSeries(id: string) {
     const row = await requireData<Record<string, unknown> | null>(this.client.from("trusted_runtime_series").select("*").eq("id", id).maybeSingle(), "Load runtime series");
     return row ? runtimeSeriesFromRow(row) : undefined;
+  }
+  async listRuntimeSeries() {
+    const rows = await requireData<Record<string, unknown>[]>(
+      this.client.from("trusted_runtime_series").select("*"),
+      "List runtime series"
+    );
+    return rows.map(runtimeSeriesFromRow);
   }
   async saveSandboxDeployment(deployment: SiteSandboxDeployment) {
     const value = siteSandboxDeploymentSchema.parse(deployment);

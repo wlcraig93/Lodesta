@@ -83,11 +83,13 @@ assert.deepEqual(promptContext.sdk.managedCapabilitiesRequireSdk, [
   "assets",
   "forms",
   "safe links",
-  "directions",
-  "navigation"
+  "directions"
 ]);
+assert.equal(promptContext.workspace.editableRecipePaths.length, 4);
 assert.match(promptContext.sdk.import, /NavigationDisclosure/);
-assert.match(promptContext.sdk.components.NavigationDisclosure!, /behavior="inline"/);
+assert.doesNotMatch(promptContext.sdk.import, /LeadLabel|LeadControl/);
+assert.match(promptContext.sdk.components.NavigationDisclosure!, /behavior="modal"/);
+assert.match(promptContext.sdk.components.NavigationDisclosure!, /trigger=/);
 const discussion = createManagerDiscussionContext({
   buildInput,
   message: "Could the homepage feel calmer?",
@@ -124,11 +126,13 @@ assert.doesNotMatch(websiteManagerSystemPrompt, /build_preview/i);
 assert.match(websiteManagerSystemPrompt, /actual rendered desktop, tablet, mobile, and opened mobile-navigation states/i);
 assert.match(websiteManagerSystemPrompt, /authoring judgment, not a mandatory sequence/i);
 assert.match(websiteManagerSystemPrompt, /business imagery is never attached automatically/i);
-assert.match(websiteManagerSystemPrompt, /owner's explicit instruction; the existing owner-approved Lodesta workspace during an edit; Lodesta's stated authoring default/i);
+assert.match(websiteManagerSystemPrompt, /owner's explicit instruction; every existing Lodesta workspace source file/i);
+assert.match(websiteManagerSystemPrompt, /Preserve existing workspace source unconditionally/i);
 assert.match(websiteManagerSystemPrompt, /src\/styles\.css as the editable site-local design-system root/i);
-assert.match(websiteManagerSystemPrompt, /shared SiteHeader, MobileNavigation, SiteFooter, and PageShell source components/i);
-assert.match(websiteManagerSystemPrompt, /NavigationDisclosure requires an explicit behavior/i);
-assert.match(websiteManagerSystemPrompt, /site owns presentation and breakpoints/i);
+assert.match(websiteManagerSystemPrompt, /blank initial workspace includes editable MobileNavigation and ManagedLeadForm recipes/i);
+assert.doesNotMatch(websiteManagerSystemPrompt, /shared SiteHeader, MobileNavigation, SiteFooter, and PageShell source components/i);
+assert.match(websiteManagerSystemPrompt, /NavigationDisclosure is an optional headless behavior primitive/i);
+assert.match(websiteManagerSystemPrompt, /site owns all artwork, presentation, and breakpoints/i);
 assert.match(websiteManagerSystemPrompt, /Compose maps or location cards, static galleries, layouts, and ordinary disclosures with semantic HTML/i);
 assert.doesNotMatch(websiteManagerSystemPrompt, /readiness score|critic agent|mandatory page|exactly two/i);
 assert.equal(websiteManagerPromptIdentity, `website-manager@${sha256(websiteManagerSystemPrompt)}`);
@@ -141,7 +145,7 @@ assert(skill.knowledge.some((item) => /Owner-authoritative facts outrank retaine
 assert(skill.knowledge.some((item) => /Judge supplied assets by visible pixels/i.test(item) && /exact official logo/i.test(item)));
 assert(skill.knowledge.some((item) => /Choose one named design grammar/i.test(item) && /route-specific useful unit or action/i.test(item)));
 assert(skill.knowledge.some((item) => /every live route reachable/i.test(item) && /never imply unsupported precision/i.test(item)));
-assert(skill.knowledge.some((item) => /native semantic HTML/i.test(item) && /opened phone state/i.test(item)));
+assert(skill.knowledge.some((item) => /Preserve every existing workspace source file unconditionally/i.test(item) && /MobileNavigation and ManagedLeadForm recipes/i.test(item)));
 assert(skill.knowledge.some((item) => /representative route set/i.test(item) && /contrast at the nearest affected selector/i.test(item)));
 assert(skill.knowledge.some((item) => /Preserve the supplied scaffold contract/i.test(item) && /SafeLink already renders its anchor/i.test(item)));
 assert(!skill.knowledge.some((item) => /mandatory tool|critic pass|section template/i.test(item)));

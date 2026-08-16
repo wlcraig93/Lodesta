@@ -1,5 +1,7 @@
 # Native Runtime and Authoring Decoupling
 
+> Superseded for go-forward implementation by `2026-08-15-managed-capabilities-editable-recipes-runtime-v4.md`. This record and the V3 experiment provenance remain immutable historical evidence.
+
 Date: 2026-08-14
 Status: implemented; corrected fair Kind rerun complete; V2 remains canonical
 

@@ -1027,12 +1027,12 @@ async function writeGenerationInput(sandbox: ReturnType<typeof getSandbox>, root
   await sandbox.writeFile(`${root}/public-build-input.json`, publicInputJson);
   await sandbox.exec(`rm -f ${root}/.lodesta/public-build-input.json && ln -s ../public-build-input.json ${root}/.lodesta/public-build-input.json`);
   const publicInput = JSON.parse(publicInputJson) as { capabilityConfiguration?: { trustedRuntimeSeries?: unknown } };
-  if (publicInput.capabilityConfiguration?.trustedRuntimeSeries === "site-runtime-v3") {
-    const packageFile = await sandbox.readFile(`${root}/package.json`, { encoding: "utf8" });
-    const packageJson = JSON.parse(packageFile.content) as { imports?: Record<string, string> };
-    packageJson.imports = { ...packageJson.imports, "#lodesta-sdk": "./platform/sdk-native.tsx" };
-    await sandbox.writeFile(`${root}/package.json`, `${JSON.stringify(packageJson, null, 2)}\n`);
-  }
+  const runtimeSeriesId = publicInput.capabilityConfiguration?.trustedRuntimeSeries;
+  if (runtimeSeriesId !== "site-runtime-v4") throw new Error("unsupported_authoring_runtime_series");
+  const packageFile = await sandbox.readFile(`${root}/package.json`, { encoding: "utf8" });
+  const packageJson = JSON.parse(packageFile.content) as { imports?: Record<string, string> };
+  packageJson.imports = { ...packageJson.imports, "#lodesta-sdk": "./platform/sdk-v4.tsx" };
+  await sandbox.writeFile(`${root}/package.json`, `${JSON.stringify(packageJson, null, 2)}\n`);
 }
 
 async function writeGenerationMetadata(sandbox: ReturnType<typeof getSandbox>, root: string, metadata: GenerationMetadata) {

@@ -4,6 +4,7 @@ import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/
 import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import {
   businessStateSchema,
+  canonicalSiteAuthoringRuntimeSeriesId,
   controlPlaneChangeRequestSchema,
   siteAgentSessionSchema,
   siteIntentSchema,
@@ -138,7 +139,7 @@ export class ControlPlaneService {
           ...currentInput.sourceSnapshotIds,
           ...(ownerSnapshot ? [ownerSnapshot.id] : [])
         ],
-        runtimeSeriesId: currentInput.capabilityConfiguration.trustedRuntimeSeries
+        runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
       let session = await this.workflow.prepareSession({
         siteId: site.id,

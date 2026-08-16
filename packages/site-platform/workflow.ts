@@ -112,6 +112,7 @@ import {
   type TrustedRuntimePatch
 } from "@/packages/site-contracts";
 import {
+  canonicalSiteAuthoringRuntimeSeriesId,
   expectedSiteSandboxManifest,
   sandboxImageDigest,
   siteToolchainIdentity,
@@ -128,7 +129,6 @@ import {
   createMediaContactSheet,
   createSourceMediaContactSheet,
   createArtifactThumbnail,
-  buildInformationArchitectureAdvisory,
   isTechnicalReleaseBlocker,
   logThumbnailFailure,
   prepareSiteArtifact,
@@ -164,7 +164,6 @@ import { scopedVisualInspectionRoutePaths } from "./visual-inspection-scope";
 import { logoPresentationRecipeVersion } from "./logo-preparation";
 import { materializeSourceLogo } from "./source-logo-materialization";
 
-const canonicalRuntimeSeriesId = "site-runtime-v2";
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 const idleLeaseMs = 10 * 60_000;
 const rotationMs = 2 * 60 * 60_000;
@@ -227,7 +226,7 @@ export class SiteAuthoringWorkflow {
       intent: initial.intent,
       forms: initial.forms,
       sourceSnapshotIds: initial.sourceSnapshots.map((source) => source.id),
-      runtimeSeriesId: canonicalRuntimeSeriesId
+      runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
     assertNoPrivateBuildInputFields(buildInput);
     const site = {
@@ -606,7 +605,7 @@ export class SiteAuthoringWorkflow {
         forms,
         sourceSnapshotIds: clonedSources.map((source) => source.snapshot.id),
         createdAt: now,
-        runtimeSeriesId: retainedInput.capabilityConfiguration.trustedRuntimeSeries
+        runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
       assertNoPrivateBuildInputFields(buildInput);
       const requestedSlug = (input.slug?.trim() || `${template.slug}-canary`).slice(0, 100).replace(/-+$/g, "");
@@ -921,6 +920,9 @@ export class SiteAuthoringWorkflow {
       }
       const session = await this.requireSession(run.sessionId);
       const buildInput = await this.requireBuildInput(run.publicBuildInputId);
+      if (buildInput.capabilityConfiguration.trustedRuntimeSeries !== canonicalSiteAuthoringRuntimeSeriesId) {
+        throw new Error("legacy_authoring_input_requires_v4_rebuild");
+      }
       const site = await this.repository.getSite(run.siteId);
       if (!site) throw new Error("Site not found.");
       const retainedParentRevision = site.currentWorkspaceRevisionId
@@ -930,15 +932,15 @@ export class SiteAuthoringWorkflow {
         ? await this.repository.getPublicBuildInput(retainedParentRevision.publicBuildInputId)
         : undefined;
       let olderAuthoringRevision = retainedParentInput
-        && buildInput.capabilityConfiguration.trustedRuntimeSeries === "site-runtime-v3"
-        && retainedParentInput.capabilityConfiguration.trustedRuntimeSeries !== "site-runtime-v3"
+        && buildInput.capabilityConfiguration.trustedRuntimeSeries === canonicalSiteAuthoringRuntimeSeriesId
+        && retainedParentInput.capabilityConfiguration.trustedRuntimeSeries !== canonicalSiteAuthoringRuntimeSeriesId
         ? retainedParentRevision
         : undefined;
-      if (run.request.kind === "restore_design" && buildInput.capabilityConfiguration.trustedRuntimeSeries === "site-runtime-v3") {
+      if (run.request.kind === "restore_design" && buildInput.capabilityConfiguration.trustedRuntimeSeries === canonicalSiteAuthoringRuntimeSeriesId) {
         const targetVersion = await this.repository.getSiteVersion(run.request.sourceVersionId);
         const targetRevision = targetVersion ? await this.repository.getWorkspaceRevision(targetVersion.workspaceRevisionId) : undefined;
         const targetInput = targetRevision ? await this.repository.getPublicBuildInput(targetRevision.publicBuildInputId) : undefined;
-        if (targetInput && targetInput.capabilityConfiguration.trustedRuntimeSeries !== "site-runtime-v3") {
+        if (targetInput && targetInput.capabilityConfiguration.trustedRuntimeSeries !== canonicalSiteAuthoringRuntimeSeriesId) {
           olderAuthoringRevision = targetRevision;
         }
       }
@@ -949,7 +951,7 @@ export class SiteAuthoringWorkflow {
           sessionId: run.sessionId,
           runId: run.id,
           role: "system",
-          content: `Older authoring format—full rebuild required. Lodesta will preserve revision ${olderAuthoringRevision.id}, re-author from retained canonical evidence, and replace no visible version until the native-runtime candidate passes verification.`,
+          content: `Older authoring format—full rebuild required. Lodesta will preserve revision ${olderAuthoringRevision.id}, re-author from retained canonical evidence, and replace no visible version until the canonical candidate passes verification.`,
           createdAt: new Date().toISOString()
         }).catch(() => undefined);
       }
@@ -1175,18 +1177,6 @@ export class SiteAuthoringWorkflow {
         redirects: outcome.redirects,
         retiredSourcePaths: outcome.retiredSourcePaths
       });
-      if (
-        outcome.buildInput.capabilityConfiguration.trustedRuntimeSeries === "site-runtime-v3"
-        && sourceCoverage.report
-        && sourceCoverage.report.counts.unaccounted > 0
-      ) {
-        throw new SiteAuthoringTerminalError(
-          "artifact_contract_invalid",
-          "platform",
-          false,
-          `The native-runtime finish result leaves ${sourceCoverage.report.counts.unaccounted} retained source path(s) without exactly one live, redirect, canonical-duplicate, or retirement disposition.`
-        );
-      }
       const completedAt = new Date().toISOString();
       const completedRun = siteAgentRunSchema.parse({
         ...run,
@@ -1408,7 +1398,7 @@ export class SiteAuthoringWorkflow {
         ...retainedSnapshots.flatMap((snapshot) => snapshot ? [snapshot.id] : []),
         ...ingested.sourceSnapshots.map((snapshot) => snapshot.id)
       ],
-      runtimeSeriesId: retainedInput.capabilityConfiguration.trustedRuntimeSeries
+      runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
     assertNoPrivateBuildInputFields(buildInput);
     const now = new Date().toISOString();
@@ -1588,7 +1578,7 @@ export class SiteAuthoringWorkflow {
       intent,
       forms: currentInput.forms,
       sourceSnapshotIds: [...retainedNonWebsiteIds, snapshot.id],
-      runtimeSeriesId: currentInput.capabilityConfiguration.trustedRuntimeSeries
+      runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
     const applied = await this.repository.applyPreparedSourceRecapture({
       expectedPublicBuildInputId: currentInput.id,
@@ -1943,7 +1933,7 @@ export class SiteAuthoringWorkflow {
         intent: effectiveIntent,
         forms: effectiveForms,
         sourceSnapshotIds,
-        runtimeSeriesId: retainedBuildInput.capabilityConfiguration.trustedRuntimeSeries
+        runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
     };
     const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
@@ -2078,7 +2068,7 @@ export class SiteAuthoringWorkflow {
         intent: effectiveIntent,
         forms: effectiveForms,
         sourceSnapshotIds: [...retainedSourceIds],
-        runtimeSeriesId: input.buildInput.capabilityConfiguration.trustedRuntimeSeries
+        runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
       // A public input that references provisional media cannot be retained
       // independently: its asset rows are committed atomically with media
@@ -2368,6 +2358,10 @@ export class SiteAuthoringWorkflow {
                 operationId: result.operationId,
                 activeGenerationRevision: result.activeGenerationRevision,
                 replayed: result.replayed ?? false,
+                submissionAttempts: result.submissionAttempts ?? 1,
+                submissionLatencyMs: result.submissionLatencyMs,
+                submissionPayloadBytes: result.submissionPayloadBytes,
+                submissionRecoveryCause: result.submissionRecoveryCause,
                 warnings: result.warnings,
                 durationMs: Date.now() - startedAt,
                 phaseTimings: result.phaseTimings
@@ -2868,6 +2862,10 @@ export class SiteAuthoringWorkflow {
               operationId: result.operationId,
               activeGenerationRevision: result.activeGenerationRevision,
               replayed: result.replayed ?? false,
+              submissionAttempts: result.submissionAttempts ?? 1,
+              submissionLatencyMs: result.submissionLatencyMs,
+              submissionPayloadBytes: result.submissionPayloadBytes,
+              submissionRecoveryCause: result.submissionRecoveryCause,
               warnings: result.warnings,
               durationMs: Date.now() - startedAt,
               phaseTimings: result.phaseTimings
@@ -3178,13 +3176,6 @@ export class SiteAuthoringWorkflow {
       }
       const runtimeSeriesId = input.buildInput.capabilityConfiguration.trustedRuntimeSeries;
       const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
-      if (runtimeSeriesId === "site-runtime-v3") {
-        const ia = buildInformationArchitectureAdvisory({
-          routes: prepared.routes,
-          sourcePaths: (input.sourcePages ?? []).map((page) => page.path)
-        });
-        prepared.findings.push(...ia.findings);
-      }
       const hardChecksMs = Date.now() - hardChecksStartedAt;
       const runtime = await this.ensureRuntime(runtimeSeriesId);
       const runtimeSource = await this.readAuditedRuntimePatch(runtime.patch);
@@ -4740,7 +4731,7 @@ export class SiteAuthoringWorkflow {
       intent,
       forms,
       sourceSnapshotIds: input.buildInput.sourceSnapshotIds,
-      runtimeSeriesId: input.buildInput.capabilityConfiguration.trustedRuntimeSeries
+      runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
 
     const run = siteAgentRunSchema.parse({ ...input.run, publicBuildInputId: buildInput.id });

@@ -8,9 +8,10 @@ export type WorkspaceSourceFile = { path: string; content: string };
 
 const sandboxRequestTimeoutMs = 150_000;
 const sandboxBuildRequestTimeoutMs = 210_000;
-const sandboxOperationSubmitTimeoutMs = 15_000;
+const sandboxOperationSubmitTimeoutMs = 30_000;
 const sandboxOperationStatusTimeoutMs = 10_000;
 const sandboxOperationPollIntervalMs = 500;
+const sandboxOperationReplayDelayMs = 250;
 
 type SandboxBuildSuccess = {
   ok: true;
@@ -21,6 +22,10 @@ type SandboxBuildSuccess = {
   operationId: string;
   activeGenerationRevision: string;
   replayed?: boolean;
+  submissionAttempts?: 1 | 2;
+  submissionLatencyMs?: number;
+  submissionPayloadBytes?: number;
+  submissionRecoveryCause?: string;
   phaseTimings: Record<string, number>;
   warnings?: string[];
 };
@@ -187,22 +192,49 @@ export class SiteSandboxClient {
     action: "apply" | "rebase" | "restore",
     body: unknown
   ): Promise<SandboxBuildSuccess> {
-    const submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
-      sessionId,
-      action,
-      "POST",
-      body,
-      sandboxOperationSubmitTimeoutMs
-    );
-    if ("revision" in submitted) return submitted;
-    const submissionReplayed = Boolean(submitted.submissionReplayed);
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
+    const submissionStartedAt = Date.now();
+    let submissionAttempts: 1 | 2 = 1;
+    let submissionRecoveryCause: string | undefined;
+    let submitted: SandboxBuildSuccess | SandboxOperationStatus;
+    try {
+      submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+        sessionId,
+        action,
+        "POST",
+        body,
+        sandboxOperationSubmitTimeoutMs
+      );
+    } catch (error) {
+      if (!isRetryableOperationSubmission(error)) throw error;
+      submissionAttempts = 2;
+      submissionRecoveryCause = sanitizedSubmissionCause(error);
+      if (error instanceof SiteSandboxRequestError && error.providerCode === "operation_in_progress") {
+        await wait(sandboxOperationReplayDelayMs);
+      }
+      submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+        sessionId,
+        action,
+        "POST",
+        body,
+        sandboxOperationSubmitTimeoutMs
+      );
+    }
+    const submissionTelemetry = {
+      submissionAttempts,
+      submissionLatencyMs: Date.now() - submissionStartedAt,
+      submissionPayloadBytes: payloadBytes,
+      ...(submissionRecoveryCause ? { submissionRecoveryCause } : {})
+    };
+    if ("revision" in submitted) return { ...submitted, ...submissionTelemetry };
+    const submissionReplayed = submissionAttempts === 2 || Boolean(submitted.submissionReplayed);
     const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
     let lastStatus = submitted;
     while (Date.now() < deadline) {
       if (lastStatus.status === "succeeded" && lastStatus.result) {
         return submissionReplayed
-          ? { ...lastStatus.result, replayed: true }
-          : lastStatus.result;
+          ? { ...lastStatus.result, replayed: true, ...submissionTelemetry }
+          : { ...lastStatus.result, ...submissionTelemetry };
       }
       if (lastStatus.status === "failed") throw operationFailure(action, sessionId, lastStatus);
       await wait(Math.min(sandboxOperationPollIntervalMs, Math.max(0, deadline - Date.now())));
@@ -252,6 +284,22 @@ export class SiteSandboxClient {
     }
     return payload as T;
   }
+}
+
+function isRetryableOperationSubmission(error: unknown) {
+  if (error instanceof SiteSandboxRequestError) {
+    return error.providerCode === "operation_in_progress"
+      || error.status === 408
+      || error.status >= 500;
+  }
+  const value = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /(?:abort|fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable)/i.test(value);
+}
+
+function sanitizedSubmissionCause(error: unknown) {
+  if (error instanceof SiteSandboxRequestError) return error.providerCode ?? `http_${error.status}`;
+  if (error instanceof Error && error.name) return error.name.slice(0, 80);
+  return "transport_failure";
 }
 
 function operationFailure(action: string, sessionId: string, status: SandboxOperationStatus) {

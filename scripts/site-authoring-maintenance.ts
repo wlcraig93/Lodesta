@@ -60,6 +60,7 @@ if (command === "acquire") {
   if (!await sitePlatformRepository.renewMaintenanceLease(task, lease.leaseTokenHash, now.toISOString(), leaseUntil)) {
     throw new Error("The site-authoring maintenance lease could not be renewed; abort the maintenance window.");
   }
+  await mkdir(dirname(leasePath), { recursive: true });
   await writeFile(leasePath, `${JSON.stringify({ ...lease, leaseUntil }, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ ok: true, action: "renew", task, leaseUntil })}\n`);
 } else if (command === "release") {
@@ -67,7 +68,9 @@ if (command === "acquire") {
   if (!await sitePlatformRepository.releaseMaintenanceLease(task, lease.leaseTokenHash)) {
     throw new Error("The site-authoring maintenance lease was not owned or had already expired/replaced; local lease state was retained.");
   }
-  await unlink(leasePath);
+  await unlink(leasePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
   process.stdout.write(`${JSON.stringify({ ok: true, action: "release", task })}\n`);
 } else if (command === "status") {
   const lease = await readLease().catch(() => undefined);

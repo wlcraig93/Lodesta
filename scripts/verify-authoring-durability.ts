@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [worker, dev, workflow, manager, history, repository, migration, sandboxMigration, verificationMigration, contracts, runtimeConfig, recoveryConfig, route] = await Promise.all([
+const [worker, dev, workflow, manager, history, repository, migration, sandboxMigration, verificationMigration, contracts, runtimeConfig, recoveryConfig, route, operatorRequeue] = await Promise.all([
   readFile("workers/runner.ts", "utf8"),
   readFile("scripts/dev.mjs", "utf8"),
   readFile("packages/site-platform/workflow.ts", "utf8"),
@@ -14,10 +14,12 @@ const [worker, dev, workflow, manager, history, repository, migration, sandboxMi
   readFile("packages/site-contracts/index.ts", "utf8"),
   readFile("packages/site-sandbox/runtime-config.ts", "utf8"),
   readFile("workers/recovery-watchdog/wrangler.jsonc", "utf8"),
-  readFile("app/api/site-agent/sites/route.ts", "utf8")
+  readFile("app/api/site-agent/sites/route.ts", "utf8"),
+  readFile("scripts/control-site-authoring-run.ts", "utf8")
 ]);
 
-assert(worker.includes("processRecoverableRuns"));
+assert(worker.includes("processQueuedSiteAuthoring"));
+assert(workflow.includes("recoverSiteAuthoring") && workflow.includes("processQueuedSiteAuthoring"));
 assert(worker.includes("250"));
 assert(worker.includes("2_000"));
 assert(dev.includes("workers/runner.ts"));
@@ -48,6 +50,13 @@ assert(sandboxMigration.includes("checkpoint_execution_fenced"));
 assert(sandboxMigration.includes("fence_expired_site_agent_session"));
 assert(sandboxMigration.includes("requeue_interrupted_site_agent_run"));
 assert(workflow.includes("requeueInterruptedAgentRun"));
+assert(workflow.includes("operatorRequeueRun")
+  && workflow.includes("operator_requeue_execution_mismatch")
+  && workflow.includes("operator_requeue_fence_failed"));
+assert(operatorRequeue.includes('command, "requeue"')
+  && operatorRequeue.includes('process.argv.includes("--apply")')
+  && operatorRequeue.includes('requiredOption("confirm")')
+  && operatorRequeue.includes('requiredOption("execution-number")'), "Operator requeue must be dry-run-first, execution-fenced, and confirmation-bound.");
 assert(sandboxMigration.includes("save_site_agent_session_for_execution"));
 assert(workflow.includes("saveSessionForExecution"));
 assert(sandboxMigration.includes("interval '5 minutes'"));

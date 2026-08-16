@@ -28,35 +28,42 @@ async function main() {
     return;
   }
   if (command === "process-once") {
-    const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs, workerId });
-    const websiteAssessment = agentRuns.processed.length || agentRuns.recovered.length || agentRuns.reaped.length
+    const recovery = await siteAuthoringWorkflow.recoverSiteAuthoring({ limit: 1, staleAfterMs: localRecoveryStaleAfterMs });
+    const agentRuns = await siteAuthoringWorkflow.processQueuedSiteAuthoring({ limit: 1, workerId });
+    const websiteAssessment = agentRuns.processed.length || recovery.recovered.length || recovery.reaped.length
       ? null
       : await processNextWebsiteAssessmentJob();
-    console.log(JSON.stringify({ agentRuns, websiteAssessment }, null, 2));
+    console.log(JSON.stringify({ recovery, agentRuns, websiteAssessment }, null, 2));
     return;
   }
   if (command === "process-all") {
     const limit = boundedLimit(process.argv[3]);
-    const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs, workerId });
+    const recovery = await siteAuthoringWorkflow.recoverSiteAuthoring({ limit, staleAfterMs: localRecoveryStaleAfterMs });
+    const agentRuns = await siteAuthoringWorkflow.processQueuedSiteAuthoring({ limit, workerId });
     const websiteAssessments = [];
     for (let index = 0; index < limit; index += 1) {
       const result = await processNextWebsiteAssessmentJob();
       if (!result) break;
       websiteAssessments.push(result);
     }
-    console.log(JSON.stringify({ agentRuns, websiteAssessments }, null, 2));
+    console.log(JSON.stringify({ recovery, agentRuns, websiteAssessments }, null, 2));
     return;
   }
   if (command === "work") {
     const idleMs = boundedIdle(process.argv[3] ?? process.env.LODESTA_WORKER_IDLE_MS);
     const limit = boundedLimit(process.argv[4]);
-    console.log(JSON.stringify({ event: "worker_started", pollMs: idleMs, batchLimit: limit }));
+    console.log(JSON.stringify({
+      event: "worker_started",
+      pollMs: idleMs,
+      batchLimit: limit,
+      releaseSha: process.env.LODESTA_RELEASE_GIT_SHA ?? null
+    }));
     let backoffMs = idleMs;
     while (!shuttingDown) {
       try {
-        const result = await siteAuthoringWorkflow.processRecoverableRuns({ limit, staleAfterMs: localRecoveryStaleAfterMs, workerId });
-        if (result.reaped.length || result.recovered.length || result.processed.length) {
-          console.log(JSON.stringify({ event: "agent_runs_processed", reapedSessions: result.reaped, recovered: result.recovered, processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
+        const result = await siteAuthoringWorkflow.processQueuedSiteAuthoring({ limit, workerId });
+        if (result.processed.length) {
+          console.log(JSON.stringify({ event: "agent_runs_processed", processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
           backoffMs = idleMs;
           continue;
         }

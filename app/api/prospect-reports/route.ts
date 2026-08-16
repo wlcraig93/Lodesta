@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import {
@@ -6,7 +6,6 @@ import {
   ProspectReportGenerationError
 } from "@/packages/acquisition/prospect-report-generation";
 import { publicProspectReport } from "@/packages/acquisition/prospect-reports";
-import { processNextWebsiteAssessmentJob } from "@/packages/website-assessment/jobs";
 
 export const runtime = "nodejs";
 
@@ -35,7 +34,6 @@ export async function POST(request: Request) {
       query: parsed.data.query,
       accessPolicy: "email_gate"
     });
-    if (created.job) scheduleAssessment(created.job.id);
     return applyRateLimitHeaders(
       NextResponse.json(
         { report: publicProspectReport(created.report), reused: created.reused },
@@ -50,18 +48,4 @@ export async function POST(request: Request) {
       : "Unable to create the report.";
     return applyRateLimitHeaders(NextResponse.json({ error: message }, { status }), limit);
   }
-}
-
-export function scheduleAssessment(jobId: string) {
-  after(async () => {
-    try {
-      await processNextWebsiteAssessmentJob({ workerId: `prospect-after-${jobId}` });
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: "prospect_report_after_failed",
-        jobId,
-        error: error instanceof Error ? error.message : String(error)
-      }));
-    }
-  });
 }

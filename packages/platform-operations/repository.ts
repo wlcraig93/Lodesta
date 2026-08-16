@@ -17,6 +17,7 @@ import {
 } from "@/packages/acquisition/outbound";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { assertHostedExecutionAuthority, configuredRepositoryMode } from "@/packages/execution-environment";
 import { websiteAssessmentSchema } from "@/packages/website-assessment/contracts";
 import {
   prospectContactId,
@@ -1168,7 +1169,14 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async listWebsiteAssessments(input: { siteId?: string; sourceKey?: string; ids?: string[]; limit?: number } = {}) { if (input.ids && !input.ids.length) return []; let query = this.client.from("website_assessments").select("*").order("created_at", { ascending: false }).limit(Math.max(1, Math.min(input.limit ?? 100, 500))); if (input.siteId) query = query.eq("site_id", input.siteId); if (input.sourceKey) query = query.eq("source_key", input.sourceKey); if (input.ids?.length) query = query.in("id", input.ids.slice(0, 500)); return (await data<WebsiteAssessmentRow[]>(query, "List website assessments")).map(websiteAssessmentFromRow); }
   async updateWebsiteAssessment(input: UpdateWebsiteAssessmentInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", assessment: "assessment_json", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateWebsiteAssessmentInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<WebsiteAssessmentRow>(this.client.from("website_assessments").update(patch).eq("id", input.assessmentId).select("*").maybeSingle(), "Update website assessment"); return row ? websiteAssessmentFromRow(row) : null; }
   async enqueueWebsiteAssessmentJob(input: { assessmentId: string; prospectReportId?: string }) { const now = new Date().toISOString(); const row = await data<WebsiteAssessmentJobRow>(this.client.from("website_assessment_jobs").insert({ id: `website_assessment_job_${crypto.randomUUID().replaceAll("-", "")}`, assessment_id: input.assessmentId, prospect_report_id: input.prospectReportId, status: "queued", attempts: 0, max_attempts: 2, run_after: now, created_at: now, updated_at: now }).select("*").single(), "Enqueue website assessment job"); return websiteAssessmentJobFromRow(row); }
-  async claimNextWebsiteAssessmentJob(workerId: string) { const row = await maybe<WebsiteAssessmentJobRow>(this.client.rpc("claim_website_assessment_job", { worker_id: workerId }).maybeSingle(), "Claim website assessment job"); return row ? websiteAssessmentJobFromRow(row) : null; }
+  async claimNextWebsiteAssessmentJob(workerId: string) {
+    assertHostedExecutionAuthority("site-authoring-worker", "claim_website_assessment_job");
+    const row = await maybe<WebsiteAssessmentJobRow>(
+      this.client.rpc("claim_website_assessment_job", { worker_id: workerId }).maybeSingle(),
+      "Claim website assessment job"
+    );
+    return row ? websiteAssessmentJobFromRow(row) : null;
+  }
   async completeWebsiteAssessmentJob(jobId: string) { const now = new Date().toISOString(); await data(this.client.from("website_assessment_jobs").update({ status: "completed", completed_at: now, updated_at: now }).eq("id", jobId).select("id").single(), "Complete website assessment job"); }
   async failWebsiteAssessmentJob(jobId: string, error: string) { const row = await data<WebsiteAssessmentJobRow>(this.client.from("website_assessment_jobs").select("*").eq("id", jobId).single(), "Read failed website assessment job"); const retry = row.attempts < row.max_attempts; await data(this.client.from("website_assessment_jobs").update({ status: retry ? "queued" : "failed", error, run_after: retry ? new Date(Date.now() + 30_000).toISOString() : row.run_after, locked_by: null, locked_at: null, updated_at: new Date().toISOString(), completed_at: retry ? null : new Date().toISOString() }).eq("id", jobId).select("id").single(), "Fail website assessment job"); }
 
@@ -1197,7 +1205,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   private async applyEvent(id: string, event: OutboundEvent) { const row = await maybe<ProspectRow>(this.client.from("outbound_prospects").select("*").eq("id", id).maybeSingle(), "Read event prospect"); if (!row) return; const value = await this.outboundProspectFromMembership(row); applyOutboundEventToProspect(value, event); await data(this.client.from("outbound_prospects").update({ site_id: value.siteId, status: value.status, mailed_at: value.mailedAt, first_report_viewed_at: value.firstReportViewedAt, first_preview_viewed_at: value.firstPreviewViewedAt, adoption_started_at: value.adoptionStartedAt, adopted_at: value.adoptedAt, published_at: value.publishedAt, disqualified_at: value.disqualifiedAt }).eq("id", id).select("id").single(), "Update event prospect"); }
 }
 
-export const platformOperationsRepository: PlatformOperationsRepository = process.env.LODESTA_REPOSITORY === "local"
+export const platformOperationsRepository: PlatformOperationsRepository = configuredRepositoryMode() === "local"
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 

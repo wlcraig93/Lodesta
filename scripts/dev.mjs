@@ -4,15 +4,22 @@ import { join } from "node:path";
 
 const host = process.env.HOST || "127.0.0.1";
 const port = process.env.PORT || "4330";
-const repositoryMode = process.env.LODESTA_REPOSITORY === "local" ? "local" : "supabase";
+const repositoryMode = "local";
 
-await ensureDevelopmentSandbox();
+const localEnvironment = {
+  ...process.env,
+  LODESTA_REPOSITORY: "local",
+  LODESTA_EXECUTION_ROLE: "",
+  LODESTA_RELEASE_GIT_SHA: ""
+};
+
+await ensureDevelopmentSandbox(localEnvironment);
 
 console.log(`[dev] starting Next.js at http://${host}:${port}`);
 console.log(`[dev] repository=${repositoryMode} sandbox=development worker=enabled`);
 
 const sharedEnv = {
-  ...process.env,
+  ...localEnvironment,
   FORCE_COLOR: process.env.FORCE_COLOR ?? "1",
   LODESTA_DEV_SANDBOX: "1",
   LODESTA_SANDBOX_BLUE_URL: "",
@@ -72,11 +79,11 @@ function stop(signal, exitCode = 0) {
   finish();
 }
 
-async function ensureDevelopmentSandbox() {
+async function ensureDevelopmentSandbox(environment) {
   await new Promise((resolveEnsure, reject) => {
     const ensure = spawn(process.execPath, ["--import", "tsx", "scripts/ensure-site-sandbox-dev.ts"], {
       stdio: "inherit",
-      env: process.env
+      env: environment
     });
     ensure.once("error", reject);
     ensure.once("exit", (code, signal) => {

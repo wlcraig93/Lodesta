@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { processWebsiteAssessmentJobs } from "@/packages/website-assessment/jobs";
 import { siteAuthoringWorkflow, siteAgentRecoveryStaleAfterMs } from "@/packages/site-platform/workflow";
 import { processDomainReconciliations } from "@/lib/domain-reconciliation";
 import { sitePlatformRepository } from "@/packages/platform-data";
@@ -10,26 +9,18 @@ export const automaticRecoveryLimit = 4;
 
 export async function processAutomaticRecovery(trigger: "startup" | "cloudflare_cron") {
   const drainingSandbox = await inspectDrainingSandboxDeployment();
-  const agentRuns = await siteAuthoringWorkflow.processRecoverableRuns({
+  const agentRuns = await siteAuthoringWorkflow.recoverSiteAuthoring({
     limit: automaticRecoveryLimit,
     staleAfterMs: siteAgentRecoveryStaleAfterMs
   });
-  const [websiteAssessments, domains] = await Promise.all([
-    processWebsiteAssessmentJobs({
-      limit: automaticRecoveryLimit,
-      workerId: `${trigger}-${process.pid}`
-    }),
-    processDomainReconciliations({ limit: automaticRecoveryLimit })
-  ]);
-  const result = { trigger, drainingSandbox, agentRuns, websiteAssessments, domains };
+  const domains = await processDomainReconciliations({ limit: automaticRecoveryLimit });
+  const result = { trigger, drainingSandbox, agentRuns, domains };
   console.log(JSON.stringify({
     event: "automatic_recovery_completed",
     trigger,
     reaped: agentRuns.reaped.length,
     recovered: agentRuns.recovered.length,
-    processed: agentRuns.processed.length,
     drainingSandbox: drainingSandbox.state,
-    websiteAssessments: websiteAssessments.length,
     domains: domains.length
   }));
   return result;

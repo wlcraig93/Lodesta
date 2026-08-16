@@ -25,6 +25,7 @@ import {
 } from "@/packages/site-artifacts";
 import {
   classifySiteAuthoringFailure,
+  classifyRecipeSource,
   createImageBytes,
   createSourceWorkspace,
   createSiteAuthoringContext,
@@ -136,6 +137,7 @@ import {
 } from "@/packages/site-verification";
 import { createSiteRuntimePatch } from "@/packages/trusted-runtime";
 import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
+import { assertHostedExecutionAuthority, configuredRepositoryMode } from "@/packages/execution-environment";
 import {
   selectArtifactReviewRoutePaths
 } from "@/packages/website-assessment/route-selection";
@@ -848,6 +850,9 @@ export class SiteAuthoringWorkflow {
   }
 
   async executeRun(runId: string, selection?: SiteElementSelection, alreadyClaimed?: SiteAgentRun): Promise<SiteAgentRun> {
+    if (configuredRepositoryMode() === "supabase") {
+      assertHostedExecutionAuthority("site-authoring-worker", "execute_site_authoring_run");
+    }
     let current = alreadyClaimed ?? await this.requireRun(runId);
     if (!alreadyClaimed) {
       if (current.status !== "queued") return current;
@@ -1010,18 +1015,24 @@ export class SiteAuthoringWorkflow {
       ))
         ? await this.sandbox.getSource(sandboxState.session.sandboxId!).catch(() => undefined)
         : undefined;
+      const isBlankOrFullRebuild = Boolean(
+        olderAuthoringRevision || run.kind === "initial_build" || !site.currentWorkspaceRevisionId
+      );
       const materializedInitialSource = !resumedSandboxSource
-        && (olderAuthoringRevision || run.kind === "initial_build" || !site.currentWorkspaceRevisionId)
+        && isBlankOrFullRebuild
         ? await this.sandbox.getSource(sandboxState.session.sandboxId!)
         : undefined;
-      if (materializedInitialSource && materializedInitialSource.revision !== sandboxState.revision) {
-        throw new Error("materialized_initial_source_revision_mismatch");
+      if (materializedInitialSource) {
+        assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision);
       }
       let currentFiles = resumedSandboxSource?.files
         ?? materializedInitialSource?.files
-        ?? (olderAuthoringRevision || run.kind === "initial_build" || !site.currentWorkspaceRevisionId
+        ?? (isBlankOrFullRebuild
           ? undefined
           : await this.loadWorkspaceSource(site.currentWorkspaceRevisionId));
+      if (!currentFiles) {
+        throw new Error("workspace_source_unavailable");
+      }
       const snapshots = (await Promise.all(buildInput.sourceSnapshotIds.map((id) => this.repository.getSourceSnapshot(id))))
         .filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
       const sourcePages = (await Promise.all(snapshots.map((snapshot) => this.repository.listSourceSnapshotPages(snapshot.id)))).flat();
@@ -1685,7 +1696,7 @@ export class SiteAuthoringWorkflow {
     return result;
   }
 
-  async processRecoverableRuns(input: { limit?: number; staleAfterMs?: number; workerId?: string } = {}) {
+  async recoverSiteAuthoring(input: { limit?: number; staleAfterMs?: number } = {}) {
     const limit = Math.max(1, Math.min(input.limit ?? 4, 20));
     const reaped = await this.reapExpiredSessions({ limit });
     const staleAfterMs = input.staleAfterMs ?? siteAgentRecoveryStaleAfterMs;
@@ -1696,6 +1707,14 @@ export class SiteAuthoringWorkflow {
       const result = await this.recoverRunIfStale(run.id, staleAfterMs);
       if (result.status !== "running") recovered.push(run.id);
     }
+    return { reaped, recovered };
+  }
+
+  async processQueuedSiteAuthoring(input: { limit?: number; workerId?: string } = {}) {
+    if (configuredRepositoryMode() === "supabase") {
+      assertHostedExecutionAuthority("site-authoring-worker", "process_queued_site_authoring");
+    }
+    const limit = Math.max(1, Math.min(input.limit ?? 4, 20));
     const claimed: SiteAgentRun[] = [];
     for (let index = 0; index < limit; index += 1) {
       const run = await this.repository.claimNextAgentRun(input.workerId ?? `site-authoring-worker-${process.pid}`);
@@ -1703,7 +1722,7 @@ export class SiteAuthoringWorkflow {
       claimed.push(run);
     }
     const processed = await Promise.all(claimed.map((run) => this.executeRunAndFinalize(run.id, undefined, run)));
-    return { reaped, recovered, processed };
+    return { processed };
   }
 
   async reapExpiredSessions(input: { limit?: number; now?: string } = {}) {
@@ -1737,6 +1756,49 @@ export class SiteAuthoringWorkflow {
     const heartbeat = Date.parse(run.heartbeatAt ?? run.startedAt);
     if (heartbeat > Date.now() - staleAfterMs) return run;
     return this.recoverInterruptedRun(run);
+  }
+
+  async operatorRequeueRun(input: { runId: string; expectedExecutionNumber: number; operatorId: string }) {
+    const run = await this.requireRun(input.runId);
+    if (run.status !== "running") throw new Error("operator_requeue_requires_running_run");
+    if (run.executionNumber !== input.expectedExecutionNumber) throw new Error("operator_requeue_execution_mismatch");
+    const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
+    const event = await recorder.open({
+      kind: "run",
+      name: "operator_requeue",
+      summary: {
+        operatorId: input.operatorId,
+        expectedExecutionNumber: input.expectedExecutionNumber,
+        sandboxDeploymentId: run.sandboxDeploymentId
+      }
+    });
+    try {
+      const requeued = await this.recoverInterruptedRun(run);
+      if (requeued.status !== "queued" || requeued.executionNumber !== input.expectedExecutionNumber + 1) {
+        throw new Error("operator_requeue_fence_failed");
+      }
+      await recorder.close(event, {
+        status: "succeeded",
+        summary: {
+          operatorId: input.operatorId,
+          priorExecutionNumber: input.expectedExecutionNumber,
+          executionNumber: requeued.executionNumber,
+          status: requeued.status
+        }
+      });
+      return requeued;
+    } catch (error) {
+      await recorder.close(event, {
+        status: "failed",
+        errorCode: "operator_requeue_failed",
+        summary: {
+          operatorId: input.operatorId,
+          expectedExecutionNumber: input.expectedExecutionNumber,
+          error: failureMessage(error)
+        }
+      }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async retryFailedRun(input: { runId: string; actorId: string }) {
@@ -1868,7 +1930,7 @@ export class SiteAuthoringWorkflow {
     snapshots: SourceSnapshot[];
     sourcePages: SourceSnapshotPage[];
     sandboxRevision: string;
-    currentFiles?: WorkspaceSourceFile[];
+    currentFiles: WorkspaceSourceFile[];
     releasePlan?: WorkspaceReleasePlan;
     instruction: string;
     selection?: SiteElementSelection;
@@ -2331,7 +2393,8 @@ export class SiteAuthoringWorkflow {
           }
         };
       },
-      applyBuild: async (files, expectedRevision) => {
+      applyBuild: async (files, expectedRevision, inspectionSignal) => {
+        const operationSignal = combineAbortSignals(input.signal, inspectionSignal);
         run = await this.updateRun(run, { stage: "building" });
         await ensureSandboxReady();
         void expectedRevision;
@@ -2349,7 +2412,7 @@ export class SiteAuthoringWorkflow {
               expectedRevision: revision,
               candidateHash
             }
-          }), input.signal);
+          }), operationSignal);
           const startedAt = Date.now();
           try {
             const result = await this.sandbox.apply(sandboxId, revision, files);
@@ -2374,7 +2437,7 @@ export class SiteAuthoringWorkflow {
                 durationMs: Date.now() - startedAt,
                 phaseTimings: result.phaseTimings
               }
-            }), input.signal).catch(() => undefined);
+            }), operationSignal).catch(() => undefined);
             return result;
           } catch (error) {
             await recorder.close(attemptSpan, {
@@ -2416,7 +2479,7 @@ export class SiteAuthoringWorkflow {
         await this.blobStore.putImmutable({ key, bytes, contentType: "text/plain; charset=utf-8", contentHash });
         return { key, contentHash, bytes: bytes.length };
       },
-      inspectVisual: async (_files, sandboxRevision, target) => this.inspectSandboxVisual({
+      inspectVisual: async (_files, sandboxRevision, target, inspectionSignal, onPhase) => this.inspectSandboxVisual({
         run,
         session: activeSession,
         buildInput: effectiveBuildInput,
@@ -2427,10 +2490,12 @@ export class SiteAuthoringWorkflow {
         imageDetail: activeAuthoringProfile?.visualInspectionImageDetail,
         selector: target.selector,
         selectionLabel: target.label,
-        signal: input.signal
+        signal: combineAbortSignals(input.signal, inspectionSignal),
+        onPhase
       }),
       visualInspectionFeedback: activeAuthoringProfile?.visualInspectionFeedback,
-      inspect: async (files, sandboxRevision): Promise<RuntimeInspection<Checkpoint>> => {
+      inspect: async (files, sandboxRevision, inspectionSignal): Promise<RuntimeInspection<Checkpoint>> => {
+        const operationSignal = combineAbortSignals(input.signal, inspectionSignal);
         run = await this.updateRun(run, { stage: "verifying" });
         const site = await this.repository.getSite(run.siteId);
         if (!site) throw new Error("Site not found.");
@@ -2450,7 +2515,7 @@ export class SiteAuthoringWorkflow {
           sourcePages: input.sourcePages,
           workspaceRevisionId,
           browserRoutePaths: input.releasePlan?.browserRoutePaths,
-          signal: input.signal
+          signal: operationSignal
         });
         if (finalized.artifact.qa.hardGate === "passed" && generatedRefs.length) {
           const source = files.map((file) => file.content).join("\n");
@@ -2468,7 +2533,7 @@ export class SiteAuthoringWorkflow {
               sourcePages: input.sourcePages,
               workspaceRevisionId,
               browserRoutePaths: input.releasePlan?.browserRoutePaths,
-              signal: input.signal
+              signal: operationSignal
             });
           }
         }
@@ -3048,7 +3113,9 @@ export class SiteAuthoringWorkflow {
     selector?: string;
     selectionLabel?: string;
     signal?: AbortSignal;
+    onPhase?: (phase: "browser_navigation_capture" | "contact_sheet_generation" | "persistence", durationMs?: number) => void;
   }) {
+    input.onPhase?.("browser_navigation_capture");
     const hardChecksStartedAt = Date.now();
     const authored = await this.sandbox.getArtifact(input.session.sandboxId!);
     if (!sandboxManifestMatches(authored.compilerManifest, this.expectedSandboxManifest())) {
@@ -3107,9 +3174,15 @@ export class SiteAuthoringWorkflow {
     });
     const inspectionFindings = [...prepared.findings, ...browserGate.findings];
     const browserCaptureMs = Date.now() - browserStartedAt;
+    input.onPhase?.("browser_navigation_capture", browserCaptureMs);
+    const contactSheetStartedAt = Date.now();
+    input.onPhase?.("contact_sheet_generation");
     const contactSheets = input.imageCoverage === "all-representative-routes" && !input.selector
       ? await createArtifactRouteFamilyContactSheets(browserGate.captures, selectedRoutes)
       : [{ routes: selectedRoutes.slice(0, 3), bytes: await createArtifactContactSheet(browserGate.captures, selectedRoutes) }];
+    const contactSheetMs = Date.now() - contactSheetStartedAt;
+    input.onPhase?.("contact_sheet_generation", contactSheetMs);
+    input.onPhase?.("persistence");
     const inspectionHash = createInspectionIdentity({
       context: {
         visualOnly: true,
@@ -3119,6 +3192,7 @@ export class SiteAuthoringWorkflow {
       findings: inspectionFindings,
       captures: browserGate.captures
     });
+    input.onPhase?.("persistence", 0);
     return {
       inspectionHash,
       modelSummary: {
@@ -3151,6 +3225,8 @@ export class SiteAuthoringWorkflow {
           compilationMs: 0,
           hardChecksMs,
           browserCaptureMs,
+          contactSheetMs,
+          persistenceMs: 0,
           advisoryEvaluationMs: 0
         }
       },
@@ -5196,6 +5272,36 @@ function retainedContactValuesMatch(kind: "phone" | "email", left: unknown, righ
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
+const requiredInitialRecipeFiles = new Map<string, { id: "mobile-navigation" | "managed-lead-form"; version: number }>([
+  ["src/components/mobile-navigation.tsx", { id: "mobile-navigation", version: 1 }],
+  ["src/components/mobile-navigation.css", { id: "mobile-navigation", version: 1 }],
+  ["src/components/managed-lead-form.tsx", { id: "managed-lead-form", version: 1 }],
+  ["src/components/managed-lead-form.css", { id: "managed-lead-form", version: 1 }]
+]);
+
+function assertMaterializedInitialSource(
+  source: { revision: string; files: WorkspaceSourceFile[] },
+  bootstrapRevision: string
+) {
+  const invalid = (reason: string): never => {
+    throw new Error(`materialized_initial_source_invalid:${reason}`);
+  };
+  if (source.revision !== bootstrapRevision) invalid("revision_mismatch");
+  if (source.files.length === 0) invalid("empty");
+  const files = new Map(source.files.map((file) => [file.path, file.content]));
+  for (const [path, expected] of requiredInitialRecipeFiles) {
+    const content = files.get(path);
+    if (content === undefined) throw new Error(`materialized_initial_source_invalid:missing:${path}`);
+    const classification = classifyRecipeSource(content);
+    if (classification.status !== "untouched") {
+      throw new Error(`materialized_initial_source_invalid:provenance:${path}:${classification.reason}`);
+    }
+    if (classification.provenance.id !== expected.id || classification.provenance.version !== expected.version) {
+      invalid(`identity:${path}`);
+    }
+  }
+}
+
 function isRepairableSandboxBuildError(error: unknown) {
   return error instanceof SiteSandboxRequestError
     && error.status === 422
@@ -5342,4 +5448,9 @@ function lazyExternalClient<T extends object>(factory: () => T): T {
 function failureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.length <= 2000 ? message : `${message.slice(0, 1980)}... [truncated]`;
+}
+
+function combineAbortSignals(left?: AbortSignal, right?: AbortSignal) {
+  if (left && right) return AbortSignal.any([left, right]);
+  return left ?? right;
 }

@@ -32,9 +32,10 @@ assert.deepEqual(ia.report.unreachableFromHome, ["/faq"]);
 assert(ia.findings.length <= 3);
 assert(ia.findings.every((finding) => finding.severity !== "error"));
 
-const [workflow, manager, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await Promise.all([
+const [workflow, manager, managerRuntime, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
+  readFile("packages/site-platform/manager-runtime.ts", "utf8"),
   readFile("packages/site-agent/skills.ts", "utf8"),
   readFile("workers/site-sandbox/src/index.ts", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
@@ -53,6 +54,19 @@ assert.match(workflow, /const materializedInitialSource = !resumedSandboxSource[
   "Blank initial builds must materialize the sandbox scaffold recipes into the manager workspace.");
 assert.match(workflow, /currentFiles = resumedSandboxSource\?\.files[\s\S]*materializedInitialSource\?\.files[\s\S]*loadWorkspaceSource/,
   "Blank recipes, resumed source, and retained owner source must share one explicit precedence path.");
+for (const path of ["mobile-navigation.tsx", "mobile-navigation.css", "managed-lead-form.tsx", "managed-lead-form.css"]) {
+  assert(workflow.includes(path), `Initial materialization must require ${path}.`);
+}
+assert(workflow.includes("assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision)")
+  && workflow.includes("materialized_initial_source_invalid")
+  && workflow.includes("currentFiles: WorkspaceSourceFile[]"), "Initial source must fail loudly before authoring and every manager invocation must receive an explicit source array.");
+assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")
+  && managerRuntime.includes('error: "inspection_timeout"')
+  && managerRuntime.includes("recoverable: true")
+  && managerRuntime.includes("mechanicalAnalysisMs")
+  && managerRuntime.includes("browserNavigationCaptureMs")
+  && managerRuntime.includes("contactSheetGenerationMs")
+  && managerRuntime.includes("persistenceMs"), "Inspection must retain mechanical feedback and surface the eight-minute ceiling as a recoverable tool failure with phase telemetry.");
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
 assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);

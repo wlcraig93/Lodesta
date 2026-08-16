@@ -235,6 +235,47 @@ const validCssEdit = await mutationRuntime.execute({
 assert.equal(validCssEdit.diagnosticOutput.ok, true);
 assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content, "body { color: #234; }");
 
+const recipePaths = [
+  "src/components/mobile-navigation.tsx",
+  "src/components/mobile-navigation.css",
+  "src/components/managed-lead-form.tsx",
+  "src/components/managed-lead-form.css"
+] as const;
+const bootstrapRecipes = await Promise.all(recipePaths.map(async (path) => ({
+  path,
+  content: await readFile(`workers/site-sandbox/scaffold/${path}`, "utf8")
+})));
+const bootstrapRuntime = new WorkspaceManagerRuntime<string>({
+  kind: "initial_build",
+  publicBuildInputId: "input_materialized_recipes",
+  toolchainVersion: "toolchain-test",
+  sandboxImageDigest: `sha256:${"e".repeat(64)}`,
+  initialSandboxRevision: "sandbox_bootstrap_1",
+  initialFiles: [
+    ...bootstrapRecipes,
+    { path: "src/site.tsx", content: validMutationSite },
+    { path: "src/styles.css", content: "body { color: #123; }" }
+  ],
+  applyBuild: async () => ({ revision: "unused", buildDurationMs: 0, previewPath: "/preview" }),
+  inspect: async () => ({
+    passed: true,
+    inspectionHash: `sha256:${"f".repeat(64)}`,
+    modelSummary: {},
+    diagnosticSummary: {},
+    checkpoint: "unused"
+  })
+});
+const unrelatedBootstrapChange = await bootstrapRuntime.execute({
+  callId: "unrelated-bootstrap-change",
+  name: "write_file",
+  arguments: { path: "src/content.ts", content: 'export const eyebrow = "Local service, thoughtfully delivered";' }
+});
+assert.equal(unrelatedBootstrapChange.diagnosticOutput.ok, true);
+for (const recipe of bootstrapRecipes) {
+  assert.equal(bootstrapRuntime.currentFiles().find((file) => file.path === recipe.path)?.content, recipe.content,
+    `${recipe.path} changed during an unrelated first workspace mutation.`);
+}
+
 const minifiedCss = Array.from({ length: 220 }, (_, index) => `.rule-${index}{color:#123;background:#fff;padding:1rem}`).join("");
 const minifiedCssRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",

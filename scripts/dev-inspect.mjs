@@ -16,6 +16,8 @@ if (!loopbackHosts.has(host)) {
 
 const inspectionEnv = {
   ...process.env,
+  LODESTA_REPOSITORY: "local",
+  LODESTA_EXECUTION_ROLE: "",
   HOST: host,
   PORT: port,
   LODESTA_ADMIN_TOKEN: "",

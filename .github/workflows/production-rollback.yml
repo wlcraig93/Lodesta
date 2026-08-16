@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       release_sha:
-        description: Exact previous Git SHA to redeploy to Railway
+        description: Exact retained Git SHA to deploy to both Railway services
         required: true
         type: string
       sandbox_deployment_id:
-        description: Immutable blue or green deployment ID to reactivate
+        description: Immutable retained sandbox deployment ID to reactivate
         required: true
         type: string
 
@@ -22,7 +22,7 @@ concurrency:
 jobs:
   rollback:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
     environment: production
     env:
       LODESTA_SANDBOX_BLUE_URL: ${{ vars.LODESTA_SANDBOX_BLUE_URL }}
@@ -32,56 +32,176 @@ jobs:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
-      RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+      RAILWAY_WEB_SERVICE_ID: ${{ vars.RAILWAY_WEB_SERVICE_ID }}
+      RAILWAY_WORKER_SERVICE_ID: ${{ vars.RAILWAY_WORKER_SERVICE_ID }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       LODESTA_APP_ORIGIN: ${{ vars.LODESTA_APP_ORIGIN }}
       LODESTA_ADMIN_TOKEN: ${{ secrets.LODESTA_ADMIN_TOKEN }}
+      LODESTA_EXECUTION_ROLE: release
+      LODESTA_RELEASE_GIT_SHA: ${{ inputs.release_sha }}
+      LODESTA_MAINTENANCE_LEASE_OWNER: ${{ secrets.LODESTA_MAINTENANCE_LEASE_OWNER }}
       EVIDENCE_DIR: .data/rollback-evidence
     steps:
       - uses: actions/checkout@v4
         with:
+          path: control
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          path: target
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: control/package-lock.json
       - run: npm ci
+        working-directory: control
       - run: npm install --global @railway/cli@5.28.1
-      - name: Validate and reactivate the retained sandbox deployment
+
+      - name: Validate rollback targets and authority
+        working-directory: control
         run: |
           set -Eeuo pipefail
           [[ "${{ inputs.release_sha }}" =~ ^[a-f0-9]{40}$ ]]
           [[ "${{ inputs.sandbox_deployment_id }}" =~ ^sandbox_deployment_[a-z0-9_]+$ ]]
-          git cat-file -e "${{ inputs.release_sha }}^{commit}"
+          test "$(git -C ../target rev-parse HEAD)" = "${{ inputs.release_sha }}"
+          test -f ../target/railway.worker.toml
           mkdir -p "$EVIDENCE_DIR"
-          npm run --silent sandbox:deployments -- rollback --deployment-id "${{ inputs.sandbox_deployment_id }}" \
-            > "$EVIDENCE_DIR/sandbox-rollback.json"
-      - name: Redeploy the retained controller
+          NODE_ENV=production npm run verify:execution-authority
+          NODE_ENV=production node --import tsx --input-type=module -e '
+            import { strict as assert } from "node:assert";
+            import { hasHostedExecutionAuthority } from "./packages/execution-environment.ts";
+            assert.equal(hasHostedExecutionAuthority("release"), true);
+            assert.equal(hasHostedExecutionAuthority("site-authoring-worker"), false);
+          '
+          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
+          railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WEB_SERVICE_ID" \
+            --limit 20 --json > "$EVIDENCE_DIR/railway-web-before.json"
+          railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WORKER_SERVICE_ID" \
+            --limit 20 --json > "$EVIDENCE_DIR/railway-worker-before.json"
+
+      - name: Acquire or renew the maintenance fence and drain
+        working-directory: control
         run: |
           set -Eeuo pipefail
-          git checkout --detach "${{ inputs.release_sha }}"
-          npm ci
-          railway variable set "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" --skip-deploys \
-            --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" > /dev/null
-          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" --message "Approved rollback to ${{ inputs.release_sha }}"
-          for attempt in $(seq 1 90); do
-            railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" \
-              --limit 1 --json > "$EVIDENCE_DIR/railway.json"
-            status="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway.json'))[0]?.status ?? 'UNKNOWN'")"
-            [ "$status" = "SUCCESS" ] && break
-            case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
-            [ "$attempt" -eq 90 ] && exit 1
-            sleep 20
+          if NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- renew --minutes=90 \
+            > "$EVIDENCE_DIR/maintenance-renew.json" 2> "$EVIDENCE_DIR/maintenance-renew-error.txt"; then
+            :
+          else
+            NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- acquire --minutes=90 --draining \
+              > "$EVIDENCE_DIR/maintenance-acquire.json"
+          fi
+          touch "$EVIDENCE_DIR/maintenance-active"
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- wait-active --timeout-minutes=30 \
+            > "$EVIDENCE_DIR/maintenance-drain.json"
+
+      - name: Deploy both retained controllers
+        id: controllers
+        working-directory: control
+        run: |
+          set -Eeuo pipefail
+          for pair in "$RAILWAY_WEB_SERVICE_ID:web" "$RAILWAY_WORKER_SERVICE_ID:site-authoring-worker"; do
+            service="${pair%%:*}"
+            role="${pair#*:}"
+            railway variable set "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
+              --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" > /dev/null
           done
+          railway up ../target --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WEB_SERVICE_ID" --message "Approved web rollback to ${{ inputs.release_sha }}"
+          railway up ../target --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to ${{ inputs.release_sha }}"
+          for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
+            name="${spec%%:*}"
+            service="${spec#*:}"
+            for attempt in $(seq 1 90); do
+              railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" \
+                --limit 20 --json > "$EVIDENCE_DIR/railway-$name-candidates.json"
+              status="$(node --input-type=module -e '
+                import { readFileSync, writeFileSync } from "node:fs";
+                const priorIds = new Set(JSON.parse(readFileSync(process.argv[1], "utf8")).map((deployment) => deployment.id));
+                const candidate = JSON.parse(readFileSync(process.argv[2], "utf8")).find((deployment) => !priorIds.has(deployment.id));
+                if (candidate) writeFileSync(process.argv[3], JSON.stringify([candidate], null, 2));
+                process.stdout.write(candidate?.status ?? "PENDING");
+              ' "$EVIDENCE_DIR/railway-$name-before.json" "$EVIDENCE_DIR/railway-$name-candidates.json" "$EVIDENCE_DIR/railway-$name.json")"
+              [ "$status" = "SUCCESS" ] && break
+              case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
+              [ "$attempt" -eq 90 ] && exit 1
+              sleep 20
+            done
+          done
+          worker_deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-worker.json'))[0].id")"
+          echo "worker_deployment=$worker_deployment" >> "$GITHUB_OUTPUT"
+
+      - name: Require both services to report the target SHA
+        working-directory: control
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/pre-pointer-health.json"; then
+              node --input-type=module -e '
+                import { readFileSync } from "node:fs";
+                const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                const identity = report.checks?.find((check) => check.id === "release_identity");
+                if (report.status === "error" || identity?.detail !== process.env.LODESTA_RELEASE_GIT_SHA) process.exit(1);
+              ' "$EVIDENCE_DIR/pre-pointer-health.json" && break
+            fi
+            [ "$attempt" -eq 30 ] && exit 1
+            sleep 10
+          done
+          for attempt in $(seq 1 30); do
+            railway logs "${{ steps.controllers.outputs.worker_deployment }}" --service "$RAILWAY_WORKER_SERVICE_ID" \
+              --environment "$RAILWAY_ENVIRONMENT_ID" --project "$RAILWAY_PROJECT_ID" --lines 200 --json \
+              > "$EVIDENCE_DIR/railway-worker-startup.jsonl"
+            if grep -q 'worker_started' "$EVIDENCE_DIR/railway-worker-startup.jsonl" \
+              && grep -q "${{ inputs.release_sha }}" "$EVIDENCE_DIR/railway-worker-startup.jsonl"; then
+              break
+            fi
+            [ "$attempt" -eq 30 ] && exit 1
+            sleep 10
+          done
+
+      - name: Reactivate the retained sandbox deployment
+        working-directory: control
+        run: |
+          set -Eeuo pipefail
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- rollback \
+            --deployment-id "${{ inputs.sandbox_deployment_id }}" > "$EVIDENCE_DIR/sandbox-rollback.json"
           curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
             "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/deep-health.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const identity = report.checks?.find((check) => check.id === "release_identity");
+            if (report.status === "error" || identity?.detail !== process.env.LODESTA_RELEASE_GIT_SHA) process.exit(1);
+          ' "$EVIDENCE_DIR/deep-health.json"
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- release \
+            > "$EVIDENCE_DIR/maintenance-release.json"
+          rm -f "$EVIDENCE_DIR/maintenance-active"
+
+      - name: Record rollback failure state
+        if: failure()
+        working-directory: control
+        run: |
+          node --input-type=module -e '
+            import { existsSync, writeFileSync } from "node:fs";
+            writeFileSync(process.argv[1], JSON.stringify({
+              ok: false,
+              maintenanceMayRemainActive: existsSync(process.argv[2]),
+              operatorInterventionRequired: true,
+              targetReleaseSha: process.env.LODESTA_RELEASE_GIT_SHA,
+              targetSandboxDeploymentId: process.argv[3]
+            }, null, 2));
+          ' "$EVIDENCE_DIR/rollback-failure.json" "$EVIDENCE_DIR/maintenance-active" "${{ inputs.sandbox_deployment_id }}"
+
       - name: Upload rollback evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: production-rollback-${{ inputs.release_sha }}-${{ github.run_attempt }}
-          path: .data/rollback-evidence/
+          path: control/.data/rollback-evidence/
           if-no-files-found: error
           retention-days: 90

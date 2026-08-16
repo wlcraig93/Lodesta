@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { appOriginFromRequest } from "@/lib/app-origin";
 import { requireAdmin } from "@/lib/security";
 import {
@@ -13,7 +13,6 @@ import {
   platformOperationsRepository as repository,
   type ProspectReportRecord
 } from "@/packages/platform-operations";
-import { processNextWebsiteAssessmentJob } from "@/packages/website-assessment/jobs";
 
 export const runtime = "nodejs";
 
@@ -68,7 +67,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     if (!attached) {
       return NextResponse.json({ error: "Unable to attach the report to this prospect." }, { status: 500 });
     }
-    if (created.job) scheduleAssessment(created.job.id);
     return NextResponse.json(
       outboundReportResponse(request, created.report, created.reused),
       { status: created.job ? 202 : 200 }
@@ -113,18 +111,4 @@ function outboundReportResponse(request: Request, report: ProspectReportRecord, 
 
 function canonicalReportUrl(request: Request, reportId: string) {
   return outboundReportUrl(appOriginFromRequest(request), reportId);
-}
-
-function scheduleAssessment(jobId: string) {
-  after(async () => {
-    try {
-      await processNextWebsiteAssessmentJob({ workerId: `outbound-prospect-after-${jobId}` });
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: "outbound_prospect_report_after_failed",
-        jobId,
-        error: error instanceof Error ? error.message : String(error)
-      }));
-    }
-  });
 }

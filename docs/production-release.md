@@ -21,6 +21,7 @@ Configure the production environment secrets:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `LODESTA_ADMIN_TOKEN`
+- `LODESTA_MAINTENANCE_LEASE_OWNER`
 
 Configure the production environment variables:
 
@@ -29,10 +30,13 @@ Configure the production environment variables:
 - `LODESTA_SANDBOX_GREEN_URL`
 - `RAILWAY_PROJECT_ID`
 - `RAILWAY_ENVIRONMENT_ID`
-- `RAILWAY_SERVICE_ID`
+- `RAILWAY_WEB_SERVICE_ID`
+- `RAILWAY_WORKER_SERVICE_ID`
 - `LODESTA_APP_ORIGIN`
 
-Blue, green, and development must use distinct Worker URLs and credentials. Railway GitHub autodeploy remains disabled; the release workflow uploads the CI-verified checkout with `railway up --ci`.
+Blue, green, and development must use distinct Worker URLs and credentials. The Cloudflare token must be able to deploy the configured Worker, Container, Durable Object, and R2 bindings; the workflow proves Worker identity and R2 access before release work starts. Railway GitHub autodeploy is disabled for both services. The web service uses `railway.toml`; the worker service uses `railway.worker.toml` as its Railway config path. GitHub Actions is the only authority that uploads either CI-verified checkout with `railway up --ci`.
+
+Railway service variables use `LODESTA_EXECUTION_ROLE=web` for web and `LODESTA_EXECUTION_ROLE=site-authoring-worker` for the runner. Release and rollback steps use `LODESTA_EXECUTION_ROLE=release`. Each hosted identity also requires `NODE_ENV=production`, the exact full `LODESTA_RELEASE_GIT_SHA`, and a non-loopback HTTPS `LODESTA_APP_ORIGIN`; no role grants authority by itself.
 
 ## One-time blue-green cutover
 
@@ -74,11 +78,11 @@ The stored-data report and confirmation make legacy cancellation explicit. The m
 2. The release reads the singleton pointer, selects the inactive slot, and calls `assert-slot-available`. A slot with a running execution pin or live sandbox session cannot be reused. There is no third slot fallback.
 3. The candidate is deployed directly to the inactive Worker. Its health, source policy, compilation, backup, restore, and exact manifest are canaried.
 4. An immutable deployment record is inserted and the inactive slot pointer is updated.
-5. The controller capable of addressing both slots is deployed to Railway. Deep health still checks the currently active deployment.
-6. Promotion atomically switches the active pointer. The promotion and run claim functions share the `site-sandbox-control` advisory lock, so every new execution receives one unambiguous deployment pin.
-7. Old executions finish on their pinned deployment. Paused sandboxes remain warm for five minutes; after teardown, their immutable checkpoints restore into whichever deployment is active when the answered run is claimed.
+5. The workflow records the active sandbox and current Railway deployment identities (including an explicit absent-worker bootstrap marker on the first split release), then acquires a 90-minute draining database maintenance lease. The claim functions enforce this fence inside Postgres, including against an old worker. The workflow waits at most 30 minutes for running authoring to reach zero. A timeout records `authoring_drain_timeout`, releases the lease, and changes none of the three active deployments.
+6. Web and worker are deployed from the same release SHA. Web must return that exact SHA from authenticated deep health, and the runner must emit it in its structured `worker_started` event. Neither success alone permits promotion.
+7. Promotion atomically switches the active sandbox pointer only after both controllers report the new SHA. Deep health runs again, then maintenance is released.
 
-Normal releases do not acquire maintenance and do not interrupt authoring. Toolchain and image identities may change. HTTP API, artifact, source-policy, storage, and Durable Object identities must remain compatible; changing one of those contracts requires intentionally coordinated maintenance.
+The accepted prelaunch consequence is a bounded authoring blackout between lease acquisition and release, potentially 30–45 minutes. New claims are rejected by the database fence during that interval. Toolchain and image identities may change. HTTP API, artifact, source-policy, storage, and Durable Object identities must remain compatible; changing one of those contracts requires intentionally coordinated maintenance.
 
 Development follows the same pinning rule. A checkout or development-Wrangler change makes the active deployment stale for the next development preflight, which deploys and promotes the inactive slot. It does not invalidate requests already pinned to the immutable active deployment. Restart `npm run dev` before expecting sandbox source changes to affect new runs; old executions continue on their pinned slot until they drain.
 
@@ -86,6 +90,8 @@ Authenticated `/api/health?deep=1` checks only the active deployment and returns
 
 ## Rollback
 
-If an inactive candidate fails, it is never promoted. If post-promotion health fails, the release workflow atomically restores the prior active pointer. The rollback function fences executions pinned to the failed deployment by advancing their execution number, requeues the same logical runs, expires affected live sessions for recovery, and marks their model continuation stale. Claim-time source compatibility decides whether to restore a current checkpoint or restart from the latest finalized source.
+If an inactive candidate fails, it is never promoted. If post-promotion health fails, the release workflow atomically restores only the prior active sandbox pointer, leaves maintenance active, and records the previous web/worker identities plus the deliberate rollback workflow. It does not attempt an automatic two-service Railway restore during an already-failing release.
 
-For an operator rollback, dispatch `Production rollback` with the retained sandbox deployment ID and prior Git SHA. Never move a running execution between deployments in place, manually replay runs, or add a compatibility fallback.
+For an operator rollback, dispatch `Production rollback` with the retained sandbox deployment ID and prior Git SHA. The workflow renews an already-owned lease or acquires one, waits at most 30 minutes for drain, deploys both Railway services from the target checkout, verifies both report the target SHA, then moves the sandbox pointer and runs deep health. Failure leaves maintenance active and uploads evidence for operator intervention. Never move a running execution between deployments in place, manually replay runs, or add a compatibility fallback.
+
+The first split-controller release is a clean-cut bootstrap: its evidence records that no prior worker deployment existed. The rollback workflow rejects pre-split commits that lack `railway.worker.toml` before acquiring maintenance. Every release after that bootstrap has a retained web deployment, worker deployment, and eligible two-service rollback target.

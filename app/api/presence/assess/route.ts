@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
@@ -6,7 +6,6 @@ import { normalizePublicFetchUrlInput, validatePublicFetchUrl } from "@/lib/url-
 import { assertLaunchMarket, isLaunchMarketError } from "@/lib/launch-market";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 import { sourceKeyForWebsite } from "@/packages/acquisition/prospect-reports";
-import { processNextWebsiteAssessmentJob } from "@/packages/website-assessment/jobs";
 import {
   websiteAssessmentRubricIdentity,
   websiteAssessmentScannerIdentity
@@ -60,17 +59,6 @@ export async function POST(request: Request) {
     scannerIdentity: websiteAssessmentScannerIdentity
   });
   const job = await repository.enqueueWebsiteAssessmentJob({ assessmentId: assessment.id });
-  after(async () => {
-    try {
-      await processNextWebsiteAssessmentJob({ workerId: `presence-after-${job.id}` });
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: "website_assessment_after_failed",
-        jobId: job.id,
-        error: error instanceof Error ? error.message : String(error)
-      }));
-    }
-  });
   return applyRateLimitHeaders(
     NextResponse.json({
       assessment,

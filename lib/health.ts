@@ -11,11 +11,23 @@ export type HealthReport = { status: HealthState; timestamp: string; checks: Hea
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
-    checkUrl(), checkRepository(), checkAuth(), checkAdmin(), await checkSandbox(),
+    checkUrl(), checkReleaseIdentity(), checkRepository(), checkAuth(), checkAdmin(), await checkSandbox(),
     checkArtifactBroker(), checkOpenAi(), checkOpenRouter(), checkHashSecret(), checkEmail()
   ];
   if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
   return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
+}
+
+function checkReleaseIdentity() {
+  const releaseSha = process.env.LODESTA_RELEASE_GIT_SHA?.trim();
+  if (releaseSha && /^[a-f0-9]{40}$/.test(releaseSha)) {
+    return ok("release_identity", "Release identity", releaseSha);
+  }
+  return (deployed() ? error : warning)(
+    "release_identity",
+    "Release identity",
+    "LODESTA_RELEASE_GIT_SHA must be the exact 40-character release commit."
+  );
 }
 
 function checkUrl() {

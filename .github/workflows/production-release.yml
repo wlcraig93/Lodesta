@@ -34,17 +34,22 @@ jobs:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
-      RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+      RAILWAY_WEB_SERVICE_ID: ${{ vars.RAILWAY_WEB_SERVICE_ID }}
+      RAILWAY_WORKER_SERVICE_ID: ${{ vars.RAILWAY_WORKER_SERVICE_ID }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       LODESTA_APP_ORIGIN: ${{ vars.LODESTA_APP_ORIGIN }}
       LODESTA_ADMIN_TOKEN: ${{ secrets.LODESTA_ADMIN_TOKEN }}
+      LODESTA_EXECUTION_ROLE: release
+      LODESTA_MAINTENANCE_LEASE_OWNER: ${{ secrets.LODESTA_MAINTENANCE_LEASE_OWNER }}
       EVIDENCE_DIR: .data/release-evidence
       RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      LODESTA_RELEASE_GIT_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_SHA }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -57,18 +62,31 @@ jobs:
       - run: npm ci --prefix workers/site-sandbox/scaffold --ignore-scripts --no-audit --no-fund
       - run: npm install --global @railway/cli@5.28.1
 
-      - name: Verify exact release
+      - name: Verify Cloudflare deployment authority
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          npx wrangler whoami > "$EVIDENCE_DIR/cloudflare-identity.txt"
+          npx wrangler r2 bucket list > "$EVIDENCE_DIR/cloudflare-r2-access.txt"
+
+      - name: Verify exact release and authority matrix
         run: |
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          mkdir -p "$EVIDENCE_DIR"
-          npm run verify:preflight
+          NODE_ENV=production npm run verify:execution-authority
+          NODE_ENV=production node --import tsx --input-type=module -e '
+            import { strict as assert } from "node:assert";
+            import { hasHostedExecutionAuthority } from "./packages/execution-environment.ts";
+            assert.equal(hasHostedExecutionAuthority("release"), true);
+            assert.equal(hasHostedExecutionAuthority("site-authoring-worker"), false);
+          '
+          LODESTA_REPOSITORY=local npm run verify:preflight
 
       - name: Select an inactive drained slot
         id: slot
         run: |
           set -Eeuo pipefail
-          npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
+          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
           inactive="$(node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const status = JSON.parse(readFileSync(process.argv[1], "utf8"));
@@ -77,11 +95,11 @@ jobs:
             process.stdout.write(status.control.blueDeploymentId === active ? "green" : "blue");
           ' "$EVIDENCE_DIR/sandbox-control-before.json")"
           previous="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-control-before.json')).control.activeDeploymentId")"
-          npm run --silent sandbox:deployments -- assert-slot-available --slot "$inactive"
+          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- assert-slot-available --slot "$inactive"
           echo "slot=$inactive" >> "$GITHUB_OUTPUT"
           echo "previous_deployment=$previous" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy and canary the inactive slot
+      - name: Deploy, canary, and register the inactive sandbox
         id: sandbox
         run: |
           set -Eeuo pipefail
@@ -97,56 +115,170 @@ jobs:
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
             > "$EVIDENCE_DIR/sandbox-canary.json"
-          npm run --silent sandbox:deployments -- register \
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- register \
             --slot "$slot" --worker-version "$version" --release-sha "$RELEASE_SHA" \
             --image-digest "$digest" > "$EVIDENCE_DIR/sandbox-registration.json"
           deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-registration.json')).deployment.id")"
           echo "deployment=$deployment" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy the dual-slot controller
+      - name: Capture current controller identities
         run: |
           set -Eeuo pipefail
-          railway variable set "LODESTA_RELEASE_GIT_SHA=$RELEASE_SHA" --skip-deploys \
-            --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" > /dev/null
+          railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WEB_SERVICE_ID" \
+            --limit 20 --json > "$EVIDENCE_DIR/railway-web-before.json"
+          railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WORKER_SERVICE_ID" \
+            --limit 20 --json > "$EVIDENCE_DIR/railway-worker-before.json"
+          railway status --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --json \
+            > "$EVIDENCE_DIR/railway-status-before.json"
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const status = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const environment = status.environments.edges.map((edge) => edge.node).find((item) => item.id === process.env.RAILWAY_ENVIRONMENT_ID);
+            const instances = environment?.serviceInstances.edges.map((edge) => edge.node) ?? [];
+            const active = (serviceId) => instances.find((instance) => instance.serviceId === serviceId)
+              ?.activeDeployments.find((deployment) => !deployment.deploymentStopped);
+            const web = active(process.env.RAILWAY_WEB_SERVICE_ID);
+            const worker = active(process.env.RAILWAY_WORKER_SERVICE_ID);
+            if (!web?.id) throw new Error("A prior Railway web deployment is required.");
+            writeFileSync(process.argv[2], JSON.stringify({
+              candidateReleaseSha: process.env.RELEASE_SHA,
+              previousWebReleaseSha: web.meta?.commitHash ?? null,
+              previousWorkerReleaseSha: worker?.meta?.commitHash ?? null,
+              workerBootstrap: !worker?.id,
+              web,
+              worker: worker ?? null
+            }, null, 2));
+          ' "$EVIDENCE_DIR/railway-status-before.json" "$EVIDENCE_DIR/controller-identities-before.json"
+
+      - name: Acquire the database maintenance fence and drain
+        run: |
+          set -Eeuo pipefail
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- acquire --minutes=90 --draining \
+            > "$EVIDENCE_DIR/maintenance-acquire.json"
+          if ! NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- wait-active --timeout-minutes=30 \
+            > "$EVIDENCE_DIR/maintenance-drain.json"; then
+            node --input-type=module -e '
+              import { writeFileSync } from "node:fs";
+              writeFileSync(process.argv[1], JSON.stringify({ ok: false, outcome: "authoring_drain_timeout" }, null, 2));
+            ' "$EVIDENCE_DIR/authoring-drain-timeout.json"
+            NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- release \
+              > "$EVIDENCE_DIR/maintenance-release-after-drain-timeout.json"
+            exit 1
+          fi
+          touch "$EVIDENCE_DIR/maintenance-active"
+
+      - name: Deploy web and worker from the same release
+        id: controllers
+        run: |
+          set -Eeuo pipefail
+          for pair in "$RAILWAY_WEB_SERVICE_ID:web" "$RAILWAY_WORKER_SERVICE_ID:site-authoring-worker"; do
+            service="${pair%%:*}"
+            role="${pair#*:}"
+            railway variable set "LODESTA_RELEASE_GIT_SHA=$RELEASE_SHA" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
+              --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" > /dev/null
+          done
           railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" --message "Production release $RELEASE_SHA"
-          for attempt in $(seq 1 90); do
-            railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID" \
-              --limit 1 --json > "$EVIDENCE_DIR/railway.json"
-            status="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway.json'))[0]?.status ?? 'UNKNOWN'")"
-            [ "$status" = "SUCCESS" ] && break
-            case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
-            [ "$attempt" -eq 90 ] && exit 1
-            sleep 20
+            --service "$RAILWAY_WEB_SERVICE_ID" --message "Production web $RELEASE_SHA"
+          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Production worker $RELEASE_SHA"
+          for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
+            name="${spec%%:*}"
+            service="${spec#*:}"
+            for attempt in $(seq 1 90); do
+              railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" \
+                --limit 20 --json > "$EVIDENCE_DIR/railway-$name-candidates.json"
+              status="$(node --input-type=module -e '
+                import { readFileSync, writeFileSync } from "node:fs";
+                const priorIds = new Set(JSON.parse(readFileSync(process.argv[1], "utf8")).map((deployment) => deployment.id));
+                const candidate = JSON.parse(readFileSync(process.argv[2], "utf8")).find((deployment) => !priorIds.has(deployment.id));
+                if (candidate) writeFileSync(process.argv[3], JSON.stringify([candidate], null, 2));
+                process.stdout.write(candidate?.status ?? "PENDING");
+              ' "$EVIDENCE_DIR/railway-$name-before.json" "$EVIDENCE_DIR/railway-$name-candidates.json" "$EVIDENCE_DIR/railway-$name.json")"
+              [ "$status" = "SUCCESS" ] && break
+              case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
+              [ "$attempt" -eq 90 ] && exit 1
+              sleep 20
+            done
+          done
+          web_deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-web.json'))[0].id")"
+          worker_deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-worker.json'))[0].id")"
+          echo "web_deployment=$web_deployment" >> "$GITHUB_OUTPUT"
+          echo "worker_deployment=$worker_deployment" >> "$GITHUB_OUTPUT"
+
+      - name: Verify both controller identities
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/pre-promotion-health.json"; then
+              node --input-type=module -e '
+                import { readFileSync } from "node:fs";
+                const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                const identity = report.checks?.find((check) => check.id === "release_identity");
+                if (report.status === "error" || identity?.detail !== process.env.RELEASE_SHA) process.exit(1);
+              ' "$EVIDENCE_DIR/pre-promotion-health.json" && break
+            fi
+            [ "$attempt" -eq 30 ] && exit 1
+            sleep 10
           done
           for attempt in $(seq 1 30); do
-            curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/pre-promotion-health.json" && break
+            railway logs "${{ steps.controllers.outputs.worker_deployment }}" --service "$RAILWAY_WORKER_SERVICE_ID" \
+              --environment "$RAILWAY_ENVIRONMENT_ID" --project "$RAILWAY_PROJECT_ID" --lines 200 --json \
+              > "$EVIDENCE_DIR/railway-worker-startup.jsonl"
+            if grep -q 'worker_started' "$EVIDENCE_DIR/railway-worker-startup.jsonl" \
+              && grep -q "$RELEASE_SHA" "$EVIDENCE_DIR/railway-worker-startup.jsonl"; then
+              break
+            fi
             [ "$attempt" -eq 30 ] && exit 1
             sleep 10
           done
 
-      - name: Atomically promote the candidate deployment
+      - name: Promote the registered sandbox and run deep health
         id: promotion
         run: |
           set -Eeuo pipefail
-          npm run --silent sandbox:deployments -- promote --deployment-id "${{ steps.sandbox.outputs.deployment }}" \
-            > "$EVIDENCE_DIR/sandbox-promotion.json"
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- promote \
+            --deployment-id "${{ steps.sandbox.outputs.deployment }}" > "$EVIDENCE_DIR/sandbox-promotion.json"
           touch "$EVIDENCE_DIR/promoted"
           for attempt in $(seq 1 30); do
-            curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/post-promotion-health.json" && exit 0
+            if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
+              "$LODESTA_APP_ORIGIN/api/health?deep=1" > "$EVIDENCE_DIR/post-promotion-health.json"; then
+              node --input-type=module -e '
+                import { readFileSync } from "node:fs";
+                const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
+                const identity = report.checks?.find((check) => check.id === "release_identity");
+                if (report.status === "error" || identity?.detail !== process.env.RELEASE_SHA) process.exit(1);
+              ' "$EVIDENCE_DIR/post-promotion-health.json" && exit 0
+            fi
             sleep 10
           done
           exit 1
 
-      - name: Roll back the pointer if post-promotion verification fails
+      - name: Release maintenance after successful health
+        if: success()
+        run: |
+          set -Eeuo pipefail
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- release \
+            > "$EVIDENCE_DIR/maintenance-release.json"
+          rm -f "$EVIDENCE_DIR/maintenance-active"
+
+      - name: Restore only the sandbox pointer after post-promotion failure
         if: failure() && steps.promotion.outcome == 'failure'
         run: |
           set -Eeuo pipefail
           [ -f "$EVIDENCE_DIR/promoted" ] || exit 0
-          npm run --silent sandbox:deployments -- rollback --deployment-id "${{ steps.slot.outputs.previous_deployment }}" \
+          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- rollback \
+            --deployment-id "${{ steps.slot.outputs.previous_deployment }}" \
             > "$EVIDENCE_DIR/automatic-sandbox-rollback.json"
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            writeFileSync(process.argv[1], JSON.stringify({
+              maintenanceActive: true,
+              operatorWorkflow: "production-rollback.yml",
+              priorSandboxDeploymentId: process.argv[2],
+              priorControllerEvidence: "controller-identities-before.json"
+            }, null, 2));
+          ' "$EVIDENCE_DIR/operator-intervention.json" "${{ steps.slot.outputs.previous_deployment }}"
 
       - name: Upload release evidence
         if: always()

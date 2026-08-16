@@ -19,6 +19,7 @@ import {
 } from "@/lib/inquiries";
 import { sanitizeAnalyticsMetadata } from "@/lib/privacy";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
+import { configuredRepositoryMode } from "@/packages/execution-environment";
 
 export type CreateCapabilityInquiryInput = {
   siteId: string;
@@ -322,7 +323,7 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
   }
 }
 
-export const siteCapabilityRepository: SiteCapabilityRepository = process.env.LODESTA_REPOSITORY === "local"
+export const siteCapabilityRepository: SiteCapabilityRepository = configuredRepositoryMode() === "local"
   ? new LocalSiteCapabilityRepository()
   : new SupabaseSiteCapabilityRepository();
 

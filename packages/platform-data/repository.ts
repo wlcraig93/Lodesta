@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { assertHostedExecutionAuthority, configuredRepositoryMode } from "@/packages/execution-environment";
 import {
   businessStateSchema,
   assetRevisionSchema,
@@ -2920,6 +2921,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return rows.map(runtimeSeriesFromRow);
   }
   async saveSandboxDeployment(deployment: SiteSandboxDeployment) {
+    assertHostedExecutionAuthority("release", "save_sandbox_deployment");
     const value = siteSandboxDeploymentSchema.parse(deployment);
     await requireOk(this.client.from("site_sandbox_deployments").insert({
       id: value.id,
@@ -2959,10 +2961,12 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return row ? siteSandboxControlSchema.parse(row.control) : undefined;
   }
   async saveSandboxControl(control: SiteSandboxControl) {
+    assertHostedExecutionAuthority("release", "save_sandbox_control");
     const value = siteSandboxControlSchema.parse(control);
     await requireData(this.client.rpc("set_site_sandbox_control", { control_document: value }), "Save sandbox control");
   }
   async rollbackSandboxDeployment(input: { failedDeploymentId: string; previousDeploymentId: string; now: string }) {
+    assertHostedExecutionAuthority("release", "rollback_sandbox_deployment");
     const value = await requireData<unknown[]>(this.client.rpc("rollback_site_sandbox_deployment", {
       target_failed_deployment_id: input.failedDeploymentId,
       target_previous_deployment_id: input.previousDeploymentId,
@@ -3130,6 +3134,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return siteAgentRunSchema.parse(result.data);
   }
   async claimAgentRun(runId: string) {
+    assertHostedExecutionAuthority("site-authoring-worker", "claim_agent_run");
     const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", {
       target_run_id: runId,
       target_worker_id: `targeted-${process.pid}`,
@@ -3138,6 +3143,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     return value ? siteAgentRunSchema.parse(value) : undefined;
   }
   async claimNextAgentRun(workerId: string) {
+    assertHostedExecutionAuthority("site-authoring-worker", "claim_next_agent_run");
     const value = await requireData<unknown>(this.client.rpc("claim_site_agent_run", {
       target_run_id: null,
       target_worker_id: workerId,
@@ -3308,16 +3314,19 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       .eq("run_id", runId).eq("status", "running"), "Fail open run events");
   }
   async acquireMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
+    assertHostedExecutionAuthority("release", "acquire_maintenance_lease");
     return Boolean(await requireData<boolean>(this.client.rpc("acquire_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
     }), "Acquire site-agent maintenance lease"));
   }
   async renewMaintenanceLease(task: string, leaseTokenHash: string, _now: string, leaseUntil: string) {
+    assertHostedExecutionAuthority("release", "renew_maintenance_lease");
     return Boolean(await requireData<boolean>(this.client.rpc("renew_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash, lease_until_value: leaseUntil
     }), "Renew site-agent maintenance lease"));
   }
   async releaseMaintenanceLease(task: string, leaseTokenHash: string) {
+    assertHostedExecutionAuthority("release", "release_maintenance_lease");
     return Boolean(await requireData<boolean>(this.client.rpc("release_site_agent_maintenance", {
       task_name: task, lease_token_hash_value: leaseTokenHash
     }), "Release site-agent maintenance lease"));
@@ -3410,7 +3419,7 @@ export async function persistSiteIntentAuthority(
   if (!updated) throw new Error("site_intent_revision_conflict");
 }
 
-export const sitePlatformRepository: SitePlatformRepository = process.env.LODESTA_REPOSITORY === "local"
+export const sitePlatformRepository: SitePlatformRepository = configuredRepositoryMode() === "local"
   ? new LocalSitePlatformRepository()
   : new SupabaseSitePlatformRepository();
 

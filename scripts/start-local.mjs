@@ -11,6 +11,8 @@ const child = spawn(next, ["start", ...process.argv.slice(2)], {
   stdio: "inherit",
   env: {
     ...process.env,
+    LODESTA_REPOSITORY: "local",
+    LODESTA_EXECUTION_ROLE: "",
     LODESTA_DEV_SANDBOX: "0",
     LODESTA_DEV_SANDBOX_BLUE_TOKEN: "",
     LODESTA_DEV_SANDBOX_GREEN_TOKEN: "",

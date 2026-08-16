@@ -182,7 +182,11 @@ async function main() {
   assert(runner.includes("localRecoveryStaleAfterMs = 5 * 60_000"), "local worker lost its explicit five-minute threshold");
   assert(workflow.includes("input.staleAfterMs ?? siteAgentRecoveryStaleAfterMs"), "workflow default does not use the conservative threshold");
   assert(maintenance.includes("body.trim() !== \"\"") && maintenance.includes("status: 202"), "machine maintenance path is not strict and asynchronous");
-  assert(!recovery.includes("WebsiteSetup") && recovery.includes("processRecoverableRuns"), "automatic recovery retains the setup queue or omits authoring recovery.");
+  assert(recovery.includes("recoverSiteAuthoring")
+    && !recovery.includes("processQueuedSiteAuthoring")
+    && !recovery.includes("processNextWebsiteAssessmentJob"), "The watchdog must recover stale work without becoming a normal queue consumer.");
+  assert(runner.includes("processQueuedSiteAuthoring") && runner.includes("processNextWebsiteAssessmentJob"), "The canonical runner must own both hosted processing queues.");
+  assert(!maintenance.includes("hasValidAdminToken") && !maintenance.includes("processQueuedSiteAuthoring"), "The maintenance route must remain recovery-only.");
   assert(workflow.includes("touchAgentRunHeartbeat") && workflow.includes("60_000"), "Long-running authoring work does not maintain a durable heartbeat.");
 
   process.stdout.write(`${JSON.stringify({

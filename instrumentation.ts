@@ -1,19 +1,9 @@
+import { hasHostedReleaseIdentity } from "@/packages/execution-environment";
+
 export function shouldScheduleStartupRecovery(environment: NodeJS.ProcessEnv = process.env) {
   return environment.NEXT_RUNTIME === "nodejs"
-    && environment.NODE_ENV === "production"
     && environment.NEXT_PHASE !== "phase-production-build"
-    && /^[a-f0-9]{40}$/.test(environment.LODESTA_RELEASE_GIT_SHA?.trim() ?? "")
-    && isNonLoopbackHttpsOrigin(environment.LODESTA_APP_ORIGIN);
-}
-
-function isNonLoopbackHttpsOrigin(source: string | undefined) {
-  if (!source) return false;
-  try {
-    const url = new URL(source);
-    return url.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  } catch {
-    return false;
-  }
+    && hasHostedReleaseIdentity(environment);
 }
 
 const startupRecoveryState = globalThis as typeof globalThis & {

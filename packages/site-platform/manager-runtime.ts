@@ -21,6 +21,8 @@ import {
 } from "./verification-feedback";
 import { validateCandidateSourceDispositions } from "./source-coverage";
 
+const inspectionToolTimeoutMs = 8 * 60_000;
+
 export type BuildResult = {
   revision: string;
   buildDurationMs: number;
@@ -50,6 +52,8 @@ export type RuntimeVisualInspection = {
   diagnosticSummary: Record<string, unknown>;
   images?: Array<{ type: "input_image"; image_url: string; detail: "high" | "low" }>;
 };
+
+type RuntimeInspectionPhase = "browser_navigation_capture" | "contact_sheet_generation" | "persistence";
 
 export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   schemaVersion: 1;
@@ -116,14 +120,14 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     initialSnapshot?: WorkspaceManagerRuntimeSnapshot<Checkpoint>;
     releasePlan?: WorkspaceReleasePlan;
     selection?: ManagerRunRequest["selection"];
-    applyBuild(files: WorkspaceSourceFile[], expectedRevision: string): Promise<BuildResult>;
-    inspect(files: WorkspaceSourceFile[], sandboxRevision: string): Promise<RuntimeInspection<Checkpoint>>;
+    applyBuild(files: WorkspaceSourceFile[], expectedRevision: string, signal?: AbortSignal): Promise<BuildResult>;
+    inspect(files: WorkspaceSourceFile[], sandboxRevision: string, signal?: AbortSignal): Promise<RuntimeInspection<Checkpoint>>;
     listBuiltRoutePaths?(sandboxRevision: string): Promise<string[]>;
     inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string, target: {
       route?: string;
       selector?: string;
       label?: string;
-    }): Promise<RuntimeVisualInspection>;
+    }, signal?: AbortSignal, onPhase?: (phase: RuntimeInspectionPhase, durationMs?: number) => void): Promise<RuntimeVisualInspection>;
     visualInspectionFeedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence";
     configureLeadForm?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
     createImage?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
@@ -497,7 +501,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     });
   }
 
-  private async build(): Promise<ManagerToolExecution> {
+  private async build(signal?: AbortSignal): Promise<ManagerToolExecution> {
     if (!this.workspaceHash) return result({ ok: false, error: "workspace_empty" });
     if (this.successfulBuild?.workspaceHash === this.workspaceHash) {
       return result({ ok: true, cached: true, workspaceHash: this.workspaceHash, sandboxRevision: this.successfulBuild.sandboxRevision, previewPath: this.successfulBuild.result.previewPath, buildDurationMs: 0 });
@@ -508,7 +512,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     this.builds += 1;
     try {
       const files = assertCompleteWorkspace(this.currentFiles());
-      const built = await this.options.applyBuild(files, this.sandboxRevision);
+      const built = await this.options.applyBuild(files, this.sandboxRevision, signal);
       this.sandboxRevision = built.revision;
       this.successfulBuild = { workspaceHash: this.workspaceHash, sandboxRevision: built.revision, result: built };
       this.failedBuild = undefined;
@@ -534,12 +538,66 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 
   private async inspect(args: Record<string, unknown>): Promise<ManagerToolExecution> {
+    const startedAt = Date.now();
+    const timeoutSignal = AbortSignal.timeout(inspectionToolTimeoutMs);
+    let failurePhase = "build";
+    const phaseTimings: Record<string, number> = {};
+    const operation = this.inspectWithinDeadline(args, timeoutSignal, phaseTimings, (phase) => {
+      failurePhase = phase;
+    });
+    try {
+      const execution = await raceWithAbort(operation, timeoutSignal);
+      execution.diagnosticOutput.inspectionPhases = {
+        ...phaseTimings,
+        totalMs: Date.now() - startedAt
+      };
+      return execution;
+    } catch (error) {
+      const cause = boundedError(error);
+      if (!timeoutSignal.aborted) {
+        await this.options.retainDiagnostic?.("inspection_failure", JSON.stringify({
+          failurePhase,
+          cause,
+          phaseTimings,
+          durationMs: Date.now() - startedAt
+        })).catch(() => undefined);
+        throw error;
+      }
+      await this.options.retainDiagnostic?.("inspection_timeout", JSON.stringify({
+        failurePhase,
+        cause,
+        phaseTimings,
+        durationMs: Date.now() - startedAt
+      })).catch(() => undefined);
+      return result({
+        ok: false,
+        error: "inspection_timeout",
+        recoverable: true,
+        failurePhase,
+        sanitizedCause: cause,
+        inspectionPhases: {
+          ...phaseTimings,
+          totalMs: Date.now() - startedAt
+        }
+      });
+    }
+  }
+
+  private async inspectWithinDeadline(
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+    phaseTimings: Record<string, number>,
+    setPhase: (phase: string) => void
+  ): Promise<ManagerToolExecution> {
     const parsed = managerToolArguments.inspect_site.parse(args);
     const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
     const selection = this.options.selection?.route === route ? this.options.selection : undefined;
     let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
-      const built = await this.build();
+      setPhase("build");
+      const phaseStartedAt = Date.now();
+      const built = await this.build(signal);
+      phaseTimings.buildMs = Date.now() - phaseStartedAt;
       if (built.diagnosticOutput.ok === false) {
         return withFailureStage(built, "compilation", { buildPerformed: true });
       }
@@ -551,7 +609,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const mechanicalCached = Boolean(this.inspection);
     if (!this.inspection) {
       this.inspections += 1;
-      this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
+      setPhase("mechanical_analysis");
+      const phaseStartedAt = Date.now();
+      this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision, signal);
+      phaseTimings.mechanicalAnalysisMs = Date.now() - phaseStartedAt;
       this.inspection.diagnosticSummary = {
         ...this.inspection.diagnosticSummary,
         verificationTimings: {
@@ -567,11 +628,19 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     );
     if (!cached) {
       this.inspections += 1;
+      const phaseStartedAt = Date.now();
       this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision, {
         route,
         selector: selection?.selector,
         label: selection?.label
+      }, signal, (phase, durationMs) => {
+        setPhase(phase);
+        if (durationMs === undefined) return;
+        if (phase === "browser_navigation_capture") phaseTimings.browserNavigationCaptureMs = durationMs;
+        if (phase === "contact_sheet_generation") phaseTimings.contactSheetGenerationMs = durationMs;
+        if (phase === "persistence") phaseTimings.persistenceMs = durationMs;
       });
+      phaseTimings.visualInspectionMs = Date.now() - phaseStartedAt;
     }
     const inspection = this.visualInspection;
     if (!inspection) return result({ ok: false, error: "visual_inspection_unavailable" });
@@ -1324,4 +1393,22 @@ function invalidSourceDisposition(error: unknown): ManagerToolExecution {
 function boundedError(error: unknown) {
   const value = error instanceof Error ? error.message : String(error);
   return value.length > 12_000 ? `${value.slice(-11_980)}... [truncated]` : value;
+}
+
+function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("inspection_timeout"));
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(signal.reason ?? new Error("inspection_timeout"));
+    signal.addEventListener("abort", aborted, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", aborted);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", aborted);
+        reject(error);
+      }
+    );
+  });
 }

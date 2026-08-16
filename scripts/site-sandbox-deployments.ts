@@ -2,6 +2,7 @@ import "./load-env";
 
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
+import { assertHostedExecutionAuthority } from "../packages/execution-environment";
 import { sitePlatformRepository } from "../packages/platform-data";
 import {
   expectedSiteSandboxManifest,
@@ -21,6 +22,9 @@ import {
 
 const command = process.argv[2];
 assert(command, "Usage: site-sandbox-deployments <status|assert-slot-available|register|promote|rollback> [options]");
+if (["register", "promote", "rollback"].includes(command)) {
+  assertHostedExecutionAuthority("release", `sandbox_deployment_${command}`);
+}
 
 if (command === "status") {
   const control = await sitePlatformRepository.getSandboxControl();

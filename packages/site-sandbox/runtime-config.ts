@@ -9,6 +9,7 @@ import {
   type SiteSandboxSlot
 } from "@/packages/site-contracts";
 import { computeSiteToolchainIdentity } from "@/scripts/site-sandbox-manifest";
+import { hasHostedReleaseIdentity } from "@/packages/execution-environment";
 export type { SiteSandboxManifest } from "@/packages/site-contracts";
 
 const developmentWorkerNames = {
@@ -195,15 +196,7 @@ export function computeDevelopmentSandboxConfigHash(
 }
 
 export function hasProductionReleaseMarker(environment: NodeJS.ProcessEnv = process.env) {
-  if (!/^[a-f0-9]{40}$/.test(environment.LODESTA_RELEASE_GIT_SHA?.trim() ?? "")) return false;
-  const source = environment.LODESTA_APP_ORIGIN?.trim();
-  if (!source) return false;
-  try {
-    const url = new URL(source);
-    return url.protocol === "https:" && !["localhost", "127.0.0.1", "::1"].includes(url.hostname);
-  } catch {
-    return false;
-  }
+  return hasHostedReleaseIdentity(environment);
 }
 
 function assertDevelopmentReceiptBindsDeployment(

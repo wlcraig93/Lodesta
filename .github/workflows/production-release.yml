@@ -114,6 +114,12 @@ jobs:
           digest="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).imageDigest")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           canary_session="sandbox_verify_${RELEASE_SHA:0:12}_${slot}"
+          # Wrangler returns after the application update is accepted, before
+          # every new Durable Object connection is guaranteed to resolve to the
+          # replacement container image. Keep this wait outside maintenance so
+          # rollout propagation cannot lengthen the authoring blackout.
+          container_readiness_delay_seconds=90
+          sleep "$container_readiness_delay_seconds"
           if ! LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
             > "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" \
             2> "$EVIDENCE_DIR/sandbox-canary-attempt-1.error.log"; then
@@ -121,7 +127,7 @@ jobs:
             # application has finished replacing its runtime connections. Keep the
             # first failure as evidence, then retry the complete canary exactly once
             # against the same immutable deployment after a bounded readiness delay.
-            sleep 20
+            sleep "$container_readiness_delay_seconds"
             LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
               > "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" \
               2> "$EVIDENCE_DIR/sandbox-canary-attempt-2.error.log"

@@ -154,7 +154,8 @@ assert(productionRelease.includes("timeout-minutes: 180")
 assert(productionRelease.includes("sandbox-canary-attempt-1.error.log")
   && productionRelease.includes("sandbox-canary-attempt-2.error.log")
   && productionRelease.includes("LODESTA_SANDBOX_CANARY_SESSION_ID")
-  && productionRelease.includes("sleep 20"),
+  && productionRelease.includes("container_readiness_delay_seconds=90")
+  && productionRelease.match(/sleep "\$container_readiness_delay_seconds"/g)?.length === 2,
   "A new Cloudflare container rollout must preserve its first canary failure and retry the same canary session exactly once after a bounded readiness delay.");
 assert(productionSandboxes.every((source) => source.includes('"observability"')
   && source.includes('"invocation_logs": true')

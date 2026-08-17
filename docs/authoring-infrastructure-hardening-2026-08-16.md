@@ -1,7 +1,7 @@
 # Authoring infrastructure hardening record
 
 Date: 2026-08-17
-Status: hosted hardening released and verified; V4 product bake-off paused after Kind
+Status: hosted hardening released and verified; current product bake-off paused after Kind
 
 ## Branch cleanup
 
@@ -31,4 +31,4 @@ The hardened release completed at exact SHA `f35fcbd5bd172a9d3ed8ea84afb8bc91215
 
 The first fresh Kind treatment, `run_b40b340df360410da0a3cc6cbc7a297f`, succeeded through the ordinary hosted worker and hard release gate. Three separate sandbox applies succeeded across multi-minute browser-inspection gaps with no timeout, replay, or recycle. This validates the infrastructure correction: interactive authoring sandboxes now use `keepAlive: true` and are explicitly destroyed, rather than sleeping while external browser inspection is still part of the same logical session.
 
-The V4 product bake-off remains paused. Kind required three inspections and multiple source repairs, used a non-matched Sol author route, cost $3.25439530, and did not clearly beat the retained R8 visual. Under the predeclared adaptive rule, Surge was not started. Existing inputs remain unchanged; the next comparison must be a matched Luna/frozen-architecture Kind run before the broader reliability screen can resume.
+The current product bake-off remains paused. Kind required three inspections and multiple source repairs, used a non-matched Sol author route, cost $3.25439530, and did not clearly beat the retained R8 visual. Under the predeclared adaptive rule, Surge was not started. Existing inputs remain unchanged; the next comparison must be a matched Luna/frozen-architecture Kind run before the broader reliability screen can resume.

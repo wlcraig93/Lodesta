@@ -88,10 +88,18 @@ if (command === "status") {
   const previousDeploymentId = requiredOption("deployment-id");
   const control = await sitePlatformRepository.getSandboxControl();
   assert(control, "Sandbox control is missing.");
-  assert(previousDeploymentId !== control.activeDeploymentId, "Rollback target is already active.");
   const deployment = await sitePlatformRepository.getSandboxDeployment(previousDeploymentId);
   assert(deployment && [control.blueDeploymentId, control.greenDeploymentId].includes(deployment.id), "Rollback target is not assigned to a slot.");
   await assertDeploymentHealth(deployment);
+  if (previousDeploymentId === control.activeDeploymentId) {
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      activeDeploymentId: previousDeploymentId,
+      alreadyActive: true,
+      affectedRunIds: []
+    }, null, 2)}\n`);
+    process.exit(0);
+  }
   const affectedRunIds = await sitePlatformRepository.rollbackSandboxDeployment({
     failedDeploymentId: control.activeDeploymentId,
     previousDeploymentId,

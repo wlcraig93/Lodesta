@@ -22,6 +22,7 @@ const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts"
 const continuousIntegration = readFileSync(".github/workflows/continuous-integration.yml", "utf8");
 const productionRelease = readFileSync(".github/workflows/production-release.yml", "utf8");
 const productionRollback = readFileSync(".github/workflows/production-rollback.yml", "utf8");
+const sandboxDeployments = readFileSync("scripts/site-sandbox-deployments.ts", "utf8");
 const instrumentation = readFileSync("instrumentation.ts", "utf8");
 const maintenanceRoute = readFileSync("app/api/site-agent/maintenance/route.ts", "utf8");
 const prospectRoute = readFileSync("app/api/prospect-reports/route.ts", "utf8");
@@ -190,6 +191,12 @@ assert(productionRollback.includes("environment: production")
   && productionRollback.includes("maintenance:site-authoring -- acquire --minutes=90 --draining")
   && productionRollback.includes("maintenance:site-authoring -- wait-active --timeout-minutes=30")
   && productionRollback.includes("railway up ../target --path-as-root --detach --json"), "Production rollback workflow is not lease-coordinated, dual-service, or exact-targeted.");
+assert(
+  sandboxDeployments.includes("previousDeploymentId === control.activeDeploymentId")
+    && sandboxDeployments.includes("alreadyActive: true")
+    && !sandboxDeployments.includes("Rollback target is already active."),
+  "Sandbox rollback must be idempotent when the requested retained deployment is already active."
+);
 assert(productionRollback.indexOf("Require both services to report the target SHA") < productionRollback.indexOf("Reactivate the retained sandbox deployment"), "Rollback must verify both controller identities before moving the sandbox pointer.");
 assert(!/^\s{6}NODE_ENV:/m.test(productionRelease) && !/^\s{6}NODE_ENV:/m.test(productionRollback), "Release workflows must set NODE_ENV only on authority-bearing steps, never at job level.");
 assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");

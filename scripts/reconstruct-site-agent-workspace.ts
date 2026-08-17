@@ -114,18 +114,37 @@ const retainedMutations = events.filter((event) => (
   && event.status === "succeeded"
   && (throughSequence === undefined || event.sequence <= throughSequence)
 ));
-if (!retainedMutations.length) throw new Error(`Run ${runId} has no retained successful file mutations.`);
-
 const store = configuredArtifactBlobStore();
 const files = new Map<string, string>();
-if (run.kind === "initial_build") {
+let sourceProvenance: "retained_candidate_sidecar" | "replayed_mutations" = "replayed_mutations";
+let retainedCandidateSourceHash: string | undefined;
+if (throughSequence === undefined && run.candidateVersionId) {
+  const candidateVersion = await sitePlatformRepository.getSiteVersion(run.candidateVersionId);
+  if (!candidateVersion) throw new Error(`Candidate version ${run.candidateVersionId} is unavailable.`);
+  const workspaceRevision = await sitePlatformRepository.getWorkspaceRevision(candidateVersion.workspaceRevisionId);
+  if (!workspaceRevision) throw new Error(`Candidate workspace revision ${candidateVersion.workspaceRevisionId} is unavailable.`);
+  const sidecarKey = workspaceSourceSidecarKey(workspaceRevision.sourceArchiveKey);
+  const sidecarBlob = await store.get(sidecarKey);
+  if (!sidecarBlob) throw new Error(`Candidate workspace sidecar is unavailable: ${sidecarKey}.`);
+  const sidecar = workspaceSourceSidecarSchema.parse(JSON.parse(sidecarBlob.bytes.toString("utf8")));
+  if (sidecar.archiveKey !== workspaceRevision.sourceArchiveKey || sidecar.sourceHash !== workspaceRevision.sourceHash) {
+    throw new Error(`Candidate workspace sidecar does not match revision ${workspaceRevision.id}.`);
+  }
+  for (const file of sidecar.files) files.set(file.path, file.content);
+  sourceProvenance = "retained_candidate_sidecar";
+  retainedCandidateSourceHash = workspaceRevision.sourceHash;
+} else if (run.kind === "initial_build") {
   const scaffoldSourceRoot = resolve(repositoryRoot, "workers/site-sandbox/scaffold/src");
-  const [siteSource, styleSource] = await Promise.all([
-    readFile(resolve(scaffoldSourceRoot, "site.tsx"), "utf8"),
-    readFile(resolve(scaffoldSourceRoot, "styles.css"), "utf8")
-  ]);
-  files.set("src/site.tsx", siteSource);
-  files.set("src/styles.css", styleSource);
+  for (const relativePath of [
+    "site.tsx",
+    "styles.css",
+    "components/mobile-navigation.tsx",
+    "components/mobile-navigation.css",
+    "components/managed-lead-form.tsx",
+    "components/managed-lead-form.css"
+  ]) {
+    files.set(`src/${relativePath}`, await readFile(resolve(scaffoldSourceRoot, relativePath), "utf8"));
+  }
   if (run.architecture) {
     const buildInput = await sitePlatformRepository.getPublicBuildInput(run.publicBuildInputId);
     if (!buildInput) throw new Error(`Run ${run.id} has no retained public build input ${run.publicBuildInputId}.`);
@@ -162,7 +181,7 @@ const replayedEvents: Array<{
   retainedWorkspaceHash?: string;
 }> = [];
 
-for (const event of retainedMutations) {
+for (const event of sourceProvenance === "retained_candidate_sidecar" ? [] : retainedMutations) {
   if (!event.payloadRef) throw new Error(`Mutation event ${event.sequence} is missing its retained payload.`);
   const blob = await store.get(event.payloadRef);
   if (!blob) throw new Error(`Mutation payload ${event.payloadRef} is unavailable.`);
@@ -249,7 +268,8 @@ const manifest = {
   status: run.status,
   throughSequence,
   exactParentRevisionId: run.exactParentRevisionId,
-  finalWorkspaceHash: replayedEvents.at(-1)?.retainedWorkspaceHash,
+  sourceProvenance,
+  finalWorkspaceHash: retainedCandidateSourceHash ?? replayedEvents.at(-1)?.retainedWorkspaceHash,
   files: [...files].map(([path, content]) => ({ path, contentHash: sha256(content), bytes: Buffer.byteLength(content) })),
   replayedEvents
 };

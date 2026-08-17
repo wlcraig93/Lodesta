@@ -16,6 +16,7 @@ const runId = process.env.LODESTA_RECONSTRUCT_RUN_ID?.trim();
 const reconstructionDirectoryInput = process.env.LODESTA_RECONSTRUCT_OUTPUT_DIR?.trim();
 const sandboxDeploymentOverrideId = process.env.LODESTA_RECONSTRUCT_SANDBOX_DEPLOYMENT_ID?.trim();
 const repeatApplyAfterInspection = process.env.LODESTA_RECONSTRUCT_REPEAT_APPLY === "1";
+const inspectionCountInput = process.env.LODESTA_RECONSTRUCT_INSPECTION_COUNT?.trim();
 const useLocalReconstructionSource = process.env.LODESTA_RECONSTRUCT_LOCAL_SOURCE === "1";
 const requestedRoutes = (process.env.LODESTA_RECONSTRUCT_ROUTES?.trim()
   || "/,/services,/ants-pest-control-services,/georgetown-pest-control,/about-us,/contact")
@@ -25,6 +26,10 @@ const requestedRoutes = (process.env.LODESTA_RECONSTRUCT_ROUTES?.trim()
 
 if (!runId) throw new Error("LODESTA_RECONSTRUCT_RUN_ID is required.");
 if (!reconstructionDirectoryInput) throw new Error("LODESTA_RECONSTRUCT_OUTPUT_DIR is required.");
+const inspectionCount = inspectionCountInput ? Number(inspectionCountInput) : 1;
+if (!Number.isInteger(inspectionCount) || inspectionCount < 1 || inspectionCount > 3) {
+  throw new Error("LODESTA_RECONSTRUCT_INSPECTION_COUNT must be an integer from 1 to 3.");
+}
 
 const repositoryRoot = resolve(process.cwd());
 const reconstructionDirectory = resolve(repositoryRoot, reconstructionDirectoryInput);
@@ -132,6 +137,7 @@ let appliedRevision: string | undefined;
 let bootstrapDurationMs: number | undefined;
 let applyDurationMs: number | undefined;
 let repeatApplyDurationMs: number | undefined;
+const inspectionDurationsMs: number[] = [];
 
 try {
   const bootstrapStartedAt = performance.now();
@@ -148,16 +154,21 @@ try {
   const prepared = prepareSiteArtifact({
     authoredArtifact,
     buildInput: effectiveBuildInput,
-    runtimeSeriesId: "site-runtime-v1"
+    runtimeSeriesId: effectiveBuildInput.capabilityConfiguration.trustedRuntimeSeries
   });
-  result = await runArtifactBrowserGate({
-    prepared,
-    buildInput: effectiveBuildInput,
-    blobStore: store,
-    capturePrefix: `diagnostic-reconstructions/${run.id}`,
-    routePaths: requestedRoutes,
-    captureMode: "review"
-  });
+  for (let inspection = 1; inspection <= inspectionCount; inspection += 1) {
+    const inspectionStartedAt = performance.now();
+    result = await runArtifactBrowserGate({
+      prepared,
+      buildInput: effectiveBuildInput,
+      blobStore: store,
+      capturePrefix: `diagnostic-reconstructions/${run.id}/inspection-${inspection}`,
+      routePaths: requestedRoutes,
+      captureMode: "review"
+    });
+    inspectionDurationsMs.push(Math.round(performance.now() - inspectionStartedAt));
+  }
+  if (!result) throw new Error("Reconstructed browser inspection did not produce a result.");
   if (repeatApplyAfterInspection) {
     const repeatApplyStartedAt = performance.now();
     const repeated = await sandbox.apply(sessionId, appliedRevision, sourceFiles);
@@ -198,6 +209,8 @@ try {
     bootstrapDurationMs,
     applyDurationMs,
     repeatApplyDurationMs,
+    inspectionCount,
+    inspectionDurationsMs,
     reconstructedPublicBuildInputId: effectiveBuildInput.id,
     sourceProvenance,
     adoptedAssets: adoptedAssets.map((asset) => ({
@@ -224,6 +237,8 @@ try {
     bootstrapDurationMs,
     applyDurationMs,
     repeatApplyDurationMs,
+    inspectionCount,
+    inspectionDurationsMs,
     sourceProvenance,
     routesChecked: result.routesChecked,
     captureCount: result.captures.length,

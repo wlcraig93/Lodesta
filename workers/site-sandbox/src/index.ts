@@ -1131,7 +1131,12 @@ function canonicalJson(value: unknown): string {
 }
 
 function sandboxFor(env: Env, sessionId: string) {
-  return getSandbox(env.Sandbox, sessionId, { normalizeId: true, sleepAfter: "10m", keepAlive: false, enableDefaultSession: true });
+  return getSandbox(env.Sandbox, sessionId, {
+    normalizeId: true,
+    sleepAfter: "10m",
+    keepAlive: false,
+    enableDefaultSession: false
+  });
 }
 
 function authorized(request: Request, env: Env) {

@@ -9,6 +9,11 @@ const watchdog = readFileSync("workers/recovery-watchdog/wrangler.jsonc", "utf8"
 const watchdogSource = readFileSync("workers/recovery-watchdog/src/index.ts", "utf8");
 const workerSource = readFileSync("workers/runner.ts", "utf8");
 const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "utf8");
+assert(
+  sandboxWorkerSource.includes("enableDefaultSession: false")
+    && !sandboxWorkerSource.includes("enableDefaultSession: true"),
+  "Sandbox operations must be sessionless; shared implicit shell state can leak across authoring phases."
+);
 const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
 const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts", "utf8");
 const continuousIntegration = readFileSync(".github/workflows/continuous-integration.yml", "utf8");

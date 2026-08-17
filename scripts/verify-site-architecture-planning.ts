@@ -243,8 +243,25 @@ assert(
   "Retained full-site runs cannot reconstruct the evidence mode selected by their authoring profile."
 );
 assert(
+  reconstructionSource.includes('sourceProvenance: "retained_candidate_sidecar"')
+    || reconstructionSource.includes('"retained_candidate_sidecar" | "replayed_mutations"')
+);
+for (const recipePath of [
+  "components/mobile-navigation.tsx",
+  "components/mobile-navigation.css",
+  "components/managed-lead-form.tsx",
+  "components/managed-lead-form.css"
+]) {
+  assert(reconstructionSource.includes(recipePath), `Initial reconstruction omitted ${recipePath}.`);
+}
+assert(
   reconstructionRendererSource.includes("readReconstructedSourceFiles(sourceDirectory)"),
   "Failed full-site reconstructions do not render all reconstructed source modules."
+);
+assert(
+  reconstructionRendererSource.includes("LODESTA_RECONSTRUCT_INSPECTION_COUNT")
+    && reconstructionRendererSource.includes("effectiveBuildInput.capabilityConfiguration.trustedRuntimeSeries"),
+  "The retained-source renderer must reproduce repeated inspections with the candidate's actual runtime series."
 );
 
 const invalidPlan = {

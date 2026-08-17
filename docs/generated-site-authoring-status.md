@@ -1,12 +1,32 @@
 # Generated-site authoring status
 
-Date: 2026-08-16
+Date: 2026-08-17
 
 ## V4 implementation status
 
 The repository now contains the V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, and editable mobile-navigation and managed-form recipes. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
 
-V4 has not yet been represented as deployed or promoted evidence. The retained-data report is complete and proves that V1–V3 rendering must remain for immutable history. Coordinated infrastructure verification, the corrected Kind/Surge bake-off, runtime promotion, and maintenance-fenced current-input cutover still gate activation. Until those records exist, the deployed baseline described below remains the operational rollback point.
+The V4-capable application and sandbox toolchain are now deployed and verified at release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3`. The active green sandbox deployment is `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
+
+The first fresh hosted Kind V4-plus-recipes treatment completed end to end and passed the hard release gate, but it did not establish superiority over the retained canonical baseline. Surge was intentionally not started. See "First hosted V4 treatment" below.
+
+## First hosted V4 treatment
+
+The first post-hardening Kind treatment used the ordinary hosted queue and worker, the active green sandbox deployment, materialized V4 recipes, and the complete retained Kind authority:
+
+- run: `run_b40b340df360410da0a3cc6cbc7a297f`;
+- candidate: `version_5372861604b305aa17da8267beedb3ab`;
+- workspace: `workspace_revision_78657f24ad853d5131d41dd284627fe9`;
+- artifact: `artifact_2aab60a67deffdf51a9de6d295db5f8d`;
+- result: succeeded, 27 routes, 28 artifact files, 13 browser-checked routes, 748 checked links, 30 retained captures, and hard gate passed;
+- usage: 18 author requests, three `inspect_site` calls plus `finish`, 1,640,298 ms recorded duration, and $3.25439530 estimated model cost; and
+- model route: Sol for the author and Luna for architecture.
+
+All four recipe files were present in the retained final source with their expected IDs, versions, and provenance headers. The managed custom form, authored mobile trigger, opened navigation, Escape/focus behavior, retained customer-portal destination, and managed submission contract passed final verification. Three source applies succeeded against one long-lived sandbox after multi-minute inspection gaps, with no replay, recycle, or transport timeout. This validates the `keepAlive` lifecycle correction that replaced the earlier post-inspection 60-second `/apply` failures.
+
+The authoring result is not a promotion result. The first source write contained malformed JSX and required repair. The first inspection found unsupported guarantee copy and shared contrast failures. The second found a missing customer-portal destination and low-contrast navigation/form actions. The third inspection passed. Final human review found a clean, restrained, correctly branded site and a sound custom form, but the retained Kind R8 homepage remained more distinctive and editorially composed.
+
+The $3.25440 result must not be read as a direct 24.6× regression against Kind R8's $0.13247 because R8 used Luna and the treatment used Sol. It is still operationally material, and the treatment did not supply enough visual benefit to justify continuing to Surge. A fair stochastic comparison would require the same model route, frozen authority and architecture, and a predeclared cost fuse. Until that matched Kind comparison passes, V4 remains a candidate rather than the canonical product generator.
 
 ## Deployed rollback baseline
 

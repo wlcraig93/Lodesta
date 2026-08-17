@@ -1,7 +1,7 @@
 # Managed capabilities, editable recipes, and Runtime V4
 
 Date: 2026-08-15
-Status: implemented in the repository; diagnostics, treatment screen, and deployment promotion pending
+Status: implemented and deployed for pinned diagnostics; product promotion pending
 
 ## Decision
 
@@ -77,6 +77,14 @@ Promotion remains blocked until evidence is appended for:
 - the read-only retained-data report and an audited maintenance-fenced cutover record.
 
 The six-run screen evaluates reliability, variance, and repeated brand adaptation. It does not establish broad cross-business template similarity. That judgment is deferred to side-by-side opened mobile menus from at least ten distinct businesses in the first prebuild batch.
+
+## First hosted treatment evidence
+
+The hardened V4-capable release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3` and green sandbox deployment `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e` passed coordinated release verification. Fresh Kind run `run_b40b340df360410da0a3cc6cbc7a297f` produced candidate `version_5372861604b305aa17da8267beedb3ab` and passed the hard release gate with all four recipe files retained.
+
+This run proves the intended mechanisms can work together: V4 emitted no platform navigation artwork, source supplied an explicit trigger and presentation, the narrowed form SDK produced a custom responsive layout, and final verification passed the managed navigation and form contracts. It also proves the sandbox lifecycle repair: all three applies succeeded on one container across long inspection gaps without replay or recycle.
+
+It does not satisfy the reliability or promotion gate. The author repaired malformed JSX, unsupported copy, contrast, the retained portal destination, and shared navigation/form action styling across three inspections. It used a Sol author while the R8 control used Luna, so its $3.25440 cost is not an attributable V4-versus-V2 estimate. Human review found no clear visual superiority over R8. Under the adaptive stop rule, Surge and the remaining treatment runs are paused. V4 remains the sole go-forward candidate in code, but it is not the active product generator and no existing input is repointed.
 
 ## Retained-data report
 

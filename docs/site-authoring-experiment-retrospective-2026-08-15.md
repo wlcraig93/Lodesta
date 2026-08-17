@@ -124,3 +124,27 @@ The follow-on V4 decision preserves the simplicity conclusion while moving the b
 - verification remains mechanism-neutral and objective.
 
 This is a mechanistic correction, not evidence that V4 is stochastically better. The same-authority V2/V4 diagnostic and the three-Kind/three-Surge V4-plus-recipe reliability screen remain pending. No result should be appended here until the immutable run, candidate, deployment, and cost records exist.
+
+## August 17 hosted V4 treatment and stop decision
+
+Release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3` deployed the hardened web, worker, and green sandbox path. The active pinned sandbox was `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e`. A fresh Kind V4-plus-recipes run then completed through the ordinary hosted queue:
+
+| Measure | Retained Kind R8 | Hosted V4 treatment |
+| --- | ---: | ---: |
+| Run | `run_c0d04e7292b84ae5981654959cafdc4a` | `run_b40b340df360410da0a3cc6cbc7a297f` |
+| Candidate | `version_d3b5e0788105a9a4b3b510fc24ee02f6` | `version_5372861604b305aa17da8267beedb3ab` |
+| Model route | Luna author + Luna architecture | Sol author + Luna architecture |
+| Recorded duration | 953,724 ms | 1,640,298 ms |
+| Estimated model cost | $0.13246954 | $3.25439530 |
+| Author requests | 18 | 18 |
+| `inspect_site` / `finish` | 3 / 1 | 3 / 1 |
+| Routes / artifact files | 27 / 28 | 27 / 28 |
+| Hard release gate | passed | passed |
+
+The V4 run is conclusive infrastructure evidence. Each of its three source submissions succeeded on the same sandbox even after multi-minute browser-inspection gaps. There was no sandbox replay, recycle, submission timeout, or database failure. This directly closes the earlier failure in which the post-inspection `/apply` request was cancelled at the 30-second client deadline twice. The cause was the sandbox lifecycle configuration: the interactive authoring container was allowed to sleep during external browser work. `keepAlive: true`, explicit destruction, and the upgraded session handling now match the product workflow.
+
+The authoring evidence is mixed. The final candidate preserved the prepared logo, used one explicit authored mobile trigger with no platform artwork, produced a custom responsive managed form, retained the customer portal, and passed navigation/form verification. It also needed one malformed-JSX repair and two finding-driven repair rounds before the third inspection passed. The final site is clean and coherent, but human side-by-side review does not show a clear visual win over R8; R8 remains more editorially distinctive.
+
+The cost values are intentionally not treated as a causal V2/V4 comparison because the author models differ. Sol's price and context behavior dominate the nominal 24.6× difference. Even with that caveat, the treatment supplied no compensating quality result and exposed avoidable recipe-adaptation failures, so the adaptive screen stops at Kind and does not spend on Surge. V4 is not promoted and no current input is repointed.
+
+The next valid experiment is one matched Kind run, not a broader cohort: use Luna for authoring, reuse the frozen retained Kind authority and architecture, keep the same V4 recipes and hard gate, and restore the predeclared $0.20 fuse. If that run cannot match or beat the lean-loop V2 evidence without a navigation/form repair loop, simplify the V4 guidance or recipe defaults before any Surge run. Do not move presentation back into the trusted runtime.

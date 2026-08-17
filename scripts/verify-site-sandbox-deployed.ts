@@ -10,7 +10,9 @@ import {
 } from "../packages/site-sandbox";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
-const sessionId = `sandbox_verify_${crypto.randomUUID().replaceAll("-", "")}`;
+const configuredSessionId = process.env.LODESTA_SANDBOX_CANARY_SESSION_ID?.trim();
+const sessionId = configuredSessionId || `sandbox_verify_${crypto.randomUUID().replaceAll("-", "")}`;
+assert(/^[a-z0-9_-]{1,80}$/.test(sessionId), "LODESTA_SANDBOX_CANARY_SESSION_ID is invalid.");
 const sandbox = await canarySandboxClient();
 const buildInput = buildSyntheticSiteInput("site-runtime-v4");
 const expectedManifest = configuredExpectedManifest();

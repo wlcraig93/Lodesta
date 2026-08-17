@@ -37,6 +37,8 @@ const localStart = readFileSync("scripts/start-local.mjs", "utf8");
 const sandboxRuntime = readFileSync("packages/site-sandbox/runtime-config.ts", "utf8");
 const developmentSandboxes = ["blue", "green"].map((slot) =>
   readFileSync(`workers/site-sandbox/wrangler.dev.${slot}.jsonc`, "utf8"));
+const productionSandboxes = ["blue", "green"].map((slot) =>
+  readFileSync(`workers/site-sandbox/wrangler.${slot}.jsonc`, "utf8"));
 const maintenanceFence = readFileSync("supabase/migrations/202607230019_site_authoring_maintenance_claim_fence.sql", "utf8");
 
 for (const name of ["typecheck", "smoke:dev", "canary:owner-journey", "verify:owner-journey-canary", "verify:site-authoring-canary", "verify:postcss-security", "verify:static", "verify:browser", "verify:sandbox", "verify:preflight", "verify:render-browser", "verify:architecture", "verify:database", "verify:database-live", "verify:authoring", "verify:runtime", "verify:account-setup-domain", "verify:acquisition", "verify:health", "verify:release-evidence", "verify:development-sandbox", "verify:site-sandbox-local", "verify:site-sandbox-manifest", "verify:execution-authority", "operator:site-authoring"]) {
@@ -151,8 +153,13 @@ assert(productionRelease.includes("timeout-minutes: 180")
   && productionRelease.includes("Restore only the sandbox pointer after post-promotion failure"), "Coordinated releases must use a bounded maintenance drain and retain pointer-only automatic rollback.");
 assert(productionRelease.includes("sandbox-canary-attempt-1.error.log")
   && productionRelease.includes("sandbox-canary-attempt-2.error.log")
+  && productionRelease.includes("LODESTA_SANDBOX_CANARY_SESSION_ID")
   && productionRelease.includes("sleep 20"),
-  "A new Cloudflare container rollout must preserve its first canary failure and retry the complete canary exactly once after a bounded readiness delay.");
+  "A new Cloudflare container rollout must preserve its first canary failure and retry the same canary session exactly once after a bounded readiness delay.");
+assert(productionSandboxes.every((source) => source.includes('"observability"')
+  && source.includes('"invocation_logs": true')
+  && source.includes('"head_sampling_rate": 1')),
+  "Production sandbox slots must retain full Worker observability for transport diagnosis.");
 assert(productionRelease.includes("activeDeployments.find")
   && productionRelease.includes("const priorIds = new Set")
   && productionRollback.includes("const priorIds = new Set"), "Release evidence must select a successful current deployment, and deployment polling must ignore stale prior failures.");

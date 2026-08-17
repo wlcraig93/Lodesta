@@ -2037,18 +2037,42 @@ const browserInspectionSource = String.raw`(() => {
         .filter((label) => colorTools.visible(label));
       return labels.length > 1 ? [{ field, labels }] : [];
     });
+    const hasVisibleControlArtwork = (control) => {
+      const visibleGraphic = [...control.querySelectorAll("img,svg,canvas,picture")]
+        .some((graphic) => colorTools.visible(graphic));
+      if (visibleGraphic) return true;
+      return [...control.querySelectorAll("*")]
+        .filter((element) => colorTools.visible(element))
+        .some((element) => {
+          const style = getComputedStyle(element);
+          const background = colorTools.parse(style.backgroundColor);
+          const borderWidth = Math.max(
+            Number.parseFloat(style.borderTopWidth) || 0,
+            Number.parseFloat(style.borderRightWidth) || 0,
+            Number.parseFloat(style.borderBottomWidth) || 0,
+            Number.parseFloat(style.borderLeftWidth) || 0
+          );
+          const borderColor = colorTools.parse(style.borderTopColor);
+          return style.backgroundImage !== "none"
+            || (background.valid && background.channels[3] > .04)
+            || (borderWidth > 0 && borderColor.valid && borderColor.channels[3] > .04);
+        });
+    };
     const emptyControls = controls.filter((element) => {
       if (!colorTools.visible(element)) return false;
       const style = getComputedStyle(element);
       const pseudo = [getComputedStyle(element, "::before"), getComputedStyle(element, "::after")]
         .some((value) => value.content && !["none", "normal", "\"\"", "''"].includes(value.content));
-      const visibleGraphic = [...element.querySelectorAll("img,svg")].some((graphic) => colorTools.visible(graphic));
       // Managed icon geometry is verified by the navigation probe. Its
       // reserved marker is enough to avoid duplicating that failure as a
       // generic empty-control finding.
       const visibleManagedGraphic = Boolean(element.querySelector("[data-lodesta-navigation-icon]"));
       const backgroundGraphic = style.backgroundImage !== "none";
-      return !colorTools.textFor(element) && !pseudo && !visibleGraphic && !visibleManagedGraphic && !backgroundGraphic;
+      return !colorTools.textFor(element)
+        && !pseudo
+        && !hasVisibleControlArtwork(element)
+        && !visibleManagedGraphic
+        && !backgroundGraphic;
     });
     const primaryActionPattern = /\b(call|contact|book|schedule|reserve|order|quote|estimate|appointment|consult|consultation|conversation|help|request|inquire|get started|get in touch)\b/i;
     const primaryActions = controls.filter((element) => {
@@ -2605,26 +2629,7 @@ const browserInspectionSource = String.raw`(() => {
     const visibleNavToggle = visibleNavToggleControls.length > 0;
     const hasVisibleNavigationTriggerArtwork = (control) => {
       if (colorTools.textFor(control).trim()) return true;
-      const visibleGraphic = [...control.querySelectorAll("img,svg,canvas,picture")]
-        .some((graphic) => colorTools.visible(graphic));
-      if (visibleGraphic) return true;
-      const paintedDescendant = [...control.querySelectorAll("*")]
-        .filter((element) => colorTools.visible(element))
-        .some((element) => {
-          const style = getComputedStyle(element);
-          const background = colorTools.parse(style.backgroundColor);
-          const borderWidth = Math.max(
-            Number.parseFloat(style.borderTopWidth) || 0,
-            Number.parseFloat(style.borderRightWidth) || 0,
-            Number.parseFloat(style.borderBottomWidth) || 0,
-            Number.parseFloat(style.borderLeftWidth) || 0
-          );
-          const borderColor = colorTools.parse(style.borderTopColor);
-          return style.backgroundImage !== "none"
-            || (background.valid && background.channels[3] > .04)
-            || (borderWidth > 0 && borderColor.valid && borderColor.channels[3] > .04);
-        });
-      if (paintedDescendant) return true;
+      if (hasVisibleControlArtwork(control)) return true;
       return ["::before", "::after"].some((pseudo) => {
         const style = getComputedStyle(control, pseudo);
         if (style.display === "none") return false;

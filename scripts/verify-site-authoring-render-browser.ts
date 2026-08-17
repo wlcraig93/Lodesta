@@ -2311,6 +2311,42 @@ assert(
   "A native navigation disclosure with a visible text label was incorrectly treated as indiscernible."
 );
 
+const paintedDisclosureNavigationPrepared = {
+  ...disclosureNavigationPrepared,
+  routes: disclosureNavigationPrepared.routes.map((route) => route.path === "/"
+    ? {
+        ...route,
+        html: route.html.replace("<summary>Menu</summary>", '<summary aria-label="Open navigation"><span></span><span></span><span></span></summary>')
+      }
+    : route),
+  files: disclosureNavigationPrepared.files.map((file) => file.path === "index.html"
+    ? {
+        ...file,
+        bytes: Buffer.from(file.bytes.toString("utf8").replace("<summary>Menu</summary>", '<summary aria-label="Open navigation"><span></span><span></span><span></span></summary>'))
+      }
+    : file.path === "site.css"
+      ? {
+          ...file,
+          bytes: Buffer.from(`${file.bytes.toString("utf8")}\n@media(max-width:640px){details>summary{list-style:none}details>summary::-webkit-details-marker{display:none}details>summary span{display:block;width:18px;height:2px;margin:4px;background:#17211b}}`)
+        }
+      : file)
+};
+const paintedDisclosureNavigationBrowser = await runArtifactBrowserGate({
+  prepared: paintedDisclosureNavigationPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-painted-disclosure-navigation",
+  routePaths: ["/"]
+});
+assert(
+  !paintedDisclosureNavigationBrowser.findings.some((finding) => finding.id === "render.empty_control"),
+  "A navigation trigger with authored CSS-painted artwork was incorrectly treated as an empty control."
+);
+assert(
+  !paintedDisclosureNavigationBrowser.findings.some((finding) => finding.id === "render.mobile_navigation_trigger"),
+  "A navigation trigger with authored CSS-painted artwork was incorrectly treated as indiscernible."
+);
+
 const indiscernibleDisclosureNavigationPrepared = {
   ...disclosureNavigationPrepared,
   routes: disclosureNavigationPrepared.routes.map((route) => route.path === "/"

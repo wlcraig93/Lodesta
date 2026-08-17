@@ -113,7 +113,8 @@ jobs:
           version="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).versionId")"
           digest="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).imageDigest")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          if ! LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
+          canary_session="sandbox_verify_${RELEASE_SHA:0:12}_${slot}"
+          if ! LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
             > "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" \
             2> "$EVIDENCE_DIR/sandbox-canary-attempt-1.error.log"; then
             # Cloudflare may accept the Worker version before the new container
@@ -121,7 +122,7 @@ jobs:
             # first failure as evidence, then retry the complete canary exactly once
             # against the same immutable deployment after a bounded readiness delay.
             sleep 20
-            LODESTA_SANDBOX_CANARY_SLOT="$slot" npm run verify:site-sandbox-deployed \
+            LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
               > "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" \
               2> "$EVIDENCE_DIR/sandbox-canary-attempt-2.error.log"
             cp "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" "$EVIDENCE_DIR/sandbox-canary.json"

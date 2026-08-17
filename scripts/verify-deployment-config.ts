@@ -138,12 +138,13 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("previous_deployment")
   && productionRelease.includes("/api/health/?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
 assert(
-  productionRelease.indexOf("Deploy, canary, and register the inactive sandbox") < productionRelease.indexOf("Acquire the database maintenance fence and drain")
-    && productionRelease.indexOf("Acquire the database maintenance fence and drain") < productionRelease.indexOf("railway up --ci")
+  productionRelease.indexOf("Deploy, canary, and register the inactive sandbox") < productionRelease.indexOf("Acquire or renew the database maintenance fence and drain")
+    && productionRelease.indexOf("Acquire or renew the database maintenance fence and drain") < productionRelease.indexOf("railway up --ci")
     && productionRelease.indexOf("Verify both controller identities") < productionRelease.indexOf("Promote the registered sandbox"),
   "Railway must not deploy before the live sandbox compile canary passes."
 );
 assert(productionRelease.includes("timeout-minutes: 180")
+  && productionRelease.includes("maintenance:site-authoring -- renew --minutes=90")
   && productionRelease.includes("maintenance:site-authoring -- acquire --minutes=90 --draining")
   && productionRelease.includes("maintenance:site-authoring -- wait-active --timeout-minutes=30")
   && productionRelease.includes("authoring_drain_timeout")

@@ -163,11 +163,16 @@ jobs:
             }, null, 2));
           ' "$EVIDENCE_DIR/railway-status-before.json" "$EVIDENCE_DIR/controller-identities-before.json"
 
-      - name: Acquire the database maintenance fence and drain
+      - name: Acquire or renew the database maintenance fence and drain
         run: |
           set -Eeuo pipefail
-          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- acquire --minutes=90 --draining \
-            > "$EVIDENCE_DIR/maintenance-acquire.json"
+          if NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- renew --minutes=90 \
+            > "$EVIDENCE_DIR/maintenance-renew.json" 2> "$EVIDENCE_DIR/maintenance-renew-error.txt"; then
+            :
+          else
+            NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- acquire --minutes=90 --draining \
+              > "$EVIDENCE_DIR/maintenance-acquire.json"
+          fi
           if ! NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- wait-active --timeout-minutes=30 \
             > "$EVIDENCE_DIR/maintenance-drain.json"; then
             node --input-type=module -e '

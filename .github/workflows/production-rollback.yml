@@ -109,10 +109,12 @@ jobs:
             railway variable set "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
               --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" > /dev/null
           done
-          railway up ../target --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WEB_SERVICE_ID" --message "Approved web rollback to ${{ inputs.release_sha }}"
-          railway up ../target --path-as-root --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to ${{ inputs.release_sha }}"
+          railway up ../target --path-as-root --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WEB_SERVICE_ID" --message "Approved web rollback to ${{ inputs.release_sha }}" \
+            > "$EVIDENCE_DIR/railway-web-submit.json"
+          railway up ../target --path-as-root --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to ${{ inputs.release_sha }}" \
+            > "$EVIDENCE_DIR/railway-worker-submit.json"
           for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
             name="${spec%%:*}"
             service="${spec#*:}"

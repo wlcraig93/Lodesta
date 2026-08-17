@@ -138,7 +138,7 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("github.event.workflow_run.head_sha")
   && productionRelease.includes("group: production-release")
   && productionRelease.includes("cancel-in-progress: false")
-  && productionRelease.includes("railway up --ci")
+  && productionRelease.includes("railway up --detach --json")
   && productionRelease.includes("Select an inactive drained slot")
   && productionRelease.includes("assert-slot-available")
   && productionRelease.includes("wrangler.$slot.jsonc")
@@ -149,7 +149,7 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("/api/health/?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
 assert(
   productionRelease.indexOf("Deploy, canary, and register the inactive sandbox") < productionRelease.indexOf("Acquire or renew the database maintenance fence and drain")
-    && productionRelease.indexOf("Acquire or renew the database maintenance fence and drain") < productionRelease.indexOf("railway up --ci")
+    && productionRelease.indexOf("Acquire or renew the database maintenance fence and drain") < productionRelease.indexOf("railway up --detach --json")
     && productionRelease.indexOf("Verify both controller identities") < productionRelease.indexOf("Promote the registered sandbox"),
   "Railway must not deploy before the live sandbox compile canary passes."
 );
@@ -189,7 +189,7 @@ assert(productionRollback.includes("environment: production")
   && productionRollback.includes("maintenance:site-authoring -- renew --minutes=90")
   && productionRollback.includes("maintenance:site-authoring -- acquire --minutes=90 --draining")
   && productionRollback.includes("maintenance:site-authoring -- wait-active --timeout-minutes=30")
-  && productionRollback.includes("railway up ../target --path-as-root --ci"), "Production rollback workflow is not lease-coordinated, dual-service, or exact-targeted.");
+  && productionRollback.includes("railway up ../target --path-as-root --detach --json"), "Production rollback workflow is not lease-coordinated, dual-service, or exact-targeted.");
 assert(productionRollback.indexOf("Require both services to report the target SHA") < productionRollback.indexOf("Reactivate the retained sandbox deployment"), "Rollback must verify both controller identities before moving the sandbox pointer.");
 assert(!/^\s{6}NODE_ENV:/m.test(productionRelease) && !/^\s{6}NODE_ENV:/m.test(productionRollback), "Release workflows must set NODE_ENV only on authority-bearing steps, never at job level.");
 assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");

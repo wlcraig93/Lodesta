@@ -202,10 +202,12 @@ jobs:
             railway variable set "LODESTA_RELEASE_GIT_SHA=$RELEASE_SHA" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
               --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" > /dev/null
           done
-          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WEB_SERVICE_ID" --message "Production web $RELEASE_SHA"
-          railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Production worker $RELEASE_SHA"
+          railway up --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WEB_SERVICE_ID" --message "Production web $RELEASE_SHA" \
+            > "$EVIDENCE_DIR/railway-web-submit.json"
+          railway up --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Production worker $RELEASE_SHA" \
+            > "$EVIDENCE_DIR/railway-worker-submit.json"
           for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
             name="${spec%%:*}"
             service="${spec#*:}"

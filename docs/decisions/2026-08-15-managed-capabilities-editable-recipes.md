@@ -86,6 +86,10 @@ This run proves the intended mechanisms can work together: V4 emitted no platfor
 
 It does not satisfy the reliability or promotion gate. The author repaired malformed JSX, unsupported copy, contrast, the retained portal destination, and shared navigation/form action styling across three inspections. It used a Sol author while the R8 control used Luna, so its $3.25440 cost is not an attributable V4-versus-V2 estimate. Human review found no clear visual superiority over R8. Under the adaptive stop rule, Surge and the remaining treatment runs are paused. V4 remains the sole go-forward candidate in code, but it is not the active product generator and no existing input is repointed.
 
+The matched follow-up used Luna, the frozen R8 architecture plan, the same retained Kind authority, and the $0.20 fuse. Run `run_06d873d5f8be4a66bc81610a0e2cd441` produced candidate `version_aa85b7fd5505644326235b05c98a7489`, passed the hard release gate, and cost $0.09015719—31.9% below R8 and 15.3% below the lean-loop V2 control. The final source had one authored managed trigger, a responsive custom managed form, and no platform presentation collision.
+
+This follow-up is still not promotion evidence. Two long inspections were followed by 60-second sandbox apply timeouts; both applies succeeded only after a sandbox recycle. The first inspection also repeated the missing retained customer-portal destination seen in the Sol treatment. Human review found a strong, clean result but not clear visual superiority over R8's more distinctive editorial direction. Surge remains paused. The next experiment must first preserve sandbox continuity across the full eight-minute inspection ceiling, then repeat this exact matched Kind arm. V4 remains unpromoted and existing inputs remain unchanged.
+
 ## Retained-data report
 
 The read-only report ran against configured storage on 2026-08-15 (America/Chicago) and found:

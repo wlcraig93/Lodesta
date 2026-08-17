@@ -147,4 +147,22 @@ The authoring evidence is mixed. The final candidate preserved the prepared logo
 
 The cost values are intentionally not treated as a causal V2/V4 comparison because the author models differ. Sol's price and context behavior dominate the nominal 24.6× difference. Even with that caveat, the treatment supplied no compensating quality result and exposed avoidable recipe-adaptation failures, so the adaptive screen stops at Kind and does not spend on Surge. V4 is not promoted and no current input is repointed.
 
-The next valid experiment is one matched Kind run, not a broader cohort: use Luna for authoring, reuse the frozen retained Kind authority and architecture, keep the same V4 recipes and hard gate, and restore the predeclared $0.20 fuse. If that run cannot match or beat the lean-loop V2 evidence without a navigation/form repair loop, simplify the V4 guidance or recipe defaults before any Surge run. Do not move presentation back into the trusted runtime.
+## Matched Luna Kind result
+
+The next arm ran with Luna authoring, the exact R8 architecture plan hash `sha256:439c56195b342a366932d16eabd82286f3ca760c1be6e87f539c4aae3de5b7b5`, the identical retained Kind inventory hash, V4 recipes, and the original $0.20 fuse.
+
+| Measure | Retained Kind R8 | Lean-loop V2 | Matched V4 Luna |
+| --- | ---: | ---: | ---: |
+| Run | `run_c0d04e7292b84ae5981654959cafdc4a` | `run_70de8cca1d7c45408b39bc88e54d11fb` | `run_06d873d5f8be4a66bc81610a0e2cd441` |
+| Candidate | `version_d3b5e0788105a9a4b3b510fc24ee02f6` | `version_2dd22feecac31dd09f4624ea0c5fdf4c` | `version_aa85b7fd5505644326235b05c98a7489` |
+| Model cost | $0.13246954 | $0.10638215 | $0.09015719 |
+| Recorded duration | 953,724 ms | 560,653 ms | 1,417,501 ms |
+| Author requests | 18 | 15 | 16 |
+| `inspect_site` / `finish` | 3 / 1 | 2 / 1 | 3 / 1 |
+| Hard gate | passed | passed | passed |
+
+The matched treatment beats both references on nominal model cost and produced a strong final site without an initial source-validation repair. It does not pass the experiment. The first inspection took 7:45; its following apply timed out at exactly 60 seconds and recycled. The second inspection reached the eight-minute recoverable ceiling; its following apply repeated the same timeout and recycle. Each identical source applied in about 13 seconds after replacement. This makes the run infrastructure-invalid and narrows the remaining fault to sandbox/session reachability after long external browser work.
+
+The treatment also repeated the missing customer-portal destination seen in the Sol run and repaired it after inspection. Final human review found a clean, coherent site, good managed form, and better logo scale, but no clear visual superiority over R8; R8 remains more editorially distinctive and its independent replay retained fewer advisory findings.
+
+Do not run Surge. First fix sandbox continuity across at least the full eight-minute inspection ceiling without adding authoring orchestration or automatic inspection retries. Then rerun this exact matched Kind arm. If the portal omission repeats, simplify or strengthen the recipe handoff at the existing prompt/recipe boundary before proceeding. Do not move presentation back into the trusted runtime.

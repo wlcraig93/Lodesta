@@ -26,7 +26,13 @@ All four recipe files were present in the retained final source with their expec
 
 The authoring result is not a promotion result. The first source write contained malformed JSX and required repair. The first inspection found unsupported guarantee copy and shared contrast failures. The second found a missing customer-portal destination and low-contrast navigation/form actions. The third inspection passed. Final human review found a clean, restrained, correctly branded site and a sound custom form, but the retained Kind R8 homepage remained more distinctive and editorially composed.
 
-The $3.25440 result must not be read as a direct 24.6× regression against Kind R8's $0.13247 because R8 used Luna and the treatment used Sol. It is still operationally material, and the treatment did not supply enough visual benefit to justify continuing to Surge. A fair stochastic comparison would require the same model route, frozen authority and architecture, and a predeclared cost fuse. Until that matched Kind comparison passes, V4 remains a candidate rather than the canonical product generator.
+The $3.25440 result must not be read as a direct 24.6× regression against Kind R8's $0.13247 because R8 used Luna and the treatment used Sol. It is still operationally material, and the treatment did not supply enough visual benefit to justify continuing to Surge.
+
+The matched Luna comparison subsequently ran as `run_06d873d5f8be4a66bc81610a0e2cd441`, reusing R8's exact architecture plan and source-inventory hashes with the original $0.20 fuse. It produced candidate `version_aa85b7fd5505644326235b05c98a7489`, passed the hard gate, used 16 author requests, and cost $0.09015719. That is 31.9% below R8 and 15.3% below the lean-loop V2 diagnostic. Its 1,417,501 ms recorded duration was 48.6% above R8 and 152.8% above lean-loop V2.
+
+The run is infrastructure-invalid. Its first 7:45 inspection was followed by an exact 60-second sandbox transport timeout and recycle. Its second inspection reached the eight-minute recoverable ceiling; the following apply repeated the exact 60-second timeout and recycle. In both cases the identical source applied in about 13 seconds on the replacement sandbox, proving that source, build, and database state were not the cause. The run also repeated the missing retained customer-portal destination seen in the Sol treatment before repairing it.
+
+Human review found the matched V4 site visually strong, with cleaner logo scale, responsive composition, and a good custom managed form, but not a clear win over R8's more distinctive editorial treatment. Its final artifact retained more advisory copy, identity-device, orphan-route, and target-size findings than the independently replayed R8 reference. Surge remains paused. V4 remains a candidate rather than the canonical product generator until long-inspection sandbox continuity is fixed and this same matched Kind arm passes without recycle.
 
 ## Deployed rollback baseline
 

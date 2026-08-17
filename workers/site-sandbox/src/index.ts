@@ -1133,8 +1133,10 @@ function canonicalJson(value: unknown): string {
 function sandboxFor(env: Env, sessionId: string) {
   return getSandbox(env.Sandbox, sessionId, {
     normalizeId: true,
-    sleepAfter: "10m",
-    keepAlive: false,
+    // Authoring has multi-minute browser-inspection gaps between mutations.
+    // Keep the owned container available for the complete run; terminal and
+    // recovery paths explicitly destroy it.
+    keepAlive: true,
     enableDefaultSession: false
   });
 }

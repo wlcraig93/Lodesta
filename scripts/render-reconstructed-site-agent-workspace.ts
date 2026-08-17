@@ -129,9 +129,13 @@ async function readReconstructedSourceFiles(root: string) {
 const requestedSessionId = process.env.LODESTA_RECONSTRUCT_SESSION_ID?.trim();
 const sessionId = requestedSessionId || `reconstruct_${randomUUID().replaceAll("-", "").slice(0, 48)}`;
 if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("LODESTA_RECONSTRUCT_SESSION_ID is invalid.");
-process.stdout.write(`${JSON.stringify({ phase: "starting", sessionId, repeatApplyAfterInspection })}\n`);
+const emitPhase = (phase: string, detail: Record<string, unknown> = {}) => {
+  process.stdout.write(`${JSON.stringify({ phase, sessionId, ...detail })}\n`);
+};
+emitPhase("starting", { repeatApplyAfterInspection, inspectionCount });
 const sandbox = configuredSiteSandboxClientForDeployment(deployment);
 let operationError: unknown;
+let operationPhase = "bootstrap";
 let result: Awaited<ReturnType<typeof runArtifactBrowserGate>> | undefined;
 let appliedRevision: string | undefined;
 let bootstrapDurationMs: number | undefined;
@@ -143,10 +147,14 @@ try {
   const bootstrapStartedAt = performance.now();
   const bootstrapped = await sandbox.bootstrap(sessionId, effectiveBuildInput);
   bootstrapDurationMs = Math.round(performance.now() - bootstrapStartedAt);
+  emitPhase("bootstrap_completed", { durationMs: bootstrapDurationMs });
+  operationPhase = "initial_apply";
   const applyStartedAt = performance.now();
   const applied = await sandbox.apply(sessionId, bootstrapped.revision, sourceFiles);
   applyDurationMs = Math.round(performance.now() - applyStartedAt);
   appliedRevision = applied.revision;
+  emitPhase("initial_apply_completed", { durationMs: applyDurationMs, revision: appliedRevision });
+  operationPhase = "artifact_fetch";
   const authoredArtifact = await sandbox.getArtifact(sessionId);
   const availableRoutes = authoredArtifact.routes.map((route) => route.path);
   const missingRoutes = requestedRoutes.filter((route) => !availableRoutes.includes(route));
@@ -157,6 +165,8 @@ try {
     runtimeSeriesId: effectiveBuildInput.capabilityConfiguration.trustedRuntimeSeries
   });
   for (let inspection = 1; inspection <= inspectionCount; inspection += 1) {
+    operationPhase = `inspection_${inspection}`;
+    emitPhase("inspection_started", { inspection });
     const inspectionStartedAt = performance.now();
     result = await runArtifactBrowserGate({
       prepared,
@@ -166,16 +176,22 @@ try {
       routePaths: requestedRoutes,
       captureMode: "review"
     });
-    inspectionDurationsMs.push(Math.round(performance.now() - inspectionStartedAt));
+    const inspectionDurationMs = Math.round(performance.now() - inspectionStartedAt);
+    inspectionDurationsMs.push(inspectionDurationMs);
+    emitPhase("inspection_completed", { inspection, durationMs: inspectionDurationMs });
   }
   if (!result) throw new Error("Reconstructed browser inspection did not produce a result.");
   if (repeatApplyAfterInspection) {
+    operationPhase = "repeat_apply";
+    emitPhase("repeat_apply_started");
     const repeatApplyStartedAt = performance.now();
     const repeated = await sandbox.apply(sessionId, appliedRevision, sourceFiles);
     repeatApplyDurationMs = Math.round(performance.now() - repeatApplyStartedAt);
     appliedRevision = repeated.revision;
+    emitPhase("repeat_apply_completed", { durationMs: repeatApplyDurationMs, revision: appliedRevision });
   }
 
+  operationPhase = "persist_captures";
   const captureDirectory = resolve(reconstructionDirectory, "captures");
   await mkdir(captureDirectory, { recursive: true });
   for (const [index, capture] of result.captures.entries()) {
@@ -248,13 +264,17 @@ try {
   })}\n`);
 } catch (error) {
   operationError = error;
+  emitPhase("operation_failed", { operationPhase, error: errorSummary(error) });
 }
 
 let cleanupError: unknown;
 try {
+  emitPhase("cleanup_started");
   await sandbox.destroy(sessionId);
+  emitPhase("cleanup_completed");
 } catch (error) {
   cleanupError = error;
+  emitPhase("cleanup_failed", { error: errorSummary(error) });
 }
 
 if (operationError && cleanupError) {
@@ -262,3 +282,14 @@ if (operationError && cleanupError) {
 }
 if (operationError) throw operationError;
 if (cleanupError) throw cleanupError;
+
+function errorSummary(error: unknown) {
+  if (!(error instanceof Error)) return { name: "Error", message: "Unknown diagnostic failure." };
+  return {
+    name: error.name,
+    message: error.message.slice(0, 500),
+    ...(error.cause instanceof Error
+      ? { cause: { name: error.cause.name, message: error.cause.message.slice(0, 500) } }
+      : {})
+  };
+}

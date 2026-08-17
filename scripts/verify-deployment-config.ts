@@ -11,8 +11,11 @@ const workerSource = readFileSync("workers/runner.ts", "utf8");
 const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "utf8");
 assert(
   sandboxWorkerSource.includes("enableDefaultSession: false")
-    && !sandboxWorkerSource.includes("enableDefaultSession: true"),
-  "Sandbox operations must be sessionless; shared implicit shell state can leak across authoring phases."
+    && !sandboxWorkerSource.includes("enableDefaultSession: true")
+    && sandboxWorkerSource.includes("keepAlive: true")
+    && !sandboxWorkerSource.includes("keepAlive: false")
+    && !sandboxWorkerSource.includes("sleepAfter:"),
+  "Sandbox operations must isolate shell state and stay alive until explicit lifecycle cleanup."
 );
 const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
 const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts", "utf8");

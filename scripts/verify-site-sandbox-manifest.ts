@@ -29,12 +29,18 @@ const packageLock = JSON.parse(await readFile("package-lock.json", "utf8")) as {
 };
 const sandboxSdkVersion = packageLock.packages?.["node_modules/@cloudflare/sandbox"]?.version;
 const sandboxDockerfile = await readFile("workers/site-sandbox/Dockerfile", "utf8");
+const sandboxWorkerSource = await readFile("workers/site-sandbox/src/index.ts", "utf8");
 const sandboxImageVersion = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:([^\s@]+)(?:@\S+)?$/m)?.[1];
 assert.ok(sandboxSdkVersion, "The installed @cloudflare/sandbox SDK version is unavailable.");
 assert.equal(
   sandboxImageVersion,
   sandboxSdkVersion,
   "The Cloudflare Sandbox SDK and container image versions must match exactly."
+);
+assert.match(
+  sandboxWorkerSource,
+  /async function sandboxFor[\s\S]*await sandbox\.setSleepAfter\("15m"\);[\s\S]*await sandbox\.setKeepAlive\(false\);/,
+  "Sandbox lifecycle configuration must complete before filesystem work begins."
 );
 
 const fixtureRoot = await mkdtemp(join(tmpdir(), "lodesta-sandbox-manifest-"));
@@ -103,5 +109,6 @@ process.stdout.write(`${JSON.stringify({
   developmentConfigIndependent: true,
   workerBridgeCovered: true,
   sandboxSdkImageVersionAligned: true,
+  sandboxLifecycleConfigurationAwaited: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

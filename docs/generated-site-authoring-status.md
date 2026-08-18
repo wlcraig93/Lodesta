@@ -64,6 +64,8 @@ The run reproduced the infrastructure fault before the first mechanical or visua
 
 Cloudflare's runtime logs exposed two concrete defects in the deployed sandbox bridge: the Worker SDK reported `0.12.7` while the base container reported `0.12.3`, and returned process RPC stubs were repeatedly left undisposed. The next sandbox release aligns both sides at `0.12.7`, explicitly disposes every returned process handle, and makes exact SDK/image version equality a preflight invariant. This is a platform correction, not an authoring or V4 promotion result.
 
+A post-release, no-model reproduction then used the retained 517,111-byte V4 workspace and the exact 465-second idle interval. The first apply completed in 14.8 seconds without retry, but the second found the container filesystem absent. Inspection of SDK `0.12.7` showed that `getSandbox` dispatches lifecycle configuration without awaiting its Durable Object RPC. The Worker now explicitly awaits the 15-minute sleep policy before every container filesystem operation; another deterministic reproduction is required before paid authoring resumes.
+
 ## Deployed rollback baseline
 
 The prior deployed generator is pinned to the following tuple:

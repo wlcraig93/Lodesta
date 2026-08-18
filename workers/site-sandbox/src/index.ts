@@ -133,7 +133,7 @@ export default {
 
     const previewMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/preview(\/.*)?$/);
     if (request.method === "GET" && previewMatch) {
-      const sandbox = sandboxFor(env, previewMatch[1]);
+      const sandbox = await sandboxFor(env, previewMatch[1]);
       const built = await sandbox.exists(`${workspaceRoot}/dist/index.html`);
       if (!built.exists) return json({ error: "preview_not_ready" }, 409);
       try {
@@ -152,7 +152,7 @@ export default {
     const operationMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/operations\/([a-f0-9]{64})$/);
     if (request.method === "GET" && operationMatch) {
       const sessionId = operationMatch[1];
-      const sandbox = sandboxFor(env, sessionId);
+      const sandbox = await sandboxFor(env, sessionId);
       try {
         const status = await operationStatus(
           sandbox,
@@ -172,7 +172,7 @@ export default {
     if (!match) return json({ error: "not_found" }, 404);
     const sessionId = match[1];
     const action = match[2];
-    const sandbox = sandboxFor(env, sessionId);
+    const sandbox = await sandboxFor(env, sessionId);
 
     try {
       if (request.method === "POST" && action === "bootstrap") {
@@ -1159,16 +1159,13 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function sandboxFor(env: Env, sessionId: string) {
-  return getSandbox(env.Sandbox, sessionId, {
-    normalizeId: true,
-    // The longest supported tool gap is eight minutes. A bounded idle window
-    // preserves continuity without allowing abandoned sessions to consume the
-    // deployment's finite instance capacity indefinitely.
-    sleepAfter: "15m",
-    keepAlive: false,
-    enableDefaultSession: false
-  });
+async function sandboxFor(env: Env, sessionId: string) {
+  const sandbox = getSandbox(env.Sandbox, sessionId, { enableDefaultSession: false });
+  // getSandbox applies lifecycle options without awaiting the Durable Object RPC.
+  // Make the bounded continuity policy a prerequisite for every filesystem call.
+  await sandbox.setSleepAfter("15m");
+  await sandbox.setKeepAlive(false);
+  return sandbox;
 }
 
 function authorized(request: Request, env: Env) {

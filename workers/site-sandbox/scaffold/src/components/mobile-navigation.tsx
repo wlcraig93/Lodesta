@@ -1,6 +1,7 @@
-/* @lodesta-recipe {"id":"mobile-navigation","version":1,"templateHash":"sha256:61ababcf6c33c09b1de27d97fdf99ebde624197bace6328907f441d644da993f"} */
+/* @lodesta-recipe {"id":"mobile-navigation","version":1,"templateHash":"sha256:06b946e0891d8168ec3710613d2eaf556838ee1dbf56ba13a9d266792261c366"} */
 import { type ReactNode } from "react";
 import { NavigationDisclosure } from "#lodesta-sdk";
+import { RequiredDestinations } from "../required-destinations";
 
 export function MobileNavigation({
   children,
@@ -24,6 +25,6 @@ export function MobileNavigation({
     trigger={<span className="recipe-mobile-navigation__artwork" aria-hidden="true"><span /><span /><span /></span>}
   >
     <div className="recipe-mobile-navigation__links">{children}</div>
-    {action ? <div className="recipe-mobile-navigation__action">{action}</div> : null}
+    <div className="recipe-mobile-navigation__action"><RequiredDestinations />{action}</div>
   </NavigationDisclosure>;
 }

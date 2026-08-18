@@ -57,7 +57,9 @@ assert.match(workflow, /currentFiles = resumedSandboxSource\?\.files[\s\S]*mater
 for (const path of ["mobile-navigation.tsx", "mobile-navigation.css", "managed-lead-form.tsx", "managed-lead-form.css"]) {
   assert(workflow.includes(path), `Initial materialization must require ${path}.`);
 }
-assert(workflow.includes("assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision)")
+assert(workflow.includes("assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision, buildInput)")
+  && workflow.includes('files.get("src/required-destinations.tsx")')
+  && workflow.includes("missing_required_destination")
   && workflow.includes("materialized_initial_source_invalid")
   && workflow.includes("currentFiles: WorkspaceSourceFile[]"), "Initial source must fail loudly before authoring and every manager invocation must receive an explicit source array.");
 assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")

@@ -15,6 +15,8 @@ import {
   sandboxToolchainIdentity
 } from "../scaffold/component-manifest";
 import { promoteGenerationTransaction } from "./generation-transaction";
+import { requiredDestinationsSource, requiredDestinationsSourcePath } from "./initial-source";
+import { sitePublicBuildInputSchema } from "../../../packages/site-contracts";
 export { ContainerProxy };
 
 export class Sandbox extends CloudflareSandbox {
@@ -329,8 +331,9 @@ async function bootstrapWorkspace(
   publicBuildInput: unknown
 ) {
   await sandbox.killAllProcesses().catch(() => undefined);
-  const publicInputJson = canonicalJson(publicBuildInput);
-  const revision = await digest(`${sessionId}:bootstrap:${publicInputJson}`);
+  const parsedPublicBuildInput = sitePublicBuildInputSchema.parse(publicBuildInput);
+  const publicInputJson = canonicalJson(parsedPublicBuildInput);
+  const revision = await digest(`${sessionId}:bootstrap:${sandboxToolchainIdentity}:${publicInputJson}`);
   const payloadHash = await digest(publicInputJson);
   const generationRoot = generationPath(revision);
   await sandbox.mkdir(generationsRoot, { recursive: true });
@@ -348,6 +351,10 @@ async function bootstrapWorkspace(
     });
   }
   await writeGenerationInput(sandbox, generationRoot, publicInputJson);
+  await sandbox.writeFile(
+    `${generationRoot}/${requiredDestinationsSourcePath}`,
+    requiredDestinationsSource(parsedPublicBuildInput)
+  );
   await sandbox.writeFile(`${generationRoot}/.lodesta/revision`, revision);
   const source = await readSourceFilesAt(sandbox, generationRoot);
   await writeGenerationMetadata(sandbox, generationRoot, {
@@ -1133,10 +1140,11 @@ function canonicalJson(value: unknown): string {
 function sandboxFor(env: Env, sessionId: string) {
   return getSandbox(env.Sandbox, sessionId, {
     normalizeId: true,
-    // Authoring has multi-minute browser-inspection gaps between mutations.
-    // Keep the owned container available for the complete run; terminal and
-    // recovery paths explicitly destroy it.
-    keepAlive: true,
+    // The longest supported tool gap is eight minutes. A bounded idle window
+    // preserves continuity without allowing abandoned sessions to consume the
+    // deployment's finite instance capacity indefinitely.
+    sleepAfter: "15m",
+    keepAlive: false,
     enableDefaultSession: false
   });
 }

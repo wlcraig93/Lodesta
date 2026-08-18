@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import postcss from "postcss";
 import { classifyRecipeSource } from "../packages/site-agent";
 import { validateWorkspaceSourcePolicy } from "../workers/site-sandbox/scaffold/platform/source-policy";
+import { requiredDestinationsSource } from "../workers/site-sandbox/src/initial-source";
+import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const paths = [
   "src/components/managed-lead-form.css",
@@ -14,6 +16,14 @@ const files = await Promise.all(paths.map(async (path) => ({
   path,
   content: await readFile(`workers/site-sandbox/scaffold/${path}`, "utf8")
 })));
+const input = buildSyntheticSiteInput("site-runtime-v4");
+input.business.links.push(
+  { id: "portal", kind: "other", label: "Customer Login", url: "https://kindpest.fieldportals.com/", publicEligible: true, sourceFactIds: [] },
+  { id: "cms", kind: "other", label: "Admin Login", url: "https://example.com/wp-admin", publicEligible: true, sourceFactIds: [] }
+);
+const destinations = { path: "src/required-destinations.tsx", content: requiredDestinationsSource(input) };
+assert.match(destinations.content, /<SafeLink id="portal">\{"Customer Login"\}<\/SafeLink>/);
+assert.doesNotMatch(destinations.content, /id="cms"/);
 
 for (const file of files) {
   const classification = classifyRecipeSource(file.content);
@@ -50,7 +60,8 @@ assert(orderedCss.includes("components/sections.css"));
 const policyFindings = validateWorkspaceSourcePolicy([
   { path: "src/site.tsx", content: `export const siteDefinition={routes:[{path:"/",element:<main>Ready</main>}]};` },
   { path: "src/styles.css", content: ":root{--site-color-text:#111}" },
-  ...files
+  ...files,
+  destinations
 ], { runtimeSeriesId: "site-runtime-v4" });
 assert.deepEqual(policyFindings, []);
 

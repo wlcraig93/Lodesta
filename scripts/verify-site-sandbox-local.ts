@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { requiredDestinationsSource } from "../workers/site-sandbox/src/initial-source";
 import {
   formatLocalHoursValue,
   formatLocalAddress,
@@ -34,6 +35,14 @@ input.business.assets.push({
   activeForFutureBuilds: true
 });
 input.assetRevisionIds.push("asset_revision_hero");
+input.business.links.push({
+  id: "link_customer_portal",
+  kind: "other",
+  label: "Customer Login",
+  url: "https://synthetic.fieldportals.com/",
+  publicEligible: true,
+  sourceFactIds: []
+});
 const recipeFiles = await Promise.all([
   "src/components/managed-lead-form.css",
   "src/components/managed-lead-form.tsx",
@@ -57,9 +66,10 @@ export const siteDefinition = {
 };`
   },
   { path: "src/styles.css", content: ":root{--site-color-background:#fff;--site-color-text:#111;--site-color-accent:#176b5b;--site-space-4:1rem;--site-content-width:72rem;--site-radius-md:.5rem;--site-shadow-md:0 1rem 2rem #0002;--site-motion-standard:180ms}html{scroll-behavior:smooth}body{margin:0;color:var(--site-color-text);background:var(--site-color-background);font:16px Arial,sans-serif}" },
+  { path: "src/required-destinations.tsx", content: requiredDestinationsSource(input) },
   { path: "src/components/LocalIntro.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered for <BusinessName />.</p>; }` },
   { path: "src/components/PageShell.tsx", content: `import type { ReactNode } from "react"; import { SiteFooter } from "./SiteFooter"; import { SiteHeader } from "./SiteHeader"; export function PageShell({children}:{children:ReactNode}){ return <><SiteHeader />{children}<SiteFooter /></>; }` },
-  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName, NavigationDisclosure } from "#lodesta-sdk"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><NavigationDisclosure id="primary-navigation" behavior="modal" label="Primary" trigger={<span>Menu</span>}><a href="/">Home</a><a href="/about">About</a></NavigationDisclosure></header>; }` },
+  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName } from "#lodesta-sdk"; import { MobileNavigation } from "./mobile-navigation"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><MobileNavigation><a href="/">Home</a><a href="/about">About</a></MobileNavigation></header>; }` },
   { path: "src/components/SiteFooter.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function SiteFooter(){ return <footer>Visit <BusinessName /></footer>; }` },
   { path: "src/components/NavigationFixtures.tsx", content: `import { NavigationDisclosure } from "#lodesta-sdk"; export function NavigationFixtures(){ return <NavigationDisclosure id="inline-navigation" label="Secondary" behavior="inline" trigger={<span>Menu choices</span>}><a href="/about">About</a></NavigationDisclosure>; }` },
   { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" },
@@ -122,6 +132,7 @@ try {
   assert(artifact.routes?.[0]?.bodyHtml?.includes('aria-label="Open navigation"'), "NavigationDisclosure omitted its default accessible label");
   assert(artifact.routes?.[0]?.bodyHtml?.includes('data-lodesta-navigation-behavior="inline"'), "NavigationDisclosure did not retain an owner-selected inline behavior");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Menu choices"), "NavigationDisclosure did not retain a custom visible trigger");
+  assert(artifact.routes?.[0]?.bodyHtml?.includes('href="https://synthetic.fieldportals.com/"'), "The materialized customer portal was not structurally seeded into mobile navigation.");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("(512) 555-0142"), "compiler did not render the canonical formatted phone");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("Monday–Friday: 8:00 AM-5:30 PM"), "compiler did not render a compact source-bound hours summary");
   assert(artifact.routes?.[0]?.bodyHtml?.includes("<dt>Monday</dt><dd>8:00 AM-5:30 PM</dd>"), "compiler did not render structured weekly hours");

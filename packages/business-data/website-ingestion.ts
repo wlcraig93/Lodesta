@@ -10,6 +10,7 @@ import {
   platformSiteRecordSchema,
   siteIntentSchema,
   sourceSnapshotSchema,
+  isCustomerPortalLink,
   type BusinessOffering,
   type BusinessState,
   type FormDefinition,
@@ -18,6 +19,7 @@ import {
   type SiteIntent,
   type SourceSnapshot
 } from "@/packages/site-contracts";
+export { isCustomerPortalLink } from "@/packages/site-contracts";
 import { WebsiteCrawlError } from "./crawl-errors";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
@@ -915,23 +917,6 @@ export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAs
 
 export function sourcePageForFunctionalLink(crawl: CrawlAssessment, destinationUrl: string) {
   return crawl.pageSummaries.find((page) => page.linkReferences.some((link) => link.href === destinationUrl))?.url;
-}
-
-export function isCustomerPortalLink(href: string, text?: string) {
-  try {
-    const url = new URL(href);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (/\b(?:wp-(?:admin|login)|administrator)\b/i.test(url.pathname)) return false;
-    if (/^(?:facebook|instagram|linkedin|x|twitter|tiktok|youtube)\.com$/.test(host)) return false;
-    if (/(?:^|\.)(?:pestportals|fieldportals)\.com$/.test(host)) return true;
-    const label = normalizedText(text ?? "");
-    const destination = normalizedText(`${url.pathname} ${url.search}`);
-    return /\b(?:customer|client|member|resident|owner)\b/.test(`${label} ${destination}`)
-      && /\b(?:portal|login|log in|sign in|account)\b/.test(`${label} ${destination}`)
-      || /^(?:customer |client )?(?:portal|login|log in|sign in|my account)$/.test(label);
-  } catch {
-    return false;
-  }
 }
 
 export function assertSourceSuitableForGeneration(

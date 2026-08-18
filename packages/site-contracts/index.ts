@@ -1,4 +1,6 @@
 import { z } from "zod";
+
+export * from "./functional-links";
 export * from "./platform-manifest";
 
 const isoTimestamp = z.string().datetime({ offset: true });

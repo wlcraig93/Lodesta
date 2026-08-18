@@ -92,6 +92,7 @@ import {
   platformSiteRecordSchema,
   siteVersionSchema,
   siteWorkspaceRevisionSchema,
+  isCustomerPortalLink,
   type SiteAgentRun,
   type SiteAgentContinuationHead,
   type AssetRevision,
@@ -1023,7 +1024,7 @@ export class SiteAuthoringWorkflow {
         ? await this.sandbox.getSource(sandboxState.session.sandboxId!)
         : undefined;
       if (materializedInitialSource) {
-        assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision);
+        assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision, buildInput);
       }
       let currentFiles = resumedSandboxSource?.files
         ?? materializedInitialSource?.files
@@ -5281,7 +5282,8 @@ const requiredInitialRecipeFiles = new Map<string, { id: "mobile-navigation" | "
 
 function assertMaterializedInitialSource(
   source: { revision: string; files: WorkspaceSourceFile[] },
-  bootstrapRevision: string
+  bootstrapRevision: string,
+  buildInput: SitePublicBuildInput
 ) {
   const invalid = (reason: string): never => {
     throw new Error(`materialized_initial_source_invalid:${reason}`);
@@ -5289,6 +5291,15 @@ function assertMaterializedInitialSource(
   if (source.revision !== bootstrapRevision) invalid("revision_mismatch");
   if (source.files.length === 0) invalid("empty");
   const files = new Map(source.files.map((file) => [file.path, file.content]));
+  const requiredDestinations = files.get("src/required-destinations.tsx")
+    ?? invalid("missing:src/required-destinations.tsx");
+  for (const link of buildInput.business.links.filter((candidate) => (
+    candidate.publicEligible && isCustomerPortalLink(candidate.url, candidate.label)
+  ))) {
+    if (!requiredDestinations.includes(`id=${JSON.stringify(link.id)}`)) {
+      invalid(`missing_required_destination:${link.id}`);
+    }
+  }
   for (const [path, expected] of requiredInitialRecipeFiles) {
     const content = files.get(path);
     if (content === undefined) throw new Error(`materialized_initial_source_invalid:missing:${path}`);

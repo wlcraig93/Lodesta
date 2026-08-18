@@ -1,6 +1,6 @@
 # Generated-site authoring status
 
-Date: 2026-08-17
+Date: 2026-08-18
 
 ## V4 implementation status
 
@@ -22,17 +22,25 @@ The first post-hardening Kind treatment used the ordinary hosted queue and worke
 - usage: 18 author requests, three `inspect_site` calls plus `finish`, 1,640,298 ms recorded duration, and $3.25439530 estimated model cost; and
 - model route: Sol for the author and Luna for architecture.
 
-All four recipe files were present in the retained final source with their expected IDs, versions, and provenance headers. The managed custom form, authored mobile trigger, opened navigation, Escape/focus behavior, retained customer-portal destination, and managed submission contract passed final verification. Three source applies succeeded against one long-lived sandbox after multi-minute inspection gaps, with no replay, recycle, or transport timeout. This validates the `keepAlive` lifecycle correction that replaced the earlier post-inspection 60-second `/apply` failures.
+All four recipe files were present in the retained final source with their expected IDs, versions, and provenance headers. The managed custom form, authored mobile trigger, opened navigation, Escape/focus behavior, retained customer-portal destination, and managed submission contract passed final verification. Three source applies succeeded against one long-lived sandbox after multi-minute inspection gaps, with no replay, recycle, or transport timeout. That single run showed the lifecycle could succeed; it did not validate `keepAlive` as the cause or establish continuity reliability.
 
 The authoring result is not a promotion result. The first source write contained malformed JSX and required repair. The first inspection found unsupported guarantee copy and shared contrast failures. The second found a missing customer-portal destination and low-contrast navigation/form actions. The third inspection passed. Final human review found a clean, restrained, correctly branded site and a sound custom form, but the retained Kind R8 homepage remained more distinctive and editorially composed.
 
 The $3.25440 result must not be read as a direct 24.6× regression against Kind R8's $0.13247 because R8 used Luna and the treatment used Sol. It is still operationally material, and the treatment did not supply enough visual benefit to justify continuing to Surge.
 
-The matched Luna comparison subsequently ran as `run_06d873d5f8be4a66bc81610a0e2cd441`, reusing R8's exact architecture plan and source-inventory hashes with the original $0.20 fuse. It produced candidate `version_aa85b7fd5505644326235b05c98a7489`, passed the hard gate, used 16 author requests, and cost $0.09015719. That is 31.9% below R8 and 15.3% below the lean-loop V2 diagnostic. Its 1,417,501 ms recorded duration was 48.6% above R8 and 152.8% above lean-loop V2.
+The matched Luna comparison subsequently ran as `run_06d873d5f8be4a66bc81610a0e2cd441`, reusing R8's exact architecture plan and source-inventory hashes with the original $0.20 fuse. It produced candidate `version_aa85b7fd5505644326235b05c98a7489`, passed the hard gate, used 16 author requests, recorded $0.09015719 of model cost, and took 1,417,501 ms. Because two sandbox recycles changed the request path, this infrastructure-invalid run cannot establish V4 economics. Current matched cost is unknown. The observed duration was 48.6% above R8 and 152.8% above lean-loop V2.
 
 The run is infrastructure-invalid. Its first 7:45 inspection was followed by an exact 60-second sandbox transport timeout and recycle. Its second inspection reached the eight-minute recoverable ceiling; the following apply repeated the exact 60-second timeout and recycle. In both cases the identical source applied in about 13 seconds on the replacement sandbox, proving that source, build, and database state were not the cause. The run also repeated the missing retained customer-portal destination seen in the Sol treatment before repairing it.
 
-Human review found the matched V4 site visually strong, with cleaner logo scale, responsive composition, and a good custom managed form, but not a clear win over R8's more distinctive editorial treatment. Its final artifact retained more advisory copy, identity-device, orphan-route, and target-size findings than the independently replayed R8 reference. Surge remains paused. V4 remains a candidate rather than the canonical product generator until long-inspection sandbox continuity is fixed and this same matched Kind arm passes without recycle.
+Human review found the matched V4 site visually strong, with cleaner logo scale, responsive composition, and a good custom managed form, but not a clear win over R8's more distinctive editorial treatment. Its final artifact retained more advisory copy, identity-device, orphan-route, and target-size findings than the independently replayed R8 reference. Surge remains paused. V4 remains a candidate rather than the canonical product generator.
+
+## Sandbox diagnosis and corrective change
+
+A zero-model synthetic reproduction separated lifecycle behavior from authoring variance. The exact 60-second signature is Lodesta's two 30-second submission attempts, not a Cloudflare idle threshold. Under six simultaneous synthetic sessions, one six-minute case failed with the provider message `The sandbox container stopped while the operation was pending`, while independent 7:45 and nine-minute cases succeeded on unchanged placements. The sandbox deployment permits five simultaneous instances, so the six-session case also exposed a real capacity mismatch: `keepAlive: true` prevented abandoned instances from ever releasing their slot.
+
+The correction restores `sleepAfter: "15m"` with `keepAlive: false`. Fifteen minutes remains above the complete eight-minute inspection ceiling, while abandoned sessions scale down and ordinary terminal paths still destroy their instance explicitly. Cloudflare host replacement remains inherently irregular, so the existing deterministic full-source recycle remains the trusted recovery boundary; a recovered provider replacement is infrastructure telemetry, not evidence that generated source was invalid.
+
+The initial mobile-navigation recipe now also renders a generated `src/required-destinations.tsx` file containing exact owner-authoritative customer-portal `SafeLink` IDs. Bootstrap validation rejects a missing or incorrect required destination before model cost. This turns the repeated portal omission from a prompt-memory task into editable starting source without restoring owner edits on later runs.
 
 ## Deployed rollback baseline
 

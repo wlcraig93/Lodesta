@@ -12,10 +12,10 @@ const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "u
 assert(
   sandboxWorkerSource.includes("enableDefaultSession: false")
     && !sandboxWorkerSource.includes("enableDefaultSession: true")
-    && sandboxWorkerSource.includes("keepAlive: true")
-    && !sandboxWorkerSource.includes("keepAlive: false")
-    && !sandboxWorkerSource.includes("sleepAfter:"),
-  "Sandbox operations must isolate shell state and stay alive until explicit lifecycle cleanup."
+    && sandboxWorkerSource.includes('sleepAfter: "15m"')
+    && sandboxWorkerSource.includes("keepAlive: false")
+    && !sandboxWorkerSource.includes("keepAlive: true"),
+  "Sandbox operations must isolate shell state and use a bounded idle lifecycle above the inspection ceiling."
 );
 const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
 const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts", "utf8");

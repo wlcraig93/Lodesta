@@ -43,7 +43,6 @@ export type ManagerAuthoringProfile = {
   assetEvidencePresentation: "contact-sheet";
   assetEvidenceReferences?: readonly ManagerAssetEvidenceReference[];
   sourceInventoryMode: "representative-customer-index";
-  visualInspectionImageCoverage: "all-representative-routes";
   visualInspectionImageDetail: "high";
   visualInspectionFeedback: "component-diagnostic-route-family-quality-led";
 };
@@ -68,7 +67,6 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     assetEvidenceLimit: 2,
     assetEvidencePresentation: "contact-sheet",
     sourceInventoryMode: "representative-customer-index",
-    visualInspectionImageCoverage: "all-representative-routes",
     visualInspectionImageDetail: "high",
     visualInspectionFeedback: "component-diagnostic-route-family-quality-led"
   };
@@ -95,7 +93,6 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
     assetEvidenceLimit: profile.assetEvidenceLimit,
     assetEvidencePresentation: profile.assetEvidencePresentation,
     sourceInventoryMode: profile.sourceInventoryMode,
-    visualInspectionImageCoverage: profile.visualInspectionImageCoverage,
     visualInspectionImageDetail: profile.visualInspectionImageDetail,
     architectureEvidenceMode: profile.architectureEvidenceMode,
     architectureBrowserCoverage: profile.architectureBrowserCoverage,

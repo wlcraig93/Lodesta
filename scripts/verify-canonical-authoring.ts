@@ -32,10 +32,11 @@ assert.deepEqual(ia.report.unreachableFromHome, ["/faq"]);
 assert(ia.findings.length <= 3);
 assert(ia.findings.every((finding) => finding.severity !== "error"));
 
-const [workflow, manager, managerRuntime, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await Promise.all([
+const [workflow, manager, managerRuntime, authoringProfile, skills, worker, nativeSdk, v4Sdk, canaryRoute] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
   readFile("packages/site-platform/manager-runtime.ts", "utf8"),
+  readFile("packages/site-agent/authoring-profile.ts", "utf8"),
   readFile("packages/site-agent/skills.ts", "utf8"),
   readFile("workers/site-sandbox/src/index.ts", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
@@ -69,6 +70,11 @@ assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")
   && managerRuntime.includes("browserNavigationCaptureMs")
   && managerRuntime.includes("contactSheetGenerationMs")
   && managerRuntime.includes("persistenceMs"), "Inspection must retain mechanical feedback and surface the eight-minute ceiling as a recoverable tool failure with phase telemetry.");
+assert(workflow.includes("preferredRouteLimit: 4")
+  && workflow.includes("browserRoutePaths: input.releasePlan?.browserRoutePaths")
+  && !workflow.includes("all-representative-routes")
+  && !authoringProfile.includes("all-representative-routes"),
+"The authoring loop must retain its all-route mechanical pass while limiting the separate model-facing visual pass to four representative routes.");
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
 assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);

@@ -127,7 +127,6 @@ import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
   createArtifactContactSheets,
-  createArtifactRouteFamilyContactSheets,
   createMediaContactSheet,
   createSourceMediaContactSheet,
   createArtifactThumbnail,
@@ -2487,7 +2486,6 @@ export class SiteAuthoringWorkflow {
         sandboxRevision,
         route: target.route,
         defaultRoutes: input.releasePlan?.browserRoutePaths,
-        imageCoverage: activeAuthoringProfile?.visualInspectionImageCoverage,
         imageDetail: activeAuthoringProfile?.visualInspectionImageDetail,
         selector: target.selector,
         selectionLabel: target.label,
@@ -3109,7 +3107,6 @@ export class SiteAuthoringWorkflow {
     route?: string;
     inspectAllBuiltRoutes?: boolean;
     defaultRoutes?: readonly string[];
-    imageCoverage?: "all-representative-routes";
     imageDetail?: "high";
     selector?: string;
     selectionLabel?: string;
@@ -3150,7 +3147,7 @@ export class SiteAuthoringWorkflow {
       preferredRoutePaths: preferredRoutes,
       // The author needs a fast visual feedback loop, not a second release
       // gate. The broader gate still verifies its architecture-derived routes.
-      preferredRouteLimit: input.imageCoverage === "all-representative-routes" ? undefined : 4
+      preferredRouteLimit: 4
     });
     const selectedRoutes = (retainedScope.length
       ? retainedScope
@@ -3158,9 +3155,7 @@ export class SiteAuthoringWorkflow {
         0,
         input.route || input.selector
           ? 1
-          : input.imageCoverage === "all-representative-routes"
-            ? undefined
-            : 4
+          : 4
       );
     const browserGate = await runArtifactBrowserGate({
       prepared,
@@ -3178,9 +3173,10 @@ export class SiteAuthoringWorkflow {
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const contactSheetStartedAt = Date.now();
     input.onPhase?.("contact_sheet_generation");
-    const contactSheets = input.imageCoverage === "all-representative-routes" && !input.selector
-      ? await createArtifactRouteFamilyContactSheets(browserGate.captures, selectedRoutes)
-      : [{ routes: selectedRoutes.slice(0, 3), bytes: await createArtifactContactSheet(browserGate.captures, selectedRoutes) }];
+    const contactSheets = [{
+      routes: selectedRoutes.slice(0, 3),
+      bytes: await createArtifactContactSheet(browserGate.captures, selectedRoutes)
+    }];
     const contactSheetMs = Date.now() - contactSheetStartedAt;
     input.onPhase?.("contact_sheet_generation", contactSheetMs);
     input.onPhase?.("persistence");

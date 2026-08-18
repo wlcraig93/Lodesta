@@ -6,7 +6,7 @@ Date: 2026-08-18
 
 The repository now contains the V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, and editable mobile-navigation and managed-form recipes. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
 
-The V4-capable application and sandbox toolchain are now deployed and verified at release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3`. The active green sandbox deployment is `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
+The V4-capable application and sandbox toolchain are now deployed and verified at release `2772f777b65dcb9c886c6a13100dc5c4158b303e`. The active blue sandbox deployment is `sandbox_deployment_01a9e83aaee3c256194f9ffdc705299f`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
 
 The first fresh hosted Kind V4-plus-recipes treatment completed end to end and passed the hard release gate, but it did not establish superiority over the retained canonical baseline. Surge was intentionally not started. See "First hosted V4 treatment" below.
 
@@ -41,6 +41,18 @@ A zero-model synthetic reproduction separated lifecycle behavior from authoring 
 The correction restores `sleepAfter: "15m"` with `keepAlive: false`. Fifteen minutes remains above the complete eight-minute inspection ceiling, while abandoned sessions scale down and ordinary terminal paths still destroy their instance explicitly. Cloudflare host replacement remains inherently irregular, so the existing deterministic full-source recycle remains the trusted recovery boundary; a recovered provider replacement is infrastructure telemetry, not evidence that generated source was invalid.
 
 The initial mobile-navigation recipe now also renders a generated `src/required-destinations.tsx` file containing exact owner-authoritative customer-portal `SafeLink` IDs. Bootstrap validation rejects a missing or incorrect required destination before model cost. This turns the repeated portal omission from a prompt-memory task into editable starting source without restoring owner edits on later runs.
+
+## Post-correction matched Kind rerun
+
+A deployed zero-model checkpoint first held one idle and one preview-active sandbox for nine minutes, then applied identical source on the original placements in 5.9 seconds each with one submission attempt and no replay, timeout, or recycle. The exact matched Kind arm then ran through the ordinary hosted worker as `run_1a5297751c184afebe285a1a5f340632`, using Luna, the original $0.20 fuse, R8's exact architecture plan and inventory hashes, and a fresh blank V4 workspace.
+
+The run produced `version_2997b072edc74a235564ed5efc60ebac`, passed the hard gate, used 12 model requests, recorded $0.08661646, and took 1,159,342 ms. All four recipe files survived in retained source. The navigation rendered the structurally seeded `link_3` customer portal, and the contact page used a custom four-field `LeadField` layout through the narrowed managed-form SDK.
+
+This is still not an infrastructure-valid comparison. The first inspection completed in 441,666 ms: 15,808 ms of build, 141,919 ms of all-route mechanical verification, and 283,832 ms of separate model-facing visual inspection. The following CSS repair then hit the same exact 60-second sandbox transport failure and recycled once; the identical source built on the replacement in 12,341 ms. The second inspection reached the 480-second recoverable ceiling. The deterministic `finish` gate still passed.
+
+The rerun disproves the claim that the bounded lifecycle alone fixed continuity. It also identifies the dominant avoidable delay: `inspect_site` performs an all-route mechanical/browser pass and then a second all-representative visual pass across 14 routes, while `finish` remains the authoritative full gate. The go-forward loop therefore retains the all-route mechanical evidence, limits the separate model-facing visual pass to four representative routes, and leaves `finish` unchanged. This removes the obsolete all-representative authoring-profile switch rather than adding retries or orchestration.
+
+Human comparison again does not show V4 beating R8. V4 has a clearer logo, structurally correct portal, and sound custom form, but R8 has stronger hierarchy and conversion pacing; V4's taller mobile header and contact introduction push the form materially lower. The V4 artifact retained 41 advisory findings versus the historical R8 artifact's 91 informational findings and no warnings. Surge remains paused pending a clean bounded-visual Kind rerun.
 
 ## Deployed rollback baseline
 

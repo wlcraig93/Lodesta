@@ -6,7 +6,7 @@ Date: 2026-08-18
 
 The repository now contains the V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, and editable mobile-navigation and managed-form recipes. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
 
-The V4-capable application and sandbox toolchain are now deployed and verified at release `2772f777b65dcb9c886c6a13100dc5c4158b303e`. The active blue sandbox deployment is `sandbox_deployment_01a9e83aaee3c256194f9ffdc705299f`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
+The V4-capable application and bounded-inspection controller are now deployed and verified at release `757dcc93f4057acee34f450cdffd5d62a44992ee`. The active green sandbox deployment is `sandbox_deployment_dde819809d5f79faf6eeb630b4d75905`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
 
 The first fresh hosted Kind V4-plus-recipes treatment completed end to end and passed the hard release gate, but it did not establish superiority over the retained canonical baseline. Surge was intentionally not started. See "First hosted V4 treatment" below.
 
@@ -53,6 +53,16 @@ This is still not an infrastructure-valid comparison. The first inspection compl
 The rerun disproves the claim that the bounded lifecycle alone fixed continuity. It also identifies the dominant avoidable delay: `inspect_site` performs an all-route mechanical/browser pass and then a second all-representative visual pass across 14 routes, while `finish` remains the authoritative full gate. The go-forward loop therefore retains the all-route mechanical evidence, limits the separate model-facing visual pass to four representative routes, and leaves `finish` unchanged. This removes the obsolete all-representative authoring-profile switch rather than adding retries or orchestration.
 
 Human comparison again does not show V4 beating R8. V4 has a clearer logo, structurally correct portal, and sound custom form, but R8 has stronger hierarchy and conversion pacing; V4's taller mobile header and contact introduction push the form materially lower. The V4 artifact retained 41 advisory findings versus the historical R8 artifact's 91 informational findings and no warnings. Surge remains paused pending a clean bounded-visual Kind rerun.
+
+## Bounded-visual Kind result and Cloudflare root cause
+
+The bounded-visual rerun used the same frozen Kind architecture and inventory, Luna, V4 recipes, and $0.20 fuse as `run_2ad38b8e310849e68cfe4593a23b55b3`. It produced `version_2a53d1b26ed01b41ccb7445a0763bbc5`, passed the hard gate, retained all four recipes plus the structurally seeded `link_3` customer portal, and used the narrowed SDK for a custom four-field form. It recorded $0.12196158, 1,330,676 ms, 17 model requests, and four `inspect_site` calls plus `finish`.
+
+The inspection simplification worked as designed. The model-facing visual phase fell from 283,832 ms to 81–82 seconds per pass; complete inspections were 309,752 ms for the recovered first build and 237–244 seconds thereafter. The all-route mechanical pass remained 143–149 seconds, and `finish` remained the unchanged authoritative gate. The run nevertheless produced 56 advisory warnings, four repair inspections, an unreachable duplicate footer return in retained source, and no clear visual superiority over R8. R8 remains the canonical product generator and Surge remains paused.
+
+The run reproduced the infrastructure fault before the first mechanical or visual pass. Both 30-second `/apply` attempts reached the active Cloudflare Worker with a 545,495-byte request and ended as `outcome: "canceled"` after about 29.9 seconds with only 6 ms of Worker CPU. No candidate build reached the original container. The deterministic recycle then built the identical source in 11.8 seconds and all later applies succeeded on that replacement.
+
+Cloudflare's runtime logs exposed two concrete defects in the deployed sandbox bridge: the Worker SDK reported `0.12.7` while the base container reported `0.12.3`, and returned process RPC stubs were repeatedly left undisposed. The next sandbox release aligns both sides at `0.12.7`, explicitly disposes every returned process handle, and makes exact SDK/image version equality a preflight invariant. This is a platform correction, not an authoring or V4 promotion result.
 
 ## Deployed rollback baseline
 

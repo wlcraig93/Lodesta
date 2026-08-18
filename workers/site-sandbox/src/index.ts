@@ -293,18 +293,23 @@ export default {
         const activeOperation = lock?.operationId && /^[a-f0-9]{64}$/.test(lock.operationId)
           ? await readOperationJournal(sandbox, lock.operationId).catch(() => undefined)
           : undefined;
-        return json({
-          ok: versions.success,
-          revision: generation.revision,
-          activeGeneration: generation,
-          activeGenerationTarget: pointer.success ? pointer.stdout.trim() : undefined,
-          mutationLock: lock,
-          activeOperation: activeOperation ? publicOperationStatus(activeOperation) : undefined,
-          versions: versions.stdout.trim().split("\n"),
-          sandboxManifest,
-          placementId: await sandbox.getContainerPlacementId(),
-          processes: (await sandbox.listProcesses()).map((process) => ({ id: process.id, command: process.command, status: process.status }))
-        });
+        const processes = await sandbox.listProcesses();
+        try {
+          return json({
+            ok: versions.success,
+            revision: generation.revision,
+            activeGeneration: generation,
+            activeGenerationTarget: pointer.success ? pointer.stdout.trim() : undefined,
+            mutationLock: lock,
+            activeOperation: activeOperation ? publicOperationStatus(activeOperation) : undefined,
+            versions: versions.stdout.trim().split("\n"),
+            sandboxManifest,
+            placementId: await sandbox.getContainerPlacementId(),
+            processes: processes.map((process) => ({ id: process.id, command: process.command, status: process.status }))
+          });
+        } finally {
+          disposeRpcAll(processes);
+        }
       }
 
       return json({ error: "method_not_allowed" }, 405);
@@ -567,6 +572,7 @@ async function recoverInterruptedPreparation(
   const processId = `lodesta-build-${journal.operationId.slice(0, 24)}`;
   const process = await sandbox.getProcess(processId).catch(() => null);
   if (process) {
+    disposeRpc(process);
     const now = new Date().toISOString();
     const resumed: OperationJournal = {
       ...journal,
@@ -652,6 +658,8 @@ async function startQueuedOperation(
         autoCleanup: false
       }
     );
+    const processId = process.id;
+    disposeRpc(process);
     const now = new Date().toISOString();
     journal = {
       ...journal,
@@ -666,7 +674,7 @@ async function startQueuedOperation(
         prepareMs: Date.now() - prepareStarted
       },
       candidateRevision: revision,
-      processId: process.id
+      processId
     };
     await writeOperationJournal(sandbox, journal);
     return journal;
@@ -705,43 +713,47 @@ async function advanceRunningOperation(
     await writeOperationJournal(sandbox, journal);
   }
   const process = await sandbox.getProcess(processId);
-  if (process && (process.status === "starting" || process.status === "running")) return journal;
-  const logs = process
-    ? await process.getLogs()
-    : await sandbox.getProcessLogs(processId).catch(() => ({ stdout: "", stderr: "" }));
-  const status = process ? await process.getStatus().catch(() => process.status) : "error";
-  const exitCode = process?.exitCode;
-  if (status !== "completed" || exitCode !== 0) {
-    const sourcePolicyFailed = !validationPassed.exists;
-    return failOperation(sandbox, journal, new SandboxOperationError(
-      sourcePolicyFailed ? 422 : status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? 504 : 422,
-      sourcePolicyFailed
-        ? {
-            error: "source_policy_violation",
-            ...parseSourcePolicyResult(logs.stdout),
-            detail: logs.stderr.trim().slice(-4_000) || "Generated source failed the sandbox source policy."
-          }
-        : {
-            error: status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? "build_timeout" : "build_failed",
-            stdout: logs.stdout.slice(-12_000),
-            stderr: logs.stderr.slice(-12_000)
-          }
-    ), candidateRoot);
-  }
-  const now = new Date().toISOString();
-  journal = {
-    ...journal,
-    phase: "promoting",
-    updatedAt: now,
-    phaseStartedAt: now,
-    timestamps: { ...journal.timestamps, promoting: now },
-    phaseTimings: {
-      ...journal.phaseTimings,
-      buildMs: Math.max(0, Date.parse(now) - Date.parse(journal.timestamps.compiling ?? now))
+  try {
+    if (process && (process.status === "starting" || process.status === "running")) return journal;
+    const logs = process
+      ? await process.getLogs()
+      : await sandbox.getProcessLogs(processId).catch(() => ({ stdout: "", stderr: "" }));
+    const status = process ? await process.getStatus().catch(() => process.status) : "error";
+    const exitCode = process?.exitCode;
+    if (status !== "completed" || exitCode !== 0) {
+      const sourcePolicyFailed = !validationPassed.exists;
+      return failOperation(sandbox, journal, new SandboxOperationError(
+        sourcePolicyFailed ? 422 : status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? 504 : 422,
+        sourcePolicyFailed
+          ? {
+              error: "source_policy_violation",
+              ...parseSourcePolicyResult(logs.stdout),
+              detail: logs.stderr.trim().slice(-4_000) || "Generated source failed the sandbox source policy."
+            }
+          : {
+              error: status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? "build_timeout" : "build_failed",
+              stdout: logs.stdout.slice(-12_000),
+              stderr: logs.stderr.slice(-12_000)
+            }
+      ), candidateRoot);
     }
-  };
-  await writeOperationJournal(sandbox, journal);
-  return finalizeBuiltOperation(sandbox, sessionId, origin, journal);
+    const now = new Date().toISOString();
+    journal = {
+      ...journal,
+      phase: "promoting",
+      updatedAt: now,
+      phaseStartedAt: now,
+      timestamps: { ...journal.timestamps, promoting: now },
+      phaseTimings: {
+        ...journal.phaseTimings,
+        buildMs: Math.max(0, Date.parse(now) - Date.parse(journal.timestamps.compiling ?? now))
+      }
+    };
+    await writeOperationJournal(sandbox, journal);
+    return finalizeBuiltOperation(sandbox, sessionId, origin, journal);
+  } finally {
+    disposeRpc(process);
+  }
 }
 
 async function finalizeBuiltOperation(
@@ -920,7 +932,11 @@ async function failOperation(
 async function cleanupOperationProcess(sandbox: ReturnType<typeof getSandbox>, journal: OperationJournal) {
   if (journal.processId) {
     const process = await sandbox.getProcess(journal.processId).catch(() => null);
-    if (process && (process.status === "starting" || process.status === "running")) await process.kill().catch(() => undefined);
+    try {
+      if (process && (process.status === "starting" || process.status === "running")) await process.kill().catch(() => undefined);
+    } finally {
+      disposeRpc(process);
+    }
   }
   await sandbox.deleteFile(`/tmp/lodesta-source-policy-${journal.operationId}.json`).catch(() => undefined);
   await sandbox.deleteFile(operationRequestPath(journal.operationId)).catch(() => undefined);
@@ -990,9 +1006,15 @@ async function acquireMutationLock(sandbox: ReturnType<typeof getSandbox>, opera
   if (!stale) {
     throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
   }
-  const associatedProcessRunning = (await sandbox.listProcesses()).some((process) =>
-    process.status === "running" && !process.command.includes(`--port ${previewPort}`)
-  );
+  const processes = await sandbox.listProcesses();
+  let associatedProcessRunning: boolean;
+  try {
+    associatedProcessRunning = processes.some((process) =>
+      process.status === "running" && !process.command.includes(`--port ${previewPort}`)
+    );
+  } finally {
+    disposeRpcAll(processes);
+  }
   if (associatedProcessRunning) throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
   await sandbox.exec(`rm -rf ${mutationLock}`);
   const retried = await sandbox.exec(`mkdir ${mutationLock}`);
@@ -1207,20 +1229,34 @@ async function ensurePreviewServer(sessionId: string, sandbox: ReturnType<typeof
     for (let attempt = 0; attempt < 120; attempt += 1) {
       if (await previewServerReady(sandbox)) return;
       const processes = await sandbox.listProcesses();
-      const running = processes.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+      let running: boolean;
+      try {
+        running = processes.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+      } finally {
+        disposeRpcAll(processes);
+      }
       if (!running) {
         const lock = await sandbox.exec(`mkdir ${lockPath}`);
         if (lock.success) {
           try {
             if (await previewServerReady(sandbox)) return;
             const afterLock = await sandbox.listProcesses();
-            const alreadyRunning = afterLock.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+            let alreadyRunning: boolean;
+            try {
+              alreadyRunning = afterLock.some((process) => process.status === "running" && process.command.includes(`--port ${previewPort}`));
+            } finally {
+              disposeRpcAll(afterLock);
+            }
             if (!alreadyRunning) {
               const server = await sandbox.startProcess(
                 `node /opt/lodesta-site-scaffold/platform/preview-server.mjs --host 0.0.0.0 --port ${previewPort}`,
                 { cwd: sessionRoot }
               );
-              await server.waitForPort(previewPort, { path: "/", status: 200, timeout: 30_000 });
+              try {
+                await server.waitForPort(previewPort, { path: "/", status: 200, timeout: 30_000 });
+              } finally {
+                disposeRpc(server);
+              }
             }
             if (!await previewServerReady(sandbox)) throw new Error("Preview process started without becoming reachable.");
             return;
@@ -1250,4 +1286,21 @@ async function previewServerReady(sandbox: ReturnType<typeof getSandbox>) {
   } catch {
     return false;
   }
+}
+
+const rpcDisposeSymbol = (Symbol as unknown as { dispose: symbol }).dispose;
+
+function disposeRpc(value: unknown) {
+  if (!value || typeof value !== "object" || !rpcDisposeSymbol) return;
+  const dispose = (value as Record<symbol, unknown>)[rpcDisposeSymbol];
+  if (typeof dispose !== "function") return;
+  try {
+    dispose.call(value);
+  } catch {
+    // Disposal follows a completed operation and must not replace its result.
+  }
+}
+
+function disposeRpcAll(values: unknown[]) {
+  for (const value of values) disposeRpc(value);
 }

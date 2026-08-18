@@ -1,4 +1,4 @@
-FROM docker.io/cloudflare/sandbox:0.12.3
+FROM docker.io/cloudflare/sandbox:0.12.7
 
 COPY scaffold/package.json scaffold/package-lock.json /opt/lodesta-site-scaffold/
 RUN cd /opt/lodesta-site-scaffold \

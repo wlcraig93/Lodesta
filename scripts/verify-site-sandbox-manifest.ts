@@ -24,6 +24,18 @@ const changed = fingerprintSiteToolchainEntries([
 assert.equal(first, reordered, "Toolchain fingerprint depends on filesystem enumeration order.");
 assert.notEqual(first, changed, "Toolchain fingerprint did not change when a source input changed.");
 const result = await synchronizeSiteSandboxManifest({ mode: "check" });
+const packageLock = JSON.parse(await readFile("package-lock.json", "utf8")) as {
+  packages?: Record<string, { version?: string }>;
+};
+const sandboxSdkVersion = packageLock.packages?.["node_modules/@cloudflare/sandbox"]?.version;
+const sandboxDockerfile = await readFile("workers/site-sandbox/Dockerfile", "utf8");
+const sandboxImageVersion = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:([^\s@]+)(?:@\S+)?$/m)?.[1];
+assert.ok(sandboxSdkVersion, "The installed @cloudflare/sandbox SDK version is unavailable.");
+assert.equal(
+  sandboxImageVersion,
+  sandboxSdkVersion,
+  "The Cloudflare Sandbox SDK and container image versions must match exactly."
+);
 
 const fixtureRoot = await mkdtemp(join(tmpdir(), "lodesta-sandbox-manifest-"));
 try {
@@ -90,5 +102,6 @@ process.stdout.write(`${JSON.stringify({
   changedInput: true,
   developmentConfigIndependent: true,
   workerBridgeCovered: true,
+  sandboxSdkImageVersionAligned: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

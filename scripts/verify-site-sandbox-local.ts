@@ -43,12 +43,6 @@ input.business.links.push({
   publicEligible: true,
   sourceFactIds: []
 });
-const recipeFiles = await Promise.all([
-  "src/components/managed-lead-form.css",
-  "src/components/managed-lead-form.tsx",
-  "src/components/mobile-navigation.css",
-  "src/components/mobile-navigation.tsx"
-].map(async (path) => ({ path, content: await readFile(join(scaffold, path), "utf8") })));
 const files = [
   {
     path: "src/site.tsx",
@@ -69,11 +63,12 @@ export const siteDefinition = {
   { path: "src/required-destinations.tsx", content: requiredDestinationsSource(input) },
   { path: "src/components/LocalIntro.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function LocalIntro(){ return <p className="intro">Multi-file component rendered for <BusinessName />.</p>; }` },
   { path: "src/components/PageShell.tsx", content: `import type { ReactNode } from "react"; import { SiteFooter } from "./SiteFooter"; import { SiteHeader } from "./SiteHeader"; export function PageShell({children}:{children:ReactNode}){ return <><SiteHeader />{children}<SiteFooter /></>; }` },
-  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName } from "#lodesta-sdk"; import { MobileNavigation } from "./mobile-navigation"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><MobileNavigation><a href="/">Home</a><a href="/about">About</a></MobileNavigation></header>; }` },
+  { path: "src/components/SiteHeader.tsx", content: `import { BusinessName } from "#lodesta-sdk"; import { MobileNavigation } from "./MobileNavigation"; export function SiteHeader(){ return <header><a href="/"><BusinessName /></a><MobileNavigation><a href="/">Home</a><a href="/about">About</a></MobileNavigation></header>; }` },
+  { path: "src/components/MobileNavigation.tsx", content: `import type { ReactNode } from "react"; import { NavigationDisclosure } from "#lodesta-sdk"; import { RequiredDestinations } from "../required-destinations"; export function MobileNavigation({children}:{children:ReactNode}){ return <NavigationDisclosure id="primary-navigation" label="Primary" behavior="modal" className="site-mobile-navigation" toggleClassName="site-mobile-navigation__toggle" panelClassName="site-mobile-navigation__panel" trigger={<span aria-hidden="true">Menu</span>}>{children}<RequiredDestinations /></NavigationDisclosure>; }` },
   { path: "src/components/SiteFooter.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function SiteFooter(){ return <footer>Visit <BusinessName /></footer>; }` },
   { path: "src/components/NavigationFixtures.tsx", content: `import { NavigationDisclosure } from "#lodesta-sdk"; export function NavigationFixtures(){ return <NavigationDisclosure id="inline-navigation" label="Secondary" behavior="inline" trigger={<span>Menu choices</span>}><a href="/about">About</a></NavigationDisclosure>; }` },
   { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" },
-  ...recipeFiles
+  { path: "src/components/mobile-navigation.css", content: ".site-mobile-navigation{display:block}.site-mobile-navigation__toggle{min-width:44px;min-height:44px}.site-mobile-navigation__panel{position:fixed;inset:0;overflow:auto;background:#fff}" }
 ];
 
 try {
@@ -117,8 +112,7 @@ try {
   assert(artifact.sharedCss?.includes(".intro{color:var(--site-color-accent)"), "nested CSS module was not included in the artifact");
   assert(artifact.sharedCss?.includes("--site-color-accent:#176b5b"), "the site-local design token root was not retained");
   assert(artifact.sharedCss?.includes("color:var(--site-color-accent)"), "component CSS did not consume the site-local token system");
-  assert(artifact.sharedCss?.includes(".recipe-mobile-navigation"), "editable mobile-navigation recipe CSS was not compiled");
-  assert(artifact.sharedCss?.includes(".recipe-managed-lead-form"), "editable managed-form recipe CSS was not compiled");
+  assert(artifact.sharedCss?.includes(".site-mobile-navigation"), "authored mobile-navigation CSS was not compiled");
   assert.equal(artifact.routes?.length, 2, "the shared-component fixture did not compile both routes");
   assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");
@@ -185,6 +179,19 @@ try {
     () => assertValidRoutePaths([{ path: "/" }, { path: "/*" }]),
     /not a static site path/,
     "The sandbox build accepted a wildcard route that cannot become an immutable artifact path."
+  );
+  const retainedLegacyRouteStartedAt = performance.now();
+  assert.doesNotThrow(
+    () => assertValidRoutePaths([{
+      path: "/"
+    }, {
+      path: "/blog/2025/february/what-is-the-best-way-to-get-rid-of-rodents-"
+    }]),
+    "The sandbox build rejected a retained legacy route with a trailing hyphen."
+  );
+  assert(
+    performance.now() - retainedLegacyRouteStartedAt < 1_000,
+    "Long retained route validation regressed to catastrophic backtracking."
   );
   await writeFile(join(workspace, "src/site.tsx"), `export const siteDefinition = {
     routes: [

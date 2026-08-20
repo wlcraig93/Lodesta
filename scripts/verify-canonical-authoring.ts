@@ -47,19 +47,20 @@ assert.match(workflow, /run\.kind === "initial_build"[\s\S]*prepareInitialArchit
 assert.doesNotMatch(workflow, /initialBuildProfile\?\.initialBuildScope/);
 assert.doesNotMatch(workflow, /architectureInventory:/);
 assert.match(skills, /Preserve every existing workspace source file unconditionally/);
-assert.match(skills, /MobileNavigation and ManagedLeadForm recipes/);
+assert.match(skills, /rather than adapting a fixed visual template/);
+assert.match(skills, /contained full-screen mobile menu is Lodesta's usual starting point/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
 assert.match(workflow, /canonicalSiteAuthoringRuntimeSeriesId/);
 assert.match(workflow, /olderAuthoringRevision \|\| run\.kind === "initial_build"/);
 assert.match(workflow, /const materializedInitialSource = !resumedSandboxSource[\s\S]*this\.sandbox\.getSource\(sandboxState\.session\.sandboxId!\)/,
-  "Blank initial builds must materialize the sandbox scaffold recipes into the manager workspace.");
+  "Blank initial builds must materialize the sandbox scaffold into the manager workspace.");
 assert.match(workflow, /currentFiles = resumedSandboxSource\?\.files[\s\S]*materializedInitialSource\?\.files[\s\S]*loadWorkspaceSource/,
-  "Blank recipes, resumed source, and retained owner source must share one explicit precedence path.");
-for (const path of ["mobile-navigation.tsx", "mobile-navigation.css", "managed-lead-form.tsx", "managed-lead-form.css"]) {
-  assert(workflow.includes(path), `Initial materialization must require ${path}.`);
-}
+  "Blank source, resumed source, and retained owner source must share one explicit precedence path.");
+assert.doesNotMatch(workflow, /mobile-navigation\.tsx|managed-lead-form\.tsx|classifyRecipeSource/);
 assert(workflow.includes("assertMaterializedInitialSource(materializedInitialSource, sandboxState.revision, buildInput)")
   && workflow.includes('files.get("src/required-destinations.tsx")')
+  && workflow.includes('"src/site.tsx"')
+  && workflow.includes('"src/styles.css"')
   && workflow.includes("missing_required_destination")
   && workflow.includes("materialized_initial_source_invalid")
   && workflow.includes("currentFiles: WorkspaceSourceFile[]"), "Initial source must fail loudly before authoring and every manager invocation must receive an explicit source array.");
@@ -82,6 +83,8 @@ assert.doesNotMatch(nativeSdk, /NavigationDisclosure/);
 assert.match(v4Sdk, /NavigationDisclosure/);
 assert.doesNotMatch(v4Sdk, /LeadLabel|LeadControl/);
 assert.match(canaryRoute, /generator: "canonical"/);
+assert.match(canaryRoute, /const lunaCanaryMaxCostUsd = 0\.50/);
+assert.match(canaryRoute, /: lunaCanaryMaxCostUsd/);
 assert.doesNotMatch(canaryRoute, /site-runtime-v3|retired_authoring_profile|identity-nav-copy/);
 
 process.stdout.write(`${JSON.stringify({ ok: true, reviewRoutes, iaFindings: ia.findings.length })}\n`);

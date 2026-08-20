@@ -246,14 +246,11 @@ assert(
   reconstructionSource.includes('sourceProvenance: "retained_candidate_sidecar"')
     || reconstructionSource.includes('"retained_candidate_sidecar" | "replayed_mutations"')
 );
-for (const recipePath of [
-  "components/mobile-navigation.tsx",
-  "components/mobile-navigation.css",
-  "components/managed-lead-form.tsx",
-  "components/managed-lead-form.css"
-]) {
-  assert(reconstructionSource.includes(recipePath), `Initial reconstruction omitted ${recipePath}.`);
-}
+assert(!reconstructionSource.includes("components/mobile-navigation.tsx")
+  && !reconstructionSource.includes("components/managed-lead-form.tsx"),
+"Initial reconstruction must not restore retired visual recipes.");
+assert(reconstructionSource.includes('files.set("src/required-destinations.tsx", requiredDestinationsSource(buildInput))'),
+  "Initial reconstruction must restore materialized owner-authoritative destinations.");
 assert(
   reconstructionRendererSource.includes("readReconstructedSourceFiles(sourceDirectory)"),
   "Failed full-site reconstructions do not render all reconstructed source modules."

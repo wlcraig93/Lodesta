@@ -21,6 +21,8 @@ const preferredRetainedSiteIds = new Map([
   [normalizeBootstrapSourceUrl("https://surgepest.com/"), "site_48e5ac5685074d275410f23689567c81"]
 ]);
 
+const lunaCanaryMaxCostUsd = 0.50;
+
 export async function POST(request: Request) {
   const unauthorized = await requireAdmin(request);
   if (unauthorized) return unauthorized;
@@ -58,7 +60,7 @@ export async function POST(request: Request) {
       ? 5
       : parsed.data.model === "terra"
         ? 2
-        : 0.20;
+        : lunaCanaryMaxCostUsd;
     const result = await siteAuthoringWorkflow.bootstrapFromRetainedSite({
       templateSiteId: retainedSourceSite.id,
       idempotencyKey: parsed.data.idempotencyKey,

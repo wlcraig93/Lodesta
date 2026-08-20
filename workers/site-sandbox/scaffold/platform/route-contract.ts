@@ -1,7 +1,7 @@
 export function assertValidRoutePaths(routes: Array<{ path: string }>) {
   const paths = new Set<string>();
   for (const route of routes) {
-    if (!/^\/(?:[a-z0-9]+(?:-[a-z0-9]+)*\/?)*$/.test(route.path)) {
+    if (!isStaticRoutePath(route.path)) {
       throw new Error(
         `Route ${route.path} is not a static site path. Use / or lowercase slug segments such as /services/water-heaters; do not define wildcard, parameterized, query, or hash routes.`
       );
@@ -10,6 +10,14 @@ export function assertValidRoutePaths(routes: Array<{ path: string }>) {
     paths.add(route.path);
   }
   if (!paths.has("/")) throw new Error("The site requires a homepage route at /.");
+}
+
+function isStaticRoutePath(path: string) {
+  if (path === "/") return true;
+  if (!path.startsWith("/") || path.endsWith("/")) return false;
+  // Retained source URLs may legitimately end a slug segment with a hyphen.
+  // Keep validation linear so long legacy paths cannot trigger regex backtracking.
+  return path.slice(1).split("/").every((segment) => /^[a-z0-9][a-z0-9-]*$/.test(segment));
 }
 
 export function assertRenderedRouteBodies(routes: Array<{ path: string; bodyHtml: string }>) {

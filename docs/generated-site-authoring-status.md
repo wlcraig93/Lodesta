@@ -1,10 +1,10 @@
 # Generated-site authoring status
 
-Date: 2026-08-18
+Date: 2026-08-20
 
 ## V4 implementation status
 
-The repository now contains the V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, and editable mobile-navigation and managed-form recipes. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
+The repository now contains the recipe-free V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, structurally materialized owner-authoritative destinations, and direct business-specific authoring from the minimal workspace. The four visual recipe files and their provenance machinery have been removed from new authoring so their value can be evaluated separately rather than bundled into the V4 boundary. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.
 
 The V4-capable application and bounded-inspection controller are now deployed and verified at release `757dcc93f4057acee34f450cdffd5d62a44992ee`. The active green sandbox deployment is `sandbox_deployment_dde819809d5f79faf6eeb630b4d75905`. This is infrastructure and pinned-canary evidence, not a V4 product promotion: current public inputs have not been repointed and the retained V2 baseline below remains the product rollback point.
 
@@ -66,6 +66,33 @@ Cloudflare's runtime logs exposed two concrete defects in the deployed sandbox b
 
 A post-release, no-model reproduction then used the retained 517,111-byte V4 workspace and the exact 465-second idle interval. The first apply completed in 14.8 seconds without retry, but the second found the container filesystem absent. Inspection of SDK `0.12.7` showed that `getSandbox` dispatches lifecycle configuration without awaiting its Durable Object RPC. The Worker now explicitly awaits the 15-minute sleep policy before every container filesystem operation; another deterministic reproduction is required before paid authoring resumes.
 
+## Matched A Step Above R8/V4 bake-off
+
+The next matched comparison used A Step Above Pest Control & Termite with direct Luna authoring, the same retained source inventory (`sha256:6e1f8a0b79154e3166fda3897377a48d40e6689f9dee113a8686feedb9a06a1b`), the same frozen architecture plan (`sha256:abb0fcfb9d52fcee3f0c6c292a442d495b07de5576496064eb21ba60c82230be`), the same exact logo (`sha256:68a91133ee8b24c0bb5fc73fe1fb50363f7e81eaf17f2be2683fea5ffad10e91`), and a $0.50 private-canary ceiling for both arms.
+
+The first R8 attempts did not fail because of the old $0.20 fuse. Two approved retained blog paths ended their final slug with `-`. The shared sandbox route validator used a nested regular expression that catastrophically backtracked on those long paths, pinning one CPU core while the operation journal remained in `compiling` until the 210-second controller deadline. The exact reconstructed R8 source reproduced the wedge locally. Replacing that expression with linear segment validation, while intentionally accepting retained trailing-hyphen URLs, reduced the same local build to 1.6 seconds. The regression is covered in `verify:site-sandbox-local`.
+
+After that shared compiler correction, both arms completed without sandbox replay, recycle, or transport failure:
+
+| Arm | Run | Result | Cost | Duration | Model requests | Applies / inspection cycles |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| R8-era control / V2 runtime | `run_6064fa0ebd254ec7b4dc331875c6a259` | hard gate passed; 48 routes; 38 captures | $0.16727261 | 27m 39.5s | 23 | 4 |
+| V4 plus editable recipes | `run_05fc4abae9cd411e8e4b2612f9d907a0` | hard gate passed; 48 routes; 38 captures | $0.34897914 | 36m 37.3s | 51 | 8 |
+
+V4 cost 108.6% more, took 32.4% longer, used 121.7% more model requests, and made 21 targeted edits versus R8's five. Its first `finish` attempt failed with 34 hard errors: the authored mobile menu created 47px of horizontal overflow, causing navigation-toggle failures across 13 sampled routes. V4 repaired the overflow and eventually passed, but only after another inspection and finish cycle. All four V4 recipe files and their provenance headers survived in the retained final workspace.
+
+Human review does not show a compensating quality win. R8 produced the stronger editorial composition: a bold split hero, better conversion pacing, a correctly legible primary logo surface, and a coherent photo-led identity. V4's desktop and custom managed form are competent, but the mobile menu dominates the top of the viewport, pushes the primary headline below the fold in the retained capture, and still places the pale supplied logo on a low-contrast light surface. Across the same retained capture count, V4 also retained 123 advisory warning instances versus R8's 78, including 35 primary-logo surface-contrast warnings, 18 text-occlusion warnings, and 20 target-size warnings.
+
+This single matched business does not establish broad cross-business template similarity, but it is sufficient to reject the V4-plus-recipes treatment for promotion. It does not reject V4's headless runtime or narrowed managed-form boundary. R8/V2 remains the canonical product generator while a recipe-free V4 arm is evaluated. Surge and the wider screen remain paused.
+
+## Recipe-free V4 isolation
+
+The next matched arm isolates the architectural change from the unproven visual defaults. It retains V4's audited navigation state machine without platform artwork or geometry, the required explicit trigger, the narrowed managed-form SDK, exact materialized customer destinations, the compact authoring skill, mechanical inspection feedback, and the unchanged hard release gate. It removes the four mobile-navigation and managed-form recipe files, recipe provenance classification, recipe-specific prompt context, and recipe preservation tests.
+
+The model now authors the visual system, shared shell, navigation, and form layout directly for the business. Lodesta's mobile-navigation preference remains outcome guidance: a contained full-screen menu is the usual starting point, not a fixed component. A different managed or verified native semantic pattern remains valid when the business, design direction, or owner request warrants it.
+
+The complete local release preflight passed before deployment, including production build, TypeScript, authoring and narrowed-SDK contracts, immutable generations, sandbox replay/recovery, trusted-runtime behavior, and desktop/tablet/mobile/opened-navigation browser verification. The hosted A Step Above arm remains pending. Promotion remains blocked, and recipes may be reconsidered only as a later isolated treatment after recipe-free V4 is at least comparable to the R8 control.
+
 ## Deployed rollback baseline
 
 The prior deployed generator is pinned to the following tuple:
@@ -101,7 +128,10 @@ continuation, or subjective publication gate.
 This baseline was promoted after private retained-mirror canaries for Kind Pest and
 Surge Pest completed through the ordinary queue and browser gate with the exact same
 authoring skill identity. The matched prior baseline failed the Kind canary at the
-same $0.20 cap. Candidate artifacts remain private until an owner publishes them.
+historical $0.20 cap. Luna private canaries now use a $0.50 cap so an otherwise
+healthy authoring run can complete long enough for a head-to-head comparison. This
+operator-only canary ceiling does not change ordinary initial-build, edit, or rebase
+guardrails. Candidate artifacts remain private until an owner publishes them.
 
 The approved product decision, scope exception, and Kind Pest evidence are in
 `docs/decisions/2026-08-03-luna-architecture-authoring-workflow.md`.

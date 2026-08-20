@@ -1,5 +1,7 @@
 # Managed capabilities, editable recipes, and Runtime V4
 
+> Superseded on 2026-08-20 for blank-workspace recipe materialization by `2026-08-20-recipe-free-v4-isolation.md`. The trusted navigation and managed-form boundaries remain in force; the prior recipe treatment and evidence remain immutable historical context.
+
 Date: 2026-08-15
 Status: implemented and deployed for pinned diagnostics; product promotion pending
 

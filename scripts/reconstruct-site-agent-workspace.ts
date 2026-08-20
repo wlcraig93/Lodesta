@@ -12,6 +12,7 @@ import {
   liveAuthoringProfile,
   retainedContentModeForAuthoringProfile
 } from "../packages/site-agent/authoring-profile";
+import { requiredDestinationsSource } from "../workers/site-sandbox/src/initial-source";
 
 const runId = process.env.LODESTA_RECONSTRUCT_RUN_ID?.trim();
 const outputDirectoryInput = process.env.LODESTA_RECONSTRUCT_OUTPUT_DIR?.trim();
@@ -137,17 +138,14 @@ if (throughSequence === undefined && run.candidateVersionId) {
   const scaffoldSourceRoot = resolve(repositoryRoot, "workers/site-sandbox/scaffold/src");
   for (const relativePath of [
     "site.tsx",
-    "styles.css",
-    "components/mobile-navigation.tsx",
-    "components/mobile-navigation.css",
-    "components/managed-lead-form.tsx",
-    "components/managed-lead-form.css"
+    "styles.css"
   ]) {
     files.set(`src/${relativePath}`, await readFile(resolve(scaffoldSourceRoot, relativePath), "utf8"));
   }
+  const buildInput = await sitePlatformRepository.getPublicBuildInput(run.publicBuildInputId);
+  if (!buildInput) throw new Error(`Run ${run.id} has no retained public build input ${run.publicBuildInputId}.`);
+  files.set("src/required-destinations.tsx", requiredDestinationsSource(buildInput));
   if (run.architecture) {
-    const buildInput = await sitePlatformRepository.getPublicBuildInput(run.publicBuildInputId);
-    if (!buildInput) throw new Error(`Run ${run.id} has no retained public build input ${run.publicBuildInputId}.`);
     const sourcePages = (await Promise.all(
       buildInput.sourceSnapshotIds.map((sourceId) => sitePlatformRepository.listSourceSnapshotPages(sourceId))
     )).flat();

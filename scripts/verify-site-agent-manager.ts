@@ -85,7 +85,7 @@ assert.deepEqual(promptContext.sdk.managedCapabilitiesRequireSdk, [
   "safe links",
   "directions"
 ]);
-assert.equal(promptContext.workspace.editableRecipePaths.length, 4);
+assert.deepEqual(promptContext.workspace.requiredAuthorityPaths, ["src/required-destinations.tsx"]);
 assert.match(promptContext.sdk.import, /NavigationDisclosure/);
 assert.doesNotMatch(promptContext.sdk.import, /LeadLabel|LeadControl/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /behavior="modal"/);
@@ -129,8 +129,9 @@ assert.match(websiteManagerSystemPrompt, /business imagery is never attached aut
 assert.match(websiteManagerSystemPrompt, /owner's explicit instruction; every existing Lodesta workspace source file/i);
 assert.match(websiteManagerSystemPrompt, /Preserve existing workspace source unconditionally/i);
 assert.match(websiteManagerSystemPrompt, /src\/styles\.css as the editable site-local design-system root/i);
-assert.match(websiteManagerSystemPrompt, /blank initial workspace includes editable MobileNavigation and ManagedLeadForm recipes/i);
-assert.doesNotMatch(websiteManagerSystemPrompt, /shared SiteHeader, MobileNavigation, SiteFooter, and PageShell source components/i);
+assert.match(websiteManagerSystemPrompt, /do not start from a fixed visual template/i);
+assert.doesNotMatch(websiteManagerSystemPrompt, /editable.*recipe|recipe provenance/i);
+assert.match(websiteManagerSystemPrompt, /contained full-screen mobile menu is Lodesta's usual starting point/i);
 assert.match(websiteManagerSystemPrompt, /NavigationDisclosure is an optional headless behavior primitive/i);
 assert.match(websiteManagerSystemPrompt, /site owns all artwork, presentation, and breakpoints/i);
 assert.match(websiteManagerSystemPrompt, /Compose maps or location cards, static galleries, layouts, and ordinary disclosures with semantic HTML/i);
@@ -145,7 +146,9 @@ assert(skill.knowledge.some((item) => /Owner-authoritative facts outrank retaine
 assert(skill.knowledge.some((item) => /Judge supplied assets by visible pixels/i.test(item) && /exact official logo/i.test(item)));
 assert(skill.knowledge.some((item) => /Choose one named design grammar/i.test(item) && /route-specific useful unit or action/i.test(item)));
 assert(skill.knowledge.some((item) => /every live route reachable/i.test(item) && /never imply unsupported precision/i.test(item)));
-assert(skill.knowledge.some((item) => /Preserve every existing workspace source file unconditionally/i.test(item) && /MobileNavigation and ManagedLeadForm recipes/i.test(item)));
+assert(skill.knowledge.some((item) => /Preserve every existing workspace source file unconditionally/i.test(item)
+  && /rather than adapting a fixed visual template/i.test(item)
+  && /src\/required-destinations\.tsx/i.test(item)));
 assert(skill.knowledge.some((item) => /representative route set/i.test(item) && /contrast at the nearest affected selector/i.test(item)));
 assert(skill.knowledge.some((item) => /Preserve the supplied scaffold contract/i.test(item) && /SafeLink already renders its anchor/i.test(item)));
 assert(!skill.knowledge.some((item) => /mandatory tool|critic pass|section template/i.test(item)));
@@ -235,24 +238,18 @@ const validCssEdit = await mutationRuntime.execute({
 assert.equal(validCssEdit.diagnosticOutput.ok, true);
 assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content, "body { color: #234; }");
 
-const recipePaths = [
-  "src/components/mobile-navigation.tsx",
-  "src/components/mobile-navigation.css",
-  "src/components/managed-lead-form.tsx",
-  "src/components/managed-lead-form.css"
-] as const;
-const bootstrapRecipes = await Promise.all(recipePaths.map(async (path) => ({
-  path,
-  content: await readFile(`workers/site-sandbox/scaffold/${path}`, "utf8")
-})));
+const requiredDestinations = {
+  path: "src/required-destinations.tsx",
+  content: `import { SafeLink } from "#lodesta-sdk"; export function RequiredDestinations(){ return <SafeLink id="link_portal">Customer portal</SafeLink>; }`
+};
 const bootstrapRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
-  publicBuildInputId: "input_materialized_recipes",
+  publicBuildInputId: "input_materialized_authority",
   toolchainVersion: "toolchain-test",
   sandboxImageDigest: `sha256:${"e".repeat(64)}`,
   initialSandboxRevision: "sandbox_bootstrap_1",
   initialFiles: [
-    ...bootstrapRecipes,
+    requiredDestinations,
     { path: "src/site.tsx", content: validMutationSite },
     { path: "src/styles.css", content: "body { color: #123; }" }
   ],
@@ -271,10 +268,11 @@ const unrelatedBootstrapChange = await bootstrapRuntime.execute({
   arguments: { path: "src/content.ts", content: 'export const eyebrow = "Local service, thoughtfully delivered";' }
 });
 assert.equal(unrelatedBootstrapChange.diagnosticOutput.ok, true);
-for (const recipe of bootstrapRecipes) {
-  assert.equal(bootstrapRuntime.currentFiles().find((file) => file.path === recipe.path)?.content, recipe.content,
-    `${recipe.path} changed during an unrelated first workspace mutation.`);
-}
+assert.equal(
+  bootstrapRuntime.currentFiles().find((file) => file.path === requiredDestinations.path)?.content,
+  requiredDestinations.content,
+  "An unrelated first workspace mutation changed materialized owner-authoritative destinations."
+);
 
 const minifiedCss = Array.from({ length: 220 }, (_, index) => `.rule-${index}{color:#123;background:#fff;padding:1rem}`).join("");
 const minifiedCssRuntime = new WorkspaceManagerRuntime<string>({

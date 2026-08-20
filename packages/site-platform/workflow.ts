@@ -25,7 +25,6 @@ import {
 } from "@/packages/site-artifacts";
 import {
   classifySiteAuthoringFailure,
-  classifyRecipeSource,
   createImageBytes,
   createSourceWorkspace,
   createSiteAuthoringContext,
@@ -5269,12 +5268,11 @@ function retainedContactValuesMatch(kind: "phone" | "email", left: unknown, righ
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
-const requiredInitialRecipeFiles = new Map<string, { id: "mobile-navigation" | "managed-lead-form"; version: number }>([
-  ["src/components/mobile-navigation.tsx", { id: "mobile-navigation", version: 1 }],
-  ["src/components/mobile-navigation.css", { id: "mobile-navigation", version: 1 }],
-  ["src/components/managed-lead-form.tsx", { id: "managed-lead-form", version: 1 }],
-  ["src/components/managed-lead-form.css", { id: "managed-lead-form", version: 1 }]
-]);
+const requiredInitialSourcePaths = [
+  "src/site.tsx",
+  "src/styles.css",
+  "src/required-destinations.tsx"
+] as const;
 
 function assertMaterializedInitialSource(
   source: { revision: string; files: WorkspaceSourceFile[] },
@@ -5287,6 +5285,9 @@ function assertMaterializedInitialSource(
   if (source.revision !== bootstrapRevision) invalid("revision_mismatch");
   if (source.files.length === 0) invalid("empty");
   const files = new Map(source.files.map((file) => [file.path, file.content]));
+  for (const path of requiredInitialSourcePaths) {
+    if (!files.has(path)) invalid(`missing:${path}`);
+  }
   const requiredDestinations = files.get("src/required-destinations.tsx")
     ?? invalid("missing:src/required-destinations.tsx");
   for (const link of buildInput.business.links.filter((candidate) => (
@@ -5294,17 +5295,6 @@ function assertMaterializedInitialSource(
   ))) {
     if (!requiredDestinations.includes(`id=${JSON.stringify(link.id)}`)) {
       invalid(`missing_required_destination:${link.id}`);
-    }
-  }
-  for (const [path, expected] of requiredInitialRecipeFiles) {
-    const content = files.get(path);
-    if (content === undefined) throw new Error(`materialized_initial_source_invalid:missing:${path}`);
-    const classification = classifyRecipeSource(content);
-    if (classification.status !== "untouched") {
-      throw new Error(`materialized_initial_source_invalid:provenance:${path}:${classification.reason}`);
-    }
-    if (classification.provenance.id !== expected.id || classification.provenance.version !== expected.version) {
-      invalid(`identity:${path}`);
     }
   }
 }

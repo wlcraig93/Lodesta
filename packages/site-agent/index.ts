@@ -17,4 +17,3 @@ export * from "./source-policy";
 export * from "./source-workspace";
 export * from "./strict-tool-schema";
 export * from "./architecture";
-export * from "./recipe-provenance";

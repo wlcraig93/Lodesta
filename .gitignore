@@ -13,7 +13,11 @@ tsconfig.tsbuildinfo
 supabase/.temp/
 .gstack/
 .claude/
-.design/
+.design/*
+!.design/canonical-authoring-bakeoff/
+.design/canonical-authoring-bakeoff/*
+!.design/canonical-authoring-bakeoff/EVALUATION.md
+!.design/canonical-authoring-bakeoff/retained-control-profile.ts
 outputs/
 screenshots/
 tmp/

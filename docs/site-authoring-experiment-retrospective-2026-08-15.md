@@ -125,6 +125,18 @@ The follow-on V4 decision preserves the simplicity conclusion while moving the b
 
 This is a mechanistic correction, not evidence that V4 is stochastically better. The same-authority V2/V4 diagnostic and the three-Kind/three-Surge V4-plus-recipe reliability screen remain pending. No result should be appended here until the immutable run, candidate, deployment, and cost records exist.
 
+## August 20 optimized recipe-free V4 decision
+
+The latest recipe-free Kind V4 candidate passed the hard gate and produced a strong custom managed form, but it repaired repeated modal containment failures by switching to an inline native link grid. The inspection failures were concrete authoring findings, not sandbox failures. V4 used more requests and source edits than the valid Kind R8 reference while producing comparable rather than superior final visual quality.
+
+Code inspection corrected the diagnosis. V4's JavaScript preserves the audited V2 navigation state machine, including focus, Escape, inertness, scroll lock, and calculation of `--lodesta-navigation-top`. V4 capability CSS had removed both platform artwork and the fixed, opaque, viewport-contained surface that made those modal behaviors coherent. The optimized boundary restores containment through low-specificity capability CSS while leaving artwork, breakpoints, motion, spacing, link layout, and inner composition authored.
+
+The authoring skill is split subtractively across the existing initial-build, edit, and rebase kinds, with exact per-kind identities. The prior eight-item R8 skill and profile are frozen in a private hashed experiment fixture before the split. Full-site authoring keeps the same compact prompt bytes; the unrelated long discussion prompt is deleted and replaced with a minimal read-only prompt.
+
+The toolchain identity remains a checked-in deployment constant produced by the existing explicit scaffold fingerprint command; imports do not derive deploy state. No manifest key, stored schema, runtime series, or no-op runtime patch is introduced. V4 capability CSS for this treatment is `sha256:ef3a20ccf7dc6c1f725218d83fba87858de27095d25c0e897c05d92bb80c173d`.
+
+The next paid evidence is a fresh matched Kind pair, followed by Surge only if Kind is at least comparable to R8 without repeated navigation churn. Deterministic fixtures answer whether containment works; paid runs answer whether the complete site is as good as R8. Recipes remain deferred until the optimized recipe-free baseline is established.
+
 ## August 17 hosted V4 treatment and stop decision
 
 Release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3` deployed the hardened web, worker, and green sandbox path. The active pinned sandbox was `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e`. A fresh Kind V4-plus-recipes run then completed through the ordinary hosted queue:

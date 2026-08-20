@@ -12,8 +12,15 @@ const v4CapabilityStyles = platformCapabilityStylesFor("site-runtime-v4");
 new Function(runtimeV1.toString("utf8"));
 new Function(runtime.toString("utf8"));
 new Function(runtimeV4.toString("utf8"));
-assert.match(v4CapabilityStyles.trim(), /^\[data-lodesta-navigation-panel\]\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}$/, "V4 retained platform navigation presentation.");
+assert.match(v4CapabilityStyles, /navigation-panel\]\[hidden\].*display:\s*none\s*!important/s);
+assert.match(v4CapabilityStyles, /navigation-behavior="modal".*position:\s*fixed/s);
+assert.match(v4CapabilityStyles, /inset:\s*var\(--lodesta-navigation-top, 0px\) 0 0/);
+assert.match(v4CapabilityStyles, /height:\s*calc\(100dvh - var\(--lodesta-navigation-top, 0px\)\)/);
+assert.match(v4CapabilityStyles, /background:\s*var\(--site-color-background, Canvas\)/);
 assert(!v4CapabilityStyles.includes("navigation-icon"), "V4 retained platform trigger artwork.");
+assert(!/navigation-panel[^}]*\b(?:display:\s*(?:flex|grid)|align-items|min-height)/s.test(v4CapabilityStyles), "V4 imposed inner navigation-link layout.");
+assert(!v4CapabilityStyles.includes("transition:"), "V4 retained platform trigger motion.");
+assert(!/\b(?:inset|height|width|position)[^;]*!important/.test(v4CapabilityStyles), "V4 modal containment is not author-overridable.");
 assert(
   platformCapabilityStyles.includes('[data-lodesta-navigation-panel]:not([hidden])')
     && platformCapabilityStyles.includes('inset: var(--lodesta-navigation-top, 0px) 0 0;')
@@ -267,7 +274,7 @@ try {
 
   const v4 = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await v4.goto(`${origin}/v4`, { waitUntil: "networkidle" });
-  const v4Toggle = v4.locator("[data-lodesta-menu-toggle]");
+  const v4Toggle = v4.locator('[aria-controls="v4-navigation"]');
   const v4Panel = v4.locator("#v4-navigation");
   assert.equal(await v4.locator("[data-lodesta-navigation-icon]").count(), 0, "V4 injected the legacy platform icon.");
   assert.deepEqual(await v4Toggle.evaluate((element) => ({
@@ -278,6 +285,29 @@ try {
   await v4Toggle.click();
   assert.equal(await v4Toggle.getAttribute("aria-expanded"), "true");
   assert(await v4Panel.isVisible(), "V4 did not open the authored panel.");
+  assert.deepEqual(await v4Panel.evaluate((element) => {
+    const computed = getComputedStyle(element);
+    const bounds = element.getBoundingClientRect();
+    return {
+      position: computed.position,
+      top: Math.round(bounds.top),
+      bottom: Math.round(bounds.bottom),
+      width: Math.round(bounds.width),
+      overflowY: computed.overflowY,
+      overscrollBehavior: computed.overscrollBehavior,
+      backgroundColor: computed.backgroundColor,
+      linkDisplay: getComputedStyle(element.querySelector("a")!).display
+    };
+  }), {
+    position: "fixed",
+    top: 72,
+    bottom: 844,
+    width: 390,
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+    backgroundColor: "rgb(255, 255, 255)",
+    linkDisplay: "grid"
+  }, "V4 did not provide contained modal geometry while preserving authored link layout.");
   assert.deepEqual(await v4.evaluate(() => ({
     bodyOverflow: document.body.style.overflow,
     rootOverflow: document.documentElement.style.overflow,
@@ -287,6 +317,21 @@ try {
   await v4.keyboard.press("Escape");
   assert.equal(await v4Toggle.getAttribute("aria-expanded"), "false");
   assert.equal(await v4.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Open navigation", "V4 did not restore trigger focus.");
+  const floorToggle = v4.locator('#v4-floor-toggle');
+  assert.deepEqual(await floorToggle.evaluate((element) => ({
+    width: Math.round(element.getBoundingClientRect().width),
+    height: Math.round(element.getBoundingClientRect().height)
+  })), { width: 44, height: 44 }, "V4 did not provide the functional trigger floor.");
+  await floorToggle.click();
+  assert.deepEqual(await v4.locator("#v4-inline").evaluate((element) => ({
+    position: getComputedStyle(element).position,
+    top: getComputedStyle(element).top
+  })), { position: "static", top: "auto" }, "V4 imposed modal containment on an inline disclosure.");
+  await floorToggle.click();
+  const drawerToggle = v4.locator('[aria-controls="v4-drawer"]');
+  await drawerToggle.click();
+  assert.equal(await v4.locator("#v4-drawer").evaluate((element) => Math.round(element.getBoundingClientRect().width)), 312, "Authored V4 drawer geometry did not override the containment default.");
+  await v4.keyboard.press("Escape");
   await v4.fill('input[name="name"]', "V4 visitor");
   const formCountBeforeV4 = forms.length;
   await v4.click('form button[type="submit"]');
@@ -305,13 +350,14 @@ function documentHtml(analyticsEnabled: boolean) {
 
 function v4DocumentHtml() {
   return `<!doctype html><html data-lodesta-site-id="site_runtime_v4_test" data-lodesta-version-id="version_runtime_v4_test" data-lodesta-analytics="false"><head><meta charset="utf-8"><style>${v4CapabilityStyles}
-  :root{--site-color-primary:#173c33;--site-color-surface:#fff;--site-color-text:#15201d}
+  :root{--site-color-primary:#173c33;--site-color-background:#fff;--site-color-text:#15201d}
   body{margin:0;color:var(--site-color-text)}.v4-header{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--site-color-primary)}
   .v4-toggle{width:48px;height:48px;border:0;background:transparent;display:grid;place-content:center;gap:5px}.v4-menu-bar{display:block;width:24px;height:2px;background:#fff;transition:transform .2s,opacity .2s}
   .v4-toggle[aria-expanded=true] .v4-menu-bar:first-child{transform:translateY(7px) rotate(45deg)}.v4-toggle[aria-expanded=true] .v4-menu-bar:nth-child(2){opacity:0}.v4-toggle[aria-expanded=true] .v4-menu-bar:last-child{transform:translateY(-7px) rotate(-45deg)}
-  .v4-panel{position:fixed;inset:72px 0 0;background:var(--site-color-surface);padding:32px}.v4-panel nav{display:grid;gap:12px}.v4-panel a{display:flex;align-items:center;min-height:48px;color:var(--site-color-text)}
+  .v4-panel{padding:32px}.v4-panel nav{display:grid;gap:12px}.v4-panel a{display:grid;grid-template-columns:1fr auto;min-height:48px;color:var(--site-color-text)}
+  .v4-floor-toggle{box-sizing:border-box;width:1px;height:1px;padding:0}.v4-drawer-panel{width:320px;max-width:80vw;inset-inline-start:auto}
   label{display:grid;gap:6px}input,button[type=submit]{min-height:48px;font-size:16px}</style><script src="/_lodesta/runtime/site-runtime-v4.js" defer></script></head><body>
-  <header class="v4-header"><a href="#top" style="color:white">Example</a><div data-lodesta-navigation-disclosure="v4-navigation" data-lodesta-navigation-behavior="modal"><button class="v4-toggle" type="button" data-lodesta-menu-toggle aria-controls="v4-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span></button><div id="v4-navigation" class="v4-panel" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#services">Services</a><a href="#contact">Contact</a></nav></div></div></header>
+  <header class="v4-header"><a href="#top" style="color:white">Example</a><div data-lodesta-navigation-disclosure="v4-navigation" data-lodesta-navigation-behavior="modal"><button class="v4-toggle" type="button" data-lodesta-menu-toggle aria-controls="v4-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span><span class="v4-menu-bar"></span></button><div id="v4-navigation" class="v4-panel" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#services"><span>Services</span><small>What we do</small></a><a href="#contact"><span>Contact</span><small>Start here</small></a></nav></div></div><div data-lodesta-navigation-disclosure="v4-inline" data-lodesta-navigation-behavior="inline"><button id="v4-floor-toggle" class="v4-floor-toggle" type="button" data-lodesta-menu-toggle aria-controls="v4-inline" aria-expanded="false" aria-label="Open secondary navigation" data-lodesta-open-label="Open secondary navigation" data-lodesta-close-label="Close secondary navigation">I</button><div id="v4-inline" data-lodesta-menu data-lodesta-navigation-panel tabindex="-1" hidden><nav aria-label="Secondary"><a href="#services">Inline</a></nav></div></div><div data-lodesta-navigation-disclosure="v4-drawer-disclosure" data-lodesta-navigation-behavior="modal"><button type="button" data-lodesta-menu-toggle aria-controls="v4-drawer" aria-expanded="false" aria-label="Open drawer" data-lodesta-open-label="Open drawer" data-lodesta-close-label="Close drawer">D</button><div id="v4-drawer" class="v4-drawer-panel" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Drawer" tabindex="-1" hidden><nav aria-label="Drawer"><a href="#contact">Drawer contact</a></nav></div></div></header>
   <main id="top"><section id="services"><h1>Services</h1></section><form id="contact" data-lodesta-form-id="form_runtime_test" data-lodesta-form-revision="1" data-lodesta-form-destination="lead_inbox" data-lodesta-success-message="Sent."><label for="v4-name">Name</label><input id="v4-name" name="name" required><button type="submit">Send</button><p data-lodesta-form-status role="status"></p></form></main></body></html>`;
 }
 

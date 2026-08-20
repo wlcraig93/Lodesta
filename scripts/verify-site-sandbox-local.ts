@@ -68,7 +68,7 @@ export const siteDefinition = {
   { path: "src/components/SiteFooter.tsx", content: `import { BusinessName } from "#lodesta-sdk"; export function SiteFooter(){ return <footer>Visit <BusinessName /></footer>; }` },
   { path: "src/components/NavigationFixtures.tsx", content: `import { NavigationDisclosure } from "#lodesta-sdk"; export function NavigationFixtures(){ return <NavigationDisclosure id="inline-navigation" label="Secondary" behavior="inline" trigger={<span>Menu choices</span>}><a href="/about">About</a></NavigationDisclosure>; }` },
   { path: "src/components/local-intro.css", content: ".intro{color:var(--site-color-accent);font-weight:700;letter-spacing:.01em}" },
-  { path: "src/components/mobile-navigation.css", content: ".site-mobile-navigation{display:block}.site-mobile-navigation__toggle{min-width:44px;min-height:44px}.site-mobile-navigation__panel{position:fixed;inset:0;overflow:auto;background:#fff}" }
+  { path: "src/components/mobile-navigation.css", content: ".site-mobile-navigation{display:block}.site-mobile-navigation__toggle{display:grid;place-items:center}.site-mobile-navigation__panel{padding:2rem}" }
 ];
 
 try {
@@ -99,6 +99,7 @@ try {
     routes?: Array<{ path?: string; title?: string; description?: string; bodyHtml?: string }>;
     capabilityBindings?: unknown[];
   };
+  const livePreviewHtml = await readFile(join(workspace, "dist", "index.html"), "utf8");
   assert.equal(artifact.kind, "agent-authored-artifact", "sandbox did not emit the canonical artifact contract");
   assert.deepEqual(artifact.compilerManifest, expectedSiteSandboxManifest, "artifact omitted or drifted from the actual compiler manifest");
   assert(!Object.hasOwn(artifact, "factDeclarations") && !Object.hasOwn(artifact, "claims"), "sandbox retained model-authored declarations");
@@ -113,6 +114,9 @@ try {
   assert(artifact.sharedCss?.includes("--site-color-accent:#176b5b"), "the site-local design token root was not retained");
   assert(artifact.sharedCss?.includes("color:var(--site-color-accent)"), "component CSS did not consume the site-local token system");
   assert(artifact.sharedCss?.includes(".site-mobile-navigation"), "authored mobile-navigation CSS was not compiled");
+  assert(!artifact.sharedCss?.includes("--lodesta-navigation-top"), "authored source unexpectedly supplied platform modal containment");
+  assert(livePreviewHtml.includes("--lodesta-navigation-top"), "live workspace preview did not use active scaffold modal containment");
+  assert(livePreviewHtml.includes(".site-mobile-navigation__panel{padding:2rem}"), "live workspace preview lost authored panel presentation");
   assert.equal(artifact.routes?.length, 2, "the shared-component fixture did not compile both routes");
   assert.equal(artifact.routes?.[0]?.title, input.business.name, "compiler did not supply the canonical fallback title");
   assert.equal(artifact.routes?.[0]?.description, `${input.business.name}.`, "compiler did not supply the canonical fallback description");

@@ -19,14 +19,16 @@ import {
   usageForModel,
   WebsiteManagerAgent,
   websiteManagerTools,
-  websiteAuthoringSkillIdentity,
+  websiteAuthoringSkillIdentityFor,
+  websiteManagerAuthoringSystemPrompt,
+  websiteManagerDiscussionPromptIdentity,
+  websiteManagerDiscussionSystemPrompt,
   websiteManagerPromptIdentity,
-  websiteManagerSystemPrompt,
   type ManagerResponsesClient,
   type ManagerToolRuntime
 } from "../packages/site-agent";
 import { sourceSnapshotSchema } from "../packages/site-contracts";
-import { sha256 } from "../packages/business-data";
+import { sha256, stableJson } from "../packages/business-data";
 import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
@@ -76,7 +78,7 @@ const promptContext = managerBuildContext({
   kind: "initial_build"
 });
 assert.equal(promptContext.context.kind, "site-authoring-context");
-assert.equal(promptContext.task.skill.identity, websiteAuthoringSkillIdentity);
+assert.equal(promptContext.task.skill.identity, websiteAuthoringSkillIdentityFor("initial_build"));
 assert.equal(promptContext.task.sourceInventorySummary, "No retained website crawl inventory is available for this run.");
 assert.equal(promptContext.workspace.sourceIsAvailableThroughTools, true);
 assert.deepEqual(promptContext.sdk.managedCapabilitiesRequireSdk, [
@@ -90,6 +92,9 @@ assert.match(promptContext.sdk.import, /NavigationDisclosure/);
 assert.doesNotMatch(promptContext.sdk.import, /LeadLabel|LeadControl/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /behavior="modal"/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /trigger=/);
+assert.match(promptContext.sdk.components.NavigationDisclosure!, /toggleClassName=/);
+assert.match(promptContext.sdk.components.NavigationDisclosure!, /panelClassName=/);
+assert.match(promptContext.sdk.components.NavigationDisclosure!, /navClassName=/);
 const discussion = createManagerDiscussionContext({
   buildInput,
   message: "Could the homepage feel calmer?",
@@ -101,60 +106,36 @@ const discussion = createManagerDiscussionContext({
 assert.deepEqual(discussion.currentRoutes, ["/", "/services"]);
 assert(discussion.workspace?.files[0]?.contentHash.startsWith("sha256:"));
 
-assert.match(websiteManagerSystemPrompt, /You own the visual direction, copy, composition/i);
-assert.match(websiteManagerSystemPrompt, /own information architecture unless an initial build supplies src\/approved-architecture\.ts/i);
-assert.match(websiteManagerSystemPrompt, /Owner-confirmed facts and explicit owner intent outrank provisional crawl discoveries/i);
-assert.match(websiteManagerSystemPrompt, /prior website submitted for generation as authorized first-party content/i);
-assert.match(websiteManagerSystemPrompt, /including verbatim when that produces the strongest page/i);
-assert.match(websiteManagerSystemPrompt, /never rewrite merely to make source content appear original/i);
-assert.match(websiteManagerSystemPrompt, /other public-web research as factual research, not as material for unrestricted verbatim copying/i);
-assert.match(websiteManagerSystemPrompt, /first establish the strongest present-day commercial core for the business; then carry forward its authorized existing content estate/i);
-assert.match(websiteManagerSystemPrompt, /implement every explicit route.*do not shrink, expand, or reinterpret the approved ledger/i);
-assert.match(websiteManagerSystemPrompt, /source is an asset layer, not the definition or ceiling of the new site/i);
-assert.match(websiteManagerSystemPrompt, /substantial existing page is accumulated first-party content, not equivalent to a hypothetical SEO page/i);
-assert.match(websiteManagerSystemPrompt, /Broad topical similarity, a tidier taxonomy, or a preference for a smaller site is not enough reason to consolidate/i);
-assert.match(websiteManagerSystemPrompt, /carry its substantive source answer forward rather than replacing it with title-derived thin copy/i);
-assert.match(websiteManagerSystemPrompt, /commercial core is only the first layer, never the stopping point for a mature source/i);
-assert.match(websiteManagerSystemPrompt, /site is incomplete until every retained source path has a deliberate disposition/i);
-assert.match(websiteManagerSystemPrompt, /site containing only the commercial core has not completed the second layer/i);
-assert.match(websiteManagerSystemPrompt, /Do not retire useful content merely to reduce implementation work/i);
-assert.match(websiteManagerSystemPrompt, /sparse source is not a ceiling/i);
-assert.match(websiteManagerSystemPrompt, /every retained source-page manifest entry/i);
-assert.match(websiteManagerSystemPrompt, /checks only technical release safety and operability/i);
-assert.match(websiteManagerSystemPrompt, /After a successful targeted edit, call finish directly/i);
-assert.doesNotMatch(websiteManagerSystemPrompt, /build_preview/i);
-assert.match(websiteManagerSystemPrompt, /actual rendered desktop, tablet, mobile, and opened mobile-navigation states/i);
-assert.match(websiteManagerSystemPrompt, /authoring judgment, not a mandatory sequence/i);
-assert.match(websiteManagerSystemPrompt, /business imagery is never attached automatically/i);
-assert.match(websiteManagerSystemPrompt, /owner's explicit instruction; every existing Lodesta workspace source file/i);
-assert.match(websiteManagerSystemPrompt, /Preserve existing workspace source unconditionally/i);
-assert.match(websiteManagerSystemPrompt, /src\/styles\.css as the editable site-local design-system root/i);
-assert.match(websiteManagerSystemPrompt, /do not start from a fixed visual template/i);
-assert.doesNotMatch(websiteManagerSystemPrompt, /editable.*recipe|recipe provenance/i);
-assert.match(websiteManagerSystemPrompt, /contained full-screen mobile menu is Lodesta's usual starting point/i);
-assert.match(websiteManagerSystemPrompt, /NavigationDisclosure is an optional headless behavior primitive/i);
-assert.match(websiteManagerSystemPrompt, /site owns all artwork, presentation, and breakpoints/i);
-assert.match(websiteManagerSystemPrompt, /Compose maps or location cards, static galleries, layouts, and ordinary disclosures with semantic HTML/i);
-assert.doesNotMatch(websiteManagerSystemPrompt, /readiness score|critic agent|mandatory page|exactly two/i);
-assert.equal(websiteManagerPromptIdentity, `website-manager@${sha256(websiteManagerSystemPrompt)}`);
+assert.equal(websiteManagerPromptIdentity, `website-manager@${sha256(websiteManagerAuthoringSystemPrompt)}`);
+assert.equal(websiteManagerDiscussionPromptIdentity, `website-manager-discussion@${sha256(websiteManagerDiscussionSystemPrompt)}`);
+assert.notEqual(websiteManagerPromptIdentity, websiteManagerDiscussionPromptIdentity);
+assert.match(websiteManagerDiscussionSystemPrompt, /without modifying source/i);
+assert.doesNotMatch(websiteManagerAuthoringSystemPrompt, /editable.*recipe|recipe provenance|critic agent|automatic repair/i);
 
-const skill = taskSkillFor("initial_build");
-assert.equal(skill.id, "website-authoring");
-assert.equal(skill.knowledge.length, 8);
-assert(skill.knowledge.some((item) => /approved-architecture\.ts/i.test(item) && /implement every explicit route/i.test(item)));
-assert(skill.knowledge.some((item) => /Owner-authoritative facts outrank retained observations/i.test(item) && /Never invent or paraphrase an unsupported service/i.test(item)));
-assert(skill.knowledge.some((item) => /Judge supplied assets by visible pixels/i.test(item) && /exact official logo/i.test(item)));
-assert(skill.knowledge.some((item) => /Choose one named design grammar/i.test(item) && /route-specific useful unit or action/i.test(item)));
-assert(skill.knowledge.some((item) => /every live route reachable/i.test(item) && /never imply unsupported precision/i.test(item)));
-assert(skill.knowledge.some((item) => /Preserve every existing workspace source file unconditionally/i.test(item)
-  && /rather than adapting a fixed visual template/i.test(item)
-  && /src\/required-destinations\.tsx/i.test(item)));
-assert(skill.knowledge.some((item) => /representative route set/i.test(item) && /contrast at the nearest affected selector/i.test(item)));
-assert(skill.knowledge.some((item) => /Preserve the supplied scaffold contract/i.test(item) && /SafeLink already renders its anchor/i.test(item)));
-assert(!skill.knowledge.some((item) => /mandatory tool|critic pass|section template/i.test(item)));
-const editSkill = taskSkillFor("edit");
-assert.match(editSkill.objective, /owner's requested website change precisely/i);
-assert.deepEqual(editSkill.knowledge, skill.knowledge);
+const taskSkills = {
+  initial_build: taskSkillFor("initial_build"),
+  edit: taskSkillFor("edit"),
+  rebase: taskSkillFor("rebase")
+} as const;
+for (const [kind, skill] of Object.entries(taskSkills)) {
+  assert.equal(skill.id, "website-authoring");
+  assert.equal(skill.identity, `website-authoring@${sha256(stableJson({
+    id: skill.id,
+    kind,
+    objective: skill.objective,
+    knowledge: skill.knowledge
+  }))}`);
+  assert(!skill.knowledge.some((item) => /mandatory tool|critic pass|section template|automatic retry/i.test(item)));
+}
+assert.equal(new Set(Object.values(taskSkills).map((skill) => skill.identity)).size, 3);
+assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.edit.knowledge.slice(0, 2));
+assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.rebase.knowledge.slice(0, 2));
+assert.match(taskSkills.initial_build.knowledge.join(" "), /blank initial build.*NavigationDisclosure behavior="modal"/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /essential controls and destinations at least 48px/i);
+assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
+assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
+assert.match(taskSkills.edit.knowledge.join(" "), /Preserve every existing workspace source file unconditionally/i);
+assert.match(taskSkills.rebase.knowledge.join(" "), /deterministic control-plane changes/i);
 
 const toolNames = new Set(managerToolNameSchema.options);
 const offeredToolNames = new Set(websiteManagerTools.flatMap((tool) => tool.type === "function" ? [tool.name] : []));

@@ -47,8 +47,10 @@ assert.match(workflow, /run\.kind === "initial_build"[\s\S]*prepareInitialArchit
 assert.doesNotMatch(workflow, /initialBuildProfile\?\.initialBuildScope/);
 assert.doesNotMatch(workflow, /architectureInventory:/);
 assert.match(skills, /Preserve every existing workspace source file unconditionally/);
-assert.match(skills, /rather than adapting a fixed visual template/);
-assert.match(skills, /contained full-screen mobile menu is Lodesta's usual starting point/);
+assert.match(skills, /const knowledgeByKind =/);
+assert.match(skills, /blank initial build.*NavigationDisclosure behavior=/);
+assert.match(skills, /Never apply blank-build design defaults/);
+assert.match(skills, /websiteAuthoringSkillIdentityFor\(kind/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
 assert.match(workflow, /canonicalSiteAuthoringRuntimeSeriesId/);
 assert.match(workflow, /olderAuthoringRevision \|\| run\.kind === "initial_build"/);

@@ -2,6 +2,18 @@
 
 Date: 2026-08-20
 
+## Optimized V4 implementation
+
+The latest recipe-free Kind V4 run was `run_9936f28aa4d64902a47ad0577c4a69c8` / `version_ded8eb4f814cba81302b72bd2747daa1`. It passed the hard release gate at $0.19357761 in 855,631 ms with 23 model requests, four applies, and four inspections. No sandbox replay, recycle, or transport timeout occurred. The three failed inspections were valid authoring feedback—contrast, required-destination reachability, and broken managed-disclosure findings—not infrastructure failures.
+
+The run validated the narrowed managed-form SDK: the final custom form rendered the retained Name, Phone, Email, and Message fields exactly once with visible labels, phone-safe control sizing, and managed submission. Its navigation result exposed the remaining architectural seam. After struggling with a transparent and overflowing managed modal, the author escaped to a functionally valid inline native link grid. That passed the hard gate but did not express Lodesta's preferred initial mobile pattern.
+
+The correction keeps V4 recipe-free and restores only modal spatial containment in capability CSS. V4 JavaScript remains unchanged. The existing manifest generator fingerprints the changed scaffold as `lodesta-static-site-workspace@sha256:7f74a114d37d80f41955d0469a38cd2cbf4297b3e635f581e92e5cc0b316c857`; imports never derive deploy state. The exact V4 capability CSS is `sha256:ef3a20ccf7dc6c1f725218d83fba87858de27095d25c0e897c05d92bb80c173d`. Navigation links retain fully authored layout and remain subject to inspection and browser verification.
+
+The canonical skill is now task-specific: initial builds receive eight focused entries, while edits and rebases receive four each. The original R8 eight-item treatment is frozen as private experiment provenance before the split. Executable authoring continues to use the exact compact prompt identity `website-manager@sha256:fbf163d754f290919f943ecbc4e5c22f432defa9dbdd823e7a15c73273171fe0`; the old long prompt has been replaced by a minimal read-only discussion prompt.
+
+This is not a promotion result. Coordinated deployment, deterministic release verification, and fresh matched Kind and Surge comparisons remain required.
+
 ## V4 implementation status
 
 The repository now contains the recipe-free V4 canonical-runtime candidate: presentation-free managed navigation, the narrowed managed-form SDK, structurally materialized owner-authoritative destinations, and direct business-specific authoring from the minimal workspace. The four visual recipe files and their provenance machinery have been removed from new authoring so their value can be evaluated separately rather than bundled into the V4 boundary. New-authoring code targets `site-runtime-v4`; V1-V3 remain only where immutable retained artifacts require their original rendering bytes.

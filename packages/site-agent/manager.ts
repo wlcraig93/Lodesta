@@ -34,8 +34,9 @@ import {
 import { DeterministicManagerHistory, managerPromptTelemetry } from "./history";
 import {
   managerBuildContext,
-  websiteManagerCompactPullSourceSystemPrompt,
-  websiteManagerSystemPrompt
+  websiteManagerAuthoringSystemPrompt,
+  websiteManagerDiscussionPromptIdentity,
+  websiteManagerDiscussionSystemPrompt
 } from "./prompts";
 import {
   establishProviderAuthoringCapabilities,
@@ -152,7 +153,7 @@ export class WebsiteManagerAgent {
     const client = this.injectedClient ?? configuredResponsesClient(providerCapability.descriptor);
     const authoringProfile = input.authoringProfile ?? canonicalAuthoringProfile(input.kind);
     const taskSkill = authoringProfile.taskSkill;
-    const systemPrompt = websiteManagerCompactPullSourceSystemPrompt;
+    const systemPrompt = websiteManagerAuthoringSystemPrompt;
     const promptIdentity = `website-manager@${sha256(systemPrompt)}`;
     const availableTools = authoringProfile.disabledTools.length
       ? websiteManagerTools.filter((tool) => tool.type !== "function" || !authoringProfile.disabledTools.includes(tool.name as "create_image"))
@@ -668,12 +669,18 @@ export class WebsiteManagerAgent {
       providerCapabilities: providerCapability.descriptor,
       name: "manager_discussion",
       schema: managerDiscussionJsonSchema,
-      system: websiteManagerSystemPrompt,
+      system: websiteManagerDiscussionSystemPrompt,
       content: [{ type: "input_text", text: JSON.stringify(createManagerDiscussionContext(input)) }],
       signal: input.signal, maxOutputTokens: 2500,
       reasoningEffort: this.reasoningEffort
     });
-    return { discussion: managerDiscussionSchema.parse(result.value), apiProvider, modelId, usage: result.usage };
+    return {
+      discussion: managerDiscussionSchema.parse(result.value),
+      apiProvider,
+      modelId,
+      promptIdentity: websiteManagerDiscussionPromptIdentity,
+      usage: result.usage
+    };
   }
 
   async architect(input: {

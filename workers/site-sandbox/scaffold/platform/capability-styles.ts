@@ -140,11 +140,31 @@ export const platformCapabilityStyles = `
 // safe destinations, forms, and telemetry do not require platform geometry.
 const nativePresentationCapabilityStyles = "";
 
-// V4 retains only the state invariant needed by the managed disclosure. All
-// geometry, artwork, breakpoints, color, spacing, and motion are authored in
-// editable site source.
-const headlessCapabilityStyles = `[data-lodesta-navigation-panel][hidden] {
+// V4 owns modal state and spatial containment without owning trigger artwork,
+// menu composition, breakpoints, spacing, typography, or motion. Zero-specificity
+// defaults remain deliberately overridable by authored site classes.
+const headlessCapabilityStyles = `:where([data-lodesta-menu-toggle]) {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+:where([data-lodesta-navigation-panel][hidden]) {
   display: none !important;
+}
+
+:where([data-lodesta-navigation-behavior="modal"] > [data-lodesta-navigation-panel]:not([hidden])) {
+  position: fixed;
+  z-index: 2147483000;
+  box-sizing: border-box;
+  inset: var(--lodesta-navigation-top, 0px) 0 0;
+  width: 100%;
+  max-width: none;
+  height: calc(100dvh - var(--lodesta-navigation-top, 0px));
+  max-height: calc(100dvh - var(--lodesta-navigation-top, 0px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--site-color-background, Canvas);
+  color: var(--site-color-text, CanvasText);
 }`;
 
 export function platformCapabilityStylesFor(runtimeSeriesId: string) {

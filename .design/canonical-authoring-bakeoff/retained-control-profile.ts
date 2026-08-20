@@ -1,0 +1,50 @@
+import { sha256, stableJson } from "../../packages/business-data";
+import type { ManagerAuthoringProfile } from "../../packages/site-agent/authoring-profile";
+import type { ManagerTaskSkill } from "../../packages/site-agent/skills";
+
+/**
+ * Immutable R8 experiment fixture captured before the canonical per-kind skill split.
+ * This is private bake-off provenance and is never reachable through liveAuthoringProfile.
+ */
+export const r8InitialBuildSkill = {
+  id: "website-authoring",
+  identity: "website-authoring@sha256:35aca099645fc40fc50d0a9c5ef136eee30debc8eb9d3724cd5b504244d25a57",
+  objective: "Create the complete customer website from the supplied business evidence and site intent.",
+  knowledge: [
+    "Implement every explicit route and disposition in src/approved-architecture.ts. src/approved-source-index.ts maps approved routes to exact retained files and includes short evidence previews; use them for distinctive customer answers, then inspect a raw source file only when an answer remains unclear. Never map extracted paragraphs into render-time copy or metadata. Every live object in siteDefinition.routes explicitly declares its own distinct truthful title and description derived from that route's customer job and retained answer. Final copy speaks directly to the customer and never mentions pages, templates, site organization, maps, mazes, research, evidence, sources, retained or public materials, or the building process.",
+    "Owner-authoritative facts outrank retained observations. Preserve exact eligible identity, phone, email, address, hours, forms, and customer-portal destinations. Never invent or paraphrase an unsupported service, location, person, credential, award, rating, price, offer, guarantee, response time, availability, result, safety or environmental quality, or service cadence; omit gated source marketing unless exact publicFacts support it. Do not characterize an address as a main shop, headquarters, flagship, or only location unless that exact role is supported.",
+    "Judge supplied assets by visible pixels, never their labels alone. Use the exact official logo at its intrinsic proportions on a compatible deliberate surface. Prefer an authentic business-specific branded person, vehicle, premises, or work scene. When none is strong enough but a polished retained photograph visibly depicts the core problem, service, or environment, a homepage made only from the logo, type, CSS shapes, or decorative symbols is below the launch target: use the strongest relevant photograph once in a high-salience role with a deliberate responsive crop. Omit misleading, weak, unrelated, or generic filler; browse ranked retained image resources only when a stronger route-relevant asset may exist. Do not repeat scarce photography across unrelated routes. Never invent a competing mark, monogram, badge, slogan poster, pseudo-map, coverage radius, decorative diagram, or business imagery. The entire exact logo mark must remain visibly recognizable at desktop and phone sizes: never enlarge internal logo artwork by translating it outside an overflow-hidden wrapper or clipping any part of its canvas; instead use a compatible surface and enough bounded height.",
+    "Choose one named design grammar that fits the business and execute its palette, typography, crop, spacing, and rhythm coherently. Give each primary route a distinct first-viewport job: the homepage orients and converts; the service hub exposes a grouped complete inventory; service details answer the exact concern with relevant evidence; locations expose supported communities; About supplies business context; Contact begins the contact path; FAQ and guides expose their useful questions or content. By the end of the first natural viewport, show the first route-specific useful unit or action; do not let an oversized title-only opening or decorative empty field postpone it. Shared structure may repeat, but visible copy and composition remain route-specific. Edit long service inventories into a scannable hierarchy with grouped compact rows, links, or categories; never assign every service equal card weight or show a long uniform wall of cards.",
+    "Keep conversion clear and proportionate. Make every live route reachable through concise navigation or an explicit hub. Present supported service area as readable grouped place names and, when useful, a real managed address or directions block; never imply unsupported precision through a map-like graphic, radius, circle, local-focus badge, or coverage visualization. When canonical locality, address, or service-area evidence exists, render one concise honest homepage cue through the supplied fact binding rather than only unbound prose; do not substitute a pseudo-map or radius graphic.",
+    "Preserve every existing workspace source file unconditionally during edits, restores, rebases, and unrelated owner requests. On a blank initial build, author navigation and managed-form presentation directly for this business rather than adapting a fixed visual template. A contained full-screen mobile menu is Lodesta's usual starting point, while a different managed or verified native semantic pattern is allowed when the business, design direction, or owner request warrants it. Runtime capabilities own navigation state and managed form submission; the site owns presentation. Render every nonempty owner-authoritative destination from src/required-destinations.tsx in a reachable location. Meaningful form text is at least 16px, essential controls are at least 44px, forms stack on phones, and the opened phone state remains opaque, legible, keyboard-operable, and viewport-contained. Inspect it opened before finishing.",
+    "Inspect the supplied representative route set when pixels can change your judgment: omit route from inspect_site to cover that set; route '/' proves only the homepage. Correct reported contrast at the nearest affected selector after reading its full cascade; avoid broad late overrides or comma groups that span light and dark surfaces. Treat internal-provenance copy and evidence-free identity devices as unfinished customer output, while avoiding unrelated taste churn.",
+    "Preserve the supplied scaffold contract: siteDefinition is an object whose routes field remains an array of route objects with rendered JSX elements; every emitted route object has an explicit string path, title, description, and rendered element, including objects returned by map helpers. CSS beneath src/ is automatic and is never imported from TypeScript; each apply_patch path appears at most once. Bind repeated route content by an explicit path or stable key rather than a positional array index. The source policy rejects dynamic object[key] access; use Map.get(key), a switch, or explicit conditions for route-keyed content. SafeLink already renders its anchor; use it directly with className and never wrap it in <a>. Before the first rendered inspection, review the complete import list and siteDefinition.routes declaration together."
+  ],
+  supportingSkills: []
+} satisfies ManagerTaskSkill;
+
+export const r8CompactPromptIdentity = "website-manager@sha256:fbf163d754f290919f943ecbc4e5c22f432defa9dbdd823e7a15c73273171fe0" as const;
+export const r8RuntimeSeriesId = "site-runtime-v2" as const;
+
+export const r8InitialBuildProfile = {
+  profileId: "canonical",
+  taskSkill: r8InitialBuildSkill,
+  systemPrompt: "compact-full-site-pull-source",
+  architectureMode: "commercial-core-pull",
+  architectureEvidenceMode: "indexed-pull-preview-readable",
+  architectureBrowserCoverage: "all-page-types",
+  disabledTools: ["create_image"],
+  sourceEvidenceLimit: 4,
+  sourceEvidencePresentation: "contact-sheet",
+  assetEvidenceLimit: 2,
+  assetEvidencePresentation: "contact-sheet",
+  sourceInventoryMode: "representative-customer-index",
+  visualInspectionImageDetail: "high",
+  visualInspectionFeedback: "component-diagnostic-route-family-quality-led"
+} satisfies ManagerAuthoringProfile;
+
+export const r8ControlFixtureHash = sha256(stableJson({
+  runtimeSeriesId: r8RuntimeSeriesId,
+  promptIdentity: r8CompactPromptIdentity,
+  profile: r8InitialBuildProfile
+}));

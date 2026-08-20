@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
+import { NextRequest } from "next/server";
+import { GET as healthRoute } from "../app/api/health/route";
 import { checkSandboxReadiness } from "../lib/health";
+import { middleware } from "../middleware";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 
 const base = {
   url: "https://sandbox.example",
   token: "test-token"
 };
+
+const shallow = await healthRoute(new Request("http://10.0.0.12/api/health", {
+  headers: { host: "10.0.0.12" }
+}));
+assert.equal(shallow.status, 200);
+assert.deepEqual(Object.keys(await shallow.json()).sort(), ["status", "timestamp"]);
+
+const internalHostHealth = await middleware(new NextRequest("http://10.0.0.12/api/health", {
+  headers: { host: "10.0.0.12" }
+}));
+assert.equal(internalHostHealth.status, 200);
 
 const matching = await checkSandboxReadiness({
   ...base,
@@ -47,7 +61,7 @@ assert.match(timedOut.detail, /timed out/i);
 
 process.stdout.write(`${JSON.stringify({
   ok: true,
-  checks: ["matching", "mismatch", "malformed", "unavailable", "timeout"]
+  checks: ["shallow-liveness", "internal-host", "matching", "mismatch", "malformed", "unavailable", "timeout"]
 })}\n`);
 
 function fetchReturning(value: unknown) {

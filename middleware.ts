@@ -31,6 +31,12 @@ const domainResolveBypassHeader = "x-lodesta-domain-resolve";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // Deployment health checks may use an internal Host header that is neither
+  // a Lodesta platform hostname nor a customer domain. Liveness must reach the
+  // health route before custom-domain resolution is considered.
+  if (pathname === "/api/health") {
+    return withCachePolicy(NextResponse.next(), pathname, false, false);
+  }
   if (pathname === "/api/domains/resolve" && request.headers.get(domainResolveBypassHeader) === "1") {
     return NextResponse.next();
   }

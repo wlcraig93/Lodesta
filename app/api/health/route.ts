@@ -8,20 +8,22 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const deep = searchParams.get("deep") === "1" || searchParams.get("ready") === "1";
 
-  if (deep) {
-    const unauthorized = await requireAdmin(request);
-    if (unauthorized) return unauthorized;
-  }
-
-  const report = await getHealthReport({ deep });
-  const status = deep && report.status === "error" ? 503 : 200;
-
+  // Railway uses this route as a process-liveness probe. Keep the shallow
+  // response independent of Supabase, sandbox compatibility, and every other
+  // readiness dependency so a coordinated release cannot deadlock before its
+  // authenticated deep-health phase.
   if (!deep) {
     return NextResponse.json({
       status: "ok",
-      timestamp: report.timestamp
+      timestamp: new Date().toISOString()
     });
   }
+
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
+  const report = await getHealthReport({ deep: true });
+  const status = report.status === "error" ? 503 : 200;
 
   return NextResponse.json(report, { status });
 }

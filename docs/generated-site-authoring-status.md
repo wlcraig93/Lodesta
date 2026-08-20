@@ -2,6 +2,29 @@
 
 Date: 2026-08-20
 
+## Optimized V4 validated for canonical promotion
+
+Release `0371ef05f7e77cf826c61daaa1182a2e64c5c1a0` deployed the recipe-free optimized V4 application and sandbox toolchain. Railway web deployment `02788109-60da-4dc8-9acb-bd4f7d245d3a` and worker deployment `f7a12c78-9d69-4523-9a1e-cfb28c64fc3e` both reported that exact SHA before sandbox promotion. The active green sandbox is `sandbox_deployment_b41d130c6159277bef84e14529a997d5`, worker version `131f0797-fb8d-46cf-808b-7ae488f72e9f`, image `sha256:f80a45a2facb768601ccafd240add43053528dd201b8dc7e72bb240a2e453d2c`, and toolchain `lodesta-static-site-workspace@sha256:7f74a114d37d80f41955d0469a38cd2cbf4297b3e635f581e92e5cc0b316c857`. Coordinated deep health passed and maintenance was released.
+
+The first fresh matched Kind pair used identical retained authority, architecture, inventory, compact executable prompt, Luna model route, and $0.50 private fuse. Frozen R8 (`run_4ff1721a1f754748bcfa3dc93281a478`) and optimized V4 (`run_9aa92465f7f74955ac76632128211f96`) both passed the hard release gate. Under the rubric frozen before capture review, optimized V4 scored 45/45 versus R8's 32/45. V4 was materially stronger at desktop scale, hierarchy, mobile polish, conversion pacing, form integration, and especially opened navigation.
+
+The mechanism result is direct: R8 authored an inline disclosure whose opened panel was a transparent 242×92 wrapping link cluster inside the header. V4 authored the requested managed modal; the platform contained it at the measured 76px header offset in the remaining 390×768 viewport, with an opaque token-derived surface, internal scrolling, and no containment repair loop. V4 also completed with no sandbox replay, recycle, transport timeout, or failed build. R8 encountered one historical 15-second transport timeout and recycle, so the lower V4 cost ($0.12705688 versus $0.14989992) and duration (20m26s versus 27m41s) are descriptive rather than a causal efficiency estimate.
+
+Kind advanced. The fresh Surge pair subsequently passed both hard gates. Frozen R8 (`run_edecd4f2d67040c29f6e7dd646ef7205`) scored 42/45 at $0.10532747 in 825,496 ms; optimized V4 (`run_cd6c6dc8abea4aa7b8008be84a58b5b5`) scored 44/45 at $0.12132790 in 933,333 ms. R8 again authored a transparent inline header grid, while V4 authored the contained managed-modal default with every required destination. V4 used 22 requests and five inspections versus R8's 13 requests and three inspections, and repaired one malformed-source build; the reliability screen will determine whether that extra churn repeats. Neither run had a transport timeout, replay, or recycle.
+
+Both businesses advanced to the optimized-V4 reliability screen. The four additional runs all passed the hard release gate:
+
+| Business / run | Cost | Duration | Requests | Inspections | Infrastructure |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Kind 2 — `run_ddbf867f44a542e1b41a2fb9397d92c3` | $0.15821632 | 22m 37s | 29 | 7 + finish | clean |
+| Kind 3 — `run_fe8092f18990423ab875a21cbb4d24c3` | $0.16322549 | 15m 13s | 22 | 4 + finish | clean |
+| Surge 2 — `run_d6f0ebc5250142a9a218ca653170e627` | $0.07336615 | 10m 02s | 12 | 2 + finish | clean |
+| Surge 3 — `run_fb98492673ba4085879c9794726b74c7` | $0.10086519 | 15m 36s | 22 | 4 + finish | clean |
+
+All six V4 treatment runs used managed modal navigation, retained exact owner-authoritative destinations, and used custom layouts through the narrowed managed-form SDK. Every sandbox apply succeeded on its first submission. No V4 treatment replayed, recycled, timed out in transport, or crossed the $0.50 fuse. The same containment, form, destination, or ownership-boundary failure did not recur in two runs for either business.
+
+The reliability rule is satisfied and optimized V4 is approved as the sole new-authoring generator. A stored-data report found 336 current inputs requiring immutable V4 replacements, zero owner-created current revisions requiring approval, and zero missing workspace sidecars. Historical V1–V3 inputs, workspaces, artifacts, versions, and runtime patches remain untouched for retained rendering.
+
 ## Optimized V4 implementation
 
 The latest recipe-free Kind V4 run was `run_9936f28aa4d64902a47ad0577c4a69c8` / `version_ded8eb4f814cba81302b72bd2747daa1`. It passed the hard release gate at $0.19357761 in 855,631 ms with 23 model requests, four applies, and four inspections. No sandbox replay, recycle, or transport timeout occurred. The three failed inspections were valid authoring feedback—contrast, required-destination reachability, and broken managed-disclosure findings—not infrastructure failures.
@@ -12,7 +35,7 @@ The correction keeps V4 recipe-free and restores only modal spatial containment 
 
 The canonical skill is now task-specific: initial builds receive eight focused entries, while edits and rebases receive four each. The original R8 eight-item treatment is frozen as private experiment provenance before the split. Executable authoring continues to use the exact compact prompt identity `website-manager@sha256:fbf163d754f290919f943ecbc4e5c22f432defa9dbdd823e7a15c73273171fe0`; the old long prompt has been replaced by a minimal read-only discussion prompt.
 
-This is not a promotion result. Coordinated deployment, deterministic release verification, and fresh matched Kind and Surge comparisons remain required.
+This implementation section records the pre-release state. The coordinated release and fresh Kind comparison described above are now complete; Surge and the reliability screen remain required for promotion.
 
 ## V4 implementation status
 

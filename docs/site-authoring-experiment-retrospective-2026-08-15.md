@@ -137,6 +137,58 @@ The toolchain identity remains a checked-in deployment constant produced by the 
 
 The next paid evidence is a fresh matched Kind pair, followed by Surge only if Kind is at least comparable to R8 without repeated navigation churn. Deterministic fixtures answer whether containment works; paid runs answer whether the complete site is as good as R8. Recipes remain deferred until the optimized recipe-free baseline is established.
 
+### Fresh optimized-V4 Kind pair
+
+The frozen-R8 and optimized-V4 arms used the same retained Kind authority, architecture and inventory hashes, compact executable prompt, Luna model route, and $0.50 fuse. Both passed the hard release gate. The predeclared neutral-label review scored optimized V4 45/45 and frozen R8 32/45. V4 was materially stronger rather than merely comparable, particularly in first-viewport scale, hierarchy, mobile composition, conversion pacing, and contact-form integration.
+
+The navigation result validates the corrected ownership boundary. Frozen R8 authored `behavior="inline"`; its opened panel was a transparent 242×92 link cluster wrapping inside the mobile header. Optimized V4 authored the managed-modal default, and the new capability CSS contained it below the measured 76px header in the remaining 390×768 viewport. It had an opaque semantic-token surface, internal scrolling, the exact required destinations, and no containment reconstruction loop. No platform artwork or inner-link layout was restored.
+
+| Measure | Fresh frozen R8 | Optimized V4 |
+| --- | ---: | ---: |
+| Run | `run_4ff1721a1f754748bcfa3dc93281a478` | `run_9aa92465f7f74955ac76632128211f96` |
+| Hard gate | passed | passed |
+| Rubric score | 32/45 | 45/45 |
+| Cost | $0.14989992 | $0.12705688 |
+| Duration | 1,660,661 ms | 1,226,444 ms |
+| Model requests | 24 | 20 |
+| Inspections | 5 plus finish | 5 plus finish |
+| Sandbox event | one historical timeout/recycle | none |
+
+Cost and duration remain descriptive because the R8 arm's historical sandbox recycle changed its execution path. Final-artifact quality is still comparable because both retained artifacts passed the same hard gate. Kind advances to Surge; this pair alone does not authorize general promotion.
+
+### Fresh optimized-V4 Surge pair
+
+The matched Surge arms reused the exact retained R6 authority, architecture plan (`sha256:2e85cbb20506ecf39212a3d75840ac257aac4f9d547a0b56eb5cee1c268afba4`), inventory (`sha256:a97468940066159001145fe19bdcd5575aa57f929f147991aa256f4ff233d533`), compact prompt, Luna route, and $0.50 fuse. Both passed the hard gate with no sandbox timeout, replay, or recycle.
+
+| Measure | Fresh frozen R8 | Optimized V4 |
+| --- | ---: | ---: |
+| Run | `run_edecd4f2d67040c29f6e7dd646ef7205` | `run_cd6c6dc8abea4aa7b8008be84a58b5b5` |
+| Rubric score | 42/45 | 44/45 |
+| Cost | $0.10532747 | $0.12132790 |
+| Duration | 825,496 ms | 933,333 ms |
+| Model requests | 13 | 22 |
+| Inspections | 3 plus finish | 5 plus finish |
+| Retained warnings | 80 | 61 |
+
+Both sites are visually strong and business-specific. R8 is a crisp geometric service system; V4 is an equally coherent navy/yellow editorial treatment with stronger use of the authentic technician image. The decisive architectural difference repeated: R8 authored `behavior="inline"` and opened a transparent 202×176 header grid, while V4 authored a contained opaque 390×731 modal with every required destination. V4's authored trigger reads as a single bar and the run repaired one malformed-source build; those are advisory reliability concerns, not hard failures.
+
+Surge advances. The extra V4 repair work prevents an efficiency claim, but final quality is at least comparable and the runtime/SDK boundary is materially cleaner. Run the planned two additional V4 generations per business and block promotion only if the same navigation, form, or ownership-boundary failure repeats in at least two runs for a business.
+
+### Optimized-V4 reliability screen and promotion
+
+The two additional V4 runs per business completed through the normal hosted queue. Together with the matched V4 arms, the screen contains three independent Kind results and three independent Surge results. All six passed the hard gate, used managed modal navigation, retained required destinations, and produced custom forms through the narrowed V4 SDK. Every sandbox source apply succeeded on its first submission; there was no replay, recycle, transport timeout, or cost-fuse failure.
+
+| Business / run | Cost | Duration | Model requests | Inspections |
+| --- | ---: | ---: | ---: | ---: |
+| Kind 2 — `run_ddbf867f44a542e1b41a2fb9397d92c3` | $0.15821632 | 1,356,796 ms | 29 | 7 plus finish |
+| Kind 3 — `run_fe8092f18990423ab875a21cbb4d24c3` | $0.16322549 | 913,421 ms | 22 | 4 plus finish |
+| Surge 2 — `run_d6f0ebc5250142a9a218ca653170e627` | $0.07336615 | 602,070 ms | 12 | 2 plus finish |
+| Surge 3 — `run_fb98492673ba4085879c9794726b74c7` | $0.10086519 | 936,373 ms | 22 | 4 plus finish |
+
+Kind 2 shows that authoring variance still matters: it used seven inspections and 29 requests, though its final artifact retained only two warnings. Surge 1 repaired malformed source once; Surge 2 and Surge 3 did not repeat that problem. Two Surge results used visually compressed trigger artwork, but the triggers remained explicit, labeled, correctly sized, keyboard-operable, and functional. That is a future authoring-guidance refinement, not a repeated containment or runtime-ownership failure and not a reason to restore platform artwork.
+
+The predeclared promotion rule is satisfied. Optimized V4 is materially better than matched R8 on Kind, at least comparable on Surge, and structurally cleaner on both. Its containment guarantee is deterministic, while brand adaptation, trigger artwork, inner menu layout, and form composition remain authored. Promote recipe-free optimized V4 as the sole new-authoring generator; retain R8/V1–V3 only for immutable historical rendering and experiment provenance.
+
 ## August 17 hosted V4 treatment and stop decision
 
 Release `f35fcbd5bd172a9d3ed8ea84afb8bc91215730c3` deployed the hardened web, worker, and green sandbox path. The active pinned sandbox was `sandbox_deployment_a22339bcc8d459db43125cd29ae1837e`. A fresh Kind V4-plus-recipes run then completed through the ordinary hosted queue:

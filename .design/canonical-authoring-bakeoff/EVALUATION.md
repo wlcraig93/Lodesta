@@ -143,6 +143,21 @@ One Surge treatment and one additional Surge run visually collapsed three unspac
 
 Kind 2 used substantially more repair work than the other runs but finished with only two retained warnings. Surge 1 repaired one malformed-source build, while Surge 2 and Surge 3 did not repeat it. Neither is a repeated architecture-related failure.
 
+### Post-review glyph correction
+
+The frozen nine-category scores above are not changed. A later byte- and screenshot-level audit found a portable-font defect that the old release gate and blinded visual review both missed:
+
+| Run | Portable glyph defect |
+| --- | --- |
+| `run_9aa92465f7f74955ac76632128211f96` | `✳` U+2733 in the hero proof mark |
+| `run_ddbf867f44a542e1b41a2fb9397d92c3` | `✳` U+2733 in the hero note |
+| `run_fe8092f18990423ab875a21cbb4d24c3` | None; it used no unsupported symbol |
+| `run_cd6c6dc8abea4aa7b8008be84a58b5b5` | `↗` U+2197 in the hero call-to-action |
+| `run_d6f0ebc5250142a9a218ca653170e627` | `↯` U+21AF in the hero badge, captured as `NO GLYPH` |
+| `run_fb98492673ba4085879c9794726b74c7` | `✓` U+2713 in the hero trust line |
+
+The managed web fonts were Latin subsets and the platform relied on visitor-specific system fallback for these characters. That made published rendering non-portable even though the authoring source and old hard gate were valid. The correction is a forward-only platform guarantee: pinned same-family symbol coverage plus a deterministic `render.missing_glyph` inspection and release finding. Future comparisons treat portable glyph rendering as a technical precondition, not a tenth subjective score. Historical archives retain their original font bytes so this defect remains reproducible.
+
 ## Promotion decision
 
 Optimized V4 satisfies the predeclared promotion rule:
@@ -155,3 +170,5 @@ Optimized V4 satisfies the predeclared promotion rule:
 - the exact prompt, task skill, toolchain, image, capability-CSS hash, and unchanged V4 runtime patch are attributable.
 
 Decision: promote recipe-free optimized V4 as the sole new-authoring generator. Preserve R8/V1–V3 only for retained artifact rendering and private experiment provenance. Do not reintroduce recipes, platform trigger artwork, a live runtime selector, or an aesthetic release critic.
+
+The promotion still stands after the glyph correction. R8's managed-navigation failure was structural and repeated across both businesses; portable glyph coverage is a deterministic platform defect fixed once for every future artifact rather than evidence for returning to mixed navigation presentation ownership.

@@ -18,6 +18,7 @@ supabase/.temp/
 .design/canonical-authoring-bakeoff/*
 !.design/canonical-authoring-bakeoff/EVALUATION.md
 !.design/canonical-authoring-bakeoff/retained-control-profile.ts
+!.design/canonical-authoring-bakeoff/evidence-registry.json
 outputs/
 screenshots/
 tmp/

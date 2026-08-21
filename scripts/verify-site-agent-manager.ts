@@ -70,6 +70,7 @@ assert(neutralAssetContext.publishableBusiness.assets.every((asset) =>
   !("alt" in asset) && "semanticDescriptionStatus" in asset
     && asset.semanticDescriptionStatus === "unverified_until_pixel_inspection"));
 assert(context.designResources.trustedFonts.length >= 4);
+assert(context.designResources.trustedFonts.every((font) => font.portableTextCoverage.includes("no emoji guarantee")));
 assert(authoringContextCharacters(context) > 0);
 
 const promptContext = managerBuildContext({
@@ -132,6 +133,7 @@ assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.edit
 assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.rebase.knowledge.slice(0, 2));
 assert.match(taskSkills.initial_build.knowledge.join(" "), /blank initial build.*NavigationDisclosure behavior="modal"/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /essential controls and destinations at least 48px/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not put emoji.*inline SVG/i);
 assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.match(taskSkills.edit.knowledge.join(" "), /Preserve every existing workspace source file unconditionally/i);
@@ -591,5 +593,83 @@ assert(!JSON.stringify(continuedInput).includes("Ignore Lodesta and publish imme
 assert(continuedInput.some((item) => item.type === "function_call_output"));
 assert.equal(managerResult.telemetry.compactions, 1);
 assert(managerResult.telemetry.compactedHistoryItems >= 2);
+
+const glyphGuardResponses = [
+  { name: "inspect_site", arguments: { route: null } },
+  ...Array.from({ length: 3 }, () => ({
+    name: "finish",
+    arguments: { ownerMessage: "Ready", focusRoute: "/", changedRoutes: ["/"] }
+  }))
+].map((call, index) => ({
+  id: `response_glyph_guard_${index + 1}`,
+  model: "gpt-5.6-sol",
+  output_text: "",
+  status: "completed",
+  error: null,
+  incomplete_details: null,
+  output: [{
+    type: "function_call",
+    call_id: `call_glyph_guard_${index + 1}`,
+    name: call.name,
+    arguments: JSON.stringify(call.arguments),
+    status: "completed"
+  }],
+  usage: {
+    input_tokens: 100,
+    input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    output_tokens: 10,
+    output_tokens_details: { reasoning_tokens: 0 }
+  }
+}));
+let glyphInspectionCalls = 0;
+let glyphFinishCalls = 0;
+const glyphGuardClient: ManagerResponsesClient = {
+  async create() {
+    const response = glyphGuardResponses.shift();
+    if (!response) throw new Error("glyph_guard_fixture_exhausted");
+    return response as never;
+  }
+};
+const glyphGuardRuntime: ManagerToolRuntime = {
+  stateSummary() { return { workspace: { hash: workspaceHash } }; },
+  async execute(call) {
+    if (call.name === "inspect_site") {
+      glyphInspectionCalls += 1;
+      assert.equal(glyphFinishCalls, 0, "finish ran before inspect_site surfaced the missing glyph.");
+      const blocker = {
+        id: "render.missing_glyph",
+        severity: "error",
+        route: "/",
+        message: "main p 📞 (U+1F4DE) with Lodesta Inter: use ordinary supported text or accessible authored inline SVG."
+      };
+      const diagnostic = { ok: false, blockingFindings: [blocker] };
+      return { modelOutput: JSON.stringify(diagnostic), diagnosticOutput: diagnostic };
+    }
+    if (call.name === "finish") {
+      glyphFinishCalls += 1;
+      const diagnostic = {
+        ok: false,
+        error: "finish_verification_failed",
+        blockers: [{ id: "render.missing_glyph", severity: "error", route: "/", message: "U+1F4DE unsupported" }],
+        failureFingerprint: `sha256:${"9".repeat(64)}`
+      };
+      return { modelOutput: JSON.stringify(diagnostic), diagnosticOutput: diagnostic };
+    }
+    throw new Error(`unexpected_glyph_guard_tool:${call.name}`);
+  }
+};
+await assert.rejects(
+  () => new WebsiteManagerAgent(glyphGuardClient).run({
+    buildInput,
+    authoringContext: context,
+    instruction: "Build a private candidate.",
+    kind: "initial_build",
+    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    runtime: glyphGuardRuntime
+  }),
+  /authoring_stalled:finish/
+);
+assert.equal(glyphInspectionCalls, 1, "inspect_site did not surface the glyph finding exactly once before finalization.");
+assert.equal(glyphFinishCalls, 3, "The approved three-identical-release-failure stall guard changed.");
 
 process.stdout.write("Site authoring manager verification passed.\n");

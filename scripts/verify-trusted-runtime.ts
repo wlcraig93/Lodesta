@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { chromium } from "playwright";
@@ -8,6 +9,13 @@ import { buildSiteRuntimeBytes } from "../packages/trusted-runtime";
 const runtimeV1 = await readFile("packages/trusted-runtime/site-runtime-v1.js");
 const runtime = await buildSiteRuntimeBytes("site-runtime-v2");
 const runtimeV4 = await buildSiteRuntimeBytes("site-runtime-v4");
+const materializedRuntimeV4 = await readFile("packages/trusted-runtime/site-runtime-v4.js");
+assert.deepEqual(runtimeV4, materializedRuntimeV4, "The canonical V4 builder did not return the materialized source bytes directly.");
+assert.equal(
+  createHash("sha256").update(runtimeV4).digest("hex"),
+  "578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403",
+  "Materialized V4 bytes no longer match the deployed active V4 patch; publish a separate audited runtime patch instead."
+);
 const v4CapabilityStyles = platformCapabilityStylesFor("site-runtime-v4");
 new Function(runtimeV1.toString("utf8"));
 new Function(runtime.toString("utf8"));

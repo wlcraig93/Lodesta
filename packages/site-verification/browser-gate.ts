@@ -9,7 +9,10 @@ import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import { isTechnicalReleaseBlocker, type PreparedSiteArtifact } from "./finalizer";
 import type { ArtifactGateFinding } from "./contracts";
 import { inspectNavigationReachability } from "./navigation-reachability";
-import { trustedFontFiles } from "../../workers/site-sandbox/scaffold/platform/font-library";
+import {
+  managedFontCoveragePolicy,
+  trustedFontFiles
+} from "../../workers/site-sandbox/scaffold/platform/font-library";
 import { buildSiteRuntimeBytes } from "@/packages/trusted-runtime";
 
 export type BrowserGateCapture = {
@@ -886,6 +889,14 @@ async function runArtifactBrowserGateOnce(input: {
             "render"
           ));
         }
+        if (metrics.missingGlyphExamples.length > 0) {
+          routeFindings.push(finding(
+            "render.missing_glyph",
+            `Visible text is not portable under Lodesta's pinned managed fonts. Use ordinary supported text, or replace a decorative character with accessible authored inline SVG. Never silently remove owner-authoritative text. Examples: ${metrics.missingGlyphExamples.map((example) => `${example.selector} ${example.character} (${example.codepoint}) with ${example.family}: ${example.reason}`).join("; ")}.`,
+            route.path,
+            "render"
+          ));
+        }
         for (const href of metrics.links) {
           if (!validRenderedLink(href, route.path, new Set(input.prepared.routes.map((item) => item.path)))) {
             routeFindings.push(finding(
@@ -1550,10 +1561,18 @@ type BrowserPageMetrics = {
   desktopDualNavigationExamples: string[];
   escapedEntityExamples: string[];
   escapedSequenceExamples: string[];
+  missingGlyphExamples: Array<{
+    selector: string;
+    character: string;
+    codepoint: string;
+    family: string;
+    reason: "coverage" | "emoji_presentation" | "emoji_sequence";
+  }>;
   links: string[];
 };
 
 const browserInspectionSource = String.raw`(() => {
+    const managedFontCoveragePolicy = ${JSON.stringify(managedFontCoveragePolicy)};
     const canonicalLogoRevisionIds = new Set(globalThis.__lodestaCanonicalLogoRevisionIds ?? []);
     const ownerLogoRevisionIds = new Set(globalThis.__lodestaOwnerLogoRevisionIds ?? []);
     const assetRevisionId = (image) => {
@@ -2774,6 +2793,63 @@ const browserInspectionSource = String.raw`(() => {
     });
     const escapedEntityExamples = [...new Set((document.body.innerText.match(/&(?:#\d+|#x[a-f0-9]+|[a-z][a-z0-9]+);/gi) ?? []).map((value) => value.slice(0, 40)))].slice(0, 3);
     const escapedSequenceExamples = [...new Set((document.body.innerText.match(/\\[nrt]/g) ?? []).map((value) => value.slice(0, 10)))].slice(0, 3);
+    const managedFontNames = Object.keys(managedFontCoveragePolicy);
+    const fontNameFor = (element) => {
+      const familyTokens = getComputedStyle(element).fontFamily.split(",").map((token) => token.trim().replace(/^['\"]|['\"]$/g, ""));
+      return managedFontNames.find((family) => familyTokens.includes(family));
+    };
+    const coveredByManagedFamily = (family, codepoint) => managedFontCoveragePolicy[family]
+      .some(([start, end]) => codepoint >= start && codepoint <= end);
+    const ignoredCodepoint = (codepoint, character) =>
+      codepoint <= 0x7f
+      || /\s/u.test(character)
+      || (codepoint >= 0x80 && codepoint <= 0x9f)
+      || (codepoint >= 0xfe00 && codepoint <= 0xfe0e)
+      || (codepoint >= 0xe0100 && codepoint <= 0xe01ef);
+    const missingGlyphExamples = [];
+    const inspectPortableText = (element, value, source) => {
+      if (!value || !colorTools.visible(element)) return;
+      const family = fontNameFor(element);
+      if (!family) return;
+      const characters = [...value];
+      for (let index = 0; index < characters.length; index += 1) {
+        const character = characters[index];
+        const codepoint = character.codePointAt(0);
+        if (codepoint === undefined || ignoredCodepoint(codepoint, character)) continue;
+        let reason;
+        if (codepoint === 0x200d || characters[index + 1]?.codePointAt(0) === 0xfe0f) reason = "emoji_sequence";
+        else if (/\p{Emoji_Presentation}/u.test(character)) reason = "emoji_presentation";
+        else if (!coveredByManagedFamily(family, codepoint)) reason = "coverage";
+        if (!reason) continue;
+        missingGlyphExamples.push({
+          selector: colorTools.selectorFor(element) + source,
+          character,
+          codepoint: "U+" + codepoint.toString(16).toUpperCase().padStart(4, "0"),
+          family,
+          reason
+        });
+      }
+    };
+    const visibleTextWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (visibleTextWalker.nextNode()) {
+      const node = visibleTextWalker.currentNode;
+      if (node.parentElement) inspectPortableText(node.parentElement, node.nodeValue ?? "", "");
+    }
+    for (const element of elements) {
+      for (const pseudo of ["::before", "::after"]) {
+        const style = getComputedStyle(element, pseudo);
+        if (style.display === "none" || style.visibility === "hidden" || style.content === "none" || style.content === "normal") continue;
+        let content = style.content;
+        if (content.startsWith('"') && content.endsWith('"')) {
+          try { content = JSON.parse(content); } catch { content = content.slice(1, -1); }
+        } else if (content.startsWith("'") && content.endsWith("'")) content = content.slice(1, -1);
+        inspectPortableText(element, content, pseudo);
+      }
+    }
+    const uniqueMissingGlyphExamples = [...new Map(missingGlyphExamples.map((example) => [
+      example.selector + "|" + example.codepoint + "|" + example.reason,
+      example
+    ])).values()].slice(0, 8);
     const inlineLinkClusters = [];
     const plainTextLink = (link) => {
       const style = getComputedStyle(link);
@@ -3552,6 +3628,7 @@ const browserInspectionSource = String.raw`(() => {
         colorTools.selectorFor(control) + " remains visible beside a complete desktop navigation"),
       escapedEntityExamples,
       escapedSequenceExamples,
+      missingGlyphExamples: uniqueMissingGlyphExamples,
       links: [...document.querySelectorAll("a[href]")].map((link) => link.getAttribute("href") ?? "")
     };
 })()`;

@@ -1,6 +1,12 @@
 # Generated-site authoring status
 
-Date: 2026-08-20
+Date: 2026-08-21
+
+## Canonical V4 glyph and runtime consolidation in progress
+
+A post-promotion audit found that five of the six retained V4 treatment artifacts depend on visitor-specific system-font fallback for `↗`, `↯`, `✓`, or `✳`. The old hard gate did not detect that portability defect. The canonical correction is forward-only: every managed Lodesta family now has pinned same-family coverage for those symbols, exact font hashes and codepoint ranges are checked in, emoji remains unsupported in agent-authored text, and `render.missing_glyph` is surfaced during `inspect_site` and blocks finalization. Historical artifact bytes and the frozen nine-category scores remain unchanged.
+
+The direct `site-runtime-v4.js` source materializes byte-for-byte to the active patch hash `sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403`; no runtime patch or series is created. The font and runtime changes await their coordinated web, worker, and sandbox release. Eight decisive R8/V4 runs must be sealed into the dedicated evidence store before the separately confirmed prelaunch reset can run. Legacy runtime code remains reachable until that reset proves zero references.
 
 ## Optimized V4 validated for canonical promotion
 

@@ -1961,6 +1961,41 @@ assert(
   "Visible literal escaped source text was not treated as a deterministic release failure."
 );
 
+const missingGlyphMarkup = '<p class="portable-symbols">Portable symbols: ↗ ↯ ✓ ✳</p><p class="unsupported-glyph">Unsupported emoji: 📞</p>';
+const missingGlyphPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${missingGlyphMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${missingGlyphMarkup}</main>`)) }
+    : file.path === "site.css"
+      ? { ...file, bytes: Buffer.concat([file.bytes, Buffer.from('.portable-symbols,.unsupported-glyph{font-family:"Lodesta Inter"}')]) }
+      : file)
+};
+const missingGlyphBrowser = await runArtifactBrowserGate({
+  prepared: missingGlyphPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-missing-glyph",
+  routePaths: ["/"]
+});
+const missingGlyphFinding = missingGlyphBrowser.findings.find((finding) => finding.id === "render.missing_glyph");
+assert(
+  missingGlyphFinding?.severity === "error" && isTechnicalReleaseBlocker(missingGlyphFinding),
+  "An unsupported emoji was not treated as a deterministic portable-font release failure."
+);
+assert(
+  missingGlyphFinding.message.includes("U+1F4DE")
+  && missingGlyphFinding.message.includes("ordinary supported text")
+  && missingGlyphFinding.message.includes("inline SVG"),
+  "The missing-glyph diagnostic did not identify the codepoint and portable alternatives."
+);
+assert(
+  !["U+2197", "U+21AF", "U+2713", "U+2733"].some((codepoint) => missingGlyphFinding.message.includes(codepoint)),
+  "A guaranteed portable symbol was incorrectly rejected."
+);
+
 const functionalDefectsPrepared = {
   ...prepared,
   routes: prepared.routes.map((route) => route.path === "/"

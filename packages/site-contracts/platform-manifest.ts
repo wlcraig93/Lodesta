@@ -8,11 +8,11 @@ export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:7f74a114d37d80f41955d0469a38cd2cbf4297b3e635f581e92e5cc0b316c857";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:d2939ae1b821cd8950bd85adbec831544611bec150f48815e9c7a637ecd92062";
 export const websiteManagerPromptIdentity = "website-manager@sha256:fbf163d754f290919f943ecbc4e5c22f432defa9dbdd823e7a15c73273171fe0";
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:eae1e92ea3eb70818e6a83cedab318494809320bae142a60b3691f46cc0e3a0d";
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:8bf130012c8273f60c86d699062db13b663231f9e98fe1f9d952e7089f7f624b";
-export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:2f90904d1ada3eddf23e2c821b7c0841ee327d6b404de909e83f0ecfe9c79cab";
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:cacf7abcf827148fd1167599153b878c9ce6445ea9ce89238483c182a46502b9";
+export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9be1b7dc256b25c26ef2b3e53175af07b046e9f9c110ab0fb425df3766fa703";
 
 export const siteTechnicalReleasePolicy = {
   schemaVersion: 1,
@@ -27,6 +27,7 @@ export const siteTechnicalReleasePolicy = {
     "render.network",
     "render.broken_image",
     "render.escaped_sequence",
+    "render.missing_glyph",
     "render.mobile_navigation",
     "render.mobile_navigation_trigger",
     "render.horizontal_overflow",

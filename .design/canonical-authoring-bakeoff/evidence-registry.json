@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "kind": "canonical-authoring-evidence-registry",
+  "runs": [
+    {
+      "runId": "run_4ff1721a1f754748bcfa3dc93281a478",
+      "business": "kind",
+      "treatment": "r8-control",
+      "knownGlyphFindings": [],
+      "archive": null
+    },
+    {
+      "runId": "run_9aa92465f7f74955ac76632128211f96",
+      "business": "kind",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [
+        {
+          "character": "✳",
+          "codepoint": "U+2733",
+          "location": "homepage hero proof mark"
+        }
+      ],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_9aa92465f7f74955ac76632128211f96/3ed1d8ddbbaf307983832c0d3e6283b04e56943642b1ab55900486cbbe1ea98d.json",
+        "bytes": 26185863,
+        "bundleHash": "sha256:3ed1d8ddbbaf307983832c0d3e6283b04e56943642b1ab55900486cbbe1ea98d",
+        "artifactHash": "sha256:1103b972d4467fa5178952f3338d4b639885ab91b0b25bb3848d79ce52a7af64",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    },
+    {
+      "runId": "run_ddbf867f44a542e1b41a2fb9397d92c3",
+      "business": "kind",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [
+        {
+          "character": "✳",
+          "codepoint": "U+2733",
+          "location": "homepage hero note"
+        }
+      ],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_ddbf867f44a542e1b41a2fb9397d92c3/a6ccd57d76578b9601012352d6a4d4e135e77703b1667e22557816816a54b6e0.json",
+        "bytes": 25698785,
+        "bundleHash": "sha256:a6ccd57d76578b9601012352d6a4d4e135e77703b1667e22557816816a54b6e0",
+        "artifactHash": "sha256:dee401ee7eb4e7b9d427fc9c668f7d0e041cb20f26de0efb4a978247ad3bbea2",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    },
+    {
+      "runId": "run_fe8092f18990423ab875a21cbb4d24c3",
+      "business": "kind",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_fe8092f18990423ab875a21cbb4d24c3/0e600753ef4ad9d5333b0d0a6bb1b766276fe9ee129306cc0b1562c2ad2f7ba7.json",
+        "bytes": 25607147,
+        "bundleHash": "sha256:0e600753ef4ad9d5333b0d0a6bb1b766276fe9ee129306cc0b1562c2ad2f7ba7",
+        "artifactHash": "sha256:19d8fb6648795ce9c61d5f30dd897e282e5d85155a2edb07ec3ec3bcfdf60aa4",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    },
+    {
+      "runId": "run_edecd4f2d67040c29f6e7dd646ef7205",
+      "business": "surge",
+      "treatment": "r8-control",
+      "knownGlyphFindings": [],
+      "archive": null
+    },
+    {
+      "runId": "run_cd6c6dc8abea4aa7b8008be84a58b5b5",
+      "business": "surge",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [
+        {
+          "character": "↗",
+          "codepoint": "U+2197",
+          "location": "homepage hero call-to-action"
+        }
+      ],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_cd6c6dc8abea4aa7b8008be84a58b5b5/316952e48c2c370640f7c9dffec1370acfffa5dff26a862f5dbddf9263136c46.json",
+        "bytes": 8152895,
+        "bundleHash": "sha256:316952e48c2c370640f7c9dffec1370acfffa5dff26a862f5dbddf9263136c46",
+        "artifactHash": "sha256:11472f918960b04299fad801c879e8b360ca99aeebe2f3660978fe8824a253e4",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    },
+    {
+      "runId": "run_d6f0ebc5250142a9a218ca653170e627",
+      "business": "surge",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [
+        {
+          "character": "↯",
+          "codepoint": "U+21AF",
+          "location": "homepage hero badge"
+        }
+      ],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_d6f0ebc5250142a9a218ca653170e627/d792847dba11abb781260e0c56094b34d29cc40efcfcaa6f886f4a223295d062.json",
+        "bytes": 7899812,
+        "bundleHash": "sha256:d792847dba11abb781260e0c56094b34d29cc40efcfcaa6f886f4a223295d062",
+        "artifactHash": "sha256:814bba402f568edb006fcbeeddce9f67e89295305cb47613156b7aa1bc10abdc",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    },
+    {
+      "runId": "run_fb98492673ba4085879c9794726b74c7",
+      "business": "surge",
+      "treatment": "optimized-v4",
+      "knownGlyphFindings": [
+        {
+          "character": "✓",
+          "codepoint": "U+2713",
+          "location": "homepage hero trust line"
+        }
+      ],
+      "archive": {
+        "key": "canonical-authoring-evidence/run_fb98492673ba4085879c9794726b74c7/8f20101348a5e568f02543f4f169c631f29fe2aa7e0fe8946d4af59c2ce5297e.json",
+        "bytes": 11234611,
+        "bundleHash": "sha256:8f20101348a5e568f02543f4f169c631f29fe2aa7e0fe8946d4af59c2ce5297e",
+        "artifactHash": "sha256:bcad1581a3398dab5f0c1972e4a35946b6d0d7cf3cbd5a7ce8f35ab2433344bc",
+        "runtimeIdentity": "site-runtime-v4:runtime_patch_76c31e69fbd1487b957c1e8290c0fa65:sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403"
+      }
+    }
+  ]
+}

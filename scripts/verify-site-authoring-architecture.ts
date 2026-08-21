@@ -34,7 +34,10 @@ for (const { path, source } of labelSources) {
   assert.deepEqual(unexpected, [], `${path} contains numbered internal labels: ${unexpected.join(", ")}`);
 }
 const allowedVersionedFiles = new Set([
+  "docs/canonical-v4-consolidation-plan.md",
+  "docs/decisions/2026-08-21-canonical-v4-glyph-runtime-consolidation.md",
   "packages/trusted-runtime/site-runtime-v1.js",
+  "packages/trusted-runtime/site-runtime-v4.js",
   "supabase/migrations/202607270001_website_health_report_v2.sql"
 ]);
 const unexpectedVersionedFiles = labelFiles.filter((path) => /(?:^|[/_.-])v\d+(?:\.\d+)?(?:[/_.-]|$)/i.test(path) && !allowedVersionedFiles.has(path));
@@ -85,6 +88,21 @@ assert(
   && prelaunchReset.includes("siteAssessments")
   && prelaunchReset.includes("siteAssessmentJobs"),
   "The prelaunch reset does not inventory and remove generated-site assessment dependencies."
+);
+assert(
+  prelaunchReset.includes('"site_agent_workspace_checkpoints"')
+  && prelaunchReset.includes('"analytics_collection_daily"')
+  && prelaunchReset.includes('"source_snapshot_mirror_references"')
+  && prelaunchReset.indexOf('updateAll(database, "site_agent_runs", { resume_checkpoint_id: null }')
+    < prelaunchReset.indexOf('["site_agent_workspace_checkpoints", "id"]')
+  && prelaunchReset.indexOf('["site_agent_workspace_checkpoints", "id"]')
+    < prelaunchReset.indexOf('["site_agent_runs", "id"]'),
+  "The prelaunch reset does not resolve the live checkpoint/run cycle and three retained dependencies in FK order."
+);
+assert(
+  !prelaunchReset.includes('selectAll(database, "prospect_observations"')
+  && prelaunchReset.includes('selectAll(database, "prospect_reports", "id,assessment_id")'),
+  "The prelaunch reset still queries retired prospect observations or lost the live prospect-report guard."
 );
 const platformDataRepository = await readFile("packages/platform-data/repository.ts", "utf8");
 assert(!platformDataRepository.includes("siteIntentMatchesBuildContent"), "Platform data still compares candidates to a legacy content-readiness projection.");
@@ -177,6 +195,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^\.github\//,
     /^docs\/generated-site-successor-experiment-plan\.md$/,
     /^docs\/generated-site-visual-process-experiment-plan\.md$/,
+    /^docs\/canonical-v4-consolidation-plan\.md$/,
     /^docs\/generated-site-authoring-status\.md$/,
     /^docs\/site-authoring-experiment-retrospective-\d{4}-\d{2}-\d{2}\.md$/,
     /^docs\/decisions\//,
@@ -187,6 +206,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^supabase\/migrations\/202607270001_website_health_report_v2\.sql$/,
     /^workers\/(?:site-sandbox|artifact-broker|recovery-watchdog)\//,
     /^packages\/trusted-runtime\//,
+    /^packages\/site-evidence\//,
     /^packages\/site-artifacts\/(?:blob-store|maintenance-store)\.ts$/,
     /^packages\/platform-operations\/preview-access\.ts$/,
     /^packages\/site-sandbox\/(?:client|runtime-config)\.ts$/,
@@ -197,7 +217,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^app\/api\/site-agent\/sessions\/\[sessionId\]\/preview\//,
     /^app\/api\/operator\/runtime\/route\.ts$/,
     /^scripts\/(?:build-first-five-prospect-reports|discover-open-prospects|enrich-prospect-ownership|enrich-prospect-websites|import-pest-control-license-rosters|import-prospects|rank-prospects|select-prospect-sample|verify-google-business-listings|verify-prospect-research)\.ts$/,
-    /^scripts\/(?:configure-r2-lifecycle|deploy-site-sandbox-dev|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-deployment-config|verify-development-sandbox|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-supabase|verify-trusted-runtime|verify-website-assessments)\.ts$/,
+    /^scripts\/(?:canonical-authoring-evidence|configure-r2-lifecycle|deploy-site-sandbox-dev|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-canonical-authoring-evidence|verify-deployment-config|verify-development-sandbox|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-supabase|verify-trusted-font-coverage|verify-trusted-runtime|verify-website-assessments|view-canonical-authoring-evidence)\.ts$/,
     /^scripts\/support\/synthetic-site-input\.ts$/,
     /^lib\/(?:analytics|analytics-ingestion|domains|privacy|rate-limit|inquiries)\.ts$/,
     /^scripts\/verify-site-authoring-architecture\.ts$/

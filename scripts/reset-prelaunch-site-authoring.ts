@@ -7,6 +7,7 @@ import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { sha256, stableJson } from "../packages/business-data";
 import { siteSandboxDeploymentSchema } from "../packages/site-contracts";
 import { configuredSiteSandboxClientForDeployment, isConfirmedSandboxAbsent } from "../packages/site-sandbox";
+import { verifyCanonicalAuthoringEvidenceRegistry } from "../packages/site-evidence";
 
 const reportPath = resolve(process.cwd(), ".data/maintenance/site-authoring-reset.json");
 const removedPrelaunchTables = [
@@ -27,10 +28,70 @@ const removedPrelaunchTableKeys: Record<(typeof removedPrelaunchTables)[number],
   site_version_redirects: "id",
   vertical_demand_events: "id"
 };
+const requiredLiveDependencyTables = [
+  "site_agent_workspace_checkpoints",
+  "analytics_collection_daily",
+  "source_snapshot_mirror_references"
+] as const;
+const requiredRetiredTables = [
+  "website_setups",
+  "authoring_outbox",
+  "generation_experiment_runs",
+  "model_bakeoff_runs",
+  "external_authoring_batch_items",
+  "external_authoring_executions",
+  "authoring_execution_bundles",
+  "staged_blob_receipts",
+  "prospect_observations"
+] as const;
+const preservedTables = [
+  "prospects",
+  "prospect_locations",
+  "prospect_contacts",
+  "prospect_reports",
+  "prospect_report_leads",
+  "prospect_report_access_grants",
+  "outbound_campaigns",
+  "outbound_prospects",
+  "outbound_events"
+] as const;
+const additionalResetTables = [
+  "businesses",
+  "business_states",
+  "site_intents",
+  "form_definitions",
+  "site_public_build_inputs",
+  "site_public_build_input_sources",
+  "site_public_build_input_assets",
+  "site_public_build_input_forms",
+  "site_version_sources",
+  "site_version_assets",
+  "site_version_forms",
+  "site_agent_messages",
+  "site_agent_run_events",
+  "control_plane_change_requests",
+  "site_operator_queue",
+  "preview_grants",
+  "active_domains",
+  "domains",
+  "adoption_invitations",
+  "site_redirects",
+  "inquiry_events",
+  "inquiries",
+  "analytics_events"
+] as const;
 const options = parseArgs(process.argv.slice(2));
 const client = getSupabaseAdminClient();
 
-if (!options.apply) {
+if (options.schemaOnly) {
+  await assertLiveSchemaContract(client);
+  process.stdout.write(`${JSON.stringify({
+    ok: true,
+    mode: "schema-only",
+    requiredLiveTables: requiredLiveDependencyTables,
+    requiredRetiredTables
+  }, null, 2)}\n`);
+} else if (!options.apply) {
   const report = await createReport(client);
   await mkdir(dirname(reportPath), { recursive: true });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -61,6 +122,10 @@ if (!options.apply) {
   if (Object.values(post.counts).some((count) => count !== 0)) {
     throw new Error(`Generated-site reset was incomplete: ${JSON.stringify(post.counts)}.`);
   }
+  if (stableJson(post.preservedDigests) !== stableJson(reviewed.preservedDigests)) {
+    throw new Error("Preserved prospect or campaign data changed outside the three declared nullable site references.");
+  }
+  await assertDetachedPreservedSiteReferences(client);
   process.stdout.write(`${JSON.stringify({
     ok: true,
     mode: "apply",
@@ -86,6 +151,10 @@ type ResetReport = {
   sessions: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
   activeRuns: Array<Record<string, unknown>>;
+  dependencyTables: Record<(typeof requiredLiveDependencyTables)[number], Array<Record<string, unknown>>>;
+  tableInventories: Record<string, { count: number; targetIdDigest: `sha256:${string}`; rowDigest: `sha256:${string}`; sampleIds: string[] }>;
+  preservedDigests: Record<(typeof preservedTables)[number], { count: number; digest: `sha256:${string}` }>;
+  evidence: Awaited<ReturnType<typeof verifyCanonicalAuthoringEvidenceRegistry>>;
   continuationHeads: Array<Record<string, unknown>>;
   continuationSegments: Array<Record<string, unknown>>;
   bootstrapRequests: Array<Record<string, unknown>>;
@@ -95,6 +164,7 @@ type ResetReport = {
 };
 
 async function createReport(database: SupabaseClient): Promise<ResetReport> {
+  await assertLiveSchemaContract(database);
   const [
     sites,
     versions,
@@ -109,6 +179,12 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     bootstrapRequests,
     assessments,
     assessmentJobs,
+    checkpointRows,
+    analyticsDailyRows,
+    mirrorReferenceRows,
+    evidence,
+    preservedRows,
+    additionalResetRows,
     ...extendedTableRows
   ] = await Promise.all([
     selectAll(database, "sites", "id,slug,business_id,owner_user_id,source_url,status,published_version_id,current_workspace_revision_id,current_public_build_input_id"),
@@ -127,6 +203,12 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     selectAll(database, "site_authoring_bootstrap_requests", "owner_user_id,site_id,run_id,created_at"),
     selectAll(database, "website_assessments", "id,target_kind,source_key,site_id,artifact_id,version_id"),
     selectAll(database, "website_assessment_jobs", "id,assessment_id,status"),
+    selectAll(database, "site_agent_workspace_checkpoints", "*"),
+    selectAll(database, "analytics_collection_daily", "*"),
+    selectAll(database, "source_snapshot_mirror_references", "*"),
+    verifyCanonicalAuthoringEvidenceRegistry(),
+    Promise.all(preservedTables.map((table) => selectAll(database, table, "*"))),
+    Promise.all(additionalResetTables.map((table) => selectAll(database, table, "*"))),
     ...removedPrelaunchTables.map((table) => selectOptionalTable(database, table))
   ]);
   const extendedTables = Object.fromEntries(removedPrelaunchTables.map((table, index) => [
@@ -136,6 +218,37 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
   const siteAssessments = assessments.filter((row) => typeof row.site_id === "string");
   const siteAssessmentIds = new Set(siteAssessments.map((row) => row.id));
   const siteAssessmentJobs = assessmentJobs.filter((row) => siteAssessmentIds.has(row.assessment_id));
+  const dependencyTables = {
+    site_agent_workspace_checkpoints: sortRows(checkpointRows),
+    analytics_collection_daily: sortRows(analyticsDailyRows),
+    source_snapshot_mirror_references: sortRows(mirrorReferenceRows)
+  } satisfies ResetReport["dependencyTables"];
+  const preservedDigests = Object.fromEntries(preservedTables.map((table, index) => [
+    table,
+    preservedDigest(table, preservedRows[index] ?? [])
+  ])) as ResetReport["preservedDigests"];
+  const inventoryRows = {
+    sites,
+    site_versions: versions,
+    site_build_artifacts: artifacts,
+    site_workspace_revisions: workspaces,
+    asset_revisions: assets,
+    source_snapshots: snapshots,
+    site_agent_sessions: sessions,
+    site_agent_runs: runs,
+    site_agent_continuation_heads: continuationHeads,
+    site_agent_continuation_segments: continuationSegments,
+    site_authoring_bootstrap_requests: bootstrapRequests,
+    website_assessments: siteAssessments,
+    website_assessment_jobs: siteAssessmentJobs,
+    ...dependencyTables,
+    ...Object.fromEntries(additionalResetTables.map((table, index) => [table, additionalResetRows[index] ?? []])),
+    ...extendedTables
+  };
+  const tableInventories = Object.fromEntries(Object.entries(inventoryRows).map(([table, rows]) => [
+    table,
+    tableInventory(rows)
+  ]));
   const canonical = {
     schemaVersion: 1 as const,
     kind: "prelaunch-site-authoring-reset" as const,
@@ -153,6 +266,8 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
       bootstrapRequests: bootstrapRequests.length,
       siteAssessments: siteAssessments.length,
       siteAssessmentJobs: siteAssessmentJobs.length,
+      ...Object.fromEntries(requiredLiveDependencyTables.map((table) => [table, dependencyTables[table].length])),
+      ...Object.fromEntries(additionalResetTables.map((table, index) => [table, (additionalResetRows[index] ?? []).length])),
       ...Object.fromEntries(removedPrelaunchTables.map((table) => [table, extendedTables[table].length]))
     },
     sites: sortRows(sites),
@@ -163,7 +278,11 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     snapshots: sortRows(snapshots),
     sessions: sortRows(sessions),
     runs: sortRows(runs),
-    activeRuns: sortRows(runs.filter((row) => row.status === "queued" || row.status === "running")),
+    activeRuns: sortRows(runs.filter((row) => row.status === "queued" || row.status === "running" || row.status === "needs_input")),
+    dependencyTables,
+    tableInventories,
+    preservedDigests,
+    evidence,
     continuationHeads: sortRows(continuationHeads),
     continuationSegments: sortRows(continuationSegments),
     bootstrapRequests: sortRows(bootstrapRequests),
@@ -238,7 +357,7 @@ async function destroySandboxes(database: SupabaseClient, sessions: Array<Record
 
 async function resetGeneratedSiteRows(database: SupabaseClient) {
   await updateAll(database, "outbound_events", { site_id: null }, "id");
-  await updateAll(database, "outbound_prospects", { site_id: null }, "id");
+  await updateAll(database, "outbound_prospects", { site_id: null, preview_id: null }, "id");
   await updateAll(database, "sites", {
     published_version_id: null,
     current_workspace_revision_id: null,
@@ -246,6 +365,7 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
   }, "id");
   await updateAll(database, "site_versions", { replaced_version_id: null }, "id");
   await updateAll(database, "site_workspace_revisions", { parent_revision_id: null }, "id");
+  await updateAll(database, "site_agent_runs", { resume_checkpoint_id: null }, "id");
   await deleteSiteAssessments(database);
   for (const table of removedPrelaunchTables) await deleteOptionalTable(database, table);
 
@@ -258,10 +378,12 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
     ["inquiry_events", "id"],
     ["inquiries", "id"],
     ["analytics_events", "id"],
+    ["analytics_collection_daily", "site_id"],
     ["control_plane_change_requests", "id"],
     ["site_operator_queue", "id"],
     ["site_agent_run_events", "id"],
     ["site_agent_messages", "id"],
+    ["site_agent_workspace_checkpoints", "id"],
     ["site_agent_continuation_segments", "id"],
     ["site_agent_continuation_heads", "run_id"],
     ["site_authoring_bootstrap_requests", "owner_user_id"],
@@ -281,6 +403,7 @@ async function resetGeneratedSiteRows(database: SupabaseClient) {
     ["business_states", "business_id"],
     ["site_intents", "id"],
     ["asset_revisions", "id"],
+    ["source_snapshot_mirror_references", "source_snapshot_id"],
     ["source_snapshots", "id"],
     ["sites", "id"],
     ["businesses", "id"]
@@ -299,17 +422,10 @@ async function deleteSiteAssessments(database: SupabaseClient) {
   const assessmentIds = assessments.map((assessment) => assessment.id);
   if (!assessmentIds.length) return;
 
-  const [reports, observations] = await Promise.all([
-    selectAll(database, "prospect_reports", "id,assessment_id"),
-    selectAll(database, "prospect_observations", "id,website_assessment_id")
-  ]);
+  const reports = await selectAll(database, "prospect_reports", "id,assessment_id");
   const assessmentIdSet = new Set(assessmentIds);
-  const prospectReferences = [
-    ...reports.filter((row) =>
-      typeof row.assessment_id === "string" && assessmentIdSet.has(row.assessment_id)),
-    ...observations.filter((row) =>
-      typeof row.website_assessment_id === "string" && assessmentIdSet.has(row.website_assessment_id))
-  ];
+  const prospectReferences = reports.filter((row) =>
+    typeof row.assessment_id === "string" && assessmentIdSet.has(row.assessment_id));
   if (prospectReferences.length) {
     throw new Error(
       `${prospectReferences.length} prospect record(s) reference generated-site assessments; explicit prospect disposition is required.`
@@ -392,14 +508,74 @@ function sortRows(rows: Array<Record<string, unknown>>) {
   return [...rows].sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
 }
 
+function tableInventory(rows: Array<Record<string, unknown>>) {
+  const sortedRows = sortRows(rows);
+  const targetIds = sortedRows.map((row) => {
+    const primary = row.id ?? row.hostname ?? row.run_id ?? row.version_id ?? row.business_id
+      ?? row.site_id ?? row.source_snapshot_id ?? row.owner_user_id ?? "row";
+    return `${String(primary)}:${sha256(stableJson(row)).slice(7, 19)}`;
+  }).sort();
+  return {
+    count: sortedRows.length,
+    targetIdDigest: sha256(stableJson(targetIds)),
+    rowDigest: sha256(stableJson(sortedRows)),
+    sampleIds: targetIds.slice(0, 25)
+  };
+}
+
+function preservedDigest(table: (typeof preservedTables)[number], rows: Array<Record<string, unknown>>) {
+  const normalized = rows.map((row) => {
+    const value = { ...row };
+    if (table === "outbound_prospects") {
+      delete value.site_id;
+      delete value.preview_id;
+    }
+    if (table === "outbound_events") delete value.site_id;
+    return value;
+  });
+  return { count: rows.length, digest: sha256(stableJson(sortRows(normalized))) };
+}
+
+async function assertLiveSchemaContract(database: SupabaseClient) {
+  const statuses = await Promise.all([
+    ...requiredLiveDependencyTables.map(async (table) => {
+      const { count, error } = await database.from(table).select("*", { count: "exact" }).limit(1);
+      return { table, expected: "live" as const, present: !error, count: error ? undefined : count, errorCode: error?.code };
+    }),
+    ...requiredRetiredTables.map(async (table) => {
+      const { count, error } = await database.from(table).select("*", { count: "exact" }).limit(1);
+      return { table, expected: "absent" as const, present: !error, count: error ? undefined : count, errorCode: error?.code };
+    })
+  ]);
+  const mismatches = statuses.filter((status) => status.expected === "live" ? !status.present : status.present);
+  if (mismatches.length) {
+    throw new Error(`prelaunch_reset_live_schema_mismatch:${JSON.stringify({ statuses, mismatches })}`);
+  }
+}
+
+async function assertDetachedPreservedSiteReferences(database: SupabaseClient) {
+  const [prospects, events] = await Promise.all([
+    selectAll(database, "outbound_prospects", "id,site_id,preview_id"),
+    selectAll(database, "outbound_events", "id,site_id")
+  ]);
+  const attachedProspects = prospects.filter((row) => row.site_id !== null || row.preview_id !== null);
+  const attachedEvents = events.filter((row) => row.site_id !== null);
+  if (attachedProspects.length || attachedEvents.length) {
+    throw new Error(`Preserved outbound records still reference deleted generated-site data (${attachedProspects.length} prospect, ${attachedEvents.length} event).`);
+  }
+}
+
 function parseArgs(args: string[]) {
   let apply = false;
+  let schemaOnly = false;
   let confirmation: string | undefined;
   for (const arg of args) {
     if (arg === "--apply") { apply = true; continue; }
+    if (arg === "--schema-only") { schemaOnly = true; continue; }
     if (arg.startsWith("--confirm=")) { confirmation = arg.slice("--confirm=".length); continue; }
     throw new Error(`Unknown argument: ${arg}`);
   }
+  if (apply && schemaOnly) throw new Error("--schema-only cannot be combined with --apply.");
   if (!apply && confirmation) throw new Error("--confirm is valid only with --apply.");
-  return { apply, confirmation };
+  return { apply, schemaOnly, confirmation };
 }

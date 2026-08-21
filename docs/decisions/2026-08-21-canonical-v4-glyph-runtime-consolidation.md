@@ -1,6 +1,6 @@
 # Canonical V4 glyph and runtime consolidation
 
-Status: implementation approved; reversible release pending; destructive reset separately confirmed
+Status: reversible release complete; evidence set and destructive reset pending owner decisions
 
 Date: 2026-08-21
 
@@ -25,6 +25,12 @@ This is a functional portability gate, not an aesthetic critic. It adds no repai
 `site-runtime-v4.js` is the direct source of the active canonical JavaScript. Its SHA-256 must equal the active retained runtime patch before release. Because the bytes are unchanged, this decision creates neither a runtime patch nor a runtime series.
 
 V1–V3 derivations remain temporarily because retained database references are boundary-sensitive. After the confirmed prelaunch reset proves zero references, a second release deletes those branches and the V1 source. At that point R8/V2 bytes exist only in sealed evidence and cannot be rebuilt or selected. That is an intentional one-way door.
+
+## Reversible release evidence
+
+Release `3cb58520e0b7157406416344bf2048beb798b591` completed the coordinated web, worker, and sandbox rollout. Railway web deployment `28706815-f2e9-4839-83fc-ac5a9a173395` and worker deployment `68a62add-0685-4e17-8468-1ffaeebd3022` both reported the exact release SHA before promotion. Sandbox deployment `sandbox_deployment_a3f0e8ed6e5c35f306f7e3da3343d837`, Worker version `fae65bfb-ef3b-44ff-a008-41b89e3ac443`, and image `sha256:f482aa2303cf1f01ec1ddf958dbde767919fb065f1f3747a28aac9682ac9aaee` passed the compile, replay, isolation, repair, and manifest canary. Authenticated post-promotion deep health passed and the maintenance lease was released.
+
+The first attempt exposed and safely stopped on a release-workflow deadlock: the new web controller required the new sandbox manifest, while the pre-promotion check required full deep health before moving the sandbox pointer. The workflow now uses a narrow authenticated release-identity probe before promotion and reserves full deep health for after promotion. No sandbox pointer moved during the failed attempt.
 
 ## Historical evidence and previews
 

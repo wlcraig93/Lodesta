@@ -2,11 +2,15 @@
 
 Date: 2026-08-21
 
-## Canonical V4 glyph and runtime consolidation in progress
+## Canonical V4 glyph and runtime consolidation released
 
 A post-promotion audit found that five of the six retained V4 treatment artifacts depend on visitor-specific system-font fallback for `↗`, `↯`, `✓`, or `✳`. The old hard gate did not detect that portability defect. The canonical correction is forward-only: every managed Lodesta family now has pinned same-family coverage for those symbols, exact font hashes and codepoint ranges are checked in, emoji remains unsupported in agent-authored text, and `render.missing_glyph` is surfaced during `inspect_site` and blocks finalization. Historical artifact bytes and the frozen nine-category scores remain unchanged.
 
-The direct `site-runtime-v4.js` source materializes byte-for-byte to the active patch hash `sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403`; no runtime patch or series is created. The font and runtime changes await their coordinated web, worker, and sandbox release. Eight decisive R8/V4 runs must be sealed into the dedicated evidence store before the separately confirmed prelaunch reset can run. Legacy runtime code remains reachable until that reset proves zero references.
+The direct `site-runtime-v4.js` source materializes byte-for-byte to the active patch hash `sha256:578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403`; no runtime patch or series was created. Coordinated release `3cb58520e0b7157406416344bf2048beb798b591` deployed the font guarantee and direct runtime source through Railway web deployment `28706815-f2e9-4839-83fc-ac5a9a173395`, Railway worker deployment `68a62add-0685-4e17-8468-1ffaeebd3022`, and sandbox deployment `sandbox_deployment_a3f0e8ed6e5c35f306f7e3da3343d837`. The sandbox image is `sha256:f482aa2303cf1f01ec1ddf958dbde767919fb065f1f3747a28aac9682ac9aaee`; its canary and authenticated post-promotion deep health passed, and maintenance was released.
+
+The initial release attempt stopped before promotion because the pre-promotion check required the new web controller to report full compatibility with the still-active old sandbox. The workflow now verifies only the authenticated controller SHA before promotion and requires full deep health afterward, removing that circular dependency without weakening the post-promotion gate.
+
+Eight decisive R8/V4 runs must still be sealed into the dedicated evidence store before the separately confirmed prelaunch reset can run. Six complete V4 bundles verify locally. The two matched R8 controls were local-only and lack reconstructable workspace and artifact bytes, so the reset remains blocked pending an owner decision on substituting complete retained hosted R8 baselines or accepting a clearly labeled capture-only exception. Legacy runtime code remains reachable until the reset proves zero references.
 
 ## Optimized V4 validated for canonical promotion
 

@@ -9,6 +9,15 @@ export type HealthState = "ok" | "warning" | "error";
 export type HealthCheck = { id: string; label: string; state: HealthState; detail: string };
 export type HealthReport = { status: HealthState; timestamp: string; checks: HealthCheck[] };
 
+export function getReleaseIdentityReport(): HealthReport {
+  const identity = checkReleaseIdentity();
+  return {
+    status: identity.state,
+    timestamp: new Date().toISOString(),
+    checks: [identity]
+  };
+}
+
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
     checkUrl(), checkReleaseIdentity(), checkRepository(), checkAuth(), checkAdmin(), await checkSandbox(),

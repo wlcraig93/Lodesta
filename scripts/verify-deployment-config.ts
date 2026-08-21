@@ -147,7 +147,11 @@ assert(productionRelease.includes("environment: production")
   && productionRelease.includes("sandbox:deployments -- promote")
   && productionRelease.includes("npm run verify:site-sandbox-deployed")
   && productionRelease.includes("previous_deployment")
+  && productionRelease.includes("/api/health/?identity=1")
   && productionRelease.includes("/api/health/?deep=1"), "Production release workflow is missing its post-CI trigger, serialization, exact-checkout, or verification contract.");
+assert(productionRelease.indexOf("/api/health/?identity=1") < productionRelease.indexOf("sandbox:deployments -- promote")
+  && productionRelease.lastIndexOf("/api/health/?deep=1") > productionRelease.indexOf("sandbox:deployments -- promote"),
+  "Release identity must be checked without active-sandbox compatibility before promotion; full deep health belongs after promotion.");
 assert(
   productionRelease.indexOf("Deploy, canary, and register the inactive sandbox") < productionRelease.indexOf("Acquire or renew the database maintenance fence and drain")
     && productionRelease.indexOf("Acquire or renew the database maintenance fence and drain") < productionRelease.indexOf("railway up --detach --json")

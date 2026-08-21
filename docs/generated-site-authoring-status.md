@@ -10,7 +10,7 @@ The direct `site-runtime-v4.js` source materializes byte-for-byte to the active 
 
 The initial release attempt stopped before promotion because the pre-promotion check required the new web controller to report full compatibility with the still-active old sandbox. The workflow now verifies only the authenticated controller SHA before promotion and requires full deep health afterward, removing that circular dependency without weakening the post-promotion gate.
 
-Eight decisive R8/V4 runs must still be sealed into the dedicated evidence store before the separately confirmed prelaunch reset can run. Six complete V4 bundles verify locally. The two matched R8 controls were local-only and lack reconstructable workspace and artifact bytes, so the reset remains blocked pending an owner decision on substituting complete retained hosted R8 baselines or accepting a clearly labeled capture-only exception. Legacy runtime code remains reachable until the reset proves zero references.
+All eight decisive R8/V4 bundles are sealed in the private `wlcraig93/Lodesta-evidence` release `canonical-authoring-evidence-2026-08-21`. The 139,329,603 uploaded bytes were independently downloaded and verified against the checked-in registry. The matched local R8 reports and captures remain supplemental evidence; the reconstructable set uses complete retained hosted baselines `run_c0d04e7292b84ae5981654959cafdc4a` and `run_07b17e4678b24fe9bcbd18928ea1ecc3`. Reset verification uses local archive files rather than the GitHub API. Legacy runtime code remains reachable until the separately confirmed reset proves zero references and fresh post-fix V4 examples pass owner review.
 
 ## Optimized V4 validated for canonical promotion
 

@@ -34,6 +34,15 @@ export type CanonicalAuthoringEvidenceBundle = {
 type EvidenceRegistry = {
   schemaVersion: 1;
   kind: "canonical-authoring-evidence-registry";
+  retention: {
+    provider: "github-release";
+    repository: string;
+    releaseTag: string;
+    visibility: "private";
+    verifiedAt: string;
+    assets: number;
+    bytes: number;
+  };
   runs: Array<{
     runId: string;
     business: "kind" | "surge";
@@ -50,11 +59,11 @@ type EvidenceRegistry = {
 };
 
 const expectedRunIds = [
-  "run_4ff1721a1f754748bcfa3dc93281a478",
+  "run_c0d04e7292b84ae5981654959cafdc4a",
   "run_9aa92465f7f74955ac76632128211f96",
   "run_ddbf867f44a542e1b41a2fb9397d92c3",
   "run_fe8092f18990423ab875a21cbb4d24c3",
-  "run_edecd4f2d67040c29f6e7dd646ef7205",
+  "run_07b17e4678b24fe9bcbd18928ea1ecc3",
   "run_cd6c6dc8abea4aa7b8008be84a58b5b5",
   "run_d6f0ebc5250142a9a218ca653170e627",
   "run_fb98492673ba4085879c9794726b74c7"
@@ -65,6 +74,18 @@ export async function readCanonicalAuthoringEvidenceRegistry() {
   const registry = JSON.parse(bytes.toString("utf8")) as EvidenceRegistry;
   if (registry.schemaVersion !== 1 || registry.kind !== "canonical-authoring-evidence-registry") {
     throw new Error("Canonical authoring evidence registry has an unsupported shape.");
+  }
+  const retainedBytes = registry.runs.reduce((total, run) => total + (run.archive?.bytes ?? 0), 0);
+  if (
+    registry.retention.provider !== "github-release"
+    || registry.retention.visibility !== "private"
+    || !registry.retention.repository
+    || !registry.retention.releaseTag
+    || !Number.isFinite(Date.parse(registry.retention.verifiedAt))
+    || registry.retention.assets !== registry.runs.length
+    || registry.retention.bytes !== retainedBytes
+  ) {
+    throw new Error("Canonical authoring evidence retention metadata is invalid.");
   }
   const runIds = registry.runs.map((run) => run.runId);
   if (new Set(runIds).size !== runIds.length || stableJson([...runIds].sort()) !== stableJson([...expectedRunIds].sort())) {

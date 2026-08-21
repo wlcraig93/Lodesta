@@ -49,6 +49,8 @@ assert.doesNotMatch(workflow, /architectureInventory:/);
 assert.match(skills, /Preserve every existing workspace source file unconditionally/);
 assert.match(skills, /const knowledgeByKind =/);
 assert.match(skills, /blank initial build.*NavigationDisclosure behavior=/);
+assert.match(skills, /three-bar closed trigger.*distinct close state/i);
+assert.match(skills, /never collapse multiple bars onto one coordinate/i);
 assert.match(skills, /Never apply blank-build design defaults/);
 assert.match(skills, /websiteAuthoringSkillIdentityFor\(kind/);
 assert.match(workflow, /Older authoring format—full rebuild required/);

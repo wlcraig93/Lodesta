@@ -60,9 +60,7 @@ async function exportRun(
 ) {
   const run = await selectMaybe(database, "site_agent_runs", "id", entry.runId);
   if (!run) {
-    throw new Error(
-      `canonical_authoring_evidence_source_incomplete:${entry.runId}:the private local control retains its report and captures but its exact artifact and workspace blobs are unavailable`
-    );
+    throw new Error(`canonical_authoring_evidence_source_incomplete:${entry.runId}:the hosted run graph is unavailable`);
   }
   const runDocument = record(run.run);
   const session = await selectOne(database, "site_agent_sessions", "id", stringValue(run.session_id));

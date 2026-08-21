@@ -34,17 +34,17 @@ The first attempt exposed and safely stopped on a release-workflow deadlock: the
 
 ## Historical evidence and previews
 
-The decisive controls and treatments are sealed as content-addressed archives in a private evidence bucket that is not part of the application blob broker or artifact-orphan audit. A complete archive includes database provenance, exact artifact/workspace/runtime bytes, screenshots, the original six font binaries, and frozen experiment inputs. A localhost-only viewer rejects analytics and form mutations.
+The decisive controls and treatments are sealed as content-addressed archives in the private `wlcraig93/Lodesta-evidence` GitHub release `canonical-authoring-evidence-2026-08-21`, outside the application blob broker and artifact-orphan audit. A complete archive includes database provenance, exact artifact/workspace/runtime bytes, screenshots, the original six font binaries, and frozen experiment inputs. All eight assets (139,329,603 bytes) were independently downloaded and verified after upload. The checked-in registry is the integrity anchor. Reset verification uses the local verified copies and never calls GitHub, so destructive authorization has no third-party availability dependency. A localhost-only viewer rejects analytics and form mutations.
 
 Historical bundles intentionally reproduce their original glyph defects. New finalized artifacts use the corrected managed fonts. Retained artifact bytes are never rewritten.
 
-Implementation audit found an important provenance limitation before reset: the six hosted V4 runs still have their exact database graph and artifact/workspace blobs and can be sealed under this contract. The matched R8 controls (`run_4ff1721a1f754748bcfa3dc93281a478` and `run_edecd4f2d67040c29f6e7dd646ef7205`) were private local runs. Their reports and QA captures survive, but their exact artifact and workspace blobs were never persisted to the hosted stores. The exporter fails explicitly for those runs, the registry leaves them unsealed, and reset authorization remains blocked. An owner decision must either approve a clearly labeled report-and-capture-only historical exception or substitute retained hosted R8 runs and amend the decisive-evidence set. Incomplete bytes must never be represented as a fully reconstructable archive.
+Implementation audit found an important provenance limitation before reset: the six hosted V4 runs still have their exact database graph and artifact/workspace blobs and can be sealed under this contract. The matched R8 controls (`run_4ff1721a1f754748bcfa3dc93281a478` and `run_edecd4f2d67040c29f6e7dd646ef7205`) were private local runs. Their reports and QA captures survive, but their exact artifact and workspace blobs were never persisted to the hosted stores and remain supplemental evidence only. On owner approval, the reconstructable decisive-evidence registry substitutes the complete retained hosted R8 baselines `run_c0d04e7292b84ae5981654959cafdc4a` for Kind and `run_07b17e4678b24fe9bcbd18928ea1ecc3` for Surge. Incomplete local bytes are never represented as fully reconstructable archives.
 
 ## Reset boundary
 
 The existing `maintenance:reset-prelaunch-site-authoring` operator is repaired rather than duplicated. Its live-schema contract expects `site_agent_workspace_checkpoints`, `analytics_collection_daily`, and `source_snapshot_mirror_references`; retired tables must remain absent. The operator nulls the checkpoint cycle, deletes those dependencies in foreign-key order, preserves the prospect/outbound corpus, verifies all evidence bundles, and requires a fresh exact report confirmation.
 
-Implementation approval does not authorize applying the reset. The destructive confirmation is collected only after the reversible release and all eight remote archives are verified.
+Implementation approval does not authorize applying the reset. The destructive confirmation is collected only after the reversible release and all eight retained archives are verified locally against the checked-in registry.
 
 ## Promotion record correction
 

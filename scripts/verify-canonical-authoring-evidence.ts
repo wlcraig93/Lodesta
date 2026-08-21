@@ -86,13 +86,23 @@ assert.throws(() => createCanonicalAuthoringEvidenceBundle({
 const { registry } = await readCanonicalAuthoringEvidenceRegistry();
 assert.equal(registry.runs.length, 8);
 assert.equal(new Set(registry.runs.map((entry) => entry.runId)).size, 8);
+assert.deepEqual(registry.retention, {
+  provider: "github-release",
+  repository: "wlcraig93/Lodesta-evidence",
+  releaseTag: "canonical-authoring-evidence-2026-08-21",
+  visibility: "private",
+  verifiedAt: "2026-08-21T21:45:00.000Z",
+  assets: 8,
+  bytes: 139329603
+});
 assert.deepEqual(artifactBlobStores, ["artifact", "workspace"], "Evidence was added to the audited artifact-store union.");
 const [storeSource, viewerSource, resetSource] = await Promise.all([
   readFile("packages/site-evidence/store.ts", "utf8"),
   readFile("scripts/view-canonical-authoring-evidence.ts", "utf8"),
   readFile("scripts/reset-prelaunch-site-authoring.ts", "utf8")
 ]);
-assert(storeSource.includes("LODESTA_EVIDENCE_BUCKET") && storeSource.includes("bucket === artifactBucket || bucket === workspaceBucket"));
+assert(storeSource.includes("LODESTA_LOCAL_EVIDENCE_ROOT"));
+assert.doesNotMatch(storeSource, /S3Client|\bR2\b|LODESTA_EVIDENCE_BUCKET/);
 assert(viewerSource.includes('server.listen(port, "127.0.0.1"') && viewerSource.includes("mutationRejected"));
 assert(viewerSource.includes('pathname.startsWith("/_lodesta/assets/")') && viewerSource.includes("assets/by-revision/"));
 assert(resetSource.includes("verifyCanonicalAuthoringEvidenceRegistry"), "The reset is not fenced on all sealed evidence bundles.");

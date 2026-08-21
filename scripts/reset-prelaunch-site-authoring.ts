@@ -100,7 +100,14 @@ if (options.schemaOnly) {
     mode: "report",
     reportPath,
     confirmation: confirmationFor(report),
-    report
+    reportHash: report.reportHash,
+    counts: report.counts,
+    activeRuns: report.activeRuns,
+    preservedDigests: report.preservedDigests,
+    evidence: {
+      registryHash: report.evidence.registryHash,
+      sealedRuns: report.evidence.sealedRuns
+    }
   }, null, 2)}\n`);
 } else {
   const reviewed = parseReport(JSON.parse(await readFile(reportPath, "utf8")));
@@ -155,66 +162,43 @@ type ResetReport = {
   tableInventories: Record<string, { count: number; targetIdDigest: `sha256:${string}`; rowDigest: `sha256:${string}`; sampleIds: string[] }>;
   preservedDigests: Record<(typeof preservedTables)[number], { count: number; digest: `sha256:${string}` }>;
   evidence: Awaited<ReturnType<typeof verifyCanonicalAuthoringEvidenceRegistry>>;
-  continuationHeads: Array<Record<string, unknown>>;
-  continuationSegments: Array<Record<string, unknown>>;
   bootstrapRequests: Array<Record<string, unknown>>;
   siteAssessments: Array<Record<string, unknown>>;
   siteAssessmentJobs: Array<Record<string, unknown>>;
-  extendedTables: Record<(typeof removedPrelaunchTables)[number], Array<Record<string, unknown>>>;
 };
 
 async function createReport(database: SupabaseClient): Promise<ResetReport> {
   await assertLiveSchemaContract(database);
-  const [
-    sites,
-    versions,
-    artifacts,
-    workspaces,
-    assets,
-    snapshots,
-    sessions,
-    runs,
-    continuationHeads,
-    continuationSegments,
-    bootstrapRequests,
-    assessments,
-    assessmentJobs,
-    checkpointRows,
-    analyticsDailyRows,
-    mirrorReferenceRows,
-    evidence,
-    preservedRows,
-    additionalResetRows,
-    ...extendedTableRows
-  ] = await Promise.all([
-    selectAll(database, "sites", "id,slug,business_id,owner_user_id,source_url,status,published_version_id,current_workspace_revision_id,current_public_build_input_id"),
-    selectAll(database, "site_versions", "id,site_id,status,schema_version,artifact_id,workspace_revision_id,public_build_input_id"),
-    selectAll(database, "site_build_artifacts", "id,site_id,toolchain_version,sandbox_image_digest,storage_prefix"),
-    selectAll(database, "site_workspace_revisions", "id,site_id,source_archive_key,source_hash"),
-    selectFirstAvailable(database, "asset_revisions", [
-      "id,asset_id,business_id,storage_path,origin",
-      "id,asset_id,business_id,storage_path,rights_status"
-    ]),
-    selectAll(database, "source_snapshots", "id,business_id,source_type,content_hash"),
-    selectAll(database, "site_agent_sessions", "id,site_id,status,sandbox_id,sandbox_deployment_id"),
-    selectAll(database, "site_agent_runs", "id,site_id,session_id,status,kind"),
-    selectAll(database, "site_agent_continuation_heads", "run_id,status,latest_sequence,purge_after"),
-    selectAll(database, "site_agent_continuation_segments", "id,run_id,generation,sequence,blob_ref"),
-    selectAll(database, "site_authoring_bootstrap_requests", "owner_user_id,site_id,run_id,created_at"),
-    selectAll(database, "website_assessments", "id,target_kind,source_key,site_id,artifact_id,version_id"),
-    selectAll(database, "website_assessment_jobs", "id,assessment_id,status"),
-    selectAll(database, "site_agent_workspace_checkpoints", "*"),
-    selectAll(database, "analytics_collection_daily", "*"),
-    selectAll(database, "source_snapshot_mirror_references", "*"),
-    verifyCanonicalAuthoringEvidenceRegistry(),
-    Promise.all(preservedTables.map((table) => selectAll(database, table, "*"))),
-    Promise.all(additionalResetTables.map((table) => selectAll(database, table, "*"))),
-    ...removedPrelaunchTables.map((table) => selectOptionalTable(database, table))
+  // The reset report intentionally reads the full retained corpus. Keep these
+  // reads serialized so the operator cannot exhaust the hosted statement
+  // budget by fanning out dozens of exact inventories at once.
+  const sites = await selectAll(database, "sites", "id,slug,business_id,owner_user_id,source_url,status,published_version_id,current_workspace_revision_id,current_public_build_input_id");
+  const versions = await selectAll(database, "site_versions", "id,site_id,status,schema_version,artifact_id,workspace_revision_id,public_build_input_id");
+  const artifacts = await selectAll(database, "site_build_artifacts", "id,site_id,toolchain_version,sandbox_image_digest,storage_prefix");
+  const workspaces = await selectAll(database, "site_workspace_revisions", "id,site_id,source_archive_key,source_hash");
+  const assets = await selectFirstAvailable(database, "asset_revisions", [
+    "id,asset_id,business_id,storage_path,origin",
+    "id,asset_id,business_id,storage_path,rights_status"
   ]);
+  const snapshots = await selectAll(database, "source_snapshots", "id,business_id,source_type,content_hash");
+  const sessions = await selectAll(database, "site_agent_sessions", "id,site_id,status,sandbox_id,sandbox_deployment_id");
+  const runs = await selectAll(database, "site_agent_runs", "id,site_id,session_id,status,kind");
+  const continuationHeads = await selectAll(database, "site_agent_continuation_heads", "run_id,status,latest_sequence,purge_after");
+  const continuationSegments = await selectAll(database, "site_agent_continuation_segments", "id,run_id,generation,sequence");
+  const bootstrapRequests = await selectAll(database, "site_authoring_bootstrap_requests", "owner_user_id,site_id,run_id,created_at");
+  const assessments = await selectAll(database, "website_assessments", "id,target_kind,source_key,site_id,artifact_id,version_id");
+  const assessmentJobs = await selectAll(database, "website_assessment_jobs", "id,assessment_id,status");
+  const checkpointRows = await selectAll(database, "site_agent_workspace_checkpoints", "*");
+  const analyticsDailyRows = await selectAll(database, "analytics_collection_daily", "*");
+  const mirrorReferenceRows = await selectAll(database, "source_snapshot_mirror_references", "*");
+  const evidence = await verifyCanonicalAuthoringEvidenceRegistry();
+  const preservedRows = await selectTablesSequentially(database, preservedTables, "*", 250);
+  const additionalResetRows = await selectTablesSequentially(database, additionalResetTables, "*", 250);
+  const extendedTableRows = await selectOptionalTablesSequentially(database, removedPrelaunchTables, 250);
   const extendedTables = Object.fromEntries(removedPrelaunchTables.map((table, index) => [
     table,
     sortRows(extendedTableRows[index] ?? [])
-  ])) as ResetReport["extendedTables"];
+  ])) as Record<(typeof removedPrelaunchTables)[number], Array<Record<string, unknown>>>;
   const siteAssessments = assessments.filter((row) => typeof row.site_id === "string");
   const siteAssessmentIds = new Set(siteAssessments.map((row) => row.id));
   const siteAssessmentJobs = assessmentJobs.filter((row) => siteAssessmentIds.has(row.assessment_id));
@@ -227,7 +211,7 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     table,
     preservedDigest(table, preservedRows[index] ?? [])
   ])) as ResetReport["preservedDigests"];
-  const inventoryRows = {
+  const inventoryRows: Record<string, Array<Record<string, unknown>>> = {
     sites,
     site_versions: versions,
     site_build_artifacts: artifacts,
@@ -283,12 +267,9 @@ async function createReport(database: SupabaseClient): Promise<ResetReport> {
     tableInventories,
     preservedDigests,
     evidence,
-    continuationHeads: sortRows(continuationHeads),
-    continuationSegments: sortRows(continuationSegments),
     bootstrapRequests: sortRows(bootstrapRequests),
     siteAssessments: sortRows(siteAssessments),
-    siteAssessmentJobs: sortRows(siteAssessmentJobs),
-    extendedTables
+    siteAssessmentJobs: sortRows(siteAssessmentJobs)
   };
   return {
     ...canonical,
@@ -435,9 +416,8 @@ async function deleteSiteAssessments(database: SupabaseClient) {
   await deleteByValues(database, "website_assessments", "id", assessmentIds);
 }
 
-async function selectAll(database: SupabaseClient, table: string, columns: string) {
+async function selectAll(database: SupabaseClient, table: string, columns: string, pageSize = 250) {
   const rows: Array<Record<string, unknown>> = [];
-  const pageSize = 1_000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await database.from(table).select(columns).range(from, from + pageSize - 1);
     if (error) throw new Error(`Load ${table}: ${error.message}`);
@@ -445,6 +425,27 @@ async function selectAll(database: SupabaseClient, table: string, columns: strin
     rows.push(...page);
     if (page.length < pageSize) return rows;
   }
+}
+
+async function selectTablesSequentially(
+  database: SupabaseClient,
+  tables: readonly string[],
+  columns: string,
+  pageSize: number
+) {
+  const rows: Array<Array<Record<string, unknown>>> = [];
+  for (const table of tables) rows.push(await selectAll(database, table, columns, pageSize));
+  return rows;
+}
+
+async function selectOptionalTablesSequentially(
+  database: SupabaseClient,
+  tables: readonly string[],
+  pageSize: number
+) {
+  const rows: Array<Array<Record<string, unknown>>> = [];
+  for (const table of tables) rows.push(await selectOptionalTable(database, table, pageSize));
+  return rows;
 }
 
 async function selectFirstAvailable(database: SupabaseClient, table: string, columnSets: string[]) {
@@ -460,9 +461,9 @@ async function selectFirstAvailable(database: SupabaseClient, table: string, col
   throw lastError instanceof Error ? lastError : new Error(`No supported ${table} inventory shape is available.`);
 }
 
-async function selectOptionalTable(database: SupabaseClient, table: string) {
+async function selectOptionalTable(database: SupabaseClient, table: string, pageSize = 1_000) {
   try {
-    return await selectAll(database, table, "*");
+    return await selectAll(database, table, "*", pageSize);
   } catch (error) {
     if (isMissingTableError(error)) return [];
     throw error;

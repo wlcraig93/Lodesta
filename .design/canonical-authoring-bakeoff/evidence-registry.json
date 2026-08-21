@@ -1,13 +1,28 @@
 {
   "schemaVersion": 1,
   "kind": "canonical-authoring-evidence-registry",
+  "retention": {
+    "provider": "github-release",
+    "repository": "wlcraig93/Lodesta-evidence",
+    "releaseTag": "canonical-authoring-evidence-2026-08-21",
+    "visibility": "private",
+    "verifiedAt": "2026-08-21T21:45:00.000Z",
+    "assets": 8,
+    "bytes": 139329603
+  },
   "runs": [
     {
-      "runId": "run_4ff1721a1f754748bcfa3dc93281a478",
+      "runId": "run_c0d04e7292b84ae5981654959cafdc4a",
       "business": "kind",
       "treatment": "r8-control",
       "knownGlyphFindings": [],
-      "archive": null
+      "archive": {
+        "key": "canonical-authoring-evidence/run_c0d04e7292b84ae5981654959cafdc4a/d748c6ca3392abca2c16116a7191c86e69c32a3bc7df9efa3a9d71e198cf96d9.json",
+        "bytes": 26507422,
+        "bundleHash": "sha256:d748c6ca3392abca2c16116a7191c86e69c32a3bc7df9efa3a9d71e198cf96d9",
+        "artifactHash": "sha256:61e6259c2fc54c9d5c0c10ee1c46184a96cbe4ba7f91f027205fad6b226b184f",
+        "runtimeIdentity": "site-runtime-v1:runtime_patch_6d89f0ff1c26418ba54df90451a5d52b:sha256:cc93378b493069e5e3ed99688ec3c074c89951921183e59a77a70f1f8579c1d2"
+      }
     },
     {
       "runId": "run_9aa92465f7f74955ac76632128211f96",
@@ -61,11 +76,17 @@
       }
     },
     {
-      "runId": "run_edecd4f2d67040c29f6e7dd646ef7205",
+      "runId": "run_07b17e4678b24fe9bcbd18928ea1ecc3",
       "business": "surge",
       "treatment": "r8-control",
       "knownGlyphFindings": [],
-      "archive": null
+      "archive": {
+        "key": "canonical-authoring-evidence/run_07b17e4678b24fe9bcbd18928ea1ecc3/c087c8a406e1e003f5f1e6abace4da5fe41ba0028452915755f89ee4f9bf25ac.json",
+        "bytes": 8043068,
+        "bundleHash": "sha256:c087c8a406e1e003f5f1e6abace4da5fe41ba0028452915755f89ee4f9bf25ac",
+        "artifactHash": "sha256:f364f619d79716d85fff19c73d1607909349e0d7a1d80c03a8bd1802173bde49",
+        "runtimeIdentity": "site-runtime-v1:runtime_patch_6d89f0ff1c26418ba54df90451a5d52b:sha256:cc93378b493069e5e3ed99688ec3c074c89951921183e59a77a70f1f8579c1d2"
+      }
     },
     {
       "runId": "run_cd6c6dc8abea4aa7b8008be84a58b5b5",

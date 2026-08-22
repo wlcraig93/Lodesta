@@ -50,6 +50,26 @@ assert.deepEqual(retainedContactConsensus([
   { url: `${origin}/two`, extractedText: "Call 212-555-0134" }
 ]), { phone: undefined, email: undefined });
 
+const headingOrigin = "https://heading-boundary.example";
+const normalizedHeading = await crawlWebsiteForGeneration({
+  url: `${headingOrigin}/`,
+  validateUrl: async (value) => value,
+  limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+  sleep: async () => undefined,
+  fetchImpl: async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const path = new URL(url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/sitemap.xml") return response("missing", 404, "text/plain");
+    if (path === "/") return response(`<!doctype html><title>Heading boundary</title><h1><span>${"Portable heading ".repeat(50)}</span><svg><title>${"untrusted artwork ".repeat(50)}</title></svg></h1><p>${"Substantive source text ".repeat(20)}</p>`, 200);
+    throw new Error(`unexpected_heading_fixture_url:${url}`);
+  }
+});
+const retainedHeading = normalizedHeading.ingestion.pages.find((page) => page.url === `${headingOrigin}/`)?.headings[0];
+assert(retainedHeading, "The normalized heading was not retained.");
+assert.equal([...retainedHeading].length, 500, "A heading was not bounded by Unicode scalar count before schema validation.");
+assert.doesNotMatch(retainedHeading, /<|>|untrusted artwork/i, "Nested markup or SVG text leaked into heading metadata.");
+
 const sitemapPages = Array.from({ length: 260 }, (_, index) => `/pages/page-${String(index).padStart(3, "0")}`);
 const firstSitemap = urlSet(sitemapPages.slice(0, 130));
 const secondSitemap = urlSet([

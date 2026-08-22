@@ -1785,9 +1785,16 @@ function documentIndexability(html: string, headers: Record<string, string>) {
 
 function extractHeadings(html: string) {
   return [...html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)]
-    .map((match) => decodeHtmlText(match[1]))
+    .map((match) => boundedUnicodeText(decodeHtmlText(match[1]
+      .replace(/<!--[^]*?-->/g, " ")
+      .replace(/<(?:script|style|svg|noscript)\b[^]*?<\/(?:script|style|svg|noscript)>/gi, " ")
+      .replace(/<[^>]+>/g, " ")), 500))
     .filter(Boolean)
     .slice(0, 100);
+}
+
+function boundedUnicodeText(value: string, maximumCodepoints: number) {
+  return [...value].slice(0, maximumCodepoints).join("").trim();
 }
 
 function extractDocumentText(html: string) {

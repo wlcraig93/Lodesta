@@ -417,14 +417,58 @@ async function deleteSiteAssessments(database: SupabaseClient) {
 }
 
 async function selectAll(database: SupabaseClient, table: string, columns: string, pageSize = 250) {
+  const { data: probeData, error: probeError } = await database.from(table).select(columns).limit(1);
+  if (probeError) throw new Error(`Load ${table}: ${probeError.message}`);
+  const probe = ((probeData ?? []) as unknown as Array<Record<string, unknown>>)[0];
+  if (!probe) return [];
+  const orderColumns = stableInventoryOrderColumns(probe);
+  if (orderColumns.length === 1 && orderColumns[0] === "id") {
+    return selectAllById(database, table, columns, pageSize);
+  }
   const rows: Array<Record<string, unknown>> = [];
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await database.from(table).select(columns).range(from, from + pageSize - 1);
+    let query = database.from(table).select(columns);
+    for (const column of orderColumns) {
+      query = query.order(column, { ascending: true, nullsFirst: true });
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) throw new Error(`Load ${table}: ${error.message}`);
     const page = (data ?? []) as unknown as Array<Record<string, unknown>>;
     rows.push(...page);
     if (page.length < pageSize) return rows;
   }
+}
+
+async function selectAllById(database: SupabaseClient, table: string, columns: string, pageSize: number) {
+  const rows: Array<Record<string, unknown>> = [];
+  let lastId: string | number | undefined;
+  for (;;) {
+    let query = database.from(table).select(columns).order("id", { ascending: true }).limit(pageSize);
+    if (lastId !== undefined) query = query.gt("id", lastId);
+    const { data, error } = await query;
+    if (error) throw new Error(`Load ${table}: ${error.message}`);
+    const page = (data ?? []) as unknown as Array<Record<string, unknown>>;
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+    const nextId = page.at(-1)?.id;
+    if (typeof nextId !== "string" && typeof nextId !== "number") {
+      throw new Error(`Load ${table}: deterministic id pagination requires a scalar id.`);
+    }
+    if (nextId === lastId) throw new Error(`Load ${table}: deterministic id pagination did not advance.`);
+    lastId = nextId;
+  }
+}
+
+function stableInventoryOrderColumns(probe: Record<string, unknown>) {
+  if (Object.hasOwn(probe, "id")) return ["id"];
+  const identifiers = Object.keys(probe)
+    .filter((column) => column === "hostname" || column === "sequence" || column === "generation" || /_id$/.test(column))
+    .sort();
+  if (identifiers.length) return identifiers;
+  // Every retained table has a scalar primary or unique key. Falling back to
+  // every selected column keeps report pagination deterministic if a future
+  // table does not follow Lodesta's identifier naming convention.
+  return Object.keys(probe).sort();
 }
 
 async function selectTablesSequentially(
@@ -486,15 +530,30 @@ async function updateAll(database: SupabaseClient, table: string, values: Record
 }
 
 async function deleteAll(database: SupabaseClient, table: string, filterColumn: string) {
-  const { error } = await database.from(table).delete().not(filterColumn, "is", null);
-  if (error) throw new Error(`Reset ${table}: ${error.message}`);
+  const batchSize = 200;
+  for (;;) {
+    const { data, error: selectError } = await database.from(table)
+      .select(filterColumn)
+      .not(filterColumn, "is", null)
+      .limit(batchSize);
+    if (selectError) throw new Error(`Reset ${table}: ${selectError.message}`);
+    const values = [...new Set(((data ?? []) as unknown as Array<Record<string, unknown>>)
+      .map((row) => row[filterColumn])
+      .filter((value): value is string | number => typeof value === "string" || typeof value === "number"))];
+    if (!values.length) return;
+    const { error: deleteError } = await database.from(table).delete().in(filterColumn, values);
+    if (deleteError) throw new Error(`Reset ${table}: ${deleteError.message}`);
+  }
 }
 
 async function deleteOptionalTable(database: SupabaseClient, table: string) {
   const key = removedPrelaunchTableKeys[table as keyof typeof removedPrelaunchTableKeys];
   if (!key) throw new Error(`No reset key is declared for ${table}.`);
-  const { error } = await database.from(table).delete().not(key, "is", null);
-  if (error && !isMissingTableError(new Error(error.message))) throw new Error(`Reset ${table}: ${error.message}`);
+  try {
+    await deleteAll(database, table, key);
+  } catch (error) {
+    if (!isMissingTableError(error)) throw error;
+  }
 }
 
 async function deleteByValues(database: SupabaseClient, table: string, column: string, values: string[]) {

@@ -46,7 +46,7 @@ export const siteTechnicalReleasePolicy = {
 } as const;
 
 // Updated only after the corresponding Cloudflare image is built and deployed.
-export const sandboxImageDigest = "sha256:f482aa2303cf1f01ec1ddf958dbde767919fb065f1f3747a28aac9682ac9aaee" as const;
+export const sandboxImageDigest = "sha256:5f127c8891290f7d811ba768fb4438fdeaac6666fca85a1aa04fbad1c6560d36" as const;
 
 export const sitePlatformManifest = {
   platform: siteAuthoringPlatformIdentity,

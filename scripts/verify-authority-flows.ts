@@ -110,7 +110,7 @@ try {
       intent: synthetic.intent,
       forms: synthetic.forms,
       sourceSnapshotIds: [websiteSnapshot.id],
-      runtimeSeriesId: "site-runtime-v2"
+      runtimeSeriesId: "site-runtime-v4"
     }),
     /supports US locations only/,
     "A non-US location crossed the public build-input boundary."
@@ -121,7 +121,7 @@ try {
     intent: synthetic.intent,
     forms: synthetic.forms,
     sourceSnapshotIds: [websiteSnapshot.id],
-    runtimeSeriesId: "site-runtime-v2"
+    runtimeSeriesId: "site-runtime-v4"
   });
   const site = platformSiteRecordSchema.parse({
     id: synthetic.siteId,

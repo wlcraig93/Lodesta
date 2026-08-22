@@ -60,7 +60,7 @@ try {
     routes: [{ path: "/", htmlFile: "index.html", title: "Verified", description: "Verified candidate" }],
     factBindings: [],
     capabilityBindings: [],
-    runtimeSeriesId: "site-runtime-v1",
+    runtimeSeriesId: "site-runtime-v4",
     runtimePatchAtFinalization: "runtime_patch_verifier",
     toolchainVersion: "test",
     sandboxImageDigest: sha256("sandbox"),

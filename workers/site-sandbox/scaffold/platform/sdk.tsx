@@ -189,13 +189,13 @@ export function LeadField({
   </div>;
 }
 
-export function LeadLabel({ id, className, children }: { id: string; className?: string; children?: ReactNode }) {
+function LeadLabel({ id, className, children }: { id: string; className?: string; children?: ReactNode }) {
   const { form, field } = useLeadField(id);
   if (field.type === "radio") return <span className={className} id={`${form.id}-${field.id}-label`}>{children ?? field.label}</span>;
   return <label className={className} htmlFor={`${form.id}-${field.id}`}>{children ?? field.label}</label>;
 }
 
-export function LeadControl({
+function LeadControl({
   id,
   className,
   placeholder,
@@ -361,13 +361,6 @@ export function HeadlessNavigationDisclosure({
       <nav className={navClassName} aria-label={label}>{children}</nav>
     </div>
   </div>;
-}
-
-export function NavigationDisclosure({ trigger, ...props }: Omit<HeadlessNavigationDisclosureProps, "trigger"> & { trigger?: ReactNode }) {
-  return <HeadlessNavigationDisclosure
-    {...props}
-    trigger={trigger ?? <span data-lodesta-navigation-icon="" aria-hidden="true"><span /><span /><span /></span>}
-  />;
 }
 
 function stableId(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "item"; }

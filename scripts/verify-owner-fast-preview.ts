@@ -19,7 +19,7 @@ const rendered = rewriteFastPreview([
   '<a href="#contact">Contact</a>',
   '<a href="https://example.com/">External</a>',
   '</body>'
-].join(""), "session owner/preview", "site-runtime-v2");
+].join(""), "session owner/preview", "site-runtime-v4");
 
 const base = "/api/site-agent/sessions/session%20owner%2Fpreview/preview";
 assert.match(rendered, new RegExp(`href="${base}/"`));
@@ -28,17 +28,17 @@ assert.match(rendered, new RegExp(`href="${base}/_lodesta/assets/asset_revision_
 assert.match(rendered, new RegExp(`href="${base}/services"`));
 assert.match(rendered, /href="#contact"/);
 assert.match(rendered, /href="https:\/\/example\.com\/"/);
-assert.match(rendered, /<script src="\/_lodesta\/runtime\/site-runtime-v2\.js" defer data-lodesta-runtime="site-runtime-v2"><\/script><\/body>/);
+assert.match(rendered, /<script src="\/_lodesta\/runtime\/site-runtime-v4\.js" defer data-lodesta-runtime="site-runtime-v4"><\/script><\/body>/);
 assert.match(fastPreviewContentSecurityPolicy, /script-src 'self'/);
 assert.doesNotMatch(fastPreviewContentSecurityPolicy, /script-src 'none'/);
 
 const retainedRuntime = rewriteFastPreview(
-  '<body><script src="/_lodesta/runtime/site-runtime-v1.js" defer data-lodesta-runtime="site-runtime-v1"></script></body>',
+  '<body><script src="/_lodesta/runtime/site-runtime-v4.js" defer data-lodesta-runtime="site-runtime-v4"></script></body>',
   "session owner/preview",
-  "site-runtime-v2"
+  "site-runtime-v4"
 );
 assert.equal((retainedRuntime.match(/data-lodesta-runtime=/g) ?? []).length, 1);
-assert.match(retainedRuntime, /src="\/_lodesta\/runtime\/site-runtime-v1\.js"/);
+assert.match(retainedRuntime, /src="\/_lodesta\/runtime\/site-runtime-v4\.js"/);
 
 const blobRoot = await mkdtemp(join(tmpdir(), "lodesta-owner-preview-"));
 const blobStore = new LocalArtifactBlobStore(blobRoot);

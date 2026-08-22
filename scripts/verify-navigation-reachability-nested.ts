@@ -35,7 +35,7 @@ try {
       </div>
     </header>
   `);
-  await mobile.addScriptTag({ path: "packages/trusted-runtime/site-runtime-v1.js" });
+  await mobile.addScriptTag({ path: "packages/trusted-runtime/site-runtime-v4.js" });
   const mobileResult = await inspectNavigationReachability(mobile);
   assert.deepEqual(mobileResult.unreachable, []);
   assert.equal(await mobile.locator("[data-lodesta-navigation-panel]").getAttribute("hidden"), "", "Managed mobile panel state leaked after inspection.");

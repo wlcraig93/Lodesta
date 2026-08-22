@@ -14,11 +14,10 @@ assert.equal(directionsHrefForLocation({
   country: "US"
 }), "https://www.google.com/maps/dir/?api=1&destination=12%20Main%20%26%20Market%2C%20Austin%2C%20TX%2C%2078701%2C%20US");
 assert.equal(directionsHrefForLocation({ label: "North office" }), "https://www.google.com/maps/dir/?api=1&destination=North%20office");
-const [sdkSource, nativeSdkSource, v4SdkSource, auditedRuntimeSource, workflowSource, browserGateSource, previewSource, operatorRuntimeSource, publicRuntimeRouteSource] = await Promise.all([
+const [sdkSource, v4SdkSource, auditedRuntimeSource, workflowSource, browserGateSource, previewSource, operatorRuntimeSource, publicRuntimeRouteSource] = await Promise.all([
   readFile("workers/site-sandbox/scaffold/platform/sdk.tsx", "utf8"),
-  readFile("workers/site-sandbox/scaffold/platform/sdk-native.tsx", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-canonical.tsx", "utf8"),
-  readFile("packages/trusted-runtime/site-runtime-v1.js", "utf8"),
+  readFile("packages/trusted-runtime/site-runtime-v4.js", "utf8"),
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-verification/browser-gate.ts", "utf8"),
   readFile("app/api/site-agent/sessions/[sessionId]/preview/[[...path]]/route.ts", "utf8"),
@@ -30,33 +29,16 @@ assert.match(sdkSource, /rel=\{target === "_blank" \? "noopener noreferrer" : un
 assert.match(sdkSource, /data-lodesta-directions=""/);
 assert.doesNotMatch(sdkSource, /export function (?:ManagedMap|Gallery|Disclosure)\b/);
 assert.match(sdkSource, /behavior: "modal" \| "inline";/);
-assert.doesNotMatch(nativeSdkSource, /NavigationDisclosure/);
 assert.match(v4SdkSource, /export function NavigationDisclosure/);
 assert.match(v4SdkSource, /trigger: ReactNode/);
 assert.doesNotMatch(v4SdkSource, /LeadLabel|LeadControl/);
 
-const [legacyRuntime, canonicalRuntime, nativeRuntime, headlessRuntime] = await Promise.all([
-  buildSiteRuntimeBytes("site-runtime-v1"),
-  buildSiteRuntimeBytes("site-runtime-v2"),
-  buildSiteRuntimeBytes("site-runtime-v3"),
-  buildSiteRuntimeBytes("site-runtime-v4")
-]);
-assert.equal(legacyRuntime.toString("utf8"), auditedRuntimeSource, "Legacy audited runtime bytes changed during canonical runtime creation");
-assert.notEqual(canonicalRuntime.toString("utf8"), auditedRuntimeSource);
-assert.match(canonicalRuntime.toString("utf8"), /isNavigationRendered/);
+const canonicalRuntime = await buildSiteRuntimeBytes("site-runtime-v4");
+assert.equal(canonicalRuntime.toString("utf8"), auditedRuntimeSource, "Canonical runtime builder must return the direct audited source.");
+assert.match(canonicalRuntime.toString("utf8"), /site-runtime-v4: managed behavior without platform presentation/);
+assert.match(canonicalRuntime.toString("utf8"), /data-lodesta-menu-toggle/);
 assert.doesNotMatch(canonicalRuntime.toString("utf8"), /data-lodesta-gallery-direction/);
-assert.doesNotMatch(nativeRuntime.toString("utf8"), /data-lodesta-menu-toggle|data-lodesta-navigation|data-lodesta-gallery-direction/);
-assert.match(nativeRuntime.toString("utf8"), /form\[data-lodesta-form-id\]/);
-assert.match(nativeRuntime.toString("utf8"), /observeWebVitals\(\)/);
-assert.match(nativeRuntime.toString("utf8"), /data-lodesta-directions/);
-assert.match(headlessRuntime.toString("utf8"), /site-runtime-v4: managed behavior without platform presentation/);
-assert.match(headlessRuntime.toString("utf8"), /data-lodesta-menu-toggle/);
-assert.notEqual(headlessRuntime.toString("utf8"), canonicalRuntime.toString("utf8"));
-assert.equal(
-  headlessRuntime.toString("utf8"),
-  `/* site-runtime-v4: managed behavior without platform presentation */\n${canonicalRuntime.toString("utf8")}`,
-  "Canonical JavaScript changed while adding compiler-owned containment CSS."
-);
+await assert.rejects(() => buildSiteRuntimeBytes("site-runtime-v3"), /only site-runtime-v4 is canonical/);
 const v4Styles = platformCapabilityStylesFor("site-runtime-v4");
 assert.match(v4Styles, /navigation-panel.*hidden/s);
 assert.match(v4Styles, /data-lodesta-menu-toggle.*min-height:\s*2\.75rem/s);
@@ -66,18 +48,12 @@ assert.match(v4Styles, /height:\s*calc\(100dvh - var\(--lodesta-navigation-top, 
 assert.match(v4Styles, /overscroll-behavior:\s*contain/);
 assert.match(v4Styles, /background:\s*var\(--site-color-background, Canvas\)/);
 assert.doesNotMatch(v4Styles, /navigation-icon|transition:|navigation-panel\]\s+a|navigation-panel\].*>\s+nav/);
-const formRuntimeMarker = '  for (const form of document.querySelectorAll("form[data-lodesta-form-id]")) {';
-assert.equal(
-  nativeRuntime.toString("utf8").slice(nativeRuntime.toString("utf8").indexOf(formRuntimeMarker)),
-  canonicalRuntime.toString("utf8").slice(canonicalRuntime.toString("utf8").indexOf(formRuntimeMarker)),
-  "The native runtime changed managed forms or telemetry while removing presentation behavior"
-);
-assert.doesNotMatch(workflowSource, /const runtimeSeriesId = "site-runtime-v1"/);
+assert.doesNotMatch(workflowSource, /const runtimeSeriesId = "site-runtime-v[123]"/);
 assert.match(workflowSource, /input\.buildInput\.capabilityConfiguration\.trustedRuntimeSeries/);
 assert.match(workflowSource, /runtimeSource = await this\.readAuditedRuntimePatch/);
 assert.match(browserGateSource, /runtimeSource\?: Buffer/);
 assert.match(previewSource, /getPublicBuildInput\(session\.publicBuildInputId\)/);
-assert.doesNotMatch(previewSource, /site-runtime-v1/);
+assert.doesNotMatch(previewSource, /site-runtime-v[123]/);
 assert.match(operatorRuntimeSource, /seriesId: seriesIdSchema/);
 assert.match(operatorRuntimeSource, /valid seriesId query parameter is required/);
 assert.match(publicRuntimeRouteSource, /getRuntimeSeries\(seriesId\)/);
@@ -93,11 +69,8 @@ assert.deepEqual(validateWorkspaceSourcePolicy(sourceFiles(
   `export const siteDefinition={routes:[{path:"/",element:<main><a href="/contact" data-lodesta-conversion="primary">Contact</a><details><summary>Question</summary><p>Answer</p></details></main>}]};`
 )), []);
 assert(validateWorkspaceSourcePolicy(sourceFiles(
-  `import { NavigationDisclosure } from "#lodesta-sdk"; export const siteDefinition={routes:[{path:"/",element:<NavigationDisclosure id="nav" behavior="inline"><a href="/">Home</a></NavigationDisclosure>}]};`
-), { runtimeSeriesId: "site-runtime-v3" }).some((finding) => finding.id === "source.sdk_export"));
-assert.deepEqual(validateWorkspaceSourcePolicy(sourceFiles(
-  `export const siteDefinition={routes:[{path:"/",element:<header><button popoverTarget="menu">Menu</button><nav id="menu" popover="auto"><a href="/">Home</a></nav></header>}]};`
-), { runtimeSeriesId: "site-runtime-v3" }), []);
+  `export const siteDefinition={routes:[{path:"/",element:<main>Legacy</main>}]};`
+), { runtimeSeriesId: "site-runtime-v3" }).some((finding) => finding.id === "source.runtime_series"));
 assert(validateWorkspaceSourcePolicy(sourceFiles(
   `import { LeadLabel } from "#lodesta-sdk"; export const siteDefinition={routes:[{path:"/",element:<main><LeadLabel id="name" /></main>}]};`
 ), { runtimeSeriesId: "site-runtime-v4" }).some((finding) => finding.id === "source.sdk_export"));

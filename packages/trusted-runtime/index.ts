@@ -15,6 +15,8 @@ export type RuntimeRegistry = {
   saveSeries(series: TrustedRuntimeSeries): Promise<void>;
 };
 
+const canonicalRuntimeSeriesId = "site-runtime-v4";
+
 export async function createSiteRuntimePatch(input: {
   id: string;
   seriesId: string;
@@ -46,40 +48,19 @@ export async function createSiteRuntimePatch(input: {
 }
 
 export async function buildSiteRuntimeBytes(seriesId: string) {
-  if (seriesId === "site-runtime-v4") {
-    return await readFile(join(process.cwd(), "packages", "trusted-runtime", "site-runtime-v4.js"));
-  }
-  const source = await readFile(join(process.cwd(), "packages", "trusted-runtime", "site-runtime-v1.js"), "utf8");
-  if (seriesId === "site-runtime-v1") return Buffer.from(source);
-  if (seriesId !== "site-runtime-v2" && seriesId !== "site-runtime-v3") {
-    throw new Error(`Unknown trusted runtime source series ${seriesId}.`);
-  }
-
-  const resizeV1 = `  addEventListener("resize", () => {\n    if (activeNavigation?.behavior === "modal") positionNavigation(activeNavigation);\n  }, { passive: true });`;
-  const resizeV2 = `  addEventListener("resize", () => {\n    if (!openNavigation) return;\n    if (!isNavigationRendered(openNavigation)) {\n      setNavigationOpen(openNavigation, false, false);\n      return;\n    }\n    if (activeNavigation?.behavior === "modal") positionNavigation(activeNavigation);\n  }, { passive: true });`;
-  const galleryV1 = `\n  for (const button of document.querySelectorAll("[data-lodesta-gallery-direction]")) {\n    button.addEventListener("click", () => {\n      const galleryId = button.getAttribute("aria-controls");\n      const gallery = galleryId ? document.getElementById(galleryId) : null;\n      if (!gallery) return;\n      const direction = button.getAttribute("data-lodesta-gallery-direction") === "previous" ? -1 : 1;\n      gallery.scrollBy({ left: direction * Math.max(240, gallery.clientWidth * 0.8), behavior: "smooth" });\n    });\n  }\n`;
-  const navigationVisibilityHelper = `\n  function isNavigationRendered(state) {\n    return state.toggle.getClientRects().length > 0\n      && state.target.getClientRects().length > 0\n      && getComputedStyle(state.toggle).visibility !== "hidden"\n      && getComputedStyle(state.target).visibility !== "hidden";\n  }\n`;
-  if (!source.includes(resizeV1) || !source.includes(galleryV1)) {
-    throw new Error("site-runtime-v2 transformation no longer matches the audited V1 source.");
-  }
-  const v2Source = source
-    .replace(resizeV1, resizeV2)
-    .replace(galleryV1, navigationVisibilityHelper);
-  if (seriesId === "site-runtime-v2") return Buffer.from(v2Source);
-  const presentationStart = "  let openNavigation = null;\n";
-  const presentationEnd = "  for (const form of document.querySelectorAll(\"form[data-lodesta-form-id]\")) {\n";
-  const startIndex = v2Source.indexOf(presentationStart);
-  const endIndex = v2Source.indexOf(presentationEnd);
-  if (startIndex < 0 || endIndex <= startIndex) {
-    throw new Error("site-runtime-v3 transformation no longer matches the audited canonical source.");
-  }
-  return Buffer.from(`${v2Source.slice(0, startIndex)}${v2Source.slice(endIndex)}`);
+  assertCanonicalRuntimeSeries(seriesId);
+  return await readFile(join(process.cwd(), "packages", "trusted-runtime", "site-runtime-v4.js"));
 }
 
 function runtimeSeriesVersion(seriesId: string) {
-  const match = /^site-runtime-v([1-9][0-9]*)$/.exec(seriesId);
-  if (!match) throw new Error(`Trusted runtime series ID is not versioned: ${seriesId}.`);
-  return Number(match[1]);
+  assertCanonicalRuntimeSeries(seriesId);
+  return 4;
+}
+
+function assertCanonicalRuntimeSeries(seriesId: string): asserts seriesId is typeof canonicalRuntimeSeriesId {
+  if (seriesId !== canonicalRuntimeSeriesId) {
+    throw new Error(`Unsupported trusted runtime series ${seriesId}; only ${canonicalRuntimeSeriesId} is canonical.`);
+  }
 }
 
 export async function promoteRuntimePatch(input: {
@@ -89,6 +70,7 @@ export async function promoteRuntimePatch(input: {
   actorId: string;
   now?: string;
 }) {
+  assertCanonicalRuntimeSeries(input.seriesId);
   const patch = await input.registry.getPatch(input.patchId);
   if (!patch || patch.seriesId !== input.seriesId) throw new Error("Runtime patch does not belong to the requested series.");
   if (patch.securityStatus !== "audited" || patch.compatibilityStatus !== "passed") {
@@ -114,6 +96,7 @@ export async function rollbackRuntimePatch(input: {
   actorId: string;
   now?: string;
 }) {
+  assertCanonicalRuntimeSeries(input.seriesId);
   const current = await input.registry.getSeries(input.seriesId);
   if (!current?.previousPatchId) throw new Error("Runtime series has no previous patch to restore.");
   return promoteRuntimePatch({

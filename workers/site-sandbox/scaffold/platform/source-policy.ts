@@ -27,17 +27,18 @@ const forbiddenCalls = new Map<string, string>([
 const forbiddenJsxElements = new Set(["link", "script", "style"]);
 const lodestaSdkJsxNames = new Set([
   "BusinessName", "BusinessHours", "BusinessAddress", "Fact", "Asset",
-  "LeadForm", "LeadField", "LeadLabel", "LeadControl", "LeadSubmit", "LeadFormStatus",
+  "LeadForm", "LeadField", "LeadSubmit", "LeadFormStatus",
   "DirectionsLink", "SafeLink", "NavigationDisclosure"
 ]);
-const nativeSdkJsxNames = new Set([...lodestaSdkJsxNames].filter((name) => name !== "NavigationDisclosure"));
-const v4SdkJsxNames = new Set([...lodestaSdkJsxNames].filter((name) => name !== "LeadLabel" && name !== "LeadControl"));
 const allowedAuthoredLodestaAttributes = new Set(["data-lodesta-conversion", "data-lodesta-role"]);
 export function validateWorkspaceSourcePolicy(
   files: WorkspaceSourcePolicyFile[],
   options?: { runtimeSeriesId?: string }
 ) {
   const runtimeSeriesId = options?.runtimeSeriesId ?? "site-runtime-v4";
+  if (runtimeSeriesId !== "site-runtime-v4") {
+    return [{ id: "source.runtime_series", path: "src", message: `Unsupported authoring runtime ${runtimeSeriesId}; only site-runtime-v4 is canonical.` }];
+  }
   const findings: WorkspaceSourcePolicyFinding[] = [];
   const paths = new Set(files.map((file) => file.path));
   for (const path of requiredPaths) {
@@ -53,12 +54,7 @@ export function validateWorkspaceSourcePolicy(
       continue;
     }
 
-    const sdkJsxNames = runtimeSeriesId === "site-runtime-v3"
-      ? nativeSdkJsxNames
-      : runtimeSeriesId === "site-runtime-v4"
-        ? v4SdkJsxNames
-        : lodestaSdkJsxNames;
-    findings.push(...validateTypeScript(file, sdkJsxNames, runtimeSeriesId !== "site-runtime-v4"));
+    findings.push(...validateTypeScript(file, lodestaSdkJsxNames));
   }
   if (files.length > 80) findings.push({ id: "source.file_limit", path: "src", message: "A workspace may contain at most 80 source files." });
   if (files.reduce((total, file) => total + new TextEncoder().encode(file.content).byteLength, 0) > 4_000_000) {
@@ -133,7 +129,7 @@ export function assertWorkspaceSourcePolicy(files: WorkspaceSourcePolicyFile[]) 
   throw error;
 }
 
-function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxNames: ReadonlySet<string>, allowLegacySdkImport: boolean) {
+function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxNames: ReadonlySet<string>) {
   const findings: WorkspaceSourcePolicyFinding[] = [];
   const source = ts.createSourceFile(file.path, file.content, ts.ScriptTarget.Latest, true, file.path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const add = (id: string, message: string) => findings.push({ id: `source.${id}`, path: file.path, message });
@@ -161,7 +157,7 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxName
             : "Only explicit static imports from the source allowlist are permitted."
         );
       }
-      if (!allowedImport(file.path, moduleId, allowLegacySdkImport)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
+      if (!allowedImport(file.path, moduleId)) add("import_module", `Import from ${moduleId} is not allowlisted.`);
       if (moduleId === "#lodesta-sdk" && statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
         for (const specifier of statement.importClause.namedBindings.elements) {
           const importedName = specifier.propertyName?.text ?? specifier.name.text;
@@ -172,7 +168,7 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxName
       }
     } else if (ts.isImportEqualsDeclaration(statement) || (ts.isExportDeclaration(statement) && statement.moduleSpecifier)) {
       if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
-        && allowedImport(file.path, statement.moduleSpecifier.text, allowLegacySdkImport)) continue;
+        && allowedImport(file.path, statement.moduleSpecifier.text)) continue;
       add("import_syntax", "Only static imports from React, the Lodesta SDK, and local src files are permitted.");
     }
   }
@@ -479,13 +475,12 @@ function isAllowedSourcePath(path: string) {
     && !path.split("/").some((part) => part === ".." || part === "." || part === "");
 }
 
-function allowedImport(fromPath: string, moduleId: string, allowLegacySdkImport: boolean) {
+function allowedImport(fromPath: string, moduleId: string) {
   if (moduleId === "react") return true;
   if (moduleId === "#lodesta-sdk") return true;
   if (!moduleId.startsWith(".")) return false;
   const resolved = normalizePath(`${fromPath.slice(0, fromPath.lastIndexOf("/"))}/${moduleId}`);
   if (!resolved) return false;
-  if (resolved === "platform/sdk") return allowLegacySdkImport;
   if (!resolved.startsWith("src/")) return false;
   return true;
 }

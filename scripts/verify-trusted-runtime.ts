@@ -6,8 +6,6 @@ import { chromium } from "playwright";
 import { platformCapabilityStyles, platformCapabilityStylesFor } from "../workers/site-sandbox/scaffold/platform/capability-styles";
 import { buildSiteRuntimeBytes } from "../packages/trusted-runtime";
 
-const runtimeV1 = await readFile("packages/trusted-runtime/site-runtime-v1.js");
-const runtime = await buildSiteRuntimeBytes("site-runtime-v2");
 const runtimeV4 = await buildSiteRuntimeBytes("site-runtime-v4");
 const materializedRuntimeV4 = await readFile("packages/trusted-runtime/site-runtime-v4.js");
 assert.deepEqual(runtimeV4, materializedRuntimeV4, "The canonical V4 builder did not return the materialized source bytes directly.");
@@ -17,9 +15,8 @@ assert.equal(
   "Materialized V4 bytes no longer match the deployed active V4 patch; publish a separate audited runtime patch instead."
 );
 const v4CapabilityStyles = platformCapabilityStylesFor("site-runtime-v4");
-new Function(runtimeV1.toString("utf8"));
-new Function(runtime.toString("utf8"));
 new Function(runtimeV4.toString("utf8"));
+await assert.rejects(() => buildSiteRuntimeBytes("site-runtime-v2"), /only site-runtime-v4 is canonical/);
 assert.match(v4CapabilityStyles, /navigation-panel\]\[hidden\].*display:\s*none\s*!important/s);
 assert.match(v4CapabilityStyles, /navigation-behavior="modal".*position:\s*fixed/s);
 assert.match(v4CapabilityStyles, /inset:\s*var\(--lodesta-navigation-top, 0px\) 0 0/);
@@ -38,15 +35,13 @@ assert(
 );
 assert(
   !platformCapabilityStyles.includes("data-lodesta-map")
-    && !runtime.includes(Buffer.from("data-lodesta-gallery-direction")),
+    && !runtimeV4.includes(Buffer.from("data-lodesta-gallery-direction")),
   "Kernel-B retained removed map presentation or gallery behavior."
 );
 const analytics: Array<Record<string, unknown>> = [];
 const forms: Array<Record<string, unknown>> = [];
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
-  if (url.pathname === "/_lodesta/runtime/site-runtime-v1.js") return send(response, 200, runtimeV1, "application/javascript; charset=utf-8");
-  if (url.pathname === "/_lodesta/runtime/site-runtime-v2.js") return send(response, 200, runtime, "application/javascript; charset=utf-8");
   if (url.pathname === "/_lodesta/runtime/site-runtime-v4.js") return send(response, 200, runtimeV4, "application/javascript; charset=utf-8");
   if (request.method === "POST" && url.pathname === "/api/analytics") {
     analytics.push(await jsonBody(request));
@@ -131,20 +126,14 @@ try {
       activeLabel: document.activeElement?.getAttribute("aria-label"),
       panelBounds: panel ? { left: panel.getBoundingClientRect().left, top: panel.getBoundingClientRect().top, width: panel.getBoundingClientRect().width } : null,
       viewportWidth: innerWidth,
-      toggleHeight: document.querySelector("[data-lodesta-navigation-icon]")?.parentElement?.getBoundingClientRect().height,
-      linkHeights: [...document.querySelectorAll("#primary-navigation a")].map((link) => link.getBoundingClientRect().height),
-      firstIconTransform: getComputedStyle(document.querySelector("[data-lodesta-navigation-icon] > span:first-child")!).transform,
-      middleIconOpacity: getComputedStyle(document.querySelector("[data-lodesta-navigation-icon] > span:nth-child(2)")!).opacity
+      toggleHeight: document.querySelector("[data-lodesta-menu-toggle]")?.getBoundingClientRect().height
     };
   });
   assert.equal(openModalState.navigationTop, `${Math.round(Number(openModalState.headerBottom) * 100) / 100}px`, "modal navigation was not positioned below the persistent header");
   assert(Math.abs(Number(openModalState.panelBounds?.top) - Number(openModalState.headerBottom)) <= 1, "the default modal panel did not begin directly below the persistent header");
   assert.equal(openModalState.panelBounds?.left, 0, "the default modal panel did not reach the left viewport edge");
   assert.equal(openModalState.panelBounds?.width, openModalState.viewportWidth, "the default modal panel was not full viewport width");
-  assert(Number(openModalState.toggleHeight) >= 44, "the default hamburger target is smaller than 44px");
-  assert(openModalState.linkHeights.every((height) => height >= 44), "the default navigation links are smaller than 44px");
-  assert.notEqual(openModalState.firstIconTransform, "none", "the default hamburger did not transform toward an X while open");
-  assert.equal(openModalState.middleIconOpacity, "0", "the middle hamburger line remained visible while open");
+  assert(Number(openModalState.toggleHeight) >= 44, "the managed trigger target is smaller than 44px");
   assert.equal(openModalState.rootOverflow, "hidden");
   assert.equal(openModalState.bodyOverflow, "hidden");
   assert.equal(openModalState.mainInert, true, "modal navigation did not suppress background interaction");
@@ -235,16 +224,8 @@ try {
   assert(Math.abs(sheetBounds.height - 338) <= 1, "modal navigation did not accept an authored sheet height");
   await page.keyboard.press("Escape");
   await page.evaluate(() => document.querySelector("#authored-navigation-geometry")?.remove());
-  await page.emulateMedia({ reducedMotion: "reduce" });
   await modalToggle.click();
-  assert.equal(await page.locator("[data-lodesta-navigation-icon] > span").first().evaluate((element) => getComputedStyle(element).transitionDuration), "0s", "the default navigation motion ignored prefers-reduced-motion");
   await page.keyboard.press("Escape");
-  const legacyToggle = page.locator("#legacy-navigation-toggle");
-  await legacyToggle.click();
-  assert.equal(await legacyToggle.getAttribute("aria-expanded"), "true", "the trusted runtime no longer supports retained raw menu-toggle markup");
-  assert(await page.locator("#legacy-navigation").getAttribute("data-lodesta-open") !== null, "retained raw menu markup did not receive its open styling hook");
-  await page.keyboard.press("Escape");
-  assert.equal(await legacyToggle.getAttribute("aria-expanded"), "false", "retained raw menu markup did not close with Escape");
 
   const previewRequestsBefore = analytics.length + forms.length;
   const preview = await browser.newPage();
@@ -353,7 +334,7 @@ try {
 }
 
 function documentHtml(analyticsEnabled: boolean) {
-  return `<!doctype html><html data-lodesta-site-id="site_runtime_test" data-lodesta-version-id="version_runtime_test" data-lodesta-analytics="${analyticsEnabled}"><head><meta charset="utf-8"><style>${platformCapabilityStyles}</style><script src="/_lodesta/runtime/site-runtime-v2.js" defer></script></head><body><header><div data-lodesta-navigation-disclosure="primary-navigation" data-lodesta-navigation-behavior="modal"><button type="button" data-lodesta-menu-toggle aria-controls="primary-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span data-lodesta-navigation-icon aria-hidden="true"><span></span><span></span><span></span></span></button><div id="primary-navigation" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#section">Section</a><a href="#contact">Contact</a></nav></div></div><div data-lodesta-navigation-disclosure="inline-navigation" data-lodesta-navigation-behavior="inline"><button type="button" data-lodesta-menu-toggle aria-controls="inline-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation">Menu</button><div id="inline-navigation" data-lodesta-menu data-lodesta-navigation-panel tabindex="-1" hidden><nav aria-label="Secondary"><a href="#section">Section</a></nav></div></div><button id="legacy-navigation-toggle" type="button" data-lodesta-menu-toggle aria-controls="legacy-navigation" aria-expanded="false">Legacy menu</button><nav id="legacy-navigation"><a href="#section">Legacy destination</a></nav></header><main><section id="section"><a href="#directions" data-lodesta-directions>Directions</a><form id="contact" data-lodesta-form-id="form_runtime_test" data-lodesta-success-message="Sent."><label>Name<input name="name" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></section></main></body></html>`;
+  return `<!doctype html><html data-lodesta-site-id="site_runtime_test" data-lodesta-version-id="version_runtime_test" data-lodesta-analytics="${analyticsEnabled}"><head><meta charset="utf-8"><style>${platformCapabilityStyles}</style><script src="/_lodesta/runtime/site-runtime-v4.js" defer></script></head><body><header><div data-lodesta-navigation-disclosure="primary-navigation" data-lodesta-navigation-behavior="modal"><button type="button" data-lodesta-menu-toggle aria-controls="primary-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation"><span aria-hidden="true">Menu</span></button><div id="primary-navigation" data-lodesta-menu data-lodesta-navigation-panel role="dialog" aria-modal="true" aria-label="Primary" tabindex="-1" hidden><nav aria-label="Primary"><a href="#section">Section</a><a href="#contact">Contact</a></nav></div></div><div data-lodesta-navigation-disclosure="inline-navigation" data-lodesta-navigation-behavior="inline"><button type="button" data-lodesta-menu-toggle aria-controls="inline-navigation" aria-expanded="false" aria-label="Open navigation" data-lodesta-open-label="Open navigation" data-lodesta-close-label="Close navigation">Menu</button><div id="inline-navigation" data-lodesta-menu data-lodesta-navigation-panel tabindex="-1" hidden><nav aria-label="Secondary"><a href="#section">Section</a></nav></div></div></header><main><section id="section"><a href="#directions" data-lodesta-directions>Directions</a><form id="contact" data-lodesta-form-id="form_runtime_test" data-lodesta-success-message="Sent."><label>Name<input name="name" required></label><button type="submit">Send</button><p data-lodesta-form-status></p></form></section></main></body></html>`;
 }
 
 function v4DocumentHtml() {

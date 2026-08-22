@@ -4,7 +4,7 @@ import { authorizedOperator } from "@/app/api/site-agent/auth";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { promoteRuntimePatch, rollbackRuntimePatch, type RuntimeRegistry } from "@/packages/trusted-runtime";
 
-const seriesIdSchema = z.string().regex(/^site-runtime-v[1-9][0-9]*$/).max(160);
+const seriesIdSchema = z.literal("site-runtime-v4");
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("promote"), seriesId: seriesIdSchema, patchId: z.string().min(1).max(160) }).strict(),
   z.object({ action: z.literal("rollback"), seriesId: seriesIdSchema }).strict()

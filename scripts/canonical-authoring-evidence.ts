@@ -196,7 +196,6 @@ async function exportRun(
     fonts: fontCoverageManifest.fonts.filter((font) => originalFontFilenames.includes(font.filename))
   });
   add("evaluation/EVALUATION.md", await readFile(".design/canonical-authoring-bakeoff/EVALUATION.md"), "text/markdown");
-  add("provenance/retained-control-profile.ts", await readFile(".design/canonical-authoring-bakeoff/retained-control-profile.ts"), "text/plain");
   add("provenance/historical-skills.ts", Buffer.from((await execFile("git", ["show", "0cc47bfa:packages/site-agent/skills.ts"])).stdout), "text/plain");
   add("provenance/executable-prompt.ts", Buffer.from((await execFile("git", ["show", "0cc47bfa:packages/site-agent/prompts.ts"])).stdout), "text/plain");
   add("provenance/capability-styles.css", Buffer.from(platformCapabilityStylesFor(stringValue(artifact.runtime_series_id))), "text/css");

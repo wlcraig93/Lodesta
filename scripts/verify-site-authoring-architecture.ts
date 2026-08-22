@@ -36,7 +36,6 @@ for (const { path, source } of labelSources) {
 const allowedVersionedFiles = new Set([
   "docs/canonical-v4-consolidation-plan.md",
   "docs/decisions/2026-08-21-canonical-v4-glyph-runtime-consolidation.md",
-  "packages/trusted-runtime/site-runtime-v1.js",
   "packages/trusted-runtime/site-runtime-v4.js",
   "supabase/migrations/202607270001_website_health_report_v2.sql"
 ]);

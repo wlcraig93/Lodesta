@@ -42,12 +42,12 @@ const form = buildInput.forms[0];
 
 const prepared = prepareSiteArtifact({
   buildInput,
-  runtimeSeriesId: "site-runtime-v1",
+  runtimeSeriesId: "site-runtime-v4",
   authoredArtifact: {
     kind: "agent-authored-artifact",
     compilerManifest: expectedSiteSandboxManifest,
     siteName: String(name.value),
-    sharedCss: `*{box-sizing:border-box}body{margin:0;color:#17211b;background:#f7f4ee;font:18px/1.55 Arial,sans-serif}header,main,footer{padding:28px max(20px,calc((100% - 1080px)/2))}header{display:flex;justify-content:space-between;gap:24px;background:#fff}nav{display:flex;gap:20px;flex-wrap:wrap;font-size:12px}a{color:inherit}.hero{padding-block:100px}h1{font:700 clamp(46px,7vw,88px)/1.02 Georgia,serif;letter-spacing:0;max-width:900px}h2{font:700 40px/1.1 Georgia,serif;letter-spacing:0}.button{display:inline-flex;min-height:48px;align-items:center;padding:10px 18px;background:#9b2c20;color:#fff;text-decoration:none}.panel{border-top:1px solid #bbb;padding-block:60px}.carousel-card{width:180px;height:24px;background:#9b2c20;animation:carousel-slide .35s linear infinite alternate}@keyframes carousel-slide{to{transform:translateX(24px)}}[data-lodesta-map-surface]{background:#17211b;color:#fff}form,label{display:grid;gap:10px}form label{font-size:14px}input,textarea,button{font:inherit;min-height:48px;padding:10px}button{background:#17211b;color:#fff;border:0}@media(max-width:640px){header{align-items:flex-start;flex-direction:column}.hero{padding-block:64px}h1{font-size:48px}}`,
+    sharedCss: `*{box-sizing:border-box}body{margin:0;color:#17211b;background:#f7f4ee;font:18px/1.55 Arial,sans-serif}header,main,footer{padding:28px max(20px,calc((100% - 1080px)/2))}header{display:flex;justify-content:space-between;gap:24px;background:#fff}nav{display:flex;gap:20px;flex-wrap:wrap;font-size:12px}a{color:inherit}.hero{padding-block:100px}h1{font:700 clamp(46px,7vw,88px)/1.02 Georgia,serif;letter-spacing:0;max-width:900px}h2{font:700 40px/1.1 Georgia,serif;letter-spacing:0}.button{display:inline-flex;min-height:48px;align-items:center;padding:10px 18px;background:#9b2c20;color:#fff;text-decoration:none}.panel{border-top:1px solid #bbb;padding-block:60px}.carousel-card{width:180px;height:24px;background:#9b2c20;animation:carousel-slide .35s linear infinite alternate}@keyframes carousel-slide{to{transform:translateX(24px)}}[data-lodesta-map]{display:grid;grid-template-columns:minmax(0,1fr) auto}[data-lodesta-map-surface]{min-width:0;background:#17211b;color:#fff}[data-lodesta-map-fallback]{min-width:11rem}form,label{display:grid;gap:10px}form label{font-size:14px}input,textarea,button{font:inherit;min-height:48px;padding:10px}button{background:#17211b;color:#fff;border:0}@media(max-width:640px){header{align-items:flex-start;flex-direction:column}.hero{padding-block:64px}h1{font-size:48px}}`,
     routes: [
       {
         path: "/",

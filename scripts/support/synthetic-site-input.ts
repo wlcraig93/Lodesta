@@ -3,7 +3,7 @@ import { siteIntentSchema, sitePublicBuildInputSchema } from "../../packages/sit
 
 const createdAt = "2026-07-20T00:00:00.000Z";
 
-export function buildSyntheticSiteInput(runtimeSeriesId = "site-runtime-v1") {
+export function buildSyntheticSiteInput(runtimeSeriesId = "site-runtime-v4") {
   const intentWithoutHash = {
     schemaVersion: 1 as const,
     id: "intent_synthetic_verification",

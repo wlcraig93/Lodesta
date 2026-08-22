@@ -1,6 +1,6 @@
 # Canonical V4 glyph and runtime consolidation
 
-Status: reversible release complete; evidence set and destructive reset pending owner decisions
+Status: canonical validation complete; legacy retirement prepared for release
 
 Date: 2026-08-21
 
@@ -24,7 +24,7 @@ This is a functional portability gate, not an aesthetic critic. It adds no repai
 
 `site-runtime-v4.js` is the direct source of the active canonical JavaScript. Its SHA-256 must equal the active retained runtime patch before release. Because the bytes are unchanged, this decision creates neither a runtime patch nor a runtime series.
 
-V1–V3 derivations remain temporarily because retained database references are boundary-sensitive. After the confirmed prelaunch reset proves zero references, a second release deletes those branches and the V1 source. At that point R8/V2 bytes exist only in sealed evidence and cannot be rebuilt or selected. That is an intentional one-way door.
+The confirmed prelaunch reset and post-reset validation proved zero V1–V3 references, so the second release deletes those derivations and the V1 source. R8/V2 bytes then exist only in sealed evidence and cannot be rebuilt or selected. That is an intentional one-way door.
 
 ## Reversible release evidence
 
@@ -45,6 +45,14 @@ Implementation audit found an important provenance limitation before reset: the 
 The existing `maintenance:reset-prelaunch-site-authoring` operator is repaired rather than duplicated. Its live-schema contract expects `site_agent_workspace_checkpoints`, `analytics_collection_daily`, and `source_snapshot_mirror_references`; retired tables must remain absent. The operator nulls the checkpoint cycle, deletes those dependencies in foreign-key order, preserves the prospect/outbound corpus, verifies all evidence bundles, and requires a fresh exact report confirmation.
 
 Implementation approval does not authorize applying the reset. The destructive confirmation is collected only after the reversible release and all eight retained archives are verified locally against the checked-in registry.
+
+The owner subsequently approved and applied the exact reset inventory. The separate artifact audit then removed 42,631 database-unreferenced managed objects (5,306,934,306 bytes), reported zero missing referenced objects and zero remaining managed orphans, and deliberately left 10,301 unknown-prefix objects untouched. Cleanup used one temporary two-bucket maintenance credential; it was revoked immediately after the post-audit passed, so the cleanup left no additional standing Cloudflare token.
+
+## Canonical validation and legacy retirement
+
+Two fresh post-reset canonical generations passed the hard release gate: one rich automotive source and one sparse, dated wallcovering source. Both used `site-runtime-v4`, produced working managed modal navigation and custom managed forms, recorded zero `render.missing_glyph` findings, and completed every sandbox mutation on its first transport attempt without replay, recycle, or timeout. The sparse-source run required deterministic authoring repairs for copy, contrast, and typography, but never reconstructed navigation containment.
+
+The live retirement report then proved that every retained public input, workspace revision, artifact, and version references only the canonical series. No V1–V3 series is required for historical rendering. This satisfies the one-way-door precondition: the direct V4 source remains, promotion and rollback accept only V4, and the V1–V3 source transformations, capability-style branches, native SDK facade, R8 execution fixture, and obsolete cutover operators are removed together. Historical R8/V2 bytes remain available only in the sealed evidence archives.
 
 ## Promotion record correction
 

@@ -1,6 +1,6 @@
 export const sandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const sandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
 export const sandboxDurableObjectIdentity = "site-sandbox-durable-object@sha256:f60c304d730f280207606d2decd14312c95b211f355dbf1ca2f829cbe2166784";
-export const sandboxSourcePolicyIdentity = "workspace-source-policy@sha256:a9be1b7dc256b25c26ef2b3e53175af07b046e9f9c110ab0fb425df3766fa703";
+export const sandboxSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 export const sandboxArtifactContractIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
-export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:d2939ae1b821cd8950bd85adbec831544611bec150f48815e9c7a637ecd92062";
+export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:2fdff1126a5ded7cd92c555a5fe2f21bb300d7a2e2fbc2e8de24a965a27b74e5";

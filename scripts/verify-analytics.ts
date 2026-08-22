@@ -69,7 +69,7 @@ assert.equal(report.current.actionRate, 1 / 3, "Action rate counted actions inst
 assert.equal(report.sufficiency, "early");
 assert.equal(report.recommendations.length, 0);
 
-const runtime = await readFile("packages/trusted-runtime/site-runtime-v1.js", "utf8");
+const runtime = await readFile("packages/trusted-runtime/site-runtime-v4.js", "utf8");
 for (const retired of ["pageview", "tel_click", "section_view", "scroll_depth", 'track("form_submit"']) {
   assert(!runtime.includes(retired), `Trusted runtime retains obsolete analytics behavior: ${retired}`);
 }

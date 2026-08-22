@@ -127,7 +127,7 @@ assert.throws(() => agentAuthoredArtifactSchema.parse({ ...valid, factDeclaratio
 const prepared = prepareSiteArtifact({
   authoredArtifact: valid,
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert.equal(errors(prepared).length, 0, JSON.stringify(errors(prepared)));
 const trustedSiteCss = prepared.files.find((file) => file.path === "site.css")?.bytes.toString("utf8") ?? "";
@@ -174,7 +174,7 @@ const enrichedStructuredInput = sitePublicBuildInputSchema.parse({
 const enrichedPrepared = prepareSiteArtifact({
   authoredArtifact: valid,
   buildInput: enrichedStructuredInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 const enrichedStructuredData = structuredDataFrom(enrichedPrepared.routes[0]!.html);
 assert.deepEqual(enrichedStructuredData.areaServed, ["Round Rock"], "Verified service areas did not reach structured data.");
@@ -189,7 +189,7 @@ assert(enrichedPrepared.factBindings.some((binding) => binding.id === "jsonld:ge
 const compactPresentation = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>Visit the Austin shop</h1><span data-lodesta-business-hours data-lodesta-hours-variant="summary" data-lodesta-fact-id="${hours.id}">Monday–Friday: 8:00 AM-5:30 PM; Saturday–Sunday: Closed</span><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_primary" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(compactPresentation).some((finding) => finding.id === "fact.sdk_value_mismatch"),
@@ -199,7 +199,7 @@ assert(
 const forgedLocalAddress = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_primary" data-lodesta-fact-id="${address.id}">999 Forged Road, Austin, TX 78701</address></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 const forgedFinding = errors(forgedLocalAddress).find((finding) => finding.id === "fact.sdk_value_mismatch");
 assert(forgedFinding, "Forged BusinessAddress binding attributes authorized incorrect rendered text.");
@@ -208,14 +208,14 @@ assert.match(forgedFinding.message, /rendered=.*expected=.*factId=.*locationId=.
 const wrongLocationAddress = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><address data-lodesta-business-address data-lodesta-address-variant="local" data-lodesta-location-id="location_missing" data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX 78701</address></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(wrongLocationAddress).some((finding) => finding.id === "fact.sdk_value_mismatch"), "A BusinessAddress binding to the wrong location passed.");
 
 const genericAddressExemption = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><address data-lodesta-fact-id="${address.id}">1200 Main Street, Austin, TX</address></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(genericAddressExemption).some((finding) => finding.id === "fact.sdk_value_mismatch"), "Generic address Fact received the local-presentation exemption.");
 
@@ -259,7 +259,7 @@ const serviceRouteArtifact = prepareSiteArtifact({
     capabilityBindings: []
   }),
   buildInput: serviceRouteInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   serviceRouteArtifact.findings.some((finding) => finding.id === "route.orphan" && finding.route === "/campaign" && finding.severity === "warning"),
@@ -272,7 +272,7 @@ assert(
 const missingRequiredRoute = prepareSiteArtifact({
   authoredArtifact: valid,
   buildInput: serviceRouteInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !missingRequiredRoute.findings.some((finding) => finding.id === "route.required"),
@@ -298,7 +298,7 @@ const scaleAuthored = agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredAr
     bodyHtml: `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><h1>${index === 0 ? "Complete service guide" : `Service route ${index}`}</h1><p>This route provides distinct customer guidance for scenario ${index}, supporting details, preparation steps, and a clear next action.</p>${index === 0 ? scaleLinks : '<a href="/">Back to the service guide</a>'}</main>`
   }))
 }));
-const scalePrepared = prepareSiteArtifact({ authoredArtifact: scaleAuthored, buildInput: input, runtimeSeriesId: "site-runtime-v1" });
+const scalePrepared = prepareSiteArtifact({ authoredArtifact: scaleAuthored, buildInput: input, runtimeSeriesId: "site-runtime-v4" });
 assert.equal(scalePrepared.routes.length, 250, "The static authoring boundary capped a 250-route site.");
 const scaleRepresentatives = representativeRoutePaths(scalePrepared, input, ["/services/route-249"]);
 assert(scaleRepresentatives.has("/") && scaleRepresentatives.has("/services/route-249"));
@@ -317,7 +317,7 @@ const provisionalInput = sitePublicBuildInputSchema.parse({
 const provisional = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="provisional">${input.business.name}</strong></header><main><h1>Welcome</h1></main>`),
   buildInput: provisionalInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(!provisional.factBindings.some((binding) => binding.sourceFactIds.includes(name.id)));
 assert(!errors(provisional).some((finding) => finding.id === "fact.sdk_unavailable"));
@@ -325,7 +325,7 @@ assert(!errors(provisional).some((finding) => finding.id === "fact.sdk_unavailab
 const mismatchedIdentity = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">Different Company</strong></header><main><h1>Welcome</h1></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(mismatchedIdentity.findings.some((finding) => finding.id === "identity.rendered_mismatch" && finding.severity === "warning"));
 
@@ -353,7 +353,7 @@ const officialLogoIdentityInput = sitePublicBuildInputSchema.parse({
 const officialLogoOnlyIdentity = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><img src="asset://asset_revision_official_logo_identity" alt="${input.business.name} logo"></header><main><h1>Welcome</h1></main>`),
   buildInput: officialLogoIdentityInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 const officialLogoIdentityFinding = officialLogoOnlyIdentity.findings.find((finding) => finding.id === "identity.rendered_mismatch");
 assert(
@@ -366,7 +366,7 @@ const naturallyRenderedCanonicalPhone = prepareSiteArtifact({
     description: `Call (512) 555-0142 for service.`
   }),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(naturallyRenderedCanonicalPhone).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.metadata_unsupported"),
@@ -375,7 +375,7 @@ assert(
 const unsupportedNaturalPhone = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Call us</h1><a href="tel:+15125550199">(512) 555-0199</a></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedNaturalPhone).some((finding) => finding.id === "fact.undeclared_marker"),
@@ -384,7 +384,7 @@ assert(
 const unsupportedCoordinate = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Raleigh service</h1><p>35°46′N</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedCoordinate).some((finding) => finding.id === "fact.undeclared_marker"),
@@ -393,7 +393,7 @@ assert(
 const unsupportedLocationRole = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Service areas</h1><p>Main shop</p><address>1200 Main Street, Austin, TX 78701</address></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedLocationRole).some((finding) => finding.id === "fact.undeclared_marker"),
@@ -420,7 +420,7 @@ const supportedLocationRoleInput = sitePublicBuildInputSchema.parse({
 const supportedLocationRole = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Service areas</h1><p data-lodesta-fact-id="${locationRoleFact.id}">Main shop</p></main>`),
   buildInput: supportedLocationRoleInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(supportedLocationRole).some((finding) => finding.id === "fact.undeclared_marker"),
@@ -439,7 +439,7 @@ const supportedSensitiveName = prepareSiteArtifact({
     description: `${sensitiveName} provides termite and pest control.`
   }),
   buildInput: sensitiveNameInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(supportedSensitiveName).some((finding) => finding.id === "fact.sensitive_unsupported" || finding.id === "fact.metadata_unsupported"),
@@ -448,7 +448,7 @@ assert(
 const unboundSensitiveName = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>${sensitiveName}</h1></main>`),
   buildInput: sensitiveNameInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unboundSensitiveName).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -458,7 +458,7 @@ assert(
 const ordinaryBestFitCopy = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Start with the service that best fits your question.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(ordinaryBestFitCopy).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -467,7 +467,7 @@ assert(
 const unsupportedBestCompanyCopy = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>We are the best pest control company in town.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedBestCompanyCopy).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -495,7 +495,7 @@ const emergencyInput = sitePublicBuildInputSchema.parse({
 const naturallySupportedEmergency = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Fast help</h1><p>Emergency services available.</p></main>`),
   buildInput: emergencyInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(naturallySupportedEmergency).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -504,7 +504,7 @@ assert(
 const unsupportedEmergency = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Fast help</h1><p>Same day service available.</p></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedEmergency).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -514,7 +514,7 @@ assert(
 const unsupportedSafetyPositioning = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Eco-friendly products that are safe for people, pets, and the environment.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedSafetyPositioning).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -523,7 +523,7 @@ assert(
 const unsupportedSafeRemoval = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Bee removal</h1><p>We locate the hive and remove or relocate it safely.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedSafeRemoval).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -532,7 +532,7 @@ assert(
 const unsupportedServiceCadence = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Routine service visits are offered every 2 months.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unsupportedServiceCadence).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -541,7 +541,7 @@ assert(
 const ordinaryCalendarGuidance = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Seasonal pest guide</h1><p>Inspect stored decorations every two months for signs of activity.</p></main>"),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   !errors(ordinaryCalendarGuidance).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -585,14 +585,14 @@ const supportedProof = prepareSiteArtifact({
     description: "See the 10-year warranty."
   }),
   buildInput: proofInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(!errors(supportedProof).some((finding) => finding.id === "fact.sensitive_unsupported" || finding.id === "fact.metadata_unsupported"));
 
 const duplicateProof = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><p data-lodesta-fact-id="${proofFact.id}">10-year warranty</p><p>10-year warranty</p></main>`),
   buildInput: proofInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(duplicateProof).some((finding) => finding.id === "fact.sensitive_unsupported"), "an unbound duplicate occurrence was authorized by text search");
 const blockedFactArtifact = finalizeForTest(duplicateProof, proofInput);
@@ -604,7 +604,7 @@ assert(
 const unboundReturnServicePromise = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Service that stands behind the work</h1><p>If pests return within your service coverage period, we will come back and re-treat your home at no additional cost.</p></main>"),
   buildInput: proofInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(
   errors(unboundReturnServicePromise).some((finding) => finding.id === "fact.sensitive_unsupported"),
@@ -629,14 +629,14 @@ const metadataOnly = prepareSiteArtifact({
     description: "Quality collision repair."
   }),
   buildInput: proofInput,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(metadataOnly).some((finding) => finding.id === "fact.metadata_unsupported"), "metadata-only sensitive copy passed");
 
 const mismatchedContact = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>${input.business.name}</h1><a href="tel:+1-555-555-5555">Call us</a></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(mismatchedContact).some((finding) => finding.id === "fact.link_mismatch"));
 const blockedContactArtifact = finalizeForTest(mismatchedContact, input);
@@ -649,7 +649,7 @@ assert(
 const malformedForm = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><form data-lodesta-form-id="form_estimate"><input data-lodesta-field-id="name"><button data-lodesta-form-submit>Send</button></form></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(errors(malformedForm).some((finding) => finding.id.startsWith("capability.form_")));
 assert.equal(finalizeForTest(malformedForm, input).qa.hardGate, "failed", "a malformed managed capability passed the technical gate");
@@ -657,7 +657,7 @@ assert.equal(finalizeForTest(malformedForm, input).qa.hardGate, "failed", "a mal
 const sanitizedUnsafeMarkup = prepareSiteArtifact({
   authoredArtifact: artifact(`<main style="color:red"><h1>Repair</h1><script>bad()</script><a href="javascript:bad()">Click</a></main>`),
   buildInput: input,
-  runtimeSeriesId: "site-runtime-v1"
+  runtimeSeriesId: "site-runtime-v4"
 });
 assert(sanitizedUnsafeMarkup.findings.some((finding) => finding.id === "html.agent_executable"));
 assert(!sanitizedUnsafeMarkup.routes[0]?.html.includes("bad()"), "unsafe markup survived deterministic sanitization");
@@ -1114,7 +1114,7 @@ function finalizeForTest(
     buildInput,
     artifactId: `artifact_test_${buildInput.id}`,
     workspaceRevisionId: "workspace_revision_test",
-    runtimeSeriesId: "site-runtime-v1",
+    runtimeSeriesId: "site-runtime-v4",
     runtimePatchId: "runtime_patch_test",
     storagePrefix: "artifacts/test",
     toolchainVersion: "test-toolchain",

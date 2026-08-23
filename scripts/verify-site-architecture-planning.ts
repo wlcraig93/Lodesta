@@ -229,6 +229,9 @@ assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-pull"), siteA
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /smallest coherent live site/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceDispositions ledger remains mechanically exhaustive/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /live route path already exists in the source inventory.*must be preserved to itself/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /transactional systems as capability boundaries/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /does not rebuild commerce catalogs, carts, checkout, appointment inventory, or provider embeds/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /redirect or retire item-detail, cart, checkout, and other transaction-only paths/i);
 assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /concrete customer decision or question/i);
